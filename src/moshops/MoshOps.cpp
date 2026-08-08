@@ -3450,8 +3450,9 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         // on this). Only present when the clip actually has takes.
         if (w->hasAnyTakes())
         {
+            const int currentTake = effectiveCurrentTakeIndex (*w);
             o->setProperty ("numTakes", w->getNumTakes (false));
-            o->setProperty ("currentTakeIndex", w->getCurrentTake());
+            o->setProperty ("currentTakeIndex", currentTake);
             auto descs = w->getTakeDescriptions();
             juce::Array<juce::var> takes;
             for (int i = 0; i < descs.size(); ++i)
@@ -3459,7 +3460,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                 auto* t = new juce::DynamicObject();
                 t->setProperty ("index", i);
                 t->setProperty ("description", descs[i]);
-                t->setProperty ("isCurrent", i == w->getCurrentTake());
+                t->setProperty ("isCurrent", i == currentTake);
                 takes.add (juce::var (t));
             }
             o->setProperty ("takes", takes);
@@ -3622,7 +3623,7 @@ juce::var MoshOps::controllerToVar()
         if (hasLanes)
         {
             take->setProperty ("numTakes", latestWave->getNumTakes (false));
-            take->setProperty ("currentTakeIndex", latestWave->getCurrentTake());
+            take->setProperty ("currentTakeIndex", effectiveCurrentTakeIndex (*latestWave));
         }
     }
 

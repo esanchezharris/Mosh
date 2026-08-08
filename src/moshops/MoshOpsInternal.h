@@ -148,6 +148,29 @@ namespace mosh
         return peaks;
     }
 
+    // Tracktion identifies a current take by parsing the clip source as a ProjectItemID.
+    // Recorded/direct-file takes store a path instead, so getCurrentTake() returns -1
+    // even while that take is playing. Match the raw source strings as the fallback all
+    // public take projections share; -1 remains honest when no take source matches.
+    inline int effectiveCurrentTakeIndex (te::WaveAudioClip& clip)
+    {
+        const int tracktionIndex = clip.getCurrentTake();
+        if (tracktionIndex >= 0)
+            return tracktionIndex;
+
+        const auto clipSource = clip.state[te::IDs::source].toString();
+        int takeIndex = 0;
+        for (auto take : clip.state.getChildWithName (te::IDs::TAKES))
+        {
+            if (! take.hasProperty (te::IDs::source))
+                continue;
+            if (take[te::IDs::source].toString() == clipSource)
+                return takeIndex;
+            ++takeIndex;
+        }
+        return -1;
+    }
+
    #if MOSH_HAVE_ANIRA
     inline RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
    #endif

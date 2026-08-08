@@ -7205,6 +7205,32 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (shapesOk, "take peaks are [min,max] pairs — the main-lane shape");
             check (distinct, "the two takes' peaks DIFFER (220 Hz vs 880 Hz sources)");
 
+            auto takeClipSnapshot = [&ops, &toneA]() -> juce::var
+            {
+                auto snap = ops.snapshot();
+                auto tracksVar = snap.getProperty ("tracks", var());
+                if (auto* trackArr = tracksVar.getArray())
+                    for (auto& trackVar : *trackArr)
+                    {
+                        auto clipsVar = trackVar.getProperty ("clips", var());
+                        if (auto* clipArr = clipsVar.getArray())
+                            for (auto& clipVar : *clipArr)
+                                if (clipVar.getProperty ("id", var()).toString() == toneA)
+                                    return clipVar;
+                    }
+                return {};
+            };
+            auto currentTakeFlags = [] (const juce::var& clipVar)
+            {
+                int count = 0;
+                auto takes = clipVar.getProperty ("takes", var());
+                if (auto* arr = takes.getArray())
+                    for (auto& take : *arr)
+                        if ((bool) take.getProperty ("isCurrent", false))
+                            ++count;
+                return count;
+            };
+
             // ── set_current_take on DIRECT-FILE takes (data-loss guard) ──
             // TE's setCurrentTake DELETES a take whose source doesn't resolve to a
             // project item (loop-overdub lands exactly those) — a real session went
@@ -7216,16 +7242,43 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { auto lt2 = cmd (ops, "list_takes", objN ({{ "clipId", toneA }}));
               check ((int) lt2["data"].getProperty ("numTakes", -1) == 2, "the take SURVIVES the switch (numTakes still 2)");
               check ((int) lt2["data"].getProperty ("currentTakeIndex", -1) == 1, "the current index follows the switch"); }
+            { const auto clip = takeClipSnapshot();
+              check ((int) clip.getProperty ("currentTakeIndex", -1) == 1,
+                     "the main snapshot follows a direct-file take switch");
+              check (currentTakeFlags (clip) == 1 && (bool) clip["takes"][1].getProperty ("isCurrent", false),
+                     "the main snapshot marks only the switched direct-file take current"); }
             check (ok (cmd (ops, "undo", objN ({}))), "undo after the take switch ok");
             check (wa->getCurrentSourceFile() == fileA, "ONE undo restores the original playing source");
             { auto lt3 = cmd (ops, "list_takes", objN ({{ "clipId", toneA }}));
               check ((int) lt3["data"].getProperty ("numTakes", -1) == 2, "the take tree is intact after the undo too"); }
+            { const auto clip = takeClipSnapshot();
+              check ((int) clip.getProperty ("currentTakeIndex", -1) == 0,
+                     "the main snapshot current take follows undo");
+              check (currentTakeFlags (clip) == 1 && (bool) clip["takes"][0].getProperty ("isCurrent", false),
+                     "the main snapshot restores exactly one current-take marker on undo"); }
 
             // The switched source actually RENDERS: remove the other clip so the
             // track holds only the take clip, switch back to take 1, bounce, and
             // measure real energy (the bounce path is the proven offline render).
             check (ok (cmd (ops, "remove_clip", objN ({{ "clipId", toneB }}))), "remove the non-take clip for the render check");
             check (ok (cmd (ops, "set_current_take", objN ({{ "clipId", toneA }, { "takeIndex", 1 }}))), "re-switch to take 1 ok");
+            const double originalTakeStart = wa->getPosition().getStart().inSeconds();
+            double latestOtherEnd = 0.0;
+            for (auto* tr : te::getAudioTracks (eng.edit()))
+                if (tr != nullptr)
+                    for (auto* c : tr->getClips())
+                        if (c != wa)
+                            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (c))
+                                latestOtherEnd = juce::jmax (latestOtherEnd, wave->getPosition().getEnd().inSeconds());
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", toneA }, { "start", latestOtherEnd + 1.0 }}))),
+                   "move the take clip latest for the producer-controller projection check");
+            { const auto controller = ops.snapshot().getProperty ("controller", var());
+              const auto take = controller.getProperty ("take", var());
+              check (take.getProperty ("clipId", var()).toString() == toneA
+                         && (int) take.getProperty ("currentTakeIndex", -1) == 1,
+                     "the producer-controller snapshot follows the direct-file take switch"); }
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", toneA }, { "start", originalTakeStart }}))),
+                   "restore the take clip position after the producer-controller projection check");
             auto tb = cmd (ops, "bounce_track", objN ({{ "trackId", tfTrack }, { "mode", "inPlace" }}));
             check (ok (tb), "bounce of the take track ok");
             { juce::AudioFormatManager rfm;

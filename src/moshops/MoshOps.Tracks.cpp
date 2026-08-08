@@ -1144,24 +1144,7 @@ juce::var MoshOps::cmdListTakes (const juce::var& args)
     auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (w == nullptr) return errResult ("list_takes", "no wave clip");
     auto descs = w->getTakeDescriptions();
-    // The effective current index. TE's getCurrentTake() string-matches the clip's
-    // source ProjectItemID against the take children; a DIRECT-FILE take (path
-    // source) never parses to an item id, so TE reports -1 even when the clip is
-    // playing take i. Fall back to the raw source-string match — the same
-    // comparison one level down, and exactly what cmdSetCurrentTake's direct-file
-    // branch sets up. -1 stays honest when nothing matches.
-    int current = w->getCurrentTake();
-    if (current < 0)
-    {
-        const auto clipSource = w->state[te::IDs::source].toString();
-        int ci = 0;
-        for (auto c : w->state.getChildWithName (te::IDs::TAKES))
-        {
-            if (! c.hasProperty (te::IDs::source)) continue;
-            if (c[te::IDs::source].toString() == clipSource) { current = ci; break; }
-            ++ci;
-        }
-    }
+    const int current = effectiveCurrentTakeIndex (*w);
     // Per-take waveform peaks (take-lanes wave) — ADDITIVE. TE's own recording lands
     // BOTH take kinds (WaveInputDevice.cpp:929 project-item ids, :934 direct file
     // refs), so resolution must cover both: each take child's source goes through
@@ -1224,9 +1207,9 @@ juce::var MoshOps::cmdSetCurrentTake (const juce::var& args)
     // clip's own source property. The clip's SourceFileReference reads that same
     // property, so the take PLAYS — and the take tree is never touched, so no take
     // can be destroyed. (TE's getCurrentTake() can't identify a direct-file
-    // current — a path never parses to a project-item id — so list_takes finds the
-    // current index with its own raw source-string match.) Takes that DO resolve
-    // keep TE's own path.
+    // current — a path never parses to a project-item id — so every public take
+    // projection uses effectiveCurrentTakeIndex's raw source-string fallback.)
+    // Takes that DO resolve keep TE's own path.
     juce::ValueTree takeChild;
     {
         int i = 0;
