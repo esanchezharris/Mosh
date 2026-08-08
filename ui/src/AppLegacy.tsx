@@ -11,6 +11,7 @@
 
 import { useEffect, useRef } from "react";
 import { useStore } from "./store";
+import { MoshTipProvider } from "./chrome/Tooltip";
 import { useSettings } from "./settings/store";
 import { isNative } from "./bridge";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -95,6 +96,7 @@ export function AppLegacy() {
   const audioEnabled = snapshot?.session.audioEnabled ?? true;
 
   return (
+    <MoshTipProvider delay={350}>
     <div className="app" data-testid="app" data-redesign={redesign ? "on" : undefined}>
       {snapshot && <Topbar snapshot={snapshot} />}
       <Toolbar />
@@ -141,5 +143,6 @@ export function AppLegacy() {
         </div>
       )}
     </div>
+    </MoshTipProvider>
   );
 }

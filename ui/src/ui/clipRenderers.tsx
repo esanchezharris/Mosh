@@ -9,6 +9,7 @@ import { memo, useEffect, useRef } from "react";
 import { type Peaks } from "../store";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import type { MidiNote } from "../types";
+import type { LoopedNote } from "../midi/midiLoop";
 import { useSettings } from "../settings/store";
 
 // NOTE: the ink-token treatment below arrived with #488 (the v2 accent pass) after this
@@ -82,7 +83,7 @@ export function isDrumClip(notes?: MidiNote[]): boolean {
 // beatSeconds(meter) → seconds, then the shared secToPx scale lands them on the
 // same grid the ruler/playhead use. Double-click the clip still opens the PianoRoll.
 export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
-  { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
+  { notes?: LoopedNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const themeKey = useThemeKey();
   useEffect(() => {
@@ -103,7 +104,9 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
       const x = secToPx(n.start * bs);
       const wpx = Math.max(2, secToPx(n.length * bs) - 1);
       const y = (1 - (n.pitch - lo) / span) * (h - rowH);   // high pitch toward top
-      ctx.globalAlpha = 0.45 + 0.55 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      // Ghost repeats (MIDI clip looping) paint the same shape dimmer (Live's stripes)
+      const a = 0.45 + 0.55 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      ctx.globalAlpha = n.ghost ? a * 0.35 : a;
       ctx.fillRect(x, y, wpx, rowH);
     }
     ctx.globalAlpha = 1;
@@ -114,7 +117,7 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
 // Inline drum preview — fixed GM lanes (kick/snare/hat/…), FL-style steps. x stays
 // grid-aligned via secToPx(beats); y is the GM lane, not the pitch.
 export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
-  { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
+  { notes?: LoopedNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const themeKey = useThemeKey();
   useEffect(() => {
@@ -132,7 +135,8 @@ export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secTo
       const x = secToPx(n.start * bs);
       const cell = Math.max(3, Math.min(secToPx(n.length * bs), laneH - 2));
       const y = Math.max(0, laneIndexForPitch(n.pitch)) * laneH + 1;
-      ctx.globalAlpha = 0.5 + 0.5 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      const a = 0.5 + 0.5 * (Math.min(127, Math.max(1, n.velocity)) / 127);
+      ctx.globalAlpha = n.ghost ? a * 0.35 : a;   // ghost repeats paint dimmer
       ctx.fillStyle = step;
       ctx.fillRect(x, y, cell, Math.max(2, laneH - 3));
     }

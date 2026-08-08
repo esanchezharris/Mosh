@@ -22,13 +22,13 @@ async function bootClassic(page: Page): Promise<void> {
   await expect(page.getByTestId("arrangement")).toBeVisible();
 }
 
-test("default (no settings): boots the v2 shell", async ({ page }) => {
+test("default (no settings): boots the live shell", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.clear()); // clean storage → schema defaults
   await page.goto("/");
-  // Post-cutover the v2 shell is the schema default (uiShell="v2"). The classic
-  // redesign layout below stays reachable by seeding uiShell="classic".
-  await expect(page.getByTestId("v2-shell")).toBeVisible();
-  await expect(page.getByTestId("v2-timeline")).toBeVisible();
+  // The Live-12 clone is the schema default (uiShell="live") as of the 2026-08-06
+  // clone cutover. v2 stays reachable via ?shell=v2 / the Interface setting; the
+  // classic redesign layout below by seeding uiShell="classic".
+  await expect(page.getByTestId("live-shell")).toBeVisible();
 });
 
 test("flag on: the Session rail is open by default with Moshi + inspector", async ({ page }) => {

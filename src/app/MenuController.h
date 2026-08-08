@@ -12,11 +12,11 @@ namespace mosh
     pickers for Open/Save As/Export). That keeps ONE definition of each command and
     matches the swappable-seam rule — the menu is just another client of the seam.
 
-    Accelerators (⌘N/⌘O/⌘S/⇧⌘S/⌘E, ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V, Space) are real NSMenu key-equivalents;
+    Accelerators (⌘N/⌘O/⌘S/⇧⌘S/⇧⌘R, ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V) are real NSMenu key-equivalents;
     the WebView keyboard layer YIELDS those chords when a native menu is present, so a
-    keystroke fires exactly once (via the menu → forwarded here → runAction). Delete is
-    intentionally NOT given a key-equivalent (it would hijack ⌫ in text fields) — the
-    web layer owns it. */
+    keystroke fires exactly once (via the menu → forwarded here → runAction). Delete AND
+    Space are intentionally NOT given key-equivalents (a modifier-less equivalent hijacks
+    the key from the DOM before any responder sees it) — the web layer owns both. */
 class MenuController : public juce::MenuBarModel,
                       public juce::ApplicationCommandTarget
 {

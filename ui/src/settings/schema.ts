@@ -187,21 +187,27 @@ export const SETTINGS: SettingDef[] = [
   },
   {
     // The from-scratch demo-driven shell (ui/src/v2). A first-class axis, NOT a
-    // variant of redesignShell: "classic" = the prior App; "v2" = the new Mosh shell.
-    // UI-local + reversible (flip back to classic anytime, here or via the in-app
-    // toggle). v2 is the DEFAULT as of the cutover; classic stays fully available. In
+    // variant of redesignShell: "classic" = the prior App; "v2" = the new Mosh shell;
+    // "live" = the Live-12 Arrangement-View clone (ui/src/live). UI-local + reversible
+    // (flip back anytime, here or via the in-app toggle). LIVE is the DEFAULT as of the
+    // 2026-08-06 clone cutover (owner decision: defer the bespoke UI until the first
+    // stranger program has usability data); v2 and classic stay fully available. In
     // dev/e2e a `?shell=` query-param overrides this per page-load (see v2/shellQuery.ts).
     id: "uiShell",
     type: "enum",
-    default: "v2",
+    default: "live",
     scope: "app",
     category: "Layout",
     label: "Interface",
-    help: "Which interface to use. “Mosh” is the new focused shell; “Classic” is the current layout. You can switch back anytime.",
+    help: "Which interface to use. “Live (clone)” is the Ableton-style default; “Mosh” is the bespoke shell; “Classic” is the original layout. You can switch back anytime.",
     constraints: {
       options: [
         { value: "classic", label: "Classic" },
         { value: "v2", label: "Mosh (new)" },
+        // The additive Live-12 Arrangement-View clone (ui/src/live). Same store/seam,
+        // same reversible flip — picking it here (or the "Live (clone)" template, or
+        // ?shell=live in dev/e2e) mounts AppLive; classic and v2 are untouched.
+        { value: "live", label: "Live (clone)" },
       ],
     },
   },
@@ -222,6 +228,31 @@ export const SETTINGS: SettingDef[] = [
     help: "Off by default. When on, Mosh may send anonymous crash reports and command-usage counts (command NAMES only — never audio, lyrics, file paths, or project content) to help find and fix bugs. No network activity happens while this is off.",
   },
   ...interactionSettings(),
+  {
+    // The live shell's detail-dock height (points), written by the dock's drag
+    // splitter so the layout survives a reload. The persisted bounds here are broad;
+    // the runtime clamp (min 226, max 70% of the shell) lives in live/dockGeometry.ts.
+    id: "liveDockHeight",
+    type: "number",
+    default: 265,
+    scope: "app",
+    category: "Layout",
+    label: "Live dock height",
+    help: "Detail-dock height in the Live (clone) interface, in points. Set by dragging the divider above the dock.",
+    constraints: { min: 120, max: 800, step: 1 },
+  },
+  {
+    // Live's Expanded Clip View (⌥⌘E): the docked editor consumes the whole window
+    // (browser/arrangement/headers hidden). STICKY across close/reopen of the clip
+    // view, like Live — hence a persisted setting rather than shell view state.
+    id: "liveClipExpanded",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Layout",
+    label: "Live: expanded clip view",
+    help: "The docked editor fills the whole window in the Live (clone) interface.",
+  },
   {
     // AUD-SCAN — opt-in AudioUnit cataloging. Off by default because an AU sweep is the
     // slow/risky path (a hung component is killed by the ~25 s stall watchdog, a crashed

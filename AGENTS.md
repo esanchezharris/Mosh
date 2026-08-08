@@ -7,7 +7,10 @@ conformance scoreboard (`docs/FEATURE_AUDIT.md`), the pinned Tracktion/JUCE
 patches (`patches/` 0001–0006), tempo ramps + audio warp, AU hosting, the iOS companion + the phone
 **DAWN recording pad** (#239/#267), **2-player multiplayer** (PR #74), **always-on voice**
 (PR #71), the DAW project-file importers (`ui/src/import/`), audio→MIDI (`/transcribe`),
-the from-scratch **v2 UI shell** (default; classic preserved in `AppLegacy.tsx`),
+the from-scratch **v2 UI shell** (classic preserved in `AppLegacy.tsx`), and — since the
+2026-08-06 clone cutover — the **Live-12 Arrangement-View clone shell** (`ui/src/live/`,
+`uiShell: "live"`, the **default**; v2/classic stay selectable; spec + parity audit in
+`docs/live-clone/`),
 **generative render layers on any track** (MIDI/drum auto-bounce), the single generative
 tier (the synthetic Tier-A neural insert was removed; the real-time RAVE insert is gated
 behind `MOSH_ENABLE_ANIRA`), **Finish-My-Song Phases 1–3** (lyrics → skeleton → sing),

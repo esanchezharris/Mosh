@@ -243,6 +243,178 @@ juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Live 12's Bounce (Edit › Bounce Track in Place / Bounce to New Track ⌘B).
+// Offline-render the track's full output — every clip through the track's
+// instrument+FX chain, no master bus — from session start to the last clip end,
+// to a 24-bit WAV (bounceTrackToWav: the same RenderTask + watchdog path
+// export_audio and the generative auto-bounce already trust).
+//
+//   inPlace  — replace the track's clips with the rendered audio; the device
+//              chain stays in place (Live's behaviour).
+//   newTrack — create a new audio track directly below the source holding the
+//              render; the source track is untouched.
+//
+// The render happens BEFORE the transaction: the WAV is a file side effect, not
+// undo state; every undoable mutation (clip removal/insertion, the new track)
+// joins the single beginTxn so ONE undo restores the pre-bounce state exactly
+// (clip ids, notes, devices). The bounced clip is plain audio — deliberately no
+// reactiveTouch: the generative re-bounce hooks must never treat it as generative.
+juce::var MoshOps::cmdBounceTrack (const juce::var& args)
+{
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = dynamic_cast<te::AudioTrack*> (findTrack (id));
+    if (track == nullptr)
+        return errResult ("bounce_track", "no bounceable track: " + id
+            + " (group folders, returns and the master bus can't be bounced)");
+    if (firstAuxReturnOn (*track) != nullptr)
+        return errResult ("bounce_track", "return tracks can't be bounced");
+    const auto mode = args.getProperty ("mode", var()).toString();
+    if (mode != "inPlace" && mode != "newTrack")
+        return errResult ("bounce_track", "mode must be inPlace|newTrack");
+
+    double lastEnd = 0.0;
+    for (auto* c : track->getClips())
+        if (c != nullptr) lastEnd = juce::jmax (lastEnd, c->getPosition().getEnd().inSeconds());
+    if (lastEnd <= 1.0e-4) return errResult ("bounce_track", "track has no clips to bounce");
+
+    static int bounceSeq = 0;
+    const auto destWav = eng.sessionDir().getChildFile ("bounces")
+        .getChildFile (track->getName() + "-" + track->itemID.toString()
+                       + "-" + juce::String (++bounceSeq) + ".wav");
+    if (! bounceTrackToWav (*track, 0.0, lastEnd, destWav))
+        return errResult ("bounce_track", "offline render failed (stalled or not possible here)");
+
+    te::AudioFile af (eng.edit().engine, destWav);
+    const double len = af.isValid() ? af.getLength() : lastEnd;
+
+    beginTxn ("bounce_track");
+    auto* data = new DynamicObject();
+    data->setProperty ("mode", mode);
+    data->setProperty ("file", destWav.getFullPathName());
+    data->setProperty ("length", len);
+
+    if (mode == "inPlace")
+    {
+        // Replace every clip with the single rendered one. The removal mirrors
+        // cmdRemoveClip: a clip with a hidden beneath-render takes that audio with
+        // it, or the hidden clip is orphaned on the track.
+        for (auto* c : track->getClips())
+        {
+            if (c == nullptr) continue;
+            if (auto node = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+                node.isValid() && (bool) node[kSourceMutedByLayer])
+                if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+                    if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != c)
+                        hidden->removeFromParent();
+            c->removeFromParent();
+        }
+        auto nc = track->insertWaveClip (track->getName(), destWav,
+            { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+        if (nc == nullptr) return errResult ("bounce_track", "insertWaveClip failed");
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("clipId", nc->itemID.toString());
+    }
+    else
+    {
+        auto* nt = createAudioTrack (track->getName() + " (bounce)");
+        if (nt == nullptr) return errResult ("bounce_track", "could not create the bounce track");
+        // Land DIRECTLY below the source (visible ordering, same idiom as move_track).
+        eng.edit().moveTrack (nt, te::TrackInsertPoint (*track, /*insertBefore=*/ false));
+        auto nc = nt->insertWaveClip (track->getName(), destWav,
+            { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+        if (nc == nullptr) return errResult ("bounce_track", "insertWaveClip failed");
+        data->setProperty ("trackId", nt->itemID.toString());
+        data->setProperty ("clipId", nc->itemID.toString());
+        data->setProperty ("sourceTrackId", track->itemID.toString());
+    }
+
+    logLine ("bounce_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("bounce_track", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Live 12's Freeze Track (⌥⇧⌘F, Edit menu). Freeze renders the track's output
+// [0, lastClipEnd] through its chain (bounceTrackToWav — the bounce wave's
+// offline path), then ONE transaction: remove the source clips (undo keeps them
+// restorable exactly), insert the rendered audio as the track's clips, DISABLE
+// every device (te::Plugin::setEnabled — undoable, serialized, zero-CPU while
+// off), and stamp the additive moshFrozen marker on the track's own state tree
+// (save/reload keeps the track frozen). Unfreeze is one forward transaction:
+// enable the devices, remove the marker — the rendered clips STAY (they are the
+// track's current audio; undoing the freeze itself is how the originals come
+// back, and undoing the unfreeze re-freezes — both directions one step).
+juce::var MoshOps::cmdFreezeTrack (const juce::var& args)
+{
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = dynamic_cast<te::AudioTrack*> (findTrack (id));
+    if (track == nullptr)
+        return errResult ("freeze_track", "no freezable track: " + id
+            + " (group folders, returns and the master bus can't be frozen)");
+    if (firstAuxReturnOn (*track) != nullptr)
+        return errResult ("freeze_track", "return tracks can't be frozen");
+    if (track->state.hasProperty (ids::moshFrozen))
+        return errResult ("freeze_track", "track is already frozen");
+
+    double lastEnd = 0.0;
+    for (auto* c : track->getClips())
+        if (c != nullptr) lastEnd = juce::jmax (lastEnd, c->getPosition().getEnd().inSeconds());
+    if (lastEnd <= 1.0e-4) return errResult ("freeze_track", "track has no clips to freeze");
+
+    static int freezeSeq = 0;
+    const auto destWav = eng.sessionDir().getChildFile ("frozen")
+        .getChildFile (track->getName() + "-" + track->itemID.toString()
+                       + "-" + juce::String (++freezeSeq) + ".wav");
+    if (! bounceTrackToWav (*track, 0.0, lastEnd, destWav))
+        return errResult ("freeze_track", "offline render failed (stalled or not possible here)");
+    te::AudioFile af (eng.edit().engine, destWav);
+    const double len = af.isValid() ? af.getLength() : lastEnd;
+
+    beginTxn ("freeze_track");
+    for (auto* c : track->getClips())
+    {
+        if (c == nullptr) continue;
+        // Mirror the bounce removal: a clip with a hidden beneath-render takes it.
+        if (auto node = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+            node.isValid() && (bool) node[kSourceMutedByLayer])
+            if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+                if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != c)
+                    hidden->removeFromParent();
+        c->removeFromParent();
+    }
+    auto nc = track->insertWaveClip (track->getName(), destWav,
+        { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+    if (nc == nullptr) return errResult ("freeze_track", "insertWaveClip failed");
+    for (auto* p : track->pluginList.getPlugins())
+        if (p != nullptr) p->setEnabled (false);   // serialized + undoable; zero-CPU while off
+    track->state.setProperty (ids::moshFrozen, true, &undoManager());
+
+    logLine ("freeze_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("file", destWav.getFullPathName());
+    data->setProperty ("clipId", nc->itemID.toString());
+    return okResult ("freeze_track", var (data));
+}
+
+juce::var MoshOps::cmdUnfreezeTrack (const juce::var& args)
+{
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = dynamic_cast<te::AudioTrack*> (findTrack (id));
+    if (track == nullptr) return errResult ("unfreeze_track", "no track: " + id);
+    if (! track->state.hasProperty (ids::moshFrozen))
+        return errResult ("unfreeze_track", "track is not frozen");
+
+    beginTxn ("unfreeze_track");
+    for (auto* p : track->pluginList.getPlugins())
+        if (p != nullptr) p->setEnabled (true);
+    track->state.removeProperty (ids::moshFrozen, &undoManager());
+    logLine ("unfreeze_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("unfreeze_track");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MIX-008 — group (submix) tracks
 //
 // A te::FolderTrack created with asSubmix=true GENUINELY sums its children: the
@@ -393,6 +565,26 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_input", "no track");
     const auto deviceID = args.getProperty ("deviceID", var()).toString();
+
+    // An EXPLICIT clear (Live's "No Input"): a PRESENT-but-empty deviceID removes
+    // the stored choice — the snapshot then omits `input`, the picker shows No
+    // Input — and unassigns any live instance of EITHER family targeting the track
+    // (a track can hold a wave and a MIDI assignment at once, and clear means
+    // neither). Same preference path as the set below — not undoable.
+    if (args.hasProperty ("deviceID") && deviceID.isEmpty())
+    {
+        track->state.removeProperty (ids::moshInputDevice, nullptr);
+        for (auto* inst : eng.edit().getAllInputDevices())
+            if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
+                [[maybe_unused]] auto r = inst->removeTarget (track->itemID, nullptr);
+        auto* data = new DynamicObject();
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("deviceID", "");
+        data->setProperty ("cleared", true);
+        logLine ("set_track_input", args, true, {}, false);   // preference — not undoable
+        emitSnapshotInvalidated();
+        return okResult ("set_track_input", var (data));
+    }
     if (deviceID.isEmpty()) return errResult ("set_track_input", "missing 'deviceID'");
 
     // A monitoring/routing PREFERENCE (like arm_track / set_input_monitor): the
@@ -942,19 +1134,63 @@ juce::var MoshOps::cmdListTakes (const juce::var& args)
     auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (w == nullptr) return errResult ("list_takes", "no wave clip");
     auto descs = w->getTakeDescriptions();
-    juce::Array<juce::var> takes;
-    for (int i = 0; i < descs.size(); ++i)
+    // The effective current index. TE's getCurrentTake() string-matches the clip's
+    // source ProjectItemID against the take children; a DIRECT-FILE take (path
+    // source) never parses to an item id, so TE reports -1 even when the clip is
+    // playing take i. Fall back to the raw source-string match — the same
+    // comparison one level down, and exactly what cmdSetCurrentTake's direct-file
+    // branch sets up. -1 stays honest when nothing matches.
+    int current = w->getCurrentTake();
+    if (current < 0)
     {
+        const auto clipSource = w->state[te::IDs::source].toString();
+        int ci = 0;
+        for (auto c : w->state.getChildWithName (te::IDs::TAKES))
+        {
+            if (! c.hasProperty (te::IDs::source)) continue;
+            if (c[te::IDs::source].toString() == clipSource) { current = ci; break; }
+            ++ci;
+        }
+    }
+    // Per-take waveform peaks (take-lanes wave) — ADDITIVE. TE's own recording lands
+    // BOTH take kinds (WaveInputDevice.cpp:929 project-item ids, :934 direct file
+    // refs), so resolution must cover both: each take child's source goes through
+    // SourceFileReference (the same class the clip's own source uses — it resolves
+    // direct paths AND project items), then buckets through the SAME bucketedPeaks
+    // the main-lane renderer consumes, so a take's ink matches the main waveform's
+    // math. `peaks` is absent when the take's file is missing or unreadable — the
+    // UI falls back to the labeled bar, honestly. The child walk mirrors getTakes()/
+    // getTakeDescriptions() (only children carrying IDs::source count), so entry i
+    // describes take i exactly as before. (getTakesTree() is private on
+    // WaveAudioClip; its one-line body is exactly this getChildWithName on the
+    // clip's public state.)
+    const int takeBuckets = juce::jlimit (16, 800, (int) args.getProperty ("takeBuckets", 200));
+    juce::Array<juce::var> takes;
+    int i = 0;
+    for (auto takeChild : w->state.getChildWithName (te::IDs::TAKES))
+    {
+        if (! takeChild.hasProperty (te::IDs::source)) continue;
         auto* t = new juce::DynamicObject();
         t->setProperty ("index", i);
         t->setProperty ("description", descs[i]);
-        t->setProperty ("isCurrent", i == w->getCurrentTake());
+        t->setProperty ("isCurrent", i == current);
+        te::SourceFileReference sfr (eng.edit(), takeChild, te::IDs::source);
+        const auto f = sfr.getFile();
+        if (f.existsAsFile())
+        {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            if (reader != nullptr)
+                t->setProperty ("peaks", var (bucketedPeaks (*reader, takeBuckets)));
+        }
         takes.add (juce::var (t));
+        ++i;
     }
     auto* o = new juce::DynamicObject();
     o->setProperty ("clipId", w->itemID.toString());
     o->setProperty ("numTakes", w->getNumTakes (false));
-    o->setProperty ("currentTakeIndex", w->getCurrentTake());
+    o->setProperty ("currentTakeIndex", current);
     o->setProperty ("takes", takes);
     return okResult ("list_takes", juce::var (o));   // read-only: no transaction / log
 }
@@ -966,8 +1202,50 @@ juce::var MoshOps::cmdSetCurrentTake (const juce::var& args)
     const int n = w->getNumTakes (false);
     if (n <= 0) return errResult ("set_current_take", "no takes");
     const int idx = juce::jlimit (0, n - 1, (int) args.getProperty ("takeIndex", 0));
+
+    // DATA-LOSS GUARD — direct-file takes. TE's setCurrentTake resolves the take's
+    // source as a PROJECT ITEM; a take whose source is a direct file ref (TE's own
+    // loop-overdub lands exactly those, tracktion_WaveInputDevice.cpp:934) resolves
+    // to nothing, and TE's fallback is takesTree.removeChild() — the "switch"
+    // silently DELETES the take (a real session went 2 takes → 0 across a save).
+    // The same happens for project-item takes whenever the edit has no Project at
+    // all. So the switch happens at THIS seam for any take whose source does not
+    // resolve to a live project item: copy the take child's source string onto the
+    // clip's own source property. The clip's SourceFileReference reads that same
+    // property, so the take PLAYS — and the take tree is never touched, so no take
+    // can be destroyed. (TE's getCurrentTake() can't identify a direct-file
+    // current — a path never parses to a project-item id — so list_takes finds the
+    // current index with its own raw source-string match.) Takes that DO resolve
+    // keep TE's own path.
+    juce::ValueTree takeChild;
+    {
+        int i = 0;
+        for (auto c : w->state.getChildWithName (te::IDs::TAKES))
+        {
+            if (! c.hasProperty (te::IDs::source)) continue;
+            if (i == idx) { takeChild = c; break; }
+            ++i;
+        }
+    }
+    if (! takeChild.isValid()) return errResult ("set_current_take", "no take at index");
+    const auto resolvesToProjectItem =
+        eng.edit().engine.getProjectManager().getProjectItem (
+            te::ProjectItemID::fromProperty (takeChild, te::IDs::source)) != nullptr;
+
     beginTxn ("set_current_take");
-    w->setCurrentTake (idx);
+    if (resolvesToProjectItem)
+    {
+        w->setCurrentTake (idx);
+    }
+    else
+    {
+        const auto takeSource = takeChild[te::IDs::source];
+        if (w->state[te::IDs::source] != takeSource)
+        {
+            w->state.setProperty (te::IDs::source, takeSource, &undoManager());
+            eng.edit().restartPlayback();   // SourceFileReference's own change does the same
+        }
+    }
     logLine ("set_current_take", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_current_take");

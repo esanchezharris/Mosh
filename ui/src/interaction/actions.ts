@@ -23,6 +23,9 @@ export const EditorAction = {
   OPEN: "open",
   PAINT: "paint",
   CONTEXT_MENU: "context_menu",
+  // Empty-lane double-click → create a clip there and open its editor (Live 12,
+  // SPEC §8). Bound in the ableton table only; the live shell's lanes execute it.
+  CREATE_CLIP: "create_clip",
 
   // pointer — transport surface (ruler)
   SEEK: "seek",
@@ -45,6 +48,7 @@ export const EditorAction = {
 
   // keyboard — transport
   PLAY_PAUSE: "play_pause",
+  CONTINUE_PLAY: "continue_play",  // ⇧Space — Live's Continue Playback: play from current; the stop leaves the playhead
   RECORD: "record",
   // REC-001 — Ableton's Capture MIDI. Transport-adjacent but the opposite direction in
   // time: RECORD decides what happens next, CAPTURE_MIDI rescues what already happened.
@@ -56,6 +60,42 @@ export const EditorAction = {
   TOOL_MOVE: "tool_move",
   TOOL_SPLIT: "tool_split",
   TOOL_RANGE: "tool_range",
+
+  // keyboard — Live-12 arrangement vocabulary (docs/live-clone/SPEC.md §8). Bound
+  // per-preset (the ableton keymap); the handlers live in menuActions/useKeyboard-
+  // Shortcuts and the live shell, never in ad-hoc key checks.
+  RENAME: "rename",              // ⌘R — rename the selected clip (live: inline on the lane)
+  DEACTIVATE: "deactivate",      // 0 / ⌘0 — mute/unmute the selected clip(s) (notes: the editor's own layer)
+  LOOP_TOGGLE: "loop_toggle",    // ⌘L — loop the time selection, else toggle the loop
+  SNAP_TOGGLE: "snap_toggle",    // ⌘4 — arrangement snap on/off
+  ZOOM_IN: "zoom_in",            // ⌘+ — arrangement horizontal zoom
+  ZOOM_OUT: "zoom_out",          // ⌘−
+  ZOOM_BACK: "zoom_back",        // X — pop the zoom history (Live's real Zoom Back)
+  ZOOM_TO_SELECTION: "zoom_to_selection",  // Z — zoom to the time selection, else fit content
+  GRID_NARROW: "grid_narrow",    // ⌘1 — finer arrangement grid division
+  GRID_WIDEN: "grid_widen",      // ⌘2 — coarser
+  GRID_TRIPLET: "grid_triplet",  // ⌘3 — triplet arrangement grid (2/3 steps)
+  // Wave 0 (menus.json ground truth — Live 12's complete menu tree):
+  SELECT_LOOP: "select_loop",            // ⇧⌘L — draw the loop range as a time selection
+  QUANTIZE: "quantize",                  // ⌘U — quantize the selected clips' notes to the grid
+  SELECT_ALL: "select_all",              // ⌘A — select every clip (arrangement scope)
+  INVERT_SELECTION: "invert_selection",  // ⇧⌘A
+  INSERT_AUDIO_TRACK: "insert_audio_track",  // ⌘T
+  INSERT_MIDI_TRACK: "insert_midi_track",    // ⇧⌘T
+  INSERT_MIDI_CLIP: "insert_midi_clip",      // ⇧⌘M — over the time selection, else at the playhead
+  NUDGE_UP: "nudge_up",                  // ↑ — move the selected clip(s) to the track above
+  NUDGE_DOWN: "nudge_down",              // ↓ — to the track below
+  UNGROUP: "ungroup",                    // ⇧⌘G — unwrap the group containing the selected track
+  INSERT_SILENCE: "insert_silence",      // ⌘I — insert_time over the time selection, else 1 bar at the playhead
+  CREATE_FADE: "create_fade",            // ⌥⌘F — Live's default edge fade on selected audio clips
+  CONSOLIDATE: "consolidate",    // ⌘J — merge the selected MIDI clips (consolidate_clips; audio refused by the engine)
+  CROP: "crop_clip",             // ⇧⌘J — trim the selected clips to the time selection (arrangement-context only)
+  BOUNCE: "bounce_track",          // ⌘B — bounce the selected track to a new track (offline render)
+  FREEZE_TRACK: "freeze_track",    // ⌥⇧⌘F — freeze/unfreeze the selected track (toggle, Live's same-key unfreeze)
+  FIND: "find",                  // ⌘F — focus the browser search (surface: the live shell)
+  EXPAND_CLIP: "expand_clip",    // ⌥⌘E — Expanded Clip View (surface: the live shell's dock)
+  AUTOMATION_VIEW: "automation_view",  // A — Live's Automation Mode (the top-bar view toggle; lanes are a later wave)
+  SETTINGS: "settings",            // ⌘, — Live's Preferences (macOS standard): the live shell's settings overlay
 
   // keyboard — taste loop (workshop 2026-07-19): "this passed but FEELS wrong" →
   // capture tag + command-diff + snapshot into the felt-wrong archive lane.

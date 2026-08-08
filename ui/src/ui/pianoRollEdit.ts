@@ -128,3 +128,41 @@ export function previewFrom(orig: ReadonlyMap<number, MidiNote>, edits: readonly
   }
   return out;
 }
+
+// ── draw mode (Live's pencil, SPEC §7 of docs/live-clone/SPEC.md) ────────────────
+// Draw ON: a click-DRAG on empty grid paints one note whose LENGTH follows the drag;
+// a plain click paints a grid-step note (the caller's existing click path — a
+// zero-travel drag degenerates to exactly that here, which the tests pin). Draw OFF:
+// this helper is never consulted and a drag is the marquee, as before.
+
+/**
+ * The { start, length } a draw gesture commits.
+ *
+ *  - The START floors to the grid line at/below the pointer-DOWN (never the current
+ *    pointer) — rounding here would drop the note half a step from where the producer
+ *    aimed, the same rule the click-to-draw path's snapDownBeat carries.
+ *  - The END follows the drag, snapped (round) to the grid, and never produces a note
+ *    shorter than one grid step — so a click (down == up) yields exactly a grid-step
+ *    note and a drag can never shrink below it.
+ *  - Dragging LEFT of the start still paints rightward from the floored start (the
+ *    span clamps at the start; Live behaves the same way).
+ *  - `stepBeats` 0 (snap off) or `bypassSnap` (Option held) = freehand: no floor, no
+ *    snap, just a floor on the minimum length so a wobble-click still lands a note.
+ */
+export function drawNoteSpan(input: {
+  downBeat: number;
+  currentBeat: number;
+  /** Grid step in beats; 0 = snap off. */
+  stepBeats: number;
+  bypassSnap?: boolean;
+}): { start: number; length: number } {
+  const { downBeat, currentBeat, stepBeats, bypassSnap } = input;
+  const snapOn = stepBeats > 0 && !bypassSnap;
+  const minLen = snapOn ? stepBeats : 0.25;
+  const start = Math.max(0, snapOn ? Math.floor(downBeat / stepBeats) * stepBeats : downBeat);
+  const rawEnd = Math.max(currentBeat, start);
+  const end = snapOn
+    ? Math.max(start + stepBeats, Math.round(rawEnd / stepBeats) * stepBeats)
+    : Math.max(start + minLen, rawEnd);
+  return { start, length: end - start };
+}

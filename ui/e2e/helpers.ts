@@ -63,6 +63,25 @@ export async function bootV2(page: Page, opts: { theme?: "dark" | "light" } = {}
   await expect(page.getByTestId("v2-timeline")).toBeVisible();
 }
 
+/** Boot the LIVE clone shell (ui/src/live — the Live 12 Arrangement-View clone) via
+ *  the dev `?shell=live` override. Pins the ableton gesture table + keymap, the same
+ *  interaction bundle the "Live (clone)" template materialises — the clone's clip
+ *  gestures (header-drag moves, body-drag time-selects) only read as Live under it.
+ *  `opts.values` layers extra setting overrides (e.g. a fixed editor grid for the
+ *  docked piano roll's draw tests) into the same seed. */
+export async function bootLive(page: Page, opts: { values?: Record<string, unknown>; query?: string } = {}): Promise<void> {
+  const values = { gestureTable: "ableton", keymap: "ableton", ...opts.values };
+  await page.addInitScript((vals) => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({
+      version: 2, template: null, values: vals, keyOverrides: {},
+    }));
+  }, values);
+  await page.goto(`/?shell=live${opts.query ?? ""}`);
+  await expect(page.getByTestId("live-shell")).toBeVisible();
+  await expect(page.getByTestId("live-timeline")).toBeVisible();
+}
+
 /** File → <action> through the in-WebView File menu (same runAction dispatch the native
  *  menu + keyboard use). */
 export async function fileMenu(page: Page, action: string): Promise<void> {
@@ -71,7 +90,23 @@ export async function fileMenu(page: Page, action: string): Promise<void> {
 }
 
 export async function newProject(page: Page): Promise<void> {
+  // The switch is ASYNC by design (runAction writes the outgoing project's session
+  // summary before the store.exec lands), so clicking File → New is not enough —
+  // the next steps must only run once the blank edit is actually showing, or their
+  // tracks get wiped when the late application lands (the walkthrough/templates
+  // 5-headers-then-0 race).
+  const before = await page.evaluate(
+    () => (window as any).__moshStore.getState().snapshot.session.editFile,
+  );
   await fileMenu(page, "new_project");
+  await expect
+    .poll(() => page.evaluate(
+      () => (window as any).__moshStore.getState().snapshot.session.editFile,
+    ))
+    .not.toBe(before);
+  await expect.poll(() =>
+    page.evaluate(() => (window as any).__moshStore.getState().snapshot.tracks.length),
+  ).toBe(0);
 }
 
 export function tracks(page: Page): Locator {

@@ -74,6 +74,11 @@ export type State = {
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
+  // Triplet arrangement grid (⌘3, Live's Options → Triplet Grid). UI-local like
+  // snap/snapDivision; the lane grid paint does NOT draw triplet lines (documented
+  // in PARITY.md) — this governs snapping only.
+  snapTriplet: boolean;
+  setSnapTriplet: (b: boolean) => void;
   // CAP-CLP-017 — RIPPLE EDIT mode. When on, dragging or trimming a clip carries every
   // later clip on the SAME track with it (move_clip/trim_clip {ripple:true}) instead of
   // leaving a hole or an overlap.
@@ -259,7 +264,7 @@ async function startRecording(get: StateGet, set: StateSet, projectEpoch: number
     const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
     if (!arm.ok || arm.command !== "arm_track" || armApplied !== true) {
       s.pushAgentUtter("UHOH", "can't — no input");
-      set({ lastError: "No audio input available — check your microphone connection and permissions." });
+      set({ lastError: "No usable audio input — check Settings → Audio (device and input selection)." });
       return;
     }
   }
@@ -327,9 +332,15 @@ async function refreshSnapshot(
     // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
     const banner = versionBannerError(snap);
     if (banner) set({ lastError: banner });
-    // Prune selection / fetch peaks for current clips.
+    // Prune selection / fetch peaks for current clips. Only emit a new Set when
+    // pruning actually REMOVED something — an unchanged reference swap would fire
+    // every selection subscriber on EVERY refresh (and, for the live shell's
+    // selection-follow, would read as a phantom deselect after any command).
     const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
-    set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+    set((s) => {
+      const kept = [...s.selection].filter((id) => ids.has(id));
+      return kept.length === s.selection.size ? {} : { selection: new Set(kept) };
+    });
     // Prune the inline-FX expand set against current tracks (mirror the selection
     // prune) so a removed track's id can't make a later id-reused track open by itself.
     const trackIds = new Set(snap.tracks.map((t) => t.id));
@@ -392,6 +403,7 @@ export const useStore = create<State>((set, get, api) => ({
   snap: true,
   snapDivision: "1/4",
   snapAuto: false,
+  snapTriplet: false,  // ⌘3 (ableton preset) — the arrangement's triplet grid; off elsewhere
   ripple: false,   // CAP-CLP-017 — OFF by default; a hidden ripple mode destroys arrangements
   selection: new Set<string>(),
   peaks: {},
@@ -584,6 +596,7 @@ export const useStore = create<State>((set, get, api) => ({
   setPianoRollBeatPx: (v) => set({ pianoRollBeatPx: Math.max(12, Math.min(160, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
+  setSnapTriplet: (b) => set({ snapTriplet: b }),
   setSnapDivision: (d) => set({ snapDivision: d, snapAuto: false }),
   setSnapAuto: (b) => set({ snapAuto: b }),
   setRipple: (b) => set({ ripple: b }),
@@ -611,7 +624,8 @@ export const useStore = create<State>((set, get, api) => ({
     const snapDivision = get().effectiveSnapDivision();
     // SES-001 — snap over the piecewise tempo map (the grid restarts at every
     // tempo/meter change; constant-tempo sessions behave exactly as before).
-    return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision);
+    // snapTriplet (⌘3, ableton preset) shortens every step to 2/3 — see time.ts.
+    return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision, get().snapTriplet);
   },
 
   ensurePeaks: (clipId) => {

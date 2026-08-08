@@ -12,13 +12,17 @@ const deps = (snapshot: Snapshot | null = null) => ({
 });
 
 describe("LAYOUT_PRESETS", () => {
-  it("ships the five v1 templates", () => {
-    expect(Object.keys(LAYOUT_PRESETS).sort()).toEqual(["ableton", "fl", "logic", "mosh", "protools"]);
+  it("ships the five v1 templates + the live-clone resting shape", () => {
+    expect(Object.keys(LAYOUT_PRESETS).sort()).toEqual(["ableton", "fl", "live", "logic", "mosh", "protools"]);
   });
   it("mosh tucks the browser; ableton/fl open it (the per-DAW IA difference)", () => {
     expect(LAYOUT_PRESETS.mosh.left).toEqual({ collapsed: true });
     expect(LAYOUT_PRESETS.ableton.left?.collapsed).toBe(false);
     expect(LAYOUT_PRESETS.fl.left?.collapsed).toBe(false);
+  });
+  it("live: browser-forward at the measured 338pt, agent rail tucked", () => {
+    expect(LAYOUT_PRESETS.live.left).toEqual({ collapsed: false, size: 338 });
+    expect(LAYOUT_PRESETS.live.right?.collapsed).toBe(true);
   });
 });
 

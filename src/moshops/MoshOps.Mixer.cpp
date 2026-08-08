@@ -8,8 +8,8 @@
 // changed. The dispatch if-chain and all transaction/log/result/emit plumbing
 // stay in MoshOps.cpp (one mutation path, by construction). Cross-TU helpers
 // (isInternalMasterPlugin — also used by the snapshot serializer that stays
-// behind) live in MoshOpsInternal.h; bucketedPeaks (only consumers here)
-// moved into this TU's anonymous namespace, verbatim.
+// behind) live in MoshOpsInternal.h; bucketedPeaks joined it for the take-lanes
+// wave (list_takes in MoshOps.Tracks.cpp is its third consumer).
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
@@ -18,39 +18,6 @@
 namespace mosh
 {
 using namespace juce;
-
-namespace
-{
-    // Downsample a reader to `buckets` [min,max] pairs for a waveform overview.
-    // Shared by get_clip_peaks (clip source) and file_peaks (un-imported file).
-    juce::Array<juce::var> bucketedPeaks (juce::AudioFormatReader& reader, int buckets)
-    {
-        const auto total = (juce::int64) reader.lengthInSamples;
-        const int chans = (int) reader.numChannels;
-        const juce::int64 perBucket = juce::jmax ((juce::int64) 1, total / juce::jmax (1, buckets));
-
-        juce::Array<juce::var> peaks;
-        juce::AudioBuffer<float> buf (juce::jmax (1, chans), (int) juce::jmin (perBucket, (juce::int64) 65536));
-        for (int b = 0; b < buckets; ++b)
-        {
-            const juce::int64 startSample = (juce::int64) b * perBucket;
-            if (startSample >= total) break;
-            const int n = (int) juce::jmin (perBucket, total - startSample, (juce::int64) buf.getNumSamples());
-            buf.clear();
-            reader.read (&buf, 0, n, startSample, true, chans > 1);
-            float mn = 0.0f, mx = 0.0f;
-            for (int c = 0; c < buf.getNumChannels(); ++c)
-            {
-                auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
-                mn = juce::jmin (mn, r.getStart());
-                mx = juce::jmax (mx, r.getEnd());
-            }
-            juce::Array<juce::var> pair; pair.add (mn); pair.add (mx);
-            peaks.add (juce::var (pair));
-        }
-        return peaks;
-    }
-}
 
 // ── Metering helpers (Wave 9) ────────────────────────────────────────────────
 te::LevelMeterPlugin* MoshOps::findTrackMeter (te::AudioTrack& t)

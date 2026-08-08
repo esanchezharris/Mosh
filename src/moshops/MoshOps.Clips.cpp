@@ -15,6 +15,7 @@
 #include "ClipLoopPhase.h"
 #include "state/Ids.h"
 #include "engine/SourceRef.h"
+#include <limits>
 
 namespace mosh
 {
@@ -451,6 +452,219 @@ juce::var MoshOps::cmdSplitClip (const juce::var& args)
     return okResult ("split_clip", var (data));
 }
 
+// ⌘J (Live's Consolidate) — merge clips into one, dispatched by clip TYPE (Live
+// consolidates both; a mixed MIDI+WAVE set is refused plainly rather than
+// silently picking a type).
+//
+// MIDI: exact note arithmetic, re-anchored through the tempo map (beat positions
+// are clip-local, so each source clip's absolute start beat minus the span's
+// start beat is its offset).
+//
+// WAVE: render the span covering the selection through the track's instrument+FX
+// chain to a WAV (bounceRenderToWavImpl — the same offline RenderTask path as
+// bounce_track and the generative auto-bounce), remove the sources, insert the
+// rendered clip at the span start. The render happens BEFORE the transaction
+// (file side effect, not undo state); an UNSELECTED clip overlapping the span is
+// refused up front, or its audio would land in the render and stay on the track.
+juce::var MoshOps::cmdConsolidateClips (const juce::var& args)
+{
+    std::vector<te::Clip*> clips;
+    if (auto* arr = args.getProperty ("clipIds", var()).getArray())
+        for (auto& id : *arr)
+            if (auto* c = findClip (id.toString()))
+                clips.push_back (c);
+    if (clips.empty()) return errResult ("consolidate_clips", "no clips found");
+
+    auto* track = dynamic_cast<te::ClipTrack*> (clips[0]->getTrack());
+    if (track == nullptr) return errResult ("consolidate_clips", "clip not on a clip track");
+    int midiCount = 0, waveCount = 0;
+    for (auto* c : clips)
+    {
+        if (c->getTrack() != track)
+            return errResult ("consolidate_clips", "consolidate works within one track");
+        if (dynamic_cast<te::MidiClip*> (c) != nullptr) ++midiCount;
+        else if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr) ++waveCount;
+        else return errResult ("consolidate_clips", "consolidate works on MIDI and audio clips");
+    }
+    if (midiCount > 0 && waveCount > 0)
+        return errResult ("consolidate_clips",
+            "a mixed MIDI + audio selection can't consolidate — consolidate per type (Live's rule)");
+
+    double spanStart = std::numeric_limits<double>::max();
+    double spanEnd   = std::numeric_limits<double>::lowest();
+    for (auto* c : clips)
+    {
+        const auto pos = c->getPosition();
+        spanStart = juce::jmin (spanStart, pos.getStart().inSeconds());
+        spanEnd   = juce::jmax (spanEnd,   pos.getEnd().inSeconds());
+    }
+    // Harvest BEFORE any mutation: removing a clip can destroy the runtime object
+    // (the undo manager keeps its STATE, not the te::Clip*), so anything read from
+    // the sources below — today just the merged clip's name — is captured up front.
+    const juce::String firstClipName = clips[0]->getName();
+
+    // ── WAVE path — render the span through the track's chain ─────────────────
+    if (waveCount > 0)
+    {
+        // An unselected clip overlapping the span would be rendered into the
+        // consolidated file AND left on the track — double audio. Refuse honestly.
+        const auto selected = std::unordered_set<te::Clip*> (clips.begin(), clips.end());
+        for (auto* c : track->getClips())
+        {
+            if (c == nullptr || selected.count (c) != 0) continue;
+            const auto pos = c->getPosition();
+            if (pos.getEnd().inSeconds() > spanStart + 1.0e-4 && pos.getStart().inSeconds() < spanEnd - 1.0e-4)
+                return errResult ("consolidate_clips",
+                    "an unselected clip overlaps the span — include it or move it before consolidating");
+        }
+
+        static int consolidateSeq = 0;
+        const auto destWav = eng.sessionDir().getChildFile ("consolidate")
+            .getChildFile (track->getName() + "-" + track->itemID.toString()
+                           + "-" + juce::String (++consolidateSeq) + ".wav");
+        if (! bounceRenderToWavImpl (*track, spanStart, spanEnd, destWav, nullptr))
+            return errResult ("consolidate_clips", "offline render failed (stalled or not possible here)");
+        te::AudioFile af (eng.edit().engine, destWav);
+        const double len = af.isValid() ? af.getLength() : (spanEnd - spanStart);
+
+        beginTxn ("consolidate_clips");
+        for (auto* c : clips)
+        {
+            if (auto node = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+                node.isValid() && (bool) node[kSourceMutedByLayer])
+                if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+                    if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != c)
+                        hidden->removeFromParent();
+            c->removeFromParent();
+        }
+        auto nc = track->insertWaveClip (firstClipName, destWav,
+            { { tracktion::TimePosition::fromSeconds (spanStart),
+                tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+        if (nc == nullptr) return errResult ("consolidate_clips", "insertWaveClip failed");
+
+        auto* data = new DynamicObject();
+        data->setProperty ("newClipId", nc->itemID.toString());
+        data->setProperty ("file", destWav.getFullPathName());
+        logLine ("consolidate_clips", args, true, {}, true);
+        emitSnapshotInvalidated();
+        return okResult ("consolidate_clips", var (data));
+    }
+
+    // ── MIDI path (byte-identical to the pre-audio behaviour) ────────────────
+
+    // Harvest note data BEFORE any mutation: the sources are removed before the new
+    // clip is inserted, so an overlap between the merged span and a still-present
+    // source can never split or swallow either.
+    struct Harvested { int pitch; double start; double length; int vel; };
+    std::vector<Harvested> notes;
+    auto& ts = eng.edit().tempoSequence;
+    const double spanStartBeat = ts.toBeats (tracktion::TimePosition::fromSeconds (spanStart)).inBeats();
+    for (auto* c : clips)
+    {
+        auto* m = dynamic_cast<te::MidiClip*> (c);
+        const double clipStartBeat = ts.toBeats (m->getPosition().getStart()).inBeats();
+        auto& src = m->getSequence();
+        for (int i = 0; i < src.getNumNotes(); ++i)
+            if (auto* n = src.getNote (i))
+                notes.push_back ({ n->getNoteNumber(),
+                                   clipStartBeat - spanStartBeat + n->getStartBeat().inBeats(),
+                                   n->getLengthBeats().inBeats(), n->getVelocity() });
+    }
+
+    beginTxn ("consolidate_clips");
+    for (auto* c : clips)
+    {
+        // Mirror cmdRemoveClip: a source with a hidden beneath-render takes that audio
+        // with it, or the hidden clip is orphaned on the track.
+        if (auto node = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+            node.isValid() && (bool) node[kSourceMutedByLayer])
+            if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
+                if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != c)
+                    hidden->removeFromParent();
+        c->removeFromParent();
+    }
+    auto nc = track->insertMIDIClip (firstClipName,
+        { tracktion::TimePosition::fromSeconds (spanStart),
+          tracktion::TimePosition::fromSeconds (spanEnd) }, nullptr);
+    if (nc == nullptr) return errResult ("consolidate_clips", "insertMIDIClip failed");
+    auto& dst = nc->getSequence();
+    for (auto& n : notes)
+        dst.addNote (n.pitch, tracktion::BeatPosition::fromBeats (n.start),
+                     tracktion::BeatDuration::fromBeats (n.length), n.vel, 0, &undoManager());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("newClipId", nc->itemID.toString());
+    data->setProperty ("noteCount", (int) notes.size());
+    logLine ("consolidate_clips", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("consolidate_clips", var (data));
+}
+
+// ⇧⌘J (Live's Crop Clip — arrangement-context only) — trim each given clip to its
+// intersection with the passed TIME RANGE (the arrangement time selection; the UI
+// owns selection state, so it arrives as start/end seconds, like insert_time).
+// MIDI clips: notes fully outside the crop are removed and notes crossing an edge
+// are clipped to it — Tracktion's OWN MidiClip::trimBeyondEnds, so the note math is
+// the engine's, not hand-rolled. Audio clips: a plain edge-trim (offset adjusts,
+// exactly cmdTrimClip's semantics). A clip fully inside the range is untouched.
+// No-op → user-facing error when the range is empty or nothing overlaps. ONE
+// transaction, one log line — the whole crop is a single undo step.
+juce::var MoshOps::cmdCropClip (const juce::var& args)
+{
+    const double start = (double) args.getProperty ("start", 0.0);
+    const double end   = (double) args.getProperty ("end", 0.0);
+    if (! (end > start)) return errResult ("crop_clip", "crop needs a time selection (start < end)");
+
+    std::vector<te::Clip*> clips;
+    if (auto* arr = args.getProperty ("clipIds", var()).getArray())
+        for (auto& id : *arr)
+            if (auto* c = findClip (id.toString()))
+                clips.push_back (c);
+    if (clips.empty()) return errResult ("crop_clip", "no clips found");
+
+    struct Plan { te::Clip* clip; double s, e; bool startMoved, endMoved; };
+    std::vector<Plan> plans;
+    for (auto* c : clips)
+    {
+        const auto pos = c->getPosition();
+        const double cs = pos.getStart().inSeconds();
+        const double ce = pos.getEnd().inSeconds();
+        const double s = juce::jmax (cs, start);
+        const double e = juce::jmin (ce, end);
+        if (e <= s) continue;
+        plans.push_back ({ c, s, e, s > cs + 1.0e-9, e < ce - 1.0e-9 });
+    }
+    if (plans.empty()) return errResult ("crop_clip", "the time selection does not overlap the clip(s)");
+    // A clip fully inside the range is untouched — and if that is ALL of them, the
+    // crop is a no-op, reported rather than silently ok (Live's own behaviour).
+    const auto croppable = std::count_if (plans.begin(), plans.end(),
+                                          [] (const Plan& p) { return p.startMoved || p.endMoved; });
+    if (croppable == 0) return errResult ("crop_clip", "the time selection already covers the clip(s)");
+
+    beginTxn ("crop_clip");
+    for (auto& p : plans)
+    {
+        if (! p.startMoved && ! p.endMoved) continue;
+        auto* c = p.clip;
+        const auto pos = c->getPosition();
+        const double cStart = pos.getStart().inSeconds();
+        c->setPosition ({ { tracktion::TimePosition::fromSeconds (p.s),
+                            tracktion::TimeDuration::fromSeconds (p.e - p.s) },
+                          tracktion::TimeDuration::fromSeconds (
+                              pos.getOffset().inSeconds() + (p.s - cStart)) });
+        // Cut the content to the new window — only the side(s) that actually moved,
+        // so a one-sided crop never rewrites the untouched end (and TE's allowed
+        // but anomalous notes-in-the-offset on the other side stay put).
+        if (auto* mc = dynamic_cast<te::MidiClip*> (c))
+            mc->trimBeyondEnds (p.startMoved, p.endMoved, &undoManager());
+        reactiveTouch (c->itemID.toString());   // Phase 3 — re-bounce the source window, as trim_clip
+    }
+
+    logLine ("crop_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("crop_clip");
+}
+
 juce::var MoshOps::cmdRemoveClip (const juce::var& args)
 {
     auto* clip = findClip (args.getProperty ("clipId", var()).toString());
@@ -601,6 +815,42 @@ juce::var MoshOps::cmdSetClipCrossfade (const juce::var& args)
 // echoes the ACTUAL post-clamp values read back off the clip — never the raw request.
 juce::var MoshOps::cmdSetClipLoop (const juce::var& args)
 {
+    // MIDI branch (Live 12: every MIDI clip can loop). loopStart/loopLength are
+    // CONTENT-RELATIVE seconds, exactly like the wave path; TE converts to beats at
+    // the clip's own tempo (setLoopRange). A zeroed range deactivates — notes play
+    // once, clip length independent (Live's per-clip deactivate). Undo rides the
+    // clip's own CachedValue undo manager inside our single transaction.
+    if (auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString())))
+    {
+        const bool enabled = (bool) args.getProperty ("enabled", false);
+        const double curStart  = mc->getLoopStart().inSeconds();
+        const double curLength = mc->getLoopLength().inSeconds();
+        const double start  = juce::jmax (0.0, (double) args.getProperty ("start", curStart));
+        const double lengthDefault = curLength > 0.0 ? curLength : mc->getPosition().getLength().inSeconds();
+        const double length = juce::jmax (0.0, (double) args.getProperty ("length", lengthDefault));
+        if (enabled && ! (length > 0.0))
+            return errResult ("set_clip_loop", "loop length must be greater than 0 when enabled");
+
+        beginTxn ("set_clip_loop");
+        if (enabled)
+            mc->setLoopRange ({ tracktion::TimePosition::fromSeconds (start),
+                                tracktion::TimeDuration::fromSeconds (length) });
+        else
+            mc->setLoopRangeBeats ({});   // empty range ⇒ isLooping() false (notes once)
+
+        logLine ("set_clip_loop", args, true, {}, true);
+        emitSnapshotInvalidated();
+        reactiveTouch (mc->itemID.toString());   // Phase 3 — a looped source re-bounces
+
+        auto* data = new DynamicObject();
+        data->setProperty ("clipId", mc->itemID.toString());
+        data->setProperty ("loopEnabled", mc->isLooping());
+        // Echo the engine truth in BEATS (the snapshot's additive MIDI loop fields).
+        data->setProperty ("midiLoopStartBeats", mc->getLoopStartBeats().inBeats());
+        data->setProperty ("midiLoopLengthBeats", mc->getLoopLengthBeats().inBeats());
+        return okResult ("set_clip_loop", var (data));
+    }
+
     auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (ac == nullptr) return errResult ("set_clip_loop", "not an audio clip");
 

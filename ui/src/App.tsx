@@ -11,6 +11,7 @@ import { resolveShell } from "./v2/shellQuery";
 import { isCharacterLab } from "./lab/labQuery";
 import { AppLegacy } from "./AppLegacy";
 import { AppV2 } from "./v2/AppV2";
+import { AppLive } from "./live/AppLive";
 
 // Dev-only Character Lab demo. The reference is gated on an explicit development mode so that in
 // the production build the ternary folds to a literal `null` and the lazy import() lands in
@@ -38,5 +39,5 @@ export function App() {
       <CharacterLab />
     </Suspense>
   );
-  return shell === "v2" ? <AppV2 /> : <AppLegacy />;
+  return shell === "live" ? <AppLive /> : shell === "v2" ? <AppV2 /> : <AppLegacy />;
 }

@@ -400,7 +400,29 @@ describe("legacy prompt byte-stability pin", () => {
     //
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("46f92aaf7eeb4fd4d3d1b7aa436f28cb957cc194b4d35b95937d128daa62b7cc");
+    //
+    // Moved 2026-08-07 (live-clone Wave 2): the catalog grew consolidate_clips (the
+    // ⌘J moshop — MIDI-only merge). Same rule as every move above: the hash below is
+    // RECOMPUTED from the merged catalog, and the command is real engine code.
+    // Moved again 2026-08-07 (Wave 3): load_plugin's description documents the
+    // instrument-on-audio-track refusal (the engine guard in cmdLoadPlugin).
+    // Moved again 2026-08-07 (Wave 3 follow-up): load_plugin gained the declared
+    // replaceInstrument arg (the hot-swap). Same recompute rule.
+    // Moved again 2026-08-07 (crop wave): the catalog grew crop_clip (the ⇧⌘J
+    // moshop — trim clips to a time range, notes clipped at the edges). Same rule.
+    // Moved again 2026-08-07 (velocity-tools wave): the catalog grew
+    // transform_velocities (Live 12's velocity tool row). Same recompute rule.
+    // Moved again 2026-08-07 (bounce wave): the catalog grew bounce_track (Live
+    // 12's Bounce — offline-render a track to audio). Same recompute rule.
+    // Moved again 2026-08-07 (audio-consolidate wave): consolidate_clips's
+    // description now documents the WAVE render-consolidate path. Same rule.
+    // Moved again 2026-08-07 (freeze wave): the catalog grew freeze_track +
+    // unfreeze_track (Live 12's Freeze Track ⌥⇧⌘F). Same recompute rule.
+    // Moved again 2026-08-07 (transform-tools wave): the catalog grew
+    // transform_notes (Live 12's Transform tools row). Same recompute rule.
+    // Moved again 2026-08-07 (transform stragglers): transform_notes's description
+    // covers setLength / addInterval / fitToScale. Same rule.
+    expect(hash).toBe("f7fd9c32e2b0acb72c7061ac594e6db987e03b6a0e114f829f434c11f9106911");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

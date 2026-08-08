@@ -595,3 +595,433 @@ describe("project picker filters (PRJ-NAME)", () => {
     expect(opts.defaultName).toBe("old song.tracktionedit");
   });
 });
+
+// Live-12 arrangement keys (SPEC §8, docs/live-clone/PARITY.md) — the ableton
+// keymap's bindings land here through the shared dispatcher.
+describe("runAction — Live-12 arrangement keys", () => {
+  const snapFor = (tracks: unknown[]): Snapshot => ({
+    schemaVersion: 1,
+    session: {
+      sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "",
+    },
+    tracks,
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    master: { volumeDb: 0, pan: 0 },
+  } as unknown as Snapshot);
+
+  it("loop_toggle arms a collapsed loop as the first four bars (4/4 at 120bpm → 8s)", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      transport: { playing: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+      snapshot: snapFor([]),
+    });
+    await runAction("loop_toggle", ctx);
+    expect(execCalls).toContainEqual({ command: "set_transport", args: { loop: true, loopStart: 0, loopEnd: 8 } });
+  });
+
+  it("loop_toggle re-arms the existing range, and releases an armed loop", async () => {
+    const on = makeCtx({}, { transport: { playing: false, looping: false, loopStart: 2, loopEnd: 6 } });
+    await runAction("loop_toggle", on.ctx);
+    expect(on.execCalls).toContainEqual({ command: "set_transport", args: { loop: true, loopStart: 2, loopEnd: 6 } });
+    const off = makeCtx({}, { transport: { playing: false, looping: true, loopStart: 2, loopEnd: 6 } });
+    await runAction("loop_toggle", off.ctx);
+    expect(off.execCalls).toContainEqual({ command: "set_transport", args: { loop: false } });
+  });
+
+  it("loop_toggle loops the drawn time selection when one exists (⌘L over a span)", async () => {
+    const { useShell } = await import("./v2/shellState");
+    useShell.getState().setTimeRange({ start: 2, end: 6 });
+    try {
+      const { ctx, execCalls } = makeCtx();
+      await runAction("loop_toggle", ctx);
+      expect(execCalls).toContainEqual({ command: "set_transport", args: { loop: true, loopStart: 2, loopEnd: 6 } });
+    } finally {
+      useShell.getState().setTimeRange(null);
+    }
+  });
+
+  it("deactivate mutes a mixed selection wholesale, and re-activates an all-muted one", async () => {
+    const tracks = [{ id: "t1", clips: [
+      { id: "c1", mute: false }, { id: "c2", mute: true },
+    ] }];
+    const mixed = makeCtx({}, { snapshot: snapFor(tracks), selection: new Set(["c1", "c2"]) });
+    await runAction("deactivate", mixed.ctx);
+    // any active ⇒ deactivate ALL (the note editor's toggleActiveEdits semantics)
+    expect(mixed.execCalls).toEqual([
+      { command: "set_clip_mute", args: { clipId: "c1", mute: true } },
+      { command: "set_clip_mute", args: { clipId: "c2", mute: true } },
+    ]);
+    const allMuted = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [{ id: "c1", mute: true }] }]),
+      selection: new Set(["c1"]),
+    });
+    await runAction("deactivate", allMuted.ctx);
+    expect(allMuted.execCalls).toEqual([{ command: "set_clip_mute", args: { clipId: "c1", mute: false } }]);
+  });
+
+  it("deactivate with an empty selection is a no-op", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("deactivate", ctx);
+    expect(execCalls).toEqual([]);
+  });
+
+  it("grid_narrow / grid_widen step the division and clamp at both ends", async () => {
+    const narrow = makeCtx({}, { snapDivision: "1/4", setSnapDivision: vi.fn() });
+    await runAction("grid_narrow", narrow.ctx);
+    expect(narrow.store.setSnapDivision).toHaveBeenCalledWith("1/8");
+    const widen = makeCtx({}, { snapDivision: "1/4", setSnapDivision: vi.fn() });
+    await runAction("grid_widen", widen.ctx);
+    expect(widen.store.setSnapDivision).toHaveBeenCalledWith("bar");
+    // already-coarsest: stays put (no pointless write)
+    const clamped = makeCtx({}, { snapDivision: "bar", setSnapDivision: vi.fn() });
+    await runAction("grid_widen", clamped.ctx);
+    expect(clamped.store.setSnapDivision).not.toHaveBeenCalled();
+  });
+
+  it("snap_toggle flips the store snap flag", async () => {
+    const on = makeCtx({}, { snap: true, setSnap: vi.fn() });
+    await runAction("snap_toggle", on.ctx);
+    expect(on.store.setSnap).toHaveBeenCalledWith(false);
+    const off = makeCtx({}, { snap: false, setSnap: vi.fn() });
+    await runAction("snap_toggle", off.ctx);
+    expect(off.store.setSnap).toHaveBeenCalledWith(true);
+  });
+
+  it("zoom_in / zoom_out scale pxPerSec by 1.25 (the store setter owns the clamp)", async () => {
+    const zin = makeCtx({}, { pxPerSec: 80, setPxPerSec: vi.fn() });
+    await runAction("zoom_in", zin.ctx);
+    expect(zin.store.setPxPerSec).toHaveBeenCalledWith(100);
+    const zout = makeCtx({}, { pxPerSec: 80, setPxPerSec: vi.fn() });
+    await runAction("zoom_out", zout.ctx);
+    expect(zout.store.setPxPerSec).toHaveBeenCalledWith(64);
+  });
+});
+
+// Wave 0 (menus.json ground truth) — creation / quantize / selection actions.
+describe("runAction — wave-0 Live menu actions", () => {
+  const snapFor = (tracks: unknown[]): Snapshot => ({
+    schemaVersion: 1,
+    session: {
+      sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "",
+    },
+    tracks,
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    master: { volumeDb: 0, pan: 0 },
+  } as unknown as Snapshot);
+
+  it("insert_audio_track → create_track; insert_midi_track → create_track + add_midi_clip on the new track", async () => {
+    // Read the exec mock's own call log here (not execCalls): the create_track result
+    // has to carry a trackId, so the fake's implementation is swapped for one that
+    // returns it — and execCalls only records through the ORIGINAL implementation.
+    const callsOf = (store: ActionStore) =>
+      (store.exec as ReturnType<typeof vi.fn>).mock.calls.map(([command, args]) => ({ command, args }));
+    const audio = makeCtx();
+    (audio.store.exec as ReturnType<typeof vi.fn>).mockImplementation(async (command: string) =>
+      ({ ok: true, command, data: command === "create_track" ? { trackId: "t9" } : undefined }));
+    await runAction("insert_audio_track", audio.ctx);
+    expect(callsOf(audio.store)).toEqual([{ command: "create_track", args: { name: "Audio" } }]);
+
+    const midi = makeCtx();
+    (midi.store.exec as ReturnType<typeof vi.fn>).mockImplementation(async (command: string) =>
+      ({ ok: true, command, data: command === "create_track" ? { trackId: "t9" } : undefined }));
+    await runAction("insert_midi_track", midi.ctx);
+    expect(callsOf(midi.store)).toEqual([
+      { command: "create_track", args: { name: "Instrument" } },
+      // the explicit trackId keeps mock and native identical (TrackLaneList's comment)
+      { command: "add_midi_clip", args: { trackId: "t9" } },
+    ]);
+  });
+
+  it("insert_midi_clip lands on the selected track over the drawn time span", async () => {
+    const { useShell } = await import("./v2/shellState");
+    useShell.getState().setTimeRange({ start: 2, end: 6 });
+    try {
+      const { ctx, execCalls } = makeCtx({}, {
+        snapshot: snapFor([{ id: "t1", clips: [] }, { id: "t2", clips: [] }]),
+        selectedTrackId: "t2",
+      });
+      await runAction("insert_midi_clip", ctx);
+      expect(execCalls).toContainEqual({ command: "add_midi_clip", args: { trackId: "t2", start: 2, length: 4 } });
+    } finally {
+      useShell.getState().setTimeRange(null);
+    }
+  });
+
+  it("insert_midi_clip without a span plants one bar at the playhead on the first track", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [] }]),
+      transport: { playing: false, position: 3 },
+    });
+    await runAction("insert_midi_clip", ctx);
+    // 4/4 at 120bpm → a 2s bar
+    expect(execCalls).toContainEqual({ command: "add_midi_clip", args: { trackId: "t1", start: 3, length: 2 } });
+  });
+
+  it("quantize hits only selected clips that HAVE notes, on the current grid division", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [
+        { id: "c1", type: "midi", start: 0, notes: [{ i: 0, pitch: 60, start: 0.13, length: 0.5, velocity: 100 }] },
+        { id: "c2", type: "midi", start: 0, notes: [] },
+        { id: "c3", type: "wave", start: 0 },
+      ] }]),
+      selection: new Set(["c1", "c2", "c3"]),
+      snapDivision: "1/8",
+    });
+    await runAction("quantize", ctx);
+    // 1/8 at 120bpm = 0.5 beats; the empty MIDI clip and the wave clip are skipped
+    expect(execCalls).toEqual([{ command: "quantize_notes", args: { clipId: "c1", division: 0.5 } }]);
+  });
+
+  it("select_loop draws the armed loop as a time selection; inert with no loop", async () => {
+    const { useShell } = await import("./v2/shellState");
+    const on = makeCtx({}, { transport: { playing: false, looping: true, loopStart: 4, loopEnd: 8 } });
+    await runAction("select_loop", on.ctx);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 8 });
+    useShell.getState().setTimeRange(null);
+    const off = makeCtx({}, { transport: { playing: false, looping: false, loopStart: 0, loopEnd: 0 } });
+    await runAction("select_loop", off.ctx);
+    expect(useShell.getState().timeRange).toBeNull();
+  });
+
+  it("select_all selects every clip; invert selects the complement (and can empty it)", async () => {
+    const tracks = [{ id: "t1", clips: [{ id: "c1" }, { id: "c2" }] }, { id: "t2", clips: [{ id: "c3" }] }];
+    const all = makeCtx({}, { snapshot: snapFor(tracks), select: vi.fn() });
+    await runAction("select_all", all.ctx);
+    expect(all.store.select).toHaveBeenCalledWith(["c1", "c2", "c3"]);
+    const inv = makeCtx({}, { snapshot: snapFor(tracks), selection: new Set(["c2"]), select: vi.fn() });
+    await runAction("invert_selection", inv.ctx);
+    expect(inv.store.select).toHaveBeenCalledWith(["c1", "c3"]);
+  });
+});
+
+describe("runAction — wave-2 (consolidate / grid_triplet)", () => {
+  const snapFor = (tracks: unknown[]): Snapshot => ({
+    schemaVersion: 1,
+    session: {
+      sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "",
+    },
+    tracks,
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    master: { volumeDb: 0, pan: 0 },
+  } as unknown as Snapshot);
+
+  it("consolidate passes exactly the selected clips' ids to consolidate_clips", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [
+        { id: "c1", type: "midi" }, { id: "c2", type: "midi" }, { id: "c3", type: "wave" },
+      ] }]),
+      selection: new Set(["c1", "c2"]),
+    });
+    await runAction("consolidate", ctx);
+    expect(execCalls).toContainEqual({ command: "consolidate_clips", args: { clipIds: ["c1", "c2"] } });
+  });
+
+  it("consolidate surfaces an engine refusal (e.g. audio in the selection) via setLastError", async () => {
+    const setLastError = vi.fn();
+    const { ctx } = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [{ id: "c3", type: "wave" }] }]),
+      selection: new Set(["c3"]),
+      setLastError,
+      exec: vi.fn(async (command: string) => ({ ok: false, command, error: "MIDI clips only — consolidating audio needs a render (not built)" })),
+    });
+    await runAction("consolidate", ctx);
+    expect(setLastError).toHaveBeenCalledWith(expect.stringContaining("MIDI clips only"));
+  });
+
+  it("consolidate with an empty selection sends nothing", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("consolidate", ctx);
+    expect(execCalls).toEqual([]);
+  });
+
+  it("grid_triplet flips the store's snapTriplet flag", async () => {
+    const on = makeCtx({}, { snapTriplet: false, setSnapTriplet: vi.fn() });
+    await runAction("grid_triplet", on.ctx);
+    expect(on.store.setSnapTriplet).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("runAction — crop_clip (⇧⌘J)", () => {
+  const snapFor = (tracks: unknown[]): Snapshot => ({
+    schemaVersion: 1,
+    session: {
+      sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "",
+    },
+    tracks,
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    master: { volumeDb: 0, pan: 0 },
+  } as unknown as Snapshot);
+
+  it("passes the selected clips + the drawn time selection to crop_clip", async () => {
+    const { useShell } = await import("./v2/shellState");
+    useShell.getState().setTimeRange({ start: 2, end: 6 });
+    try {
+      const { ctx, execCalls } = makeCtx({}, {
+        snapshot: snapFor([{ id: "t1", clips: [{ id: "c1" }, { id: "c2" }] }]),
+        selection: new Set(["c1"]),
+      });
+      await runAction("crop_clip", ctx);
+      expect(execCalls).toContainEqual({ command: "crop_clip", args: { clipIds: ["c1"], start: 2, end: 6 } });
+    } finally {
+      useShell.getState().setTimeRange(null);
+    }
+  });
+
+  it("with NO time selection it errors honestly and sends nothing (no playhead fallback)", async () => {
+    const setLastError = vi.fn();
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [{ id: "c1" }] }]),
+      selection: new Set(["c1"]),
+      setLastError,
+    });
+    await runAction("crop_clip", ctx);
+    expect(execCalls).toEqual([]);
+    expect(setLastError).toHaveBeenCalledWith(expect.stringContaining("time selection"));
+  });
+
+  it("with an empty clip selection it errors and sends nothing", async () => {
+    const setLastError = vi.fn();
+    const { useShell } = await import("./v2/shellState");
+    useShell.getState().setTimeRange({ start: 2, end: 6 });
+    try {
+      const { ctx, execCalls } = makeCtx({}, { setLastError });
+      await runAction("crop_clip", ctx);
+      expect(execCalls).toEqual([]);
+      expect(setLastError).toHaveBeenCalledWith(expect.stringContaining("no clips selected"));
+    } finally {
+      useShell.getState().setTimeRange(null);
+    }
+  });
+
+  it("surfaces an engine refusal (e.g. no overlap) via setLastError", async () => {
+    const { useShell } = await import("./v2/shellState");
+    useShell.getState().setTimeRange({ start: 2, end: 6 });
+    try {
+      const setLastError = vi.fn();
+      const { ctx } = makeCtx({}, {
+        snapshot: snapFor([{ id: "t1", clips: [{ id: "c1" }] }]),
+        selection: new Set(["c1"]),
+        setLastError,
+        exec: vi.fn(async (command: string) => ({ ok: false, command, error: "the time selection does not overlap the clip(s)" })),
+      });
+      await runAction("crop_clip", ctx);
+      expect(setLastError).toHaveBeenCalledWith(expect.stringContaining("does not overlap"));
+    } finally {
+      useShell.getState().setTimeRange(null);
+    }
+  });
+});
+
+describe("runAction — keymap-audit wave (nudge_up/down, ungroup, insert_silence, create_fade, group-by-track)", () => {
+  const snapFor = (tracks: unknown[]): Snapshot => ({
+    schemaVersion: 1,
+    session: {
+      sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "",
+    },
+    tracks,
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    master: { volumeDb: 0, pan: 0 },
+  } as unknown as Snapshot);
+
+  it("nudge_down moves selected clips to the track below; the bottom track's clips stay", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([
+        { id: "t1", clips: [{ id: "c1" }] },
+        { id: "t2", clips: [{ id: "c2" }] },
+        { id: "t3", clips: [{ id: "c3" }] },
+      ]),
+      selection: new Set(["c1", "c3"]),
+    });
+    await runAction("nudge_down", ctx);
+    // c1 → t2; c3 is already on the bottom track and stays (drop, not error)
+    expect(execCalls).toEqual([{ command: "move_clip", args: { clipId: "c1", trackId: "t2" } }]);
+  });
+
+  it("nudge_up moves to the track above; the top track's clips stay", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([
+        { id: "t1", clips: [{ id: "c1" }] },
+        { id: "t2", clips: [{ id: "c2" }] },
+      ]),
+      selection: new Set(["c1", "c2"]),
+    });
+    await runAction("nudge_up", ctx);
+    expect(execCalls).toEqual([{ command: "move_clip", args: { clipId: "c2", trackId: "t1" } }]);
+  });
+
+  it("ungroup unwraps the selected track's PARENT group", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([
+        { id: "g1", isGroup: true, type: "group", clips: [] },
+        { id: "t1", parentId: "g1", clips: [] },
+      ]),
+      selectedTrackId: "t1",
+    });
+    await runAction("ungroup", ctx);
+    expect(execCalls).toContainEqual({ command: "ungroup_track", args: { trackId: "g1" } });
+  });
+
+  it("ungroup on a selected group track unwraps it directly", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([{ id: "g1", isGroup: true, type: "group", clips: [] }]),
+      selectedTrackId: "g1",
+    });
+    await runAction("ungroup", ctx);
+    expect(execCalls).toContainEqual({ command: "ungroup_track", args: { trackId: "g1" } });
+  });
+
+  it("insert_silence uses the time selection when one exists, else one bar at the playhead", async () => {
+    const { useShell } = await import("./v2/shellState");
+    useShell.getState().setTimeRange({ start: 2, end: 6 });
+    try {
+      const { ctx, execCalls } = makeCtx({}, { snapshot: snapFor([]) });
+      await runAction("insert_silence", ctx);
+      expect(execCalls).toContainEqual({ command: "insert_time", args: { start: 2, duration: 4 } });
+    } finally {
+      useShell.getState().setTimeRange(null);
+    }
+    const { ctx: ctx2, execCalls: calls2 } = makeCtx({}, {
+      snapshot: snapFor([]),
+      transport: { playing: false, position: 3 },
+    });
+    await runAction("insert_silence", ctx2);
+    // 4/4 at 120bpm → a 2s bar at the playhead
+    expect(calls2).toContainEqual({ command: "insert_time", args: { start: 3, duration: 2 } });
+  });
+
+  it("create_fade applies Live's 4ms default to selected WAVE clips only", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [
+        { id: "w1", type: "wave" }, { id: "m1", type: "midi" },
+      ] }]),
+      selection: new Set(["w1", "m1"]),
+    });
+    await runAction("create_fade", ctx);
+    expect(execCalls).toEqual([{ command: "set_clip_fade", args: { clipId: "w1", fadeInSec: 0.004, fadeOutSec: 0.004 } }]);
+  });
+
+  it("group falls back to the track selection when no clips are selected", async () => {
+    const byClips = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [{ id: "c1" }] }]),
+      selection: new Set(["c1"]),
+    });
+    await runAction("group", byClips.ctx);
+    expect(byClips.execCalls).toContainEqual({ command: "create_group_track", args: { trackIds: ["t1"] } });
+
+    const byTrack = makeCtx({}, {
+      snapshot: snapFor([{ id: "t1", clips: [] }]),
+      selection: new Set<string>(),
+      selectedTrackId: "t1",
+    });
+    await runAction("group", byTrack.ctx);
+    expect(byTrack.execCalls).toContainEqual({ command: "create_group_track", args: { trackIds: ["t1"] } });
+
+    const nothing = makeCtx({}, { snapshot: snapFor([{ id: "t1", clips: [] }]), selection: new Set<string>() });
+    await runAction("group", nothing.ctx);
+    expect(nothing.execCalls).toEqual([]);
+  });
+});

@@ -7,8 +7,8 @@ import { settingDef, coerceSetting } from "./schema";
 // "select a template" can never write garbage into the store.
 
 describe("built-in templates", () => {
-  it("ships the five built-ins", () => {
-    expect(TEMPLATES.map((t) => t.name).sort()).toEqual(["ableton", "fl", "logic", "mosh", "protools"]);
+  it("ships the five DAW built-ins + the live-clone shell bundle", () => {
+    expect(TEMPLATES.map((t) => t.name).sort()).toEqual(["ableton", "fl", "live", "logic", "mosh", "protools"]);
   });
 
   it("references only valid schema ids", () => {
@@ -23,9 +23,19 @@ describe("built-in templates", () => {
         expect(coerceSetting(id, v), `${t.name}.${id}`).toEqual(v);
   });
 
-  it("gives each built-in a distinct skin", () => {
-    const skins = TEMPLATES.map((t) => t.values.skin);
-    expect(new Set(skins).size).toBe(TEMPLATES.length);
+  it("gives each DAW built-in a distinct skin (the live bundle is the one exception)", () => {
+    // The five DAW templates are pure re-skins — distinct skin per template. "live"
+    // is NOT a re-skin: it mounts its own shell (ui/src/live), so it reuses the
+    // ableton skin and pins uiShell instead.
+    const daw = TEMPLATES.filter((t) => t.name !== "live");
+    expect(new Set(daw.map((t) => t.values.skin)).size).toBe(daw.length);
+  });
+
+  it("the live bundle switches the shell and loads the ableton interaction model", () => {
+    const live = template("live");
+    expect(live?.values.uiShell).toBe("live");
+    expect(live?.values.gestureTable).toBe("ableton");
+    expect(live?.values.keymap).toBe("ableton");
   });
 
   it("pins a panel layout per template (FL = its floating layout)", () => {

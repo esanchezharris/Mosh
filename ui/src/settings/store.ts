@@ -19,6 +19,7 @@ import {
   type SettingValue,
 } from "./schema";
 import { templateValues } from "./templates";
+import { resolveShell } from "../v2/shellQuery";
 import { applySettingEffects } from "./effects";
 
 export const STORAGE_KEY = "mosh.settings";
@@ -45,9 +46,16 @@ function isKeyId(id: string): boolean {
 
 // The active keymap that scopes key.* rebinds: the effective `keymap` value
 // (override ?? schema default), always defined even with no named template.
+// Mirrors effectiveInteractionSetting() in interaction/config.ts: under the LIVE
+// shell an UNSET keymap resolves to "ableton", so rebinds written under the live
+// shell land in the ableton bucket that the effective keymap actually reads.
 function activeKeymap(values: Record<string, SettingValue>): string {
   const v = values.keymap;
   if (typeof v === "string") return v;
+  const shell = resolveShell(
+    typeof values.uiShell === "string" ? values.uiShell : settingDef("uiShell")?.default,
+  );
+  if (shell === "live") return "ableton";
   const d = settingDef("keymap")?.default;
   return typeof d === "string" ? d : "mosh";
 }

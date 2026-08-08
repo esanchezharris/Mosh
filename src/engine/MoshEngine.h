@@ -48,6 +48,16 @@ public:
         hardware-free error when this session never wanted audio. */
     juce::String retryAudioDevice();
 
+    /** AUD-017 follow-up — adopt a device that set_audio_device opened FROM the
+        degraded state. applyAudioDeviceSetup goes through JUCE's
+        AudioDeviceManager directly, so it can succeed while this engine still
+        believes audio is dead; a successful pick from the Settings panel IS the
+        recovery, and this flips the engine over (audioOpen, error cleared,
+        playback context allocated) exactly like retryAudioDevice's success tail.
+        A no-op when audio is already up; never called headless (the degraded
+        state is unreachable there, by audioRequested()'s construction). */
+    void adoptOpenedAudioDevice();
+
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 

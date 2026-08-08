@@ -442,7 +442,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     await flushQueuedTransport();
 
     expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
-    expect(useStore.getState().lastError).toBe("No audio input available — check your microphone connection and permissions.");
+    expect(useStore.getState().lastError).toBe("No usable audio input — check Settings → Audio (device and input selection).");
   });
 
   it("does not start recording when automatic arming is not applied", async () => {
@@ -457,7 +457,8 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     await flushQueuedTransport();
 
     expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
-    expect(useStore.getState().lastError).toBe("no input device");
+    // REC-NO-INPUT: the guided message, not the engine's bare generic reason
+    expect(useStore.getState().lastError).toBe("No usable audio input — check Settings → Audio (device and input selection).");
   });
 
   it("does not continue a delayed arm into a replacement project", async () => {

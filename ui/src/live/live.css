@@ -1,0 +1,759 @@
+/* ============================================================================
+   MOSH LIVE — the Live 12 Arrangement-View clone shell (docs/live-clone/SPEC.md).
+   All tokens + rules are scoped under .live-shell so this never touches the classic
+   or v2 shells (all three bundles coexist behind the uiShell router). The palette is
+   SAMPLED from Live 12 (SPEC §2); geometry is SPEC §1's measured points.
+   ============================================================================ */
+
+.live-shell {
+  /* ── palette (SPEC §2, sampled from Live 12.4.2, quantized ±2) ─────────────── */
+  --live-bg-deep: #2e2926;        /* control bar, rulers, dock headers */
+  --live-bg: #3b3430;             /* browser, panels */
+  --live-lane-bg: #332e2a;        /* lane ground — a step darker than the panels so the muted clip bodies still lift off it (12.4.2 proof shots) */
+  --live-bg-raise: #3d3733;       /* lighter panel rows, editor grid */
+  --live-bg-inset: #13100d;       /* near-black warm inset */
+  --live-line: #282420;           /* hairlines, gridlines (deliberately low contrast) */
+  --live-line-strong: #453e38;    /* bar lines, hover edges — one step up, still quiet */
+  --live-text: #bcb3a6;           /* warm bone */
+  --live-text-dim: #8a827a;       /* secondary labels */
+  --live-accent: #f3b166;         /* ACTIVE controls: draw, track number box, loop */
+  --live-accent-ink: #241804;     /* dark number/label on the accent fill */
+  --live-select: #a8c7d3;         /* browser row selection (re-sampled from the browser-*.png proofs — SPEC's #7a8fa0 estimate was too dark) */
+  --live-select-ink: #161c22;
+  --live-status: #121e21;         /* status bar (dark teal-black) */
+  --live-rec: #e0533d;            /* record/arm — warm red, distinct from the accent */
+  --live-solo: #5f7f96;           /* solo — a cool blue-gray near Live's solo blue */
+
+  /* clip fallbacks when the track carries no colour (SPEC §2's observed families) */
+  --live-clip-midi: #836ddd;      /* lavender */
+  --live-clip-drum: #a878c0;      /* purple */
+  --live-clip-wave: #879da5;      /* blue-gray */
+  --live-clip-block: #6f6a63;     /* unknown clip type */
+
+  /* ── geometry (WIDGETS.md §1 — the measured 12.4.2 zone model, which refines
+     SPEC §1: control bar 30 not 28, bar ruler ~19 not 15/22, status 16, browser
+     331 not 338, header column FIXED 279 with no resize affordance, overview
+     strip ~11 between control bar and ruler, device panel fixed ~212) ────────── */
+  --live-cb-h: 30px;              /* control bar */
+  --live-overview-h: 11px;        /* mini-arrangement strip */
+  --live-browser-w: 331px;        /* browser dock (default; draggable, hides at min) */
+  --live-bcat-w: 109px;           /* browser category column */
+  --live-head-w: 279px;           /* RIGHT track-header column — fixed, no resize affordance (WIDGETS §1) */
+  --live-lane-h: 86px;            /* default lane height (drag range 17–443, per lane) */
+  --live-ruler-h: 19px;           /* bar ruler */
+  --live-dock-h: 265px;           /* detail dock default (clip panel min 226 — dockGeometry.ts) */
+  --live-device-h: 212px;         /* device panel — FIXED (its top edge does not drag) */
+  --live-status-h: 16px;          /* status bar */
+
+  /* Canvas ink for the shared clip renderers (ui/clipRenderers.tsx reads these off
+     the canvas's computed style — var()/color-mix would NOT resolve there, so these
+     are literals on purpose). Live's ink is a darker complement of the clip colour:
+     dark note blocks / waveform on the clip-coloured ground (SPEC §6). */
+  --clip-ink-wave: rgba(19, 16, 13, 0.62);
+  --clip-ink-midi: rgba(19, 16, 13, 0.55);
+  --clip-ink-drum: rgba(19, 16, 13, 0.55);
+  --clip-ink-drum-lane: rgba(255, 255, 255, 0.12);
+
+  /* ── the MIDI editor (--pr-*), re-pinned to the Live palette (SPEC §2/§7) ──────
+     PianoRoll lives in ui/src/ui and is mounted by ALL THREE shells, so it paints
+     through the --pr-* family; this is the same re-pin v2 does in 00-tokens.css.
+     Every surface value is an OPAQUE --live-* token (the whole point of the -solid
+     lesson in v2: a translucent editor composites the arrangement through its own
+     grid — the "transparent piano roll" bug). Live's notes invert Mosh's: a LIGHT
+     tint of the clip colour on the dark grid, selection darkening toward navy. */
+  --pr-panel: var(--live-bg);
+  --pr-text: var(--live-text);
+  --pr-text-dim: var(--live-text-dim);
+  --pr-grid-bg: var(--live-bg-raise);            /* #3d3733 — SPEC §7's editor grid */
+  --pr-line: var(--live-line);
+  --pr-line-bar: var(--live-line-strong);        /* bar lines one step stronger (SPEC §7) */
+  --pr-row-alt: rgba(255, 255, 255, 0.04);       /* alpha veil over the known-dark grid */
+  --pr-key-white-bg: var(--live-bg-deep);
+  --pr-key-black-bg: var(--live-bg-inset);
+  --pr-key-text: var(--live-text-dim);
+  --pr-key-line: var(--live-line);
+  --pr-note: #b9dce9;                            /* SPEC §2: notes take a LIGHT tint */
+  --pr-note-edge: #aecfdb;
+  --pr-note-sel: #7e9aac;                        /* selection darkens (SPEC §2) */
+  --pr-note-ring: var(--live-text);
+  --pr-lasso: rgba(122, 143, 160, 0.22);         /* the --live-select wash */
+  --pr-lasso-edge: var(--live-select);
+  --pr-offkey: rgba(255, 255, 255, 0.05);
+  --pr-playhead: var(--live-text);
+  --pr-ruler-bg: var(--live-bg-deep);
+  --pr-ruler-text: var(--live-text-dim);
+  --pr-vel-bg: var(--live-bg-deep);
+  --pr-vel-bar: color-mix(in srgb, #b9dce9 55%, transparent);
+  --pr-vel-bar-sel: #b9dce9;
+  --pr-ruler-h: 15px;                            /* SPEC §7: the dock's bar ruler is ~15pt */
+
+  /* ── the classic --lime family, bridged into this subtree ─────────────────────
+     Same bridge v2 documents in 00-tokens.css: the shared component library (the
+     docked PianoRoll's header buttons, MoshTip, the menu popups) paints from
+     mosh.css's --lime, which is Mosh's brand green — inside the Live clone that
+     reads as a foreign accent. Re-pinned to Live's orange family here so the editor
+     chrome matches the shell it is docked in. */
+  --lime: var(--live-accent);
+  --lime-glow: var(--live-accent);
+  --lime-dim: color-mix(in srgb, var(--live-accent) 42%, transparent);
+  --lime-faint: color-mix(in srgb, var(--live-accent) 12%, transparent);
+  --lime-text: var(--live-accent);
+  --on-accent: var(--live-accent-ink);
+  --auto-line: var(--live-accent);
+  --focus-ring: var(--live-accent);
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--live-bg);
+  color: var(--live-text);
+  font-family: var(--font-body);
+  font-size: 11px;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── dual-theme discipline ─────────────────────────────────────────────────────
+   Same posture as the v2 shell: the panels stay dark in BOTH themes (v2's pattern is
+   "dark panels on a light page"; the live shell is full-bleed, so there is no page
+   ground to flip). This block is the seam a future Live light variant hangs off —
+   Live's own Mid-Dark/Light themes only re-tone these same surfaces. */
+[data-theme="light"] .live-shell {
+  /* no flips yet — every token above is already theme-independent */
+}
+
+/* ── boot / errors ───────────────────────────────────────────────────────────── */
+.live-boot { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 8px; }
+.live-errbar {
+  padding: 4px 10px; font-size: 11px;
+  background: color-mix(in srgb, var(--live-rec) 18%, var(--live-bg-deep));
+  color: #f0b9ae; border-bottom: 1px solid var(--live-line);
+}
+.live-arr-loading { display: grid; place-items: center; color: var(--live-text-dim); }
+
+/* ── control bar (28pt, SPEC §3) ─────────────────────────────────────────────── */
+.live-controlbar {
+  flex: 0 0 var(--live-cb-h);
+  display: flex; align-items: stretch; gap: 10px;
+  padding: 0 8px;
+  background: var(--live-bg-deep);
+  border-bottom: 1px solid var(--live-line);
+}
+.live-cb-group { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.live-cb-spacer { flex: 1 1 auto; }
+.live-cb-right { justify-content: flex-end; }
+.live-cb-btn {
+  display: grid; place-items: center;
+  min-width: 22px; height: 20px; padding: 0 3px;
+  border: none; border-radius: 3px;
+  background: transparent; color: var(--live-text);
+  font: inherit; font-size: 12px; line-height: 1; cursor: pointer;
+}
+.live-cb-btn:hover { background: var(--live-bg-raise); }
+/* ACTIVE = accent orange (SPEC §2: "ACTIVE controls: draw mode, loop toggle") */
+.live-cb-btn[data-on="true"] { color: var(--live-accent); }
+.live-cb-btn.rec .live-rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--live-text-dim); }
+.live-cb-btn.rec[data-on="true"] .live-rec-dot { background: var(--live-rec); }
+.live-cb-btn:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -1px; }
+.live-cb-num {
+  width: 46px; height: 18px; padding: 0 4px;
+  background: var(--live-bg-inset); color: var(--live-text);
+  border: 1px solid var(--live-line); border-radius: 3px;
+  font: inherit; font-family: var(--font-mono); font-size: 11px;
+}
+.live-cb-num:focus { outline: 1px solid var(--live-accent); }
+.live-cb-chip { color: var(--live-text-dim); font-size: 10px; padding: 0 2px; }
+.live-cb-chip.dim { opacity: 0.8; }
+.live-cb-position {
+  font-family: var(--font-mono); font-size: 11px; color: var(--live-text);
+  padding: 0 6px; min-width: 52px; text-align: center;
+}
+.live-cb-looprange { font-family: var(--font-mono); font-size: 10px; color: var(--live-text-dim); }
+
+/* ── body grid: browser | arrangement ────────────────────────────────────────── */
+.live-body {
+  position: relative;             /* anchors the browser divider + reopen strip */
+  flex: 1 1 auto; min-height: 0;
+  display: grid;
+  grid-template-columns: var(--live-browser-w) minmax(0, 1fr);
+}
+/* explicit columns: with the browser hidden its column is 0px and the arrangement
+   must still land in column 2 (auto-placement would put it in the dead slot). */
+.live-browser { grid-column: 1; }
+.live-body > .live-arr, .live-body > .live-arr-loading { grid-column: 2; }
+
+/* ── overview strip (WIDGETS §1: ~11pt, between control bar and ruler) ───────── */
+.live-overview {
+  position: relative; flex: 0 0 var(--live-overview-h);
+  background: var(--live-bg-deep); border-bottom: 1px solid var(--live-line);
+  cursor: pointer; overflow: hidden;
+}
+.live-overview:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -2px; }
+.live-ov-block { position: absolute; border-radius: 1px; opacity: 0.85; pointer-events: none; }
+.live-ov-play { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--live-text); pointer-events: none; }
+
+/* the browser divider + the hidden-browser reopen strip */
+.live-browser-divider {
+  position: absolute; top: 0; bottom: 0; width: 6px; z-index: 8;
+  cursor: col-resize;
+}
+.live-browser-divider:hover { background: color-mix(in srgb, var(--live-accent) 30%, transparent); }
+.live-browser-divider:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -1px; }
+.live-browser-reopen {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 14px; z-index: 8;
+  border: none; border-right: 1px solid var(--live-line);
+  background: var(--live-bg-deep); color: var(--live-text-dim);
+  font-size: 9px; cursor: pointer; padding: 0;
+}
+.live-browser-reopen:hover { color: var(--live-accent); }
+
+/* ── browser (SPEC §4) ───────────────────────────────────────────────────────── */
+.live-browser {
+  display: grid; grid-template-columns: var(--live-bcat-w) minmax(0, 1fr);
+  min-height: 0; background: var(--live-bg); border-right: 1px solid var(--live-line);
+}
+.live-bcats { overflow-y: auto; padding: 6px 0; border-right: 1px solid var(--live-line); }
+.live-bsec { margin-bottom: 10px; }
+/* small-caps gray section headers ("Collections", "Library", "Places") */
+.live-bsec-label {
+  padding: 0 8px 3px; font-size: 9px; letter-spacing: 0.08em;
+  text-transform: uppercase; font-variant-caps: small-caps; color: var(--live-text-dim);
+}
+.live-bcat {
+  display: block; width: 100%; height: 17px; padding: 0 8px;
+  border: none; background: transparent; color: var(--live-text);
+  font: inherit; font-size: 10.5px; text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.live-bcat:hover { background: var(--live-bg-raise); }
+.live-bcat.sel { background: var(--live-select); color: var(--live-select-ink); }
+.live-bcat:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -2px; }
+.live-bresults { overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; }
+.live-bnav { display: flex; align-items: center; gap: 6px; padding: 0 6px 4px; }
+.live-bnav-up {
+  height: 16px; padding: 0 6px; border: 1px solid var(--live-line); border-radius: 3px;
+  background: var(--live-bg-raise); color: var(--live-text); font: inherit; font-size: 9.5px; cursor: pointer;
+}
+.live-bnav-up:disabled { opacity: 0.4; cursor: default; }
+.live-bnav-path {
+  flex: 1; min-width: 0; font-size: 9.5px; color: var(--live-text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.live-brow {
+  display: flex; align-items: center; gap: 5px;
+  height: 17px; padding: 0 6px;
+  color: var(--live-text); font-size: 10.5px; cursor: pointer;
+  white-space: nowrap;
+}
+.live-brow:hover { background: var(--live-bg-raise); }
+.live-brow.sel { background: var(--live-select); color: var(--live-select-ink); }
+.live-brow.sel .live-brow-hint { color: color-mix(in srgb, var(--live-select-ink) 65%, transparent); }
+.live-brow.auditioning { box-shadow: inset 2px 0 0 var(--live-accent); }
+.live-brow:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -2px; }
+.live-brow-icon { flex: 0 0 auto; display: grid; place-items: center; opacity: 0.75; }
+.live-brow-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.live-brow-hint { flex: 0 0 auto; font-size: 9px; color: var(--live-text-dim); }
+.live-brow-import {
+  flex: 0 0 auto; width: 15px; height: 15px; display: grid; place-items: center;
+  border: 1px solid var(--live-line); border-radius: 3px;
+  background: transparent; color: var(--live-text-dim); font-size: 10px; line-height: 1; cursor: pointer;
+}
+.live-brow-import:hover { color: var(--live-accent); border-color: var(--live-accent); }
+.live-bempty { padding: 10px 8px; font-size: 10px; color: var(--live-text-dim); }
+.live-bsearch {
+  margin: 0 6px 4px; height: 18px; padding: 0 6px;
+  background: var(--live-bg-inset); color: var(--live-text);
+  border: 1px solid var(--live-line); border-radius: 3px;
+  font: inherit; font-size: 10px;
+}
+.live-bsearch:focus { outline: 1px solid var(--live-accent); }
+.live-bhint {
+  margin: 4px 6px 0; padding: 4px 6px;
+  border-top: 1px solid var(--live-line);
+  font-size: 9.5px; color: var(--live-text-dim);
+}
+/* the rescan footer (AUD-SCAN) — Instruments/Audio Effects categories only */
+.live-bscan { margin-top: auto; padding: 6px; border-top: 1px solid var(--live-line); }
+.live-bscan-row { display: flex; align-items: center; gap: 8px; }
+.live-bscan-btn {
+  height: 18px; padding: 0 8px;
+  border: 1px solid var(--live-line-strong); border-radius: 3px;
+  background: var(--live-bg-raise); color: var(--live-text);
+  font: inherit; font-size: 9.5px; cursor: pointer;
+}
+.live-bscan-btn:hover:not(:disabled) { border-color: var(--live-accent); color: var(--live-accent); }
+.live-bscan-btn:disabled { opacity: 0.6; cursor: default; }
+.live-bscan-au { display: flex; align-items: center; gap: 4px; font-size: 9.5px; color: var(--live-text-dim); }
+.live-bscan-status { padding-top: 4px; font-size: 9.5px; color: var(--live-text-dim); }
+
+/* ── arrangement (lanes + RIGHT headers, SPEC §1/§5) ─────────────────────────── */
+.live-arr { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.live-ruler-row {
+  flex: 0 0 var(--live-ruler-h);
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--live-head-w);
+}
+.live-ruler-clip { overflow: hidden; }
+.live-ruler-inner { position: relative; height: 100%; }
+.live-ruler-corner { background: var(--live-bg-deep); border-left: 1px solid var(--live-line); border-bottom: 1px solid var(--live-line); }
+.live-arr-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
+.live-lanes-scroll { flex: 1 1 auto; min-width: 0; overflow: auto; }
+.live-lanes { position: relative; min-height: 100%; }
+
+/* the bar/beat grid: bar lines one step stronger than beat lines (SPEC §7's grid rule) */
+.live-lane {
+  position: relative; height: var(--live-lane-h);
+  border-bottom: 1px solid var(--live-line);
+  background-color: var(--live-lane-bg);
+  background-image:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--bar-px, 160px) - 1px), var(--live-line-strong) calc(var(--bar-px, 160px) - 1px), var(--live-line-strong) var(--bar-px, 160px)),
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--beat-px, 40px) - 1px), var(--live-line) calc(var(--beat-px, 40px) - 1px), var(--live-line) var(--beat-px, 40px));
+}
+
+/* take lanes (Live 12) — sub-lane rows under a track's lane, one row per take
+   index. Labeled bars this wave: list_takes carries no per-take source/peaks,
+   so there is nothing honest to draw a waveform FROM (PARITY.md). */
+.live-takelanes { position: relative; border-bottom: 1px solid var(--live-line); }
+.live-takerow {
+  position: relative; box-sizing: border-box;
+  border-bottom: 1px solid var(--live-line);
+  background: var(--live-bg-inset);
+}
+.live-takebar {
+  position: absolute; top: 1px; bottom: 1px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+  padding: 0 4px; overflow: hidden;
+  border: 1px solid var(--live-line-strong); border-radius: 3px;
+  background: var(--live-bg-raise); color: var(--live-text-dim);
+  font-size: 8.5px; cursor: pointer; white-space: nowrap;
+}
+.live-takebar-label { overflow: hidden; text-overflow: ellipsis; position: relative; }
+/* the per-take waveform ink (take-lanes wave) — behind the label, non-interactive */
+.live-takewave {
+  position: absolute; left: 4px; top: 2px; bottom: 2px;
+  pointer-events: none;
+}
+.live-takebar.cur {
+  border-color: var(--live-accent); color: var(--live-text);
+  background: color-mix(in srgb, var(--live-accent) 16%, var(--live-bg-raise));
+}
+.live-takebar:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+.live-take-keep {
+  flex: 0 0 auto; margin-left: auto; height: 12px; padding: 0 4px;
+  border: 1px solid var(--live-line-strong); border-radius: 3px;
+  background: transparent; color: var(--live-accent); font-size: 8px; cursor: pointer;
+}
+.live-take-keep:hover { border-color: var(--live-accent); }
+/* the header's expand/collapse control (bottom of the header, Live's arrow) */
+.live-take-toggle {
+  margin-top: auto; align-self: flex-start; height: 14px; padding: 0 6px;
+  border: 1px solid var(--live-line); border-radius: 3px;
+  background: transparent; color: var(--live-text-dim); font-size: 8.5px; cursor: pointer;
+}
+.live-take-toggle:hover { color: var(--live-accent); border-color: var(--live-accent); }
+
+/* re-skinned BarRuler (the v2 component, Live's paint) */
+.live-shell .v2-ruler {
+  height: var(--live-ruler-h);
+  background: var(--live-bg-deep); border-bottom: 1px solid var(--live-line);
+}
+.live-shell .v2-ruler-bar { background: var(--live-line-strong); }
+.live-shell .v2-ruler-num { color: var(--live-text-dim); font-size: 9.5px; top: 4px; }
+
+/* loop brace — interactive (drag body = move, drag an end = resize, brace keys) */
+.live-loop-brace {
+  position: absolute; top: 0; bottom: 0; z-index: 2;
+  background: color-mix(in srgb, var(--live-accent) 26%, transparent);
+  border-left: 2px solid var(--live-accent); border-right: 2px solid var(--live-accent);
+}
+.live-loop-brace:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+.live-loop-body { position: absolute; inset: 0; cursor: grab; }
+.live-loop-body:active { cursor: grabbing; }
+.live-loop-edge {
+  position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; z-index: 1;
+}
+.live-loop-edge.l { left: 0; }
+.live-loop-edge.r { right: 0; }
+.live-loop-edge:hover { background: color-mix(in srgb, var(--live-accent) 45%, transparent); }
+
+/* clip-body time selection (the ableton table's TIME_SELECT writes shellState) */
+.live-timerange {
+  position: absolute; top: 0; bottom: 0; z-index: 3; pointer-events: none;
+  background: color-mix(in srgb, var(--live-text) 12%, transparent);
+  border-left: 1px solid var(--live-text-dim); border-right: 1px solid var(--live-text-dim);
+}
+
+/* playhead */
+.live-playhead { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--live-text); z-index: 4; pointer-events: none; }
+.live-playhead::before {
+  content: ""; position: absolute; top: 0; left: -3.5px;
+  border: 4px solid transparent; border-top-color: var(--live-text); border-bottom: none;
+}
+
+/* ── clip anatomy (SPEC §6 + the 12.4.2 proof shots) — the shared ClipView,
+   re-skinned, never forked. Live's contrast relationship: a MUTED body (track
+   colour ~60% toward the lane ground) and a clearly DARKER name strip with light
+   text. Our first pass inverted that (saturated body, washed strip). ───────────── */
+.live-shell .v2-clip {
+  top: 2px; bottom: 2px;
+  border: none; border-radius: 4px; box-shadow: none;
+  background: color-mix(in srgb, var(--track-col, var(--live-clip-block)) 58%, var(--live-lane-bg));
+}
+.live-shell .v2-clip.midi { background: color-mix(in srgb, var(--track-col, var(--live-clip-midi)) 58%, var(--live-lane-bg)); }
+.live-shell .v2-clip.drum { background: color-mix(in srgb, var(--track-col, var(--live-clip-drum)) 58%, var(--live-lane-bg)); }
+.live-shell .v2-clip.wave { background: color-mix(in srgb, var(--track-col, var(--live-clip-wave)) 58%, var(--live-lane-bg)); }
+/* Selected: brighter body + the name strip inverts (dark text on light, SPEC §6). */
+.live-shell .v2-clip.sel { outline: none; filter: brightness(1.22); z-index: 1; }
+.live-shell .v2-clip:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+
+/* The name strip — the SAME hue, darkened hard (~30% colour over the warm
+   near-black), light text. Its height rides --v2-clip-hdr (18px), the SAME var
+   ClipView's header hit-region reads, so the paint and the gesture region can
+   never disagree. */
+.live-shell .v2-clip > .v2-clip-label,
+.live-shell .v2-clip.hdr > .v2-clip-label {
+  inset: 0 0 auto 0; height: var(--v2-clip-hdr, 18px);
+  display: flex; align-items: center; padding: 0 6px;
+  font-size: 10px; letter-spacing: 0; color: var(--live-text);
+  text-shadow: none; border-bottom: none;
+  background: color-mix(in srgb, var(--track-col, var(--live-clip-block)) 30%, var(--live-bg-inset));
+}
+.live-shell .v2-clip.midi > .v2-clip-label { background: color-mix(in srgb, var(--track-col, var(--live-clip-midi)) 30%, var(--live-bg-inset)); }
+.live-shell .v2-clip.drum > .v2-clip-label { background: color-mix(in srgb, var(--track-col, var(--live-clip-drum)) 30%, var(--live-bg-inset)); }
+.live-shell .v2-clip.wave > .v2-clip-label { background: color-mix(in srgb, var(--track-col, var(--live-clip-wave)) 30%, var(--live-bg-inset)); }
+.live-shell .v2-clip.sel > .v2-clip-label { background: var(--live-text); color: var(--live-bg-inset); }
+/* ClipView's badge/button chrome inherits v2 positions; only re-tone what assumes
+   v2's near-black bodies. */
+.live-shell .v2-clip-badge.working { background: var(--live-accent); color: var(--live-accent-ink); animation: none; }
+.live-shell .v2-trim { z-index: 2; }
+
+/* ── RIGHT track headers (SPEC §5) ───────────────────────────────────────────── */
+.live-headers {
+  flex: 0 0 var(--live-head-w);
+  overflow: hidden;
+  background: var(--live-bg-deep); border-left: 1px solid var(--live-line);
+}
+.live-headers-inner { will-change: transform; }
+.live-thead {
+  position: relative;
+  height: var(--live-lane-h); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 4px 7px 4px 12px;   /* left padding clears the colour spine */
+  border-bottom: 1px solid var(--live-line);
+  overflow: hidden;
+}
+.live-thead.compact { padding: 2px 7px; }
+.live-tname-input {
+  flex: 1 1 auto; min-width: 0; height: 16px; padding: 0 3px;
+  background: var(--live-bg-inset); color: var(--live-text);
+  border: 1px solid var(--live-accent); border-radius: 3px;
+  font: inherit; font-size: 11px; outline: none;
+}
+/* the lane-height divider — the header's bottom edge (WIDGETS §1: drag between
+   two headers; the lane follows 1:1). Sits INSIDE the header (the header clips
+   overflow for compact mode, so a handle sticking out would be unreachable). */
+.live-lane-resize {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 6px; z-index: 5;
+  cursor: row-resize;
+}
+.live-lane-resize:hover { background: color-mix(in srgb, var(--live-accent) 35%, transparent); }
+.live-lane-resize:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -1px; }
+/* the header context menu's Colors grid (70 swatches, 14 per row like Live) */
+.live-swatches { display: grid; grid-template-columns: repeat(14, 14px); gap: 3px; padding: 4px 6px; }
+.live-swatch {
+  width: 14px; height: 14px; padding: 0; border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.4); cursor: pointer;
+}
+.live-swatch.on { outline: 2px solid #f3b166; outline-offset: 1px; }
+.live-swatch:focus-visible { outline: 2px solid #f3b166; outline-offset: 1px; }
+.live-thead.sel { background: var(--live-bg-raise); box-shadow: inset 2px 0 0 var(--live-accent); }
+.live-thead-top { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* the track colour as a full-height LEFT spine (Live's header block), not a chip */
+.live-tcolor {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+  border-radius: 0;
+}
+.live-tname {
+  flex: 1 1 auto; min-width: 0; padding: 0;
+  border: none; background: transparent; color: var(--live-text);
+  font: inherit; font-size: 11px; text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.live-tname:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+/* the track number box — accent orange fill, dark number, right of the name */
+.live-tnum {
+  flex: 0 0 auto; margin-left: auto; min-width: 15px; height: 14px; padding: 0 2px;
+  display: grid; place-items: center;
+  background: var(--live-accent); color: var(--live-accent-ink);
+  border-radius: 3px; font-size: 9px; font-weight: 700;
+}
+.live-thead-row { display: flex; align-items: center; gap: 6px; }
+.live-tms { display: flex; gap: 3px; }
+.live-tms button {
+  width: 18px; height: 14px; padding: 0;
+  border: 1px solid var(--live-line); border-radius: 3px;
+  background: transparent; color: var(--live-text-dim);
+  font: inherit; font-size: 8.5px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.live-tms button.on.m { background: var(--live-accent); color: var(--live-accent-ink); border-color: transparent; }
+.live-tms button.on.s { background: var(--live-solo); color: var(--live-select-ink); border-color: transparent; }
+.live-tms button.on.r { color: var(--live-rec); border-color: var(--live-rec); }
+.live-tms button.m.automated { border-style: dashed; }
+.live-tmon { display: flex; gap: 0; border: 1px solid var(--live-line); border-radius: 3px; overflow: hidden; }
+.live-tmon button {
+  height: 13px; padding: 0 5px; border: none; background: transparent;
+  color: var(--live-text-dim); font: inherit; font-size: 8.5px; cursor: pointer;
+}
+.live-tmon button + button { border-left: 1px solid var(--live-line); }
+/* monitor active = accent orange (SPEC §5) */
+.live-tmon button.on { color: var(--live-accent); }
+/* the I/O grid (TrackIoSection) — real routing popups + monitor trio + vol/pan,
+   4 rows stacked under the M/S/arm row (WIDGETS §2 mixer panel group) */
+.live-tio-grid { display: flex; flex-direction: column; gap: 3px; }
+.live-tio-row { display: flex; gap: 4px; }
+.live-io-pop {
+  flex: 1 1 0; min-width: 0; height: 13px; padding: 0 4px;
+  display: flex; align-items: center; justify-content: space-between; gap: 2px;
+  background: var(--live-bg); border: 1px solid var(--live-line); border-radius: 3px;
+  font: inherit; font-size: 9px; color: var(--live-text); cursor: pointer; text-align: left;
+}
+.live-io-pop:hover { border-color: var(--live-accent); }
+.live-io-pop-label {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.live-io-pop-caret { flex: none; font-size: 7px; color: var(--live-text-dim); }
+.live-io-dis { opacity: 0.45; cursor: default; color: var(--live-text-dim); }
+.live-io-dis:hover { border-color: var(--live-line); }
+.live-io-check { flex: none; width: 9px; color: var(--live-accent); }
+.live-io-slider { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 3px; }
+.live-io-slider input[type="range"] {
+  flex: 1 1 0; min-width: 0; height: 12px; margin: 0; accent-color: var(--live-accent);
+}
+.live-io-val {
+  flex: none; width: 26px; font-family: var(--font-mono); font-size: 8px;
+  color: var(--live-text-dim); text-align: right;
+}
+
+/* add-track affordance (trailing row in the header column / the empty state) */
+.live-add-row {
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; height: 24px; padding: 0 8px;
+  border: none; border-bottom: 1px solid var(--live-line);
+  background: transparent; color: var(--live-text-dim);
+  font: inherit; font-size: 10px; cursor: pointer;
+}
+.live-add-row:hover { color: var(--live-accent); background: var(--live-bg-raise); }
+.live-add-empty {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+  border: 1px dashed var(--live-line-strong); border-radius: 4px;
+  background: transparent; color: var(--live-text-dim); font: inherit; cursor: pointer;
+}
+.live-add-empty:hover { color: var(--live-accent); border-color: var(--live-accent); }
+.live-empty {
+  flex: 1; display: grid; place-content: center; justify-items: center; gap: 10px;
+  color: var(--live-text-dim);
+}
+
+/* ── ⌘R inline clip rename — an input over the clip's name strip ─────────────── */
+.live-rename {
+  position: absolute; top: 2px; height: 18px; z-index: 5;
+  box-sizing: border-box; padding: 0 5px;
+  background: var(--live-bg-inset); color: var(--live-text);
+  border: 1px solid var(--live-accent); border-radius: 4px 4px 0 0;
+  font: inherit; font-size: 10px; outline: none;
+}
+
+/* drop affordance (global file drag) */
+.live-drop {
+  position: absolute; inset: 0; z-index: 10; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--live-bg-inset) 72%, transparent);
+  border: 1px dashed var(--live-accent); color: var(--live-accent); font-size: 12px;
+  pointer-events: none;
+}
+
+/* ── detail dock (SPEC §1/§7 — the MIDI editor docks here from Phase 2) ───────── */
+.live-dock {
+  flex: 0 0 var(--live-dock-h);
+  /* min-height: 0 is load-bearing: the editor's 128-row grid makes the dock's
+     min-content ~2000px, and a flex item's AUTOMATIC minimum would size the dock to
+     that — the editor swallowing the whole window (measured: 2116px, control bar
+     pushed to y=-29). Zero the auto minimum so the 265px basis holds and the
+     editor's own .pr-scroll owns the overflow. */
+  min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--live-bg); border-top: 1px solid var(--live-line);
+}
+/* The splitter — the dock's top edge drag handle (Live drags the divider). A real
+   focusable separator: keyboard ↑/↓ step it, pointer drags it; the height persists
+   via the liveDockHeight setting on release. */
+.live-dock-splitter {
+  flex: 0 0 5px; margin-top: -3px; z-index: 6;
+  cursor: row-resize;
+  border-top: 1px solid var(--live-line);
+}
+.live-dock-splitter:hover { border-top-color: var(--live-accent); }
+.live-dock-splitter:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -1px; }
+/* The docked MIDI editor fills its clip panel: the modal's sizing, border, radius
+   and pop-in animation are all frame concerns, and this mount has no frame. Flex
+   sizing (not height:100%) so the fixed device panel can stack below it. */
+.live-dock-editor { padding: 0; }
+.live-shell .pr.docked {
+  width: 100%; height: auto;
+  flex: 1 1 auto; min-height: 0;
+  border: none; border-radius: 0; animation: none;
+}
+/* The device panel — FIXED ~212pt (WIDGETS §1: dragging its top edge does nothing),
+   stacked below the clip panel when one is open, or the whole dock when not. */
+.live-devpanel {
+  flex: 0 0 var(--live-device-h);
+  display: flex; flex-direction: column; min-height: 0;
+  border-top: 1px solid var(--live-line);
+}
+.live-devpanel .live-devices { flex: 1 1 auto; min-height: 0; }
+.live-dock-fixed { flex: 0 0 var(--live-device-h); }
+/* Expanded Clip View (⌥⌘E): the shell hides browser+arrangement; the dock takes
+   the rest (the editor keeps its device strip below it, per WIDGETS §1). */
+.live-shell[data-clip-expanded="true"] .live-body { display: none; }
+
+/* devices view — the selected track's plugin strip (Live's device-view dock half) */
+.live-devices {
+  flex: 1 1 auto; display: flex; align-items: flex-start; align-content: flex-start; gap: 6px;
+  padding: 8px 12px; overflow-x: auto;
+}
+.live-devices-empty { color: var(--live-text-dim); font-size: 10.5px; }
+.live-device {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--live-line-strong); border-radius: 4px;
+  background: var(--live-bg-raise); overflow: hidden; cursor: default;
+}
+.live-device.off { opacity: 0.55; }
+.live-device.sel { border-color: var(--live-accent); box-shadow: 0 0 0 1px var(--live-accent); }
+.live-device:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+.live-device-name {
+  display: flex; align-items: center;
+  padding: 6px 10px;
+  color: var(--live-text); font-size: 10.5px;
+}
+.live-device.sel .live-device-name { color: var(--live-accent); }
+.live-device-bypass {
+  width: 20px; border: none; border-left: 1px solid var(--live-line);
+  background: transparent; color: var(--live-text-dim); font-size: 10px; cursor: pointer;
+}
+.live-device-bypass:hover { color: var(--live-accent); }
+.live-device-bypass[aria-pressed="true"] { color: var(--live-accent); }
+
+/* freeze track (⌥⇧⌘F) — a frozen track parks its chain: the strip reads grayed +
+   non-interactive, the lane's clips take the cold tint, and the header carries the
+   same edge marker. The chips' own `off` state (enabled=false) is the per-device
+   truth; these rules are the track-level frame around it. */
+.live-devices.frozen .live-device { pointer-events: none; filter: grayscale(0.7); opacity: 0.5; }
+.live-devices-frozen {
+  align-self: center; color: var(--live-text-dim); font-size: 9.5px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid var(--live-line); border-radius: 3px; padding: 2px 6px;
+}
+.live-thead.frozen { box-shadow: inset 2px 0 0 var(--live-text-dim); }
+.live-thead.frozen .live-tname { color: var(--live-text-dim); }
+.live-lane.frozen .v2-clip { filter: saturate(0.35) brightness(0.92); }
+.live-lane.frozen .v2-clip .v2-clip-label { font-style: italic; }
+
+/* the wave clip view's loop bar (CLP-LOOP) */
+.live-loopbar-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; max-width: 560px; width: 100%; }
+.live-loopbar {
+  position: relative; flex: 1 1 auto; height: 18px;
+  background: var(--live-bg-inset); border: 1px solid var(--live-line); border-radius: 3px;
+}
+.live-loopbar-brace {
+  position: absolute; top: 0; bottom: 0; cursor: ew-resize;
+  background: color-mix(in srgb, var(--live-accent) 30%, transparent);
+  border-left: 2px solid var(--live-accent); border-right: 2px solid var(--live-accent);
+}
+.live-loopbar-brace:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+.live-loopbar-readout { font-family: var(--font-mono); font-size: 9.5px; color: var(--live-text-dim); white-space: nowrap; }
+/* the clip view's stub copy stacks vertically with the loop bar */
+.live-dock-clip { flex-direction: column; align-items: flex-start; justify-content: center; }
+.live-dock-head {
+  flex: 0 0 20px; display: flex; align-items: center; gap: 8px; padding: 0 8px;
+  background: var(--live-bg-deep); border-bottom: 1px solid var(--live-line);
+}
+.live-dock-title { flex: 1 1 auto; font-size: 10.5px; color: var(--live-text); }
+.live-dock-close {
+  display: grid; place-items: center; width: 16px; height: 16px;
+  border: none; border-radius: 3px; background: transparent; color: var(--live-text-dim); cursor: pointer;
+}
+.live-dock-close:hover { color: var(--live-text); background: var(--live-bg-raise); }
+.live-dock-moshi, .live-dock-clip {
+  flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 16px; text-align: left;
+}
+.live-dock-stub-icon { color: var(--live-accent); }
+.live-dock-stub-title { margin: 0 0 4px; font-size: 12px; color: var(--live-text); }
+.live-dock-stub-copy { margin: 0; max-width: 460px; font-size: 10.5px; color: var(--live-text-dim); }
+
+/* ── cursor affordances (RESOURCES.md §cursor) ─────────────────────────────────
+   State hooks live as data-attrs on .live-shell (AppLive tracks them); the cursors
+   themselves are pure CSS. grab / ew-resize (trim) / row-resize (dock splitter) are
+   inherited from the shared ClipView/splitter rules above. */
+.live-shell .live-ruler { cursor: ns-resize; }                 /* ruler zoom scrub */
+.live-shell[data-draw="true"] .pr-grid { cursor: crosshair; }  /* draw mode (B) */
+.live-shell[data-alt="true"] .v2-clip { cursor: copy; }        /* ⌥ copy-drag */
+
+/* ── status bar (15pt, SPEC §9) ──────────────────────────────────────────────── */
+.live-statusbar {
+  flex: 0 0 var(--live-status-h);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 0 8px;
+  background: var(--live-status);
+  font-size: 9.5px; color: var(--live-text-dim);
+}
+.live-status-readout { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-status-track { display: flex; align-items: center; gap: 5px; color: var(--live-text); }
+.live-status-dot { width: 7px; height: 7px; border-radius: 2px; }
+
+/* the clip context menu (portaled to <body>, so global like .live-menu) */
+.live-clipmenu {
+  position: fixed; z-index: 90; min-width: 190px;
+  background: #3d3733; border: 1px solid #453e38; border-radius: 8px;
+  box-shadow: 0 14px 34px -12px rgba(0, 0, 0, 0.7);
+  padding: 4px; font-size: 11px; color: #bcb3a6;
+}
+.live-clipmenu button {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 5px 8px; border: none; border-radius: 4px;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.live-clipmenu button:hover:not(:disabled), .live-clipmenu button:focus-visible { background: rgba(255, 255, 255, 0.07); outline: none; }
+.live-clipmenu button:disabled { color: rgba(138, 130, 122, 0.6); cursor: default; }
+.live-clipmenu button.danger:hover { background: rgba(224, 83, 61, 0.18); color: #f0b9ae; }
+.live-clipmenu kbd { font-family: var(--font-mono); font-size: 9px; opacity: 0.55; }
+.live-clipmenu-sep { height: 1px; margin: 4px 6px; background: rgba(0, 0, 0, 0.35); }
+.live-clipmenu-label {
+  padding: 2px 8px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-variant-caps: small-caps; color: #8a827a;
+}
+
+/* ── menus (MoshMenu popups are portaled to <body>, so these rules are global —
+   the .live-menu class exists only on this shell's menu content) ─────────────── */
+.live-menu { padding: 4px; min-width: 190px; }
+.live-menu button {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 6px 8px; border: none; border-radius: 4px;
+  background: transparent; color: inherit; font: inherit; font-size: 11px;
+  text-align: left; cursor: pointer;
+}
+.live-menu button:hover, .live-menu button[data-highlighted] { background: rgba(255, 255, 255, 0.07); }
+.live-menu-label { flex: 0 0 auto; }
+.live-menu-hint { flex: 1 1 auto; font-size: 9.5px; opacity: 0.6; }
+
+/* ⌘, Settings overlay — the shared SettingsPanel in a live-chrome modal frame. */
+.live-settings-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.live-settings-overlay {
+  width: 480px; max-width: 92vw; max-height: 82vh; overflow-y: auto;
+  background: var(--live-bg-raise); border: 1px solid var(--live-line-strong, var(--live-line));
+  border-radius: 10px; padding: 12px 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}

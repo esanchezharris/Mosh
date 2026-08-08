@@ -710,7 +710,10 @@ test("the add-track menu flips above the trigger when it would run off-screen", 
   await page.setViewportSize({ width: 1280, height: 420 });
   await page.getByTestId("v2-track-add").click();
 
-  const panel = page.locator(".v2-menu-panel-fixed");
+  // The menu is a MoshMenu (Base UI) since the chrome pilot: the library's Floating-UI
+  // Positioner owns flip/clamp, so the popup is `.v2-menu-panel-floating` (a skin with no
+  // positioning of its own), portaled to <body> — not the old measured-rect `-fixed` one.
+  const panel = page.locator(".v2-menu-panel-floating");
   await expect(panel).toBeVisible();
   const box = await panel.boundingBox();
   const vh = page.viewportSize()!.height;

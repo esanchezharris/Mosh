@@ -8,7 +8,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import { muteButtonState } from "../../ui/muteState";
-import { useAnchoredPanel } from "../../hooks/useAnchoredPanel";
+import { MoshMenu, MoshMenuItem } from "../../chrome/Menu";
 import { useShell, type SectionZoom } from "../shellState";
 import { beatSeconds, barSeconds } from "../../time";
 import type { CommandResult, Snapshot, Track } from "../../types";
@@ -298,63 +298,53 @@ export async function addTrackOfKind(
 // shifts. (`.v2-lhead` is `position: sticky` — wrapping it in a positioned div would break
 // the sticky-left column.)
 function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
-  // Flip-up-when-there's-no-room-below used to be hand-rolled here; it now lives in the
-  // shared hook, which additionally clamps horizontally. The 200px estimate is load-bearing
-  // and unchanged: the trailing add-track row sits at the END of the lane list, so on a full
-  // session it lands at the bottom of the window and a downward panel runs off-screen — with
-  // 8 tracks, "Instrument" was entirely unreachable. (v2-shell.spec pins that threshold.)
-  // 232px = `.v2-menu-rich`'s rendered width, for the horizontal clamp only.
-  const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(232, 200, "start");
+  // Migrated to MoshMenu (Base UI) in the chrome pilot: Floating UI's Positioner now owns
+  // the flip-up-when-there's-no-room-below + viewport clamp that useAnchoredPanel used to
+  // compute from measured rects (the 8-tracks "Instrument unreachable" bug stays pinned by
+  // v2-shell.spec, which now finds the popup by role). Escape/outside-click/typeahead come
+  // from the library.
   const exec = useStore((s) => s.exec);
-
-  const pick = useCallback((kind: TrackKind) => {
-    close();
-    void addTrackOfKind(kind, exec);
-  }, [close, exec]);
 
   return (
     <div className="v2-addtrack">
-      <button
-        ref={anchorRef}
-        className={variant === "empty" ? "v2-empty-add" : "v2-lhead v2-lhead-add"}
-        data-testid="v2-track-add"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Add a track (or drop an audio file here)"
-        onClick={toggle}
+      <MoshMenu
+        label="Add track"
+        align="start"
+        trigger={
+          <button
+            className={variant === "empty" ? "v2-empty-add" : "v2-lhead v2-lhead-add"}
+            data-testid="v2-track-add"
+            title="Add a track (or drop an audio file here)"
+          >
+            <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
+            <span className="v2-lname">Add track</span>
+          </button>
+        }
       >
-        <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
-        <span className="v2-lname">Add track</span>
-      </button>
-      {open && at && (
-        <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed"
-          style={{ top: at.top, bottom: at.bottom, left: at.left }}>
-          <div className="v2-menu v2-menu-rich" role="menu" aria-label="Add track">
-            {TRACK_KINDS.map(({ kind, label, hint }) => (
-              <button
-                key={kind}
-                role="menuitem"
-                // Explicit: the icon is aria-hidden and the visible text is split across
-                // two spans, so screen readers were announcing these rows unnamed.
-                aria-label={`${label} track — ${hint}`}
-                data-testid={`v2-track-add-${kind}`}
-                onClick={() => pick(kind)}
-              >
-                <span className="v2-licon" aria-hidden="true">
-                  {/* "tone" is not a track type — it makes an AUDIO track with a tone on
-                      it — so it borrows the waveform icon rather than falling through to
-                      TrackTypeIcon's unknown-type default. */}
-                  <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
-                </span>
-                <span className="v2-menu-text">
-                  <span className="v2-menu-label">{label}</span>
-                  <span className="v2-menu-hint">{hint}</span>
-                </span>
-              </button>
-            ))}
-          </div>
+        <div className="v2-menu v2-menu-rich">
+          {TRACK_KINDS.map(({ kind, label, hint }) => (
+            <MoshMenuItem
+              key={kind}
+              // Explicit: the icon is aria-hidden and the visible text is split across
+              // two spans, so screen readers were announcing these rows unnamed.
+              ariaLabel={`${label} track — ${hint}`}
+              testId={`v2-track-add-${kind}`}
+              onPick={() => void addTrackOfKind(kind, exec)}
+            >
+              <span className="v2-licon" aria-hidden="true">
+                {/* "tone" is not a track type — it makes an AUDIO track with a tone on
+                    it — so it borrows the waveform icon rather than falling through to
+                    TrackTypeIcon's unknown-type default. */}
+                <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
+              </span>
+              <span className="v2-menu-text">
+                <span className="v2-menu-label">{label}</span>
+                <span className="v2-menu-hint">{hint}</span>
+              </span>
+            </MoshMenuItem>
+          ))}
         </div>
-      )}
+      </MoshMenu>
     </div>
   );
 }

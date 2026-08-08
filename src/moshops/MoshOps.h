@@ -221,6 +221,8 @@ private:
     juce::var cmdMoveClip       (const juce::var& args);
     juce::var cmdTrimClip       (const juce::var& args);
     juce::var cmdSplitClip      (const juce::var& args);
+    juce::var cmdConsolidateClips (const juce::var& args);
+    juce::var cmdCropClip      (const juce::var& args);
     juce::var cmdRemoveClip     (const juce::var& args);
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
@@ -350,6 +352,8 @@ private:
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
     juce::var cmdQuantizeNotes  (const juce::var& args);
+    juce::var cmdTransformVelocities (const juce::var& args);
+    juce::var cmdTransformNotes  (const juce::var& args);
     // Stage 5 — Tier-B generative layer (RenderLayer flow)
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
@@ -359,6 +363,16 @@ private:
     // WAV — the auto-bounce that lets generative render layers run on MIDI/drum clips
     // (the model is audio→audio). Offline, synchronous, mirrors cmdExportAudio's render.
     bool bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav);
+    // Render a WHOLE track's output (all its clips through the track's instrument+FX
+    // chain, no master bus) over [startSec,endSec] — the Live-12 Bounce primitive
+    // (Bounce Track in Place / Bounce to New Track). Same offline path as the clip form.
+    bool bounceTrackToWav (te::Track& track, double startSec, double endSec, const juce::File& destWav);
+    juce::var cmdBounceTrack (const juce::var& args);
+    juce::var cmdFreezeTrack (const juce::var& args);
+    juce::var cmdUnfreezeTrack (const juce::var& args);
+    // The shared offline-render body behind both bounce wrappers (nullptr = all clips).
+    bool bounceRenderToWavImpl (te::Track& track, double startSec, double endSec, const juce::File& destWav,
+                                const juce::Array<te::Clip*>* onlyTheseClips);
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
@@ -896,6 +910,13 @@ private:
     // mutex-guarded) where both callers can share it. See MultiplayerSession.h.
     juce::int64 seq = 0;
     juce::File  logFile;
+
+    // Live 12's Space vs ⇧Space (Continue Playback) — cmdSetTransport's insert
+    // marker (the position a normal stop returns to) and whether the current play
+    // was started via continue (its stop leaves the playhead where it halted).
+    // Playback machine state: NOT undoable, never in the snapshot.
+    double insertMarkerSec = 0.0;
+    bool   playStartedViaContinue = false;
 
     // ── CAP-PRJ-005 — the undo-transaction MIRROR ────────────────────────────────
     // mosh-log.jsonl and the UndoManager are two different lists and they do not line

@@ -477,6 +477,35 @@ juce::var MoshOps::executeImpl (const juce::var& command)
         }
     }
 
+    // FREEZE GUARD — one chokepoint, after the MP lock guard's own shape. A frozen
+    // track (moshFrozen on its state) refuses clip-CONTENT and DEVICE mutations:
+    // the track's audio is the rendered file and the chain is parked, so editing
+    // either would silently change nothing audible. Whole-clip structure (move /
+    // duplicate / remove / rename), mixer, and project ops stay allowed (Live's rule).
+    {
+        static const juce::StringArray frozenLocked {
+            "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
+            "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
+            "set_clip_gain", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
+            "normalize_clip", "set_clip_warp", "stretch_clip",
+            "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
+            "set_plugin_param", "bypass_plugin", "open_plugin_editor",
+            "set_track_automation_mode", "write_automation_curve",
+            "add_automation_point", "set_automation_point", "remove_automation_point",
+            "clear_automation", "replace_instrument", "hot_swap_instrument",
+        };
+        if (frozenLocked.contains (name))
+        {
+            te::Track* target = nullptr;
+            const auto tid = args.getProperty ("trackId", var()).toString();
+            if (tid.isNotEmpty()) target = findTrack (tid);
+            else if (auto cid = args.getProperty ("clipId", var()).toString(); cid.isNotEmpty())
+                if (auto* c = findClip (cid)) target = c->getTrack();
+            if (target != nullptr && target->state.hasProperty (ids::moshFrozen))
+                return errResult (name, "track is frozen (unfreeze it first)");
+        }
+    }
+
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "set_track_color")   return cmdSetTrackColor (args);
@@ -542,6 +571,11 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "move_clip")         return cmdMoveClip (args);
     if (name == "trim_clip")         return cmdTrimClip (args);
     if (name == "split_clip")        return cmdSplitClip (args);
+    if (name == "consolidate_clips") return cmdConsolidateClips (args);
+    if (name == "crop_clip")      return cmdCropClip (args);
+    if (name == "bounce_track")    return cmdBounceTrack (args);
+    if (name == "freeze_track")    return cmdFreezeTrack (args);
+    if (name == "unfreeze_track")  return cmdUnfreezeTrack (args);
     if (name == "remove_clip")       return cmdRemoveClip (args);
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
@@ -631,6 +665,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
     if (name == "quantize_notes")    return cmdQuantizeNotes (args);
+    if (name == "transform_velocities") return cmdTransformVelocities (args);
+    if (name == "transform_notes")   return cmdTransformNotes (args);
     if (name == "create_render_layer") return cmdCreateRenderLayer (args);
     if (name == "set_render_param")  return cmdSetRenderParam (args);
     if (name == "render_layer")      return cmdRenderLayer (args);
@@ -2304,6 +2340,303 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     return okResult ("quantize_notes", var (data));
 }
 
+// ── Live 12's velocity tool row (Randomize / Ramp / Deviation) ────────────────
+// ONE command for the whole gesture — the producer perceives a single edit, so a
+// fan-out of set_note calls would spam both undo and the JSONL log. Target = an
+// explicit noteIndexes array (the editor's selection), else EVERY note in the
+// clip (Live's rule for these tools). Modes:
+//   randomize <amount> — uniform ±amount around each note's current velocity
+//   ramp <lo> <hi>     — linear lo→hi across the targets in time order (ties by pitch)
+//   deviate <amount>   — uniform offset in [-amount, +amount] per note
+// (randomize and deviate share the ±amount shape by design in Live's row; each mode
+// seeds independently so both stay deterministic.) Velocities clamp to 1..127.
+// The randomness is SEEDED from the canonical args + the target notes' current
+// state (FNV-1a → mt19937_64), so replaying the logged command against the same
+// pre-state reproduces the exact same numbers — the JSONL log stays a program.
+juce::var MoshOps::cmdTransformVelocities (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("transform_velocities", "no midi clip");
+    const auto mode = args.getProperty ("mode", var()).toString();
+    if (mode != "randomize" && mode != "ramp" && mode != "deviate")
+        return errResult ("transform_velocities", "mode must be randomize|ramp|deviate");
+    auto& seq = mc->getSequence();
+
+    std::vector<te::MidiNote*> targets;
+    const auto idxVar = args.getProperty ("noteIndexes", var());   // bind: the temporary would die
+    if (auto* arr = idxVar.getArray())
+    {
+        if (arr->isEmpty()) return errResult ("transform_velocities", "'noteIndexes' is empty");
+        for (auto& v : *arr)
+        {
+            const int i = (int) v;
+            if (i < 0 || i >= seq.getNumNotes()) return errResult ("transform_velocities", "bad noteIndex");
+            targets.push_back (seq.getNote (i));
+        }
+    }
+    else
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            targets.push_back (seq.getNote (i));
+    if (targets.empty()) return errResult ("transform_velocities", "no notes to transform");
+
+    const int amount = juce::jlimit (0, 127, (int) args.getProperty ("amount", 0));
+    const int lo     = juce::jlimit (1, 127, (int) args.getProperty ("lo", 1));
+    const int hi     = juce::jlimit (1, 127, (int) args.getProperty ("hi", 127));
+    if (mode == "ramp" && (! args.hasProperty ("lo") || ! args.hasProperty ("hi")))
+        return errResult ("transform_velocities", "ramp needs 'lo' and 'hi'");
+    if (mode != "ramp" && ! args.hasProperty ("amount"))
+        return errResult ("transform_velocities", "mode needs 'amount'");
+
+    // Deterministic seed: FNV-1a over mode/clip/args + each target's identity and
+    // current velocity — identical command + identical pre-state ⇒ identical result.
+    uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h] (uint64_t v) { h ^= v; h *= 1099511628211ULL; };
+    const auto seedText = mode + "|" + args.getProperty ("clipId", var()).toString();
+    for (int si = 0; si < seedText.length(); ++si) mix ((uint64_t) (uint8_t) seedText[si]);
+    mix ((uint64_t) amount); mix ((uint64_t) lo); mix ((uint64_t) hi);
+    for (auto* n : targets)
+    {
+        mix ((uint64_t) n->getNoteNumber());
+        mix ((uint64_t) n->getVelocity());
+        mix ((uint64_t) std::llround (n->getStartBeat().inBeats() * 1.0e6));
+    }
+    std::mt19937_64 rng (h);
+
+    beginTxn ("transform_velocities");
+    int changed = 0;
+    if (mode == "ramp")
+    {
+        auto sorted = targets;
+        std::sort (sorted.begin(), sorted.end(), [] (const te::MidiNote* a, const te::MidiNote* b) {
+            if (a->getStartBeat() != b->getStartBeat()) return a->getStartBeat() < b->getStartBeat();
+            return a->getNoteNumber() < b->getNoteNumber();
+        });
+        const int n = (int) sorted.size();
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = n > 1 ? (double) i / (double) (n - 1) : 0.0;
+            const int v = juce::jlimit (1, 127, (int) std::lround (lo + (hi - lo) * t));
+            if (v != sorted[i]->getVelocity()) { sorted[i]->setVelocity (v, &undoManager()); ++changed; }
+        }
+    }
+    else
+    {
+        std::uniform_int_distribution<int> dist (-amount, amount);
+        for (auto* n : targets)
+        {
+            const int v = juce::jlimit (1, 127, n->getVelocity() + dist (rng));
+            if (v != n->getVelocity()) { n->setVelocity (v, &undoManager()); ++changed; }
+        }
+    }
+
+    logLine ("transform_velocities", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
+    auto* data = new DynamicObject();
+    data->setProperty ("mode", mode);
+    data->setProperty ("changed", changed);
+    return okResult ("transform_velocities", var (data));
+}
+
+juce::var MoshOps::cmdTransformNotes (const juce::var& args)
+{
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (mc == nullptr) return errResult ("transform_notes", "no midi clip");
+    const auto mode = args.getProperty ("mode", var()).toString();
+    if (mode != "reverse" && mode != "invert" && mode != "legato"
+        && mode != "humanize" && mode != "x2" && mode != "d2"
+        && mode != "setLength" && mode != "addInterval" && mode != "fitToScale")
+        return errResult ("transform_notes", "mode must be reverse|invert|legato|humanize|x2|d2|setLength|addInterval|fitToScale");
+    auto& seq = mc->getSequence();
+
+    // Targets: the explicit noteIndexes array, else ALL notes (Live's rule — same
+    // as transform_velocities). Snapshot every target's state BEFORE any mutation:
+    // setStartAndLength can re-sort the sequence mid-loop, so the math runs on the
+    // captured values and applies by pointer.
+    struct Target { te::MidiNote* n; double start, len; int pitch, vel; };
+    std::vector<Target> targets;
+    const auto idxVar = args.getProperty ("noteIndexes", var());   // bind: the temporary would die
+    auto pushNote = [&] (int i) -> bool {
+        if (i < 0 || i >= seq.getNumNotes()) return false;
+        auto* n = seq.getNote (i);
+        targets.push_back ({ n, n->getStartBeat().inBeats(), n->getLengthBeats().inBeats(),
+                             n->getNoteNumber(), n->getVelocity() });
+        return true;
+    };
+    if (auto* arr = idxVar.getArray())
+    {
+        if (arr->isEmpty()) return errResult ("transform_notes", "'noteIndexes' is empty");
+        for (auto& v : *arr)
+            if (! pushNote ((int) v)) return errResult ("transform_notes", "bad noteIndex");
+    }
+    else
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            pushNote (i);
+    if (targets.empty()) return errResult ("transform_notes", "no notes to transform");
+
+    const int amount = juce::jlimit (0, 100, (int) args.getProperty ("amount", 0));
+    if (mode == "humanize" && ! args.hasProperty ("amount"))
+        return errResult ("transform_notes", "humanize needs 'amount'");
+    const double lengthBeats = (double) args.getProperty ("lengthBeats", 0.0);
+    if (mode == "setLength" && (! args.hasProperty ("lengthBeats") || lengthBeats <= 1.0e-4))
+        return errResult ("transform_notes", "setLength needs 'lengthBeats' (beats > 0)");
+    const int semitones = (int) args.getProperty ("semitones", 0);
+    if (mode == "addInterval" && ! args.hasProperty ("semitones"))
+        return errResult ("transform_notes", "addInterval needs 'semitones'");
+
+    // fitToScale's mask: the voice.js NOTE_PC / SCALES domains, ported — the engine
+    // has no mask helper (TempoProject's kNotePcNames/kScaleNames are validation
+    // lists only). Lockstep with ui/src/musicalKey.ts, whose test parses voice.js —
+    // the same truth in three places, two of them executable guards. The key is the
+    // session key from the MOSH_PROJECT node (A/minor default, same as the snapshot).
+    bool scaleMask[12] = {};
+    if (mode == "fitToScale")
+    {
+        static const std::pair<const char*, int> kNotePc[] = {
+            { "C", 0 }, { "C#", 1 }, { "Db", 1 }, { "D", 2 }, { "D#", 3 }, { "Eb", 3 },
+            { "E", 4 }, { "F", 5 }, { "F#", 6 }, { "Gb", 6 }, { "G", 7 }, { "G#", 8 },
+            { "Ab", 8 }, { "A", 9 }, { "A#", 10 }, { "Bb", 10 }, { "B", 11 } };
+        static const struct { const char* name; std::initializer_list<int> offs; } kScales[] = {
+            { "major", { 0, 2, 4, 5, 7, 9, 11 } }, { "minor", { 0, 2, 3, 5, 7, 8, 10 } },
+            { "dorian", { 0, 2, 3, 5, 7, 9, 10 } }, { "mixolydian", { 0, 2, 4, 5, 7, 9, 10 } },
+            { "pentatonic", { 0, 3, 5, 7, 10 } },
+            { "chromatic", { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 } } };
+        auto proj = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+        const auto tonicName = proj.hasProperty (ids::musicalTonic)
+                                   ? proj.getProperty (ids::musicalTonic).toString()
+                                   : juce::String (kDefaultKeyTonic);
+        const auto modeName = proj.hasProperty (ids::musicalMode)
+                                  ? proj.getProperty (ids::musicalMode).toString()
+                                  : juce::String (kDefaultKeyMode);
+        int tonicPc = 9;   // A
+        for (auto& kv : kNotePc) if (tonicName == kv.first) { tonicPc = kv.second; break; }
+        for (auto& s : kScales)
+            if (modeName == s.name)
+                for (int off : s.offs) scaleMask[(tonicPc + off) % 12] = true;
+    }
+    // Nearest in-scale pitch; a pitch exactly between two scale tones resolves
+    // DOWNWARD (ui/src/musicalKey.ts snapToScale — same algorithm, same ties rule).
+    auto pcOf = [] (int p) { return ((p % 12) + 12) % 12; };
+    auto snapToMask = [&] (int pitch) {
+        pitch = juce::jlimit (0, 127, pitch);
+        if (scaleMask[pcOf (pitch)]) return pitch;
+        for (int d = 1; d <= 6; ++d)
+        {
+            if (pitch - d >= 0 && scaleMask[pcOf (pitch - d)]) return pitch - d;   // ties DOWN
+            if (pitch + d <= 127 && scaleMask[pcOf (pitch + d)]) return pitch + d;
+        }
+        return pitch;   // unreachable with any real scale — behave chromatically
+    };
+
+    // The span the deterministic modes work inside: the targets' own [min start, max
+    // end] — a selection transforms within the SELECTION's span (Live's panel rule).
+    double spanStart = std::numeric_limits<double>::max(), spanEnd = 0.0;
+    int topPitch = 0;
+    for (auto& t : targets)
+    {
+        spanStart = juce::jmin (spanStart, t.start);
+        spanEnd   = juce::jmax (spanEnd, t.start + t.len);
+        topPitch  = juce::jmax (topPitch, t.pitch);
+    }
+
+    // Deterministic seed for humanize: FNV-1a over mode/clip/amount + each target's
+    // identity and current state — the transform_velocities contract (identical
+    // command + identical pre-state ⇒ identical result; the JSONL log stays a program).
+    uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h] (uint64_t v) { h ^= v; h *= 1099511628211ULL; };
+    const auto seedText = mode + "|" + args.getProperty ("clipId", var()).toString();
+    for (int si = 0; si < seedText.length(); ++si) mix ((uint64_t) (uint8_t) seedText[si]);
+    mix ((uint64_t) amount);
+    for (auto& t : targets)
+    {
+        mix ((uint64_t) t.pitch);
+        mix ((uint64_t) t.vel);
+        mix ((uint64_t) std::llround (t.start * 1.0e6));
+    }
+    std::mt19937_64 rng (h);
+
+    // Legato's next-onset map: each distinct start extends to the NEXT distinct start;
+    // the last group extends to the span end. Same-start notes (chords) share the
+    // onset, so no note collapses to zero length.
+    std::vector<double> onsets;
+    for (auto& t : targets)
+        if (onsets.empty() || t.start > onsets.back() + 1.0e-9)
+            onsets.push_back (t.start);
+    auto legatoEnd = [&] (double start) {
+        for (double o : onsets)
+            if (o > start + 1.0e-9) return o;
+        return spanEnd;
+    };
+
+    // Humanize deviation: timing ±(amount% of a 16th) and velocity ±amount — small by
+    // construction at Live's 10% default (±0.025 beats, ±10 velocity).
+    const double maxTimeDev = (amount / 100.0) * 0.25;
+    std::uniform_real_distribution<double> timeDev (-maxTimeDev, maxTimeDev);
+    std::uniform_int_distribution<int> velDev (-amount, amount);
+
+    beginTxn ("transform_notes");
+    int changed = 0, added = 0;
+    // addInterval's dupe set: every (start, pitch) already sounding in the clip
+    // (the whole sequence, not just the targets) plus the tones this pass adds —
+    // a chord tone that would stack on an existing note is SKIPPED, never doubled.
+    std::set<std::pair<double, int>> sounding;
+    if (mode == "addInterval")
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            if (auto* n = seq.getNote (i))
+                sounding.insert ({ n->getStartBeat().inBeats(), n->getNoteNumber() });
+    for (auto& t : targets)
+    {
+        if (mode == "addInterval")
+        {
+            // ADDS a chord tone at +N semitones; the source note is never mutated.
+            const int cand = juce::jlimit (0, 127, t.pitch + semitones);
+            if (cand != t.pitch && sounding.insert ({ t.start, cand }).second)
+            {
+                seq.addNote (cand, tracktion::BeatPosition::fromBeats (t.start),
+                             tracktion::BeatDuration::fromBeats (t.len), t.vel, 0, &undoManager());
+                ++added;
+            }
+            continue;
+        }
+        double newStart = t.start, newLen = t.len;
+        int newPitch = t.pitch, newVel = t.vel;
+        if (mode == "reverse")
+            newStart = spanStart + (spanEnd - (t.start + t.len));   // mirror inside the span
+        else if (mode == "invert")
+            newPitch = juce::jlimit (0, 127, 2 * topPitch - t.pitch);   // Live inverts around the top
+        else if (mode == "legato")
+            newLen = juce::jmax (1.0e-4, legatoEnd (t.start) - t.start);
+        else if (mode == "x2") { newStart = spanStart + 2.0 * (t.start - spanStart); newLen = 2.0 * t.len; }
+        else if (mode == "d2") { newStart = spanStart + 0.5 * (t.start - spanStart); newLen = 0.5 * t.len; }
+        else if (mode == "setLength")
+            newLen = lengthBeats;   // validated > 1e-4 above; starts unchanged
+        else if (mode == "fitToScale")
+            newPitch = snapToMask (t.pitch);
+        else   // humanize
+        {
+            newStart = juce::jmax (0.0, t.start + timeDev (rng));
+            newVel   = juce::jlimit (1, 127, t.vel + velDev (rng));
+        }
+        if (std::abs (newStart - t.start) > 1.0e-9 || std::abs (newLen - t.len) > 1.0e-9)
+        {
+            t.n->setStartAndLength (tracktion::BeatPosition::fromBeats (newStart),
+                                    tracktion::BeatDuration::fromBeats (newLen), &undoManager());
+            ++changed;
+        }
+        if (newPitch != t.pitch) { t.n->setNoteNumber (newPitch, &undoManager()); ++changed; }
+        if (newVel != t.vel)     { t.n->setVelocity (newVel, &undoManager()); ++changed; }
+    }
+
+    logLine ("transform_notes", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
+    auto* data = new DynamicObject();
+    data->setProperty ("mode", mode);
+    data->setProperty ("changed", changed);
+    data->setProperty ("added", added);
+    return okResult ("transform_notes", var (data));
+}
+
 te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
 {
     auto& edit = eng.edit();
@@ -2894,13 +3227,17 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // header surface the auto-loaded default and label the track MIDI-armable.
     o->setProperty ("isInstrument", trackHasInstrument (t));
     o->setProperty ("meterEnabled", findTrackMeter (t) != nullptr);
+    // Freeze Track (⌥⇧⌘F) — additive; absent on unfrozen tracks so pre-freeze
+    // consumers and snapshots are untouched. The marker itself lives on the track's
+    // state tree (ids::moshFrozen) so it persists save/reload and rides undo.
+    if (t.state.hasProperty (ids::moshFrozen))
+        o->setProperty ("frozen", true);
 
     // Mixer state (Stage 2 mixer stub).
     if (auto* vp = t.getVolumePlugin())
     {
         o->setProperty ("volumeDb", vp->getVolumeDb());
-        o->setProperty ("pan", vp->getPan());
-    }
+        o->setProperty ("pan", vp->getPan());    }
     else
     {
         o->setProperty ("volumeDb", 0.0);
@@ -3078,6 +3415,14 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
     {
         o->setProperty ("type", "midi");
+        // MIDI clip looping (Live 12's brace): ADDITIVE — only present while
+        // looping, so consumers written before the fields existed see no change.
+        // Content-relative beats, engine truth straight off the clip's CachedValues.
+        if (mc->isLooping())
+        {
+            o->setProperty ("midiLoopStartBeats",  mc->getLoopStartBeats().inBeats());
+            o->setProperty ("midiLoopLengthBeats", mc->getLoopLengthBeats().inBeats());
+        }
         Array<var> notes;
         auto& seq = mc->getSequence();
         for (int i = 0; i < seq.getNumNotes(); ++i)
@@ -3471,7 +3816,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
     static const juce::StringArray replayable {
         "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "set_track_icon", "move_track",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
-        "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
+        "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",
         "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",

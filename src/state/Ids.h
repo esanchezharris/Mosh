@@ -86,6 +86,13 @@ namespace mosh::ids
     // preference (written without the undo manager, like monitor mode).
     MOSH_DECLARE_ID (moshInputDevice)
 
+    // FREEZE TRACK (Live 12 ⌥⇧⌘F) — a plain property on the track's own state
+    // tree (like moshInputDevice): present ⇒ the track is frozen (rendered to
+    // audio, device chain disabled). Written WITH the undo manager by
+    // freeze_track / unfreeze_track, so undo restores the exact pre-state.
+    // Saves/reloads with the edit — a frozen track stays frozen across sessions.
+    MOSH_DECLARE_ID (moshFrozen)
+
     // DRM-001 — the track's TYPE ("audio" | "drum"). A plain property on the
     // track's own state tree (like moshInputDevice), so it saves/reloads with the
     // edit. A "drum" track defaults to the working sampler + bundled kit and is the

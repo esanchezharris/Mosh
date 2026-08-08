@@ -9,7 +9,8 @@
 // lives in the context menu instead of a split-tool click. Selection routes through the
 // store (so multiplayer broadcast/lock-claim still fire).
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { expandLoopedNotes } from "../../midi/midiLoop";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import { useSettings } from "../../settings/store";
@@ -93,6 +94,17 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const pxToSec = (px: number) => px / pxPerSec;
   const secToPx = (s: number) => s * pxPerSec;
   const bs = beatSeconds(meterOf(snapshot)); // seconds per beat (renderers map beats→px)
+  // MIDI clip looping: expand the notes into originals + dimmed ghost repeats
+  // (Live's striped repeat rendering) whenever the clip carries loop fields.
+  const shownNotes = useMemo(
+    () => expandLoopedNotes(
+      clip.notes ?? [],
+      bs > 0 ? clip.length / bs : 0,
+      clip.midiLoopStartBeats ?? 0,
+      clip.midiLoopLengthBeats ?? 0,
+    ),
+    [clip.notes, clip.length, clip.midiLoopStartBeats, clip.midiLoopLengthBeats, bs],
+  );
   // clip.sourceFile is a dep so an in-place repoint (re-imagine / relink) re-fetches the waveform.
   useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, clip.sourceFile, ensurePeaks]);
 
@@ -320,8 +332,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     >
       {clip.type === "wave" && <ClipWave peaks={peaks} width={width} />}
       {clip.type === "midi" && (drumClip
-        ? <ClipDrumGrid notes={clip.notes} width={width} bs={bs} secToPx={secToPx} />
-        : <ClipMidi notes={clip.notes} width={width} bs={bs} secToPx={secToPx} />)}
+        ? <ClipDrumGrid notes={shownNotes} width={width} bs={bs} secToPx={secToPx} />
+        : <ClipMidi notes={shownNotes} width={width} bs={bs} secToPx={secToPx} />)}
       <span className="v2-clip-label">{clip.name}</span>
       {clip.renderLayer?.reimagineActive && (
         <span className="v2-clip-badge reimagine" data-testid="v2-clip-reimagine"

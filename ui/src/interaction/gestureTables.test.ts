@@ -123,3 +123,14 @@ describe("all presets share the ruler transport surface", () => {
     }
   });
 });
+
+describe("ableton preset — empty-lane creation (SPEC §8)", () => {
+  it("empty dblclick → CREATE_CLIP (Live: create a clip and open its editor)", () => {
+    expect(r("ableton", { region: "empty", gesture: "dblclick" })).toBe(A.CREATE_CLIP);
+  });
+
+  it("the other presets leave empty dblclick unbound (additive change)", () => {
+    for (const name of ["mosh", "fl", "protools", "logic"])
+      expect(r(name, { region: "empty", gesture: "dblclick" }), name).toBeNull();
+  });
+});

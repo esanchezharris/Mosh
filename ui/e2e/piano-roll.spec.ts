@@ -59,6 +59,26 @@ for (const theme of ["light", "dark"] as const) {
         .toBeGreaterThanOrEqual(viewportW);
     });
 
+    test("the editor is fully OPAQUE — the arrangement must not show through the grid", async ({ page }) => {
+      // The "transparent piano roll" bug: in the dark theme the v2 --pr-* surfaces were
+      // pinned to the shell's GLASS tokens (alpha 0.62–0.74), so the timeline's own
+      // clips and lane lines bled through the editor's grid. A modal editor is the one
+      // surface that must never be glass.
+      await bootV2(page, { theme });
+      await openShortMidiClip(page);
+
+      const alphas = await page.evaluate(() => {
+        const alpha = (sel: string) => {
+          const m = getComputedStyle(document.querySelector(sel)!).backgroundColor
+            .match(/[\d.]+/g)?.map(Number);
+          return m && m.length === 4 ? m[3] : 1; // rgb() has no 4th channel = opaque
+        };
+        return { panel: alpha(".pr"), grid: alpha(".pr-grid"), keys: alpha(".pr-key.white") };
+      });
+      for (const [surface, a] of Object.entries(alphas))
+        expect(a, `${surface} is translucent — the arrangement bleeds through`).toBe(1);
+    });
+
     test("note-name labels on the key gutter are legible", async ({ page }) => {
       await bootV2(page, { theme });
       await openShortMidiClip(page);
@@ -240,5 +260,20 @@ test.describe("piano roll · DAW affordances", () => {
     await expect.poll(async () => page.locator(".pr-body").evaluate((el) => el.classList.contains("pr-playing")))
       .toBe(false);
     expect(Number.isFinite(inside)).toBe(true);
+  });
+
+  test("header controls show the styled tooltip (chrome pilot), not a native title", async ({ page }) => {
+    await bootV2(page);
+    await openShortMidiClip(page);
+    const quantize = page.getByTestId("pr-quantize");
+    // Migrated off the native attribute — a title left behind would double-tooltip.
+    await expect(quantize).not.toHaveAttribute("title", /./);
+    await quantize.hover();
+    const tip = page.locator(".mosh-tip");
+    await expect(tip).toBeVisible();
+    await expect(tip).toContainText(/snap every note/i);
+    // …and it leaves when the pointer does.
+    await page.locator(".pr-head strong").hover();
+    await expect(tip).toHaveCount(0);
   });
 });

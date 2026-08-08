@@ -175,6 +175,10 @@ export type ClipTake = {
   index: number;        // position in the take tree (the command handle)
   description?: string; // engine-supplied take description (file/name), if any
   isCurrent?: boolean;  // the take that currently plays
+  /** Per-take waveform peaks ([min,max] bucket pairs — the main-lane shape).
+   *  Additive (take-lanes wave): absent when the take's source file is missing
+   *  or unreadable — the lane falls back to the labeled bar. */
+  peaks?: [number, number][];
 };
 
 // A MIDI note as serialised in the snapshot — beats within the clip sequence.
@@ -216,6 +220,11 @@ export type Clip = {
   loopEnabled?: boolean;
   loopStart?: number;
   loopLength?: number;
+  /** MIDI clip looping (Live 12's brace): content-relative beats, present ONLY
+   *  while the clip loops (additive — absent otherwise). set_clip_loop's MIDI
+   *  branch writes them; arrangement/editor paint ghost repeats from them. */
+  midiLoopStartBeats?: number;
+  midiLoopLengthBeats?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
   sourceLength?: number;
@@ -415,6 +424,10 @@ export type Track = {
   isReturn?: boolean;
   returnBus?: number;
   meterEnabled?: boolean;
+  /** Freeze Track (⌥⇧⌘F) — present+true only while the track is frozen: its clips
+   *  are the rendered WAV and the device chain is parked (every plugin disabled).
+   *  Additive; absent on unfrozen tracks and pre-freeze snapshots. */
+  frozen?: boolean;
   // MIX-008 — group (submix) tracks. A group entry has isGroup + type "group" and
   // an empty clips array; a track nested under a group carries parentId.
   isGroup?: boolean;

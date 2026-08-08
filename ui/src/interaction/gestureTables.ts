@@ -43,7 +43,9 @@ const MOSH: GestureTable = [
   ...RULER_RULES,
 ];
 
-// ── Ableton — header moves, body time-selects, edge trims.
+// ── Ableton — header moves, body time-selects, edge trims. Empty-ground double-click
+// creates a clip and opens its editor (Live 12, SPEC §8); the live shell's lanes are
+// the executing surface.
 const ABLETON: GestureTable = [
   { region: "clip.header", gesture: "click", action: A.SELECT },
   { region: "clip.header", gesture: "drag", action: A.MOVE },
@@ -53,6 +55,7 @@ const ABLETON: GestureTable = [
   { region: "clip.edge", gesture: "drag", action: A.TRIM },
   { region: "empty", gesture: "click", action: A.DESELECT },
   { region: "empty", gesture: "drag", action: A.MARQUEE },
+  { region: "empty", gesture: "dblclick", action: A.CREATE_CLIP },
   ...RULER_RULES,
 ];
 

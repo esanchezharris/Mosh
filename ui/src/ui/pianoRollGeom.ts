@@ -32,6 +32,24 @@ export function gridBeatsFor(opts: {
 export const BEAT_PX_MIN = 12;
 export const BEAT_PX_MAX = 160;
 
+/**
+ * Snap a note-DRAW start DOWN to the grid line at or below the pointer.
+ *
+ * Why this is not Math.round: round-to-nearest moves the start up to HALF a grid
+ * step away from the click — at a 1-beat grid the note can begin a half beat from
+ * where you pointed, and AHEAD of it. Every reference DAW's pencil floors the
+ * draw start (Live, Logic, FL): you point at the bar the note starts in, it
+ * starts at that line. Round stays correct for MOVE gestures (preserve the
+ * relative feel of the thing you grabbed); entry is the case that must floor.
+ *
+ * The epsilon keeps a click that lands a hair left of a line (floating-point dust
+ * from px → beats) ON that line instead of dropping a whole step below it.
+ */
+export function snapDownBeat(beat: number, stepBeats: number): number {
+  if (!Number.isFinite(beat) || !Number.isFinite(stepBeats) || stepBeats <= 0) return beat;
+  return Math.floor((beat + 1e-6) / stepBeats) * stepBeats;
+}
+
 /** Clamp a zoom level to the usable range. */
 export function clampBeatPx(v: number): number {
   if (!Number.isFinite(v)) return BEAT_PX_MIN;

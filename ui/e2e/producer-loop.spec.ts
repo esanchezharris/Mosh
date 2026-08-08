@@ -94,7 +94,7 @@ test("File menu exposes the project actions with accelerators", async ({ page })
     await expect(menu.locator(`[data-action="${action}"]`)).toBeVisible();
   }
   await expect(menu.locator('[data-action="new_project"] .menu-accel')).toHaveText("⌘N");
-  await expect(menu.locator('[data-action="export_audio"] .menu-accel')).toHaveText("⌘E");
+  await expect(menu.locator('[data-action="export_audio"] .menu-accel')).toHaveText("⇧⌘R");
   // Save dispatches without surfacing an error.
   await menu.locator('[data-action="save"]').click();
   await expect(page.getByTestId("error")).toHaveCount(0);

@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { EditorAction as A } from "./actions";
+import { EditorAction as A, type EditorAction as Action } from "./actions";
 import {
   eventToCombo,
   canonicalCombo,
   resolveKey,
   getKeymap,
   KEYMAPS,
+  type KeyCombo,
   type KeyEventLike,
 } from "./keymap";
 
@@ -31,6 +32,40 @@ describe("eventToCombo", () => {
   it("returns an empty combo for a lone modifier press", () => {
     expect(eventToCombo(ev({ key: "Shift", shiftKey: true }))).toBe("");
     expect(eventToCombo(ev({ key: "Meta", metaKey: true }))).toBe("");
+  });
+
+  // macOS Option TRANSFORMS letter keys (⌥f → key "ƒ", ⌥⇧f → "Ï"), so the letter
+  // must come from the physical code. Verified live in the packaged app: ⌥⇧⌘F
+  // never dispatched before this (Playwright synthesizes untransformed keys, so
+  // the e2e pin cannot catch this class).
+  it("derives the letter from e.code when Alt is held (macOS Option transform)", () => {
+    expect(eventToCombo(ev({ key: "ƒ", code: "KeyF", altKey: true }))).toBe("Alt+F");
+    expect(eventToCombo(ev({ key: "Ï", code: "KeyF", metaKey: true, shiftKey: true, altKey: true })))
+      .toBe("Mod+Shift+Alt+F");
+    expect(eventToCombo(ev({ key: "´", code: "KeyE", metaKey: true, altKey: true }))).toBe("Mod+Alt+E");
+  });
+
+  it("Alt events without a letter code keep e.key (digits/punct/unavailable code)", () => {
+    // no code at all — the pre-fix shape, unchanged
+    expect(eventToCombo(ev({ key: "Z", altKey: true, shiftKey: true }))).toBe("Shift+Alt+Z");
+    // non-letter codes: the transformed key stays (no binding names it, but the
+    // combo format must not invent a letter)
+    expect(eventToCombo(ev({ key: "¡", code: "Digit1", altKey: true }))).toBe("Alt+¡");
+    expect(eventToCombo(ev({ key: "≠", code: "Equal", altKey: true }))).toBe("Alt+≠");
+  });
+
+  // ⇧= sends the shifted SYMBOL (key "+", US layout), but ZOOM_IN binds the
+  // physical ⌘⇧= chord as "Mod+Shift+=" — so the `Equal` code normalizes the
+  // shifted form back to "=". Same key-vs-physical class as the Option transform.
+  it("⇧= normalizes to '=' from the Equal code (the physical ⌘⇧= zoom chord)", () => {
+    expect(eventToCombo(ev({ key: "+", code: "Equal", metaKey: true, shiftKey: true }))).toBe("Mod+Shift+=");
+    expect(eventToCombo(ev({ key: "+", code: "Equal", shiftKey: true }))).toBe("Shift+=");
+    // without a code (synthetic events) the shifted symbol still rides e.key
+    expect(eventToCombo(ev({ key: "+", metaKey: true, shiftKey: true }))).toBe("Mod+Shift++");
+    // plain/Mod = arrives as "=" via e.key already — byte-identical, code or not
+    expect(eventToCombo(ev({ key: "=", code: "Equal", metaKey: true }))).toBe("Mod+=");
+    // the Alt pin above is untouched: ⌥⇧= keeps its transformed key
+    expect(eventToCombo(ev({ key: "≠", code: "Equal", altKey: true }))).toBe("Alt+≠");
   });
 });
 
@@ -122,5 +157,182 @@ describe("resolveKey — custom keymap overrides", () => {
     const km = { ...getKeymap("mosh"), [A.PLAY_PAUSE]: "Mod+P" };
     expect(resolveKey(km, ev({ key: "p", metaKey: true }))).toBe(A.PLAY_PAUSE);
     expect(resolveKey(km, ev({ key: " " }))).toBeNull(); // old binding gone
+  });
+});
+
+describe("resolveKey — ableton Live-12 arrangement keys (SPEC §8)", () => {
+  const km = getKeymap("ableton");
+
+  it("binds the Live inventory to actions with real handlers", () => {
+    expect(resolveKey(km, ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
+    expect(resolveKey(km, ev({ key: "l", metaKey: true }))).toBe(A.LOOP_TOGGLE);
+    expect(resolveKey(km, ev({ key: "r", metaKey: true }))).toBe(A.RENAME);
+    expect(resolveKey(km, ev({ key: "0" }))).toBe(A.DEACTIVATE);
+    expect(resolveKey(km, ev({ key: "1", metaKey: true }))).toBe(A.GRID_NARROW);
+    expect(resolveKey(km, ev({ key: "2", metaKey: true }))).toBe(A.GRID_WIDEN);
+    expect(resolveKey(km, ev({ key: "4", metaKey: true }))).toBe(A.SNAP_TOGGLE);
+    expect(resolveKey(km, ev({ key: "=", metaKey: true }))).toBe(A.ZOOM_IN);
+    expect(resolveKey(km, ev({ key: "-", metaKey: true }))).toBe(A.ZOOM_OUT);
+  });
+
+  it("⌘J and ⌘3 are bound (Wave 2 closed both gaps — consolidate_clips + the triplet snap)", () => {
+    expect(resolveKey(km, ev({ key: "j", metaKey: true }))).toBe(A.CONSOLIDATE);
+    expect(resolveKey(km, ev({ key: "3", metaKey: true }))).toBe(A.GRID_TRIPLET);
+  });
+
+  it("the other presets do NOT grow the Live bindings (per-preset, additive)", () => {
+    for (const name of ["mosh", "fl", "protools", "logic"]) {
+      expect(resolveKey(getKeymap(name), ev({ key: "l", metaKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "0" })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "1", metaKey: true })), name).toBeNull();
+    }
+  });
+});
+
+describe("resolveKey — ableton wave-0 menu bindings (menus.json ground truth)", () => {
+  const km = getKeymap("ableton");
+
+  it("binds the creation / quantize / selection inventory", () => {
+    expect(resolveKey(km, ev({ key: "t", metaKey: true }))).toBe(A.INSERT_AUDIO_TRACK);
+    expect(resolveKey(km, ev({ key: "t", metaKey: true, shiftKey: true }))).toBe(A.INSERT_MIDI_TRACK);
+    expect(resolveKey(km, ev({ key: "m", metaKey: true, shiftKey: true }))).toBe(A.INSERT_MIDI_CLIP);
+    expect(resolveKey(km, ev({ key: "u", metaKey: true }))).toBe(A.QUANTIZE);
+    expect(resolveKey(km, ev({ key: "a", metaKey: true }))).toBe(A.SELECT_ALL);
+    expect(resolveKey(km, ev({ key: "a", metaKey: true, shiftKey: true }))).toBe(A.INVERT_SELECTION);
+    expect(resolveKey(km, ev({ key: "l", metaKey: true, shiftKey: true }))).toBe(A.SELECT_LOOP);
+    // Duplicate rides the shared MOSH core (⌘D) — pinned here because it IS Live's binding.
+    expect(resolveKey(km, ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
+  });
+
+  it("deactivate takes BOTH of Live's forms — plain 0 and ⌘0", () => {
+    expect(resolveKey(km, ev({ key: "0" }))).toBe(A.DEACTIVATE);
+    expect(resolveKey(km, ev({ key: "0", metaKey: true }))).toBe(A.DEACTIVATE);
+  });
+
+  it("the other presets do NOT grow the wave-0 bindings", () => {
+    for (const name of ["mosh", "fl", "protools", "logic"]) {
+      expect(resolveKey(getKeymap(name), ev({ key: "t", metaKey: true, shiftKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "u", metaKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "l", metaKey: true, shiftKey: true })), name).toBeNull();
+    }
+  });
+});
+
+describe("resolveKey — ableton wave-2 bindings (consolidate / triplet / zoom-back / find)", () => {
+  const km = getKeymap("ableton");
+  it("binds them", () => {
+    expect(resolveKey(km, ev({ key: "j", metaKey: true }))).toBe(A.CONSOLIDATE);
+    expect(resolveKey(km, ev({ key: "3", metaKey: true }))).toBe(A.GRID_TRIPLET);
+    expect(resolveKey(km, ev({ key: "x" }))).toBe(A.ZOOM_BACK);
+    expect(resolveKey(km, ev({ key: "f", metaKey: true }))).toBe(A.FIND);
+  });
+  it("the other presets stay free of them", () => {
+    for (const name of ["mosh", "fl", "protools", "logic"]) {
+      expect(resolveKey(getKeymap(name), ev({ key: "j", metaKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "3", metaKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "x" })), name).toBeNull();
+    }
+  });
+});
+
+describe("resolveKey — ableton expanded clip view (⌥⌘E)", () => {
+  it("binds Alt+Mod+E, and only in the ableton preset", () => {
+    expect(resolveKey(getKeymap("ableton"), ev({ key: "e", metaKey: true, altKey: true }))).toBe(A.EXPAND_CLIP);
+    for (const name of ["mosh", "fl", "protools", "logic"])
+      expect(resolveKey(getKeymap(name), ev({ key: "e", metaKey: true, altKey: true })), name).toBeNull();
+  });
+});
+
+describe("resolveKey — ableton keymap-audit wave", () => {
+  const km = getKeymap("ableton");
+
+  it("binds the new inventory", () => {
+    expect(resolveKey(km, ev({ key: "ArrowUp" }))).toBe(A.NUDGE_UP);
+    expect(resolveKey(km, ev({ key: "ArrowDown" }))).toBe(A.NUDGE_DOWN);
+    expect(resolveKey(km, ev({ key: "g", metaKey: true, shiftKey: true }))).toBe(A.UNGROUP);
+    expect(resolveKey(km, ev({ key: "i", metaKey: true }))).toBe(A.INSERT_SILENCE);
+    expect(resolveKey(km, ev({ key: "f", metaKey: true, altKey: true }))).toBe(A.CREATE_FADE);
+    expect(resolveKey(km, ev({ key: "z" }))).toBe(A.ZOOM_TO_SELECTION);   // Z = Zoom to Time Selection
+    expect(resolveKey(km, ev({ key: "x" }))).toBe(A.ZOOM_BACK);           // X = Zoom Back (history pop)
+  });
+
+  it("⌘+ works in BOTH physical forms (⌘= and ⌘⇧=)", () => {
+    expect(resolveKey(km, ev({ key: "=", metaKey: true }))).toBe(A.ZOOM_IN);
+    expect(resolveKey(km, ev({ key: "=", metaKey: true, shiftKey: true }))).toBe(A.ZOOM_IN);
+    // real macOS hardware sends key "+" for ⌘⇧= (the shifted symbol) — resolved
+    // through the Equal code (Playwright's synthesized keys never exposed this).
+    expect(resolveKey(km, ev({ key: "+", code: "Equal", metaKey: true, shiftKey: true }))).toBe(A.ZOOM_IN);
+  });
+
+  it("bare 1/2/3 are free in the ableton preset only (modal tools dropped)", () => {
+    expect(resolveKey(km, ev({ key: "1" }))).toBeNull();
+    expect(resolveKey(km, ev({ key: "2" }))).toBeNull();
+    expect(resolveKey(km, ev({ key: "3" }))).toBeNull();
+    // …and kept in the presets that use them (Pro Tools deliberately rebinds
+    // Move/Range to F8/F7, so only its Split digit survives there).
+    for (const name of ["mosh", "fl", "logic"]) {
+      expect(resolveKey(getKeymap(name), ev({ key: "1" })), name).not.toBeNull();
+    }
+    expect(resolveKey(getKeymap("protools"), ev({ key: "2" }))).not.toBeNull();
+  });
+
+  it("the new bindings stay ableton-only", () => {
+    for (const name of ["mosh", "fl", "protools", "logic"]) {
+      expect(resolveKey(getKeymap(name), ev({ key: "i", metaKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "g", metaKey: true, shiftKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "f", metaKey: true, altKey: true })), name).toBeNull();
+      expect(resolveKey(getKeymap(name), ev({ key: "z" })), name).toBeNull();
+    }
+  });
+});
+
+
+describe("resolveKey — Alt+letter bindings resolve from macOS Option-transformed events", () => {
+  // The live bug: on real macOS hardware ⌥⇧⌘F sends key "Ï" (⌥f sends "ƒ"), so
+  // the event never matched "Mod+Shift+Alt+F". The letter comes from e.code now.
+  // Every Alt+letter binding in every preset is covered by the sweep below; these
+  // three pin the concrete transformed keys macOS actually sends.
+  const km = getKeymap("ableton");
+  it("⌥⇧⌘F (key 'Ï', code 'KeyF') → FREEZE_TRACK", () => {
+    expect(resolveKey(km, ev({ key: "Ï", code: "KeyF", metaKey: true, shiftKey: true, altKey: true })))
+      .toBe(A.FREEZE_TRACK);
+  });
+  it("⌥⌘F (key 'ƒ', code 'KeyF') → CREATE_FADE", () => {
+    expect(resolveKey(km, ev({ key: "ƒ", code: "KeyF", metaKey: true, altKey: true })))
+      .toBe(A.CREATE_FADE);
+  });
+  it("⌥⌘E (key '´', code 'KeyE') → EXPAND_CLIP", () => {
+    expect(resolveKey(km, ev({ key: "´", code: "KeyE", metaKey: true, altKey: true })))
+      .toBe(A.EXPAND_CLIP);
+  });
+});
+
+describe("Alt-combo sweep — every Alt+letter binding in every preset", () => {
+  // Walks KEYMAPS itself (not a hand-list), so a future Alt+letter binding is
+  // covered the moment it lands: build the macOS-transformed event for the combo
+  // (key is NOT the letter — 'Ï' stands in for whatever Option produced) and
+  // require resolution from the code-derived letter.
+  it("all resolve from code-derived letters, and the sweep is non-empty", () => {
+    let swept = 0;
+    for (const [preset, km] of Object.entries(KEYMAPS)) {
+      for (const [action, bound] of Object.entries(km) as [Action, KeyCombo | KeyCombo[]][]) {
+        for (const combo of Array.isArray(bound) ? bound : [bound]) {
+          const canonical = canonicalCombo(combo);
+          const parts = canonical.split("+");
+          const letter = parts[parts.length - 1];
+          if (!parts.includes("Alt") || !/^[A-Z]$/.test(letter)) continue;
+          swept++;
+          const action_ = resolveKey(km, {
+            key: "Ï",   // any Option-transformed char — proof the code path wins
+            code: `Key${letter}`,
+            metaKey: parts.includes("Mod"),
+            shiftKey: parts.includes("Shift"),
+            altKey: true,
+          });
+          expect(action_, `${preset}: ${combo} (${canonical})`).toBe(action);
+        }
+      }
+    }
+    expect(swept).toBeGreaterThanOrEqual(3);   // CREATE_FADE, FREEZE_TRACK, EXPAND_CLIP today
   });
 });

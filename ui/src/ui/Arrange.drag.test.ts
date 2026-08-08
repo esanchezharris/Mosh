@@ -25,6 +25,7 @@ import { Arrange } from "./Arrange";
 import { useStore } from "../store";
 import { liveFeel } from "../interaction/config";
 import type { Clip, CommandResult, Snapshot, Track } from "../types";
+import { useSettings } from "../settings/store";
 
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
@@ -104,6 +105,9 @@ describe("Arrange clip drag — time-axis guard", () => {
   };
 
   beforeEach(() => {
+    // These tests pin MOSH-bundle behavior; the live shell's default bundle
+    // (ableton under uiShell "live") would otherwise change every gesture/feel result.
+    useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" } });
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -115,6 +119,7 @@ describe("Arrange clip drag — time-axis guard", () => {
   });
 
   afterEach(() => {
+    useSettings.setState({ values: {} });
     act(() => root.unmount());
     host.remove();
     useStore.setState({ snapshot: null, snap: false, selection: new Set<string>(), editingClipId: null });

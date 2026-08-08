@@ -41,8 +41,8 @@ export default defineConfig({
   }],
   webServer: {
     command: preview
-      ? "npm run build:e2e && npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port 5173"
-      : "npm run dev -- --host 127.0.0.1",
+      ? "MOSH_E2E_HERMETIC_BRAIN=1 npm run build:e2e && MOSH_E2E_HERMETIC_BRAIN=1 npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port 5173"
+      : "MOSH_E2E_HERMETIC_BRAIN=1 npm run dev -- --host 127.0.0.1",
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI && !preview,
     timeout: 120_000,

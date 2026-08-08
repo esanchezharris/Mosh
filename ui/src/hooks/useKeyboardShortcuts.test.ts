@@ -5,6 +5,7 @@ import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useStore } from "../store";
 import { nativeMenuPresent } from "../bridge";
 import type { CommandResult } from "../types";
+import { useSettings } from "../settings/store";
 
 const bridgeMock = vi.hoisted(() => ({
   eventHandlers: new Map<string, (raw: unknown) => void>(),
@@ -36,6 +37,9 @@ describe("useKeyboardShortcuts", () => {
   const execCalls: { command: string; args?: Record<string, unknown> }[] = [];
 
   beforeEach(() => {
+    // These tests pin MOSH-bundle behavior; the live shell's default bundle
+    // (ableton under uiShell "live") would otherwise change every gesture/feel result.
+    useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" } });
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     execCalls.length = 0;
     bridgeMock.eventHandlers.clear();
@@ -55,6 +59,7 @@ describe("useKeyboardShortcuts", () => {
   });
 
   afterEach(() => {
+    useSettings.setState({ values: {} });
     act(() => root.unmount());
     host.remove();
     useStore.setState({
@@ -124,7 +129,10 @@ describe("useKeyboardShortcuts", () => {
     promptWrap.remove();
   });
 
-  it("yields Space to the native menu in the packaged app", () => {
+  it("handles Space in the WebView even when the native menu is present (the menu carries no Space equivalent)", async () => {
+    // The transport menu item carries NO Space key-equivalent (a modifier-less
+    // equivalent hijacks the key from the DOM — MenuController.cpp), so PLAY_PAUSE
+    // is not in NATIVE_MENU_ACTIONS and the web layer must act on it directly.
     vi.mocked(nativeMenuPresent).mockReturnValue(true);
     act(() => {
       root.render(React.createElement(Harness));
@@ -133,8 +141,12 @@ describe("useKeyboardShortcuts", () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     });
+    // play_pause rides the transport-action QUEUE (async) — flush it before asserting.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
-    expect(execCalls).toEqual([]);
+    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
   });
 
   it("keeps Delete in the WebView when the native menu is present", () => {
@@ -310,6 +322,14 @@ describe("useKeyboardShortcuts", () => {
         tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 2, length: 2 }] }],
       } as unknown as import("../types").Snapshot,
     });
+    // The gate is focus-scoped (editorKeyFocused): the modal roll always has focus
+    // inside it. Model that by focusing an element inside a piano-roll node.
+    const roll = document.createElement("div");
+    roll.setAttribute("data-testid", "piano-roll");
+    const inner = document.createElement("button");
+    roll.appendChild(inner);
+    document.body.appendChild(roll);
+    inner.focus();
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -319,6 +339,28 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls.some((c) => c.command === "move_clip")).toBe(false);
+    roll.remove();
+  });
+
+  it("nudge reaches the arrangement while the editor is open but NOT focused (docked selection-follow)", () => {
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      editingClipId: "clip-1",   // docked editor open, focus on the arrangement (body)
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 2, length: 2 }] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    expect(execCalls.some((c) => c.command === "move_clip")).toBe(true);
   });
 
   it("preserves native menu open_project file payloads", () => {

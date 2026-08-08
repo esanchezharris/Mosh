@@ -18,6 +18,7 @@ import { ClipView } from "./ClipView";
 import { useStore } from "../../store";
 import { FEEL_DEFAULTS } from "../../interaction/feel";
 import type { Clip, CommandResult, Snapshot } from "../../types";
+import { useSettings } from "../../settings/store";
 
 vi.mock("../../bridge", async () => {
   const actual = await vi.importActual<typeof import("../../bridge")>("../../bridge");
@@ -91,6 +92,9 @@ describe("v2 timeline clip drag — time-axis guard", () => {
   };
 
   beforeEach(() => {
+    // These tests pin MOSH-bundle behavior; the live shell's default bundle
+    // (ableton under uiShell "live") would otherwise change every gesture/feel result.
+    useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" } });
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -99,6 +103,7 @@ describe("v2 timeline clip drag — time-axis guard", () => {
   });
 
   afterEach(() => {
+    useSettings.setState({ values: {} });
     act(() => root.unmount());
     host.remove();
     useStore.setState({ snapshot: null, snap: false, selection: new Set<string>() });

@@ -566,6 +566,14 @@ juce::String MoshEngine::retryAudioDevice()
     return {};
 }
 
+void MoshEngine::adoptOpenedAudioDevice()
+{
+    if (audioOpen) return;          // already up; nothing to adopt
+    audioOpen = true;
+    audioError = {};                // the banner clears on the next snapshot
+    ensurePlaybackContext();
+}
+
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)
 {
     auto file = session.getChildFile ("audio")

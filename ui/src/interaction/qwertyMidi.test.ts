@@ -82,10 +82,20 @@ describe("the Shift rule — how the instrument coexists with the app keymap", (
   it("every note key it claims is otherwise unbound in every DAW preset", () => {
     // If a preset bound a bare note letter, turning the instrument on would silently
     // shadow that shortcut with no Shift escape available for it.
+    //
+    // ONE documented exception class: the ableton preset's bare X and Z (Live's
+    // zoom-back / Zoom-to-Time-Selection) and A (Live's Automation Mode toggle).
+    // The Shift escape DOES exist for them —
+    // unshiftForQwerty retries Shift+<owned key> against the keymap with the Shift
+    // stripped, so Shift+X/Shift+Z/Shift+A still fire while the keyboard is armed.
+    // That is Ableton's own published rule ("single-letter shortcuts need Shift while
+    // the computer MIDI keyboard is on"), not a shadow.
+    const isAllowedException = (preset: string, combo: string) =>
+      preset === "ableton" && (combo === "X" || combo === "Z" || combo === "A");
     const noteKeys = [...QWERTY_KEYS];
     for (const [name, km] of Object.entries(KEYMAPS)) {
       for (const combo of Object.values(km).flatMap((c) => (Array.isArray(c) ? c : [c]))) {
-        if (noteKeys.includes(combo as string)) {
+        if (noteKeys.includes(combo as string) && !isAllowedException(name, combo as string)) {
           throw new Error(`preset "${name}" binds a bare QWERTY note key: ${combo}`);
         }
       }
