@@ -11025,6 +11025,242 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "applied track survives the undo (apply is outside the undo system)");
     }
 
+    section ("Multiplayer: commit envelope identity binds the applied track");
+    {
+        MoshEngine identityEng (false, true, "mp-commit-identity");
+        MoshOps    identityOps (identityEng);
+        std::vector<String> identityEvents;
+        identityOps.setEventSink ([&] (const var& event)
+        {
+            identityEvents.push_back (event.getProperty ("type", var()).toString());
+        });
+
+        check (ok (cmd (identityOps, "new_project", args1 ("name", "mp-commit-identity"))),
+               "commit identity fixture project created");
+        const auto created = cmd (identityOps, "create_track", args1 ("name", "Commit Victim"));
+        check (ok (created), "commit identity victim created");
+        const auto victimTrackId = created.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        const auto serialized = cmd (identityOps, "mp_serialize_track", args1 ("trackId", victimTrackId));
+        check (ok (serialized), "commit identity victim serialized");
+        const auto victimBlob = serialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+        const auto victimLogicalId = serialized.getProperty ("data", var()).getProperty ("logicalId", var()).toString();
+        check (victimBlob.isNotEmpty() && victimLogicalId.isNotEmpty(),
+               "commit identity fixture carries blob and logicalId");
+        check (ok (cmd (identityOps, "rename_track",
+                        objN ({ { "trackId", victimTrackId }, { "name", "Commit Victim Preserved" } }))),
+               "commit identity victim diverged after serialization");
+
+        auto trackIdForLogicalId = [&] (const String& logicalId)
+        {
+            return trackSnapshotByLogicalId (identityOps, logicalId)
+                .getProperty ("id", var()).toString();
+        };
+        auto trackNameForLogicalId = [&] (const String& logicalId)
+        {
+            return trackSnapshotByLogicalId (identityOps, logicalId)
+                .getProperty ("name", var()).toString();
+        };
+        auto trackNamedExists = [&] (const String& name)
+        {
+            auto snapshot = identityOps.snapshot();
+            if (auto* tracksArray = snapshot.getProperty ("tracks", var()).getArray())
+                for (auto& track : *tracksArray)
+                    if (track.getProperty ("name", var()).toString() == name)
+                        return true;
+            return false;
+        };
+        auto setPeerTrackLock = [&] (bool active, const String& logicalId)
+        {
+            if (! active)
+                return cmd (identityOps, "mp_sync_locks", objN ({ { "active", false } }));
+
+            auto* locks = new DynamicObject();
+            locks->setProperty (logicalId, "other");
+            return cmd (identityOps, "mp_sync_locks",
+                        objN ({ { "active", true }, { "selfPeer", "me" }, { "locks", var (locks) } }));
+        };
+        const auto logFile = identityEng.sessionDir().getChildFile ("mosh-log.jsonl");
+        const String decoyLogicalId = "peer-controlled-decoy-logical-id";
+
+        section ("Multiplayer: mismatched commit envelope is a no-op");
+        {
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Mismatch Undo Sentinel"))),
+                   "mismatched commit undo sentinel created");
+            check (ok (setPeerTrackLock (true, victimLogicalId)),
+                   "mismatched commit fixture activates the peer track lock");
+
+            const auto trackIdBefore = trackIdForLogicalId (victimLogicalId);
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* mismatch = new DynamicObject();
+            mismatch->setProperty ("type", "commit");
+            mismatch->setProperty ("logicalId", decoyLogicalId);
+            mismatch->setProperty ("blob", victimBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (mismatch));
+
+            check (trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "mismatched commit preserves the victim's content");
+            check (trackIdForLogicalId (victimLogicalId) == trackIdBefore,
+                   "mismatched commit does not replace the victim track");
+            check (tracks (identityOps) == trackCountBefore
+                       && ! trackSnapshotByLogicalId (identityOps, decoyLogicalId).isObject(),
+                   "mismatched commit creates no decoy track");
+            check (logFile.getSize() == logBytesBefore,
+                   "mismatched commit writes no command-log record");
+            check (identityEvents.size() == eventsBefore,
+                   "mismatched commit emits no snapshot invalidation or event");
+            check (! ok (cmd (identityOps, "rename_track",
+                              objN ({ { "trackId", trackIdForLogicalId (victimLogicalId) },
+                                      { "name", "LOCK BYPASS LEAKED" } }))),
+                   "mismatched commit leaves the peer track lock enforced");
+            check (ok (setPeerTrackLock (false, victimLogicalId)),
+                   "mismatched commit fixture deactivates the peer track lock");
+            check (ok (cmd (identityOps, "undo")), "undo after mismatched commit succeeds");
+            check (! trackNamedExists ("Mismatch Undo Sentinel")
+                       && trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "mismatched commit leaves the local undo head and victim untouched");
+        }
+
+        section ("Multiplayer: missing commit envelope identity is a no-op");
+        {
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Missing Undo Sentinel"))),
+                   "missing-identity commit undo sentinel created");
+            check (ok (setPeerTrackLock (true, victimLogicalId)),
+                   "missing-identity fixture activates the peer track lock");
+
+            const auto trackIdBefore = trackIdForLogicalId (victimLogicalId);
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* missing = new DynamicObject();
+            missing->setProperty ("type", "commit");
+            missing->setProperty ("blob", victimBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (missing));
+
+            check (trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "missing-identity commit preserves the victim's content");
+            check (trackIdForLogicalId (victimLogicalId) == trackIdBefore,
+                   "missing-identity commit does not replace the victim track");
+            check (tracks (identityOps) == trackCountBefore,
+                   "missing-identity commit creates no track");
+            check (logFile.getSize() == logBytesBefore && identityEvents.size() == eventsBefore,
+                   "missing-identity commit writes no log and emits no event");
+            check (! ok (cmd (identityOps, "rename_track",
+                              objN ({ { "trackId", trackIdForLogicalId (victimLogicalId) },
+                                      { "name", "MISSING ID LOCK BYPASS LEAKED" } }))),
+                   "missing-identity commit leaves the peer track lock enforced");
+            check (ok (setPeerTrackLock (false, victimLogicalId)),
+                   "missing-identity fixture deactivates the peer track lock");
+            check (ok (cmd (identityOps, "undo")), "undo after missing-identity commit succeeds");
+            check (! trackNamedExists ("Missing Undo Sentinel")
+                       && trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "missing-identity commit leaves the local undo head and victim untouched");
+        }
+
+        section ("Multiplayer: non-string commit envelope identity is a no-op");
+        {
+            String coercionBlob;
+            if (auto coercionXml = parseXML (victimBlob))
+            {
+                auto coercionTree = ValueTree::fromXml (*coercionXml);
+                if (coercionTree.isValid())
+                {
+                    coercionTree.setProperty (ids::moshLogicalId, "1", nullptr);
+                    if (auto rewrittenXml = coercionTree.createXml())
+                        coercionBlob = rewrittenXml->toString();
+                }
+            }
+            check (coercionBlob.isNotEmpty(),
+                   "non-string identity fixture derives a valid blob whose logicalId is the string 1");
+
+            const auto directApply = cmd (identityOps, "apply_remote_track", args1 ("blob", coercionBlob));
+            check (ok (directApply)
+                       && directApply.getProperty ("data", var()).getProperty ("logicalId", var()).toString() == "1"
+                       && directApply.getProperty ("data", var()).getProperty ("mode", var()).toString() == "created",
+                   "blob-only internal apply creates the string-1 fixture track");
+            const auto coercionTrackId = trackIdForLogicalId ("1");
+            check (coercionTrackId.isNotEmpty(), "string-1 fixture track resolves by logical identity");
+            check (ok (cmd (identityOps, "rename_track",
+                            objN ({ { "trackId", coercionTrackId },
+                                    { "name", "Coercion Target Preserved" } }))),
+                   "string-1 fixture target diverged after direct apply");
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Coercion Undo Sentinel"))),
+                   "non-string identity undo sentinel created");
+            check (ok (setPeerTrackLock (true, "1")),
+                   "non-string identity fixture activates the peer track lock");
+
+            const auto trackIdBefore = trackIdForLogicalId ("1");
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* coercion = new DynamicObject();
+            coercion->setProperty ("type", "commit");
+            coercion->setProperty ("logicalId", true);
+            coercion->setProperty ("blob", coercionBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (coercion));
+
+            check (trackNameForLogicalId ("1") == "Coercion Target Preserved",
+                   "non-string identity commit preserves the target's content");
+            check (trackIdForLogicalId ("1") == trackIdBefore,
+                   "non-string identity commit does not replace the target track");
+            check (tracks (identityOps) == trackCountBefore,
+                   "non-string identity commit creates no track");
+            check (logFile.getSize() == logBytesBefore,
+                   "non-string identity commit writes no command-log record");
+            check (identityEvents.size() == eventsBefore,
+                   "non-string identity commit emits no snapshot invalidation or event");
+            check (! ok (cmd (identityOps, "rename_track",
+                              objN ({ { "trackId", trackIdForLogicalId ("1") },
+                                      { "name", "NON-STRING ID LOCK BYPASS LEAKED" } }))),
+                   "non-string identity commit leaves the peer track lock enforced");
+            check (ok (setPeerTrackLock (false, "1")),
+                   "non-string identity fixture deactivates the peer track lock");
+            check (ok (cmd (identityOps, "undo")), "undo after non-string identity commit succeeds");
+            check (! trackNamedExists ("Coercion Undo Sentinel")
+                       && trackNameForLogicalId ("1") == "Coercion Target Preserved",
+                   "non-string identity commit leaves the local undo head and target untouched");
+        }
+
+        section ("Multiplayer: matched commit envelope still applies");
+        {
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Matched Undo Sentinel"))),
+                   "matched commit undo sentinel created");
+            const auto trackIdBefore = trackIdForLogicalId (victimLogicalId);
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* matched = new DynamicObject();
+            matched->setProperty ("type", "commit");
+            matched->setProperty ("logicalId", victimLogicalId);
+            matched->setProperty ("blob", victimBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (matched));
+
+            check (trackNameForLogicalId (victimLogicalId) == "Commit Victim",
+                   "matched commit applies the serialized victim content");
+            check (trackIdForLogicalId (victimLogicalId).isNotEmpty()
+                       && trackIdForLogicalId (victimLogicalId) != trackIdBefore,
+                   "matched commit replaces the intended victim track");
+            check (tracks (identityOps) == trackCountBefore,
+                   "matched commit replacement preserves the track count");
+            check (logFile.getSize() == logBytesBefore,
+                   "matched peer commit remains absent from the local command log");
+            check (identityEvents.size() == eventsBefore + 1
+                       && identityEvents.back() == "snapshot_invalidated",
+                   "matched commit emits exactly one snapshot invalidation");
+            check (ok (cmd (identityOps, "undo")), "undo after matched commit succeeds");
+            check (! trackNamedExists ("Matched Undo Sentinel")
+                       && trackNameForLogicalId (victimLogicalId) == "Commit Victim",
+                   "matched commit remains outside the local undo stack");
+        }
+
+        identityOps.setEventSink ({});
+    }
+
     section ("Multiplayer: lock guard at the mutation path (MP-001 P3)");
     {
         // The guard sits at the single chokepoint MoshOps::execute(). When a session

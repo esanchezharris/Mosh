@@ -16,7 +16,8 @@ juce::String serialize (te::Track& track)
     return {};
 }
 
-ApplyResult apply (te::Edit& edit, const juce::String& blob)
+ApplyResult apply (te::Edit& edit, const juce::String& blob,
+                   const juce::String& expectedLogicalId)
 {
     ApplyResult r;
 
@@ -38,6 +39,11 @@ ApplyResult apply (te::Edit& edit, const juce::String& blob)
     if (lid.isEmpty())
     {
         r.error = "incoming track has no moshLogicalId";
+        return r;
+    }
+    if (expectedLogicalId.isNotEmpty() && lid != expectedLogicalId)
+    {
+        r.error = "incoming track logicalId does not match commit envelope";
         return r;
     }
     r.logicalId = lid;

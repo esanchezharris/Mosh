@@ -33,7 +33,10 @@ namespace trackcommit
         UndoManager — the local user's undo stack is never touched — and nothing is
         emitted (no relay echo; the caller repaints locally by other means).
         EditItemIDs are remapped fresh to avoid collisions; moshLogicalId (a plain
-        property, not an EditItemID) is preserved. */
-    ApplyResult apply (te::Edit& edit, const juce::String& blob);
+        property, not an EditItemID) is preserved. When expectedLogicalId is
+        non-empty, it must match the embedded moshLogicalId before any remap or
+        splice; empty preserves the legacy internal blob-only caller contract. */
+    ApplyResult apply (te::Edit& edit, const juce::String& blob,
+                       const juce::String& expectedLogicalId = {});
 }
 }

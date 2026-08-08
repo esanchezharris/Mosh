@@ -58,6 +58,12 @@ membership alive, while a peer that stays silent for 90 s is removed from the ro
 its locks, and stops occupying one of the two room slots. Rejoining with the same peer id inside
 the grace window is idempotent; after expiry the peer must join the room again.
 
+Incoming commits are identity-bound before they can touch the Edit: the frame's `logicalId` must
+be a non-empty string that matches the serialized track's embedded `moshLogicalId`. A missing,
+non-string, or mismatched identity is ignored without replacing or creating a track, emitting an
+event, or entering the local undo history. This check applies to the live peer callback; the
+backend-only direct `apply_remote_track` command keeps its legacy/internal blob-only form.
+
 **Practical consequence:** your peer sees your work on a track **when you finish with it /
 move off it**, not keystroke-by-keystroke. Park on a track and your changes checkpoint after
 a few seconds; switch tracks and they flush immediately.

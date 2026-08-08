@@ -76,8 +76,17 @@ void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
     // calling this directly (bypassing the session/worker) therefore no longer
     // downloads stems either; a future direct-callback test needs its own prefetch
     // (mirroring what the session does) or should drive the download separately first.
+    const auto envelopeLogicalId = msg.getProperty ("logicalId", var());
+    if (! envelopeLogicalId.isString())
+        return;
+
+    const auto expectedLogicalId = envelopeLogicalId.toString();
+    if (expectedLogicalId.isEmpty())
+        return;
+
     auto* applyArgs = new DynamicObject();
     applyArgs->setProperty ("blob", msg.getProperty ("blob", var()));
+    applyArgs->setProperty ("expectedLogicalId", expectedLogicalId);
     auto* command = new DynamicObject();
     command->setProperty ("command", "apply_remote_track");
     command->setProperty ("args", var (applyArgs));
@@ -116,7 +125,8 @@ juce::var MoshOps::cmdApplyRemoteTrack (const juce::var& args)
     if (blob.isEmpty())
         return errResult ("apply_remote_track", "missing blob");
 
-    auto res = trackcommit::apply (eng.edit(), blob);
+    const auto expectedLogicalId = args.getProperty ("expectedLogicalId", var()).toString();
+    auto res = trackcommit::apply (eng.edit(), blob, expectedLogicalId);
     if (! res.ok)
         return errResult ("apply_remote_track", res.error);
 
