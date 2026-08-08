@@ -34,11 +34,12 @@ describe("init() never eagerly spawns the generative service", () => {
     vi.mocked(executeCommand).mockClear();
   });
 
-  it("issues no service-spawning list command while init() runs", async () => {
+  it("runs once and issues no service-spawning list command when init is replayed", async () => {
     __resetMockForTests();
     useStore.setState({ capabilities: null, availableColors: [], availableTransformTargets: [], availableLoras: [] });
 
     useStore.getState().init();
+    useStore.getState().init(); // React.StrictMode replays the owning App effect in dev.
     // Drain whatever init() kicked off synchronously (refresh / refreshRemote /
     // enable_all_meters) — several ticks, since these chain through async handlers.
     await flush(); await flush(); await flush();
@@ -48,6 +49,7 @@ describe("init() never eagerly spawns the generative service", () => {
     // Sanity: init() DID run (not a vacuously-passing empty call log) — enable_all_meters
     // is the one command init() unconditionally issues.
     expect(commandsSeen()).toContain("enable_all_meters");
+    expect(commandsSeen().filter((c) => c === "enable_all_meters")).toHaveLength(1);
   });
 
   it("the lazy loadCapabilities() trigger (clip-menu / Gen-drawer open) still resolves it", async () => {

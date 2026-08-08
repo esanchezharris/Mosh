@@ -32,6 +32,27 @@ test("boots the zone model: control bar, browser, lanes, RIGHT headers, status b
   await expect(page.getByTestId("live-devices")).toContainText("No devices");
 });
 
+test("a new empty project keeps both arrangement rulers and advances one epoch", async ({ page }) => {
+  await bootLive(page);
+  const epochBefore = await storeVal<number>(page, "projectEpoch");
+  await page.evaluate(async () => {
+    await (window as any).__moshStore.getState().exec("new_project", { name: "empty-ruler-e2e" });
+  });
+
+  await expect.poll(() => storeVal<number>(page, "projectEpoch")).toBe(epochBefore + 1);
+  await expect(page.getByTestId("live-lane")).toHaveCount(0);
+  await expect(page.getByTestId("live-track-header")).toHaveCount(0);
+  await expect(page.getByTestId("live-ruler")).toBeVisible();
+  await expect(page.getByTestId("live-time-ruler")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("No tracks yet");
+  await page.getByRole("button", { name: "Add track" }).click();
+  await page.getByTestId("live-track-add-audio").click();
+  await expect.poll(() => commandLog(page, 10)).toContain("create_track");
+  await expect(page.getByTestId("live-lane")).toHaveCount(1);
+  await expect(page.getByTestId("live-ruler")).toBeVisible();
+  await expect(page.getByTestId("live-time-ruler")).toBeVisible();
+});
+
 test("track headers sit on the RIGHT of the lanes (Live's signature)", async ({ page }) => {
   await bootLive(page);
   // The lane element itself spans the whole (horizontally scrolling) content, so the
@@ -1015,6 +1036,107 @@ test("ruler: click seeks, vertical drag zooms anchored (Live's beat-time ruler)"
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBeGreaterThan(before);
 });
 
+test("bottom beat-time ruler mirrors scroll and keeps the zoom anchor", async ({ page }) => {
+  await bootLive(page);
+  const timeline = page.getByTestId("live-timeline");
+  const body = page.locator(".live-arr-body");
+  const clip = page.getByTestId("live-time-ruler-clip");
+  const ruler = page.getByTestId("live-time-ruler");
+
+  await expect(ruler).toBeVisible();
+  await expect(ruler.locator(".live-time-label").first()).toHaveText("0:00");
+  const bodyBox = (await body.boundingBox())!;
+  const clipBox = (await clip.boundingBox())!;
+  expect(clipBox.y).toBeGreaterThanOrEqual(bodyBox.y + bodyBox.height - 1);
+
+  await timeline.evaluate((el) => {
+    el.scrollLeft = 180;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await expect.poll(() => clip.evaluate((el) => el.scrollLeft)).toBe(180);
+
+  const pointerOffset = Math.min(300, clipBox.width * 0.55);
+  const x = clipBox.x + pointerOffset;
+  const y = clipBox.y + clipBox.height / 2;
+  const before = await page.evaluate((offset) => {
+    const st = (window as any).__moshStore.getState();
+    const sc = document.querySelector(".live-lanes-scroll") as HTMLElement;
+    return { pps: st.pxPerSec as number, scrollLeft: sc.scrollLeft, anchor: (sc.scrollLeft + offset) / st.pxPerSec };
+  }, pointerOffset);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 70, { steps: 7 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(({ offset, anchor }) => {
+    const st = (window as any).__moshStore.getState();
+    const sc = document.querySelector(".live-lanes-scroll") as HTMLElement;
+    return Math.abs((sc.scrollLeft + offset) / st.pxPerSec - anchor);
+  }, { offset: pointerOffset, anchor: before.anchor })).toBeLessThan(0.02);
+  const after = await page.evaluate((offset) => {
+    const st = (window as any).__moshStore.getState();
+    const sc = document.querySelector(".live-lanes-scroll") as HTMLElement;
+    return { pps: st.pxPerSec as number, scrollLeft: sc.scrollLeft, anchor: (sc.scrollLeft + offset) / st.pxPerSec };
+  }, pointerOffset);
+  expect(after.pps).toBeGreaterThan(before.pps);
+  expect(Math.abs(after.anchor - before.anchor)).toBeLessThan(0.02);
+  await expect.poll(() => clip.evaluate((el) => el.scrollLeft)).toBeCloseTo(after.scrollLeft, 0);
+});
+
+test("both arrangement rulers are focusable and the lower ruler exposes keyboard seek and zoom", async ({ page }) => {
+  await bootLive(page);
+  const top = page.getByTestId("live-ruler");
+  const bottom = page.getByTestId("live-time-ruler");
+  await expect(top).toHaveAttribute("tabindex", "0");
+  await expect(bottom).toHaveAttribute("tabindex", "0");
+  await bottom.focus();
+  await expect(bottom).toBeFocused();
+
+  await page.keyboard.press("End");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeGreaterThan(0);
+  const atEnd = await storeVal<number>(page, "transport.position");
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeLessThan(atEnd);
+  await page.keyboard.press("Home");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeCloseTo(0, 6);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeGreaterThan(0);
+  const afterFirstRight = await storeVal<number>(page, "transport.position");
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeGreaterThan(afterFirstRight);
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeCloseTo(afterFirstRight, 6);
+
+  await page.evaluate(async () => {
+    const st = (window as any).__moshStore.getState();
+    st.setPxPerSec(200);
+    await st.exec("set_transport", { position: 6 });
+  });
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeCloseTo(6, 6);
+  const timeline = page.getByTestId("live-timeline");
+  await expect.poll(() => timeline.evaluate((el) => el.scrollWidth)).toBeGreaterThan(1500);
+  await timeline.evaluate((el) => {
+    el.scrollLeft = 900;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await bottom.focus();
+  const anchorOffset = 300;
+  const beforeZoom = await storeVal<number>(page, "pxPerSec");
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBeGreaterThan(beforeZoom);
+  await expect.poll(() => page.evaluate((offset) => {
+    const st = (window as any).__moshStore.getState();
+    const scroller = document.querySelector(".live-lanes-scroll") as HTMLElement;
+    return Math.abs((scroller.scrollLeft + offset) / st.pxPerSec - st.transport.position);
+  }, anchorOffset)).toBeLessThan(0.02);
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBeCloseTo(beforeZoom, 5);
+  await expect.poll(() => page.evaluate((offset) => {
+    const st = (window as any).__moshStore.getState();
+    const scroller = document.querySelector(".live-lanes-scroll") as HTMLElement;
+    return Math.abs((scroller.scrollLeft + offset) / st.pxPerSec - st.transport.position);
+  }, anchorOffset)).toBeLessThan(0.02);
+});
+
 test("browser search (⌘F): focuses the field, filters across categories, Esc clears", async ({ page }) => {
   await bootLive(page);
   await page.keyboard.press("Meta+f");
@@ -1993,6 +2115,184 @@ test("X steps BACK through the zoom history one entry per press", async ({ page 
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(mid);
   await page.keyboard.press("x");
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(start);
+});
+
+test("X restores the exact far-right scroll after expanding the arrangement width", async ({ page }) => {
+  await bootLive(page);
+  const timeline = page.getByTestId("live-timeline");
+  await page.evaluate(() => (window as any).__moshStore.getState().setPxPerSec(400));
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(400);
+  const recordedScroll = await timeline.evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+    el.dispatchEvent(new Event("scroll"));
+    return el.scrollLeft;
+  });
+  expect(recordedScroll).toBeGreaterThan(1000);
+
+  await page.keyboard.press("Meta+-");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(320);
+  await page.waitForTimeout(50);
+  await page.keyboard.press("x");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(400);
+  await expect.poll(() => page.evaluate(() => ({
+    timeline: (document.querySelector(".live-lanes-scroll") as HTMLElement).scrollLeft,
+    top: (document.querySelector(".live-ruler-clip") as HTMLElement).scrollLeft,
+    bottom: (document.querySelector(".live-time-ruler-clip") as HTMLElement).scrollLeft,
+  }))).toEqual({ timeline: recordedScroll, top: recordedScroll, bottom: recordedScroll });
+});
+
+test("X history never crosses a same-page project replacement", async ({ page }) => {
+  await bootLive(page);
+  const timeline = page.getByTestId("live-timeline");
+  await page.evaluate(() => (window as any).__moshStore.getState().setPxPerSec(400));
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(400);
+  await timeline.evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await page.keyboard.press("Meta+-");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(320);
+
+  const epochBeforeReplacement = await storeVal<number>(page, "projectEpoch");
+  await page.evaluate(async () => {
+    const store = (window as any).__moshStore;
+    await store.getState().exec("open_without_plugins", {});
+    store.getState().setPxPerSec(80);
+  });
+  await expect.poll(() => storeVal<number>(page, "projectEpoch")).toBe(epochBeforeReplacement + 1);
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await timeline.evaluate((el) => {
+    el.scrollLeft = 0;
+    el.dispatchEvent(new Event("scroll"));
+  });
+
+  await page.keyboard.press("x");
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await storeVal<number>(page, "pxPerSec")).toBe(80);
+  expect(await timeline.evaluate((el) => el.scrollLeft)).toBe(0);
+});
+
+test("a queued ruler zoom restore cannot write into a replaced project", async ({ page }) => {
+  await bootLive(page);
+  const timeline = page.getByTestId("live-timeline");
+  const bottom = page.getByTestId("live-time-ruler");
+  await page.evaluate(async () => {
+    const st = (window as any).__moshStore.getState();
+    st.setPxPerSec(200);
+    await st.exec("set_transport", { position: 6 });
+  });
+  await expect.poll(() => timeline.evaluate((el) => el.scrollWidth)).toBeGreaterThan(1500);
+  await timeline.evaluate((el) => {
+    el.scrollLeft = 900;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await bottom.focus();
+
+  await page.evaluate(() => {
+    const ruler = document.querySelector('[data-testid="live-time-ruler"]')!;
+    ruler.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    const store = (window as any).__moshStore;
+    void store.getState().exec("open_without_plugins", {});
+  });
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await timeline.evaluate((el) => el.scrollLeft)).toBe(900);
+});
+
+test("X history never crosses multiplayer host-project adoption", async ({ page }) => {
+  await bootLive(page);
+  const timeline = page.getByTestId("live-timeline");
+  await page.evaluate(() => (window as any).__moshStore.getState().setPxPerSec(400));
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(400);
+  await timeline.evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await page.keyboard.press("Meta+-");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(320);
+
+  const epochBeforeAdoption = await storeVal<number>(page, "projectEpoch");
+  const shellStateAfterAdoption = await page.evaluate(() => {
+    const shell = (window as any).__moshShellStore.getState();
+    shell.setTimeRange({ start: 4, end: 8 });
+    shell.setTimeRangeDragging(true);
+    (window as any).__moshMockEmitForTests("snapshot_invalidated", {
+      projectReplaced: true,
+      reason: "multiplayer_bootstrap",
+    });
+    (window as any).__moshStore.getState().setPxPerSec(80);
+    const after = (window as any).__moshShellStore.getState();
+    return { timeRange: after.timeRange, timeRangeDragging: after.timeRangeDragging };
+  });
+  expect(shellStateAfterAdoption).toEqual({ timeRange: null, timeRangeDragging: false });
+  await expect.poll(() => storeVal<number>(page, "projectEpoch")).toBe(epochBeforeAdoption + 1);
+  await timeline.evaluate((el) => {
+    el.scrollLeft = 0;
+    el.dispatchEvent(new Event("scroll"));
+  });
+
+  await page.keyboard.press("x");
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await storeVal<number>(page, "pxPerSec")).toBe(80);
+  expect(await timeline.evaluate((el) => el.scrollLeft)).toBe(0);
+});
+
+test("a queued ruler restore cannot write past multiplayer host-project adoption", async ({ page }) => {
+  await bootLive(page);
+  const timeline = page.getByTestId("live-timeline");
+  const bottom = page.getByTestId("live-time-ruler");
+  await page.evaluate(async () => {
+    const st = (window as any).__moshStore.getState();
+    st.setPxPerSec(200);
+    await st.exec("set_transport", { position: 6 });
+  });
+  await expect.poll(() => timeline.evaluate((el) => el.scrollWidth)).toBeGreaterThan(1500);
+  await timeline.evaluate((el) => {
+    el.scrollLeft = 900;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await bottom.focus();
+
+  await page.evaluate(() => {
+    const ruler = document.querySelector('[data-testid="live-time-ruler"]')!;
+    ruler.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    (window as any).__moshMockEmitForTests("snapshot_invalidated", {
+      projectReplaced: true,
+      reason: "multiplayer_bootstrap",
+    });
+  });
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await timeline.evaluate((el) => el.scrollLeft)).toBe(900);
+});
+
+test("Z defers a far-right time-selection scroll until the fitted width exists", async ({ page }) => {
+  await bootLive(page);
+  await page.evaluate(() => (window as any).__moshStore.getState().setPxPerSec(20));
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(20);
+  const timeline = page.getByTestId("live-timeline");
+  const lane = page.getByTestId("live-lane").first();
+  const laneBox = await lane.boundingBox();
+  if (!laneBox) throw new Error("no lane");
+  const y = laneBox.y + laneBox.height / 2;
+  await page.mouse.move(laneBox.x + 6 * 20, y);
+  await page.mouse.down();
+  await page.mouse.move(laneBox.x + 7 * 20, y, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.getByTestId("live-timerange")).toBeVisible();
+
+  const viewportWidth = await timeline.evaluate((el) => el.clientWidth);
+  await page.keyboard.press("z");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(400);
+  const expectedLeft = 6 * 400 - viewportWidth * 0.05;
+  await expect.poll(() => timeline.evaluate((el, expected) => Math.abs(el.scrollLeft - expected), expectedLeft)).toBeLessThanOrEqual(1);
+  await expect.poll(() => page.evaluate((expected) => Math.max(
+    Math.abs((document.querySelector(".live-ruler-clip") as HTMLElement).scrollLeft - expected),
+    Math.abs((document.querySelector(".live-time-ruler-clip") as HTMLElement).scrollLeft - expected),
+  ), expectedLeft)).toBeLessThanOrEqual(1);
 });
 
 test("Z zooms to the time selection; without one it fits the arrangement content", async ({ page }) => {

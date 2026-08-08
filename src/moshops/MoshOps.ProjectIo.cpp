@@ -230,7 +230,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     logLine ("reload", args, true, {}, false);
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("reload");
     return okResult ("reload");
 }
 
@@ -1475,7 +1475,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("new_project");
 
     auto* data = new DynamicObject();
     data->setProperty ("editFile", eng.editFile().getFullPathName());
@@ -1501,7 +1501,7 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
-    emitSnapshotInvalidated();
+    emitProjectReplaced (commandName);
 
     auto* data = new DynamicObject();
     data->setProperty ("editFile", eng.editFile().getFullPathName());

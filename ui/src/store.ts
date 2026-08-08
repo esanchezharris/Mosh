@@ -38,6 +38,7 @@ import { createJobsSlice, type JobsSlice } from "./store/jobs";
 import { createCatalogsSlice, type CatalogsSlice } from "./store/catalogs";
 import { landedRecordingClipIds, type RecordingCommandData } from "./recordingLifecycle";
 import { cancelTransportActions, enqueueTransportAction } from "./transportActionQueue";
+import { useShell } from "./v2/shellState";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -240,6 +241,18 @@ export type State = {
 type StateGet = () => State;
 type StateSet = (state: Partial<State> | ((state: State) => Partial<State>)) => void;
 
+// App mounts under React.StrictMode in development, which deliberately replays
+// effects. The bridge and settings subscriptions live for the page lifetime, so
+// wiring them twice would reduce every native event twice (notably advancing a
+// project-replacement epoch by two in the dev/e2e shell).
+let storeInitialized = false;
+
+function clearProjectLocalShellRange(): void {
+  const shell = useShell.getState();
+  shell.setTimeRange(null);
+  shell.setTimeRangeDragging(false);
+}
+
 async function startRecording(get: StateGet, set: StateSet, projectEpoch: number, bar?: number): Promise<void> {
   if (get().projectEpoch !== projectEpoch) return;
   if (get().projectTransitioning) {
@@ -421,10 +434,11 @@ export const useStore = create<State>((set, get, api) => ({
   },
 
   exec: async (command, args = {}, transaction) => {
-    const replacesProject = ["new_project", "open_project", "open_recent", "reload", "recover_session"].includes(command);
+    const replacesProject = ["new_project", "open_project", "open_recent", "reload", "recover_session", "open_without_plugins"].includes(command);
     let transitionEpoch: number | undefined;
     if (replacesProject) {
       cancelTransportActions();
+      clearProjectLocalShellRange();
       set((state) => ({
         projectEpoch: state.projectEpoch + 1,
         projectTransitioning: true,
@@ -435,9 +449,12 @@ export const useStore = create<State>((set, get, api) => ({
     }
     let res: CommandResult;
     try {
-      res = await executeCommand<CommandResult>(
-        transaction ? { command, args, transaction } : { command, args },
-      );
+      res = await executeCommand<CommandResult>({
+        command,
+        args,
+        ...(transaction ? { transaction } : {}),
+        ...(replacesProject ? { _moshProjectEpochPrepared: true } : {}),
+      });
     } catch (error) {
       if (replacesProject && get().projectEpoch === transitionEpoch)
         set({ projectTransitioning: false });
@@ -492,6 +509,8 @@ export const useStore = create<State>((set, get, api) => ({
   invalidateMemory: () => invalidateMemoryHydration(),
 
   init: () => {
+    if (storeInitialized) return;
+    storeInitialized = true;
     // Thin dispatcher over the per-rail handlers in store/events.ts (verbatim body
     // motion). The order + conditions here are load-bearing and must not change:
     // transport / levels / spectrum are the 30 Hz telemetry rails that deliberately
@@ -499,6 +518,25 @@ export const useStore = create<State>((set, get, api) => ({
     onEvent("mosh_event", (raw) => {
       const ev = raw as MoshEvent;
       if (ev.type === "snapshot_invalidated") {
+        const projectReplaced = ev.payload !== null
+          && typeof ev.payload === "object"
+          && (ev.payload as { projectReplaced?: unknown }).projectReplaced === true;
+        const epochManagedByUi = projectReplaced
+          && (ev.payload as { epochManagedByUi?: unknown }).epochManagedByUi === true;
+        if (projectReplaced) {
+          cancelTransportActions();
+          clearProjectLocalShellRange();
+          set((state) => ({
+            projectEpoch: state.projectEpoch + (epochManagedByUi ? 0 : 1),
+            projectTransitioning: epochManagedByUi ? state.projectTransitioning : false,
+            takeDecisionPending: false,
+            lastTakeClipId: null,
+            selection: new Set<string>(),
+            selectedTrackId: null,
+            expandedTracks: new Set<string>(),
+            timeRange: null,
+          }));
+        }
         onSnapshotInvalidated(ev, set, get);
       } else if (ev.type === "transport") {
         onTransport(ev, set);

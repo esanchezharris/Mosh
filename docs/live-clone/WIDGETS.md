@@ -214,12 +214,12 @@ MIDI editor Transpose ±127 · Interval ±74 · Humanize 0–1 · Velocity tools
 1–127 (deviation ±127) · Segment BPM 5–999 · Transient envelope 0–100 ·
 Settings zoom 50–200%.
 
-## 4. Contradictions with SPEC.md (action list)
+## 4. Remaining contradictions with SPEC.md (action list)
 
 1. Zone model: add the 28pt titlebar row and the **~11pt arrangement overview
    strip**; control bar is 30pt not 28; bar ruler ~19pt not 15.
-2. Beat-time ruler + h-zoom scroller live at the **bottom** of the lanes
-   (~25pt combined), not the top.
+2. **Resolved by C007:** SPEC now places the elapsed-time ruler + h-zoom surface at
+   the **bottom** of the lanes (~25pt combined), distinct from the top bar ruler.
 3. Returns 20/19pt, Main 19pt (SPEC: 35/17).
 4. Header column is **fixed 279pt** — no drag affordance found (2 attempts);
    drop the "~93pt collapsed" assumption for arrangement view.

@@ -477,7 +477,7 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
                 edit.state.appendChild (vt, nullptr);
 
     eng.markDirty();
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("multiplayer_bootstrap");
 
     // P4 self-heal (PR-1): the download loop above ignores its result, so a transient
     // upload/download failure during THIS bootstrap (or a peer's blob that hadn't

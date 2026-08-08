@@ -1,5 +1,6 @@
-// The live shell's bar ruler — Live 12's beat-time-ruler gestures, which v2's shared
-// BarRuler deliberately does NOT have (its held plain drag SCRUBS). Live's idiom:
+// The live shell's two arrangement rulers — Live 12's bar ruler above the lanes and
+// elapsed-time ruler below them — share the gestures that v2's BarRuler deliberately
+// does NOT have (its held plain drag SCRUBS). Live's idiom:
 //   click          = position the playhead (seek)
 //   vertical drag  = zoom, anchored at the drag point (down = zoom in, up = out)
 //   Shift-drag     = time-range span (the shared RULER_RULES' LOOP_REGION)
@@ -11,11 +12,12 @@
 import { useRef } from "react";
 import { useStore } from "../store";
 import { useShell } from "../v2/shellState";
-import { tempoMapFrom, gridLines, snapTimeMap } from "../time";
+import { tempoMapFrom, gridLines, meterAt, snapStep, snapTimeMap } from "../time";
 import { contentSeconds } from "../v2/timeline/geom";
 import { EditorAction as EA } from "../interaction/actions";
 import { resolveGesture } from "../interaction/gestures";
 import { liveGestureTable } from "../interaction/config";
+import { timeRulerTicks } from "./timeRuler";
 import type { Snapshot } from "../types";
 
 type RulerDrag = {
@@ -27,9 +29,10 @@ type RulerDrag = {
   startPps: number;         // pxPerSec at pointer-down — zoom factors multiply THIS
 };
 
-export function LiveRuler({ snapshot, width, onZoom }: {
+export function LiveRuler({ snapshot, width, onZoom, variant = "bars" }: {
   snapshot: Snapshot;
   width: number;
+  variant?: "bars" | "time";
   /** Zoom to `nextPps`, keeping anchorSec stationary at anchorOffsetX in the viewport. */
   onZoom: (anchorSec: number, anchorOffsetX: number, nextPps: number) => void;
 }) {
@@ -38,7 +41,8 @@ export function LiveRuler({ snapshot, width, onZoom }: {
   const snap = useStore((s) => s.snap);
   const snapDivision = useStore((s) => s.snapDivision);
   const map = tempoMapFrom(snapshot.session);
-  const total = contentSeconds(snapshot);
+  const rawTotal = contentSeconds(snapshot);
+  const total = Number.isFinite(rawTotal) ? Math.max(0, rawTotal) : 0;
   const { bars } = gridLines(map, 0, total);
   // Label every bar when zoomed in, else thin out so numbers don't collide (BarRuler's rule).
   const stride = pxPerSec >= 60 ? 1 : pxPerSec >= 32 ? 2 : 4;
@@ -63,8 +67,10 @@ export function LiveRuler({ snapshot, width, onZoom }: {
       return;
     }
     if (resolveGesture(table, { region: "ruler", gesture: "click", mods, tool }) !== EA.SEEK) return;
+    const viewport = e.currentTarget.closest<HTMLElement>(".live-ruler-clip, .live-time-ruler-clip");
+    const viewportRect = viewport?.getBoundingClientRect() ?? rect;
     drag.current = { pointerId: e.pointerId, mode: "maybe", downY: e.clientY,
-                     anchorSec: raw, anchorOffsetX: e.clientX - rect.left, startPps: pxPerSec };
+                     anchorSec: raw, anchorOffsetX: e.clientX - viewportRect.left, startPps: pxPerSec };
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* no-op */ }
   };
 
@@ -97,23 +103,61 @@ export function LiveRuler({ snapshot, width, onZoom }: {
     }
   };
 
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const livePosition = useStore.getState().transport.position;
+    const rawPosition = Number.isFinite(livePosition)
+      ? livePosition
+      : (snapshot.transport.position ?? 0);
+    const position = Math.max(0, Math.min(total, rawPosition));
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      e.stopPropagation();
+      const step = snap ? snapStep(meterAt(map, position), snapDivision) : 1;
+      const next = e.key === "Home" ? 0
+        : e.key === "End" ? total
+        : Math.max(0, Math.min(total, position + (e.key === "ArrowRight" ? step : -step)));
+      void exec("set_transport", { position: next });
+      return;
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      const viewport = e.currentTarget.closest<HTMLElement>(".live-ruler-clip, .live-time-ruler-clip");
+      const anchorOffsetX = viewport
+        ? Math.max(0, Math.min(viewport.clientWidth, position * pxPerSec - viewport.scrollLeft))
+        : 0;
+      onZoom(position, anchorOffsetX, pxPerSec * (e.key === "ArrowUp" ? 1.25 : 0.8));
+    }
+  };
+
   return (
     <div
-      className="v2-ruler live-ruler"
+      className={`v2-ruler live-ruler${variant === "time" ? " live-time-ruler" : ""}`}
       style={{ width }}
-      data-testid="live-ruler"
-      title="Click to place the playhead · drag up/down to zoom · Shift-drag selects a time range"
+      data-testid={variant === "time" ? "live-time-ruler" : "live-ruler"}
+      role="region"
+      tabIndex={0}
+      aria-label={variant === "time" ? "Arrangement elapsed-time ruler" : "Arrangement bar ruler"}
+      aria-keyshortcuts="ArrowLeft ArrowRight Home End ArrowUp ArrowDown"
+      title="Click to place the playhead · drag up/down to zoom · Shift-drag selects a time range · keyboard: ←/→ seek, Home/End, ↑/↓ zoom"
+      onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={finish}
       onPointerCancel={finish}
       onLostPointerCapture={finish}
     >
-      {bars.map((b, i) => (
-        <div key={b.label} className="v2-ruler-bar" style={{ left: b.sec * pxPerSec }}>
-          {i % stride === 0 && <span className="v2-ruler-num">{b.label}</span>}
-        </div>
-      ))}
+      {variant === "bars"
+        ? bars.map((b, i) => (
+            <div key={b.label} className="v2-ruler-bar" style={{ left: b.sec * pxPerSec }}>
+              {i % stride === 0 && <span className="v2-ruler-num">{b.label}</span>}
+            </div>
+          ))
+        : timeRulerTicks(total, pxPerSec).map((tick) => (
+            <div key={tick.seconds} className="live-time-tick" style={{ left: tick.seconds * pxPerSec }}>
+              <span className="live-time-label">{tick.label}</span>
+            </div>
+          ))}
     </div>
   );
 }

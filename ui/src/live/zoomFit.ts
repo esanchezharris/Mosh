@@ -3,17 +3,18 @@
 // clip context menu — one geometry implementation, both entry points.
 
 import { useStore } from "../store";
-import { recordZoom } from "./zoomHistory";
+import { applyArrangementZoom, recordZoom } from "./zoomHistory";
 
 export function zoomToFitSpan(span: { start: number; end: number }): boolean {
   if (!span || span.end - span.start < 1e-6) return false;
   const scroller = document.querySelector<HTMLElement>(".live-lanes-scroll");
   if (!scroller) return false;
   recordZoom();   // Live's zoom history: X returns to the view before the fit
-  const s = useStore.getState();
-  s.setPxPerSec((scroller.clientWidth * 0.9) / (span.end - span.start)); // store clamps 20..400
-  const applied = useStore.getState().pxPerSec;
-  scroller.scrollLeft = Math.max(0, span.start * applied - scroller.clientWidth * 0.05);
+  applyArrangementZoom(
+    scroller,
+    (scroller.clientWidth * 0.9) / (span.end - span.start), // store clamps 20..400
+    (applied) => span.start * applied - scroller.clientWidth * 0.05,
+  );
   return true;
 }
 

@@ -93,6 +93,15 @@ namespace
         return ops.execute (juce::var (c));
     }
 
+    juce::var uiProjectCmd (MoshOps& ops, const juce::String& name, juce::var args = juce::var())
+    {
+        auto* c = new juce::DynamicObject();
+        c->setProperty ("command", name);
+        c->setProperty ("_moshProjectEpochPrepared", true);
+        if (! args.isVoid()) c->setProperty ("args", args);
+        return ops.executeFromUi (juce::var (c));
+    }
+
     juce::var args1 (const char* k, juce::var v)
     {
         auto* o = new juce::DynamicObject();
@@ -609,7 +618,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // check can inspect the payload).
     std::vector<String> eventTypes;
     var lastEvent;
-    ops.setEventSink ([&] (const var& e) { eventTypes.push_back (e.getProperty ("type", var()).toString()); lastEvent = e; });
+    bool sawProjectReplacementEvent = false;
+    String lastProjectReplacementReason;
+    bool lastProjectReplacementManagedByUi = false;
+    ops.setEventSink ([&] (const var& e)
+    {
+        eventTypes.push_back (e.getProperty ("type", var()).toString());
+        lastEvent = e;
+        if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
+            && (bool) e.getProperty ("payload", var()).getProperty ("projectReplaced", false))
+        {
+            sawProjectReplacementEvent = true;
+            const auto payload = e.getProperty ("payload", var());
+            lastProjectReplacementReason = payload.getProperty ("reason", var()).toString();
+            lastProjectReplacementManagedByUi = (bool) payload.getProperty ("epochManagedByUi", false);
+        }
+    });
 
     auto hadEvent = [&] (const String& t) {
         for (auto& e : eventTypes) if (e == t) return true; return false; };
@@ -7500,8 +7524,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // new_project -> ok, empty tracks, editFile path changed, fresh file on disk.
         auto npFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new.mosh");
         npFile.deleteFile();
-        auto np = cmd (ops, "new_project", args1 ("name", "selftest-new"));
+        sawProjectReplacementEvent = false;
+        lastProjectReplacementReason.clear();
+        lastProjectReplacementManagedByUi = false;
+        auto np = uiProjectCmd (ops, "new_project", args1 ("name", "selftest-new"));
         check (ok (np), "new_project ok");
+        check (sawProjectReplacementEvent,
+               "UI new_project marks snapshot_invalidated as a project replacement");
+        check (lastProjectReplacementReason == "new_project",
+               "UI new_project identifies the replacement reason");
+        check (lastProjectReplacementManagedByUi,
+               "UI new_project reports that the store prepared the project epoch");
         check (tracks (ops) == 0, "new_project starts with zero tracks");
         const auto newEdit = sess().getProperty ("editFile", var()).toString();
         check (newEdit != sessionEdit.getFullPathName(), "new_project changed session.editFile path");
@@ -7547,8 +7580,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         npFile2.deleteFile();
         check (ok (cmd (ops, "new_project", args1 ("name", "selftest-new2"))), "second new_project ok");
         check (tracks (ops) == 0, "second new project is empty");
+        sawProjectReplacementEvent = false;
+        lastProjectReplacementReason.clear();
+        lastProjectReplacementManagedByUi = true;
         auto op = cmd (ops, "open_project", args1 ("file", newEdit));
         check (ok (op), "open_project ok");
+        check (sawProjectReplacementEvent,
+               "direct open_project marks snapshot_invalidated as a project replacement");
+        check (lastProjectReplacementReason == "open_project",
+               "direct open_project identifies the replacement reason");
+        check (! lastProjectReplacementManagedByUi,
+               "direct open_project leaves project epoch ownership to event consumers");
         check (tracks (ops) == 1, "open_project round-trips the saved track count");
 
         // save_as(tmp) -> ok, file exists non-empty, subsequent save targets the new path.
@@ -11102,12 +11144,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "bootstrap by-hash ref has no spurious '../' (" + hostRef + ")");
         }
 
+        sawProjectReplacementEvent = false;
+        lastProjectReplacementReason.clear();
+        lastProjectReplacementManagedByUi = true;
         check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-dst"))), "new_project (joiner wipe) ok");
         check (tracks (ops) == 0, "joiner starts empty before bootstrap");
+        check (sawProjectReplacementEvent,
+               "direct new_project marks snapshot_invalidated as a project replacement");
+        check (lastProjectReplacementReason == "new_project",
+               "direct new_project identifies the replacement reason");
+        check (! lastProjectReplacementManagedByUi,
+               "direct new_project leaves project epoch ownership to event consumers");
 
+        sawProjectReplacementEvent = false;
         auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) },
                                                            { "annotations", bundle.getProperty ("annotations", juce::var()) } }));
         check (ok (app), "mp_apply_bootstrap ok");
+        check (sawProjectReplacementEvent,
+               "mp_apply_bootstrap marks snapshot_invalidated as a project replacement");
         // The joiner adopts the host's annotation (id + author + text preserved).
         bool joinerHasAnn = false;
         { auto arr = ops.snapshot().getProperty ("annotations", juce::var());

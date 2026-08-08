@@ -41,12 +41,44 @@ export function captureView(): ZoomView | null {
   return { pxPerSec: useStore.getState().pxPerSec ?? 80, scrollLeft: scroller.scrollLeft };
 }
 
+/** Apply a zoom and restore its horizontal view after React has committed the new
+ * content width. Synchronous scroll writes can clamp against the OLD width, losing
+ * far-right history/fit positions. Dispatching scroll re-syncs both ruler followers. */
+export function applyArrangementZoom(
+  scroller: HTMLElement,
+  nextPxPerSec: number,
+  scrollLeftForAppliedZoom: (appliedPxPerSec: number) => number,
+): void {
+  const projectEpoch = useStore.getState().projectEpoch;
+  useStore.getState().setPxPerSec(nextPxPerSec);
+  const appliedPxPerSec = useStore.getState().pxPerSec;
+  requestAnimationFrame(() => {
+    if (useStore.getState().projectEpoch !== projectEpoch
+        || !scroller.isConnected
+        || document.querySelector(".live-lanes-scroll") !== scroller) return;
+    scroller.scrollLeft = Math.max(0, scrollLeftForAppliedZoom(appliedPxPerSec));
+    for (const follower of document.querySelectorAll<HTMLElement>(".live-ruler-clip, .live-time-ruler-clip"))
+      follower.scrollLeft = scroller.scrollLeft;
+    scroller.dispatchEvent(new Event("scroll"));
+  });
+}
+
 // ── module-level instance (the live shell's one stack) ────────────────────────
 let stack: ZoomView[] = [];
 let lastRecordAt: number | null = null;
+let historyEpoch: number | null = null;
+
+function syncZoomHistoryEpoch(): void {
+  const currentEpoch = useStore.getState().projectEpoch;
+  if (historyEpoch === currentEpoch) return;
+  stack = [];
+  lastRecordAt = null;
+  historyEpoch = currentEpoch;
+}
 
 /** Record the CURRENT view before a zoom change (call at every zoom mutation point). */
 export function recordZoom(nowMs: number = Date.now()): void {
+  syncZoomHistoryEpoch();
   const view = captureView();
   if (!view) return;
   const r = pushZoom(stack, view, nowMs, lastRecordAt);
@@ -57,13 +89,15 @@ export function recordZoom(nowMs: number = Date.now()): void {
 /** Pop the previous view and restore it (Live's X). Returns false when the stack
  *  is empty — X is a no-op there, matching Live. */
 export function popZoomView(): boolean {
+  syncZoomHistoryEpoch();
   const r = popZoom(stack);
   if (!r.view) return false;
+  const view = r.view;
   stack = r.stack;
   lastRecordAt = null;   // a restore is a new gesture, not part of any burst
   const scroller = document.querySelector<HTMLElement>(".live-lanes-scroll");
-  useStore.getState().setPxPerSec(r.view.pxPerSec);
-  if (scroller) scroller.scrollLeft = r.view.scrollLeft;
+  if (scroller) applyArrangementZoom(scroller, view.pxPerSec, () => view.scrollLeft);
+  else useStore.getState().setPxPerSec(view.pxPerSec);
   return true;
 }
 
@@ -71,9 +105,11 @@ export function popZoomView(): boolean {
 export function clearZoomHistory(): void {
   stack = [];
   lastRecordAt = null;
+  historyEpoch = useStore.getState().projectEpoch;
 }
 
 /** Test hook: read the module stack's depth. */
 export function zoomHistoryDepth(): number {
+  syncZoomHistoryEpoch();
   return stack.length;
 }

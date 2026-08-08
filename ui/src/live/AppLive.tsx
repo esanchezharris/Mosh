@@ -38,10 +38,12 @@ import { pushEscapeHandler } from "../hooks/escapeStack";
 import { useLive } from "./liveState";
 import { useLiveKeys } from "./useLiveKeys";
 import { useSelectionFollow } from "./selectionFollow";
+import { clearZoomHistory } from "./zoomHistory";
 import "./live.css";
 
 export function AppLive() {
   const snapshot = useStore((s) => s.snapshot);
+  const projectEpoch = useStore((s) => s.projectEpoch);
   const lastError = useStore((s) => s.lastError);
   const peers = useStore((s) => s.peers);
   // Same peer-name mapping as v2's error bar (#40) — lock denials name people, not UUIDs.
@@ -52,6 +54,11 @@ export function AppLive() {
   useSelectionFollow();   // the dock's clip view follows the CLIP SELECTION (Live 12's rule)
   useQwertyMidi();        // the computer keyboard as a MIDI controller
   const dragging = useFileDrop(); // drag-and-drop audio import (bytes over the bridge)
+
+  // Zoom history belongs to one project. The store advances projectEpoch before
+  // every project-replacing command, so a same-window open/new/recover can never
+  // make X restore the previous project's width or far-right scroll position.
+  useEffect(() => clearZoomHistory(), [projectEpoch]);
 
   // Draw mode (B) — Live's pencil toggle. Plain bubble-phase listener: the qwerty
   // instrument never claims B (it owns A..K/WETYU/ZXCV), and the app keymap has no

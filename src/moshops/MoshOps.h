@@ -61,9 +61,13 @@ public:
         why the button tracks the playhead while the transport is STOPPED. */
     juce::var muteAutomationAtPlayhead();
 
-    /** The single entry point — bound to the WebView's execute_command. Thin wrapper around
-        executeImpl that also feeds the A3 crash-recovery journal. */
+    /** The single command spine for native, remote, and internal callers. Thin wrapper
+        around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
+
+    /** WebView execute_command entry point. Project-replacement commands carry an
+        internal flag only when the UI store advanced its epoch before dispatch. */
+    juce::var executeFromUi (const juce::var& command);
 
     /** Browser-only read path. list_directory is pure filesystem I/O and may block on
         a large, cloud-backed, or disconnected directory, so WebBridge invokes this
@@ -764,6 +768,7 @@ private:
 
     void  emit (const juce::String& type, juce::var payload = {});
     void  emitSnapshotInvalidated();
+    void  emitProjectReplaced (const juce::String& reason);
     // Scoped invalidation: a provably track-local mutation (mixer volume/pan/mute, plugin
     // param) emits snapshot_invalidated carrying JUST that track's var, so the UI patches one
     // track instead of re-pulling the whole snapshot (measured 330 ms / 3.7 MiB at 100 tracks).
@@ -1012,6 +1017,7 @@ private:
     juce::File        txnLedgerFile;
     juce::int64       editRevision_ = 0;   // bumped by beginTxn / cmdUndo / cmdRedo
     int               execDepth_    = 0;   // the guard governs the OUTERMOST execute only
+    bool              projectEpochManagedByUi_ = false;
     // Set by txnPreDispatch when it admits a manifested command, consumed by
     // txnPostDispatch to record that command's outcome against its manifest entry.
     int               pendingTxnIndex_ = -1;

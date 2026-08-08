@@ -18,10 +18,10 @@ substitute our own (system sans + our icon set), matching metrics, not artwork.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ CONTROL BAR (28pt)                                               │
+│ CONTROL BAR (30pt)                                               │
 ├──────────┬──────────────────────────────────────────┬────────────┤
-│ BROWSER  │ RULER (bar numbers) ~15pt + beat-time    │ TRACK      │
-│ ~338pt   │ ruler ~22pt                              │ HEADERS    │
+│ BROWSER  │ RULER (bar numbers) ~19pt                │ TRACK      │
+│ ~331pt   │                                          │ HEADERS    │
 │ (2 col:  │                                          │ (RIGHT!)   │
 │ cats     │ TRACK LANES — 86pt default lane height   │ ~275pt     │
 │ 109pt +  │                                          │ (with I/O) │
@@ -29,6 +29,8 @@ substitute our own (system sans + our icon set), matching metrics, not artwork.
 │          │                                          │ returns    │
 │          │                                          │ ~35pt,     │
 │          │                                          │ Main ~17pt │
+│          ├──────────────────────────────────────────┼────────────┤
+│          │ ELAPSED-TIME RULER + H-ZOOM ~25pt        │ 1/1 corner │
 ├──────────┴──────────────────────────────────────────┴────────────┤
 │ CLIP VIEW / DETAIL DOCK ~265pt (toggle; auto-opens on clip ⌃)    │
 │  [clip params | note tools | keys strip | editor | velocity]     │
@@ -161,7 +163,8 @@ Total ~265pt, full width. Left → right:
   double-click empty lane = create clip + open editor; double-click clip = open editor.
 - ⌘E split, ⌘J consolidate, ⌘L activate loop, ⌘1/2/3 narrow/widen/triplet grid,
   ⌘4 snap toggle, ⌘R rename, 0 = deactivate clip/note, X = zoom back.
-- Zoom: ⌘+/−, or drag in the beat-time ruler; pinch/scroll-zoom at pointer.
+- Zoom: ⌘+/−, or drag either Arrangement ruler; the lower ruler reads elapsed time
+  and both preserve the time beneath the pointer after horizontal scrolling.
 - Context menu inventory captured in `09-ctxmenu` (see §7 of plan for which exist in
   Mosh: split/consolidate/crop/rename/loop/freeze?/bounce exist as moshops).
 

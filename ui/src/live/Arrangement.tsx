@@ -33,7 +33,7 @@ import { useLive } from "./liveState";
 import { LiveClipMenu, type LiveClipMenuState } from "./LiveClipMenu";
 import { clampLaneHeight, LANE_DEFAULT, LANE_COMPACT_MAX, LANE_MIN, LANE_MAX } from "./laneGeometry";
 import { TrackHeaderMenu, type TrackMenuState } from "./TrackHeaderMenu";
-import { recordZoom } from "./zoomHistory";
+import { applyArrangementZoom, recordZoom } from "./zoomHistory";
 import { TrackIoSection } from "./TrackIoSection";
 import { TakeLanes, TAKE_ROW_H } from "./TakeLanes";
 import { takeLanesLayout } from "./takeLanesLayout";
@@ -93,17 +93,19 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
       })()
     : null;
 
-  // The ruler strip and the RIGHT header column are separate overflow:hidden panes
+  // The two ruler strips and the RIGHT header column are separate overflow:hidden panes
   // synced to the lanes' scroll — the lanes own BOTH scrollbars (so they sit at the
   // viewport's bottom/right edge, reachable without scrolling to them), and the
   // ruler/header panes follow by scrollLeft / translateY.
   const lanesScrollRef = useRef<HTMLDivElement>(null);
   const rulerClipRef = useRef<HTMLDivElement>(null);
+  const timeRulerClipRef = useRef<HTMLDivElement>(null);
   const headersInnerRef = useRef<HTMLDivElement>(null);
   const syncPanes = useCallback(() => {
     const sc = lanesScrollRef.current;
     if (!sc) return;
     if (rulerClipRef.current) rulerClipRef.current.scrollLeft = sc.scrollLeft;
+    if (timeRulerClipRef.current) timeRulerClipRef.current.scrollLeft = sc.scrollLeft;
     if (headersInnerRef.current)
       headersInnerRef.current.style.transform = `translateY(${-sc.scrollTop}px)`;
   }, []);
@@ -111,13 +113,11 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
   // The ruler's vertical drag-zoom (LiveRuler): set the zoom, then re-anchor the
   // scroll so the time under the drag point stays put. setPxPerSec owns the clamp;
   // scrollLeft applies the CLAMPED value, or the anchor would drift at the extremes.
-  const setPxPerSec = useStore((s) => s.setPxPerSec);
   const onRulerZoom = useCallback((anchorSec: number, anchorOffsetX: number, nextPps: number) => {
     recordZoom();   // Live's zoom history: the burst-start view (coalesced per drag)
-    setPxPerSec(nextPps);
     const sc = lanesScrollRef.current;
-    if (sc) sc.scrollLeft = Math.max(0, anchorSec * useStore.getState().pxPerSec - anchorOffsetX);
-  }, [setPxPerSec]);
+    if (sc) applyArrangementZoom(sc, nextPps, (applied) => anchorSec * applied - anchorOffsetX);
+  }, []);
 
   // Empty-lane pointer (SPEC §8): click resolves the table's "empty"/click rule
   // (DESELECT under every preset); a DRAG paints Live's time selection — the live
@@ -255,17 +255,6 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
     setClipMenu({ x: e.clientX, y: e.clientY, clipId, time });
   };
 
-  if (tracks.length === 0) {
-    return (
-      <div className="live-arr" data-testid="live-arrangement">
-        <div className="live-empty" role="status" aria-live="polite">
-          <span>No tracks yet — add one to start.</span>
-          <AddTrackButton variant="empty" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="live-arr" data-testid="live-arrangement">
       {/* ruler row — bar numbers over the lanes; a corner cell caps the header column */}
@@ -292,6 +281,12 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
             onDoubleClick={onEmptyDblClick}
             onContextMenuCapture={onClipContextCapture}
           >
+            {tracks.length === 0 && (
+              <div className="live-empty live-empty-arrangement" role="status" aria-live="polite">
+                <span>No tracks yet — add one to start.</span>
+                <AddTrackButton variant="empty" />
+              </div>
+            )}
             {tracks.map((t) => (
               <Fragment key={t.id}>
               <div
@@ -367,9 +362,20 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
                 takesOpen={takeRowsOpen(t)}
                 onToggleTakes={() => setTakesCollapsed((m) => ({ ...m, [t.id]: !m[t.id] }))} />
             ))}
-            <AddTrackButton variant="row" />
+            {tracks.length > 0 && <AddTrackButton variant="row" />}
           </div>
         </div>
+      </div>
+
+      {/* Live's second ruler sits below the lanes: elapsed time, not bar numbers.
+          It follows the same horizontal viewport and owns the same anchored zoom. */}
+      <div className="live-time-ruler-row">
+        <div className="live-time-ruler-clip" ref={timeRulerClipRef} data-testid="live-time-ruler-clip">
+          <div className="live-time-ruler-inner" style={{ width: contentW }}>
+            <LiveRuler snapshot={snapshot} width={contentW} onZoom={onRulerZoom} variant="time" />
+          </div>
+        </div>
+        <div className="live-time-ruler-corner" aria-hidden="true">1/1</div>
       </div>
 
       {dragging && (
@@ -578,13 +584,14 @@ function AddTrackButton({ variant }: { variant: "empty" | "row" }) {
           className={variant === "empty" ? "live-add-empty" : "live-add-row"}
           data-testid="live-track-add"
           title="Add a track"
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <IconPlus size={12} />
           <span>Add track</span>
         </button>
       }
     >
-      <div className="live-menu" role="menu">
+      <div className="live-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
         {TRACK_KINDS.map(({ kind, label, hint }) => (
           <MoshMenuItem
             key={kind}

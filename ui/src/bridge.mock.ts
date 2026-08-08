@@ -532,6 +532,9 @@ const DEFAULT_OK = new Set([
   // plugins and has no project file to reload.
   "open_without_plugins",
 ]);
+const PROJECT_REPLACEMENTS = new Set([
+  "new_project", "open_project", "open_recent", "reload", "recover_session", "open_without_plugins",
+]);
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
 // browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
@@ -676,6 +679,10 @@ export function mockOnEvent(eventId: string, fn: Listener): () => void {
  * store.ts's real onEvent("mosh_event", ...) reducer instead of duplicating its logic. */
 export function __mockEmitForTests(type: string, payload?: unknown): void {
   emit(type, payload);
+}
+if (MOCK_ENABLED && typeof window !== "undefined") {
+  (window as Window & { __moshMockEmitForTests?: typeof __mockEmitForTests })
+    .__moshMockEmitForTests = __mockEmitForTests;
 }
 const invalidate = () => { emit("snapshot_invalidated"); emitMuteAutomation(); };
 
@@ -2950,7 +2957,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
-      invalidate();
       return ok(command);
     }
 
@@ -2968,7 +2974,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
-      invalidate();
       return ok(command);
     }
     case "relink_clip": return ok(command);   // gap 3 — re-point a missing wave source (mock no-op)
@@ -4095,6 +4100,7 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     command: string;
     args?: Record<string, unknown>;
     transaction?: { transactionId?: unknown; requestId?: unknown; index?: unknown };
+    _moshProjectEpochPrepared?: unknown;
   };
 
   // FS-B2a guard, before dispatch — so a refusal mutates nothing, exactly as in the engine.
@@ -4139,6 +4145,14 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     for (const k of ["trackId", "clipId", "index", "busNumber", "groupId"])
       if (data[k] !== undefined) resultIds[k] = data[k];
     w.__moshCmdTrace.push({ command: c.command, args: c.args ?? {}, ok: res.ok, resultIds });
+  }
+  if (res.ok && PROJECT_REPLACEMENTS.has(c.command)) {
+    emit("snapshot_invalidated", {
+      projectReplaced: true,
+      reason: c.command,
+      epochManagedByUi: c._moshProjectEpochPrepared === true,
+    });
+    emitMuteAutomation();
   }
   return Promise.resolve(res as unknown as T);
 }

@@ -405,6 +405,14 @@ void MoshOps::timerCallback()
 // ─────────────────────────────────────────────────────────────────────────────
 // Dispatch
 // ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::executeFromUi (const juce::var& command)
+{
+    const juce::ScopedValueSetter<bool> guard (
+        projectEpochManagedByUi_,
+        (bool) command.getProperty ("_moshProjectEpochPrepared", false));
+    return execute (command);
+}
+
 juce::var MoshOps::execute (const juce::var& command)
 {
     // FS-B2a — re-entrancy depth. execute() is re-entered from INSIDE handlers (the
@@ -3696,6 +3704,15 @@ void MoshOps::emitSnapshotInvalidated()
     emit ("snapshot_invalidated");
 }
 
+void MoshOps::emitProjectReplaced (const juce::String& reason)
+{
+    auto* payload = new DynamicObject();
+    payload->setProperty ("projectReplaced", true);
+    payload->setProperty ("reason", reason);
+    payload->setProperty ("epochManagedByUi", projectEpochManagedByUi_);
+    emit ("snapshot_invalidated", var (payload));
+}
+
 void MoshOps::emitTrackPatch (te::AudioTrack& track)
 {
     if (eventSink == nullptr) { return; }   // (no sink ⇒ nothing to scope)
@@ -3945,7 +3962,7 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
     // FS-B2a — the journal tail was replayed, so the POST-transaction state stands: a
     // crash-orphaned agent transaction is no longer ambiguous and skills are unblocked.
     resolveUnresolvedTxns (/*provedPostState=*/true);
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("recover_session");
     logLine ("recover_session", args, true, {}, false);
 
     auto* d = new DynamicObject();
@@ -3997,7 +4014,7 @@ juce::var MoshOps::cmdOpenWithoutPlugins (const juce::var& args)
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     logLine ("open_without_plugins", args, true, {}, false);   // machine op, not undoable
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("open_without_plugins");
 
     auto* d = new DynamicObject();
     d->setProperty ("pluginsSkipped", skipped);

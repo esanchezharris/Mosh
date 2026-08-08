@@ -41,6 +41,7 @@
   --live-head-w: 279px;           /* RIGHT track-header column — fixed, no resize affordance (WIDGETS §1) */
   --live-lane-h: 86px;            /* default lane height (drag range 17–443, per lane) */
   --live-ruler-h: 19px;           /* bar ruler */
+  --live-time-ruler-h: 25px;      /* elapsed-time ruler + horizontal zoom surface */
   --live-dock-h: 265px;           /* detail dock default (clip panel min 226 — dockGeometry.ts) */
   --live-device-h: 212px;         /* device panel — FIXED (its top edge does not drag) */
   --live-status-h: 16px;          /* status bar */
@@ -299,6 +300,18 @@
 .live-arr-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
 .live-lanes-scroll { flex: 1 1 auto; min-width: 0; overflow: auto; }
 .live-lanes { position: relative; min-height: 100%; }
+.live-time-ruler-row {
+  flex: 0 0 var(--live-time-ruler-h);
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--live-head-w);
+}
+.live-time-ruler-clip { overflow: hidden; background: var(--live-bg-deep); }
+.live-time-ruler-inner { position: relative; height: 100%; }
+.live-time-ruler-corner {
+  display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;
+  background: var(--live-bg-deep); color: var(--live-text-dim);
+  border-top: 1px solid var(--live-line); border-left: 1px solid var(--live-line);
+  font-size: 9.5px;
+}
 
 /* the bar/beat grid: bar lines one step stronger than beat lines (SPEC §7's grid rule) */
 .live-lane {
@@ -359,6 +372,21 @@
 }
 .live-shell .v2-ruler-bar { background: var(--live-line-strong); }
 .live-shell .v2-ruler-num { color: var(--live-text-dim); font-size: 9.5px; top: 4px; }
+.live-shell .live-time-ruler {
+  height: var(--live-time-ruler-h); border-top: 1px solid var(--live-line);
+  border-bottom: 0; cursor: ns-resize;
+}
+.live-shell .live-ruler:focus-visible {
+  outline: 2px solid var(--live-accent); outline-offset: -2px; z-index: 5;
+}
+.live-time-tick {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--live-line-strong);
+}
+.live-time-label {
+  position: absolute; top: 5px; left: 4px; white-space: nowrap;
+  color: var(--live-text-dim); font-size: 9.5px; line-height: 1;
+}
 
 /* loop brace — interactive (drag body = move, drag an end = resize, brace keys) */
 .live-loop-brace {
@@ -553,6 +581,7 @@
   flex: 1; display: grid; place-content: center; justify-items: center; gap: 10px;
   color: var(--live-text-dim);
 }
+.live-empty-arrangement { position: absolute; inset: 0; }
 
 /* ── ⌘R inline clip rename — an input over the clip's name strip ─────────────── */
 .live-rename {
