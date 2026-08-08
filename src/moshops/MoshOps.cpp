@@ -496,13 +496,20 @@ juce::var MoshOps::executeImpl (const juce::var& command)
         };
         if (frozenLocked.contains (name))
         {
-            te::Track* target = nullptr;
+            auto isFrozen = [&] (te::Track* target) {
+                return target != nullptr && target->state.hasProperty (ids::moshFrozen);
+            };
             const auto tid = args.getProperty ("trackId", var()).toString();
-            if (tid.isNotEmpty()) target = findTrack (tid);
-            else if (auto cid = args.getProperty ("clipId", var()).toString(); cid.isNotEmpty())
-                if (auto* c = findClip (cid)) target = c->getTrack();
-            if (target != nullptr && target->state.hasProperty (ids::moshFrozen))
+            if (tid.isNotEmpty() && isFrozen (findTrack (tid)))
                 return errResult (name, "track is frozen (unfreeze it first)");
+            const auto cid = args.getProperty ("clipId", var()).toString();
+            if (cid.isNotEmpty())
+                if (auto* c = findClip (cid); isFrozen (c != nullptr ? c->getTrack() : nullptr))
+                    return errResult (name, "track is frozen (unfreeze it first)");
+            if (auto* clipIds = args.getProperty ("clipIds", var()).getArray())
+                for (auto& id : *clipIds)
+                    if (auto* c = findClip (id.toString()); isFrozen (c != nullptr ? c->getTrack() : nullptr))
+                        return errResult (name, "track is frozen (unfreeze it first)");
         }
     }
 

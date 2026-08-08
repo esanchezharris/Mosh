@@ -339,11 +339,13 @@ juce::var MoshOps::cmdBounceTrack (const juce::var& args)
 // offline path), then ONE transaction: remove the source clips (undo keeps them
 // restorable exactly), insert the rendered audio as the track's clips, DISABLE
 // every device (te::Plugin::setEnabled — undoable, serialized, zero-CPU while
-// off), and stamp the additive moshFrozen marker on the track's own state tree
-// (save/reload keeps the track frozen). Unfreeze is one forward transaction:
-// enable the devices, remove the marker — the rendered clips STAY (they are the
-// track's current audio; undoing the freeze itself is how the originals come
-// back, and undoing the unfreeze re-freezes — both directions one step).
+// off), save every device's prior enabled state in its own ValueTree, and stamp
+// the additive moshFrozen marker on the track's own state tree (save/reload
+// keeps the track frozen). Unfreeze is one forward transaction: restore each
+// saved state (or enabled for legacy frozen sessions), remove the saved state
+// and marker — the rendered clips STAY (they are the track's current audio;
+// undoing the freeze itself is how the originals come back, and undoing the
+// unfreeze re-freezes — both directions one step).
 juce::var MoshOps::cmdFreezeTrack (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();
@@ -386,7 +388,11 @@ juce::var MoshOps::cmdFreezeTrack (const juce::var& args)
         { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
     if (nc == nullptr) return errResult ("freeze_track", "insertWaveClip failed");
     for (auto* p : track->pluginList.getPlugins())
-        if (p != nullptr) p->setEnabled (false);   // serialized + undoable; zero-CPU while off
+        if (p != nullptr)
+        {
+            p->state.setProperty (ids::moshPreFreezeEnabled, p->isEnabled(), &undoManager());
+            p->setEnabled (false);   // serialized + undoable; zero-CPU while off
+        }
     track->state.setProperty (ids::moshFrozen, true, &undoManager());
 
     logLine ("freeze_track", args, true, {}, true);
@@ -407,7 +413,11 @@ juce::var MoshOps::cmdUnfreezeTrack (const juce::var& args)
 
     beginTxn ("unfreeze_track");
     for (auto* p : track->pluginList.getPlugins())
-        if (p != nullptr) p->setEnabled (true);
+        if (p != nullptr)
+        {
+            p->setEnabled ((bool) p->state.getProperty (ids::moshPreFreezeEnabled, true));
+            p->state.removeProperty (ids::moshPreFreezeEnabled, &undoManager());
+        }
     track->state.removeProperty (ids::moshFrozen, &undoManager());
     logLine ("unfreeze_track", args, true, {}, true);
     emitSnapshotInvalidated();

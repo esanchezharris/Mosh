@@ -5,6 +5,7 @@
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Lyrics.h"
+#include "state/Ids.h"
 #include "state/Migrations.h"
 #include "state/TrackIcons.h"
 #include "state/SafeMode.h"
@@ -6576,6 +6577,125 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                  "lock: load_plugin refused after save/reload"); }
         // Teardown — leave the session unfrozen for the sections that follow.
         check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", fzId2 }}))), "teardown: unfroze the persistence fixture");
+
+        // Regression: freeze is a state-preserving park, not an "enable every
+        // device" operation. Keep this separate from the all-enabled fixture
+        // above, which remains the pin for the ordinary flow.
+        const auto fzBypassTrack = cmd (ops, "create_track", args1 ("name", "FreezeBypass"))["data"].getProperty ("trackId", var()).toString();
+        auto* bypassClipArgs = new DynamicObject();
+        bypassClipArgs->setProperty ("trackId", fzBypassTrack);
+        bypassClipArgs->setProperty ("start", 0.0);
+        bypassClipArgs->setProperty ("length", 2.0);
+        const auto fzBypassClip = cmd (ops, "add_midi_clip", var (bypassClipArgs))["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", fzBypassClip }, { "pitch", 67 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 100 }}))),
+               "freeze bypass fixture: note added");
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", fzBypassTrack }, { "type", "compressor" }}))),
+               "freeze bypass fixture: compressor loaded");
+        int bypassCompressorIndex = -1;
+        { const auto t = trackById (fzBypassTrack);
+          if (auto* ps = t.getProperty ("plugins", var()).getArray())
+              for (auto& p : *ps)
+                  if (p.getProperty ("type", var()).toString() == "compressor")
+                      bypassCompressorIndex = (int) p.getProperty ("index", -1); }
+        check (bypassCompressorIndex >= 0, "freeze bypass fixture: compressor index resolved");
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", fzBypassTrack }, { "index", bypassCompressorIndex }, { "bypassed", true }}))),
+               "freeze bypass fixture: compressor deliberately bypassed");
+
+        auto rawFreezeTrack = [&] (const String& tid) -> te::AudioTrack* {
+            for (auto* candidate : te::getAudioTracks (eng.edit()))
+                if (candidate != nullptr && candidate->itemID.toString() == tid)
+                    return candidate;
+            return nullptr;
+        };
+        const auto& preFreezeEnabledId = ids::moshPreFreezeEnabled;
+        auto enabledStatesOf = [&] (const String& tid) {
+            Array<bool> states;
+            if (auto* raw = rawFreezeTrack (tid))
+                for (auto* p : raw->pluginList.getPlugins())
+                    if (p != nullptr) states.add (p->isEnabled());
+            return states;
+        };
+        auto savedStatesMatch = [&] (const String& tid, const Array<bool>& expected) {
+            auto* raw = rawFreezeTrack (tid);
+            if (raw == nullptr || raw->pluginList.getPlugins().size() != expected.size()) return false;
+            for (int i = 0; i < expected.size(); ++i)
+            {
+                auto p = raw->pluginList.getPlugins()[i];
+                if (p == nullptr || ! p->state.hasProperty (preFreezeEnabledId)
+                    || (bool) p->state.getProperty (preFreezeEnabledId) != expected[i]) return false;
+            }
+            return true;
+        };
+        auto hasNoSavedStates = [&] (const String& tid) {
+            if (auto* raw = rawFreezeTrack (tid))
+                for (auto* p : raw->pluginList.getPlugins())
+                    if (p != nullptr && p->state.hasProperty (preFreezeEnabledId)) return false;
+            return true;
+        };
+        const auto bypassPreFreezeStates = enabledStatesOf (fzBypassTrack);
+        check (bypassPreFreezeStates.contains (false), "freeze bypass fixture: chain includes a deliberately bypassed device");
+
+        auto fzBypass = cmd (ops, "freeze_track", objN ({{ "trackId", fzBypassTrack }}));
+        check (ok (fzBypass), "freeze bypass fixture: freeze_track ok");
+        { const auto parked = pluginsEnabledOf (fzBypassTrack);
+          check (parked.second > 0 && parked.first == 0,
+                 "freeze bypass fixture: every rack device is parked disabled"); }
+        check (savedStatesMatch (fzBypassTrack, bypassPreFreezeStates),
+               "freeze records each device's pre-freeze enabled state through the plugin ValueTree");
+
+        const auto frozenBypassClip = trackById (fzBypassTrack)["clips"][0].getProperty ("id", var()).toString();
+        { const auto r = cmd (ops, "set_clip_loop", objN ({{ "clipId", frozenBypassClip }, { "loop", true }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "freeze guard: singular clipId mutation is refused"); }
+        const auto guardTrack = cmd (ops, "create_track", args1 ("name", "FreezeGuardOther"))["data"].getProperty ("trackId", var()).toString();
+        const auto guardClip = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", guardTrack }, { "seconds", 2.0 }, { "freq", 330.0 }}))["data"].getProperty ("clipId", var()).toString();
+        { const auto r = cmd (ops, "set_clip_loop", objN ({{ "trackId", guardTrack }, { "clipId", frozenBypassClip }, { "loop", true }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "freeze guard: an unfrozen trackId cannot mask a frozen singular clipId"); }
+        Array<var> mixedFrozenClipIds { guardClip, frozenBypassClip };
+        const auto pluralGuard = cmd (ops, "crop_clip", objN ({{ "trackId", guardTrack }, { "clipIds", mixedFrozenClipIds }, { "start", 0.0 }, { "end", 1.0 }}));
+        check (! ok (pluralGuard) && pluralGuard.getProperty ("error", var()).toString().contains ("frozen"),
+               "freeze guard: an unfrozen trackId and first clipId cannot mask a later frozen clipId in a mixed multi-clip mutation");
+        if (ok (pluralGuard)) cmd (ops, "undo"); // keep the RED run isolated from later assertions
+
+        check (ok (cmd (ops, "save")), "freeze bypass fixture: save frozen state ok");
+        check (ok (cmd (ops, "open_project", args1 ("file", eng.editFile().getFullPathName()))),
+               "freeze bypass fixture: reload frozen state ok");
+        String reloadedBypassTrack;
+        { const auto snapTracks = ops.snapshot()["tracks"];
+          if (auto* ts = snapTracks.getArray())
+              for (auto& t : *ts)
+                  if (t.getProperty ("name", var()).toString() == "FreezeBypass")
+                      reloadedBypassTrack = t.getProperty ("id", var()).toString(); }
+        check (reloadedBypassTrack.isNotEmpty(), "freeze bypass fixture: track found after reload");
+        check (savedStatesMatch (reloadedBypassTrack, bypassPreFreezeStates),
+               "freeze bypass fixture: saved enabled states persist through save/reload");
+
+        check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", reloadedBypassTrack }}))),
+               "freeze bypass fixture: unfreeze_track ok");
+        check (enabledStatesOf (reloadedBypassTrack) == bypassPreFreezeStates,
+               "unfreeze restores each device's saved enabled state, including bypass");
+        check (hasNoSavedStates (reloadedBypassTrack), "unfreeze removes every pre-freeze state property");
+        check (ok (cmd (ops, "undo")), "freeze bypass fixture: undo unfreeze ok");
+        { const auto parked = pluginsEnabledOf (reloadedBypassTrack);
+          check (savedStatesMatch (reloadedBypassTrack, bypassPreFreezeStates)
+                 && parked.second > 0 && parked.first == 0,
+                 "undo unfreeze restores parked rack devices and their saved states"); }
+        check (ok (cmd (ops, "redo")), "freeze bypass fixture: redo unfreeze ok");
+        check (enabledStatesOf (reloadedBypassTrack) == bypassPreFreezeStates
+               && hasNoSavedStates (reloadedBypassTrack),
+               "redo unfreeze restores bypass and removes the saved states again");
+
+        check (ok (cmd (ops, "freeze_track", objN ({{ "trackId", reloadedBypassTrack }}))),
+               "freeze legacy fixture: freeze_track ok");
+        if (auto* raw = rawFreezeTrack (reloadedBypassTrack))
+            for (auto* p : raw->pluginList.getPlugins())
+                if (p != nullptr) p->state.removeProperty (preFreezeEnabledId, nullptr);
+        check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", reloadedBypassTrack }}))),
+               "freeze legacy fixture: unfreeze_track accepts a frozen legacy session");
+        { const auto legacyStates = enabledStatesOf (reloadedBypassTrack);
+          check (! legacyStates.contains (false) && hasNoSavedStates (reloadedBypassTrack),
+                 "legacy frozen sessions without saved device state default every device enabled"); }
     }
 
     // ─── consolidate_clips — the WAVE path (⌘J on audio) ───

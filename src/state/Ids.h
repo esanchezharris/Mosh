@@ -92,6 +92,10 @@ namespace mosh::ids
     // freeze_track / unfreeze_track, so undo restores the exact pre-state.
     // Saves/reloads with the edit — a frozen track stays frozen across sessions.
     MOSH_DECLARE_ID (moshFrozen)
+    // FREEZE TRACK — each plugin's enabled state immediately before freeze. This
+    // lets unfreeze restore deliberately bypassed devices instead of changing the
+    // mix by enabling the entire chain. Absent in a legacy frozen session => enabled.
+    MOSH_DECLARE_ID (moshPreFreezeEnabled)
 
     // DRM-001 — the track's TYPE ("audio" | "drum"). A plain property on the
     // track's own state tree (like moshInputDevice), so it saves/reloads with the
