@@ -59,6 +59,10 @@ export function useSelectionFollow() {
       prev, selection, s.editingClipId, useLive.getState().emptyDragInFlight,
     );
     if (decision === "close") s.closePianoRoll();
-    else if (decision) s.openPianoRoll(decision.open);
+    else if (decision) {
+      const clip = s.snapshot?.tracks.flatMap((track) => track.clips).find((item) => item.id === decision.open);
+      if (clip?.type === "midi" || clip?.type === "wave") s.openPianoRoll(decision.open);
+      else s.closePianoRoll();
+    }
   }, [selection]);
 }

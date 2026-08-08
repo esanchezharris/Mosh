@@ -14,9 +14,9 @@
 //     liveClipExpanded setting.
 //
 // Content priority: Moshi stub drawer (control-bar spark) → docked MIDI editor →
-// wave clip view (placeholder + loop bar) → device panel. The MIDI editor's own
-// header keeps the ONE close (its ✕); the wave view and the device panel have the
-// dock's own ✕ (the device panel's hides it until the selection changes).
+// wave clip editor → device panel. The MIDI editor's own header keeps the ONE close
+// (its ✕); the audio editor and the device panel have the dock's own ✕ (the device
+// panel's hides it until the selection changes).
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
@@ -25,7 +25,7 @@ import { PianoRoll } from "../ui/PianoRoll";
 import { IconClose, IconSpark } from "../ui/icons";
 import { useLive } from "./liveState";
 import { DeviceStrip } from "./DeviceStrip";
-import { ClipLoopBar } from "./ClipLoopBar";
+import { AudioClipEditor } from "./AudioClipEditor";
 import { clampDockHeight, dockDragDismisses, DOCK_MIN, DOCK_MAX_FRAC, DEVICE_PANEL_H } from "./dockGeometry";
 
 export function DetailDock() {
@@ -51,13 +51,13 @@ export function DetailDock() {
 
   const showMoshi = moshiOpen;
   const showEditor = !showMoshi && clip?.type === "midi";
-  const showWaveStub = !showMoshi && !showEditor && !!clip;
+  const showWaveEditor = !showMoshi && !showEditor && clip?.type === "wave";
   // The clip panel = editor / wave view / Moshi; the device panel stacks below it
   // when one of those is open, or IS the dock when nothing is.
-  const clipPanelOpen = showMoshi || showEditor || showWaveStub;
+  const clipPanelOpen = showMoshi || showEditor || showWaveEditor;
   const showDevices = !!selectedTrack && !devicesHidden;
-  // Expanded Clip View only means anything with the editor open (Live greys it
-  // otherwise) — and the editor is only ever a MIDI clip here.
+  // Expanded Clip View remains MIDI-only in this slice; the audio editor stays
+  // docked until its own posture and escape behavior receive a dedicated audit.
   const expanded = expandedSetting && showEditor;
 
   // ── splitter (clip panel only; the device panel's edge never drags) ──
@@ -188,24 +188,7 @@ export function DetailDock() {
           }}
         />
       )}
-      {showWaveStub && clip && (
-        <>
-          <div className="live-dock-head">
-            <span className="live-dock-title">Clip — {clip.name}</span>
-            <DockClose label="Close the detail view" onClose={closePianoRoll} />
-          </div>
-          <div className="live-dock-clip" data-testid="live-clip-editor" data-clip-id={clip.id}>
-            <p className="live-dock-stub-title">{clip.name}</p>
-            {/* CLP-LOOP — the one real clip-view control that exists today: the source
-                loop brace (set_clip_loop). The rest of the sample editor is a later phase. */}
-            <ClipLoopBar clip={clip} />
-            <p className="live-dock-stub-copy">
-              The sample editor lands here in a later phase — Start/Length fields, warp and
-              fades, in this dock. MIDI clips open the note editor here today.
-            </p>
-          </div>
-        </>
-      )}
+      {showWaveEditor && clip && <AudioClipEditor clip={clip} onClose={closePianoRoll} />}
       {devicePanel}
     </section>
   );

@@ -135,23 +135,94 @@ test("Escape closes the docked editor through the shared escape stack", async ({
   await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
 });
 
-test("a wave clip keeps the placeholder (the sample editor is a later phase)", async ({ page }) => {
+test("a wave clip opens a real audio editor through the Live double-click path", async ({ page }) => {
   await bootLive(page);
-  // ClipView only sets editingClipId for MIDI clips, so drive the wave path through
-  // the dev store handle — the same field the dock reacts to.
+  const waveClip = page.getByTestId("live-lane").nth(2).getByTestId("v2-clip");
+  await waveClip.dblclick();
+
+  const editor = page.getByTestId("live-audio-clip-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor.getByTestId("live-audio-waveform")).toBeVisible();
+  await expect(editor.locator("canvas")).toBeVisible();
+  const waveformContrast = await editor.getByTestId("live-audio-waveform").evaluate((waveform) => {
+    const canvas = waveform.querySelector("canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error("waveform canvas is absent");
+    const channels = (color: string): { r: number; g: number; b: number; a: number } => {
+      const parts = color.match(/[0-9.]+/g);
+      if (!parts || parts.length < 3) throw new Error(`unparseable color: ${color}`);
+      return {
+        r: Number(parts[0]),
+        g: Number(parts[1]),
+        b: Number(parts[2]),
+        a: parts[3] === undefined ? 1 : Number(parts[3]),
+      };
+    };
+    const background = channels(getComputedStyle(waveform).backgroundColor);
+    const ink = channels(getComputedStyle(canvas).getPropertyValue("--clip-ink-wave"));
+    const composite = {
+      r: ink.r * ink.a + background.r * (1 - ink.a),
+      g: ink.g * ink.a + background.g * (1 - ink.a),
+      b: ink.b * ink.a + background.b * (1 - ink.a),
+    };
+    return Math.hypot(composite.r - background.r, composite.g - background.g, composite.b - background.b);
+  });
+  expect(waveformContrast).toBeGreaterThan(25);
+
+  await page.evaluate(() => {
+    const store = (window as any).__moshStore;
+    const snapshot = store.getState().snapshot;
+    const tracks = snapshot.tracks.map((track: any) => ({
+      ...track,
+      clips: track.clips.map((clip: any) => clip.type === "wave" ? { ...clip, sourceMissing: true } : clip),
+    }));
+    store.setState({ snapshot: { ...snapshot, tracks } });
+  });
+  const status = editor.getByTestId("live-audio-waveform-status");
+  await expect(status).toBeVisible();
+  const statusContrast = await status.evaluate((element) => {
+    const waveform = element.parentElement;
+    if (!waveform) throw new Error("waveform ground is absent");
+    const channels = (color: string): [number, number, number] => {
+      const parts = color.match(/[0-9.]+/g);
+      if (!parts || parts.length < 3) throw new Error(`unparseable color: ${color}`);
+      return [Number(parts[0]), Number(parts[1]), Number(parts[2])];
+    };
+    const luminance = (color: [number, number, number]): number => {
+      const [r, g, b] = color.map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return r * 0.2126 + g * 0.7152 + b * 0.0722;
+    };
+    const text = luminance(channels(getComputedStyle(element).color));
+    const ground = luminance(channels(getComputedStyle(waveform).backgroundColor));
+    return (Math.max(text, ground) + 0.05) / (Math.min(text, ground) + 0.05);
+  });
+  expect(statusContrast).toBeGreaterThanOrEqual(4.5);
+
+  const reverse = editor.getByTestId("live-audio-reverse");
+  await expect(reverse).toHaveAttribute("aria-pressed", "false");
+  await reverse.click();
+  await expect(reverse).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Close the detail view" }).click();
+  await expect(editor).toHaveCount(0);
+  await waveClip.dblclick();
+  await expect(page.getByTestId("live-audio-reverse")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a displayed generic clip never opens a MIDI or audio editor", async ({ page }) => {
+  await bootLive(page);
   await page.evaluate(() => {
     const st = (window as any).__moshStore.getState();
-    const wave = st.snapshot.tracks.flatMap((t: any) => t.clips).find((c: any) => c.type === "wave");
-    st.openPianoRoll(wave.id);
+    st.snapshot.tracks[2].clips[0].type = "clip";
+    st.closePianoRoll();
   });
-  await expect(page.getByTestId("live-clip-editor")).toContainText("chords");
-  await expect(page.getByTestId("live-clip-editor")).toContainText("sample editor");
-  await expect(page.locator(".live-shell .pr")).toHaveCount(0);
-  await page.getByRole("button", { name: "Close the detail view" }).click();
-  // closing the placeholder clears the editor field; the dock falls back to devices
-  await expect(page.locator(".live-shell .pr")).toHaveCount(0);
-  await expect(page.getByTestId("live-devices")).toBeVisible();
+
+  await page.getByTestId("live-lane").nth(2).getByTestId("v2-clip").dblclick();
   await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
+  await expect(page.getByTestId("live-audio-clip-editor")).toHaveCount(0);
+  await expect(page.locator(".live-shell .pr.docked")).toHaveCount(0);
 });
 
 // The two paint tests pin the editor's grid to a FIXED 1/4 division (snap on) so the
@@ -1032,7 +1103,7 @@ test("hot-swap: a second instrument replaces the first; an effect still appends"
 
 // ── Selection-follow: the dock's clip view tracks the CLIP SELECTION (Live 12) ─
 
-test("single-click opens the clip's view (MIDI editor; wave stub for audio)", async ({ page }) => {
+test("single-click opens the clip's view (MIDI editor; wave audio editor)", async ({ page }) => {
   await bootLive(page);
   // devices posture at boot (nothing selected)
   await expect(page.getByTestId("live-devices")).toBeVisible();
@@ -1040,9 +1111,9 @@ test("single-click opens the clip's view (MIDI editor; wave stub for audio)", as
   await page.locator('.live-shell [data-testid="v2-clip"]').first().click();
   await expect(page.locator(".live-shell .pr.docked")).toBeVisible();
   await expect.poll(() => storeVal<string | null>(page, "editingClipId")).not.toBeNull();
-  // clicking the audio clip shows its (wave) view instead
+  // clicking the audio clip shows its wave editor instead
   await page.getByTestId("live-lane").nth(2).locator('[data-testid="v2-clip"]').click();
-  await expect(page.getByTestId("live-clip-editor")).toContainText("chords");
+  await expect(page.getByTestId("live-audio-clip-editor")).toContainText("chords");
   await expect(page.locator(".live-shell .pr.docked")).toHaveCount(0);
 });
 

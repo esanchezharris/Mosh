@@ -670,8 +670,6 @@
 }
 .live-loopbar-brace:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
 .live-loopbar-readout { font-family: var(--font-mono); font-size: 9.5px; color: var(--live-text-dim); white-space: nowrap; }
-/* the clip view's stub copy stacks vertically with the loop bar */
-.live-dock-clip { flex-direction: column; align-items: flex-start; justify-content: center; }
 .live-dock-head {
   flex: 0 0 20px; display: flex; align-items: center; gap: 8px; padding: 0 8px;
   background: var(--live-bg-deep); border-bottom: 1px solid var(--live-line);
@@ -682,13 +680,33 @@
   border: none; border-radius: 3px; background: transparent; color: var(--live-text-dim); cursor: pointer;
 }
 .live-dock-close:hover { color: var(--live-text); background: var(--live-bg-raise); }
-.live-dock-moshi, .live-dock-clip {
+.live-dock-moshi {
   flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 12px;
   padding: 16px; text-align: left;
 }
 .live-dock-stub-icon { color: var(--live-accent); }
 .live-dock-stub-title { margin: 0 0 4px; font-size: 12px; color: var(--live-text); }
 .live-dock-stub-copy { margin: 0; max-width: 460px; font-size: 10.5px; color: var(--live-text-dim); }
+
+.live-audio-editor {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px;
+  padding: 8px 10px; overflow: hidden;
+}
+.live-audio-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--live-text-dim); font-size: 10px; }
+.live-audio-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--live-text); }
+.live-audio-source-missing { color: #e5a29b; }
+.live-audio-waveform {
+  flex: 1 1 auto; min-height: 56px; position: relative; display: grid; place-items: center;
+  overflow: hidden; background: var(--live-clip-wave); border: 1px solid var(--live-line); border-radius: 3px;
+}
+.live-audio-waveform canvas { display: block; width: 100%; height: 100%; }
+.live-audio-waveform p { margin: 0; color: var(--live-bg-inset); font-size: 10.5px; }
+.live-audio-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 7px; }
+.live-audio-controls label { display: grid; gap: 2px; color: var(--live-text-dim); font-size: 9px; }
+.live-audio-controls input { width: 68px; padding: 2px 4px; background: var(--live-bg-inset); color: var(--live-text); border: 1px solid var(--live-line); border-radius: 2px; font: inherit; }
+.live-audio-controls input:focus-visible, .live-audio-controls button:focus-visible { outline: 2px solid var(--live-accent); outline-offset: 1px; }
+.live-audio-controls button { padding: 3px 6px; border: 1px solid var(--live-line); border-radius: 3px; background: var(--live-bg-raise); color: var(--live-text); font: inherit; font-size: 10px; cursor: pointer; }
+.live-audio-controls button[aria-pressed="true"] { border-color: var(--live-accent); color: var(--live-accent); }
 
 /* ── cursor affordances (RESOURCES.md §cursor) ─────────────────────────────────
    State hooks live as data-attrs on .live-shell (AppLive tracks them); the cursors

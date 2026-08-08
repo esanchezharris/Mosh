@@ -277,7 +277,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       lastUp.current = null;
       const { region } = regionOf(e);
       const action = resolveGesture(TABLE(), { region, gesture: "dblclick", mods: modsOf(e), tool });
-      if (action === EA.OPEN && clip.type === "midi") openPianoRoll(clip.id);
+      if (action === EA.OPEN && (clip.type === "midi" || clip.type === "wave")) openPianoRoll(clip.id);
     } else {
       lastUp.current = now;
     }
