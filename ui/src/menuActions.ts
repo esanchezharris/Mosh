@@ -6,6 +6,7 @@
 // pick_save_file) — they only resolve a path; the mutation is still a command.
 
 import { runCaptureMidi } from "./captureMidi";
+import { editorKeyFocused } from "./hooks/editorFocus";
 import type { ActionId } from "./keymap";
 import type { Snapshot } from "./types";
 import { meterAt, snapStep, snapStepBeats, tempoMapFrom, barSeconds, SNAP_DIVISIONS, type SnapDiv } from "./time";
@@ -97,8 +98,9 @@ export interface ActionStore {
   // FU-CLIP-NUDGE — the grid resolution nudge steps by. Optional so test fakes can
   // omit it (defaults to "1/4", the store's own default snap division).
   snapDivision?: SnapDiv;
-  // open clip-editor modals — Delete is suppressed on the arrangement while either
-  // is set (the editor owns Delete then). Optional so test fakes can omit them.
+  // Open editors. Keyboard focus decides whether a docked clip editor or the
+  // arrangement owns Delete; automation remains modal and suppresses arrangement
+  // deletion while open. Optional so test fakes can omit them.
   editingClipId?: string | null;
   automationTrackId?: string | null;
   // Taste loop (⌘⇧F) — opens the felt-wrong capture dialog. Optional for test fakes.
@@ -313,10 +315,11 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       return;
 
     case "delete": {
-      // While a clip-editor modal is open (piano roll / automation), Delete belongs
-      // to that editor (delete selected notes/points), not the arrangement — bail so
-      // we never silently remove the clip being edited (Phase 1 fix, preserved here).
-      if (store.editingClipId || store.automationTrackId) return;
+      // The piano roll can be docked and unfocused. Its local key layer and the app
+      // shortcut router decide ownership from DOM focus before this action runs, so
+      // editingClipId alone must not swallow an arrangement-owned Delete. Automation
+      // remains modal and keeps its existing arrangement guard.
+      if (store.automationTrackId || (store.editingClipId && editorKeyFocused())) return;
       for (const clipId of [...store.selection]) await store.exec("remove_clip", { clipId });
       store.clearSelection();
       return;

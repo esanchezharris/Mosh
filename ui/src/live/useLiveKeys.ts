@@ -18,7 +18,7 @@ import { useShell } from "../v2/shellState";
 import { EditorAction as EA } from "../interaction/actions";
 import { liveKeymap } from "../interaction/config";
 import { isEditableTarget, resolveKey } from "../interaction/keymap";
-import { editorKeyFocused } from "../hooks/useKeyboardShortcuts";
+import { editorKeyFocused } from "../hooks/editorFocus";
 import { useLive } from "./liveState";
 import { zoomToFitSpan, contentFitSpan } from "./zoomFit";
 import { popZoomView } from "./zoomHistory";

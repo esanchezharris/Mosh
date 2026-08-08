@@ -17,6 +17,7 @@ import { centerScrollTopForNotes } from "./pianoRollScroll";
 import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx, snapDownBeat } from "./pianoRollGeom";
 import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
+import { editorKeyFocused } from "../hooks/editorFocus";
 import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
 import { moveEdits, resizeEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
 import { expandLoopedNotes } from "../midi/midiLoop";
@@ -320,6 +321,7 @@ export function PianoRoll({ docked = false, expandControl }: {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (docked && !editorKeyFocused()) return;
       const mod = e.metaKey || e.ctrlKey;
       const sel = selectedNotes;
       const take = () => { e.preventDefault(); e.stopPropagation(); };

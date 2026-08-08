@@ -124,6 +124,31 @@ test("double-clicking a MIDI clip docks the REAL editor (no modal, no backdrop)"
   await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
 });
 
+test("Delete belongs exclusively to the focused arrangement while the MIDI editor is docked", async ({ page }) => {
+  await bootLive(page);
+  const arrangementClip = page.locator('.live-shell [data-testid="v2-clip"]').first();
+  await arrangementClip.dblclick();
+
+  const pianoRoll = page.getByTestId("piano-roll");
+  await expect(pianoRoll).toBeVisible();
+  const note = pianoRoll.getByTestId("pr-note").first();
+  await note.click();
+  await expect(note).toHaveClass(/\bsel\b/);
+
+  await arrangementClip.click();
+  await expect(arrangementClip).toBeFocused();
+  await expect(note).toHaveClass(/\bsel\b/);
+  await expect.poll(() => storeVal<number>(page, "selection.size")).toBe(1);
+  await expect.poll(() => page.evaluate(() =>
+    document.activeElement?.closest('[data-testid="piano-roll"]') != null,
+  )).toBe(false);
+
+  await page.keyboard.press("Delete");
+
+  await expect.poll(async () => commandLog(page, 5)).toContain("remove_clip");
+  expect(await commandLog(page, 5)).not.toContain("remove_note");
+});
+
 test("Escape closes the docked editor through the shared escape stack", async ({ page }) => {
   await bootLive(page);
   await page.locator('.live-shell [data-testid="v2-clip"]').first().dblclick();

@@ -163,6 +163,46 @@ describe("useKeyboardShortcuts", () => {
     expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } });
   });
 
+  it("keeps native-menu Delete inside a focused modal piano roll", async () => {
+    useStore.setState({ selection: new Set(["clip-1"]), editingClipId: "clip-1" });
+    const roll = document.createElement("div");
+    roll.setAttribute("data-testid", "piano-roll");
+    const editorControl = document.createElement("button");
+    roll.appendChild(editorControl);
+    document.body.appendChild(roll);
+    editorControl.focus();
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      bridgeMock.eventHandlers.get("mosh_menu")?.({ action: "delete" });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(execCalls.some((call) => call.command === "remove_clip")).toBe(false);
+    roll.remove();
+  });
+
+  it("lets native-menu Delete reach the arrangement beside an unfocused docked roll", async () => {
+    useStore.setState({ selection: new Set(["clip-1"]), editingClipId: "clip-1" });
+    const roll = document.createElement("div");
+    roll.setAttribute("data-testid", "piano-roll");
+    document.body.appendChild(roll);
+    const arrangementClip = document.createElement("button");
+    document.body.appendChild(arrangementClip);
+    arrangementClip.focus();
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      bridgeMock.eventHandlers.get("mosh_menu")?.({ action: "delete" });
+    });
+
+    await vi.waitFor(() =>
+      expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } }),
+    );
+    roll.remove();
+    arrangementClip.remove();
+  });
+
   it("dispatches Record through the app action dispatcher", async () => {
     useStore.setState({
       selectedTrackId: "record-track",

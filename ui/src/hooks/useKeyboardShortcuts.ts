@@ -8,6 +8,7 @@ import { isEditableTarget, resolveKey } from "../interaction/keymap";
 import { unshiftForQwerty } from "../interaction/qwertyMidi";
 import { qwertyState } from "./useQwertyMidi";
 import { useLive } from "../live/liveState";
+import { editorKeyFocused } from "./editorFocus";
 
 const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat });
 
@@ -33,11 +34,6 @@ const emptyAgentPromptSpace = (target: EventTarget | null, action: string): bool
 // otherwise. The modal mounts (classic/v2) focus the roll on open and the backdrop
 // keeps focus inside, so this check is true there exactly as before — v2/classic
 // semantics unchanged by construction.
-export function editorKeyFocused(): boolean {
-  const el = document.activeElement as HTMLElement | null;
-  return !!el && !!el.closest('[data-testid="piano-roll"]');
-}
-
 const dispatch = (id: ActionId) => runAction(id, ctx());
 
 export function useKeyboardShortcuts() {

@@ -300,6 +300,29 @@ describe("runAction — Edit", () => {
     ]);
     expect(store.clearSelection).toHaveBeenCalled();
   });
+
+  it("delete reaches the arrangement while a docked clip editor remains open", async () => {
+    const { ctx, execCalls } = makeCtx({}, {
+      editingClipId: "c1",
+      selection: new Set(["c1"]),
+    });
+
+    await runAction("delete", ctx);
+
+    expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "c1" } });
+  });
+
+  it("delete stays suppressed while the automation editor is open", async () => {
+    const { ctx, store, execCalls } = makeCtx({}, {
+      automationTrackId: "t1",
+      selection: new Set(["c1"]),
+    });
+
+    await runAction("delete", ctx);
+
+    expect(execCalls).toEqual([]);
+    expect(store.clearSelection).not.toHaveBeenCalled();
+  });
 });
 
 describe("runAction — transport", () => {
