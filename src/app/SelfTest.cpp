@@ -6078,6 +6078,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "transform_notes rejects an unknown mode");
             check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }}))),
                    "transform_notes humanize without amount errors");
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                              { "noteIndexes", Array<var> { 0, 0, 0, 0, 0, 0 } }}))),
+                   "transform_notes rejects noteIndexes larger than the clip's note count");
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                              { "noteIndexes", Array<var> { 0.5 } }}))),
+                   "transform_notes rejects a non-integral noteIndex");
 
             // REVERSE: mirror inside the span [0,8]; pitches/lengths ride along
             check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "reverse" }}))), "reverse ok");
@@ -6099,6 +6105,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                               { 4.0, 70, 3.0, 90 }, { 7.0, 72, 1.0, 127 } }),
                    "legato extends to the next distinct onset, chord tones included");
             undoRestores ("undo after legato ok");
+
+            auto duplicateLegato = cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                                        { "noteIndexes", Array<var> { 4, 0, 0, 2 } }}));
+            check (ok (duplicateLegato)
+                       && (int) duplicateLegato["data"].getProperty ("changed", -1) == 2,
+                   "transform_notes deduplicates repeated noteIndexes before Legato");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 4.0, 40 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 3.0, 100 },
+                                              { 4.0, 70, 1.0, 90 }, { 7.0, 72, 1.0, 127 } }),
+                   "duplicate-selection Legato transforms every selected note exactly once");
+            undoRestores ("undo after duplicate-selection legato ok");
+
+            // An explicit selection arrives in gesture order, not necessarily time
+            // order. Legato must still use the next SELECTED onset, and must leave an
+            // unselected chord tone at the same start untouched.
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                           { "noteIndexes", Array<var> { 4, 0, 2 } }}))),
+                   "legato on an unsorted selection ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 4.0, 40 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 3.0, 100 },
+                                              { 4.0, 70, 1.0, 90 }, { 7.0, 72, 1.0, 127 } }),
+                   "legato orders selected onsets by time, independent of noteIndexes order");
+            undoRestores ("undo after unsorted-selection legato ok");
 
             // ×2 / /2 around the span start 0
             check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "x2" }}))), "x2 ok");

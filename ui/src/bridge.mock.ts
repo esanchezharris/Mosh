@@ -3774,10 +3774,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       let targets: { i: number }[];
       if (Array.isArray(args.noteIndexes)) {
         if (args.noteIndexes.length === 0) return err(command, "'noteIndexes' is empty");
+        if (args.noteIndexes.length > notes.length) return err(command, "too many noteIndexes");
         targets = [];
+        const seen = new Set<number>();
         for (const v of args.noteIndexes) {
-          const i = num(v, -1);
+          if (typeof v !== "number" || !Number.isInteger(v)) return err(command, "bad noteIndex");
+          const i = v;
           if (i < 0 || i >= notes.length || notes[i] == null) return err(command, "bad noteIndex");
+          if (seen.has(i)) continue;
+          seen.add(i);
           targets.push({ i });
         }
       } else {

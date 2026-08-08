@@ -2473,8 +2473,23 @@ juce::var MoshOps::cmdTransformNotes (const juce::var& args)
     if (auto* arr = idxVar.getArray())
     {
         if (arr->isEmpty()) return errResult ("transform_notes", "'noteIndexes' is empty");
+        const int noteCount = seq.getNumNotes();
+        if (arr->size() > noteCount)
+            return errResult ("transform_notes", "too many noteIndexes");
+        std::vector<bool> seen (static_cast<size_t> (noteCount), false);
         for (auto& v : *arr)
-            if (! pushNote ((int) v)) return errResult ("transform_notes", "bad noteIndex");
+        {
+            if (! v.isInt() && ! v.isInt64())
+                return errResult ("transform_notes", "bad noteIndex");
+            const auto rawIndex = static_cast<juce::int64> (v);
+            if (rawIndex < 0 || rawIndex >= noteCount)
+                return errResult ("transform_notes", "bad noteIndex");
+            const int i = static_cast<int> (rawIndex);
+            if (seen[static_cast<size_t> (i)])
+                continue;
+            seen[static_cast<size_t> (i)] = true;
+            if (! pushNote (i)) return errResult ("transform_notes", "bad noteIndex");
+        }
     }
     else
         for (int i = 0; i < seq.getNumNotes(); ++i)
@@ -2564,11 +2579,18 @@ juce::var MoshOps::cmdTransformNotes (const juce::var& args)
 
     // Legato's next-onset map: each distinct start extends to the NEXT distinct start;
     // the last group extends to the span end. Same-start notes (chords) share the
-    // onset, so no note collapses to zero length.
+    // onset, so no note collapses to zero length. Explicit selections arrive in
+    // gesture order, so derive this map independently of noteIndexes order.
     std::vector<double> onsets;
-    for (auto& t : targets)
-        if (onsets.empty() || t.start > onsets.back() + 1.0e-9)
+    if (mode == "legato")
+    {
+        for (auto& t : targets)
             onsets.push_back (t.start);
+        std::sort (onsets.begin(), onsets.end());
+        onsets.erase (std::unique (onsets.begin(), onsets.end(), [] (double a, double b) {
+            return std::abs (a - b) <= 1.0e-9;
+        }), onsets.end());
+    }
     auto legatoEnd = [&] (double start) {
         for (double o : onsets)
             if (o > start + 1.0e-9) return o;
