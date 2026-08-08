@@ -357,13 +357,44 @@ test("empty-lane drag paints a time selection, and ⌘L loops exactly that span"
   await expect(page.getByTestId("live-loop-brace")).toBeVisible();
 });
 
-test("double-click on an empty lane creates a clip there and opens the docked editor", async ({ page }) => {
+test("double-click on an empty ordinary Audio lane leaves its clips and the dock unchanged", async ({ page }) => {
+  await bootLive(page);
+  // Keys is ordinary audio: unlike the Bass lane, it has neither an instrument nor
+  // drum semantics, so an empty-ground MIDI gesture must not turn it into MIDI.
+  await page.keyboard.press("Meta+-");
+  await page.keyboard.press("Meta+-");
+  const lane = page.getByTestId("live-lane").nth(2); // Keys — ordinary Audio
+  const box = await lane.boundingBox();
+  if (!box) throw new Error("no lane");
+  const pps = await storeVal<number>(page, "pxPerSec");
+  await expect(lane.locator('[data-testid="v2-clip"]')).toHaveCount(1);
+  await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
+
+  await page.mouse.dblclick(box.x + 9 * pps, box.y + box.height / 2);
+
+  await expect(lane.locator('[data-testid="v2-clip"]')).toHaveCount(1);
+  await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
+  await expect(page.locator(".live-shell .pr.docked")).toHaveCount(0);
+});
+
+test("double-click on an empty instrument lane creates its clip and opens the docked editor", async ({ page }) => {
   await bootLive(page);
   // zoom out so empty ground past the seed clips is comfortably clickable (the
   // fixed 279pt header column eats the right side of the lanes viewport)
   await page.keyboard.press("Meta+-");
   await page.keyboard.press("Meta+-");
-  const lane = page.getByTestId("live-lane").nth(2); // Keys — empty past 8s
+  // Make Bass taller than the first lane. A target is valid only when its actual
+  // bounding box is used; dividing by the first lane's height lands on Keys here.
+  const bassHeader = page.getByTestId("live-track-header").nth(1);
+  const handle = bassHeader.getByTestId("live-lane-resize");
+  const handleBox = await handle.boundingBox();
+  if (!handleBox) throw new Error("no Bass lane resize handle");
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2 + 120, { steps: 6 });
+  await page.mouse.up();
+
+  const lane = page.getByTestId("live-lane").nth(1); // Bass — audio type, but MIDI-capable via isInstrument
   const box = await lane.boundingBox();
   if (!box) throw new Error("no lane");
   const pps = await storeVal<number>(page, "pxPerSec");
@@ -374,10 +405,10 @@ test("double-click on an empty lane creates a clip there and opens the docked ed
   await expect.poll(async () => {
     const starts = await page.evaluate(() => {
       const st = (window as any).__moshStore.getState();
-      return st.snapshot.tracks[2].clips.map((c: any) => c.start).sort((a: number, b: number) => a - b);
+      return st.snapshot.tracks[1].clips.map((c: any) => c.start).sort((a: number, b: number) => a - b);
     });
     return starts;
-  }).toEqual([2, 9]);
+  }).toEqual([0, 9]);
   // …and its editor is already open in the dock
   await expect(page.locator(".live-shell .pr.docked")).toBeVisible();
 });

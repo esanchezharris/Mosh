@@ -196,25 +196,31 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
   // Empty-lane double-click (ableton table: CREATE_CLIP) — Live's "make a clip and
   // open its editor" in one gesture. The clip lands at the snapped pointer position,
   // one bar long; clips keep their own dblclick (OPEN), so this bails on clip hits.
-  // The lane is resolved by COORDINATES, not e.target: the empty-drag's pointer
-  // capture retargets the dblclick event to the lanes container, so a target-based
-  // closest() finds no [data-track-id] and the gesture silently dies.
+  // The lane is resolved by its rendered bounding box, not e.target: the empty-drag's
+  // pointer capture retargets the dblclick event to the lanes container, so a
+  // target-based closest() finds no [data-track-id]. Bounding boxes also keep
+  // resized lanes and intervening take rows from being misrouted as a uniform stack.
   const onEmptyDblClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest(".v2-clip")) return;
     const mods = { shift: e.shiftKey, alt: e.altKey, meta: e.metaKey || e.ctrlKey };
     const action = resolveGesture(liveGestureTable(), { region: "empty", gesture: "dblclick", mods });
     if (action !== EA.CREATE_CLIP) return;
     const lanesEl = e.currentTarget as HTMLElement;
+    const lane = Array.from(lanesEl.querySelectorAll<HTMLElement>("[data-testid='live-lane']"))
+      .find((el) => {
+        const box = el.getBoundingClientRect();
+        return e.clientY >= box.top && e.clientY < box.bottom;
+      });
+    const track = tracks.find((t) => t.id === lane?.dataset.trackId);
+    // An ordinary audio lane has no sound-producing MIDI path. Bass is an audio
+    // track too, but its isInstrument marker makes it MIDI-capable; drum tracks
+    // are always eligible because add_midi_clip supplies their sampler if needed.
+    if (!track || (!track.isInstrument && track.type !== "drum")) return;
     const rect = lanesEl.getBoundingClientRect();
-    const laneEls = lanesEl.querySelectorAll<HTMLElement>("[data-track-id]");
-    const laneH = laneEls[0]?.offsetHeight ?? 0;
-    if (laneH <= 0) return;
-    const trackId = laneEls[Math.floor((e.clientY - rect.top) / laneH)]?.dataset.trackId;
-    if (!trackId) return;
     const start = snapTime(Math.max(0, (e.clientX - rect.left) / pxPerSec));
     const length = barSeconds(meterOf(snapshot));
     void (async () => {
-      const res = await exec("add_midi_clip", { trackId, start, length });
+      const res = await exec("add_midi_clip", { trackId: track.id, start, length });
       await refresh();
       const clipId = (res.data as { clipId?: string } | undefined)?.clipId;
       if (res.ok && clipId) openPianoRoll(clipId);
