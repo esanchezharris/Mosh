@@ -36,6 +36,19 @@ namespace
         o->setProperty ("trackId", args.getProperty ("trackId", var()).toString());
         return var (o);
     }
+
+    bool isStructuralCommand (const String& name)
+    {
+        static const StringArray allowed {
+            "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
+            "set_tempo", "set_time_signature", "set_metronome",
+            "set_master_volume", "set_master_pan",
+            "load_master_plugin", "load_master_builtin", "remove_master_plugin",
+            "reorder_master_plugin", "bypass_master_plugin", "set_master_plugin_param",
+            "set_key", "set_count_in", "set_record_options",
+        };
+        return allowed.contains (name);
+    }
 }
 
 void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
@@ -293,8 +306,9 @@ juce::var MoshOps::cmdMpSendSignal (const juce::var& args)
 juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result)
 {
     // Mirror a successful local session-global scalar op to the peer (LWW). Skipped
-    // when single-player, or while applying a peer's op (echo-free).
-    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_
+    // when single-player, while applying a peer's op (echo-free), or when the command
+    // is outside the same closed registry enforced at the inbound boundary.
+    if (isStructuralCommand (name) && mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_
         && (bool) result.getProperty ("ok", false))
         mpSession_->broadcastStructural (name, args);
     return result;
@@ -302,16 +316,20 @@ juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const 
 
 juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
 {
+    const auto name = args.getProperty ("command", var()).toString();
+    const auto commandArgs = args.getProperty ("args", var());
+    if (! isStructuralCommand (name) || ! commandArgs.isObject())
+        return errResult ("mp_apply_structural", "structural command is not allowed");
+
     // Re-execute a peer's structural op locally: applyingRemote_ bypasses the lock
     // guard (it is incoming history) AND short-circuits broadcastStructuralIfActive
     // (no echo). The inner command's own emit repaints the UI.
     auto* c = new DynamicObject();
-    c->setProperty ("command", args.getProperty ("command", var()));
-    c->setProperty ("args", args.getProperty ("args", var()));
+    c->setProperty ("command", name);
+    c->setProperty ("args", commandArgs);
 
-    applyingRemote_ = true;
+    const ScopedValueSetter<bool> remoteApply (applyingRemote_, true);
     auto r = execute (var (c));
-    applyingRemote_ = false;
     return okResult ("mp_apply_structural", r);
 }
 

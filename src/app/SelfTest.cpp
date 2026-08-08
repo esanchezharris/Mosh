@@ -11202,6 +11202,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Multiplayer: structural sync (scalar session-global ops)");
     {
         auto tempoNow = [] (MoshOps& o) { return (double) o.snapshot()["session"].getProperty ("tempo", 0.0); };
+        check (ok (cmd (ops, "new_project", args1 ("name", "mp-structural-authority"))),
+               "structural authority fixture project created");
+        const auto sentinelCreated = cmd (ops, "create_track", args1 ("name", "Structural Sentinel"));
+        check (ok (sentinelCreated), "structural authority sentinel track created");
+        const auto sentinelTrackId = sentinelCreated.getProperty ("data", juce::var())
+                                                    .getProperty ("trackId", juce::var()).toString();
+        const auto fixtureEditFile = eng.editFile().getFullPathName();
+        auto sentinelExists = [&]
+        {
+            const auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& track : *arr)
+                    if (track.getProperty ("id", juce::var()).toString() == sentinelTrackId)
+                        return true;
+            return false;
+        };
+        check (sentinelTrackId.isNotEmpty() && sentinelExists(),
+               "structural authority sentinel exists before the peer attack");
+
         cmd (ops, "set_tempo", objN ({ { "bpm", 120.0 } }));
         check (std::abs (tempoNow (ops) - 120.0) < 0.01, "baseline tempo is 120");
 
@@ -11217,11 +11236,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "local tempo change blocked while the peer holds the session lock");
         check (std::abs (tempoNow (ops) - 120.0) < 0.01, "tempo unchanged after the blocked local change");
 
+        // An authenticated peer controls both fields of a structural frame. Project/file/
+        // transport/agent/local-only/unknown commands must be rejected BEFORE the remote
+        // lock bypass and generic execute boundary. `new_project` is the malicious control:
+        // the pre-fix handler replaced this fixture project, removed its sentinel, logged the
+        // command, emitted a project-replacement event, and still returned outer ok:true.
+        const auto logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+        const auto logBytesBeforeAttack = logFile.getSize();
+        const auto eventsBeforeAttack = eventTypes.size();
+        auto rejectedProjectCommand = cmd (
+            ops, "mp_apply_structural",
+            objN ({ { "command", "new_project" },
+                    { "args", objN ({ { "name", "peer-controlled-project-replacement" } }) } }));
+        check (! ok (rejectedProjectCommand)
+                   && rejectedProjectCommand.getProperty ("command", juce::var()).toString() == "mp_apply_structural",
+               "peer structural new_project is explicitly rejected by mp_apply_structural");
+        check (eng.editFile().getFullPathName() == fixtureEditFile,
+               "rejected peer project command preserves the current project");
+        check (sentinelExists(), "rejected peer project command preserves the sentinel track");
+        check (logFile.getSize() == logBytesBeforeAttack,
+               "rejected peer project command writes no command-log record");
+        check (eventTypes.size() == eventsBeforeAttack,
+               "rejected peer project command emits no event");
+
+        // A rejection must not enter or leak applyingRemote_: this local command remains
+        // subject to the peer-held session lock immediately after the malicious frame.
+        check (! ok (cmd (ops, "set_tempo", objN ({ { "bpm", 150.0 } }))),
+               "rejected peer frame does not leak the remote lock bypass");
+        check (std::abs (tempoNow (ops) - 120.0) < 0.01,
+               "tempo unchanged after the post-rejection local lock check");
+
         // Applying the PEER's structural op bypasses the guard and lands (echo-free).
         check (ok (cmd (ops, "mp_apply_structural",
                         objN ({ { "command", "set_tempo" }, { "args", objN ({ { "bpm", 145.0 } }) } }))),
                "mp_apply_structural ok");
         check (std::abs (tempoNow (ops) - 145.0) < 0.01, "peer's tempo change applied (guard bypassed)");
+
+        const auto logBytesBeforeMalformed = logFile.getSize();
+        const auto eventsBeforeMalformed = eventTypes.size();
+        check (! ok (cmd (ops, "mp_apply_structural", objN ({ { "args", objN ({ { "bpm", 90.0 } }) } }))),
+               "malformed peer structural frame without a command is rejected");
+        check (! ok (cmd (ops, "mp_apply_structural",
+                          objN ({ { "command", "peer_unknown_command" }, { "args", juce::var (new juce::DynamicObject()) } }))),
+               "unknown peer structural command is rejected");
+        check (! ok (cmd (ops, "mp_apply_structural",
+                          objN ({ { "command", "set_tempo" }, { "args", "peer-controlled-non-object" } }))),
+               "allowlisted peer structural command with non-object args is rejected");
+        check (std::abs (tempoNow (ops) - 145.0) < 0.01,
+               "malformed, unknown, and non-object peer frames do not mutate tempo");
+        check (logFile.getSize() == logBytesBeforeMalformed && eventTypes.size() == eventsBeforeMalformed,
+               "malformed, unknown, and non-object peer frames write no log and emit no event");
 
         check (ok (cmd (ops, "mp_sync_locks", objN ({ { "active", false } }))), "session deactivated");
     }

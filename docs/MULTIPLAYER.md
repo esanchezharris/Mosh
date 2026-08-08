@@ -40,7 +40,10 @@ The split is enforced in one place — `LockManager::classify()`
   layer…) — clip-scoped, committed with their track.
 - **Session-global ops** — `create_track` / bus / group, **tempo**, **key**, master
   volume/pan, metronome, tempo-map. Scalars (tempo/key/master) use **last-writer-wins**
-  ([MultiplayerSession.cpp:182](src/multiplayer/MultiplayerSession.cpp:182)).
+  ([MultiplayerSession.cpp:182](src/multiplayer/MultiplayerSession.cpp:182)). Incoming peer
+  structural frames are restricted to the same closed command registry Mosh uses for
+  outbound structural broadcasts; project/file/export/agent/transport/local-only and
+  unknown commands are rejected before command execution.
 - **Locks + presence** — who's editing which track, name, colour, online status.
 
 ## Track locks & commit-on-move

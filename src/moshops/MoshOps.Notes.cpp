@@ -361,18 +361,16 @@ juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
     logLine ("create_annotation", args, true, {}, true);
     emitSnapshotInvalidated();
 
-    // Broadcast with the RESOLVED id (the generic wrapper would re-mint on the peer).
-    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_)
-    {
-        auto* ba = new DynamicObject();
-        ba->setProperty ("annotationId", annId);
-        ba->setProperty ("text", text);
-        ba->setProperty ("beat", beat);
-        if (color.isNotEmpty())  ba->setProperty ("color", color);
-        if (author.isNotEmpty()) ba->setProperty ("author", author);
-        mpSession_->broadcastStructural ("create_annotation", var (ba));
-    }
-    return okResult ("create_annotation", var (data));
+    // Broadcast the RESOLVED id through the shared structural producer seam (passing
+    // the original args would re-mint on the peer).
+    auto* broadcastArgs = new DynamicObject();
+    broadcastArgs->setProperty ("annotationId", annId);
+    broadcastArgs->setProperty ("text", text);
+    broadcastArgs->setProperty ("beat", beat);
+    if (color.isNotEmpty())  broadcastArgs->setProperty ("color", color);
+    if (author.isNotEmpty()) broadcastArgs->setProperty ("author", author);
+    return broadcastStructuralIfActive ("create_annotation", var (broadcastArgs),
+                                        okResult ("create_annotation", var (data)));
 }
 
 juce::var MoshOps::cmdEditAnnotation (const juce::var& args)
