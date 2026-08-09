@@ -38,7 +38,7 @@ type Props = {
 };
 
 type ClipMatch = { clip: Clip; track: Track };
-type Marquee = { trackId: string; startX: number; x: number; top: number };
+type Marquee = { pointerId: number; trackId: string; startX: number; x: number; top: number };
 
 export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }: Props) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -115,6 +115,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
     const contentRect = e.currentTarget.getBoundingClientRect();
     const lane = current.element.closest<HTMLElement>(".pt-lane");
     const next = {
+      pointerId: e.pointerId,
       trackId: current.track.id,
       startX: e.clientX - contentRect.left,
       x: e.clientX - contentRect.left,
@@ -141,8 +142,10 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
 
   const finishGesture = (e: React.PointerEvent<HTMLDivElement>) => {
     const velocity = velocityDrag.current;
+    let handled = false;
     if (velocity?.pointerId === e.pointerId) {
       e.preventDefault(); e.stopPropagation();
+      handled = true;
       velocityDrag.current = null;
       const delta = Math.round((velocity.startY - e.clientY) * 0.8);
       if (delta && useStore.getState().projectEpoch === velocity.epoch) {
@@ -154,8 +157,9 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
       }
     }
     const area = marqueeRef.current;
-    if (area) {
+    if (area?.pointerId === e.pointerId) {
       e.preventDefault(); e.stopPropagation();
+      handled = true;
       marqueeRef.current = null; setMarquee(null);
       const start = Math.min(area.startX, area.x) / pxPerSec;
       const end = Math.max(area.startX, area.x) / pxPerSec;
@@ -166,6 +170,20 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
         : [];
       select(ids, false);
     }
+    if (handled) releasePointer(e.currentTarget, e.pointerId);
+  };
+
+  const cancelGesture = (e: React.PointerEvent<HTMLDivElement>) => {
+    const velocity = velocityDrag.current;
+    const area = marqueeRef.current;
+    const cancelled = velocity?.pointerId === e.pointerId || area?.pointerId === e.pointerId;
+    if (!cancelled) return;
+    e.preventDefault(); e.stopPropagation();
+    if (velocity?.pointerId === e.pointerId) velocityDrag.current = null;
+    if (area?.pointerId === e.pointerId) {
+      marqueeRef.current = null;
+      setMarquee(null);
+    }
     releasePointer(e.currentTarget, e.pointerId);
   };
 
@@ -174,7 +192,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
       role="region" aria-label="Editing timeline" tabIndex={0}>
       <div className="pt-timeline-content" style={{ width: contentWidth }}
         onPointerDownCapture={onPointerDownCapture} onPointerMoveCapture={onPointerMoveCapture}
-        onPointerUpCapture={finishGesture} onPointerCancelCapture={finishGesture}
+        onPointerUpCapture={finishGesture} onPointerCancelCapture={cancelGesture}
         onPointerLeave={() => { lastIntentClip.current?.removeAttribute("data-pt-intent"); setHoveredIntent(null); }}>
         <div className="pt-timeline-title-spacer">Timeline</div>
         {tracks.map((track) => (

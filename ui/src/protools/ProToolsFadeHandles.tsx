@@ -65,7 +65,7 @@ export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
     setPreview({ side: current.side, seconds });
   };
 
-  const end = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const finish = (e: React.PointerEvent<HTMLButtonElement>) => {
     const current = drag.current;
     if (!current || current.pointerId !== e.pointerId) return;
     drag.current = null;
@@ -74,6 +74,14 @@ export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
     setPreview(null);
     if (useStore.getState().projectEpoch === current.epoch && value !== current.initial)
       commit(current.side, value);
+  };
+
+  const cancel = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const current = drag.current;
+    if (!current || current.pointerId !== e.pointerId) return;
+    drag.current = null;
+    releasePointer(e.currentTarget, e.pointerId);
+    setPreview(null);
   };
 
   const keyAdjust = (side: Side) => (e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -94,7 +102,7 @@ export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
           aria-label={`${side === "in" ? "Fade in" : "Fade out"} ${clip.name}`}
           onPointerEnter={() => setHoveredIntent(side === "in" ? "fade-in" : "fade-out")}
           onPointerLeave={() => { if (!drag.current) setHoveredIntent(null); }}
-          onPointerDown={begin(side)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+          onPointerDown={begin(side)} onPointerMove={move} onPointerUp={finish} onPointerCancel={cancel}
           onKeyDown={keyAdjust(side)} />
       ))}
     </div>

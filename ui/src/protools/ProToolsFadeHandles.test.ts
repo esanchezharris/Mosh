@@ -56,4 +56,22 @@ describe("ProToolsFadeHandles project epoch cancellation", () => {
     // Then: the old clip is never addressed by set_clip_fade.
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it("abandons a fade preview when the drag is cancelled", () => {
+    // Given: an in-handle drag has produced a nonzero preview.
+    const handle = host.querySelector<HTMLButtonElement>('button[aria-label^="Fade in"]');
+    const fadeLine = host.querySelector<HTMLElement>(".pt-fade-line.in");
+    if (!handle || !fadeLine) throw new Error("fade-in controls did not render");
+    dispatchPointer(handle, "pointerdown", { pointerId: 10, button: 0, clientX: 10, clientY: 20 });
+    dispatchPointer(handle, "pointermove", { pointerId: 10, buttons: 1, clientX: 110, clientY: 20 });
+    expect(fadeLine.style.width).toBe("100px");
+
+    // When: the browser cancels the drag and an unrelated release follows.
+    dispatchPointer(handle, "pointercancel", { pointerId: 10, clientX: 110, clientY: 20 });
+    dispatchPointer(handle, "pointerup", { pointerId: 11, clientX: 110, clientY: 20 });
+
+    // Then: no fade command is committed and the preview is gone.
+    expect(exec).not.toHaveBeenCalled();
+    expect(fadeLine.style.width).toBe("0px");
+  });
 });
