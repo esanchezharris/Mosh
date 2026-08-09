@@ -12236,6 +12236,110 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "live bootstrap transaction fixture rolls back cleanly");
             cmd (authorityOps, "mp_leave_session");
             transactionHost.leave();
+
+            if (std::getenv ("MOSH_MP_SYNC_TRANSFER") == nullptr)
+            {
+                section ("Multiplayer C013: bootstrap capture follows queued commits");
+
+                check (ok (cmd (authorityOps, "new_project", args1 ("name", "c013-capture-order"))),
+                       "capture-order responder project initialized");
+                const auto created = cmd (authorityOps, "create_track", args1 ("name", "C013 Before"));
+                const auto trackId = created.getProperty ("data", var())
+                                            .getProperty ("trackId", var()).toString();
+                check (ok (created) && trackId.isNotEmpty(),
+                       "capture-order responder created the Before track");
+                check (ok (cmd (authorityOps, "rename_track",
+                                objN ({ { "trackId", trackId }, { "name", "C013 After" } }))),
+                       "capture-order fixture prepared the After state");
+                const auto serializedAfter = cmd (authorityOps, "mp_serialize_track",
+                                                  args1 ("trackId", trackId));
+                const auto serializedData = serializedAfter.getProperty ("data", var());
+                const auto afterBlob = serializedData.getProperty ("blob", var()).toString();
+                const auto logicalId = serializedData.getProperty ("logicalId", var()).toString();
+                check (ok (serializedAfter) && afterBlob.isNotEmpty() && logicalId.isNotEmpty(),
+                       "capture-order fixture serialized a valid After commit");
+                check (ok (cmd (authorityOps, "rename_track",
+                                objN ({ { "trackId", trackId }, { "name", "C013 Before" } }))),
+                       "capture-order responder restored the observable Before state");
+
+                const auto responder = cmd (authorityOps, "mp_create_session",
+                                            objN ({ { "name", "CaptureResponder" },
+                                                    { "color", "#c01313" } }));
+                const auto responderCode = responder.getProperty ("data", var())
+                                                     .getProperty ("code", var()).toString();
+                check (ok (responder) && responderCode.isNotEmpty(),
+                       "capture-order responder created an owned relay room");
+                MultiplayerClient requester;
+                check (requester.joinSession (responderCode, "CaptureRequester", "#13c013"),
+                       "capture-order requester joined the responder");
+                const auto lock = requester.tryLock (logicalId);
+                const auto epoch = (int) lock.getProperty ("epoch", 0);
+                check ((bool) lock.getProperty ("granted", false) && epoch > 0,
+                       "capture-order requester acquired the track epoch");
+
+                auto* commit = new DynamicObject();
+                commit->setProperty ("type", "commit");
+                commit->setProperty ("logicalId", logicalId);
+                commit->setProperty ("epoch", epoch);
+                commit->setProperty ("blob", afterBlob);
+                const auto commitSequence = requester.publish (var (commit));
+
+                const String requestId ("c013-capture-order-request");
+                auto* request = new DynamicObject();
+                request->setProperty ("type", "bootstrap_request");
+                request->setProperty ("requestId", requestId);
+                const auto requestSequence = requester.publish (var (request));
+                check (commitSequence > 0 && requestSequence > commitSequence,
+                       "capture-order relay sequenced commit before bootstrap request");
+
+                // Keep the message thread parked until the responder's poll thread
+                // has fetched both relay-ordered frames and queued its callback.
+                Thread::sleep (750);
+
+                var answer;
+                int answerSequence = 0;
+                const auto answerDeadline = Time::getMillisecondCounter() + (uint32) 5000;
+                while (! answer.isObject() && Time::getMillisecondCounter() < answerDeadline)
+                {
+                    pumpFor (25);
+                    for (const auto& frame : requester.poll())
+                    {
+                        const auto message = frame.getProperty ("msg", var());
+                        if (message.getProperty ("type", var()).toString() == "bootstrap_state"
+                            && message.getProperty ("requestId", var()).toString() == requestId
+                            && message.getProperty ("to", var()).toString() == requester.peerId())
+                        {
+                            answer = message;
+                            answerSequence = (int) frame.getProperty ("seq", 0);
+                        }
+                    }
+                }
+                check (answer.isObject() && answerSequence > requestSequence,
+                       "capture-order responder published one correlated answer after the request");
+
+                String answerName;
+                const auto answerTracks = answer.getProperty ("tracks", var());
+                if (auto* tracks = answerTracks.getArray())
+                    for (const auto& track : *tracks)
+                        if (track.getProperty ("logicalId", var()).toString() == logicalId)
+                        {
+                            const auto answerBlob = track.getProperty ("blob", var()).toString();
+                            if (auto xml = parseXML (answerBlob))
+                                answerName = ValueTree::fromXml (*xml).getProperty ("name").toString();
+                        }
+                check (answerName == "C013 After",
+                       "capture-order bootstrap answer includes the earlier queued commit");
+
+                const auto settleDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+                while (! hasTrackNamed (authorityOps, "C013 After")
+                       && Time::getMillisecondCounter() < settleDeadline)
+                    pumpFor (25);
+                check (hasTrackNamed (authorityOps, "C013 After"),
+                       "capture-order responder itself settles on After");
+
+                requester.leave();
+                cmd (authorityOps, "mp_leave_session");
+            }
         }
 
         // P4 — audio stems. Content-addressing + the by-hash rewrite run on any

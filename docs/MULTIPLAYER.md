@@ -184,11 +184,10 @@ sanitized log record, clears stale local undo history, and never echoes back to 
     (download any missing stems, then apply) routed through the SAME single-worker FIFO — even
     `structural` (which has nothing to download) — so a fast tempo change enqueued right after a
     slow commit upload can never apply before it: **global apply order is preserved** end-to-end.
-  - The host's bootstrap answer is split: the engine-touching content-address/serialize step
-    stays on the message thread; the worker uploads every stem and THEN publishes
-    `bootstrap_state`.
-    The captured answer can still precede an earlier received job that is waiting in the FIFO;
-    ordering answer capture behind prior applies remains a separate follow-up.
+  - The host's bootstrap answer is split into two ordered jobs. A message-thread apply barrier
+    captures the project only after every earlier relay-ordered state apply; the worker then
+    uploads every stem and publishes `bootstrap_state`. A commit immediately followed by a
+    bootstrap request therefore cannot produce a correctly correlated but stale answer.
   - Why a **dedicated** worker (not the existing poll thread): a multi-minute transfer on the
     poll thread would stop it from calling `/mp/events` and so from refreshing this peer's own
     held lock leases — the relay auto-frees a lock after **90s of silence**

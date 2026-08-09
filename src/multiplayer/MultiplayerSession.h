@@ -55,12 +55,11 @@ namespace mosh
         end-to-end. presence/selection/webrtc/locks/mp_state are UNCHANGED (still
         applied immediately inline) — they are not state that must serialize
         against a stem transfer.
-      - The host's bootstrap answer is split: the message-thread part
-        (MoshOps::serializeProjectForBootstrapAnswer, called from provideBootstrap_)
-        does the engine-touching content-addressing/serialize and returns
-        {tracks, annotations, stemFiles[]} WITHOUT uploading; one worker job then
-        uploads every stem THEN publishes bootstrap_state (in-job ordering
-        guarantees the guest's prefetch finds the blobs already on the relay).
+      - The host's bootstrap answer uses two ordered jobs: a message-thread apply
+        barrier captures {tracks, annotations, stemFiles[]} only after every prior
+        relay-ordered state apply, then a worker job uploads every stem and publishes
+        bootstrap_state (in-job ordering guarantees the guest's prefetch finds the
+        blobs already on the relay).
       - Why a DEDICATED worker rather than reusing the poll thread: a multi-minute
         transfer on the poll thread would stop it from calling client_.poll()
         (no /mp/events heartbeat) and so from touch()-ing this peer's own held

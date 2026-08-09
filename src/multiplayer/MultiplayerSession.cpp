@@ -530,38 +530,55 @@ void MultiplayerSession::pollLoop()
                                          || msg.getProperty ("requestId", var()).toString().isEmpty()))
                         continue;
 
-                    auto answer = provideBootstrap_ ? provideBootstrap_() : var();
-                    auto* msgOut = new DynamicObject();
-                    msgOut->setProperty ("type", "bootstrap_state");
-                    if (hasRequestId)
-                    {
-                        msgOut->setProperty ("requestId", msg.getProperty ("requestId", var()));
-                        msgOut->setProperty ("to", f.getProperty ("from", var()));
-                    }
-                    msgOut->setProperty ("tracks", answer.getProperty ("tracks", var()));
-                    msgOut->setProperty ("annotations", answer.getProperty ("annotations", var()));
-                    const var msgOutVar (msgOut);
-                    const auto stemFiles = answer.getProperty ("stemFiles", var());
+                    const auto requestId = hasRequestId
+                        ? msg.getProperty ("requestId", var()).toString() : String();
+                    const auto requester = f.getProperty ("from", var()).toString();
 
-                    TransferQueue::Job job;
-                    job.prefetch = [this, msgOutVar, stemFiles]
+                    // Capture is itself an ordered apply stage. A commit frame
+                    // earlier in the same relay batch may only have queued its
+                    // message-thread apply so far; routing this barrier through
+                    // the same FIFO guarantees that apply runs before we serialize
+                    // the answer. The upload/publish remains a second worker job.
+                    TransferQueue::Job captureJob;
+                    captureJob.apply = [this, hasRequestId, requestId, requester]
                     {
-                        if (auto* sf = stemFiles.getArray())
-                            for (auto& s : *sf)
-                            {
-                                if (transferAborting())
-                                    return;
-                                const auto h = s.getProperty ("hash", var()).toString();
-                                const auto e = s.getProperty ("ext", var()).toString();
-                                const auto p = s.getProperty ("path", var()).toString();
-                                if (h.isEmpty() || p.isEmpty())
-                                    continue;
-                                client_.uploadBlob (h, e, File (p), [this] { return transferAborting(); });
-                            }
-                        client_.publish (msgOutVar);
+                        if (! running_.load())
+                            return;
+
+                        const auto answer = provideBootstrap_ ? provideBootstrap_() : var();
+                        auto* msgOut = new DynamicObject();
+                        msgOut->setProperty ("type", "bootstrap_state");
+                        if (hasRequestId)
+                        {
+                            msgOut->setProperty ("requestId", requestId);
+                            msgOut->setProperty ("to", requester);
+                        }
+                        msgOut->setProperty ("tracks", answer.getProperty ("tracks", var()));
+                        msgOut->setProperty ("annotations", answer.getProperty ("annotations", var()));
+                        const var msgOutVar (msgOut);
+                        const auto stemFiles = answer.getProperty ("stemFiles", var());
+
+                        TransferQueue::Job publishJob;
+                        publishJob.prefetch = [this, msgOutVar, stemFiles]
+                        {
+                            if (auto* sf = stemFiles.getArray())
+                                for (auto& s : *sf)
+                                {
+                                    if (transferAborting())
+                                        return;
+                                    const auto h = s.getProperty ("hash", var()).toString();
+                                    const auto e = s.getProperty ("ext", var()).toString();
+                                    const auto p = s.getProperty ("path", var()).toString();
+                                    if (h.isEmpty() || p.isEmpty())
+                                        continue;
+                                    client_.uploadBlob (h, e, File (p),
+                                                        [this] { return transferAborting(); });
+                                }
+                            client_.publish (msgOutVar);
+                        };
+                        routeStateMutatingJob (std::move (publishJob));
                     };
-                    // No apply stage -- nothing to apply locally on the host side.
-                    routeStateMutatingJob (std::move (job));
+                    routeStateMutatingJob (std::move (captureJob));
                 }
                 else if (type == "bootstrap_state")
                 {
