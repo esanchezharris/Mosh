@@ -67,17 +67,21 @@ Top-to-bottom, arrangement-idle, dock closed:
 
 ### Detail dock behavior (clip view + device view)
 
-Live 12.4 stacks two panels above the status bar: **clip panel on top
-(flexible), device panel below (fixed ~212pt — dragging its top edge does
-nothing)**.
+The measured Live 12.4 reference stacks two panels above the status bar. Mosh
+intentionally diverges for the MIDI workflow: the MIDI editor and Devices are
+**mutually exclusive**, giving note editing the full dock height. Selecting/opening
+a MIDI clip shows the editor; clicking the right-side track name shows Devices.
+Wave/audio and Moshi drawer postures retain their existing stacked device panel.
 
 - Clip panel default ~248–265pt; **min clamp 226pt** (a short drag past min
   holds at 226; a long drag well past min **dismisses the view** — drag-to-close,
   not a hard floor).
+- Devices-only posture remains fixed ~212pt with no splitter. A track-name click
+  explicitly re-shows it even if Devices was previously hidden on that same track.
 - **Max = Expanded Clip View**: dragging the clip panel divider to the top (or
   View → Expand Clip View ⌥⌘E) makes the editor consume the **entire window** —
-  browser, arrangement and headers all hidden, only control bar + editor +
-  device strip + status bar. This state is **sticky across close/reopen** of the
+  browser, arrangement and headers all hidden, only control bar + editor + status
+  bar. This state is **sticky across close/reopen** of the
   clip view. SPEC §7 doesn't mention expanded mode — add it.
 - Mixer strip (View → Mixer ⌥⌘M) overlays the bottom of the lanes area,
   **coexists with the dock** (stacked above it), ~350pt tall observed; the lanes

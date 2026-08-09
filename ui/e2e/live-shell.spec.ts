@@ -120,7 +120,7 @@ test("browser: Live's category column renders, and categories show Mosh's data",
   await expect(page.getByTestId("live-error")).toHaveCount(0);
 });
 
-test("double-clicking a MIDI clip docks the REAL editor (no modal, no backdrop)", async ({ page }) => {
+test("double-clicking a MIDI clip replaces Devices with the real editor", async ({ page }) => {
   await bootLive(page);
   // no clip open → the dock is in its devices posture
   await expect(page.getByTestId("live-devices")).toBeVisible();
@@ -130,13 +130,14 @@ test("double-clicking a MIDI clip docks the REAL editor (no modal, no backdrop)"
   await expect.poll(() => storeVal<string | null>(page, "editingClipId")).not.toBeNull();
   const dock = page.getByTestId("live-dock");
   await expect(dock).toBeVisible();
-  // the editor is the SAME PianoRoll component classic/v2 show as a modal, docked:
-  // no .modal-backdrop anywhere in the shell, and the clip panel adds no ✕ of its
-  // own (the only dock close is the fixed device panel's, which hides just that panel)
+  // The editor is the SAME PianoRoll component classic/v2 show as a modal, docked.
+  // It replaces the Devices posture instead of stacking above it, preserving the
+  // dock's full height for note editing.
   await expect(page.locator(".live-shell .pr.docked")).toBeVisible();
   await expect(page.locator(".live-shell .modal-backdrop")).toHaveCount(0);
-  await expect(page.getByTestId("live-dock").getByTestId("live-dock-close")).toHaveCount(1);
-  await expect(page.getByTestId("live-devpanel")).toBeVisible();
+  await expect(page.getByTestId("live-dock").getByTestId("live-dock-close")).toHaveCount(0);
+  await expect(page.getByTestId("live-devpanel")).toHaveCount(0);
+  await expect(page.getByTestId("live-devices")).toHaveCount(0);
   await expect(page.locator(".live-shell .pr.docked")).toContainText("loop");
   // the editor's own ✕ clears editingClipId and the dock falls back to devices
   await page.locator(".live-shell .pr.docked .pr-head .btn.x").click();
@@ -734,7 +735,7 @@ test("dock splitter: a short drag holds at the 226pt floor; a long one dismisses
   const splitter = page.getByTestId("live-dock-splitter");
 
   // short drag below the floor → clamps at 226 (the persisted setting carries the
-  // clamped value; the editor + fixed device panel stay mounted)
+  // clamped value; the exclusive MIDI editor stays mounted)
   let sb = (await splitter.boundingBox())!;
   await page.mouse.move(sb.x + sb.width / 2, sb.y);
   await page.mouse.down();
@@ -762,14 +763,14 @@ test("Expanded Clip View (⌥⌘E): the editor fills the window, sticky across c
   await page.locator('.live-shell [data-testid="v2-clip"]').first().dblclick();
   await expect(page.locator(".live-shell .pr.docked")).toBeVisible();
   await page.keyboard.press("Alt+Meta+e");
-  // browser + arrangement hidden (CSS — they stay mounted); control bar + editor +
-  // device strip + status bar stay visible
+  // Browser + arrangement are hidden (CSS — they stay mounted); the MIDI editor
+  // remains exclusive, so only the control bar + editor + status bar stay visible.
   await expect(page.locator(".live-shell")).toHaveAttribute("data-clip-expanded", "true");
   await expect(page.getByTestId("live-browser")).toBeHidden();
   await expect(page.getByTestId("live-arrangement")).toBeHidden();
   await expect(page.getByTestId("live-controlbar")).toBeVisible();
   await expect(page.locator(".live-shell .pr.docked")).toBeVisible();
-  await expect(page.getByTestId("live-devpanel")).toBeVisible();
+  await expect(page.getByTestId("live-devpanel")).toHaveCount(0);
   await expect(page.getByTestId("live-statusbar")).toBeVisible();
   // sticky: close the editor, reopen — still expanded
   await page.locator(".live-shell .pr.docked .pr-head .btn.x").click();
@@ -1264,14 +1265,20 @@ test("single-click opens the clip's view (MIDI editor; wave audio editor)", asyn
   await expect(page.locator(".live-shell .pr.docked")).toHaveCount(0);
 });
 
-test("clicking a track header returns the dock to devices-only", async ({ page }) => {
+test("clicking the current track name replaces the MIDI editor with Devices", async ({ page }) => {
   await bootLive(page);
+  // Even if the user previously hid Devices on this same track, its name box is
+  // the explicit way back to that posture.
+  await page.getByRole("button", { name: "Hide the device view" }).click();
+  await expect(page.getByTestId("live-devpanel")).toHaveCount(0);
   await page.locator('.live-shell [data-testid="v2-clip"]').first().click();
   await expect(page.locator(".live-shell .pr.docked")).toBeVisible();
-  await page.getByTestId("live-track-header").nth(1).getByRole("button", { name: /Select track/ }).click();
+  await expect(page.getByTestId("live-devpanel")).toHaveCount(0);
+  await page.getByTestId("live-track-header").first().locator(".live-tname").click();
   await expect(page.locator(".live-shell .pr.docked")).toHaveCount(0);
   await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
   await expect(page.getByTestId("live-devices")).toBeVisible();
+  await expect(page.getByTestId("live-devpanel")).toBeVisible();
 });
 
 test("⌘-click on the shown clip keeps its view open (the ableton table has no toggle-off)", async ({ page }) => {

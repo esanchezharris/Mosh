@@ -129,6 +129,13 @@ track index.
 ## 7. Clip view dock (the MIDI editor — Phase 2's target)
 
 Total ~265pt, full width. Left → right:
+
+**Mosh interaction contract:** opening/selecting a MIDI clip makes the MIDI editor
+replace the Devices rack in this dock; the two never stack. Clicking the selected
+track's right-side name box closes the clip view and restores Devices. This is an
+intentional usability override of the measured Live stacked-panel posture: stacking
+leaves too little vertical room for note editing.
+
 1. **Clip params panel** (~150pt, near-black `#13100d`): Start/Position/Length fields
    (bars.beats.16ths, with Set buttons), Loop toggle (accent when on), Signature,
    Groove, Scale pickers.

@@ -422,10 +422,15 @@ function TrackHeader({ track, index, height, takeRows = 0, takesOpen = false, on
   const setLaneHeight = useLive((s) => s.setLaneHeight);
   const renamingTrackId = useLive((s) => s.renamingTrackId);
   const setRenamingTrack = useLive((s) => s.setRenamingTrack);
+  const setDevicesHidden = useLive((s) => s.setDevicesHidden);
   const [menu, setMenu] = useState<TrackMenuState | null>(null);
   const laneDrag = useRef<{ pointerId: number; startY: number; startH: number } | null>(null);
 
-  const selectTrack = () => { clearSelection(); setSelectedTrack(track.id); };
+  const selectTrack = () => {
+    clearSelection();
+    setSelectedTrack(track.id);
+    setDevicesHidden(false);
+  };
   const setMonitor = (mode: "on" | "automatic" | "off") =>
     void exec("set_input_monitor", { trackId: track.id, mode });
 

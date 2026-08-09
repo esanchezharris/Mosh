@@ -624,15 +624,15 @@
 .live-dock-splitter:focus-visible { outline: 2px solid var(--live-accent); outline-offset: -1px; }
 /* The docked MIDI editor fills its clip panel: the modal's sizing, border, radius
    and pop-in animation are all frame concerns, and this mount has no frame. Flex
-   sizing (not height:100%) so the fixed device panel can stack below it. */
+   sizing (not height:100%) keeps its own scroll region bounded. */
 .live-dock-editor { padding: 0; }
 .live-shell .pr.docked {
   width: 100%; height: auto;
   flex: 1 1 auto; min-height: 0;
   border: none; border-radius: 0; animation: none;
 }
-/* The device panel — FIXED ~212pt (WIDGETS §1: dragging its top edge does nothing),
-   stacked below the clip panel when one is open, or the whole dock when not. */
+/* The device panel — FIXED ~212pt (WIDGETS §1: dragging its top edge does nothing).
+   It is the whole dock in the Devices posture; MIDI editor posture excludes it. */
 .live-devpanel {
   flex: 0 0 var(--live-device-h);
   display: flex; flex-direction: column; min-height: 0;
@@ -640,8 +640,8 @@
 }
 .live-devpanel .live-devices { flex: 1 1 auto; min-height: 0; }
 .live-dock-fixed { flex: 0 0 var(--live-device-h); }
-/* Expanded Clip View (⌥⌘E): the shell hides browser+arrangement; the dock takes
-   the rest (the editor keeps its device strip below it, per WIDGETS §1). */
+/* Expanded Clip View (⌥⌘E): the shell hides browser+arrangement; the exclusive
+   MIDI editor takes the rest of the shell. */
 .live-shell[data-clip-expanded="true"] .live-body { display: none; }
 
 /* devices view — the selected track's plugin strip (Live's device-view dock half) */

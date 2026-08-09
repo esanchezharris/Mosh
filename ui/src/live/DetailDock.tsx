@@ -1,17 +1,16 @@
 // The detail dock (WIDGETS.md §1 "Detail dock behavior" — the measured 12.4.2
 // rules, which refined SPEC §7):
 //
-//   • TWO stacked panels when a clip is open: the clip panel on top (flexible —
-//     splitter drag, min clamp 226pt) and the device panel below (FIXED ~212pt —
-//     its top edge does not drag). With no clip open the dock IS just the device
-//     panel (fixed 212, no splitter).
+//   • The MIDI editor and Devices are mutually exclusive: selecting/opening a
+//     MIDI clip gives the editor the whole detail dock; selecting a track name
+//     returns the dock to Devices. Other clip/drawer postures retain the measured
+//     stacked behavior until their own interaction contracts are revised.
 //   • A LONG drag past the clip panel's min dismisses the view (drag-to-close —
 //     dockDragDismisses in dockGeometry.ts); a short one holds at 226.
 //   • EXPANDED CLIP VIEW (⌥⌘E / the editor's ⤢ control): the editor consumes the
 //     whole window — browser/arrangement/headers hidden (the data-clip-expanded
-//     attribute on .live-shell owns that), only control bar + editor + device
-//     strip + status bar remain. Sticky across close/reopen via the
-//     liveClipExpanded setting.
+//     attribute on .live-shell owns that), only control bar + editor + status bar
+//     remain. Sticky across close/reopen via the liveClipExpanded setting.
 //
 // Content priority: Moshi stub drawer (control-bar spark) → docked MIDI editor →
 // wave clip editor → device panel. The MIDI editor's own header keeps the ONE close
@@ -52,10 +51,10 @@ export function DetailDock() {
   const showMoshi = moshiOpen;
   const showEditor = !showMoshi && clip?.type === "midi";
   const showWaveEditor = !showMoshi && !showEditor && clip?.type === "wave";
-  // The clip panel = editor / wave view / Moshi; the device panel stacks below it
-  // when one of those is open, or IS the dock when nothing is.
+  // The MIDI editor owns the whole detail dock. Selecting a track name clears
+  // editingClipId through selection-follow, which returns this to Devices.
   const clipPanelOpen = showMoshi || showEditor || showWaveEditor;
-  const showDevices = !!selectedTrack && !devicesHidden;
+  const showDevices = !!selectedTrack && !devicesHidden && !showEditor;
   // Expanded Clip View remains MIDI-only in this slice; the audio editor stays
   // docked until its own posture and escape behavior receive a dedicated audit.
   const expanded = expandedSetting && showEditor;
@@ -152,8 +151,8 @@ export function DetailDock() {
       className={`live-dock${showEditor ? " live-dock-editor" : ""}${expanded ? " expanded" : ""}`}
       data-testid="live-dock"
       aria-label={showEditor ? "Clip view" : "Detail view"}
-      // The basis is the CLIP panel's height plus the fixed device panel's — the
-      // splitter's `height` is the clip panel alone (WIDGETS §1's stacked panels).
+      // The basis is the clip panel plus a fixed device panel only for the remaining
+      // stacked postures; MIDI supplies no devicePanel and receives the full height.
       style={expanded ? { flex: "1 1 auto" } : { flexBasis: height + (devicePanel ? DEVICE_PANEL_H : 0) }}
     >
       {!expanded && splitter}
