@@ -103,6 +103,25 @@ The session control lives in the topbar's **2-player (B-5) pop**
 - **Host:** open the pop → set your name + colour → **Create session** → a **room code**
   appears (read-only, click to select). Share it (paste into Discord).
 - **Guest:** open the pop → set name + colour → paste the code → **Join**.
+
+### Bootstrap acceptance and data safety
+
+Joining issues a locally generated unpredictable `requestId`. A new-form bootstrap answer
+echoes that ID and is addressed to the joiner's relay-frame peer ID; the joiner consumes the
+pending request exactly once. Unknown IDs, wrong recipients, partial correlation fields,
+unsolicited states, and replays are ignored before any stem prefetch or project mutation.
+For mixed versions, an old request still receives the old response shape, and a new requester
+accepts one fully legacy response only while exactly one local request is pending and the
+response relay sequence is newer than that request. Retained requestless history from before
+the join cannot consume or suppress the new request.
+
+The entire bundle is preflighted before prefetch and again before replacement: `tracks` must be
+an explicit array; every envelope identity must uniquely match a real serialized track root;
+audio references require a 64-hex hash plus a short alphanumeric extension; and annotation XML
+must contain only the annotation schema. A valid explicit empty project remains valid. Any
+malformed entry rejects the whole bundle without changing tracks, annotations, events, JSONL,
+or undo state. A successful adoption is one non-undoable project-replacement event and one
+sanitized log record, clears stale local undo history, and never echoes back to the relay.
 - Once connected, both see a **roster** (peer name, colour swatch, online dot) and a **Leave**
   control. Session state rides the `mp_state` event, off-snapshot.
 
@@ -168,6 +187,8 @@ The session control lives in the topbar's **2-player (B-5) pop**
   - The host's bootstrap answer is split: the engine-touching content-address/serialize step
     stays on the message thread; the worker uploads every stem and THEN publishes
     `bootstrap_state`.
+    The captured answer can still precede an earlier received job that is waiting in the FIFO;
+    ordering answer capture behind prior applies remains a separate follow-up.
   - Why a **dedicated** worker (not the existing poll thread): a multi-minute transfer on the
     poll thread would stop it from calling `/mp/events` and so from refreshing this peer's own
     held lock leases — the relay auto-frees a lock after **90s of silence**

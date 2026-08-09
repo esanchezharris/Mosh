@@ -449,17 +449,91 @@ juce::var MoshOps::serializeProjectForBootstrapAnswer()
     return contentAddressWholeProjectNoUpload();
 }
 
+juce::String MoshOps::validateBootstrapBundle (const juce::var& args) const
+{
+    if (! args.isObject())
+        return "bootstrap bundle must be an object";
+
+    const auto tracksValue = args.getProperty ("tracks", var());
+    auto* tracksArray = tracksValue.getArray();
+    if (tracksArray == nullptr)
+        return "bootstrap bundle requires a tracks array";
+
+    StringArray logicalIds;
+    for (const auto& track : *tracksArray)
+    {
+        if (! track.isObject())
+            return "bootstrap track entry must be an object";
+
+        const auto logicalIdValue = track.getProperty ("logicalId", var());
+        const auto blobValue = track.getProperty ("blob", var());
+        if (! logicalIdValue.isString() || logicalIdValue.toString().isEmpty())
+            return "bootstrap track requires a string logicalId";
+        if (! blobValue.isString() || blobValue.toString().isEmpty())
+            return "bootstrap track requires a string blob";
+
+        const auto logicalId = logicalIdValue.toString();
+        if (logicalIds.contains (logicalId))
+            return "bootstrap contains duplicate logicalId";
+        logicalIds.add (logicalId);
+
+        if (auto validated = trackcommit::validate (blobValue.toString(), logicalId); ! validated.ok)
+            return validated.error;
+
+        const auto refsValue = track.getProperty ("audioRefs", var());
+        if (! refsValue.isVoid())
+        {
+            auto* refs = refsValue.getArray();
+            if (refs == nullptr)
+                return "bootstrap audioRefs must be an array";
+            for (const auto& ref : *refs)
+            {
+                if (! ref.isObject())
+                    return "bootstrap audioRef must be an object";
+                const auto hashValue = ref.getProperty ("hash", var());
+                const auto extValue = ref.getProperty ("ext", var());
+                if (! hashValue.isString() || ! extValue.isString())
+                    return "bootstrap audioRef hash and ext must be strings";
+                const auto hash = hashValue.toString();
+                const auto ext = extValue.toString();
+                if (hash.length() != 64 || ! hash.containsOnly ("0123456789abcdefABCDEF"))
+                    return "bootstrap audioRef hash must be 64 hex characters";
+                if (ext.isEmpty() || ext.length() > 16
+                    || ! ext.containsOnly ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
+                    return "bootstrap audioRef extension is invalid";
+            }
+        }
+    }
+
+    const auto annotationsValue = args.getProperty ("annotations", var());
+    if (! annotationsValue.isVoid())
+    {
+        if (! annotationsValue.isString())
+            return "bootstrap annotations must be XML text";
+        const auto text = annotationsValue.toString();
+        if (text.isNotEmpty())
+        {
+            auto xml = parseXML (text);
+            if (xml == nullptr)
+                return "bootstrap annotations are not valid XML";
+            auto annotations = ValueTree::fromXml (*xml);
+            if (! annotations.isValid() || ! annotations.hasType (ids::MOSH_ANNOTATIONS))
+                return "bootstrap annotations have the wrong root";
+            for (int i = 0; i < annotations.getNumChildren(); ++i)
+                if (! annotations.getChild (i).hasType (ids::MOSH_ANNOTATION))
+                    return "bootstrap annotations contain an invalid child";
+        }
+    }
+
+    return {};
+}
+
 juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
 {
-    // P6 — adopt a peer's project: drop our local tracks, rebuild from the bundle.
-    // nullptr UndoManager + no relay echo (this is incoming history, like a commit).
+    if (const auto error = validateBootstrapBundle (args); error.isNotEmpty())
+        return errResult ("mp_apply_bootstrap", error);
+
     auto& edit = eng.edit();
-    for (auto* t : te::getAudioTracks (edit))
-        if (t != nullptr)
-        {
-            auto st = t->state;
-            st.getParent().removeChild (st, nullptr);
-        }
 
     // PR-2: bundles arriving through the LIVE SESSION path (MultiplayerSession's
     // "bootstrap_state" handling) have already had every stem prefetched by the
@@ -469,30 +543,42 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
     // exactly as before — the direct-command contract is unchanged.
     const bool stemsPrefetched = (bool) args.getProperty ("stemsPrefetched", false);
 
-    int applied = 0;
+    auto* tracksArray = args.getProperty ("tracks", var()).getArray();
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
-    if (auto* arr = args.getProperty ("tracks", var()).getArray())
-        for (auto& tv : *arr)
+    for (auto& tv : *tracksArray)
+    {
+        if (! stemsPrefetched)
+            if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
+                for (auto& a : *refs)
+                {
+                    const auto h = a.getProperty ("hash", var()).toString();
+                    const auto e = a.getProperty ("ext", var()).toString();
+                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                        mpSession_->downloadBlob (h, e, dest);
+                }
+    }
+
+    // Validate again immediately before the destructive phase. The first pass protects
+    // prefetch; this pass protects deletion if the command is ever refactored to yield.
+    if (const auto error = validateBootstrapBundle (args); error.isNotEmpty())
+        return errResult ("mp_apply_bootstrap", error);
+
+    for (auto* t : te::getAudioTracks (edit))
+        if (t != nullptr)
         {
-            // Fetch any by-hash stems this track references (into audio/by-hash/) BEFORE
-            // applying, so its pre-existing wave clips resolve without a host re-commit —
-            // the late-join analogue of the commit-apply download. The result is ignored
-            // here (a transient failure just leaves the clip sourceMissing) — the
-            // self-heal pass below retries anything still missing once the tracks land.
-            if (! stemsPrefetched)
-                if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
-                    for (auto& a : *refs)
-                    {
-                        const auto h = a.getProperty ("hash", var()).toString();
-                        const auto e = a.getProperty ("ext", var()).toString();
-                        if (h.isEmpty()) continue;
-                        if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                            mpSession_->downloadBlob (h, e, dest);
-                    }
-            const auto blob = tv.getProperty ("blob", var()).toString();
-            if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
-                ++applied;
+            auto state = t->state;
+            state.getParent().removeChild (state, nullptr);
         }
+
+    int applied = 0;
+    for (auto& tv : *tracksArray)
+    {
+        const auto logicalId = tv.getProperty ("logicalId", var()).toString();
+        const auto result = trackcommit::apply (edit, tv.getProperty ("blob", var()).toString(), logicalId);
+        if (! result.ok)
+            return errResult ("mp_apply_bootstrap", "validated track failed to apply: " + result.error);
+        ++applied;
+    }
 
     // Adopt the host's annotations (a top-level Edit child, outside the per-track blobs):
     // drop ours, graft the host's subtree. nullptr UndoManager — incoming history, like
@@ -504,6 +590,12 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             if (auto vt = juce::ValueTree::fromXml (*xml); vt.isValid())
                 edit.state.appendChild (vt, nullptr);
 
+    int annotationCount = 0;
+    if (auto annotations = edit.state.getChildWithName (ids::MOSH_ANNOTATIONS); annotations.isValid())
+        annotationCount = annotations.getNumChildren();
+
+    undoManager().clearUndoHistory();
+    ++editRevision_;
     eng.markDirty();
     emitProjectReplaced ("multiplayer_bootstrap");
 
@@ -514,8 +606,18 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
     // no-op (synchronous, effectively free) when nothing is missing.
     cmdMpFetchMissingStems (var (new DynamicObject()));
 
+    const auto source = args.getProperty ("source", var()).toString() == "peer" ? String ("peer")
+                                                                                 : String ("direct");
+    auto* logArgsObject = new DynamicObject();
+    logArgsObject->setProperty ("trackCount", applied);
+    logArgsObject->setProperty ("annotationCount", annotationCount);
+    logArgsObject->setProperty ("source", source);
+    logLine ("mp_apply_bootstrap", var (logArgsObject), true, {}, false);
+
     auto* d = new DynamicObject();
     d->setProperty ("applied", applied);
+    d->setProperty ("annotationCount", annotationCount);
+    d->setProperty ("source", source);
     return okResult ("mp_apply_bootstrap", var (d));
 }
 

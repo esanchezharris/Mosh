@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 namespace mosh
 {
@@ -22,10 +23,12 @@ namespace
 }
 
 MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
-                                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap,
+                                        ProvideBootstrapFn provideBootstrap, ValidateBootstrapFn validateBootstrap,
+                                        ApplyBootstrapFn applyBootstrap,
                                         ApplyStructuralFn applyStructural)
     : applyCommit_ (std::move (applyCommit)), emit_ (std::move (emit)), syncLocks_ (std::move (syncLocks)),
-      provideBootstrap_ (std::move (provideBootstrap)), applyBootstrap_ (std::move (applyBootstrap)),
+      provideBootstrap_ (std::move (provideBootstrap)), validateBootstrap_ (std::move (validateBootstrap)),
+      applyBootstrap_ (std::move (applyBootstrap)),
       applyStructural_ (std::move (applyStructural)),
       syncMode_ (readSyncTransferEnv())
 {
@@ -34,12 +37,14 @@ MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, 
 MultiplayerSession::~MultiplayerSession()
 {
     stopPoll();
+    clearPendingBootstrapRequests();
     // transferQueue_'s own destructor aborts + joins its worker if one is still
     // alive (idempotent with the explicit reset() in leaveSession()).
 }
 
 juce::String MultiplayerSession::createSession (const String& name, const String& color)
 {
+    clearPendingBootstrapRequests();
     const auto code = client_.createSession (name, color);
     if (code.isNotEmpty())
     {
@@ -54,6 +59,7 @@ juce::String MultiplayerSession::createSession (const String& name, const String
 
 bool MultiplayerSession::joinSession (const String& code, const String& name, const String& color)
 {
+    clearPendingBootstrapRequests();
     if (! client_.joinSession (code, name, color))
         return false;
     transferQueue_ = std::make_unique<TransferQueue> (
@@ -61,9 +67,7 @@ bool MultiplayerSession::joinSession (const String& code, const String& name, co
     startPoll();
     // P6 — ask the host for the full project so a late-joiner starts from their
     // state (the host answers in its poll loop with a bootstrap_state).
-    auto* req = new DynamicObject();
-    req->setProperty ("type", "bootstrap_request");
-    client_.publish (var (req));
+    requestBootstrap();
     return true;
 }
 
@@ -71,11 +75,97 @@ void MultiplayerSession::leaveSession()
 {
     stopPoll();             // no more poll callAsyncs after this (they no-op on !running_)
     transferQueue_.reset(); // PR-2: abort() + join the worker before it's gone for good
+    clearPendingBootstrapRequests();
     client_.leave();
     syncLocks_ (false, {}, {});
     auto* o = new DynamicObject();
     o->setProperty ("active", false);
     emit_ ("mp_state", var (o));
+}
+
+void MultiplayerSession::requestBootstrap()
+{
+    const auto requestId = Uuid().toString();
+    {
+        const std::lock_guard<std::mutex> lock (bootstrapMutex_);
+        pendingBootstrapRequests_.clear();
+        // Keep legacy acceptance closed until publish() returns the relay sequence
+        // that separates retained history from a fresh response.
+        pendingBootstrapRequests_.emplace (requestId, std::numeric_limits<int>::max());
+    }
+
+    auto* request = new DynamicObject();
+    request->setProperty ("type", "bootstrap_request");
+    request->setProperty ("requestId", requestId);
+    const auto publishSequence = client_.publish (var (request));
+    const std::lock_guard<std::mutex> lock (bootstrapMutex_);
+    const auto found = pendingBootstrapRequests_.find (requestId);
+    if (found == pendingBootstrapRequests_.end())
+        return;
+    if (publishSequence < 1)
+        pendingBootstrapRequests_.erase (found);
+    else
+    {
+        found->second = publishSequence;
+    }
+}
+
+void MultiplayerSession::clearPendingBootstrapRequests()
+{
+    const std::lock_guard<std::mutex> lock (bootstrapMutex_);
+    pendingBootstrapRequests_.clear();
+}
+
+bool MultiplayerSession::acceptBootstrapState (const var& msg, const String& self, int frameSequence)
+{
+    auto* object = msg.getDynamicObject();
+    if (object == nullptr)
+        return false;
+
+    const bool hasRequestId = object->hasProperty ("requestId");
+    const bool hasTo = object->hasProperty ("to");
+    if (hasRequestId != hasTo)
+        return false;
+
+    String requestId;
+    bool legacy = ! hasRequestId;
+    if (! hasRequestId)
+    {
+        const std::lock_guard<std::mutex> lock (bootstrapMutex_);
+        if (pendingBootstrapRequests_.size() == 1)
+        {
+            const auto& pending = *pendingBootstrapRequests_.begin();
+            if (frameSequence > pending.second)
+                requestId = pending.first;
+        }
+    }
+    else
+    {
+        const auto requestIdValue = object->getProperty ("requestId");
+        const auto toValue = object->getProperty ("to");
+        if (! requestIdValue.isString() || ! toValue.isString())
+            return false;
+        requestId = requestIdValue.toString();
+        if (requestId.isEmpty() || toValue.toString() != self)
+            return false;
+        const std::lock_guard<std::mutex> lock (bootstrapMutex_);
+        if (pendingBootstrapRequests_.find (requestId) == pendingBootstrapRequests_.end())
+            requestId.clear();
+    }
+
+    if (requestId.isEmpty())
+        return false;
+    if (validateBootstrap_ && validateBootstrap_ (msg).isNotEmpty())
+        return false;
+
+    const std::lock_guard<std::mutex> lock (bootstrapMutex_);
+    const auto found = pendingBootstrapRequests_.find (requestId);
+    if (found == pendingBootstrapRequests_.end())
+        return false;
+    if (legacy && (pendingBootstrapRequests_.size() != 1 || frameSequence <= found->second))
+        return false;
+    pendingBootstrapRequests_.erase (found);
+    return true;
 }
 
 int MultiplayerSession::claim (const String& logicalId)
@@ -366,11 +456,7 @@ void MultiplayerSession::pollLoop()
         // offline), the incremental frames can't catch us up — re-request the full
         // project. poll() has already jumped haveSeq to latest, so this fires once.
         if (running_.load() && client_.needsResync())
-        {
-            auto* req = new DynamicObject();
-            req->setProperty ("type", "bootstrap_request");
-            client_.publish (var (req));
-        }
+            requestBootstrap();
 
         // Marshal everything to the message thread (engine + WebView live there).
         MessageManager::callAsync ([this, frames, locks, peers, code, self]
@@ -432,9 +518,20 @@ void MultiplayerSession::pollLoop()
                     // one worker job then uploads every stem THEN publishes
                     // bootstrap_state (in-job ordering guarantees the guest's
                     // prefetch finds the blobs already on the relay).
+                    auto* requestObject = msg.getDynamicObject();
+                    const bool hasRequestId = requestObject != nullptr && requestObject->hasProperty ("requestId");
+                    if (hasRequestId && (! msg.getProperty ("requestId", var()).isString()
+                                         || msg.getProperty ("requestId", var()).toString().isEmpty()))
+                        continue;
+
                     auto answer = provideBootstrap_ ? provideBootstrap_() : var();
                     auto* msgOut = new DynamicObject();
                     msgOut->setProperty ("type", "bootstrap_state");
+                    if (hasRequestId)
+                    {
+                        msgOut->setProperty ("requestId", msg.getProperty ("requestId", var()));
+                        msgOut->setProperty ("to", f.getProperty ("from", var()));
+                    }
                     msgOut->setProperty ("tracks", answer.getProperty ("tracks", var()));
                     msgOut->setProperty ("annotations", answer.getProperty ("annotations", var()));
                     const var msgOutVar (msgOut);
@@ -462,6 +559,8 @@ void MultiplayerSession::pollLoop()
                 }
                 else if (type == "bootstrap_state")
                 {
+                    if (! acceptBootstrapState (msg, self, (int) f.getProperty ("seq", 0)))
+                        continue;
                     TransferQueue::Job job;
                     // SHOULD-FIX (PR-2 review): captured NOW (message thread, enqueue
                     // time) -- see prefetchAudioRefs's doc comment.
@@ -494,7 +593,15 @@ void MultiplayerSession::pollLoop()
                         withFlag->setProperty ("tracks", msg.getProperty ("tracks", var()));
                         withFlag->setProperty ("annotations", msg.getProperty ("annotations", var()));
                         withFlag->setProperty ("stemsPrefetched", true);
-                        applyBootstrap_ (var (withFlag));
+                        withFlag->setProperty ("source", "peer");
+                        const auto result = applyBootstrap_ (var (withFlag));
+                        if (! (bool) result.getProperty ("ok", false))
+                        {
+                            auto* diagnostic = new DynamicObject();
+                            diagnostic->setProperty ("stage", "apply");
+                            diagnostic->setProperty ("reason", "rejected");
+                            emit_ ("mp_bootstrap_rejected", var (diagnostic));
+                        }
                     };
                     routeStateMutatingJob (std::move (job));
                 }

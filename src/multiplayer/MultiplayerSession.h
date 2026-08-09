@@ -93,12 +93,14 @@ public:
     // P6 bootstrap: host serializes the whole project (returns the bundle);
     // joiner adopts a received bundle.
     using ProvideBootstrapFn = std::function<juce::var()>;
-    using ApplyBootstrapFn   = std::function<void (const juce::var& bundle)>;
+    using ValidateBootstrapFn = std::function<juce::String (const juce::var& bundle)>;
+    using ApplyBootstrapFn   = std::function<juce::var (const juce::var& bundle)>;
     // Apply a peer's session-global scalar op ({command, args}) locally.
     using ApplyStructuralFn  = std::function<void (const juce::var& msg)>;
 
     MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
-                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap,
+                        ProvideBootstrapFn provideBootstrap, ValidateBootstrapFn validateBootstrap,
+                        ApplyBootstrapFn applyBootstrap,
                         ApplyStructuralFn applyStructural);
     ~MultiplayerSession();
 
@@ -109,6 +111,11 @@ public:
     /** Stop polling + leave the room; aborts any in-flight/queued stem transfer
         (PR-2) before pushing an inactive mp_state. */
     void leaveSession();
+
+    /** Request a fresh full-project bootstrap. A newer request supersedes any
+        unanswered older request, keeping correlation bounded and legacy fallback
+        unambiguous. */
+    void requestBootstrap();
 
     bool         active()   const { return running_.load(); }
     juce::String roomCode() const { return client_.roomCode(); }
@@ -192,12 +199,15 @@ private:
     // explicitly aborting one) -- the null-safe abort-check every prefetch closure
     // polls, so a stale in-flight transfer notices a leaveSession() promptly.
     bool transferAborting() const;
+    void clearPendingBootstrapRequests();
+    bool acceptBootstrapState (const juce::var& msg, const juce::String& self, int frameSequence);
 
     MultiplayerClient client_;
     ApplyCommitFn      applyCommit_;
     EmitFn             emit_;
     SyncLocksFn        syncLocks_;
     ProvideBootstrapFn provideBootstrap_;
+    ValidateBootstrapFn validateBootstrap_;
     ApplyBootstrapFn   applyBootstrap_;
     ApplyStructuralFn  applyStructural_;
     std::map<juce::String, int> heldEpochs_;   // logicalId -> granted epoch (commit fencing); message-thread only
@@ -218,6 +228,9 @@ private:
 
     std::mutex              inFlightMutex_;
     std::set<juce::String>  inFlightStems_;         // guarded by inFlightMutex_ -- see claimStem/releaseStem doc
+
+    std::mutex                  bootstrapMutex_;
+    std::map<juce::String, int> pendingBootstrapRequests_; // requestId -> publish sequence, consumed once
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MultiplayerSession)
 };

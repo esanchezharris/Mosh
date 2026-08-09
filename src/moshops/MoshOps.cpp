@@ -231,7 +231,14 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
         // directly-callable command) is UNCHANGED and keeps uploading synchronously
         // itself, so existing direct-call tests stay valid.
         [this] { return serializeProjectForBootstrapAnswer(); },   // provide
-        [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); },             // adopt
+        [this] (const juce::var& bundle) { return validateBootstrapBundle (bundle); },  // preflight
+        [this] (const juce::var& bundle)
+        {
+            auto* command = new DynamicObject();
+            command->setProperty ("command", "mp_apply_bootstrap");
+            command->setProperty ("args", bundle);
+            return execute (var (command));
+        },                                                                              // adopt
         [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
     refreshMpStemDir();
 }

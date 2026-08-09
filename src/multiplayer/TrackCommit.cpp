@@ -4,6 +4,50 @@
 
 namespace mosh::trackcommit
 {
+namespace
+{
+ApplyResult parseIncoming (const juce::String& blob, const juce::String& expectedLogicalId,
+                           juce::ValueTree* parsed)
+{
+    ApplyResult r;
+    auto xml = juce::parseXML (blob);
+    if (xml == nullptr)
+    {
+        r.error = "blob is not valid XML";
+        return r;
+    }
+
+    auto incoming = juce::ValueTree::fromXml (*xml);
+    if (! incoming.isValid())
+    {
+        r.error = "blob is not a valid ValueTree";
+        return r;
+    }
+    if (incoming.getType().toString() != "TRACK")
+    {
+        r.error = "blob root is not a track";
+        return r;
+    }
+
+    const auto lid = logicalid::track (incoming);
+    if (lid.isEmpty())
+    {
+        r.error = "incoming track has no moshLogicalId";
+        return r;
+    }
+    if (expectedLogicalId.isNotEmpty() && lid != expectedLogicalId)
+    {
+        r.error = "incoming track logicalId does not match commit envelope";
+        return r;
+    }
+
+    r.ok = true;
+    r.logicalId = lid;
+    if (parsed != nullptr)
+        *parsed = std::move (incoming);
+    return r;
+}
+}
 
 juce::String serialize (te::Track& track)
 {
@@ -19,34 +63,11 @@ juce::String serialize (te::Track& track)
 ApplyResult apply (te::Edit& edit, const juce::String& blob,
                    const juce::String& expectedLogicalId)
 {
-    ApplyResult r;
-
-    auto xml = juce::parseXML (blob);
-    if (xml == nullptr)
-    {
-        r.error = "blob is not valid XML";
+    juce::ValueTree incoming;
+    auto r = parseIncoming (blob, expectedLogicalId, &incoming);
+    if (! r.ok)
         return r;
-    }
-
-    auto incoming = juce::ValueTree::fromXml (*xml);
-    if (! incoming.isValid())
-    {
-        r.error = "blob is not a valid ValueTree";
-        return r;
-    }
-
-    const auto lid = logicalid::track (incoming);
-    if (lid.isEmpty())
-    {
-        r.error = "incoming track has no moshLogicalId";
-        return r;
-    }
-    if (expectedLogicalId.isNotEmpty() && lid != expectedLogicalId)
-    {
-        r.error = "incoming track logicalId does not match commit envelope";
-        return r;
-    }
-    r.logicalId = lid;
+    const auto lid = r.logicalId;
 
     // Fresh copy + remap EditItemIDs so they cannot collide with anything live in
     // this engine (the peer's ids are allocator-dependent and meaningless here).
@@ -79,6 +100,11 @@ ApplyResult apply (te::Edit& edit, const juce::String& blob,
 
     r.ok = true;
     return r;
+}
+
+ApplyResult validate (const juce::String& blob, const juce::String& expectedLogicalId)
+{
+    return parseIncoming (blob, expectedLogicalId, nullptr);
 }
 
 }

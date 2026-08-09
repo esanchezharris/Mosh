@@ -14,9 +14,11 @@ sweep-specific items and the "why" behind each one.*
 - **Joining replaces your current project.** The host's bootstrap adopts wholesale — the
   guest's local tracks are non-undoably swapped out for the host's. **PR #350 added a
   confirm dialog** ("Joining adopts the host's project and replaces yours — continue?")
-  whenever the joiner's project already has tracks, so this can no longer happen silently.
-  The underlying mechanism (no snapshot/backup of the pre-join project, no
-  `clearUndoHistory()` call) is unchanged — see the next section. **Guidance: join on an
+  whenever the joiner's project already has tracks. Bootstrap state is now additionally
+  request-correlated, one-shot, targeted, and all-or-nothing validated; unsolicited, stale,
+  replayed, or malformed responses cannot replace the project. A successful adoption clears
+  the pre-bootstrap undo history. There is still no snapshot/backup of the pre-join project,
+  so the confirmed replacement itself remains non-undoable. **Guidance: join on an
   empty or throwaway project** so the confirm dialog is a formality, not a real choice
   between two pieces of work.
 - **A crashed peer now expires after the 90-second reconnect grace.** The local and cloud
@@ -27,13 +29,14 @@ sweep-specific items and the "why" behind each one.*
 
 ## Still open — deferred post-playtest (documented, not code-fixed)
 
-- **Undo after a remote change is local-only and can look wrong.** A peer's applied edit
-  (tempo/key/master, or the bootstrap resync itself) lands on *your* local undo stack —
+- **Undo after a remote change is local-only and can look wrong.** A peer's ordinary applied
+  edit (tempo/key/master) lands relative to *your* local undo stack —
   pressing Cmd+Z right after someone else's change lands can revert *their* change, locally,
   on your machine only (it does not corrupt the shared session — a resync/re-commit
   straightens it back out). **Guidance:** don't reach for Cmd+Z immediately after you see a
   peer's change arrive; if something looks off, keep working — the next commit/resync
-  corrects it.
+  corrects it. Whole-project bootstrap is the exception: it clears stale local undo history
+  after a successful adoption.
 - **Selecting a peer's idle track can silently claim it after ~90 seconds.** Lock leases
   aren't renewed just because you're still looking at (not actively editing) a track — if
   your peer merely clicks the same track after your lease lapses, they can take it out from

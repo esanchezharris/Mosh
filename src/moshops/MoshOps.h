@@ -174,6 +174,7 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    juce::String validateBootstrapBundle (const juce::var& args) const;
     // PR-2 — shared content-addressing/serialize body (no upload) for the whole
     // project; cmdMpSerializeProject uploads synchronously right after (kept
     // behavior-compatible with direct-call tests), serializeProjectForBootstrapAnswer

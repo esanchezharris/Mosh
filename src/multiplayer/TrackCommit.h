@@ -27,6 +27,10 @@ namespace trackcommit
         juce::String error;
     };
 
+    /** Parse and validate a serialized track without mutating an Edit. */
+    ApplyResult validate (const juce::String& blob,
+                          const juce::String& expectedLogicalId = {});
+
     /** Apply a serialized track blob to `edit`: find the local track with the same
         moshLogicalId and REPLACE it (remove + re-add a remapped copy at the same
         position), or CREATE it if absent. ALL ValueTree mutations use a nullptr

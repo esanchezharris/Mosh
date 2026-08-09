@@ -618,6 +618,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // check can inspect the payload).
     std::vector<String> eventTypes;
     var lastEvent;
+    var lastMpCommitDone;
     bool sawProjectReplacementEvent = false;
     String lastProjectReplacementReason;
     bool lastProjectReplacementManagedByUi = false;
@@ -625,6 +626,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     {
         eventTypes.push_back (e.getProperty ("type", var()).toString());
         lastEvent = e;
+        if (e.getProperty ("type", var()).toString() == "mp_commit_done")
+            lastMpCommitDone = e;
         if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
             && (bool) e.getProperty ("payload", var()).getProperty ("projectReplaced", false))
         {
@@ -11027,7 +11030,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     section ("Multiplayer: commit envelope identity binds the applied track");
     {
-        MoshEngine identityEng (false, true, "mp-commit-identity");
+        MoshEngine identityEng (false, true, "session-mp-commit-identity");
         MoshOps    identityOps (identityEng);
         std::vector<String> identityEvents;
         identityOps.setEventSink ([&] (const var& event)
@@ -11354,6 +11357,72 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((int) bundle.getProperty ("count", 0) == 2, "serialized a 2-track project bundle");
         check (bundle.getProperty ("annotations", juce::var()).toString().isNotEmpty(), "bundle carries the annotations subtree");
 
+        // C010: a bootstrap is a whole-project transaction. Reject every malformed
+        // envelope before touching the current project, its undo head, events, or log.
+        auto bootstrapRejectsWithoutMutation = [&] (const juce::var& candidate,
+                                                     const juce::String& label)
+        {
+            const auto tracksBefore = tracks (ops);
+            const auto annotationsBefore = JSON::toString (ops.snapshot().getProperty ("annotations", var()), true);
+            const auto logBefore = eng.sessionDir().getChildFile ("mosh-log.jsonl").getSize();
+            sawProjectReplacementEvent = false;
+
+            const auto rejected = cmd (ops, "mp_apply_bootstrap", candidate);
+            check (! ok (rejected), label + " rejects");
+            check (tracks (ops) == tracksBefore, label + " preserves every local track");
+            check (JSON::toString (ops.snapshot().getProperty ("annotations", var()), true) == annotationsBefore,
+                   label + " preserves local annotations");
+            check (! sawProjectReplacementEvent, label + " emits no project replacement");
+            check (eng.sessionDir().getChildFile ("mosh-log.jsonl").getSize() == logBefore,
+                   label + " writes no JSONL record");
+        };
+
+        bootstrapRejectsWithoutMutation (objN ({}), "bootstrap missing tracks");
+        bootstrapRejectsWithoutMutation (args1 ("tracks", "not-an-array"), "bootstrap non-array tracks");
+
+        juce::var firstEntry;
+        if (auto* bundleTracks = bundle.getProperty ("tracks", var()).getArray();
+            bundleTracks != nullptr && ! bundleTracks->isEmpty())
+            firstEntry = bundleTracks->getFirst();
+        check (firstEntry.isObject(), "bootstrap preflight fixture has a valid track entry");
+
+        auto mismatchEntry = JSON::parse (JSON::toString (firstEntry, true));
+        if (auto* o = mismatchEntry.getDynamicObject()) o->setProperty ("logicalId", "wrong-envelope-id");
+        bootstrapRejectsWithoutMutation (args1 ("tracks", var (Array<var> { mismatchEntry })),
+                                         "bootstrap envelope/blob identity mismatch");
+
+        const auto firstLogicalId = firstEntry.getProperty ("logicalId", var()).toString();
+        ValueTree wrongTrackRoot ("NOT_A_TRACK");
+        wrongTrackRoot.setProperty (ids::moshLogicalId, firstLogicalId, nullptr);
+        auto wrongRootEntry = objN ({ { "logicalId", firstLogicalId },
+                                     { "blob", wrongTrackRoot.createXml()->toString() },
+                                     { "audioRefs", var (Array<var>()) } });
+        bootstrapRejectsWithoutMutation (args1 ("tracks", var (Array<var> { wrongRootEntry })),
+                                         "bootstrap non-track blob root");
+
+        bootstrapRejectsWithoutMutation (
+            args1 ("tracks", var (Array<var> { firstEntry, var ("malformed-entry") })),
+            "bootstrap partial malformed bundle");
+        bootstrapRejectsWithoutMutation (
+            args1 ("tracks", var (Array<var> { firstEntry, firstEntry })),
+            "bootstrap duplicate logical identity");
+        bootstrapRejectsWithoutMutation (
+            objN ({ { "tracks", var (Array<var>()) }, { "annotations", "<WRONG_ROOT/>" } }),
+            "bootstrap wrong annotation root");
+        bootstrapRejectsWithoutMutation (
+            objN ({ { "tracks", var (Array<var>()) },
+                    { "annotations", "<MOSH_ANNOTATIONS><WRONG_CHILD/></MOSH_ANNOTATIONS>" } }),
+            "bootstrap wrong annotation child");
+
+        auto badRefEntry = JSON::parse (JSON::toString (firstEntry, true));
+        auto* badRef = new DynamicObject();
+        badRef->setProperty ("hash", "not-a-sha256");
+        badRef->setProperty ("ext", "../wav");
+        if (auto* o = badRefEntry.getDynamicObject())
+            o->setProperty ("audioRefs", var (Array<var> { var (badRef) }));
+        bootstrapRejectsWithoutMutation (args1 ("tracks", var (Array<var> { badRefEntry })),
+                                         "bootstrap unsafe audio reference");
+
         // REGRESSION (bootstrap audio late-join): the bundle must carry per-track by-hash
         // audioRefs so a late-joiner can fetch PRE-EXISTING audio, not just structure/MIDI.
         // Before the fix mp_serialize_project never content-addressed/uploaded → the bundle
@@ -11379,6 +11448,40 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! hostRef.startsWith ("../") && ! hostRef.contains ("/../"),
                    "bootstrap by-hash ref has no spurious '../' (" + hostRef + ")");
         }
+
+        const auto tracksBeforeTxnRefusal = tracks (ops);
+        check (ok (txnBegin (ops, "bootstrap-refusal-txn", "bootstrap refusal",
+                             txnManifest ({ { "bootstrap-next", "create_track" } }))),
+               "bootstrap transaction-refusal fixture opens");
+        const auto refusedDuringTxn = cmd (ops, "mp_apply_bootstrap", bundle);
+        check (! ok (refusedDuringTxn)
+                   && refusedDuringTxn.getProperty ("error", var()).toString()
+                                          .containsIgnoreCase ("transaction_in_progress"),
+               "bootstrap is refused at execute while an agent transaction is open");
+        check (tracks (ops) == tracksBeforeTxnRefusal,
+               "transaction refusal preserves the project before dispatch");
+        check (ok (cmd (ops, "batch_rollback", args1 ("transactionId", "bootstrap-refusal-txn"))),
+               "bootstrap transaction-refusal fixture rolls back cleanly");
+
+        const auto logLinesBeforeEmpty = StringArray::fromLines (
+            eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()).size();
+        sawProjectReplacementEvent = false;
+        const auto emptyApply = cmd (ops, "mp_apply_bootstrap",
+                                     objN ({ { "tracks", var (Array<var>()) },
+                                             { "annotations", "" } }));
+        check (ok (emptyApply)
+                   && (int) emptyApply.getProperty ("data", var()).getProperty ("applied", -1) == 0,
+               "explicit empty bootstrap is a valid project adoption");
+        check (tracks (ops) == 0 && ops.snapshot().getProperty ("annotations", var()).size() == 0,
+               "valid empty bootstrap clears tracks and annotations");
+        check (sawProjectReplacementEvent, "valid empty bootstrap emits one project replacement");
+        const auto logLinesAfterEmpty = StringArray::fromLines (
+            eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()).size();
+        check (logLinesAfterEmpty == logLinesBeforeEmpty + 1
+                   && commandLogHasRecord (eng, "mp_apply_bootstrap", true, false),
+               "valid empty bootstrap writes one undoable:false JSONL record");
+        cmd (ops, "undo");
+        check (tracks (ops) == 0, "undo cannot resurrect the pre-bootstrap project");
 
         sawProjectReplacementEvent = false;
         lastProjectReplacementReason.clear();
@@ -11409,6 +11512,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (joinerHasAnn, "joiner adopts the host's pre-existing annotation via bootstrap");
         check ((int) app.getProperty ("data", juce::var()).getProperty ("applied", 0) == 2, "bootstrap applied 2 tracks");
         check (tracks (ops) == 2, "joiner now holds the host's 2 tracks");
+        auto appliedTracks = ops.snapshot().getProperty ("tracks", var());
+        check (appliedTracks.size() == 2
+                   && appliedTracks[0].getProperty ("name", var()).toString() == "Boot A"
+                   && appliedTracks[1].getProperty ("name", var()).toString() == "Boot B",
+               "matched multi-track bootstrap preserves envelope order");
         check (lidByName (ops, "Boot A") == lidA && lidA.isNotEmpty(), "Boot A logicalId preserved across bootstrap");
         check (lidByName (ops, "Boot B") == lidB && lidB.isNotEmpty(), "Boot B logicalId preserved across bootstrap");
         int aClips = 0;
@@ -11829,6 +11937,276 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && ! privateSessionLog.contains (privateCreatedCode),
                "multiplayer JSONL omits private room, name, color, and returned-code values");
 
+        section ("Multiplayer C010: bootstrap request authority + one-shot adoption");
+        {
+            auto pumpFor = [] (int milliseconds)
+            {
+                auto* mm = MessageManager::getInstanceWithoutCreating();
+                const auto deadline = Time::getMillisecondCounter() + (uint32) milliseconds;
+                while (Time::getMillisecondCounter() < deadline)
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (25);
+                    else Thread::sleep (25);
+                }
+            };
+            auto hasTrackNamed = [] (MoshOps& target, const String& name)
+            {
+                const auto snapshot = target.snapshot();
+                const auto tracks = snapshot.getProperty ("tracks", var());
+                if (auto* array = tracks.getArray())
+                    for (const auto& track : *array)
+                        if (track.getProperty ("name", var()).toString() == name)
+                            return true;
+                return false;
+            };
+            auto waitForRequest = [&pumpFor] (MultiplayerClient& host)
+            {
+                var request;
+                const auto deadline = Time::getMillisecondCounter() + (uint32) 3000;
+                while (! request.isObject() && Time::getMillisecondCounter() < deadline)
+                {
+                    for (const auto& frame : host.poll())
+                    {
+                        auto message = frame.getProperty ("msg", var());
+                        if (message.getProperty ("type", var()).toString() == "bootstrap_request")
+                            request = message;
+                    }
+                    if (! request.isObject()) pumpFor (25);
+                }
+                return request;
+            };
+
+            const auto savedSelftestSession = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
+            ::unsetenv ("MOSH_SELFTEST_SESSION");
+            auto authorityEngine = std::make_unique<MoshEngine> (false, true, "session-c010-bootstrap-authority");
+            if (savedSelftestSession.isNotEmpty())
+                ::setenv ("MOSH_SELFTEST_SESSION", savedSelftestSession.toRawUTF8(), 1);
+            else
+                ::unsetenv ("MOSH_SELFTEST_SESSION");
+            MoshOps authorityOps (*authorityEngine);
+            check (authorityEngine->sessionDir() != eng.sessionDir(),
+                   "C010 authority engine has a distinct owned session root");
+            int projectReplacements = 0;
+            authorityOps.setEventSink ([&projectReplacements] (const var& event)
+            {
+                if (event.getProperty ("type", var()).toString() == "snapshot_invalidated"
+                    && (bool) event.getProperty ("payload", var()).getProperty ("projectReplaced", false))
+                    ++projectReplacements;
+            });
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-source"))),
+                   "C010 source project initialized");
+            check (ok (cmd (authorityOps, "create_track", args1 ("name", "C010 Host Track"))),
+                   "C010 source track created");
+            const auto sourceSerialized = cmd (authorityOps, "mp_serialize_project");
+            check (ok (sourceSerialized), "C010 source project serialized");
+            const auto sourceBundle = sourceSerialized.getProperty ("data", var());
+            check (sourceBundle.getProperty ("tracks", var()).size() == 1,
+                   "C010 source bundle contains one valid track");
+
+            // Only the newest locally issued request remains authoritative. This
+            // bounds pending state and keeps requestless mixed-version fallback
+            // unambiguous even after reconnect/resync asks again.
+            MultiplayerClient supersessionHost;
+            const auto supersessionCode = supersessionHost.createSession ("SupersessionHost", "#090909");
+            int supersessionApplies = 0;
+            MultiplayerSession supersessionGuest (
+                [] (const var&) {},
+                [] (const String&, var) {},
+                [] (bool, const String&, const std::map<String, String>&) {},
+                [] () -> var { return {}; },
+                [] (const var&) -> String { return {}; },
+                [&supersessionApplies] (const var&) -> var
+                {
+                    ++supersessionApplies;
+                    return {};
+                },
+                [] (const var&) {});
+            check (supersessionGuest.joinSession (supersessionCode, "SupersessionGuest", "#101010"),
+                   "supersession guest joined");
+            const auto supersededRequest = waitForRequest (supersessionHost);
+            supersessionGuest.requestBootstrap();
+            const auto currentRequest = waitForRequest (supersessionHost);
+            const auto supersededId = supersededRequest.getProperty ("requestId", var()).toString();
+            const auto currentId = currentRequest.getProperty ("requestId", var()).toString();
+            check (supersededId.isNotEmpty() && currentId.isNotEmpty() && supersededId != currentId,
+                   "a newer bootstrap request supersedes a distinct older request");
+            auto supersessionState = [&sourceBundle, &supersessionGuest] (const String& requestId)
+            {
+                return objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                               { "to", supersessionGuest.selfPeer() },
+                               { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                               { "annotations", sourceBundle.getProperty ("annotations", var()) } });
+            };
+            supersessionHost.publish (supersessionState (supersededId));
+            pumpFor (500);
+            check (supersessionApplies == 0,
+                   "a response to the superseded bootstrap request is ignored");
+            supersessionHost.publish (supersessionState (currentId));
+            const auto supersessionDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+            while (supersessionApplies == 0 && Time::getMillisecondCounter() < supersessionDeadline)
+                pumpFor (25);
+            check (supersessionApplies == 1,
+                   "only the current bootstrap request is accepted once");
+            supersessionGuest.leaveSession();
+            supersessionHost.leave();
+
+            // A room member may send a bootstrap state, but a creator has no locally
+            // pending request and therefore must ignore it before prefetch or mutation.
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-unsolicited"))),
+                   "unsolicited victim project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Unsolicited Sentinel"));
+            cmd (authorityOps, "create_annotation",
+                 objN ({ { "annotationId", "unsolicited-ann" }, { "text", "keep" }, { "beat", 1.0 } }));
+            check (hasTrackNamed (authorityOps, "Unsolicited Sentinel"),
+                   "unsolicited sentinel exists before network traffic");
+            projectReplacements = 0;
+            const auto unsolicitedSession = cmd (authorityOps, "mp_create_session",
+                                                  objN ({ { "name", "Victim" }, { "color", "#111111" } }));
+            const auto unsolicitedCode = unsolicitedSession.getProperty ("data", var())
+                                                              .getProperty ("code", var()).toString();
+            MultiplayerClient attacker;
+            check (attacker.joinSession (unsolicitedCode, "Member", "#222222"),
+                   "unsolicited attacker joined as a real room member");
+            const auto unsolicitedLogBefore = authorityEngine->sessionDir()
+                .getChildFile ("mosh-log.jsonl").getSize();
+            attacker.publish (objN ({ { "type", "bootstrap_state" },
+                                      { "tracks", var (Array<var>()) }, { "annotations", "" } }));
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Unsolicited Sentinel"),
+                   "unsolicited bootstrap preserves the victim track");
+            check (authorityOps.snapshot().getProperty ("annotations", var()).size() == 1,
+                   "unsolicited bootstrap preserves the victim annotation");
+            check (projectReplacements == 0,
+                   "unsolicited bootstrap emits no project replacement");
+            check (authorityEngine->sessionDir().getChildFile ("mosh-log.jsonl").getSize()
+                       == unsolicitedLogBefore,
+                   "unsolicited bootstrap writes no JSONL record");
+            attacker.leave();
+            cmd (authorityOps, "mp_leave_session");
+
+            MultiplayerClient correlatedHost;
+            const auto correlatedCode = correlatedHost.createSession ("RawHost", "#333333");
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-correlated"))),
+                   "correlated guest project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Correlation Sentinel"));
+            check (hasTrackNamed (authorityOps, "Correlation Sentinel"),
+                   "correlation sentinel exists before network traffic");
+            projectReplacements = 0;
+            const auto joined = cmd (authorityOps, "mp_join_session",
+                                     objN ({ { "code", correlatedCode }, { "name", "Guest" }, { "color", "#444444" } }));
+            const auto self = joined.getProperty ("data", var()).getProperty ("selfPeer", var()).toString();
+            const auto request = waitForRequest (correlatedHost);
+            const auto requestId = request.getProperty ("requestId", var()).toString();
+            check (requestId.isNotEmpty(), "join publishes a non-empty unpredictable bootstrap requestId");
+
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                             { "to", "wrong-target" },
+                                             { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                             { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", "unknown-request" },
+                                             { "to", self },
+                                             { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                             { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                             { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                             { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                             { "to", self }, { "tracks", "malformed" },
+                                             { "annotations", "" } }));
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Correlation Sentinel")
+                       && ! hasTrackNamed (authorityOps, "C010 Host Track"),
+                   "wrong-target, unknown-ID, partial, and malformed correlated frames are no-ops");
+
+            auto validState = objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                      { "to", self },
+                                      { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                      { "annotations", sourceBundle.getProperty ("annotations", var()) } });
+            correlatedHost.publish (validState);
+            const auto applyDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+            while (! hasTrackNamed (authorityOps, "C010 Host Track")
+                   && Time::getMillisecondCounter() < applyDeadline)
+                pumpFor (25);
+            check (hasTrackNamed (authorityOps, "C010 Host Track") && projectReplacements == 1,
+                   "matched targeted bootstrap applies exactly once");
+            cmd (authorityOps, "create_track", args1 ("name", "Replay Sentinel"));
+            correlatedHost.publish (validState);
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Replay Sentinel") && projectReplacements == 1,
+                   "replayed bootstrap is rejected after one-shot consumption");
+            bool mutatingEcho = false;
+            for (const auto& frame : correlatedHost.poll())
+            {
+                const auto echoType = frame.getProperty ("msg", var())
+                                           .getProperty ("type", var()).toString();
+                if (echoType == "commit" || echoType == "structural" || echoType == "bootstrap_state")
+                    mutatingEcho = true;
+            }
+            check (! mutatingEcho, "accepted bootstrap produces no mutating relay echo");
+            cmd (authorityOps, "mp_leave_session");
+            correlatedHost.leave();
+
+            MultiplayerClient legacyHost;
+            const auto legacyCode = legacyHost.createSession ("LegacyHost", "#555555");
+            legacyHost.publish (objN ({ { "type", "bootstrap_state" },
+                                         { "tracks", var (Array<var>()) },
+                                         { "annotations", "" } }));
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-legacy"))),
+                   "legacy guest project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Legacy History Sentinel"));
+            check (hasTrackNamed (authorityOps, "Legacy History Sentinel"),
+                   "legacy retained-history sentinel exists before join");
+            check (ok (cmd (authorityOps, "mp_join_session",
+                            objN ({ { "code", legacyCode }, { "name", "LegacyGuest" }, { "color", "#666666" } }))),
+                   "legacy fallback guest joined");
+            check (waitForRequest (legacyHost).isObject(), "legacy fallback observed one pending local request");
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Legacy History Sentinel"),
+                   "retained requestless bootstrap older than the request is ignored");
+            legacyHost.publish (objN ({ { "type", "bootstrap_state" },
+                                         { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                         { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            const auto legacyDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+            while (! hasTrackNamed (authorityOps, "C010 Host Track")
+                   && Time::getMillisecondCounter() < legacyDeadline)
+                pumpFor (25);
+            check (hasTrackNamed (authorityOps, "C010 Host Track"),
+                   "fresh legacy response remains compatible after retained history is ignored");
+            cmd (authorityOps, "mp_leave_session");
+            legacyHost.leave();
+
+            MultiplayerClient transactionHost;
+            const auto transactionCode = transactionHost.createSession ("TxnHost", "#777777");
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-transaction"))),
+                   "transaction guest project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Transaction Sentinel"));
+            check (hasTrackNamed (authorityOps, "Transaction Sentinel"),
+                   "transaction sentinel exists before network traffic");
+            const auto transactionJoin = cmd (authorityOps, "mp_join_session",
+                                              objN ({ { "code", transactionCode }, { "name", "TxnGuest" }, { "color", "#888888" } }));
+            const auto transactionSelf = transactionJoin.getProperty ("data", var())
+                                                        .getProperty ("selfPeer", var()).toString();
+            const auto transactionRequest = waitForRequest (transactionHost);
+            check (ok (txnBegin (authorityOps, "live-bootstrap-txn", "live bootstrap refusal",
+                                 txnManifest ({ { "live-next", "create_track" } }))),
+                   "live bootstrap transaction fixture opens");
+            transactionHost.publish (objN ({ { "type", "bootstrap_state" },
+                                               { "requestId", transactionRequest.getProperty ("requestId", var()) },
+                                               { "to", transactionSelf },
+                                               { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                               { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Transaction Sentinel")
+                       && ! hasTrackNamed (authorityOps, "C010 Host Track"),
+                   "live matched bootstrap is refused before mutation during an agent transaction");
+            check (txnField (txnStatus (authorityOps, "live-bootstrap-txn"), "status") == "open",
+                   "live bootstrap refusal leaves the agent transaction unchanged");
+            check (ok (cmd (authorityOps, "batch_rollback", args1 ("transactionId", "live-bootstrap-txn"))),
+                   "live bootstrap transaction fixture rolls back cleanly");
+            cmd (authorityOps, "mp_leave_session");
+            transactionHost.leave();
+        }
+
         // P4 — audio stems. Content-addressing + the by-hash rewrite run on any
         // relay; the upload/peer-download round-trip now runs against WHATEVER
         // relay MOSH_RELAY_URL points at — cloud or local. (Previously gated to
@@ -11849,6 +12227,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         cmd (ops, "add_test_tone_clip", objN ({ { "trackId", stemTrk }, { "seconds", 1.0 } }));
 
+        lastMpCommitDone = var();
         auto commitRes = cmd (ops, "mp_commit_track", args1 ("trackId", stemTrk));
         check (ok (commitRes), "mp_commit_track ok (with audio)");
         // MOSH_MP_SYNC_TRANSFER (the PR-2 kill switch, gated separately below) pins this
@@ -11869,7 +12248,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // additive mp_commit_done event before assuming the stem has actually landed
         // on the relay's blob store (a bounded drain, mirroring the async-outbox
         // check below; the shared event sink set at the top of this function
-        // captures it into lastEvent).
+        // captures the latest completion separately from noisy presence events).
         {
             auto* mmc = juce::MessageManager::getInstanceWithoutCreating();
             bool committed = false;
@@ -11878,11 +12257,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             {
                 if (mmc != nullptr) mmc->runDispatchLoopUntil (50);
                 else juce::Thread::sleep (50);
-                committed = lastEvent.getProperty ("type", juce::var()).toString() == "mp_commit_done"
-                            && lastEvent.getProperty ("payload", juce::var()).getProperty ("logicalId", juce::var()).toString() == stemLogicalId;
+                committed = lastMpCommitDone.getProperty ("payload", juce::var())
+                                               .getProperty ("logicalId", juce::var()).toString() == stemLogicalId;
             }
             check (committed, "mp_commit_track's async transfer completed (mp_commit_done observed)");
-            check ((bool) lastEvent.getProperty ("payload", juce::var()).getProperty ("ok", false),
+            check ((bool) lastMpCommitDone.getProperty ("payload", juce::var()).getProperty ("ok", false),
                    "mp_commit_done reports ok:true");
         }
 
@@ -11909,10 +12288,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // resolving via the worker's prefetch stage (the "receive path" case).
         section ("Multiplayer PR-2: stem transfer order + receive path (live session)");
         {
-            MoshEngine ordHostEng (false, true, "pr2-order-host");
+            MoshEngine ordHostEng (false, true, "session-pr2-order-host");
             MoshOps    ordHostOps (ordHostEng);
-            MoshEngine ordGuestEng (false, true, "pr2-order-guest");
+            MoshEngine ordGuestEng (false, true, "session-pr2-order-guest");
             MoshOps    ordGuestOps (ordGuestEng);
+            check (ordHostEng.sessionDir() != ordGuestEng.sessionDir(),
+                   "order: host and guest use distinct owned session roots");
 
             auto ordSess = cmd (ordHostOps, "mp_create_session", objN ({ { "name", "OrdHost" }, { "color", "#101010" } }));
             check (ok (ordSess), "order: host created a session");
@@ -12014,7 +12395,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             section ("Multiplayer PR-2: no-freeze proxy (MOSH_RELAY_BLOB_DELAY_MS)");
 
-            MoshEngine nfEng (false, true, "pr2-nofreeze-host");
+            MoshEngine nfEng (false, true, "session-pr2-nofreeze-host");
             MoshOps    nfOps (nfEng);
             juce::var nfLastEvent;
             nfOps.setEventSink ([&] (const juce::var& e) { nfLastEvent = e; });
@@ -12072,7 +12453,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             section ("Multiplayer PR-2: MOSH_MP_SYNC_TRANSFER kill switch");
 
-            MoshEngine syncEng (false, true, "pr2-syncswitch-host");
+            MoshEngine syncEng (false, true, "session-pr2-syncswitch-host");
             MoshOps    syncOps (syncEng);
 
             auto syncSess = cmd (syncOps, "mp_create_session", objN ({ { "name", "Sync" }, { "color", "#666666" } }));
@@ -12134,7 +12515,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 },
                 [] (bool, const juce::String&, const std::map<juce::String, juce::String>&) {},   // syncLocks
                 [] () -> juce::var { return {}; },                                       // provideBootstrap
-                [] (const juce::var&) {},                                               // applyBootstrap
+                [] (const juce::var&) -> juce::String { return {}; },                   // validateBootstrap
+                [] (const juce::var&) -> juce::var { return {}; },                      // applyBootstrap
                 [] (const juce::var&) {});                                              // applyStructural
 
             const auto failCode = failSess.createSession ("FailHost", "#facade");
@@ -12258,10 +12640,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // not a same-directory coincidence.
         section ("Multiplayer P4: self-healing stem fetch (mp_fetch_missing_stems)");
         {
-            MoshEngine hostEng (false, true, "mp-selfheal-host");
+            MoshEngine hostEng (false, true, "session-mp-selfheal-host");
             MoshOps    hostOps (hostEng);
-            MoshEngine guestEng (false, true, "mp-selfheal-guest");
+            MoshEngine guestEng (false, true, "session-mp-selfheal-guest");
             MoshOps    guestOps (guestEng);
+            check (hostEng.sessionDir() != guestEng.sessionDir(),
+                   "self-heal: host and guest use distinct owned session roots");
 
             auto hostSess = cmd (hostOps, "mp_create_session", objN ({ { "name", "SHHost" }, { "color", "#111111" } }));
             check (ok (hostSess), "self-heal: host created a session");
@@ -12490,10 +12874,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // cloud relay now also works against relay/server.py.
         section ("Multiplayer P4: bootstrap end-to-end on the local relay");
         {
-            MoshEngine bootHostEng (false, true, "mp-bootstrap-host");
+            MoshEngine bootHostEng (false, true, "session-mp-bootstrap-host");
             MoshOps    bootHostOps (bootHostEng);
-            MoshEngine bootGuestEng (false, true, "mp-bootstrap-guest");
+            MoshEngine bootGuestEng (false, true, "session-mp-bootstrap-guest");
             MoshOps    bootGuestOps (bootGuestEng);
+            check (bootHostEng.sessionDir() != bootGuestEng.sessionDir(),
+                   "bootstrap: host and guest use distinct owned session roots");
 
             auto bhSess = cmd (bootHostOps, "mp_create_session", objN ({ { "name", "BHost" }, { "color", "#333333" } }));
             check (ok (bhSess), "bootstrap: host created a session");
