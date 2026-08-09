@@ -189,6 +189,7 @@ if (MOSH_BUILD_APP)
         src/app/MenuController.cpp
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
+        src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.
