@@ -52,15 +52,33 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
 test("mode, tool, Smart Tool, and resizable headers are keyboard operable", async ({ page }) => {
   await bootProTools(page);
   const shell = page.getByTestId("protools-shell");
-  await page.keyboard.press("F1");
-  await expect(shell).toHaveAttribute("data-edit-mode", "shuffle");
-  await page.keyboard.press("F4");
-  await expect(shell).toHaveAttribute("data-edit-mode", "grid");
+
+  const editModes = [
+    ["F1", "shuffle"],
+    ["F2", "slip"],
+    ["F3", "spot"],
+    ["F4", "grid"],
+  ] as const;
+  for (const [key, mode] of editModes) {
+    await page.keyboard.press(key);
+    await expect(shell).toHaveAttribute("data-edit-mode", mode);
+  }
 
   await expect(page.getByTestId("pt-smart-tool")).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("F8");
-  await expect(page.getByTestId("pt-smart-tool")).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByRole("button", { name: "Grabber" })).toHaveAttribute("aria-pressed", "true");
+
+  const editTools = [
+    ["F5", "Zoomer"],
+    ["F6", "Trimmer"],
+    ["F7", "Selector"],
+    ["F8", "Grabber"],
+    ["F9", "Scrubber"],
+    ["F10", "Pencil"],
+  ] as const;
+  for (const [key, tool] of editTools) {
+    await page.keyboard.press(key);
+    await expect(page.getByTestId("pt-smart-tool")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("button", { name: tool, exact: true })).toHaveAttribute("aria-pressed", "true");
+  }
 
   const resizer = page.getByTestId("pt-track-head-resizer");
   await resizer.focus();
