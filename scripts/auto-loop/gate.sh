@@ -68,6 +68,16 @@ run_step() {
   [ "$ok" = true ]
 }
 
+run_memory_preflight() {
+  local log ok=true
+  log="$(mktemp)"
+  "$SELF_DIR/memory-preflight.sh" >"$log" 2>&1 || ok=false
+  emit_step "memory_preflight" "$ok" \
+    "$(jq -nc --arg log "$(safe_tail "$log" 1200)" '{log:$log}')"
+  rm -f "$log"
+  [ "$ok" = true ]
+}
+
 # ── selftest ×3 (native only) ────────────────────────────────────────────────────
 SELFTEST_NS="[]"; SELFTEST_FMAX=0; SELFTEST_AMAX=0
 run_selftest_x3() {
@@ -365,11 +375,13 @@ finish() {
       steps:$steps}'
 }
 
-case "$CLASS" in
-  cheap)  gate_cheap ;;
-  native) gate_native ;;
-  *) al_die "unknown class: $CLASS (cheap|native)";;
-esac
+if run_memory_preflight; then
+  case "$CLASS" in
+    cheap)  gate_cheap ;;
+    native) gate_native ;;
+    *) al_die "unknown class: $CLASS (cheap|native)";;
+  esac
+fi
 
 finish
 [ "$OVERALL" = true ]
