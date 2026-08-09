@@ -7,9 +7,9 @@
 // it, and effects.ts is itself imported by the settings store, so a settings import
 // here would create an evaluation cycle. Keep it dependency-free.
 
-// "live" is the additive Live-12-Arrangement clone shell (ui/src/live) — same
+// "live" and "protools" are additive DAW-inspired shells — each uses the same
 // registration seam as v2: a uiShell enum value plus this dev-only override.
-export type ShellId = "classic" | "v2" | "live";
+export type ShellId = "classic" | "v2" | "live" | "protools";
 
 export function devShellOverride(): ShellId | null {
   // import.meta.env may be undefined in some non-Vite contexts; guard defensively.
@@ -22,6 +22,7 @@ export function devShellOverride(): ShellId | null {
     const q = new URLSearchParams(window.location.search).get("shell");
     if (q === "v2") return "v2";
     if (q === "live") return "live";
+    if (q === "protools") return "protools";
     if (q === "classic" || q === "legacy") return "classic"; // accept "legacy" as an alias
     return null;
   } catch {
@@ -36,5 +37,6 @@ export function resolveShell(uiShell: unknown): ShellId {
   if (over) return over;
   if (uiShell === "v2") return "v2";
   if (uiShell === "live") return "live";
+  if (uiShell === "protools") return "protools";
   return "classic";
 }

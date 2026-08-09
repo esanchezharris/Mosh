@@ -1,4 +1,4 @@
-// App router — picks the active shell (classic vs the new v2 shell) from the
+// App router — picks the active shell from the
 // `uiShell` UI-local setting, honoring a dev-only `?shell=` override. This is the
 // single mount point main.tsx renders; it owns the data lifecycle (init() runs once
 // here, so switching shells at runtime never re-subscribes the event feed). Both
@@ -12,6 +12,7 @@ import { isCharacterLab } from "./lab/labQuery";
 import { AppLegacy } from "./AppLegacy";
 import { AppV2 } from "./v2/AppV2";
 import { AppLive } from "./live/AppLive";
+import { AppProTools } from "./protools/AppProTools";
 
 // Dev-only Character Lab demo. The reference is gated on an explicit development mode so that in
 // the production build the ternary folds to a literal `null` and the lazy import() lands in
@@ -39,5 +40,18 @@ export function App() {
       <CharacterLab />
     </Suspense>
   );
-  return shell === "live" ? <AppLive /> : shell === "v2" ? <AppV2 /> : <AppLegacy />;
+  switch (shell) {
+    case "classic":
+      return <AppLegacy />;
+    case "v2":
+      return <AppV2 />;
+    case "live":
+      return <AppLive />;
+    case "protools":
+      return <AppProTools />;
+    default: {
+      const unreachable: never = shell;
+      return unreachable;
+    }
+  }
 }

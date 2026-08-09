@@ -58,12 +58,18 @@ export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks
     if (!peaks) return;
     const prep = prepCanvas(ref.current); if (!prep) return;
     const { ctx, w, h } = prep;
-    ctx.fillStyle = inkOf(ref.current, "--clip-ink-wave", "rgba(204,255,35,0.5)");
+    const fill = inkOf(ref.current, "--clip-ink-wave", "rgba(204,255,35,0.5)");
+    const outline = inkOf(ref.current, "--clip-ink-wave-outline", "transparent");
     const mid = h / 2, n = peaks.length;
     for (let x = 0; x < w; x++) {
       const p = peaks[Math.min(n - 1, Math.floor((x / w) * n))];
       if (!p) continue;
       const top = mid + p[0] * mid * 0.92, bot = mid + p[1] * mid * 0.92;
+      if (outline !== "transparent") {
+        ctx.fillStyle = outline;
+        ctx.fillRect(x - 1, top - 1, 3, Math.max(2, bot - top + 2));
+      }
+      ctx.fillStyle = fill;
       ctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
   }, [peaks, width, themeKey]);

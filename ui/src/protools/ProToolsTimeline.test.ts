@@ -1,0 +1,129 @@
+import React, { act, useRef } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CommandResult, Snapshot } from "../types";
+import { useStore } from "../store";
+import { useProTools } from "./proToolsState";
+import { ProToolsTimeline } from "./ProToolsTimeline";
+
+vi.mock("../bridge", async () => {
+  const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
+  return { ...actual, onEvent: vi.fn(() => () => {}), pickFiles: vi.fn(), pickSaveFile: vi.fn() };
+});
+
+vi.mock("../ui/clipRenderers", async () => {
+  const actual = await vi.importActual<typeof import("../ui/clipRenderers")>("../ui/clipRenderers");
+  return { ...actual, ClipMidi: () => React.createElement("div") };
+});
+
+const SNAPSHOT: Snapshot = {
+  schemaVersion: 1,
+  session: {
+    sampleRate: 48_000,
+    tempo: 120,
+    editFile: "/tmp/protools-timeline.mosh",
+    key: { tonic: "C", mode: "major" },
+  },
+  tracks: [{
+    id: "midi-track",
+    index: 0,
+    name: "MIDI",
+    type: "midi",
+    clips: [{
+      id: "midi-clip",
+      name: "Verse",
+      type: "midi",
+      start: 0,
+      length: 4,
+      offset: 0,
+      hasRenderLayer: false,
+      notes: [{ i: 0, pitch: 60, start: 4, length: 2, velocity: 80 }],
+    }],
+  }],
+  transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+};
+
+function Harness() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  return React.createElement(ProToolsTimeline, {
+    snapshot: SNAPSHOT,
+    contentWidth: 600,
+    scrollRef,
+    onScroll: () => {},
+  });
+}
+
+describe("ProToolsTimeline pointer capture", () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  let exec: ReturnType<typeof vi.fn>;
+  const originalExec = useStore.getState().exec;
+
+  const clip = () => {
+    const element = host.querySelector<HTMLElement>('[data-testid="v2-clip"]');
+    if (!element) throw new Error("MIDI clip did not render");
+    element.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 400, bottom: 60, width: 400, height: 60, x: 0, y: 0, toJSON: () => ({}),
+    }) as DOMRect;
+    return element;
+  };
+
+  const dispatchPointer = (element: HTMLElement, type: string, init: PointerEventInit) => {
+    act(() => element.dispatchEvent(new PointerEvent(type, { bubbles: true, ...init })));
+  };
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
+    useStore.setState({
+      snapshot: SNAPSHOT,
+      transport: SNAPSHOT.transport,
+      selection: new Set<string>(),
+      pxPerSec: 100,
+      projectEpoch: 41,
+      exec,
+    });
+    useProTools.getState().resetForProject(41);
+    act(() => root.render(React.createElement(Harness)));
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+    useStore.setState({ snapshot: null, selection: new Set<string>(), exec: originalExec });
+    vi.restoreAllMocks();
+  });
+
+  it("routes a blank MIDI edge through timeline capture into ClipView trimming", () => {
+    // Given: the only note is in the clip's middle, so the left edge is explicitly blank.
+    const element = clip();
+
+    // When: the user edge-drags through the real timeline capture layer and the shared ClipView.
+    dispatchPointer(element, "pointerdown", { pointerId: 7, button: 0, clientX: 2, clientY: 50 });
+    expect(element.dataset.ptIntent).toBe("trimmer");
+    dispatchPointer(element, "pointermove", { pointerId: 7, buttons: 1, clientX: 26, clientY: 50 });
+    dispatchPointer(element, "pointerup", { pointerId: 7, clientX: 26, clientY: 50 });
+
+    // Then: the real clip drag reaches the command seam.
+    expect(exec).toHaveBeenCalledWith("trim_clip", expect.objectContaining({ clipId: "midi-clip" }));
+  });
+
+  it("does not execute a Cmd MIDI velocity drag after the project epoch changes", () => {
+    // Given: Cmd on a rendered MIDI note starts the timeline-owned velocity drag.
+    const element = clip();
+    dispatchPointer(element, "pointerdown", {
+      pointerId: 8, button: 0, clientX: 200, clientY: 30, metaKey: true,
+    });
+    dispatchPointer(element, "pointermove", { pointerId: 8, buttons: 1, clientX: 200, clientY: 10, metaKey: true });
+
+    // When: the active project is replaced before the matching pointer release.
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    dispatchPointer(element, "pointerup", { pointerId: 8, clientX: 200, clientY: 10, metaKey: true });
+
+    // Then: the captured stale gesture reaches no MoshOps mutation.
+    expect(exec).not.toHaveBeenCalled();
+  });
+});

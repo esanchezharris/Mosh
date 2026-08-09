@@ -72,13 +72,13 @@ const FL: GestureTable = [
   ...RULER_RULES,
 ];
 
-// ── Pro Tools — the Smart Tool: top of clip = Grabber (move), lower = Selector
-// (time-select), edges = Trim. Same shape as Ableton's header/body split.
+// ── Pro Tools — the Smart Tool: upper audio = Selector (time-select), lower =
+// Grabber (move), edges = Trim. Media-specific refinements live in protools/smartTool.
 const PROTOOLS: GestureTable = [
   { region: "clip.header", gesture: "click", action: A.SELECT },
-  { region: "clip.header", gesture: "drag", action: A.MOVE },
+  { region: "clip.header", gesture: "drag", action: A.TIME_SELECT },
   { region: "clip.body", gesture: "click", action: A.SELECT },
-  { region: "clip.body", gesture: "drag", action: A.TIME_SELECT },
+  { region: "clip.body", gesture: "drag", action: A.MOVE },
   { region: "clip.body", gesture: "dblclick", action: A.OPEN },
   { region: "clip.edge", gesture: "drag", action: A.TRIM },
   { region: "empty", gesture: "click", action: A.DESELECT },

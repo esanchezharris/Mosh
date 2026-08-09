@@ -82,6 +82,22 @@ export async function bootLive(page: Page, opts: { values?: Record<string, unkno
   await expect(page.getByTestId("live-timeline")).toBeVisible();
 }
 
+/** Boot the Pro Tools Edit Window shell against the isolated in-memory backend. */
+export async function bootProTools(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({
+      version: 2,
+      template: null,
+      values: { gestureTable: "protools", keymap: "protools" },
+      keyOverrides: {},
+    }));
+  });
+  await page.goto("/?shell=protools");
+  await expect(page.getByTestId("protools-shell")).toBeVisible();
+  await expect(page.getByTestId("pt-timeline")).toBeVisible();
+}
+
 /** File → <action> through the in-WebView File menu (same runAction dispatch the native
  *  menu + keyboard use). */
 export async function fileMenu(page: Page, action: string): Promise<void> {

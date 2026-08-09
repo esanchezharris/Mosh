@@ -209,14 +209,13 @@ const ABLETON: Keymap = {
 };
 const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
 
-// Pro Tools — Separate Clip = ⌘E; Selector = F7, Grabber = F8; Record = ⌘Space
-// (PT also uses numpad 3); Return = back to start.
+// Pro Tools — Separate Clip = ⌘E; Record = ⌘Space; Return = back to start.
+// F1–F10 belong to the Pro Tools shell-local mode/tool layer so the shared
+// dispatcher cannot also mutate an invisible global modal-tool selection.
 const PROTOOLS: Keymap = {
-  ...MOSH,
+  ...MOSH_NO_MODAL_TOOLS,
   [A.SPLIT]: "Mod+E",
   [A.RECORD]: "Mod+Space",
-  [A.TOOL_RANGE]: "F7",
-  [A.TOOL_MOVE]: "F8",
   [A.TO_START]: "Enter",
 };
 

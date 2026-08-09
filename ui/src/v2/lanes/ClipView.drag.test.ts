@@ -177,6 +177,19 @@ describe("v2 timeline clip drag — time-axis guard", () => {
     expect(exec.mock.calls.some((c) => c[0] === "move_clip")).toBe(false);
   });
 
+  it("discards an engaged move when the project changes before pointerup", () => {
+    mount();
+    const origLeft = clipLeft();
+    const { el, x0, y0 } = startEngagedDrag(10, GRID_SEC * PX_PER_SEC);
+    expect(clipLeft()).not.toBe(origLeft);
+
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    act(() => { el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 10, clientX: x0 + GRID_SEC * PX_PER_SEC, clientY: y0 })); });
+
+    expect(clipLeft()).toBe(origLeft);
+    expect(exec.mock.calls.some((c) => c[0] === "move_clip" || c[0] === "trim_clip")).toBe(false);
+  });
+
   it("Escape mid-drag cancels the gesture (preview cleared, nothing committed)", () => {
     mount();
     const origLeft = clipLeft();
