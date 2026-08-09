@@ -1,0 +1,172 @@
+import { expect, test, type Page } from "@playwright/test";
+import { bootProTools } from "./helpers";
+import type { Snapshot } from "../src/types";
+
+type ProToolsWindow = Window & {
+  __moshStore?: {
+    getState: () => {
+      snapshot: Pick<Snapshot, "tracks">;
+    };
+  };
+};
+
+async function storeVal<T>(page: Page, path: string): Promise<T> {
+  return page.evaluate(
+    (value) => value.split(".").reduce(
+      (object: unknown, key) => (object as Record<string, unknown>)?.[key],
+      (window as unknown as { __moshStore: { getState: () => unknown } }).__moshStore.getState(),
+    ),
+    path,
+  ) as Promise<T>;
+}
+
+async function clipStart(page: Page, clipId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const snapshot = (window as ProToolsWindow).__moshStore?.getState().snapshot;
+    if (!snapshot) throw new Error("__moshStore snapshot is unavailable");
+    const clip = snapshot.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === id);
+    if (!clip) throw new Error(`clip ${id} is absent`);
+    return clip.start;
+  }, clipId);
+}
+
+test("?shell=protools boots the Edit Window zones with left track headers", async ({ page }) => {
+  await bootProTools(page);
+  await expect(page.getByTestId("pt-toolbar")).toBeVisible();
+  await expect(page.getByTestId("pt-track-list")).toBeVisible();
+  await expect(page.getByTestId("pt-clip-list")).toBeVisible();
+  await expect(page.getByTestId("pt-status-bar")).toBeVisible();
+  await expect(page.getByTestId("live-browser")).toHaveCount(0);
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
+  await expect(page.getByTestId("pt-lane")).toHaveCount(3);
+  await expect(page.locator("[data-ruler]")).toHaveCount(4);
+
+  const header = await page.getByTestId("pt-track-header").first().boundingBox();
+  const lane = await page.getByTestId("pt-lane").first().boundingBox();
+  if (!header || !lane) throw new Error("Edit Window bounds are missing");
+  expect(header.x).toBeLessThan(lane.x);
+  expect(Math.abs(header.y - lane.y)).toBeLessThanOrEqual(2);
+});
+
+test("mode, tool, Smart Tool, and resizable headers are keyboard operable", async ({ page }) => {
+  await bootProTools(page);
+  const shell = page.getByTestId("protools-shell");
+  await page.keyboard.press("F1");
+  await expect(shell).toHaveAttribute("data-edit-mode", "shuffle");
+  await page.keyboard.press("F4");
+  await expect(shell).toHaveAttribute("data-edit-mode", "grid");
+
+  await expect(page.getByTestId("pt-smart-tool")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("F8");
+  await expect(page.getByTestId("pt-smart-tool")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Grabber" })).toHaveAttribute("aria-pressed", "true");
+
+  const resizer = page.getByTestId("pt-track-head-resizer");
+  await resizer.focus();
+  const before = Number(await resizer.getAttribute("aria-valuenow"));
+  await resizer.press("ArrowRight");
+  await expect(resizer).toHaveAttribute("aria-valuenow", String(before + 8));
+});
+
+test("clip navigation opens the shared editor and track selection closes it", async ({ page }) => {
+  await bootProTools(page);
+  const midiEntry = page.getByTestId("pt-clip-list-item").filter({ hasText: "MIDI" }).first();
+  await midiEntry.click();
+  await expect.poll(() => storeVal<string | null>(page, "editingClipId")).not.toBeNull();
+  await expect(page.getByTestId("pt-detail-dock")).toBeVisible();
+  await expect(page.locator(".protools-shell .pr.docked")).toBeVisible();
+
+  await page.getByTestId("pt-track-select").first().click();
+  await expect.poll(() => storeVal<string | null>(page, "editingClipId")).toBeNull();
+  await expect(page.getByTestId("pt-detail-dock")).toBeVisible();
+  await expect(page.getByTestId("pt-device-rack")).toBeVisible();
+  await expect(page.getByTestId("pt-device-rack")).toContainText("Drums");
+});
+
+test("Tab navigates and Cmd/Ctrl plus nudges through the command seam", async ({ page }) => {
+  await bootProTools(page);
+  const clip = page.getByTestId("pt-lane").first().getByTestId("v2-clip").first();
+  await clip.click();
+  await expect.poll(() => storeVal<number>(page, "selection.size")).toBe(1);
+  const clipId = await clip.getAttribute("data-clip-id");
+  if (!clipId) throw new Error("selected clip id is absent");
+  const start = await clipStart(page, clipId);
+  await page.keyboard.press(process.platform === "darwin" ? "Meta++" : "Control++");
+  await expect.poll(() => clipStart(page, clipId)).toBeCloseTo(start + 0.25, 5);
+
+  const positionBefore = await storeVal<number>(page, "transport.position");
+  await page.keyboard.press("Tab");
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeGreaterThan(positionBefore);
+});
+
+test("Classic theme and Clip List collapse stay available", async ({ page }) => {
+  await bootProTools(page);
+  const shell = page.getByTestId("protools-shell");
+  await page.getByRole("button", { name: "Classic", exact: true }).click();
+  await expect(shell).toHaveAttribute("data-pt-theme", "classic");
+
+  const clipList = page.getByTestId("pt-clip-list");
+  await page.getByTestId("pt-clip-list-toggle").click();
+  await expect(clipList).toHaveClass(/is-closed/);
+  await expect(page.getByTestId("pt-clip-list-item")).toHaveCount(0);
+  await page.getByTestId("pt-clip-list-toggle").click();
+  await expect(clipList).toHaveClass(/is-open/);
+});
+
+test("compact Edit Window keeps collapsed Clip List and overflow controls reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 720 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await bootProTools(page);
+
+  const clipList = page.getByTestId("pt-clip-list");
+  await expect(clipList).toHaveClass(/is-closed/);
+  await expect(page.getByTestId("pt-clip-list-toggle")).toBeVisible();
+  await expect(page.getByTestId("pt-clip-list-toggle")).toHaveAttribute("aria-expanded", "false");
+
+  const toolbar = page.getByTestId("pt-toolbar");
+  const toolbarMetrics = await toolbar.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(toolbarMetrics.scrollWidth).toBeGreaterThan(toolbarMetrics.clientWidth);
+  await expect(toolbar).toHaveCSS("overflow-x", "auto");
+
+  const rulers = page.getByRole("button", { name: "Rulers" });
+  await rulers.scrollIntoViewIfNeeded();
+  await expect(rulers).toBeInViewport();
+  await rulers.click();
+  const rulerMenu = page.getByRole("menu", { name: "Visible rulers" });
+  await expect(rulerMenu).toBeVisible();
+  const samplesRuler = rulerMenu.getByRole("menuitem", { name: "Toggle Samples ruler" });
+  await samplesRuler.focus();
+  await samplesRuler.press("Enter");
+  await expect(page.locator('[data-ruler="samples"]')).toHaveCount(0);
+
+  const interfaceOptions = page.getByRole("button", { name: "Interface options" });
+  await interfaceOptions.scrollIntoViewIfNeeded();
+  await expect(interfaceOptions).toBeInViewport();
+  await interfaceOptions.click();
+  await expect(page.getByRole("menu", { name: "Interface options" })).toContainText("Switch to Live (clone)");
+  await page.keyboard.press("Escape");
+
+  const settings = page.getByRole("button", { name: "Settings" });
+  await settings.scrollIntoViewIfNeeded();
+  await expect(settings).toBeInViewport();
+  await settings.click();
+  const dialog = page.getByTestId("pt-settings-dialog");
+  await expect(dialog).toBeVisible();
+  const controls = dialog.locator(
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
+  );
+  const firstControl = controls.first();
+  const lastControl = controls.last();
+  await expect(firstControl).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(lastControl).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(firstControl).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(settings).toBeFocused();
+});

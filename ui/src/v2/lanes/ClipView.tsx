@@ -18,7 +18,7 @@ import { useShell } from "../shellState";
 import { beatSeconds } from "../../time";
 import { meterOf } from "../timeline/geom";
 import { EditorAction as EA, type Mods } from "../../interaction/actions";
-import { resolveGesture } from "../../interaction/gestures";
+import { resolveGesture, type GestureTable } from "../../interaction/gestures";
 import { selectSimilarIds } from "./selectSimilar";
 import { classifyClipRegion } from "../../interaction/region";
 import { liveFeel, liveGestureTable } from "../../interaction/config";
@@ -67,7 +67,11 @@ const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).
 
 type DragKind = "move" | "trim-l" | "trim-r" | "stretch" | "time";
 
-export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType: string; snapshot: Snapshot }) {
+export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHeaderPx, gestureTable }: {
+  clip: Clip; trackType: string; snapshot: Snapshot;
+  clipHeaderPx?: number; clipVisualHeaderPx?: number;
+  gestureTable?: () => GestureTable;
+}) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const selection = useStore((s) => s.selection);
   const select = useStore((s) => s.select);
@@ -110,7 +114,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   // Optimistic preview during a drag; cleared when the committed props arrive.
   const [preview, setPreview] = useState<DragPos | null>(null);
-  const drag = useRef<{ kind: DragKind; startX: number; startY: number; engaged: boolean; anchorSec: number; orig: DragPos } | null>(null);
+  const drag = useRef<{ kind: DragKind; startX: number; startY: number; engaged: boolean; anchorSec: number; orig: DragPos; projectEpoch: number } | null>(null);
   const lastUp = useRef<number | null>(null);
   const clipRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; time: number; splitLabel: string } | null>(null);
@@ -158,9 +162,12 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     });
   };
   const edgeGrab = liveFeel().edgeGrabPx;
+  const activeTable = gestureTable ?? TABLE;
 
   // 0 unless the ACTIVE table has clip.header rules — see CLIP_HEADER_PX.
-  const headerPx = () => (tableHasHeader(TABLE()) ? CLIP_HEADER_PX : 0);
+  const headerPx = () => Number.isFinite(clipHeaderPx)
+    ? Math.max(0, clipHeaderPx!)
+    : (tableHasHeader(activeTable()) ? CLIP_HEADER_PX : 0);
 
   const regionOf = (e: React.PointerEvent | React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -178,8 +185,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     if (e.button !== 0) return; // right-click handled by onContextMenu
     const { region, localX, edgePx } = regionOf(e);
     const mods = modsOf(e);
-    const clickAction = resolveGesture(TABLE(), { region, gesture: "click", mods, tool });
-    const dragAction = resolveGesture(TABLE(), { region, gesture: "drag", mods, tool });
+    const clickAction = resolveGesture(activeTable(), { region, gesture: "click", mods, tool });
+    const dragAction = resolveGesture(activeTable(), { region, gesture: "drag", mods, tool });
     if (clickAction === EA.SELECT) selectClip(false);
     else if (clickAction === EA.ADDITIVE_SELECT) selectClip(true);
     let dk: DragKind | null = null;
@@ -196,7 +203,11 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     // clip's start: the range a producer draws across a clip body has nothing to do with
     // where that clip begins.
     const anchorSec = snapTime(Math.max(0, clip.start + localX / pxPerSec));
-    drag.current = { kind: dk, startX: e.clientX, startY: e.clientY, engaged: false, anchorSec, orig: { start: clip.start, length: clip.length, offset: clip.offset } };
+    drag.current = {
+      kind: dk, startX: e.clientX, startY: e.clientY, engaged: false, anchorSec,
+      orig: { start: clip.start, length: clip.length, offset: clip.offset },
+      projectEpoch: useStore.getState().projectEpoch,
+    };
     escDispose.current?.();
     escDispose.current = pushEscapeHandler(cancelDrag);
   };
@@ -259,6 +270,10 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
         if (r && r.end - r.start < 1e-6) useShell.getState().setTimeRange(null);
         return;
       }
+      if (useStore.getState().projectEpoch !== d.projectEpoch) {
+        setPreview(null);
+        return;
+      }
       commitClipDrag(d.kind, preview, d.orig.start, clip.id, exec, setPreview, ripple);
       return;
     }
@@ -276,7 +291,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     if (isDoubleClick(lastUp.current, now, liveFeel().doubleClickMs)) {
       lastUp.current = null;
       const { region } = regionOf(e);
-      const action = resolveGesture(TABLE(), { region, gesture: "dblclick", mods: modsOf(e), tool });
+      const action = resolveGesture(activeTable(), { region, gesture: "dblclick", mods: modsOf(e), tool });
       if (action === EA.OPEN && (clip.type === "midi" || clip.type === "wave")) openPianoRoll(clip.id);
     } else {
       lastUp.current = now;
@@ -290,7 +305,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   const onContext = (e: React.MouseEvent) => {
     const { region, localX } = regionOf(e);
-    const action = resolveGesture(TABLE(), { region, gesture: "contextmenu", mods: modsOf(e), tool });
+    const action = resolveGesture(activeTable(), { region, gesture: "contextmenu", mods: modsOf(e), tool });
     if (action !== EA.CONTEXT_MENU) return;
     e.preventDefault();
     selectClip(false);
@@ -323,7 +338,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       // programme exists to remove. Under Ableton/Pro Tools it is the ONLY place a clip
       // can be grabbed to move, so it has to be visible.
       className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}${headerPx() > 0 ? " hdr" : ""}`}
-      style={{ left, width, "--v2-clip-hdr": `${headerPx()}px` } as React.CSSProperties}
+      style={{ left, width, "--v2-clip-hdr": `${clipVisualHeaderPx ?? headerPx()}px` } as React.CSSProperties}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onContextMenu={onContext}
       onKeyDown={onKeyDown}
       role="button" tabIndex={0} aria-label={`${clip.name} ${kind} clip`} aria-pressed={selected}

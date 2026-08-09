@@ -100,6 +100,27 @@ describe("reset", () => {
 });
 
 describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
+  it("stores an unset Pro Tools shell rebind in the Pro Tools keymap bucket", () => {
+    useSettings.getState().set("uiShell", "protools");
+
+    useSettings.getState().set("key.undo", "Mod+P");
+
+    const { keyOverrides } = loadPersisted(localStorage);
+    expect(keyOverrides.protools?.["key.undo"]).toBe("Mod+P");
+    expect(keyOverrides.mosh?.["key.undo"]).toBeUndefined();
+  });
+
+  it("stores a Pro Tools shell rebind in an explicitly selected keymap bucket", () => {
+    useSettings.getState().set("uiShell", "protools");
+    useSettings.getState().set("keymap", "ableton");
+
+    useSettings.getState().set("key.undo", "Mod+J");
+
+    const { keyOverrides } = loadPersisted(localStorage);
+    expect(keyOverrides.ableton?.["key.undo"]).toBe("Mod+J");
+    expect(keyOverrides.protools?.["key.undo"]).toBeUndefined();
+  });
+
   it("scopes a key.* rebind to the active keymap — it doesn't bleed into another", () => {
     // On the Ableton keymap, rebind Undo.
     useSettings.getState().set("keymap", "ableton");

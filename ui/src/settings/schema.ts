@@ -188,7 +188,8 @@ export const SETTINGS: SettingDef[] = [
   {
     // The from-scratch demo-driven shell (ui/src/v2). A first-class axis, NOT a
     // variant of redesignShell: "classic" = the prior App; "v2" = the new Mosh shell;
-    // "live" = the Live-12 Arrangement-View clone (ui/src/live). UI-local + reversible
+    // "live" = the Live-12 Arrangement-View clone (ui/src/live); "protools" = the
+    // Pro Tools Edit-Window-inspired shell (ui/src/protools). UI-local + reversible
     // (flip back anytime, here or via the in-app toggle). LIVE is the DEFAULT as of the
     // 2026-08-06 clone cutover (owner decision: defer the bespoke UI until the first
     // stranger program has usability data); v2 and classic stay fully available. In
@@ -199,7 +200,7 @@ export const SETTINGS: SettingDef[] = [
     scope: "app",
     category: "Layout",
     label: "Interface",
-    help: "Which interface to use. “Live (clone)” is the Ableton-style default; “Mosh” is the bespoke shell; “Classic” is the original layout. You can switch back anytime.",
+    help: "Which interface to use. “Live (clone)” remains the default; “Pro Tools” is the Edit-Window-inspired shell; “Mosh” is bespoke; “Classic” is the original layout.",
     constraints: {
       options: [
         { value: "classic", label: "Classic" },
@@ -208,6 +209,7 @@ export const SETTINGS: SettingDef[] = [
         // same reversible flip — picking it here (or the "Live (clone)" template, or
         // ?shell=live in dev/e2e) mounts AppLive; classic and v2 are untouched.
         { value: "live", label: "Live (clone)" },
+        { value: "protools", label: "Pro Tools" },
       ],
     },
   },

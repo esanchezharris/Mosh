@@ -46,16 +46,25 @@ function isKeyId(id: string): boolean {
 
 // The active keymap that scopes key.* rebinds: the effective `keymap` value
 // (override ?? schema default), always defined even with no named template.
-// Mirrors effectiveInteractionSetting() in interaction/config.ts: under the LIVE
-// shell an UNSET keymap resolves to "ableton", so rebinds written under the live
-// shell land in the ableton bucket that the effective keymap actually reads.
+// Mirrors effectiveInteractionSetting() in interaction/config.ts: under a DAW shell,
+// an UNSET keymap resolves to that shell's native bundle so rebinds land in the same
+// bucket that the effective keymap reads.
 function activeKeymap(values: Record<string, SettingValue>): string {
   const v = values.keymap;
   if (typeof v === "string") return v;
   const shell = resolveShell(
     typeof values.uiShell === "string" ? values.uiShell : settingDef("uiShell")?.default,
   );
-  if (shell === "live") return "ableton";
+  switch (shell) {
+    case "live": return "ableton";
+    case "protools": return "protools";
+    case "classic":
+    case "v2": break;
+    default: {
+      const unreachable: never = shell;
+      return unreachable;
+    }
+  }
   const d = settingDef("keymap")?.default;
   return typeof d === "string" ? d : "mosh";
 }

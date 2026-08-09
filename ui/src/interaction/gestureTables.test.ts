@@ -56,9 +56,9 @@ describe("fl preset", () => {
 });
 
 describe("pro tools preset (Smart Tool)", () => {
-  it("clip.header drag MOVE; clip.body drag TIME_SELECT, dblclick OPEN; edge TRIM", () => {
-    expect(r("protools", { region: "clip.header", gesture: "drag" })).toBe(A.MOVE);
-    expect(r("protools", { region: "clip.body", gesture: "drag" })).toBe(A.TIME_SELECT);
+  it("audio upper drag TIME_SELECT; lower drag MOVE, dblclick OPEN; edge TRIM", () => {
+    expect(r("protools", { region: "clip.header", gesture: "drag" })).toBe(A.TIME_SELECT);
+    expect(r("protools", { region: "clip.body", gesture: "drag" })).toBe(A.MOVE);
     expect(r("protools", { region: "clip.body", gesture: "dblclick" })).toBe(A.OPEN);
     expect(r("protools", { region: "clip.edge", gesture: "drag" })).toBe(A.TRIM);
   });

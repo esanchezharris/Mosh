@@ -1,0 +1,127 @@
+import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
+import { useStore } from "../store";
+import type { Snapshot, Track } from "../types";
+import { IconPlus } from "../ui/icons";
+import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
+import { TRACK_ROW_HEIGHT } from "./layout";
+
+type ProToolsTrackHeadersProps = {
+  readonly snapshot: Snapshot;
+};
+
+export function ProToolsTrackHeaders({ snapshot }: ProToolsTrackHeadersProps) {
+  const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
+
+  return (
+    <section className="pt-track-list" data-testid="pt-track-list" aria-label="Track List">
+      <header className="pt-track-list-title">Track List</header>
+      <div className="pt-track-list-rows">
+        {tracks.length === 0
+          ? <p className="pt-track-list-empty" role="status">No tracks</p>
+          : tracks.map((track) => <ProToolsTrackHeader key={track.id} track={track} />)}
+        <AddTrackMenu />
+      </div>
+    </section>
+  );
+}
+
+function ProToolsTrackHeader({ track }: { readonly track: Track }) {
+  const exec = useStore((state) => state.exec);
+  const selectedTrackId = useStore((state) => state.selectedTrackId);
+  const clearSelection = useStore((state) => state.clearSelection);
+  const setSelectedTrack = useStore((state) => state.setSelectedTrack);
+  const closePianoRoll = useStore((state) => state.closePianoRoll);
+  const selected = selectedTrackId === track.id;
+
+  const selectTrack = () => {
+    clearSelection();
+    setSelectedTrack(track.id);
+    closePianoRoll();
+  };
+
+  return (
+    <div
+      className="pt-track-header"
+      data-testid="pt-track-header"
+      data-track-id={track.id}
+      data-selected={selected}
+      style={{ height: TRACK_ROW_HEIGHT }}
+    >
+      <span
+        className="pt-track-color"
+        style={{ backgroundColor: track.color ?? "var(--pt-selected)" }}
+        aria-hidden="true"
+      />
+      <button
+        type="button"
+        className="pt-track-select"
+        data-testid="pt-track-select"
+        aria-label={`Select track ${track.name}`}
+        aria-pressed={selected}
+        onClick={selectTrack}
+      >
+        <span className="pt-track-index" aria-hidden="true">{track.index + 1}</span>
+        <span className="pt-track-name" title={track.name}>{track.name}</span>
+        <span className="pt-track-type">{track.type}</span>
+      </button>
+      <div className="pt-track-controls" role="group" aria-label={`${track.name} track controls`}>
+        <button
+          type="button"
+          className="pt-track-arm"
+          data-testid="pt-track-arm"
+          aria-label={`Record-arm ${track.name}`}
+          aria-pressed={Boolean(track.armed)}
+          onClick={() => void exec("arm_track", { trackId: track.id, armed: !track.armed })}
+        >R</button>
+        <button
+          type="button"
+          className="pt-track-solo"
+          data-testid="pt-track-solo"
+          aria-label={`Solo ${track.name}`}
+          aria-pressed={Boolean(track.solo)}
+          onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}
+        >S</button>
+        <button
+          type="button"
+          className="pt-track-mute"
+          data-testid="pt-track-mute"
+          aria-label={`Mute ${track.name}`}
+          aria-pressed={Boolean(track.mute)}
+          onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}
+        >M</button>
+      </div>
+      <span className="pt-track-route">Out 1–2</span>
+    </div>
+  );
+}
+
+function AddTrackMenu() {
+  const exec = useStore((state) => state.exec);
+
+  return (
+    <MoshMenu
+      label="Add track"
+      align="start"
+      trigger={
+        <button type="button" className="pt-add-track" data-testid="pt-add-track">
+          <IconPlus size={14} />
+          <span>Add Track</span>
+        </button>
+      }
+    >
+      <div className="pt-menu" data-testid="pt-add-track-menu">
+        {TRACK_KINDS.map(({ kind, label, hint }) => (
+          <MoshMenuItem
+            key={kind}
+            testId={`pt-add-track-${kind}`}
+            ariaLabel={`${label} track — ${hint}`}
+            onPick={() => void addTrackOfKind(kind, exec)}
+          >
+            <span className="pt-menu-label">{label}</span>
+            <span className="pt-menu-hint">{hint}</span>
+          </MoshMenuItem>
+        ))}
+      </div>
+    </MoshMenu>
+  );
+}
