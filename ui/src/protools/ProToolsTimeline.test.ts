@@ -126,4 +126,39 @@ describe("ProToolsTimeline pointer capture", () => {
     // Then: the captured stale gesture reaches no MoshOps mutation.
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it("abandons a Cmd MIDI velocity drag when the pointer is cancelled", () => {
+    // Given: Cmd on a MIDI note begins a drag with a nonzero velocity delta.
+    const element = clip();
+    dispatchPointer(element, "pointerdown", {
+      pointerId: 9, button: 0, clientX: 200, clientY: 30, metaKey: true,
+    });
+    dispatchPointer(element, "pointermove", {
+      pointerId: 9, buttons: 1, clientX: 200, clientY: 10, metaKey: true,
+    });
+
+    // When: the browser cancels it and a separate pointer later releases.
+    dispatchPointer(element, "pointercancel", { pointerId: 9, clientX: 200, clientY: 10, metaKey: true });
+    dispatchPointer(element, "pointerup", { pointerId: 10, clientX: 200, clientY: 10, metaKey: true });
+
+    // Then: neither cancellation nor the unrelated release applies note edits.
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("abandons a marquee when the pointer is cancelled", () => {
+    // Given: a blank MIDI area starts a marquee and renders its transient box.
+    const element = clip();
+    dispatchPointer(element, "pointerdown", { pointerId: 10, button: 0, clientX: 10, clientY: 30 });
+    expect(element.dataset.ptIntent).toBe("marquee");
+    dispatchPointer(element, "pointermove", { pointerId: 10, buttons: 1, clientX: 110, clientY: 30 });
+    expect(host.querySelector(".pt-marquee")).not.toBeNull();
+
+    // When: the browser cancels the drag before a separate pointer releases.
+    dispatchPointer(element, "pointercancel", { pointerId: 10, clientX: 110, clientY: 30 });
+    dispatchPointer(element, "pointerup", { pointerId: 11, clientX: 110, clientY: 30 });
+
+    // Then: the transient selection gesture is removed without selecting a clip.
+    expect(host.querySelector(".pt-marquee")).toBeNull();
+    expect(useStore.getState().selection).toEqual(new Set<string>());
+  });
 });
