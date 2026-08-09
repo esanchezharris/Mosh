@@ -17,6 +17,7 @@
 #include <exception>
 #include <iostream>
 #include <thread>
+#include <utility>
 
 namespace mosh
 {
@@ -276,6 +277,24 @@ public:
             const auto retryError = retry.getProperty ("error", juce::var()).toString();
             const auto timeoutDeviceError = engine->audioDeviceError();
 
+            const auto countDeviceNames = [] (const juce::var& types)
+            {
+                std::pair<int, int> counts;
+                if (auto* typeArray = types.getArray())
+                    for (const auto& type : *typeArray)
+                    {
+                        const auto outputs = type.getProperty ("outputs", juce::var());
+                        const auto inputs = type.getProperty ("inputs", juce::var());
+                        if (auto* outputArray = outputs.getArray())
+                            counts.first += outputArray->size();
+                        if (auto* inputArray = inputs.getArray())
+                            counts.second += inputArray->size();
+                    }
+                return counts;
+            };
+            const auto firstDeviceCounts = countDeviceNames (firstTypes);
+            const auto secondDeviceCounts = countDeviceNames (secondTypes);
+
             const auto invalidSetupFile =
                 engine->sessionDir().getChildFile ("audio-device.xml");
             const bool invalidSetupWritten =
@@ -293,14 +312,16 @@ public:
                            && outputOnlyArgvRoundTrip
                            && inputOnlyArgvRoundTrip
                            && ! (bool) firstData.getProperty ("audioEnabled", true)
-                           && firstTypes.isArray() && firstTypes.getArray()->isEmpty()
+                           && firstTypes.isArray() && ! firstTypes.getArray()->isEmpty()
+                           && firstDeviceCounts.first + firstDeviceCounts.second > 0
                            && firstListElapsedMs < 1000.0
                            && ! (bool) retry.getProperty ("ok", true)
                            && retryError.contains ("did not open within")
                            && retryElapsedMs < 2000.0
                            && (bool) secondList.getProperty ("ok", false)
                            && ! (bool) secondData.getProperty ("audioEnabled", true)
-                           && secondTypes.isArray() && secondTypes.getArray()->isEmpty()
+                           && secondTypes.isArray() && ! secondTypes.getArray()->isEmpty()
+                           && secondDeviceCounts.first + secondDeviceCounts.second > 0
                            && secondListElapsedMs < 1000.0
                            && timeoutDeviceError.contains ("did not open within")
                            && invalidSetupWritten
@@ -317,8 +338,14 @@ public:
             evidence->setProperty ("inputOnlyArgvRoundTrip", inputOnlyArgvRoundTrip);
             evidence->setProperty ("audioEnabled",
                                    secondData.getProperty ("audioEnabled", true));
+            evidence->setProperty ("firstDeviceTypeCount",
+                                   firstTypes.isArray() ? firstTypes.getArray()->size() : -1);
+            evidence->setProperty ("firstOutputDeviceCount", firstDeviceCounts.first);
+            evidence->setProperty ("firstInputDeviceCount", firstDeviceCounts.second);
             evidence->setProperty ("deviceTypeCount",
                                    secondTypes.isArray() ? secondTypes.getArray()->size() : -1);
+            evidence->setProperty ("outputDeviceCount", secondDeviceCounts.first);
+            evidence->setProperty ("inputDeviceCount", secondDeviceCounts.second);
             evidence->setProperty ("firstListElapsedMs", firstListElapsedMs);
             evidence->setProperty ("retryOk", retry.getProperty ("ok", true));
             evidence->setProperty ("retryElapsedMs", retryElapsedMs);
