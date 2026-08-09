@@ -44,11 +44,17 @@ The owner merges; most lanes touch engine/auth/packaging/relay/state and are own
 
 ## Verify before any merge
 ```sh
+scripts/auto-loop/memory-preflight.sh
 cmake --build build
 APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
 MOSH_NO_AUDIO=1 "$APP" --selftest        # ~1200+ checks (gate-dependent), 0 failed, 0 JUCE assertions
 MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # focused undo battery
 ```
+The canonical gate runs the same preflight automatically before any suite. It
+fails closed below 25% free memory, above 4 GiB used swap, below 32 GiB free on
+the Data volume, or above 64 direct Codex app-server children. Thresholds are
+overridable through the `MOSH_*` variables named in the script for stricter
+machine-local policies.
 Run it 3× for determinism and paste the tallies in the PR/commit — the LOCAL
 battery is THE merge gate. **CI is best-effort signal only:** GitHub Actions were
 removed 2026-06-15, re-added 2026-07-07 as a PR gate (`.github/workflows/ci.yml` +
