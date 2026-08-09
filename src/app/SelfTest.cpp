@@ -12339,6 +12339,111 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
                 requester.leave();
                 cmd (authorityOps, "mp_leave_session");
+
+                section ("Multiplayer C014: handed-off bootstrap capture is bound to its room");
+
+                // Given an old-room bootstrap capture that the transfer worker has
+                // already handed off, but the message thread has not executed yet.
+                std::mutex handedOffMutex;
+                std::vector<std::function<void()>> handedOffCallbacks;
+                std::atomic<int> bootstrapCaptures { 0 };
+                std::atomic<int> structuralApplies { 0 };
+                MultiplayerSession generationResponder (
+                    [] (const var&) {},
+                    [] (const String&, var) {},
+                    [] (bool, const String&, const std::map<String, String>&) {},
+                    [&bootstrapCaptures] () -> var
+                    {
+                        bootstrapCaptures.fetch_add (1);
+                        auto* answer = new DynamicObject();
+                        answer->setProperty ("tracks", Array<var>());
+                        answer->setProperty ("annotations", Array<var>());
+                        answer->setProperty ("stemFiles", Array<var>());
+                        return var (answer);
+                    },
+                    [] (const var&) -> String { return {}; },
+                    [] (const var&) -> var { return {}; },
+                    [&structuralApplies] (const var&) { structuralApplies.fetch_add (1); });
+                generationResponder.setTransferDispatcherForSelfTest (
+                    [&handedOffMutex, &handedOffCallbacks] (std::function<void()> apply)
+                    {
+                        const std::lock_guard<std::mutex> lock (handedOffMutex);
+                        handedOffCallbacks.push_back (std::move (apply));
+                    });
+
+                const auto oldCode = generationResponder.createSession ("GenerationOld", "#c01401");
+                MultiplayerClient oldRequester;
+                check (oldCode.isNotEmpty()
+                           && oldRequester.joinSession (oldCode, "GenerationRequester", "#c01402"),
+                       "generation fixture created and joined the old room");
+                const String oldRequestId ("c014-old-room-request");
+                oldRequester.publish (objN ({ { "type", "structural" },
+                                               { "command", "set_tempo" },
+                                               { "args", objN ({ { "bpm", 123.0 } }) } }));
+                oldRequester.publish (objN ({ { "type", "bootstrap_request" },
+                                               { "requestId", oldRequestId } }));
+
+                const auto handoffDeadline = Time::getMillisecondCounter() + (uint32) 5000;
+                bool callbacksWereHandedOff = false;
+                while (! callbacksWereHandedOff && Time::getMillisecondCounter() < handoffDeadline)
+                {
+                    pumpFor (25);
+                    const std::lock_guard<std::mutex> lock (handedOffMutex);
+                    callbacksWereHandedOff = handedOffCallbacks.size() >= 2;
+                }
+                check (callbacksWereHandedOff,
+                       "old-room structural apply and bootstrap capture reached the dispatcher before leave");
+
+                generationResponder.leaveSession();
+                oldRequester.leave();
+                const auto replacementCode = generationResponder.createSession ("GenerationNew", "#c01403");
+                MultiplayerClient replacementObserver;
+                check (replacementCode.isNotEmpty()
+                           && replacementObserver.joinSession (replacementCode, "GenerationObserver", "#c01404"),
+                       "same responder entered a replacement room");
+
+                // When the callback authorized by the old room finally executes.
+                std::vector<std::function<void()>> staleCallbacks;
+                {
+                    const std::lock_guard<std::mutex> lock (handedOffMutex);
+                    staleCallbacks = std::move (handedOffCallbacks);
+                }
+                for (auto& callback : staleCallbacks)
+                    if (callback)
+                        callback();
+
+                // Then neither project capture nor publication may migrate to the
+                // replacement session.
+                check (structuralApplies.load() == 0,
+                       "old-room handed-off structural apply cannot mutate the replacement project");
+                check (bootstrapCaptures.load() == 0,
+                       "old-room handed-off capture cannot read the replacement project");
+                bool stalePublished = false;
+                const auto staleDeadline = Time::getMillisecondCounter() + (uint32) 1500;
+                while (! stalePublished && Time::getMillisecondCounter() < staleDeadline)
+                {
+                    for (const auto& frame : replacementObserver.poll())
+                    {
+                        const auto message = frame.getProperty ("msg", var());
+                        stalePublished = message.getProperty ("type", var()).toString() == "bootstrap_state"
+                            && message.getProperty ("requestId", var()).toString() == oldRequestId;
+                    }
+                    if (! stalePublished)
+                        Thread::sleep (25);
+                }
+                check (! stalePublished,
+                       "old-room handed-off capture cannot publish into the replacement room");
+
+                const auto replacementRoom = generationResponder.roomCode();
+                check (generationResponder.createSession ("GenerationNested", "#c01405").isEmpty()
+                           && generationResponder.roomCode() == replacementRoom,
+                       "active session rejects create without changing rooms");
+                check (! generationResponder.joinSession (replacementRoom, "GenerationNested", "#c01406")
+                           && generationResponder.roomCode() == replacementRoom,
+                       "active session rejects join without changing rooms");
+
+                replacementObserver.leave();
+                generationResponder.leaveSession();
             }
         }
 

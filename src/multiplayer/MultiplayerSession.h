@@ -103,9 +103,10 @@ public:
                         ApplyStructuralFn applyStructural);
     ~MultiplayerSession();
 
-    /** Create a room (this peer joins) + start polling. Returns the code, or "". */
+    /** Create a room (this peer joins) + start polling. Returns the code, or "".
+        An active room must be left explicitly before creating another. */
     juce::String createSession (const juce::String& name, const juce::String& color);
-    /** Join a room by code + start polling. */
+    /** Join a room by code + start polling. An active room must be left first. */
     bool joinSession (const juce::String& code, const juce::String& name, const juce::String& color);
     /** Stop polling + leave the room; aborts any in-flight/queued stem transfer
         (PR-2) before pushing an inactive mp_state. */
@@ -123,6 +124,11 @@ public:
     /** True when MOSH_MP_SYNC_TRANSFER=1 pins every transfer path back to fully
         synchronous/inline behaviour (the PR-2 kill switch). */
     bool syncTransferMode() const { return syncMode_; }
+
+    /** Test seam: replace the dispatcher used by subsequently-created transfer
+        queues. Must be called while inactive. Production keeps the default JUCE
+        message-thread dispatcher. */
+    void setTransferDispatcherForSelfTest (TransferQueue::Dispatcher dispatcher);
 
     /** PR-2: snapshot the directory stem transfers resolve `audio/by-hash/` under
         (the edit file's parent dir) for the worker thread to use later — call
@@ -177,9 +183,14 @@ public:
     void releaseStem (const juce::String& hash);
 
 private:
+    using SessionGeneration = std::shared_ptr<std::atomic<bool>>;
+
+    static bool sessionIsActive (const SessionGeneration& generation);
+    void beginSessionGeneration();
+    void invalidateSessionGeneration();
     void startPoll();
     void stopPoll();
-    void pollLoop();
+    void pollLoop (SessionGeneration generation);
 
     // PR-2 helpers (defined in the .cpp; kept private -- MoshOps only sees the
     // public surface above).
@@ -213,8 +224,10 @@ private:
     OutboundQueue      outbox_;                 // message thread enqueues; poll thread publishes
     std::thread        pollThread_;
     std::atomic<bool>  running_ { false };
+    SessionGeneration  sessionGeneration_;       // unique cancellation identity for one create/join lifetime
 
     const bool         syncMode_;                // MOSH_MP_SYNC_TRANSFER kill switch, latched at construction
+    TransferQueue::Dispatcher transferDispatcher_;
     // PR-2 — dedicated stem-transfer worker. A TransferQueue is NOT restartable
     // after abort() (by design — see TransferQueue.h), so this is recreated fresh
     // by createSession()/joinSession() and torn down by leaveSession() (which

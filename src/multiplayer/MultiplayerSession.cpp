@@ -31,28 +31,32 @@ MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, 
       provideBootstrap_ (std::move (provideBootstrap)), validateBootstrap_ (std::move (validateBootstrap)),
       applyBootstrap_ (std::move (applyBootstrap)),
       applyStructural_ (std::move (applyStructural)),
-      syncMode_ (readSyncTransferEnv())
+      syncMode_ (readSyncTransferEnv()),
+      transferDispatcher_ ([] (std::function<void()> f) { MessageManager::callAsync (std::move (f)); })
 {
 }
 
 MultiplayerSession::~MultiplayerSession()
 {
+    invalidateSessionGeneration();
     stopPoll();
+    transferQueue_.reset();
     clearPendingBootstrapRequests();
-    // transferQueue_'s own destructor aborts + joins its worker if one is still
-    // alive (idempotent with the explicit reset() in leaveSession()).
 }
 
 juce::String MultiplayerSession::createSession (const String& name, const String& color)
 {
+    if (active())
+        return {};
+
     clearPendingBootstrapRequests();
     const auto code = client_.createSession (name, color);
     if (code.isNotEmpty())
     {
+        beginSessionGeneration();
         // PR-2: a fresh worker for this session (a TransferQueue is not restartable
         // after a prior leaveSession()'s abort() — see TransferQueue.h).
-        transferQueue_ = std::make_unique<TransferQueue> (
-            [] (std::function<void()> f) { MessageManager::callAsync (std::move (f)); });
+        transferQueue_ = std::make_unique<TransferQueue> (transferDispatcher_);
         startPoll();
     }
     return code;
@@ -60,11 +64,14 @@ juce::String MultiplayerSession::createSession (const String& name, const String
 
 bool MultiplayerSession::joinSession (const String& code, const String& name, const String& color)
 {
+    if (active())
+        return false;
+
     clearPendingBootstrapRequests();
     if (! client_.joinSession (code, name, color))
         return false;
-    transferQueue_ = std::make_unique<TransferQueue> (
-        [] (std::function<void()> f) { MessageManager::callAsync (std::move (f)); });
+    beginSessionGeneration();
+    transferQueue_ = std::make_unique<TransferQueue> (transferDispatcher_);
     startPoll();
     // P6 — ask the host for the full project so a late-joiner starts from their
     // state (the host answers in its poll loop with a bootstrap_state).
@@ -74,6 +81,7 @@ bool MultiplayerSession::joinSession (const String& code, const String& name, co
 
 void MultiplayerSession::leaveSession()
 {
+    invalidateSessionGeneration();
     stopPoll();             // no more poll callAsyncs after this (they no-op on !running_)
     transferQueue_.reset(); // PR-2: abort() + join the worker before it's gone for good
     clearPendingBootstrapRequests();
@@ -167,6 +175,29 @@ bool MultiplayerSession::acceptBootstrapState (const var& msg, const String& sel
         return false;
     pendingBootstrapRequests_.erase (found);
     return true;
+}
+
+void MultiplayerSession::setTransferDispatcherForSelfTest (TransferQueue::Dispatcher dispatcher)
+{
+    jassert (! active());
+    transferDispatcher_ = std::move (dispatcher);
+}
+
+bool MultiplayerSession::sessionIsActive (const SessionGeneration& generation)
+{
+    return generation != nullptr && generation->load();
+}
+
+void MultiplayerSession::beginSessionGeneration()
+{
+    sessionGeneration_ = std::make_shared<std::atomic<bool>> (true);
+}
+
+void MultiplayerSession::invalidateSessionGeneration()
+{
+    if (sessionGeneration_ != nullptr)
+        sessionGeneration_->store (false);
+    sessionGeneration_.reset();
 }
 
 int MultiplayerSession::claim (const String& logicalId)
@@ -270,6 +301,7 @@ void MultiplayerSession::routeStateMutatingJob (TransferQueue::Job job)
 void MultiplayerSession::commit (const String& logicalId, const String& blob, const var& audioRefs,
                                  const juce::Array<juce::File>& stemFiles)
 {
+    const auto generation = sessionGeneration_;
     const int epoch = [&]
     {
         const auto it = heldEpochs_.find (logicalId);
@@ -315,15 +347,19 @@ void MultiplayerSession::commit (const String& logicalId, const String& blob, co
     auto err = std::make_shared<String>();
 
     TransferQueue::Job job;
-    job.prefetch = [this, logicalId, msgVar, refs, stemFiles, ok, err]
+    job.prefetch = [this, generation, logicalId, msgVar, refs, stemFiles, ok, err]
     {
         for (int i = 0; i < refs.size() && i < stemFiles.size(); ++i)
         {
-            if (transferAborting())
+            if (! sessionIsActive (generation) || transferAborting())
                 { *ok = false; if (err->isEmpty()) *err = "aborted"; break; }
             const auto h = refs[i].getProperty ("hash", var()).toString();
             const auto e = refs[i].getProperty ("ext", var()).toString();
-            if (! client_.uploadBlob (h, e, stemFiles[i], [this] { return transferAborting(); }))
+            if (! client_.uploadBlob (h, e, stemFiles[i], [this, generation]
+                                      {
+                                          return ! sessionIsActive (generation)
+                                              || transferAborting();
+                                      }))
                 { *ok = false; if (err->isEmpty()) *err = "upload failed"; }
         }
         // PR-2 review: after the (abort-aware) upload loop, bail before the publish +
@@ -333,7 +369,7 @@ void MultiplayerSession::commit (const String& logicalId, const String& blob, co
         // /mp/leave releases every lock this peer holds. (Residual: an abort landing
         // *inside* the sub-second publish/releaseLock call still runs to its timeout --
         // bounded, and the same class as the pre-existing client_.leave() call.)
-        if (transferAborting())
+        if (! sessionIsActive (generation) || transferAborting())
             { *ok = false; if (err->isEmpty()) *err = "aborted"; return; }
         int seq = -1;
         if (*ok)
@@ -342,18 +378,9 @@ void MultiplayerSession::commit (const String& logicalId, const String& blob, co
             { *ok = false; if (err->isEmpty()) *err = "publish failed"; }
         client_.releaseLock (logicalId);   // ALWAYS -- success or failure (design point 3)
     };
-    job.apply = [this, logicalId, ok, err]
+    job.apply = [this, generation, logicalId, ok, err]
     {
-        // SHOULD-FIX (PR-2 review): pollLoop's own callAsync guards every dispatch
-        // with `if (! running_.load()) return;` (a stale tick after leaveSession()
-        // is dropped) -- this worker's job.apply closures need the SAME guard. The
-        // race: the worker thread can have ALREADY handed this apply to callAsync
-        // (queued on the message thread) before leaveSession() runs; leaveSession()
-        // sets running_ false and tears down transferQueue_/client_, but that
-        // teardown cannot retroactively cancel an apply already sitting in the
-        // message thread's queue -- without this guard it would fire AFTER the
-        // session is gone and emit a stale mp_commit_done.
-        if (! running_.load()) return;
+        if (! sessionIsActive (generation)) return;
         emitCommitDone (logicalId, *ok, *err);
     };
     transferQueue_->enqueue (std::move (job));
@@ -428,7 +455,9 @@ void MultiplayerSession::startPoll()
 {
     if (running_.exchange (true))
         return;   // already polling
-    pollThread_ = std::thread ([this] { pollLoop(); });
+    const auto generation = sessionGeneration_;
+    jassert (generation != nullptr);
+    pollThread_ = std::thread ([this, generation] { pollLoop (generation); });
 }
 
 void MultiplayerSession::stopPoll()
@@ -439,7 +468,7 @@ void MultiplayerSession::stopPoll()
         pollThread_.join();
 }
 
-void MultiplayerSession::pollLoop()
+void MultiplayerSession::pollLoop (SessionGeneration generation)
 {
     while (running_.load())
     {
@@ -463,9 +492,9 @@ void MultiplayerSession::pollLoop()
             requestBootstrap();
 
         // Marshal everything to the message thread (engine + WebView live there).
-        MessageManager::callAsync ([this, frames, locks, peers, code, self]
+        MessageManager::callAsync ([this, generation, frames, locks, peers, code, self]
         {
-            if (! running_.load())
+            if (! sessionIsActive (generation))
                 return;   // a stale tick after leaveSession() — drop it (no re-activation)
 
             for (auto& f : frames)
@@ -487,11 +516,16 @@ void MultiplayerSession::pollLoop()
                     // thread, enqueue time), not inside prefetchAudioRefs -- see its
                     // doc comment for why a re-read on the worker thread is wrong.
                     const auto commitBaseDir = stemBaseDir();
-                    job.prefetch = [this, msg, commitBaseDir]
-                        { prefetchAudioRefs (msg.getProperty ("audioRefs", var()), commitBaseDir); };
-                    // SHOULD-FIX (PR-2 review): running_ teardown guard -- see the
-                    // commit()/emitCommitDone job.apply's doc comment above.
-                    job.apply    = [this, msg] { if (running_.load()) applyCommit_ (msg); };
+                    job.prefetch = [this, generation, msg, commitBaseDir]
+                    {
+                        if (sessionIsActive (generation))
+                            prefetchAudioRefs (msg.getProperty ("audioRefs", var()), commitBaseDir);
+                    };
+                    job.apply = [this, generation, msg]
+                    {
+                        if (sessionIsActive (generation))
+                            applyCommit_ (msg);
+                    };
                     routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "selection")
@@ -540,9 +574,9 @@ void MultiplayerSession::pollLoop()
                     // the same FIFO guarantees that apply runs before we serialize
                     // the answer. The upload/publish remains a second worker job.
                     TransferQueue::Job captureJob;
-                    captureJob.apply = [this, hasRequestId, requestId, requester]
+                    captureJob.apply = [this, generation, hasRequestId, requestId, requester]
                     {
-                        if (! running_.load())
+                        if (! sessionIsActive (generation))
                             return;
 
                         const auto answer = provideBootstrap_ ? provideBootstrap_() : var();
@@ -559,12 +593,14 @@ void MultiplayerSession::pollLoop()
                         const auto stemFiles = answer.getProperty ("stemFiles", var());
 
                         TransferQueue::Job publishJob;
-                        publishJob.prefetch = [this, msgOutVar, stemFiles]
+                        publishJob.prefetch = [this, generation, msgOutVar, stemFiles]
                         {
+                            if (! sessionIsActive (generation))
+                                return;
                             if (auto* sf = stemFiles.getArray())
                                 for (auto& s : *sf)
                                 {
-                                    if (transferAborting())
+                                    if (! sessionIsActive (generation) || transferAborting())
                                         return;
                                     const auto h = s.getProperty ("hash", var()).toString();
                                     const auto e = s.getProperty ("ext", var()).toString();
@@ -572,9 +608,14 @@ void MultiplayerSession::pollLoop()
                                     if (h.isEmpty() || p.isEmpty())
                                         continue;
                                     client_.uploadBlob (h, e, File (p),
-                                                        [this] { return transferAborting(); });
+                                                        [this, generation]
+                                                        {
+                                                            return ! sessionIsActive (generation)
+                                                                || transferAborting();
+                                                        });
                                 }
-                            client_.publish (msgOutVar);
+                            if (sessionIsActive (generation))
+                                client_.publish (msgOutVar);
                         };
                         routeStateMutatingJob (std::move (publishJob));
                     };
@@ -588,21 +629,21 @@ void MultiplayerSession::pollLoop()
                     // SHOULD-FIX (PR-2 review): captured NOW (message thread, enqueue
                     // time) -- see prefetchAudioRefs's doc comment.
                     const auto bootstrapBaseDir = stemBaseDir();
-                    job.prefetch = [this, msg, bootstrapBaseDir]
+                    job.prefetch = [this, generation, msg, bootstrapBaseDir]
                     {
+                        if (! sessionIsActive (generation))
+                            return;
                         if (auto* tarr = msg.getProperty ("tracks", var()).getArray())
                             for (auto& tv : *tarr)
                             {
-                                if (transferAborting())
+                                if (! sessionIsActive (generation) || transferAborting())
                                     return;
                                 prefetchAudioRefs (tv.getProperty ("audioRefs", var()), bootstrapBaseDir);
                             }
                     };
-                    job.apply = [this, msg]
+                    job.apply = [this, generation, msg]
                     {
-                        // SHOULD-FIX (PR-2 review): running_ teardown guard -- see the
-                        // commit()/emitCommitDone job.apply's doc comment above.
-                        if (! running_.load())
+                        if (! sessionIsActive (generation))
                             return;
                         if (! applyBootstrap_)
                             return;
@@ -634,9 +675,11 @@ void MultiplayerSession::pollLoop()
                     // FIFO purely for ordering: a fast tempo change enqueued right
                     // after a slow commit upload must still apply strictly after it.
                     TransferQueue::Job job;
-                    // SHOULD-FIX (PR-2 review): running_ teardown guard -- see the
-                    // commit()/emitCommitDone job.apply's doc comment above.
-                    job.apply = [this, msg] { if (running_.load() && applyStructural_) applyStructural_ (msg); };
+                    job.apply = [this, generation, msg]
+                    {
+                        if (sessionIsActive (generation) && applyStructural_)
+                            applyStructural_ (msg);
+                    };
                     routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "webrtc")
