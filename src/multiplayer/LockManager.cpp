@@ -90,6 +90,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // G10 — automation recording: arming write mode and bulk-authoring a curve both
         // target one track's parameter surface, same lock group as the Wave-7 quartet above.
         "set_track_automation_mode", "write_automation_curve",
+        "bounce_track", "freeze_track", "unfreeze_track",
         // LYR-001 — lyric sheet mutations target a track (args carry trackId).
         "create_lyric_sheet", "remove_lyric_sheet", "set_lyric_constraint",
         "set_lyric_line", "remove_lyric_line",
@@ -102,8 +103,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "confirm_skeleton",
     };
 
-    // Clip-scoped: mutate one clip (args carry a clipId). Key = the clip's track
-    // logicalId, resolved by MoshOps.
+    // Clip-scoped: mutate clip content. MoshOps resolves the singular clipId and
+    // every valid clipIds entry to all affected tracks' logicalIds before guarding.
     static const std::set<juce::String> clip {
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
@@ -113,6 +114,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // CLP-LOOP — clip loop region; carries a clipId like gain/mute/fade.
         "set_clip_loop",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
+        "consolidate_clips", "crop_clip", "transform_velocities", "transform_notes",
         "apply_choke",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",

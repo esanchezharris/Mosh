@@ -200,9 +200,10 @@ private:
     // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
     juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
     juce::var cmdMpApplyStructural  (const juce::var& args);
-    // Resolve the lock key (the affected track's logicalId, or the session key) for
-    // a guarded command, given its scope + args. Engine-coupled (findTrack/findClip).
-    juce::String lockKeyFor (LockManager::Scope scope, const juce::var& args);
+    // Resolve every affected lock key (track logicalIds or the session key) for a
+    // guarded command. Clip scope includes singular clipId and every valid clipIds
+    // entry; unresolvable targets stay empty so command handlers own shape errors.
+    std::vector<juce::String> lockKeysFor (LockManager::Scope scope, const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);

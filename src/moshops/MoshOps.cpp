@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include "MoshOps.h"
 #include "files/DirectoryListing.h"
@@ -477,7 +478,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
 
     // MP-001 lock guard — the single chokepoint. When a multiplayer session is
     // active, reject any mutation to a track / clip / structure currently locked by
-    // the OTHER peer (fail-closed: unclassified commands need the session lock).
+    // the OTHER peer. Multi-clip commands check every resolved affected track
+    // (fail-closed: unclassified commands need the session lock).
     // No session => no-op, so single-player behaviour is unchanged. A REMOTE apply
     // (applyingRemote_) bypasses the guard — it is the peer's change landing, not a
     // local edit, so it must not be blocked by the peer's own lock.
@@ -486,9 +488,12 @@ juce::var MoshOps::executeImpl (const juce::var& command)
         const auto scope = LockManager::classify (name);
         if (scope != LockManager::Scope::Unguarded)
         {
-            const auto decision = lockManager_.decide (scope, lockKeyFor (scope, args));
-            if (! decision.allow)
-                return errResult (name, "blocked: " + decision.reason);
+            for (const auto& key : lockKeysFor (scope, args))
+            {
+                const auto decision = lockManager_.decide (scope, key);
+                if (! decision.allow)
+                    return errResult (name, "blocked: " + decision.reason);
+            }
         }
     }
 
@@ -787,33 +792,55 @@ juce::var MoshOps::executeImpl (const juce::var& command)
 // Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& args)
+std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope, const juce::var& args)
 {
     using Scope = LockManager::Scope;
+    std::vector<juce::String> keys;
+    auto addTrackKey = [&keys] (te::Track* track)
+    {
+        if (track == nullptr)
+            return;
+        const auto key = logicalid::track (track->state);
+        if (key.isNotEmpty() && std::find (keys.begin(), keys.end(), key) == keys.end())
+            keys.push_back (key);
+    };
+
     if (scope == Scope::SessionGlobal)
-        return LockManager::sessionKey();
+    {
+        keys.push_back (LockManager::sessionKey());
+        return keys;
+    }
 
     if (scope == Scope::Track)
     {
         if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
-            return logicalid::track (t->state);
+        {
+            addTrackKey (t);
+            return keys;
+        }
         // Track-scoped composites may target via clipId only (add_drum_pattern) —
         // resolve through the clip so a peer's track lock still guards them.
         if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
-            if (auto* tr = c->getTrack())
-                return logicalid::track (tr->state);
-        return {};   // unresolvable target -> empty key allows; the command itself will error
+            addTrackKey (c->getTrack());
+        return keys;   // unresolvable target -> empty collection; the handler errors
     }
 
     if (scope == Scope::Clip)
     {
+        auto addClipTrack = [this, &addTrackKey] (const juce::var& clipId)
+        {
+            if (auto* clip = findClip (clipId.toString()))
+                addTrackKey (clip->getTrack());
+        };
         if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
-            if (auto* tr = c->getTrack())
-                return logicalid::track (tr->state);
-        return {};
+            addTrackKey (c->getTrack());
+        if (auto* clipIds = args.getProperty ("clipIds", var()).getArray())
+            for (auto& clipId : *clipIds)
+                addClipTrack (clipId);
+        return keys;
     }
 
-    return {};
+    return keys;
 }
 
 juce::var MoshOps::cmdUndo (const juce::var& args)

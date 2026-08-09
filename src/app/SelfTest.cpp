@@ -11288,6 +11288,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // A clip on Lock A, added BEFORE locking, to exercise clip-scoped guarding.
         auto addc = cmd (ops, "add_test_tone_clip", objN ({ { "trackId", aId }, { "seconds", 1.0 } }));
         const auto aClipId = addc.getProperty ("data", juce::var()).getProperty ("clipId", juce::var()).toString();
+        const auto aMidiClipOne = cmd (ops, "add_midi_clip",
+                                       objN ({ { "trackId", aId }, { "start", 2.0 }, { "length", 1.0 } }))
+                                      ["data"].getProperty ("clipId", juce::var()).toString();
+        const auto aMidiClipTwo = cmd (ops, "add_midi_clip",
+                                       objN ({ { "trackId", aId }, { "start", 3.0 }, { "length", 1.0 } }))
+                                      ["data"].getProperty ("clipId", juce::var()).toString();
+        const auto bClipId = cmd (ops, "add_test_tone_clip",
+                                  objN ({ { "trackId", bId }, { "seconds", 1.0 } }))
+                                 ["data"].getProperty ("clipId", juce::var()).toString();
+        check (aClipId.isNotEmpty() && aMidiClipOne.isNotEmpty() && aMidiClipTwo.isNotEmpty()
+                   && bClipId.isNotEmpty(),
+               "lock-test clip fixtures resolved across both tracks");
 
         // Activate: the OTHER peer holds Lock A AND the session (structural) lock.
         auto* locks = new juce::DynamicObject();
@@ -11307,6 +11319,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         if (aClipId.isNotEmpty())
             check (! ok (cmd (ops, "set_clip_gain", objN ({ { "clipId", aClipId }, { "gain", 0.5 } }))),
                    "clip mutation on a peer-locked track's clip is BLOCKED (clip->track->logicalId)");
+        check (! ok (cmd (ops, "consolidate_clips",
+                          objN ({ { "clipIds", Array<var> { aMidiClipOne, aMidiClipTwo } } }))),
+               "clipIds consolidation on a peer-locked track is BLOCKED");
+        check (! ok (cmd (ops, "crop_clip",
+                          objN ({ { "clipIds", Array<var> { aClipId, bClipId } },
+                                  { "start", 0.1 }, { "end", 0.9 } }))),
+               "multi-track crop is BLOCKED when any selected track is peer-locked");
         check (! ok (cmd (ops, "create_track", args1 ("name", "Nope"))),
                "session-global op BLOCKED while the session lock is peer-held");
 
