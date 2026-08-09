@@ -14,6 +14,7 @@
 #include "engine/SourceRef.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
+#include "multiplayer/AudioRefValidation.h"
 #include <juce_cryptography/juce_cryptography.h>
 #include <thread>
 
@@ -48,6 +49,21 @@ namespace
             "set_key", "set_count_in", "set_record_options",
         };
         return allowed.contains (name);
+    }
+
+    String bootstrapAudioRefError (audioref::Error error)
+    {
+        switch (error)
+        {
+            case audioref::Error::none: return {};
+            case audioref::Error::arrayRequired: return "bootstrap audioRefs must be an array";
+            case audioref::Error::objectRequired: return "bootstrap audioRef must be an object";
+            case audioref::Error::stringFieldsRequired: return "bootstrap audioRef hash and ext must be strings";
+            case audioref::Error::invalidHash: return "bootstrap audioRef hash must be 64 hex characters";
+            case audioref::Error::invalidExtension:
+            case audioref::Error::destinationOutsideRoot: return "bootstrap audioRef extension is invalid";
+        }
+        return "bootstrap audioRef is invalid";
     }
 }
 
@@ -480,29 +496,8 @@ juce::String MoshOps::validateBootstrapBundle (const juce::var& args) const
         if (auto validated = trackcommit::validate (blobValue.toString(), logicalId); ! validated.ok)
             return validated.error;
 
-        const auto refsValue = track.getProperty ("audioRefs", var());
-        if (! refsValue.isVoid())
-        {
-            auto* refs = refsValue.getArray();
-            if (refs == nullptr)
-                return "bootstrap audioRefs must be an array";
-            for (const auto& ref : *refs)
-            {
-                if (! ref.isObject())
-                    return "bootstrap audioRef must be an object";
-                const auto hashValue = ref.getProperty ("hash", var());
-                const auto extValue = ref.getProperty ("ext", var());
-                if (! hashValue.isString() || ! extValue.isString())
-                    return "bootstrap audioRef hash and ext must be strings";
-                const auto hash = hashValue.toString();
-                const auto ext = extValue.toString();
-                if (hash.length() != 64 || ! hash.containsOnly ("0123456789abcdefABCDEF"))
-                    return "bootstrap audioRef hash must be 64 hex characters";
-                if (ext.isEmpty() || ext.length() > 16
-                    || ! ext.containsOnly ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
-                    return "bootstrap audioRef extension is invalid";
-            }
-        }
+        if (const auto refs = audioref::validate (track.getProperty ("audioRefs", var())); ! refs.ok())
+            return bootstrapAudioRefError (refs.error);
     }
 
     const auto annotationsValue = args.getProperty ("annotations", var());
@@ -553,8 +548,11 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
                 {
                     const auto h = a.getProperty ("hash", var()).toString();
                     const auto e = a.getProperty ("ext", var()).toString();
-                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                        mpSession_->downloadBlob (h, e, dest);
+                    const auto resolved = audioref::resolveContainedDestination (byHashDir, a);
+                    if (! resolved.ok())
+                        return errResult ("mp_apply_bootstrap", bootstrapAudioRefError (resolved.error));
+                    if (! resolved.destination.existsAsFile())
+                        mpSession_->downloadBlob (h, e, resolved.destination);
                 }
     }
 

@@ -1,4 +1,5 @@
 #include "SelfTest.h"
+#include "selftest/MultiplayerAudioRefSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -11848,6 +11849,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)
     {
+        runMultiplayerAudioRefSelfTest (
+            eng, ops, { [] (const String& name) { section (name); },
+                        [] (bool condition, const String& message) { check (condition, message); },
+                        [&eventTypes] (const String& expected)
+                        {
+                            int count = 0;
+                            for (const auto& type : eventTypes)
+                                if (type == expected)
+                                    ++count;
+                            return count;
+                        } });
         section ("Multiplayer: native relay round-trip (P2, gated MOSH_SELFTEST_MP)");
 
         MultiplayerClient a, b;   // both resolve the relay from MOSH_RELAY_URL

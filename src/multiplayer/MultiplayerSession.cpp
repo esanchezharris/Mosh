@@ -1,4 +1,5 @@
 #include "MultiplayerSession.h"
+#include "AudioRefValidation.h"
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -225,17 +226,20 @@ void MultiplayerSession::prefetchAudioRefs (const juce::var& audioRefsArr, const
     // actually arrived.
     if (baseDir.isEmpty())
         return;   // no session-stamped directory yet (shouldn't happen once a session is live)
+    if (! audioref::validate (audioRefsArr).ok())
+        return;
     auto byHashDir = byHashDirFor (baseDir);
     if (auto* arr = audioRefsArr.getArray())
         for (auto& a : *arr)
         {
             if (transferAborting())
                 return;
+            const auto resolved = audioref::resolveContainedDestination (byHashDir, a);
+            if (! resolved.ok())
+                return;
             const auto h = a.getProperty ("hash", var()).toString();
             const auto e = a.getProperty ("ext", var()).toString();
-            if (h.isEmpty())
-                continue;
-            auto dest = byHashDir.getChildFile (h + "." + e);
+            const auto dest = resolved.destination;
             if (dest.existsAsFile())
                 continue;
             // SHOULD-FIX (PR-2 review): claim the hash before fetching -- the message
@@ -470,6 +474,8 @@ void MultiplayerSession::pollLoop()
                 const auto type = msg.getProperty ("type", var()).toString();
                 if (type == "commit")
                 {
+                    if (! audioref::validate (msg.getProperty ("audioRefs", var())).ok())
+                        continue;
                     // PR-2: prefetch (download any missing stems) on the transfer
                     // worker, THEN apply (the existing applyCommit_ callback) —
                     // routed through the SAME ordered pipeline as bootstrap_state/
