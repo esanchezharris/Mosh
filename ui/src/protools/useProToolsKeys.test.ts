@@ -20,6 +20,7 @@ const SNAPSHOT: Snapshot = {
     index: 0,
     name: "Audio",
     type: "audio",
+    monitor: "automatic",
     clips: [{
       id: "clip-1",
       name: "Verse",
@@ -36,6 +37,7 @@ const SNAPSHOT: Snapshot = {
     name: "Instrument",
     type: "midi",
     isInstrument: true,
+    monitor: "automatic",
     clips: [{
       id: "clip-2",
       name: "Keys",
@@ -200,11 +202,12 @@ describe("useProToolsKeys", () => {
   });
 
   it.each([
-    ["R", "KeyR", "arm_track", "armed"],
-    ["S", "KeyS", "set_track_solo", "solo"],
-    ["M", "KeyM", "set_track_mute", "mute"],
+    ["R", "KeyR", "arm_track", { armed: true }],
+    ["S", "KeyS", "set_track_solo", { solo: true }],
+    ["M", "KeyM", "set_track_mute", { mute: true }],
+    ["I", "KeyI", "set_input_monitor", { mode: "on" }],
   ] as const)("Shift+%s applies the track-header action to every Edit-associated track",
-    async (key, code, command, field) => {
+    async (key, code, command, expectedArgs) => {
       // Given both tracks contain the Edit selection.
       useProTools.setState({
         editSelectionTrackId: "track-2",
@@ -223,8 +226,8 @@ describe("useProToolsKeys", () => {
 
       // Then each target is changed serially through its existing MoshOps command.
       await vi.waitFor(() => expect(execCalls.filter((call) => call.command === command)).toEqual([
-        { command, args: { trackId: "track-1", [field]: true } },
-        { command, args: { trackId: "track-2", [field]: true } },
+        { command, args: { trackId: "track-1", ...expectedArgs } },
+        { command, args: { trackId: "track-2", ...expectedArgs } },
       ]));
     });
 
@@ -272,6 +275,61 @@ describe("useProToolsKeys", () => {
 
     // Then the honest hardware failure is visible instead of a false armed state.
     await vi.waitFor(() => expect(useStore.getState().lastError).toBe("No physical input"));
+  });
+
+  it("surfaces an applied:false TrackInput result and stops the group action", async () => {
+    // Given two tracks own the Edit range and the second cannot enter Input Monitor.
+    useProTools.setState({
+      editSelectionTrackId: "track-2",
+      editSelectionTrackIds: ["track-1", "track-2"],
+      trackSelectionIds: ["track-1", "track-2"],
+    });
+    useStore.setState({
+      lastError: null,
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        execCalls.push({ command, args });
+        if (command === "set_input_monitor" && args?.trackId === "track-2") {
+          return { ok: true, command, data: { applied: false, reason: "Input unavailable" } };
+        }
+        return { ok: true, command, data: { applied: true } };
+      }),
+    });
+
+    // When Shift+I enables TrackInput across the Edit-associated tracks.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "I", code: "KeyI", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+
+    // Then the hardware/application refusal remains visible.
+    await vi.waitFor(() => expect(useStore.getState().lastError).toBe("Input unavailable"));
+  });
+
+  it("Shift+I returns a focused Monitor In track to Auto", async () => {
+    // Given the Edit-associated source track is already in Input Monitor.
+    useStore.setState({
+      snapshot: {
+        ...SNAPSHOT,
+        tracks: SNAPSHOT.tracks.map((track) => track.id === "track-1"
+          ? { ...track, monitor: "on" as const }
+          : track),
+      },
+    });
+    useProTools.setState({
+      editSelectionTrackId: "track-1",
+      editSelectionTrackIds: ["track-1"],
+      trackSelectionIds: ["track-1"],
+    });
+
+    // When Shift+I toggles the Pro Tools TrackInput action.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "I", code: "KeyI", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+
+    // Then Mosh's three-state monitor model returns to Auto rather than Off.
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_input_monitor",
+      args: { trackId: "track-1", mode: "automatic" },
+    }));
   });
 
   it("stops a group track action when projectEpoch changes after the first command", async () => {
@@ -392,6 +450,99 @@ describe("useProToolsKeys", () => {
     })));
     expect(useStore.getState().pxPerSec).toBe(80);
     canvas.remove();
+  });
+
+  it("moves a linked multi-track Edit selection to one adjacent track with P and Semicolon", () => {
+    // Given both tracks own one horizontal Edit span and the timeline has keyboard focus.
+    act(() => useShell.setState({ timeRange: { start: 2, end: 6 } }));
+    useProTools.setState({
+      editSelectionTrackId: "track-2",
+      editSelectionTrackIds: ["track-1", "track-2"],
+      trackSelectionIds: ["track-1", "track-2"],
+    });
+    useStore.setState({ selectedTrackId: "track-2" });
+    const canvas = document.createElement("div");
+    canvas.className = "pt-timeline-scroll";
+    canvas.tabIndex = 0;
+    document.body.appendChild(canvas);
+    canvas.focus();
+
+    // When P moves Edit ownership up.
+    act(() => canvas.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "p", code: "KeyP", bubbles: true, cancelable: true,
+    })));
+
+    // Then the vertical scope collapses to one track while time and linked Track focus follow.
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["track-1"]);
+    expect(useProTools.getState().trackSelectionIds).toEqual(["track-1"]);
+    expect(useStore.getState().selectedTrackId).toBe("track-1");
+    expect(useShell.getState().timeRange).toEqual({ start: 2, end: 6 });
+
+    // When Semicolon moves Edit ownership down again.
+    act(() => canvas.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ";", code: "Semicolon", bubbles: true, cancelable: true,
+    })));
+
+    // Then the next visible track becomes the single linked target.
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["track-2"]);
+    expect(useStore.getState().selectedTrackId).toBe("track-2");
+    expect(execCalls).toEqual([]);
+    canvas.remove();
+  });
+
+  it("moves only Edit ownership with Control+Semicolon while Track/Edit is unlinked", () => {
+    // Given Edit and Track ownership both begin on track one before they are unlinked.
+    useProTools.setState({
+      trackEditLinked: false,
+      editSelectionTrackId: "track-1",
+      editSelectionTrackIds: ["track-1"],
+      trackSelectionIds: ["track-1"],
+    });
+    useStore.setState({ selectedTrackId: "track-1" });
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+
+    // When Avid's Mac system-level Move Edit Down shortcut is used.
+    act(() => outside.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ";", code: "Semicolon", ctrlKey: true, bubbles: true, cancelable: true,
+    })));
+
+    // Then only the Edit association moves.
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["track-2"]);
+    expect(useProTools.getState().trackSelectionIds).toEqual(["track-1"]);
+    expect(useStore.getState().selectedTrackId).toBe("track-1");
+    expect(execCalls).toEqual([]);
+    outside.remove();
+  });
+
+  it("does not claim P at the top boundary or from unrelated controls", () => {
+    // Given Edit ownership is already at the first visible track.
+    useProTools.setState({
+      editSelectionTrackId: "track-1",
+      editSelectionTrackIds: ["track-1"],
+      trackSelectionIds: ["track-1"],
+    });
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    const outsideEvent = new KeyboardEvent("keydown", {
+      key: "p", code: "KeyP", bubbles: true, cancelable: true,
+    });
+
+    // When plain P comes from a non-editing control, then it remains unclaimed.
+    act(() => outside.dispatchEvent(outsideEvent));
+    expect(outsideEvent.defaultPrevented).toBe(false);
+
+    // When Control+P requests a move beyond the top boundary, then it is also a no-op.
+    const boundaryEvent = new KeyboardEvent("keydown", {
+      key: "p", code: "KeyP", ctrlKey: true, bubbles: true, cancelable: true,
+    });
+    act(() => outside.dispatchEvent(boundaryEvent));
+    expect(boundaryEvent.defaultPrevented).toBe(false);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["track-1"]);
+    expect(execCalls).toEqual([]);
+    outside.remove();
   });
 
   it("recalls zoom presets 1-5 only from the editing timeline", () => {

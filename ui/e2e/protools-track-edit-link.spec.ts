@@ -149,7 +149,7 @@ test("vertical Edit selection links contiguous tracks and their compatible Track
   await expect(thirdHeader).toHaveAttribute("data-selected", "false");
 });
 
-test("Track Name modifiers and Shift R S M follow the tutorial-backed Edit selection", async ({ page }, testInfo) => {
+test("Track Name modifiers, keyboard focus, and Shift R S M I follow Edit selection", async ({ page }, testInfo) => {
   // Given a linked Edit range on the first of three visible tracks.
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
@@ -193,13 +193,17 @@ test("Track Name modifiers and Shift R S M follow the tutorial-backed Edit selec
   await page.keyboard.press("Shift+R");
   await expect(firstHeader.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
   await expect(lastHeader.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Shift+I");
+  await expect(firstHeader.getByTestId("pt-track-input-monitor")).toHaveAttribute("aria-pressed", "true");
+  await expect(middleHeader.getByTestId("pt-track-input-monitor")).toHaveAttribute("aria-pressed", "false");
+  await expect(lastHeader.getByTestId("pt-track-input-monitor")).toHaveAttribute("aria-pressed", "true");
 
   // And the command trail names each existing per-track MoshOps mutation in visible order.
   const controls = await page.evaluate(() => {
     const trace = (window as unknown as {
       __moshCmdTrace?: Array<{ command: string; args: Record<string, unknown> }>;
     }).__moshCmdTrace ?? [];
-    return trace.filter((entry) => ["set_track_mute", "set_track_solo", "arm_track"]
+    return trace.filter((entry) => ["set_track_mute", "set_track_solo", "arm_track", "set_input_monitor"]
       .includes(entry.command))
       .map(({ command, args }) => ({ command, args }));
   });
@@ -210,6 +214,8 @@ test("Track Name modifiers and Shift R S M follow the tutorial-backed Edit selec
     { command: "set_track_solo", args: { trackId: lastTrackId, solo: true } },
     { command: "arm_track", args: { trackId: firstTrackId, armed: true } },
     { command: "arm_track", args: { trackId: lastTrackId, armed: true } },
+    { command: "set_input_monitor", args: { trackId: firstTrackId, mode: "on" } },
+    { command: "set_input_monitor", args: { trackId: lastTrackId, mode: "on" } },
   ]);
   await page.screenshot({
     path: testInfo.outputPath("protools-track-group-controls-wide.png"),
@@ -226,4 +232,23 @@ test("Track Name modifiers and Shift R S M follow the tutorial-backed Edit selec
     path: testInfo.outputPath("protools-track-group-controls-compact.png"),
     animations: "disabled",
   });
+
+  // When command-focus P and Semicolon move the Edit selection vertically.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const timeline = page.getByTestId("pt-timeline");
+  await timeline.focus();
+  await page.keyboard.press("p");
+
+  // Then the multi-track Edit set collapses to the middle track without a command.
+  const middleTrackId = await middleHeader.getAttribute("data-track-id");
+  if (!middleTrackId) throw new Error("middle track id is unavailable");
+  await expect(edit).toHaveAttribute("data-track-ids", middleTrackId);
+  await expect(middleHeader).toHaveAttribute("data-selected", "true");
+  await expect(firstHeader).toHaveAttribute("data-selected", "false");
+  await expect(lastHeader).toHaveAttribute("data-selected", "false");
+
+  // And Semicolon moves it back down to the last visible track.
+  await page.keyboard.press(";");
+  await expect(edit).toHaveAttribute("data-track-ids", lastTrackId);
+  await expect(lastHeader).toHaveAttribute("data-selected", "true");
 });

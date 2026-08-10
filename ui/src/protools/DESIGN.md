@@ -164,12 +164,19 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Mutation**: link and both selection sets are UI-local. The focused lane still uses the existing global `setSelectedTrack` path for the active inspector and multiplayer signaling; no snapshot mutation or project command occurs. Track View is shell-local display state.
 - **Adaptation**: Mosh's canonical active-track field remains singular, so the last focused associated lane owns the inspector while the shell renders and operates on the complete selected set. If a modifier removes the active Track Name, the last remaining selected Track Name becomes active; removing the final Track Name clears the linked Edit range.
 
+### Edit Keyboard Focus track navigation
+
+- **Behavior**: P moves Edit ownership up one visible track and Semicolon moves it down while the Edit timeline or a clip owns focus. Control+P and Control+Semicolon provide Avid's system-level Mac shortcuts outside editable controls. A multi-track Edit set collapses to the one adjacent track resolved from its focused lane; the horizontal time span is unchanged.
+- **Linked state**: Link Track/Edit on moves the pressed Track Name and active inspector with Edit ownership. Link Track/Edit off moves only the Edit band and leaves independently selected Track Names unchanged.
+- **Boundary and safety**: navigation at the first or last visible track is a no-op and is not claimed from unrelated buttons by the focus-only shortcut. Track ids are resolved against current visible order, so deleted/group/return tracks cannot become targets. This is project-scoped UI state and issues no command.
+
 ### Track control row
 
 - **Structure**: color strip, select/name button, record/solo/mute controls, and snapshot-backed output metadata.
 - **States**: default, hover, selected, armed, muted, soloed, focus-visible, group action in flight, failure.
-- **Accessibility**: controls use native buttons and explicit labels; Track Name selection is separate from record/mute actions. Shift+R/S/M act outside editable controls on the exact tracks containing the Edit cursor or selection. Option/Alt+Shift-click on R/S/M applies the source control's next state to selected Track Names.
-- **Mutation**: group actions call the existing `arm_track`, `set_track_solo`, or `set_track_mute` MoshOps command once per target in visible order. Calls are serial, stop on the first failure, and abort on `projectEpoch` replacement. Both `ok:false` and `ok:true, applied:false` surface through the existing Pro Tools error banner. This preserves canonical validation, JSONL, multiplayer locks, and `arm_track` hardware semantics; it is explicitly not an atomic native group command.
+- **Accessibility**: controls use native buttons and explicit labels; Track Name selection is separate from record/mute actions. Shift+R/S/M/I act outside editable controls on the exact tracks containing the Edit cursor or selection. Option/Alt+Shift-click on R/S/M/I applies the source control's next state to selected Track Names.
+- **TrackInput adaptation**: the compact I button and Shift+I toggle between In (`on`) and Auto (`automatic`), matching Pro Tools' binary TrackInput action while retaining Mosh's explicit Off choice in the inspector. Its pressed state means In.
+- **Mutation**: group actions call the existing `arm_track`, `set_track_solo`, `set_track_mute`, or `set_input_monitor` MoshOps command once per target in visible order. Calls are serial, stop on the first failure, and abort on `projectEpoch` replacement. Both `ok:false` and `ok:true, applied:false` surface through the existing Pro Tools error banner. This preserves canonical validation, JSONL, multiplayer locks, and hardware-application semantics; it is explicitly not an atomic native group command.
 - **Layout**: vertical stack row locked to the corresponding lane; resize separator is keyboard-operable.
 
 ### Timeline lane and Smart Tool surface

@@ -3,12 +3,13 @@ import type { Snapshot, Track } from "../types";
 import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
 
-export type ProToolsTrackControl = "arm" | "solo" | "mute";
+export type ProToolsTrackControl = "arm" | "solo" | "mute" | "input";
 
 const TRACK_CONTROL_KEYS: Readonly<Partial<Record<string, ProToolsTrackControl>>> = {
   KeyR: "arm",
   KeyS: "solo",
   KeyM: "mute",
+  KeyI: "input",
 };
 
 export function proToolsEditTrackIds(snapshot: Snapshot): readonly string[] {
@@ -25,20 +26,28 @@ export function proToolsEditTrackIds(snapshot: Snapshot): readonly string[] {
     .map((track) => track.id);
 }
 
-function nextControlState(control: ProToolsTrackControl, track: Track): boolean {
-  if (control === "arm") return !Boolean(track.armed);
-  if (control === "solo") return !Boolean(track.solo);
-  return !Boolean(track.mute);
-}
-
-function commandArgs(
+function trackControlCommand(
   control: ProToolsTrackControl,
-  trackId: string,
-  enabled: boolean,
-): { command: string; args: Record<string, unknown> } {
-  if (control === "arm") return { command: "arm_track", args: { trackId, armed: enabled } };
-  if (control === "solo") return { command: "set_track_solo", args: { trackId, solo: enabled } };
-  return { command: "set_track_mute", args: { trackId, mute: enabled } };
+  sourceTrack: Track,
+): (trackId: string) => { readonly command: string; readonly args: Record<string, unknown> } {
+  switch (control) {
+    case "arm": {
+      const armed = !Boolean(sourceTrack.armed);
+      return (trackId) => ({ command: "arm_track", args: { trackId, armed } });
+    }
+    case "solo": {
+      const solo = !Boolean(sourceTrack.solo);
+      return (trackId) => ({ command: "set_track_solo", args: { trackId, solo } });
+    }
+    case "mute": {
+      const mute = !Boolean(sourceTrack.mute);
+      return (trackId) => ({ command: "set_track_mute", args: { trackId, mute } });
+    }
+    case "input": {
+      const mode = sourceTrack.monitor === "on" ? "automatic" : "on";
+      return (trackId) => ({ command: "set_input_monitor", args: { trackId, mode } });
+    }
+  }
 }
 
 export async function applyProToolsTrackControl(
@@ -53,12 +62,12 @@ export async function applyProToolsTrackControl(
   const tracks = snapshot.tracks.filter((track) => requested.has(track.id));
   const sourceTrack = tracks.find((track) => track.id === sourceTrackId) ?? tracks[0];
   if (!sourceTrack) return;
-  const enabled = nextControlState(control, sourceTrack);
+  const commandForTrack = trackControlCommand(control, sourceTrack);
   const epoch = store.projectEpoch;
 
   for (const track of tracks) {
     if (useStore.getState().projectEpoch !== epoch) return;
-    const { command, args } = commandArgs(control, track.id, enabled);
+    const { command, args } = commandForTrack(track.id);
     const result = await store.exec(command, args);
     if (useStore.getState().projectEpoch !== epoch) return;
     if (!result.ok) {
@@ -67,7 +76,9 @@ export async function applyProToolsTrackControl(
     }
     const failure = control === "arm"
       ? appliedFailure(result, "Record arm could not be applied.")
-      : null;
+      : control === "input"
+        ? appliedFailure(result, "Input Monitor could not be applied.")
+        : null;
     if (failure) {
       store.setLastError(failure);
       return;

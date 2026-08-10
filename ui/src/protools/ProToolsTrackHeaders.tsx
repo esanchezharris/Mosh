@@ -138,6 +138,15 @@ function ProToolsTrackHeader({ track, tracks }: {
           aria-keyshortcuts="Shift+M"
           onClick={(event) => applyControl("mute", event)}
         >M</button>
+        <button
+          type="button"
+          className="pt-track-input"
+          data-testid="pt-track-input-monitor"
+          aria-label={`Input-monitor ${track.name}`}
+          aria-pressed={track.monitor === "on"}
+          aria-keyshortcuts="Shift+I"
+          onClick={(event) => applyControl("input", event)}
+        >I</button>
       </div>
       <span className="pt-track-route" title={track.output?.name ?? "Default output"}>
         {track.output?.name ?? "Default output"}

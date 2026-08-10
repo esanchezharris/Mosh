@@ -35,6 +35,7 @@ const SNAPSHOT: Snapshot = {
     index: 0,
     name: "Lead Vocal",
     type: "audio",
+    monitor: "automatic",
     clips: [{
       id: "audio-clip",
       name: "Vocal Take",
@@ -63,6 +64,7 @@ const SNAPSHOT: Snapshot = {
     name: "Keys",
     type: "midi",
     isInstrument: true,
+    monitor: "automatic",
     clips: [{
       id: "midi-clip",
       name: "Chords",
@@ -78,6 +80,7 @@ const SNAPSHOT: Snapshot = {
     index: 2,
     name: "Double Vocal",
     type: "audio",
+    monitor: "automatic",
     clips: [],
   }],
   transport: {
@@ -244,6 +247,33 @@ describe("Pro Tools Track Views", () => {
       .toEqual([
         { command: "set_track_mute", args: { trackId: "audio-track", mute: true } },
         { command: "set_track_mute", args: { trackId: "double-track", mute: true } },
+      ]));
+  });
+
+  it("exposes TrackInput and Option-Shift-click applies it to selected Track Names", async () => {
+    // Given two nonadjacent Track Names are selected and both monitor in Auto.
+    useProTools.setState({
+      editSelectionTrackId: "double-track",
+      editSelectionTrackIds: ["audio-track", "double-track"],
+      trackSelectionIds: ["audio-track", "double-track"],
+    });
+    act(() => root.render(React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT })));
+    const lead = host.querySelector<HTMLElement>('[data-track-id="audio-track"]');
+    const inputMonitor = lead?.querySelector<HTMLButtonElement>("[data-testid=pt-track-input-monitor]");
+    if (!inputMonitor) throw new Error("Lead Vocal TrackInput control is missing");
+    expect(inputMonitor.getAttribute("aria-label")).toBe("Input-monitor Lead Vocal");
+    expect(inputMonitor.getAttribute("aria-pressed")).toBe("false");
+
+    // When the source I button is Option-Shift-clicked.
+    act(() => inputMonitor.dispatchEvent(new MouseEvent("click", {
+      bubbles: true, cancelable: true, altKey: true, shiftKey: true,
+    })));
+
+    // Then every selected Track Name receives Monitor In in visible order.
+    await vi.waitFor(() => expect(execCalls.filter((call) => call.command === "set_input_monitor"))
+      .toEqual([
+        { command: "set_input_monitor", args: { trackId: "audio-track", mode: "on" } },
+        { command: "set_input_monitor", args: { trackId: "double-track", mode: "on" } },
       ]));
   });
 
