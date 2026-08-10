@@ -54,6 +54,8 @@ type ProToolsViewState = {
   readonly timelineSelectionDragging: boolean;
   readonly trackEditLinked: boolean;
   readonly editSelectionTrackId: string | null;
+  readonly editSelectionTrackIds: readonly string[];
+  readonly trackSelectionIds: readonly string[];
 };
 
 type ProToolsActions = {
@@ -86,6 +88,8 @@ type ProToolsActions = {
   readonly setTimelineSelectionDragging: (dragging: boolean) => void;
   readonly setTrackEditLinked: (linked: boolean) => void;
   readonly setEditSelectionTrackId: (trackId: string | null) => void;
+  readonly setEditSelectionTracks: (trackIds: readonly string[], focusTrackId: string | null) => void;
+  readonly setTrackSelectionIds: (trackIds: readonly string[]) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -126,6 +130,8 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   timelineSelectionDragging: false,
   trackEditLinked: true,
   editSelectionTrackId: null,
+  editSelectionTrackIds: [],
+  trackSelectionIds: [],
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -210,7 +216,15 @@ export const useProTools = create<ProToolsState>((set) => ({
   setTimelineSelection: (timelineSelection) => set({ timelineSelection }),
   setTimelineSelectionDragging: (timelineSelectionDragging) => set({ timelineSelectionDragging }),
   setTrackEditLinked: (trackEditLinked) => set({ trackEditLinked }),
-  setEditSelectionTrackId: (editSelectionTrackId) => set({ editSelectionTrackId }),
+  setEditSelectionTrackId: (editSelectionTrackId) => set({
+    editSelectionTrackId,
+    editSelectionTrackIds: editSelectionTrackId ? [editSelectionTrackId] : [],
+  }),
+  setEditSelectionTracks: (editSelectionTrackIds, editSelectionTrackId) => set({
+    editSelectionTrackId,
+    editSelectionTrackIds: [...editSelectionTrackIds],
+  }),
+  setTrackSelectionIds: (trackSelectionIds) => set({ trackSelectionIds: [...trackSelectionIds] }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

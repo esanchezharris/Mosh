@@ -16,21 +16,24 @@ export function ProToolsEditSelectionOverlay({ snapshot }: { readonly snapshot: 
   const setRange = useShell((state) => state.setTimeRange);
   const trackEditLinked = useProTools((state) => state.trackEditLinked);
   const editSelectionTrackId = useProTools((state) => state.editSelectionTrackId);
+  const editSelectionTrackIds = useProTools((state) => state.editSelectionTrackIds);
   const trackViews = useProTools((state) => state.trackViews);
   const automationLanesVisible = useProTools((state) => state.automationLanesVisible);
   const trackHeightScale = useProTools((state) => state.trackHeightScale);
   const geometry = useMemo(() => {
     const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
-    const requestedTrackId = trackEditLinked
+    const fallbackTrackId = trackEditLinked
       ? selectedTrackId ?? editSelectionTrackId
       : editSelectionTrackId ?? selectedTrackId;
-    let trackId: string | null = null;
-    if (requestedTrackId && tracks.some((track) => track.id === requestedTrackId)) {
-      trackId = requestedTrackId;
-    } else if (selectedTrackId && tracks.some((track) => track.id === selectedTrackId)) {
-      trackId = selectedTrackId;
-    }
-    if (!trackId) return null;
+    const requestedTrackIds = editSelectionTrackIds.length > 0
+      ? editSelectionTrackIds
+      : fallbackTrackId ? [fallbackTrackId] : [];
+    const requested = new Set(requestedTrackIds);
+    const trackIds = tracks.filter((track) => requested.has(track.id)).map((track) => track.id);
+    if (trackIds.length === 0) return null;
+    const selected = new Set(trackIds);
+    let firstTop: number | null = null;
+    let lastBottom = 0;
     let top = 0;
     for (const track of tracks) {
       const height = proToolsTrackRowHeight(
@@ -39,13 +42,26 @@ export function ProToolsEditSelectionOverlay({ snapshot }: { readonly snapshot: 
         Boolean(automationLanesVisible[track.id]),
         trackHeightScale,
       );
-      if (track.id === trackId) return { trackId, top, height };
+      if (selected.has(track.id)) {
+        firstTop ??= top;
+        lastBottom = top + height;
+      }
       top += height;
     }
-    return null;
+    if (firstTop === null) return null;
+    const focusTrackId = editSelectionTrackId && selected.has(editSelectionTrackId)
+      ? editSelectionTrackId
+      : trackIds.at(-1) ?? null;
+    return {
+      trackId: focusTrackId,
+      trackIds,
+      top: firstTop,
+      height: lastBottom - firstTop,
+    };
   }, [
     automationLanesVisible,
     editSelectionTrackId,
+    editSelectionTrackIds,
     selectedTrackId,
     snapshot.tracks,
     trackEditLinked,
@@ -59,6 +75,7 @@ export function ProToolsEditSelectionOverlay({ snapshot }: { readonly snapshot: 
   return (
     <div className="pt-edit-selection" data-testid="pt-edit-selection"
       data-track-id={geometry?.trackId}
+      data-track-ids={geometry?.trackIds.join(" ")}
       data-dragging={dragging}
       role="status"
       aria-label={`Edit selection ${formatSecond(range.start)} to ${formatSecond(range.end)}`}

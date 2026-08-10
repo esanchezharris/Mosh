@@ -15,6 +15,7 @@ import { ProToolsPlaylists } from "./ProToolsPlaylists";
 import { ProToolsPunchOverlay } from "./ProToolsPunchOverlay";
 import { proToolsSelectionSecondAt } from "./proToolsEditSelection";
 import { proToolsGestureTable } from "./proToolsGestureTable";
+import { proToolsEditableLaneTarget } from "./proToolsLaneTarget";
 import { useProTools } from "./proToolsState";
 import { useProToolsEditSelection } from "./useProToolsEditSelection";
 import { applyHorizontalZoomRange, applyHorizontalZoomStep } from "./proToolsZoom";
@@ -34,20 +35,6 @@ type ClipMatch = { clip: Clip; track: Track };
 type Marquee = { pointerId: number; trackId: string; startX: number; x: number; top: number };
 type SpotCandidate = { pointerId: number; clip: Clip; epoch: number };
 type ZoomArea = { pointerId: number; startX: number; x: number; epoch: number; zoomOut: boolean };
-
-const isEditableBlankLaneTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement) || !target.closest(".pt-lane")) return false;
-  return !target.closest([
-    "[data-clip-id]",
-    "button",
-    "input",
-    "select",
-    "textarea",
-    "[role=button]",
-    ".pt-playlists",
-    ".pt-automation-lane-frame",
-  ].join(","));
-};
 
 export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, onSpotClip }: Props) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -162,7 +149,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     }
     const current = hit(e);
     if (!current) {
-      if (!isEditableBlankLaneTarget(e.target) || !editSelection.begin(e)) return;
+      if (!proToolsEditableLaneTarget(e.target) || !editSelection.begin(e)) return;
       e.preventDefault();
       e.stopPropagation();
       return;

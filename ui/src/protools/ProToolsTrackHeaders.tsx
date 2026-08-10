@@ -27,14 +27,19 @@ export function ProToolsTrackHeaders({ snapshot }: ProToolsTrackHeadersProps) {
       <div className="pt-track-list-rows">
         {tracks.length === 0
           ? <p className="pt-track-list-empty" role="status">No tracks</p>
-          : tracks.map((track) => <ProToolsTrackHeader key={track.id} track={track} />)}
+          : tracks.map((track) => (
+            <ProToolsTrackHeader key={track.id} track={track} tracks={tracks} />
+          ))}
         <AddTrackMenu />
       </div>
     </section>
   );
 }
 
-function ProToolsTrackHeader({ track }: { readonly track: Track }) {
+function ProToolsTrackHeader({ track, tracks }: {
+  readonly track: Track;
+  readonly tracks: readonly Track[];
+}) {
   const exec = useStore((state) => state.exec);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const clearSelection = useStore((state) => state.clearSelection);
@@ -43,9 +48,13 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
   const requestedTrackView = useProTools((state) => state.trackViews[track.id]);
   const automationLaneVisible = useProTools((state) => Boolean(state.automationLanesVisible[track.id]));
   const trackHeightScale = useProTools((state) => state.trackHeightScale);
+  const trackSelectionIds = useProTools((state) => state.trackSelectionIds);
   const setTrackView = useProTools((state) => state.setTrackView);
   const toggleAutomationLane = useProTools((state) => state.toggleAutomationLane);
-  const selected = selectedTrackId === track.id;
+  const selectedTrackIds = trackSelectionIds.length > 0
+    ? trackSelectionIds
+    : selectedTrackId ? [selectedTrackId] : [];
+  const selected = selectedTrackIds.includes(track.id);
   const trackViewOptions = proToolsTrackViewOptions(track);
   const trackView = resolveProToolsTrackView(track, requestedTrackView);
   const playlistRows = proToolsPlaylistRowCount(track);
@@ -130,7 +139,12 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
             value={trackView}
             onChange={(event) => {
               const option = trackViewOptions.find((candidate) => candidate.value === event.target.value);
-              if (option) setTrackView(track.id, option.value);
+              if (!option) return;
+              const targets = selected
+                ? tracks.filter((candidate) => selectedTrackIds.includes(candidate.id)
+                  && proToolsTrackViewOptions(candidate).some((view) => view.value === option.value))
+                : [track];
+              targets.forEach((target) => setTrackView(target.id, option.value));
             }}>
             {trackViewOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>

@@ -73,6 +73,12 @@ const SNAPSHOT: Snapshot = {
       hasRenderLayer: false,
       notes: [{ i: 0, pitch: 60, start: 0, length: 1, velocity: 96 }],
     }],
+  }, {
+    id: "double-track",
+    index: 2,
+    name: "Double Vocal",
+    type: "audio",
+    clips: [],
   }],
   transport: {
     playing: false,
@@ -152,6 +158,31 @@ describe("Pro Tools Track Views", () => {
     if (!audioSelect) throw new Error("audio Track View selector is missing");
     act(() => setSelectValue(audioSelect, "volume"));
     expect(useProTools.getState().trackViews["audio-track"]).toBe("volume");
+  });
+
+  it("applies Track View changes to every compatible selected track", () => {
+    // Given two audio tracks own the linked Track selection.
+    useProTools.setState({
+      editSelectionTrackId: "double-track",
+      editSelectionTrackIds: ["audio-track", "double-track"],
+      trackSelectionIds: ["audio-track", "double-track"],
+    });
+    act(() => root.render(React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT })));
+    const leadHeader = host.querySelector<HTMLElement>('[data-track-id="audio-track"]');
+    const doubleHeader = host.querySelector<HTMLElement>('[data-track-id="double-track"]');
+    const leadView = leadHeader?.querySelector<HTMLSelectElement>("[data-testid=pt-track-view]");
+    const doubleView = doubleHeader?.querySelector<HTMLSelectElement>("[data-testid=pt-track-view]");
+    if (!leadView || !doubleView) throw new Error("selected audio Track View controls are missing");
+
+    // When Volume is chosen from either selected audio header.
+    act(() => setSelectValue(leadView, "volume"));
+
+    // Then both selected compatible tracks change view and remain visibly selected.
+    expect(useProTools.getState().trackViews["audio-track"]).toBe("volume");
+    expect(useProTools.getState().trackViews["double-track"]).toBe("volume");
+    expect(leadHeader?.dataset.selected).toBe("true");
+    expect(doubleHeader?.dataset.selected).toBe("true");
+    expect(doubleView.value).toBe("volume");
   });
 
   it("discloses a secondary automation lane without mutating the project", () => {

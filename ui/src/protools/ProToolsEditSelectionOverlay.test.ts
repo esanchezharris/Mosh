@@ -74,6 +74,25 @@ describe("Pro Tools Edit selection track scope", () => {
     expect(overlay.style.bottom).toBe("auto");
   });
 
+  it("spans every contiguous track associated with a vertical Edit range", () => {
+    // Given both visible tracks own the linked Edit range.
+    useProTools.setState({
+      editSelectionTrackId: "vocal",
+      editSelectionTrackIds: ["drums", "vocal"],
+      trackSelectionIds: ["drums", "vocal"],
+    });
+
+    // When the shared Edit range is rendered.
+    act(() => root.render(React.createElement(ProToolsEditSelectionOverlay, { snapshot: SNAPSHOT })));
+    const overlay = host.querySelector<HTMLElement>("[data-testid=pt-edit-selection]");
+    if (!overlay) throw new Error("Edit selection overlay is missing");
+
+    // Then one band covers the complete contiguous lane set, in visible order.
+    expect(overlay.dataset.trackIds).toBe("drums vocal");
+    expect(overlay.style.top).toBe("calc(var(--pt-track-title-h) + 0px)");
+    expect(overlay.style.height).toBe("184px");
+  });
+
   it("retains its Edit track while header selection is independently unlinked", () => {
     // Given Vocal owns the Edit range when Track/Edit is disabled.
     act(() => {

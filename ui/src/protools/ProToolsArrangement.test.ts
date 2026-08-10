@@ -20,12 +20,16 @@ vi.mock("./ProToolsTimeline", () => ({
         if (clip && onSpotClip) onSpotClip(clip);
       },
     }, "Request spot"),
-    React.createElement("button", {
-      type: "button",
-      className: "pt-lane",
-      "data-track-id": snapshot.tracks[0]?.id,
-      "data-testid": "mock-edit-lane",
-    }, "Edit Vocal"),
+    React.createElement("div", { className: "pt-timeline-content" },
+      snapshot.tracks.map((track) => React.createElement("div", {
+        key: track.id,
+        className: "pt-lane",
+        "data-track-id": track.id,
+        "data-testid": "mock-edit-lane",
+      }, React.createElement("span", {
+        "data-testid": `mock-edit-surface-${track.id}`,
+      }, `Edit ${track.name}`))),
+    ),
   ),
 }));
 vi.mock("./ProToolsTrackHeaders", () => ({ ProToolsTrackHeaders: () => React.createElement("div") }));
@@ -52,6 +56,18 @@ const SNAPSHOT: Snapshot = {
       offset: 0,
       hasRenderLayer: false,
     }],
+  }, {
+    id: "bass-track",
+    index: 1,
+    name: "Bass",
+    type: "audio",
+    clips: [],
+  }, {
+    id: "keys-track",
+    index: 2,
+    name: "Keys",
+    type: "audio",
+    clips: [],
   }],
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
 };
@@ -81,6 +97,7 @@ describe("ProToolsArrangement", () => {
       addEventListener: (_event: string, listener: () => void) => { changeListener = listener; },
       removeEventListener: vi.fn(),
     })));
+    useProTools.getState().resetForProject();
     useProTools.setState({ clipListOpen: true });
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useStore.setState({ snapshot: SNAPSHOT, projectEpoch: 51, selectedTrackId: null, exec });
@@ -118,7 +135,7 @@ describe("ProToolsArrangement", () => {
     // Given no active track in the default linked Track/Edit state.
     compact = false;
     act(() => root.render(React.createElement(ProToolsArrangement, { snapshot: SNAPSHOT })));
-    const lane = host.querySelector<HTMLButtonElement>("[data-testid=mock-edit-lane]");
+    const lane = host.querySelector<HTMLElement>("[data-testid=mock-edit-lane]");
     if (!lane) throw new Error("mock Edit lane is missing");
 
     // When the producer begins an Edit interaction in the Vocal lane.
@@ -130,6 +147,98 @@ describe("ProToolsArrangement", () => {
 
     // Then the associated track becomes active without a project command.
     expect(useStore.getState().selectedTrackId).toBe("audio-track");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("associates a vertical Edit drag with every contiguous visible track", () => {
+    // Given three visible lanes and the linked Selector surface.
+    compact = false;
+    act(() => root.render(React.createElement(ProToolsArrangement, { snapshot: SNAPSHOT })));
+    const lanes = Array.from(host.querySelectorAll<HTMLElement>("[data-testid=mock-edit-lane]"));
+    lanes.forEach((lane, index) => {
+      vi.spyOn(lane, "getBoundingClientRect").mockReturnValue(new DOMRect(160, 100 + index * 92, 800, 92));
+    });
+    const firstSurface = host.querySelector<HTMLElement>("[data-testid=mock-edit-surface-audio-track]");
+    if (!firstSurface) throw new Error("first Edit surface is missing");
+
+    // When the Edit drag crosses from Vocal through Keys.
+    act(() => {
+      firstSurface.dispatchEvent(new PointerEvent("pointerdown", {
+        pointerId: 7,
+        button: 0,
+        clientY: 120,
+        bubbles: true,
+        cancelable: true,
+      }));
+      firstSurface.dispatchEvent(new PointerEvent("pointermove", {
+        pointerId: 7,
+        buttons: 1,
+        clientY: 304,
+        bubbles: true,
+        cancelable: true,
+      }));
+      firstSurface.dispatchEvent(new PointerEvent("pointerup", {
+        pointerId: 7,
+        button: 0,
+        clientY: 304,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    // Then Edit and Track selection share the ordered lane set and Keys is active.
+    expect(useProTools.getState().editSelectionTrackIds)
+      .toEqual(["audio-track", "bass-track", "keys-track"]);
+    expect(useProTools.getState().trackSelectionIds)
+      .toEqual(["audio-track", "bass-track", "keys-track"]);
+    expect(useStore.getState().selectedTrackId).toBe("keys-track");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("restores both track sets when a vertical Edit drag is cancelled", () => {
+    // Given Bass owns the linked Edit and Track selection before a new drag.
+    compact = false;
+    useProTools.setState({
+      editSelectionTrackId: "bass-track",
+      editSelectionTrackIds: ["bass-track"],
+      trackSelectionIds: ["bass-track"],
+    });
+    useStore.setState({ selectedTrackId: "bass-track" });
+    act(() => root.render(React.createElement(ProToolsArrangement, { snapshot: SNAPSHOT })));
+    const lanes = Array.from(host.querySelectorAll<HTMLElement>("[data-testid=mock-edit-lane]"));
+    lanes.forEach((lane, index) => {
+      vi.spyOn(lane, "getBoundingClientRect").mockReturnValue(new DOMRect(160, 100 + index * 92, 800, 92));
+    });
+    const firstSurface = host.querySelector<HTMLElement>("[data-testid=mock-edit-surface-audio-track]");
+    if (!firstSurface) throw new Error("first Edit surface is missing");
+
+    // When a Vocal-to-Keys drag is cancelled by the pointer system.
+    act(() => {
+      firstSurface.dispatchEvent(new PointerEvent("pointerdown", {
+        pointerId: 8,
+        button: 0,
+        clientY: 120,
+        bubbles: true,
+        cancelable: true,
+      }));
+      firstSurface.dispatchEvent(new PointerEvent("pointermove", {
+        pointerId: 8,
+        buttons: 1,
+        clientY: 304,
+        bubbles: true,
+        cancelable: true,
+      }));
+      firstSurface.dispatchEvent(new PointerEvent("pointercancel", {
+        pointerId: 8,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    // Then the prior Bass-only ownership and active track return without a command.
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["bass-track"]);
+    expect(useProTools.getState().trackSelectionIds).toEqual(["bass-track"]);
+    expect(useStore.getState().selectedTrackId).toBe("bass-track");
     expect(exec).not.toHaveBeenCalled();
   });
 
