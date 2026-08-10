@@ -7,6 +7,7 @@ This contract is scoped to `.protools-shell`. Existing Mosh shells keep their ow
 - Product reference: reviewed the Avid documentation and visual references recorded in `docs/protools-clone/RESEARCH.md`; extracted Edit Window hierarchy, dense control grammar, ruler stacking, list placement, tools, and keyboard behavior without copying any asset.
 - Existing-system extraction: mapped `ui/src/live/`, shared `ClipView`, `PianoRoll`, `SettingsPanel`, `MoshMenu`, `MoshTip`, icons, interaction tables, and global store ownership; selected additive reuse instead of a parallel data path.
 - Interaction reference: read beui.dev `tabs` and `table` source; kept its accessible segmented-control semantics and direct pointer-resize mechanism, but omitted its spring library because an editing surface needs immediate, low-motion feedback.
+- Spot interaction reference: read Avid's “Spotting Clips” procedure and beui.dev `center-morph-modal` source. Kept controlled open state, initial focus, focus containment, Escape/backdrop dismissal, and trigger restoration; omitted the center-unfold animation and motion dependency to preserve the shell's immediate panel contract.
 - Skipped generated imagery and broad style search: the user supplied a concrete Pro Tools reference target and prohibited proprietary art reuse; original CSS geometry and existing Mosh renderers are the fidelity contract.
 
 ## 1. Atmosphere & Identity
@@ -67,7 +68,7 @@ A dense, quiet editing console that feels mechanical, dependable, and immediatel
 
 ### Base Unit
 
-Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt-space-3: 12px`, `--pt-space-4: 16px`, `--pt-space-6: 24px`.
+Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt-space-3: 12px`, `--pt-space-4: 16px`, `--pt-space-6: 24px`. Modal controls use `--pt-control-h: 32px`; the Spot surface is capped by `--pt-dialog-w: 360px` before viewport padding.
 
 ### Grid and Ownership
 
@@ -139,6 +140,15 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: labelled region, explicit close button, content stays keyboard reachable.
 - **Layout**: dock is a fixed shell row with internal overflow; status bar never overlays content.
 
+### Spot placement dialog
+
+- **Structure**: modal title and clip identity, native Time Scale select, one editable Start field, validation message, Cancel, and Spot confirmation.
+- **Variants**: Bars+Beats, fixed-30-fps Timecode, Minutes:Seconds, and Samples use the same conversion contract as the visible rulers.
+- **States**: open, invalid location, submitting, command rejected, closed by confirmation, Escape, Cancel, backdrop, or project replacement.
+- **Accessibility**: Grabber activation is available by pointer or Enter/Space on a focused clip; Start receives initial focus and selection; Tab stays inside the dialog; Escape and Cancel restore the originating clip; errors are announced and associated with Start.
+- **Mutation**: successful confirmation sends exactly one `move_clip` command with `clipId` and parsed non-negative `start`; invalid or stale-project input sends no command.
+- **Motion**: immediate modal mount plus tokenized opacity/color feedback only; reduced motion removes the remaining transitions.
+
 ## 6. Motion & Interaction
 
 | Token | Value | Usage |
@@ -149,6 +159,7 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - Mode/tool selection uses the beui.dev segmented-tabs accessibility mechanism (`role`/`aria-pressed` equivalent) without its spring: edit commands must feel immediate.
 - Header resizing follows the beui.dev table mechanism: pointer capture, clamped direct width updates, and no tween during drag.
 - Smart Tool feedback changes cursor and status text before mutation; drag mutations commit only through `store.exec` on gesture completion.
+- Spot mode intercepts the Grabber's normal move gesture, opens the placement dialog after pointer release (or keyboard activation), and restores the clip trigger when dismissed.
 - All nonessential transitions are disabled under `prefers-reduced-motion: reduce`.
 - Never animate width, height, left, or grid tracks. Panel layout changes are immediate.
 
@@ -177,7 +188,7 @@ Strategy: mixed tonal shift plus one-pixel dimensional edges.
 | Item | Location | Why accepted | Owner / Exit |
 |---|---|---|---|
 | Exact pixel polish against current Pro Tools | Entire shell | Explicit follow-up; Pro Tools is unavailable locally and no proprietary imagery is copied | Later reference-fidelity pass with licensed access |
-| Spot placement dialog | Spot mode | Explicitly outside this delivery | Follow-up interaction slice |
+| Spot Sync Point and timestamp recall | Spot dialog | Mosh snapshots do not expose clip sync points, original timestamps, or user timestamps | Add fields only with an additive backend snapshot/command contract |
 | Per-clip gain | Audio detail dock | Explicitly outside this delivery | Follow-up MoshOps command/UI slice |
 | Memory Locations | Toolbar/list surfaces | Explicitly outside this delivery | Follow-up navigation slice |
 | True transient detector | Tab navigation | Mosh exposes waveform peaks, not Pro Tools transient metadata; falls back to clip boundaries | Replace when an additive backend transient feed exists |

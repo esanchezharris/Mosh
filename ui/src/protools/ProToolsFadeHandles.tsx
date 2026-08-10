@@ -1,27 +1,10 @@
 import { useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Clip } from "../types";
+import { capturePointer, releasePointer } from "./pointerCapture";
 import { useProTools } from "./proToolsState";
 
 type Side = "in" | "out";
-
-const capturePointer = (element: HTMLElement, pointerId: number): void => {
-  if (typeof element.setPointerCapture !== "function") return;
-  try {
-    element.setPointerCapture(pointerId);
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
-};
-
-const releasePointer = (element: HTMLElement, pointerId: number): void => {
-  if (typeof element.releasePointerCapture !== "function") return;
-  try {
-    element.releasePointerCapture(pointerId);
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
-};
 
 export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
   const pxPerSec = useStore((s) => s.pxPerSec);

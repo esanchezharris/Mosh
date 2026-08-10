@@ -50,8 +50,11 @@ function Harness() {
     contentWidth: 600,
     scrollRef,
     onScroll: () => {},
+    onSpotClip: openSpot,
   });
 }
+
+let openSpot: ReturnType<typeof vi.fn>;
 
 describe("ProToolsTimeline pointer capture", () => {
   let host: HTMLDivElement;
@@ -78,6 +81,7 @@ describe("ProToolsTimeline pointer capture", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
+    openSpot = vi.fn();
     useStore.setState({
       snapshot: SNAPSHOT,
       transport: SNAPSHOT.transport,
@@ -109,6 +113,69 @@ describe("ProToolsTimeline pointer capture", () => {
 
     // Then: the real clip drag reaches the command seam.
     expect(exec).toHaveBeenCalledWith("trim_clip", expect.objectContaining({ clipId: "midi-clip" }));
+  });
+
+  it("opens Spot placement after a Grabber click without moving the clip", () => {
+    // Given: Spot mode is active and the pointer is over MIDI note content, which is Grabber intent.
+    act(() => useProTools.getState().setEditMode("spot"));
+    const element = clip();
+
+    // When: the matching primary pointer press and release completes without a drag.
+    dispatchPointer(element, "pointerdown", { pointerId: 12, button: 0, clientX: 200, clientY: 30 });
+    expect(element.dataset.ptIntent).toBe("grabber");
+    dispatchPointer(element, "pointerup", { pointerId: 12, button: 0, clientX: 200, clientY: 30 });
+
+    // Then: the shell requests precise placement and sends no free-move command.
+    expect(openSpot).toHaveBeenCalledWith(expect.objectContaining({ id: "midi-clip" }));
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("opens Spot placement when a focused clip is activated with Enter", () => {
+    // Given: Spot mode and Smart Tool are active with keyboard focus on a rendered clip.
+    act(() => useProTools.getState().setEditMode("spot"));
+    const element = clip();
+    element.focus();
+
+    // When: the producer activates the clip from the keyboard.
+    act(() => element.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    // Then: the same placement request opens without a mutation.
+    expect(openSpot).toHaveBeenCalledWith(expect.objectContaining({ id: "midi-clip" }));
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("abandons Spot placement when the project epoch changes", () => {
+    // Given: a Spot-mode Grabber press captures the current project epoch.
+    act(() => useProTools.getState().setEditMode("spot"));
+    const element = clip();
+    dispatchPointer(element, "pointerdown", { pointerId: 13, button: 0, clientX: 200, clientY: 30 });
+
+    // When: the project is replaced before that pointer is released.
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    dispatchPointer(element, "pointerup", { pointerId: 13, button: 0, clientX: 200, clientY: 30 });
+
+    // Then: the stale clip never opens a placement dialog or mutates the new project.
+    expect(openSpot).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("abandons Spot placement when the browser cancels the pointer", () => {
+    // Given: a Spot-mode Grabber press is waiting for its matching release.
+    act(() => useProTools.getState().setEditMode("spot"));
+    const element = clip();
+    dispatchPointer(element, "pointerdown", { pointerId: 14, button: 0, clientX: 200, clientY: 30 });
+
+    // When: the browser cancels it and a separate pointer later releases.
+    dispatchPointer(element, "pointercancel", { pointerId: 14, clientX: 200, clientY: 30 });
+    dispatchPointer(element, "pointerup", { pointerId: 15, clientX: 200, clientY: 30 });
+
+    // Then: the cancelled gesture cannot open a dialog or send a command.
+    expect(openSpot).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("does not execute a Cmd MIDI velocity drag after the project epoch changes", () => {

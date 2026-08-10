@@ -6,47 +6,33 @@ import { applyNoteEdits } from "../ui/noteCommands";
 import { ClipView } from "../v2/lanes/ClipView";
 import { TRACK_ROW_HEIGHT, CLIP_VISUAL_HEADER_PX } from "./layout";
 import { midiPointerIsBlank } from "./midiBlankHit";
+import { capturePointer, releasePointer } from "./pointerCapture";
 import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
 import { ProToolsFadeHandles } from "./ProToolsFadeHandles";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
 
-const capturePointer = (element: HTMLElement, pointerId: number): void => {
-  if (typeof element.setPointerCapture !== "function") return;
-  try {
-    element.setPointerCapture(pointerId);
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
-};
-
-const releasePointer = (element: HTMLElement, pointerId: number): void => {
-  if (typeof element.releasePointerCapture !== "function") return;
-  try {
-    element.releasePointerCapture(pointerId);
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
-};
-
 type Props = {
   snapshot: Snapshot;
   contentWidth: number;
   scrollRef: RefObject<HTMLDivElement>;
   onScroll: () => void;
+  onSpotClip: (clip: Clip) => void;
 };
 
 type ClipMatch = { clip: Clip; track: Track };
 type Marquee = { pointerId: number; trackId: string; startX: number; x: number; top: number };
+type SpotCandidate = { pointerId: number; clip: Clip; epoch: number };
 
-export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }: Props) {
+export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, onSpotClip }: Props) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const select = useStore((s) => s.select);
   const clearSelection = useStore((s) => s.clearSelection);
   const position = useStore((s) => s.transport.position);
   const smartToolEnabled = useProTools((s) => s.smartToolEnabled);
   const activeTool = useProTools((s) => s.activeTool);
+  const editMode = useProTools((s) => s.editMode);
   const setHoveredIntent = useProTools((s) => s.setHoveredIntent);
   const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
   const clipMap = useMemo(() => new Map(tracks.flatMap((track) =>
@@ -57,10 +43,12 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
   const velocityDrag = useRef<{
     pointerId: number; startY: number; clip: Clip; epoch: number;
   } | null>(null);
+  const spotCandidate = useRef<SpotCandidate | null>(null);
   const lastIntentClip = useRef<HTMLElement | null>(null);
 
   const hit = (e: React.PointerEvent): (ClipMatch & { element: HTMLElement; intent: ProToolsIntent; blank: boolean }) | null => {
-    const element = (e.target as HTMLElement).closest<HTMLElement>("[data-clip-id]");
+    if (!(e.target instanceof HTMLElement)) return null;
+    const element = e.target.closest<HTMLElement>("[data-clip-id]");
     const match = element?.dataset.clipId ? clipMap.get(element.dataset.clipId) : null;
     if (!element || !match) return null;
     const rect = element.getBoundingClientRect();
@@ -97,6 +85,18 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
   const onPointerDownCapture = (e: React.PointerEvent<HTMLDivElement>) => {
     const current = hit(e);
     if (!current || e.button !== 0) return;
+    if (editMode === "spot" && current.intent === "grabber") {
+      e.preventDefault(); e.stopPropagation();
+      select([current.clip.id]);
+      current.element.focus();
+      spotCandidate.current = {
+        pointerId: e.pointerId,
+        clip: current.clip,
+        epoch: useStore.getState().projectEpoch,
+      };
+      capturePointer(e.currentTarget, e.pointerId);
+      return;
+    }
     if (current.intent === "velocity-trim" && current.clip.notes?.length) {
       e.preventDefault(); e.stopPropagation();
       select([current.clip.id]);
@@ -141,6 +141,14 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
   };
 
   const finishGesture = (e: React.PointerEvent<HTMLDivElement>) => {
+    const spot = spotCandidate.current;
+    if (spot?.pointerId === e.pointerId) {
+      e.preventDefault(); e.stopPropagation();
+      spotCandidate.current = null;
+      releasePointer(e.currentTarget, e.pointerId);
+      if (useStore.getState().projectEpoch === spot.epoch) onSpotClip(spot.clip);
+      return;
+    }
     const velocity = velocityDrag.current;
     let handled = false;
     if (velocity?.pointerId === e.pointerId) {
@@ -176,15 +184,31 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
   const cancelGesture = (e: React.PointerEvent<HTMLDivElement>) => {
     const velocity = velocityDrag.current;
     const area = marqueeRef.current;
-    const cancelled = velocity?.pointerId === e.pointerId || area?.pointerId === e.pointerId;
+    const spot = spotCandidate.current;
+    const cancelled = velocity?.pointerId === e.pointerId
+      || area?.pointerId === e.pointerId
+      || spot?.pointerId === e.pointerId;
     if (!cancelled) return;
     e.preventDefault(); e.stopPropagation();
     if (velocity?.pointerId === e.pointerId) velocityDrag.current = null;
+    if (spot?.pointerId === e.pointerId) spotCandidate.current = null;
     if (area?.pointerId === e.pointerId) {
       marqueeRef.current = null;
       setMarquee(null);
     }
     releasePointer(e.currentTarget, e.pointerId);
+  };
+
+  const onKeyDownCapture = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (editMode !== "spot" || (e.key !== "Enter" && e.key !== " ")) return;
+    if (!smartToolEnabled && activeTool !== "grabber") return;
+    if (!(e.target instanceof HTMLElement)) return;
+    const element = e.target.closest<HTMLElement>("[data-clip-id]");
+    const match = element?.dataset.clipId ? clipMap.get(element.dataset.clipId) : null;
+    if (!match) return;
+    e.preventDefault(); e.stopPropagation();
+    select([match.clip.id]);
+    onSpotClip(match.clip);
   };
 
   return (
@@ -193,6 +217,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll }
       <div className="pt-timeline-content" style={{ width: contentWidth }}
         onPointerDownCapture={onPointerDownCapture} onPointerMoveCapture={onPointerMoveCapture}
         onPointerUpCapture={finishGesture} onPointerCancelCapture={cancelGesture}
+        onKeyDownCapture={onKeyDownCapture}
         onPointerLeave={() => { lastIntentClip.current?.removeAttribute("data-pt-intent"); setHoveredIntent(null); }}>
         <div className="pt-timeline-title-spacer">Timeline</div>
         {tracks.map((track) => (

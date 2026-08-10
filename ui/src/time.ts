@@ -162,7 +162,7 @@ const barPosAt = (map: TempoMap, sec: number): number => {
 };
 
 /** Invert a continuous bar position back to seconds. */
-const barPosToSec = (map: TempoMap, barF: number): number => {
+export const barPosToSec = (map: TempoMap, barF: number): number => {
   let seg = map[0];
   for (const s of map) { if (s.startBarF <= barF + 1e-9) seg = s; else break; }
   return seg.startSec + (barF - seg.startBarF) * seg.barSec;

@@ -1,33 +1,18 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { ProToolsClipList } from "./ProToolsClipList";
 import { ProToolsRulers } from "./ProToolsRulers";
+import { ProToolsSpotDialog } from "./ProToolsSpotDialog";
 import { ProToolsTimeline } from "./ProToolsTimeline";
 import { ProToolsTrackHeaders } from "./ProToolsTrackHeaders";
 import { timelineSeconds } from "./layout";
+import { capturePointer, releasePointer } from "./pointerCapture";
 import { useProTools } from "./proToolsState";
-
-const capturePointer = (element: HTMLElement, pointerId: number): void => {
-  if (typeof element.setPointerCapture !== "function") return;
-  try {
-    element.setPointerCapture(pointerId);
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
-};
-
-const releasePointer = (element: HTMLElement, pointerId: number): void => {
-  if (typeof element.releasePointerCapture !== "function") return;
-  try {
-    element.releasePointerCapture(pointerId);
-  } catch (error) {
-    if (!(error instanceof DOMException)) throw error;
-  }
-};
 
 export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
+  const projectEpoch = useStore((s) => s.projectEpoch);
   const trackHeaderWidth = useProTools((s) => s.trackHeaderWidth);
   const setTrackHeaderWidth = useProTools((s) => s.setTrackHeaderWidth);
   const rulersVisible = useProTools((s) => s.rulersVisible);
@@ -38,6 +23,11 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
   const rulerFieldRef = useRef<HTMLDivElement>(null);
   const headerPaneRef = useRef<HTMLDivElement>(null);
   const resize = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const [spotClipId, setSpotClipId] = useState<string | null>(null);
+  const spotClip = snapshot.tracks.flatMap((track) => track.clips)
+    .find((clip) => clip.id === spotClipId);
+
+  useEffect(() => setSpotClipId(null), [projectEpoch]);
 
   useEffect(() => {
     const compactQuery = window.matchMedia("(max-width: 760px)");
@@ -70,7 +60,7 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
             <ProToolsTrackHeaders snapshot={snapshot} />
           </div>
           <ProToolsTimeline snapshot={snapshot} contentWidth={contentWidth}
-            scrollRef={timelineRef} onScroll={syncScroll} />
+            scrollRef={timelineRef} onScroll={syncScroll} onSpotClip={(clip) => setSpotClipId(clip.id)} />
           <div className="pt-track-head-resizer" data-testid="pt-track-head-resizer"
             role="separator" aria-orientation="vertical" aria-label="Resize track headers"
             aria-valuemin={128} aria-valuemax={280} aria-valuenow={trackHeaderWidth}
@@ -106,6 +96,9 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
         </div>
       </div>
       <ProToolsClipList snapshot={snapshot} open={clipListOpen} onOpenChange={setClipListOpen} />
+      {spotClip && (
+        <ProToolsSpotDialog clip={spotClip} snapshot={snapshot} onClose={() => setSpotClipId(null)} />
+      )}
     </section>
   );
 }
