@@ -46,6 +46,7 @@ test("Avid V07 automation selection, trim, nudge, move, and delete remain comman
       trackId, pluginIndex: 100, paramIndex: 0, time, value,
     });
   }
+  await page.getByTestId("pt-track-header").first().getByTestId("pt-automation-lanes").click();
 
   const lane = page.locator(`[data-testid="protools-automation-lane"][data-track-id="${trackId}"]`);
   await expect(lane).toBeVisible();
@@ -127,6 +128,7 @@ test("Avid V07 automation clipboard and Pencil paths remain context-owned", asyn
       trackId, pluginIndex: 100, paramIndex: 0, time, value,
     });
   }
+  await page.getByTestId("pt-track-header").first().getByTestId("pt-automation-lanes").click();
 
   const lane = page.locator(`[data-testid="protools-automation-lane"][data-track-id="${trackId}"]`);
   const pxPerSec = await page.evaluate(() =>
