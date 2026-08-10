@@ -33,6 +33,7 @@ describe("Pro Tools shell state", () => {
       memoryLocationEditor: state.memoryLocationEditor,
       singleZoomEnabled: state.singleZoomEnabled,
       zoomReturnState: state.zoomReturnState,
+      trackHeightScale: state.trackHeightScale,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -59,6 +60,7 @@ describe("Pro Tools shell state", () => {
       memoryLocationEditor: null,
       singleZoomEnabled: false,
       zoomReturnState: null,
+      trackHeightScale: 1,
     });
   });
 
@@ -114,6 +116,17 @@ describe("Pro Tools shell state", () => {
     expect(useProTools.getState().activeTool).toBe("selector");
     expect(useProTools.getState().smartToolEnabled).toBe(true);
     expect(useProTools.getState().zoomReturnState).toBeNull();
+  });
+
+  it("keeps proportional track height project-scoped", () => {
+    const state = useProTools.getState();
+    state.setTrackHeightScale(1.25);
+    expect(useProTools.getState().trackHeightScale).toBe(1.25);
+
+    state.resetForProject(projectEpoch);
+    expect(useProTools.getState().trackHeightScale).toBe(1.25);
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().trackHeightScale).toBe(1);
   });
 
   it("clamps track-header resizing at both supported boundaries", () => {

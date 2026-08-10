@@ -5,8 +5,8 @@ import { IconLayers, IconPlus } from "../ui/icons";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
 import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
+import { scaledTrackHeights } from "./trackHeightZoom";
 import {
-  PROTOOLS_PLAYLIST_ROW_HEIGHT,
   proToolsPlaylistRowCount,
   proToolsTrackRowHeight,
   proToolsTrackViewOptions,
@@ -42,13 +42,15 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
   const setLastError = useStore((state) => state.setLastError);
   const requestedTrackView = useProTools((state) => state.trackViews[track.id]);
   const automationLaneVisible = useProTools((state) => Boolean(state.automationLanesVisible[track.id]));
+  const trackHeightScale = useProTools((state) => state.trackHeightScale);
   const setTrackView = useProTools((state) => state.setTrackView);
   const toggleAutomationLane = useProTools((state) => state.toggleAutomationLane);
   const selected = selectedTrackId === track.id;
   const trackViewOptions = proToolsTrackViewOptions(track);
   const trackView = resolveProToolsTrackView(track, requestedTrackView);
   const playlistRows = proToolsPlaylistRowCount(track);
-  const rowHeight = proToolsTrackRowHeight(track, trackView, automationLaneVisible);
+  const heights = scaledTrackHeights(trackHeightScale);
+  const rowHeight = proToolsTrackRowHeight(track, trackView, automationLaneVisible, trackHeightScale);
 
   const selectTrack = () => {
     clearSelection();
@@ -68,7 +70,13 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
       data-track-id={track.id}
       data-selected={selected}
       data-track-view={trackView}
-      style={{ height: rowHeight }}
+      data-track-height-compact={trackHeightScale < 1}
+      style={{
+        height: rowHeight,
+        "--pt-main-lane-h": `${heights.main}px`,
+        "--pt-playlist-row-h": `${heights.playlist}px`,
+        "--pt-automation-h": `${heights.automation}px`,
+      } as React.CSSProperties}
     >
       <span
         className="pt-track-color"
@@ -141,14 +149,14 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
         <div className="pt-playlist-header-rows" data-testid="pt-playlist-header-rows">
           {playlistRows === 0 ? (
             <span data-testid="pt-playlist-header-row"
-              style={{ height: PROTOOLS_PLAYLIST_ROW_HEIGHT }}>No alternate playlists</span>
+              style={{ height: heights.playlist }}>No alternate playlists</span>
           ) : Array.from({ length: playlistRows }, (_, takeIndex) => {
             const current = track.clips.some((clip) => clip.type === "wave"
               && (clip.numTakes ?? 0) > takeIndex
               && (clip.currentTakeIndex ?? 0) === takeIndex);
             return (
               <span key={takeIndex} data-testid="pt-playlist-header-row" data-current={current}
-                style={{ height: PROTOOLS_PLAYLIST_ROW_HEIGHT }}>
+                style={{ height: heights.playlist }}>
                 Playlist {takeIndex + 1}
               </span>
             );

@@ -5,6 +5,7 @@ import type { Track } from "../types";
 import { ProToolsAutomationCurve } from "./ProToolsAutomationCurve";
 import { ProToolsAutomationMenu } from "./ProToolsAutomationMenu";
 import { automationTargetByName, firstAutomationTarget } from "./automationEditing";
+import { useProTools } from "./proToolsState";
 import { useProToolsAutomationLane } from "./useProToolsAutomationLane";
 
 type Props = {
@@ -19,12 +20,13 @@ type LaneStyle = CSSProperties & { "--pt-track-color": string };
 export function ProToolsAutomationLane({ track, width, primary = false, targetName }: Props) {
   const pxPerSec = useStore((state) => state.pxPerSec);
   const position = useStore((state) => state.transport.position);
+  const trackHeightScale = useProTools((state) => state.trackHeightScale);
   const target = useMemo(
     () => targetName ? automationTargetByName(track, targetName) : firstAutomationTarget(track),
     [targetName, track.plugins, track.mixerPlugins],
   );
-  const graphTopPx = primary ? 6 : 3;
-  const graphHeightPx = primary ? 80 : 20;
+  const graphTopPx = Math.max(2, Math.round((primary ? 6 : 3) * trackHeightScale));
+  const graphHeightPx = Math.max(12, Math.round((primary ? 80 : 20) * trackHeightScale));
   const snapshotPoints = target?.points ?? [];
   const interaction = useProToolsAutomationLane({
     trackId: track.id,

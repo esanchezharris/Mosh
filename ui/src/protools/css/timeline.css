@@ -116,12 +116,17 @@
   bottom: 7px;
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 3px;
   padding: 2px;
   border: 1px solid var(--pt-border);
   border-radius: 2px;
   background: var(--pt-surface);
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.45);
+}
+.pt-lower-zoom-axis {
+  display: flex;
+  align-items: center;
+  gap: 1px;
 }
 .pt-lower-zoom button {
   width: 24px;
@@ -143,6 +148,7 @@
   background: var(--pt-inset);
   font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.pt-lower-zoom-axis:first-child output { width: 38px; }
 .pt-timeline-content { position: relative; min-height: 100%; }
 .pt-timeline-title-spacer {
   position: relative;
@@ -398,7 +404,7 @@
 .pt-playlists.is-empty {
   display: flex;
   align-items: center;
-  height: 26px;
+  height: var(--pt-playlist-row-h, 26px);
   padding: 0 8px;
   color: var(--pt-text-muted);
   font-size: 9px;

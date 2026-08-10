@@ -55,5 +55,7 @@ describe("Pro Tools Track View model", () => {
     expect(proToolsTrackRowHeight(audioTrack(), "playlists"))
       .toBe(TRACK_ROW_HEIGHT + PROTOOLS_PLAYLIST_ROW_HEIGHT);
     expect(proToolsTrackRowHeight(audioTrack(3), "waveform")).toBe(TRACK_ROW_HEIGHT);
+    expect(proToolsTrackRowHeight(audioTrack(3), "playlists", true, 0.75))
+      .toBe(69 + 3 * 20 + 21);
   });
 });

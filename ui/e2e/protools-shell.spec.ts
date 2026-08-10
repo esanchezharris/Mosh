@@ -180,6 +180,19 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(112);
   await page.getByTestId("pt-lower-zoom-out").click();
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(80);
+  const firstHeader = page.getByTestId("pt-track-header").first();
+  const firstLane = page.getByTestId("pt-lane").first();
+  const baseHeaderHeight = (await firstHeader.boundingBox())?.height;
+  await page.getByTestId("pt-lower-track-height-in").click();
+  const enlargedHeaderHeight = (await firstHeader.boundingBox())?.height;
+  const enlargedLaneHeight = (await firstLane.boundingBox())?.height;
+  if (!baseHeaderHeight || !enlargedHeaderHeight || !enlargedLaneHeight) {
+    throw new Error("track-height zoom bounds are missing");
+  }
+  expect(enlargedHeaderHeight).toBeGreaterThan(baseHeaderHeight);
+  expect(enlargedLaneHeight).toBe(enlargedHeaderHeight);
+  await page.getByTestId("pt-lower-track-height-out").click();
+  await expect.poll(async () => (await firstHeader.boundingBox())?.height).toBe(baseHeaderHeight);
 
   await timeline.focus();
   await page.keyboard.press("F5");
@@ -230,6 +243,8 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
   for (let step = 0; step < 4; step += 1) await midiIn.click();
   await expect(midiIn).toHaveAttribute("aria-label", /200 percent/);
   await expect.poll(() => canvasInkHeight(midiCanvas)).toBeGreaterThan(midiLow);
+  await page.getByTestId("pt-lower-track-height-in").click();
+  await expect(page.getByLabel("Track height scale")).toHaveText("125%");
   await page.screenshot({ path: testInfo.outputPath("protools-zoom-wide.png"), animations: "disabled" });
 
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -240,6 +255,9 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
   await expect(page.getByTestId("pt-zoom-in")).toBeVisible();
   await expect(page.getByTestId("pt-zoom-preset-5")).toBeVisible();
   await expect(page.getByRole("group", { name: "Vertical media zoom" })).toBeInViewport();
+  await page.getByTestId("pt-lower-track-height-out").click();
+  await page.getByTestId("pt-lower-track-height-out").click();
+  await expect(page.getByLabel("Track height scale")).toHaveText("75%");
   await page.screenshot({ path: testInfo.outputPath("protools-zoom-compact.png"), animations: "disabled" });
 
   const traceAfter = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace?.length ?? 0);

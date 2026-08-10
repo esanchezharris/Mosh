@@ -6,6 +6,7 @@ import {
   DEFAULT_HORIZONTAL_ZOOM_PRESETS,
 } from "./proToolsZoom";
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
+import { clampTrackHeightScale } from "./trackHeightZoom";
 import type { ProToolsTrackView } from "./trackViews";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
@@ -44,6 +45,7 @@ type ProToolsViewState = {
   readonly memoryLocationEditor: ProToolsMemoryLocationEditor | null;
   readonly singleZoomEnabled: boolean;
   readonly zoomReturnState: ProToolsZoomReturnState | null;
+  readonly trackHeightScale: number;
 };
 
 type ProToolsActions = {
@@ -69,6 +71,7 @@ type ProToolsActions = {
   readonly closeMemoryLocationEditor: () => void;
   readonly toggleSingleZoom: () => void;
   readonly completeSingleZoom: () => void;
+  readonly setTrackHeightScale: (scale: number) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -102,6 +105,7 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   memoryLocationEditor: null,
   singleZoomEnabled: false,
   zoomReturnState: null,
+  trackHeightScale: 1,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -176,6 +180,7 @@ export const useProTools = create<ProToolsState>((set) => ({
       zoomReturnState: null,
     };
   }),
+  setTrackHeightScale: (scale) => set({ trackHeightScale: clampTrackHeightScale(scale) }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

@@ -4,7 +4,7 @@ import { beatSeconds, meterFrom } from "../time";
 import type { Clip, Snapshot, Track } from "../types";
 import { applyNoteEdits } from "../ui/noteCommands";
 import { ClipView } from "../v2/lanes/ClipView";
-import { TRACK_ROW_HEIGHT, CLIP_VISUAL_HEADER_PX } from "./layout";
+import { CLIP_VISUAL_HEADER_PX } from "./layout";
 import { midiPointerIsBlank } from "./midiBlankHit";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { ProToolsAudioClip } from "./ProToolsAudioClip";
@@ -14,6 +14,7 @@ import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
 import { applyHorizontalZoomRange, applyHorizontalZoomStep } from "./proToolsZoom";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
+import { scaledTrackHeights } from "./trackHeightZoom";
 import { proToolsTrackRowHeight, resolveProToolsTrackView } from "./trackViews";
 
 type Props = {
@@ -42,6 +43,8 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const automationLanesVisible = useProTools((s) => s.automationLanesVisible);
   const midiNoteZoom = useProTools((s) => s.midiNoteZoom);
   const completeSingleZoom = useProTools((s) => s.completeSingleZoom);
+  const trackHeightScale = useProTools((s) => s.trackHeightScale);
+  const trackHeights = scaledTrackHeights(trackHeightScale);
   const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
   const clipMap = useMemo(() => new Map(tracks.flatMap((track) =>
     track.clips.map((clip) => [clip.id, { clip, track }] as const))), [tracks]);
@@ -288,8 +291,9 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
         marqueeTrack,
         marqueeTrackView,
         marqueeTrackView !== "volume" && Boolean(automationLanesVisible[marqueeTrack.id]),
+        trackHeightScale,
       )
-    : TRACK_ROW_HEIGHT;
+    : trackHeights.main;
 
   return (
     <div ref={scrollRef} className="pt-timeline-scroll" data-testid="pt-timeline"
@@ -310,13 +314,21 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           const trackView = resolveProToolsTrackView(track, trackViews[track.id]);
           const primaryAutomation = trackView === "volume";
           const secondaryAutomation = !primaryAutomation && Boolean(automationLanesVisible[track.id]);
-          const rowHeight = proToolsTrackRowHeight(track, trackView, secondaryAutomation);
+          const rowHeight = proToolsTrackRowHeight(
+            track,
+            trackView,
+            secondaryAutomation,
+            trackHeightScale,
+          );
           return (
             <div key={track.id} className="pt-lane" data-testid="pt-lane" data-track-id={track.id}
               data-track-view={trackView} data-secondary-automation={secondaryAutomation}
+              data-track-height-compact={trackHeightScale < 1}
               style={{
                 height: rowHeight,
-                "--pt-main-lane-h": `${TRACK_ROW_HEIGHT}px`,
+                "--pt-main-lane-h": `${trackHeights.main}px`,
+                "--pt-playlist-row-h": `${trackHeights.playlist}px`,
+                "--pt-automation-h": `${trackHeights.automation}px`,
                 "--pt-track-color": track.color ?? "var(--pt-selected)",
                 "--pt-beat-px": `${beatsInSeconds * pxPerSec}px`,
               } as React.CSSProperties}>

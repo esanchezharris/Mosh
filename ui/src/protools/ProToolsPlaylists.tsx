@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import type { ClipTake, CommandResult, Track } from "../types";
 import { ClipWave } from "../ui/clipRenderers";
-import { PROTOOLS_PLAYLIST_ROW_HEIGHT, proToolsPlaylistRowCount } from "./trackViews";
+import { useProTools } from "./proToolsState";
+import { scaledTrackHeights } from "./trackHeightZoom";
+import { proToolsPlaylistRowCount } from "./trackViews";
 
 type TakesInfo = {
   readonly takes: readonly ClipTake[];
@@ -24,6 +26,8 @@ export function ProToolsPlaylists({ track }: { readonly track: Track }) {
   const pxPerSec = useStore((state) => state.pxPerSec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const setLastError = useStore((state) => state.setLastError);
+  const trackHeightScale = useProTools((state) => state.trackHeightScale);
+  const playlistRowHeight = scaledTrackHeights(trackHeightScale).playlist;
   const clips = useMemo(() => track.clips.filter((clip) =>
     clip.type === "wave" && (clip.numTakes ?? 0) > 1), [track.clips]);
   const signature = clips.map((clip) =>
@@ -80,7 +84,7 @@ export function ProToolsPlaylists({ track }: { readonly track: Track }) {
       aria-label={`${track.name} playlists`}>
       {Array.from({ length: rows }, (_, takeIndex) => (
         <div key={takeIndex} className="pt-playlist-row" data-testid="pt-playlist-row"
-          style={{ height: PROTOOLS_PLAYLIST_ROW_HEIGHT }}>
+          style={{ height: playlistRowHeight }}>
           {clips.filter((clip) => takeIndex < (clip.numTakes ?? 0)).map((clip) => {
             const info = infoByClip[clip.id];
             const take = info?.takes.find((candidate) => candidate.index === takeIndex);

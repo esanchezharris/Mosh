@@ -204,4 +204,31 @@ describe("Pro Tools Track Views", () => {
     expect(midiLane?.querySelector('[data-clip-id="midi-clip"]')).not.toBeNull();
     expect(midiLane?.querySelector("[data-testid=midi-ink]")).not.toBeNull();
   });
+
+  it("keeps headers, lanes, playlists, and automation on one proportional height scale", () => {
+    act(() => root.render(React.createElement(React.Fragment, null,
+      React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT }),
+      React.createElement(TimelineHarness),
+    )));
+    act(() => useProTools.getState().setTrackHeightScale(1.25));
+
+    const header = host.querySelector<HTMLElement>('.pt-track-header[data-track-id="audio-track"]');
+    const lane = host.querySelector<HTMLElement>('.pt-lane[data-track-id="audio-track"]');
+    expect(header?.style.height).toBe("115px");
+    expect(lane?.style.height).toBe("115px");
+    expect(header?.style.getPropertyValue("--pt-playlist-row-h")).toBe("33px");
+    expect(lane?.style.getPropertyValue("--pt-main-lane-h")).toBe("115px");
+    expect(lane?.style.getPropertyValue("--pt-automation-h")).toBe("35px");
+
+    act(() => {
+      useProTools.getState().setTrackView("audio-track", "playlists");
+      useProTools.getState().toggleAutomationLane("audio-track");
+    });
+    expect(header?.style.height).toBe("183px");
+    expect(lane?.style.height).toBe("183px");
+    expect(header?.querySelector<HTMLElement>("[data-testid=pt-playlist-header-row]")?.style.height)
+      .toBe("33px");
+    expect(lane?.querySelector("[data-testid=pt-playlists]")).not.toBeNull();
+    expect(lane?.querySelector("[data-testid=pt-automation-lane-frame]")).not.toBeNull();
+  });
 });

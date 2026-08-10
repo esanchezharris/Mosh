@@ -1,9 +1,9 @@
 import type { Track } from "../types";
-import { TRACK_ROW_HEIGHT } from "./layout";
+import { BASE_PLAYLIST_ROW_HEIGHT, scaledTrackHeights } from "./trackHeightZoom";
 
 export type ProToolsTrackView = "waveform" | "playlists" | "volume" | "clips" | "notes";
 
-export const PROTOOLS_PLAYLIST_ROW_HEIGHT = 26;
+export const PROTOOLS_PLAYLIST_ROW_HEIGHT = BASE_PLAYLIST_ROW_HEIGHT;
 
 export type ProToolsTrackViewOption = {
   readonly value: ProToolsTrackView;
@@ -61,10 +61,12 @@ export function proToolsTrackRowHeight(
   track: Track,
   requested: ProToolsTrackView | undefined,
   automationLaneVisible = false,
+  trackHeightScale = 1,
 ): number {
-  if (resolveProToolsTrackView(track, requested) !== "playlists") return TRACK_ROW_HEIGHT;
+  const heights = scaledTrackHeights(trackHeightScale);
+  if (resolveProToolsTrackView(track, requested) !== "playlists") return heights.main;
   const playlistRows = Math.max(1, proToolsPlaylistRowCount(track));
-  return TRACK_ROW_HEIGHT
-    + playlistRows * PROTOOLS_PLAYLIST_ROW_HEIGHT
-    + (automationLaneVisible ? 28 : 0);
+  return heights.main
+    + playlistRows * heights.playlist
+    + (automationLaneVisible ? heights.automation : 0);
 }

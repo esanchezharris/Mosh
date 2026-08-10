@@ -1,8 +1,9 @@
 import type { Snapshot } from "../types";
 import { gridLines, secAtBeat, secondsToBBSMap, tempoMapFrom } from "../time";
 import { contentSeconds } from "../v2/timeline/geom";
+import { BASE_TRACK_ROW_HEIGHT } from "./trackHeightZoom";
 
-export const TRACK_ROW_HEIGHT = 92;
+export const TRACK_ROW_HEIGHT = BASE_TRACK_ROW_HEIGHT;
 export const AUDIO_CLIP_HEADER_PX = 44;
 export const CLIP_VISUAL_HEADER_PX = 16;
 export const PROTOOLS_TIMECODE_FPS = 30;
