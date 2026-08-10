@@ -9,7 +9,11 @@ import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 import type { ProToolsTrackView } from "./trackViews";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
-export type ProToolsRuler = "barsBeats" | "timecode" | "minutesSeconds" | "samples";
+export type ProToolsRuler = "markers" | "barsBeats" | "timecode" | "minutesSeconds" | "samples";
+
+export type ProToolsMemoryLocationEditor =
+  | { readonly mode: "create"; readonly seconds: number }
+  | { readonly mode: "edit"; readonly annotationId: string };
 
 export type ProToolsRulersVisible = Readonly<Record<ProToolsRuler, boolean>>;
 
@@ -31,6 +35,8 @@ type ProToolsViewState = {
   readonly horizontalZoomPresets: readonly number[];
   readonly audioWaveformZoom: number;
   readonly midiNoteZoom: number;
+  readonly memoryLocationsOpen: boolean;
+  readonly memoryLocationEditor: ProToolsMemoryLocationEditor | null;
 };
 
 type ProToolsActions = {
@@ -50,6 +56,10 @@ type ProToolsActions = {
   readonly setHorizontalZoomPreset: (index: number, pxPerSec: number) => void;
   readonly setAudioWaveformZoom: (value: number) => void;
   readonly setMidiNoteZoom: (value: number) => void;
+  readonly setMemoryLocationsOpen: (open: boolean) => void;
+  readonly requestNewMemoryLocation: (seconds: number) => void;
+  readonly requestEditMemoryLocation: (annotationId: string) => void;
+  readonly closeMemoryLocationEditor: () => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -63,6 +73,7 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   tabToTransient: true,
   trackHeaderWidth: 160,
   rulersVisible: {
+    markers: true,
     barsBeats: true,
     timecode: true,
     minutesSeconds: true,
@@ -78,6 +89,8 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   horizontalZoomPresets: [...DEFAULT_HORIZONTAL_ZOOM_PRESETS],
   audioWaveformZoom: 1,
   midiNoteZoom: 1,
+  memoryLocationsOpen: false,
+  memoryLocationEditor: null,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -112,6 +125,22 @@ export const useProTools = create<ProToolsState>((set) => ({
   }),
   setAudioWaveformZoom: (value) => set({ audioWaveformZoom: clampVerticalZoom(value) }),
   setMidiNoteZoom: (value) => set({ midiNoteZoom: clampVerticalZoom(value) }),
+  setMemoryLocationsOpen: (memoryLocationsOpen) => set({
+    memoryLocationsOpen,
+    ...(!memoryLocationsOpen ? { memoryLocationEditor: null } : {}),
+  }),
+  requestNewMemoryLocation: (seconds) => set({
+    memoryLocationsOpen: true,
+    memoryLocationEditor: {
+      mode: "create",
+      seconds: Number.isFinite(seconds) ? Math.max(0, seconds) : 0,
+    },
+  }),
+  requestEditMemoryLocation: (annotationId) => set({
+    memoryLocationsOpen: true,
+    memoryLocationEditor: { mode: "edit", annotationId },
+  }),
+  closeMemoryLocationEditor: () => set({ memoryLocationEditor: null }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

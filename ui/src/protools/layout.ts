@@ -1,5 +1,5 @@
 import type { Snapshot } from "../types";
-import { gridLines, secondsToBBSMap, tempoMapFrom } from "../time";
+import { gridLines, secAtBeat, secondsToBBSMap, tempoMapFrom } from "../time";
 import { contentSeconds } from "../v2/timeline/geom";
 
 export const TRACK_ROW_HEIGHT = 92;
@@ -23,7 +23,12 @@ const finitePositive = (value: number, fallback: number) =>
   Number.isFinite(value) && value > 0 ? value : fallback;
 
 export function timelineSeconds(snapshot: Snapshot): number {
-  return finitePositive(contentSeconds(snapshot), 32);
+  const map = tempoMapFrom(snapshot.session);
+  const lastMarker = (snapshot.annotations ?? []).reduce((latest, annotation) => {
+    if (!Number.isFinite(annotation.beat)) return latest;
+    return Math.max(latest, secAtBeat(map, annotation.beat) + 4);
+  }, 0);
+  return finitePositive(Math.max(contentSeconds(snapshot), lastMarker), 32);
 }
 
 export function timelinePxPerSecond(contentWidth: number, totalSeconds: number): number {

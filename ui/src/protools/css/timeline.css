@@ -15,11 +15,25 @@
   box-shadow: inset 0 1px var(--pt-highlight);
 }
 .pt-ruler-label {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   height: var(--pt-ruler-row-h);
   padding: 2px 7px;
   border-bottom: 1px solid var(--pt-border);
   color: var(--pt-text-muted);
   font: 600 10px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.pt-marker-label button {
+  width: 18px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--pt-border);
+  border-radius: 2px;
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  font: 700 11px/1 sans-serif;
 }
 .pt-ruler-viewport { position: relative; min-width: 0; overflow: hidden; }
 .pt-ruler-field { display: grid; will-change: transform; }
@@ -54,6 +68,38 @@
   font: 500 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums;
 }
+.pt-marker-ruler { overflow: visible; }
+.pt-marker-flag {
+  position: absolute;
+  z-index: 2;
+  top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 132px;
+  height: 16px;
+  padding: 0 5px 0 3px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--pt-marker-color) 68%, var(--pt-border));
+  border-radius: 2px 2px 2px 0;
+  color: var(--pt-text);
+  background: color-mix(in srgb, var(--pt-marker-color) 42%, var(--pt-inset));
+  font-size: 9px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-1px);
+}
+.pt-marker-flag::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--pt-marker-color);
+  content: "";
+}
+.pt-marker-flag > span:first-child { color: var(--pt-text-muted); font-variant-numeric: tabular-nums; }
 
 .pt-timeline-scroll {
   position: relative;

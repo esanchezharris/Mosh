@@ -29,6 +29,8 @@ describe("Pro Tools shell state", () => {
       horizontalZoomPresets: state.horizontalZoomPresets,
       audioWaveformZoom: state.audioWaveformZoom,
       midiNoteZoom: state.midiNoteZoom,
+      memoryLocationsOpen: state.memoryLocationsOpen,
+      memoryLocationEditor: state.memoryLocationEditor,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -40,6 +42,7 @@ describe("Pro Tools shell state", () => {
         timecode: true,
         minutesSeconds: true,
         samples: true,
+        markers: true,
       },
       clipListOpen: true,
       nudgeValue: 0.25,
@@ -50,7 +53,30 @@ describe("Pro Tools shell state", () => {
       horizontalZoomPresets: DEFAULT_HORIZONTAL_ZOOM_PRESETS,
       audioWaveformZoom: 1,
       midiNoteZoom: 1,
+      memoryLocationsOpen: false,
+      memoryLocationEditor: null,
     });
+  });
+
+  it("keeps the Memory Locations window and editor project-scoped", () => {
+    const state = useProTools.getState();
+    state.setMemoryLocationsOpen(true);
+    state.requestNewMemoryLocation(3.5);
+
+    expect(useProTools.getState().memoryLocationsOpen).toBe(true);
+    expect(useProTools.getState().memoryLocationEditor).toEqual({ mode: "create", seconds: 3.5 });
+
+    useProTools.getState().requestEditMemoryLocation("marker-1");
+    expect(useProTools.getState().memoryLocationEditor).toEqual({
+      mode: "edit",
+      annotationId: "marker-1",
+    });
+    useProTools.getState().closeMemoryLocationEditor();
+    expect(useProTools.getState().memoryLocationEditor).toBeNull();
+
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().memoryLocationsOpen).toBe(false);
+    expect(useProTools.getState().memoryLocationEditor).toBeNull();
   });
 
   it("keeps media zoom independent and project-scoped", () => {

@@ -5,7 +5,9 @@ import {
   formatTimecode,
   linearRulerTicks,
   secondsAtClientX,
+  timelineSeconds,
 } from "./layout";
+import type { Snapshot } from "../types";
 
 describe("Pro Tools ruler geometry", () => {
   it("maps the transformed full-width field back to timeline seconds", () => {
@@ -25,5 +27,29 @@ describe("Pro Tools ruler geometry", () => {
     expect(ticks.length).toBeGreaterThan(0);
     expect(ticks.length).toBeLessThanOrEqual(2_048);
     expect(ticks.every((tick) => Number.isFinite(tick.seconds))).toBe(true);
+  });
+
+  it("extends the timeline so late Memory Locations remain reachable", () => {
+    const snapshot: Snapshot = {
+      schemaVersion: 1,
+      session: {
+        sampleRate: 48_000,
+        tempo: 120,
+        editFile: "/tmp/protools-late-marker.mosh",
+        key: { tonic: "C", mode: "major" },
+      },
+      tracks: [],
+      transport: {
+        playing: false,
+        recording: false,
+        position: 0,
+        looping: false,
+        loopStart: 0,
+        loopEnd: 0,
+      },
+      annotations: [{ id: "late", text: "Outro", beat: 80 }],
+    };
+
+    expect(timelineSeconds(snapshot)).toBe(44);
   });
 });

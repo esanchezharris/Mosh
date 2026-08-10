@@ -29,6 +29,7 @@ const TOOLS: readonly { id: ProToolsTool; key: string; label: string; glyph: str
 ];
 
 const RULERS: readonly { id: ProToolsRuler; label: string }[] = [
+  { id: "markers", label: "Markers" },
   { id: "barsBeats", label: "Bars+Beats" },
   { id: "timecode", label: "Timecode" },
   { id: "minutesSeconds", label: "Minutes:Seconds" },
@@ -61,6 +62,8 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
   const setNudgeValue = useProTools((s) => s.setNudgeValue);
   const classicTheme = useProTools((s) => s.classicTheme);
   const toggleClassicTheme = useProTools((s) => s.toggleClassicTheme);
+  const memoryLocationsOpen = useProTools((s) => s.memoryLocationsOpen);
+  const setMemoryLocationsOpen = useProTools((s) => s.setMemoryLocationsOpen);
   const setShell = useSettings((s) => s.set);
   const fallbackTrackId = selectedTrackId
     ?? snapshot.tracks.find((track) => track.type === "audio")?.id
@@ -152,6 +155,10 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
 
       <div className="pt-toolbar-spacer" />
       <div className="pt-toolbar-group pt-view-group">
+        <button type="button" className="pt-view-button" data-testid="pt-memory-toggle"
+          aria-expanded={memoryLocationsOpen} aria-controls="pt-memory-locations"
+          aria-pressed={memoryLocationsOpen}
+          onClick={() => setMemoryLocationsOpen(!memoryLocationsOpen)}>Memory</button>
         <MoshMenu label="Visible rulers" align="end" trigger={
           <button type="button" className="pt-view-button" aria-label="Visible rulers">Rulers</button>}>
           <div className="pt-menu" role="menu">

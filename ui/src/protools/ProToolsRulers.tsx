@@ -15,6 +15,8 @@ import {
   timelineSeconds,
   type ProToolsRulerTick,
 } from "./layout";
+import { numberedMemoryLocations } from "./memoryLocations";
+import { useProTools } from "./proToolsState";
 
 type Props = {
   snapshot: Snapshot;
@@ -31,6 +33,7 @@ type RulerSpec = {
 };
 
 const RULERS: readonly RulerSpec[] = [
+  { id: "markers", label: "Markers", hint: "saved Memory Locations" },
   { id: "barsBeats", label: "Bars+Beats", hint: "musical bars and beats" },
   { id: "timecode", label: "Timecode", hint: "30 frames per second" },
   { id: "minutesSeconds", label: "Minutes:Seconds", hint: "elapsed minutes and seconds" },
@@ -54,9 +57,12 @@ export function ProToolsRulers({
   getScrollLeft,
 }: Props) {
   const exec = useStore((state) => state.exec);
+  const requestNewMemoryLocation = useProTools((state) => state.requestNewMemoryLocation);
+  const requestEditMemoryLocation = useProTools((state) => state.requestEditMemoryLocation);
   const totalSeconds = timelineSeconds(snapshot);
   const pxPerSecond = timelinePxPerSecond(contentWidth, totalSeconds);
   const ticks = useMemo<Record<ProToolsRuler, ProToolsRulerTick[]>>(() => ({
+    markers: [],
     barsBeats: barsBeatsRulerTicks(snapshot, contentWidth),
     timecode: linearRulerTicks(totalSeconds, contentWidth, formatTimecode, 102),
     minutesSeconds: linearRulerTicks(totalSeconds, contentWidth, formatMinutesSeconds, 96),
@@ -67,6 +73,7 @@ export function ProToolsRulers({
       92,
     ),
   }), [contentWidth, snapshot, totalSeconds]);
+  const memoryLocations = useMemo(() => numberedMemoryLocations(snapshot), [snapshot]);
   const visible = RULERS.filter((ruler) => rulersVisible[ruler.id]);
   const seek = (position: number) => {
     void exec("set_transport", { position: Math.max(0, Math.min(totalSeconds, position)) });
@@ -99,8 +106,17 @@ export function ProToolsRulers({
   if (visible.length === 0) return null;
   return (
     <section className="pt-rulers" aria-label="Timeline rulers">
-      <div className="pt-ruler-label-stack" aria-hidden="true">
-        {visible.map((ruler) => <span className="pt-ruler-label" key={ruler.id}>{ruler.label}</span>)}
+      <div className="pt-ruler-label-stack">
+        {visible.map((ruler) => ruler.id === "markers" ? (
+          <span className="pt-ruler-label pt-marker-label" key={ruler.id}>
+            <span aria-hidden="true">{ruler.label}</span>
+            <button type="button" data-testid="pt-memory-ruler-add"
+              aria-label="Add Memory Location at the playhead"
+              onClick={() => requestNewMemoryLocation(useStore.getState().transport.position)}>+</button>
+          </span>
+        ) : (
+          <span className="pt-ruler-label" aria-hidden="true" key={ruler.id}>{ruler.label}</span>
+        ))}
       </div>
       <div className="pt-ruler-viewport">
         <div
@@ -111,7 +127,36 @@ export function ProToolsRulers({
             transform: `translate3d(${-Math.max(0, getScrollLeft())}px, 0, 0)`,
           }}
         >
-          {visible.map((ruler) => (
+          {visible.map((ruler) => ruler.id === "markers" ? (
+            <div className="pt-ruler-row pt-marker-ruler" data-ruler="markers"
+              role="group" aria-label="Marker ruler with saved Memory Locations" key={ruler.id}>
+              {memoryLocations.map((location) => (
+                <button type="button" className="pt-marker-flag"
+                  data-testid={`pt-memory-marker-${location.annotation.id}`}
+                  key={location.annotation.id}
+                  aria-label={`Memory Location ${location.number}: ${location.annotation.text}`}
+                  title={`${location.number} · ${location.annotation.text} — double-click to edit; Option-click to remove`}
+                  style={{
+                    left: location.seconds * pxPerSecond,
+                    "--pt-marker-color": location.annotation.color ?? "var(--pt-selected)",
+                  } as React.CSSProperties}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    requestEditMemoryLocation(location.annotation.id);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (event.altKey) {
+                      void exec("remove_annotation", { annotationId: location.annotation.id });
+                      return;
+                    }
+                    seek(location.seconds);
+                  }}>
+                  <span>{location.number}</span><span>{location.annotation.text}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
             <button
               type="button"
               className="pt-ruler-row"

@@ -13,6 +13,7 @@ import { RecoveryNotice } from "../ui/RecoveryNotice";
 import { ProToolsArrangement } from "./ProToolsArrangement";
 import { ProToolsDetailDock } from "./ProToolsDetailDock";
 import { ProToolsMoshiDrawer } from "./ProToolsMoshiDrawer";
+import { ProToolsMemoryLocations } from "./ProToolsMemoryLocations";
 import { ProToolsStatusBar } from "./ProToolsStatusBar";
 import { ProToolsToolbar } from "./ProToolsToolbar";
 import { useProTools } from "./proToolsState";
@@ -75,6 +76,7 @@ export function AppProTools() {
         <ProToolsStatusBar snapshot={snapshot} />
         <ProToolsMoshiDrawer open={moshiOpen} onClose={() => setMoshiOpen(false)}
           returnFocusRef={moshiButtonRef} />
+        {snapshot && <ProToolsMemoryLocations snapshot={snapshot} />}
         {settingsOpen && snapshot && (
           <SettingsOverlay onClose={() => setSettingsOpen(false)} />
         )}

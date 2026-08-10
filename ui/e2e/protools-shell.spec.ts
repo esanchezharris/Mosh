@@ -79,7 +79,7 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   await expect(page.getByTestId("live-browser")).toHaveCount(0);
   await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
   await expect(page.getByTestId("pt-lane")).toHaveCount(3);
-  await expect(page.locator("[data-ruler]")).toHaveCount(4);
+  await expect(page.locator("[data-ruler]")).toHaveCount(5);
 
   const header = await page.getByTestId("pt-track-header").first().boundingBox();
   const lane = await page.getByTestId("pt-lane").first().boundingBox();
@@ -105,6 +105,59 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   expect(trackList.width / viewport.width).toBeLessThan(0.16);
   expect(clipList.width / viewport.width).toBeGreaterThan(0.09);
   expect(clipList.width / viewport.width).toBeLessThan(0.18);
+});
+
+test("tutorial-backed Memory Locations persist markers and recall the timeline", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  await execInPage(page, "set_transport", { position: 3 });
+
+  await page.getByTestId("pt-memory-toggle").click();
+  const memoryWindow = page.getByTestId("pt-memory-locations");
+  await expect(memoryWindow).toBeVisible();
+  await page.getByTestId("pt-memory-add").click();
+  const dialog = page.getByTestId("pt-memory-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId("pt-memory-name")).toBeFocused();
+  await page.getByTestId("pt-memory-name").fill("Verse In");
+  await page.locator("#pt-memory-color").selectOption("#4a90d9");
+  await page.getByTestId("pt-memory-save").click();
+
+  const row = memoryWindow.locator("li").filter({ hasText: "Verse In" });
+  await expect(row).toBeVisible();
+  await expect(page.locator('[data-ruler="markers"]')).toContainText("Verse In");
+  await execInPage(page, "set_transport", { position: 0 });
+  await row.locator(".pt-memory-recall").click();
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBe(3);
+
+  await row.getByRole("button", { name: "Edit" }).click();
+  await page.getByTestId("pt-memory-name").fill("Verse Pickup");
+  await page.getByTestId("pt-memory-save").click();
+  await expect(memoryWindow).toContainText("Verse Pickup");
+  await page.getByTestId("pt-memory-search").fill("pickup");
+  const editedRow = memoryWindow.locator("li").filter({ hasText: "Verse Pickup" });
+  await expect(editedRow).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath("protools-memory-locations-wide.png"), animations: "disabled" });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(memoryWindow).toBeVisible();
+  const compactBox = await memoryWindow.boundingBox();
+  if (!compactBox) throw new Error("compact Memory Locations bounds are missing");
+  expect(compactBox.x).toBe(0);
+  expect(compactBox.width).toBe(720);
+  await page.screenshot({ path: testInfo.outputPath("protools-memory-locations-compact.png"), animations: "disabled" });
+
+  await editedRow.getByRole("button", { name: "Remove" }).click();
+  await expect(memoryWindow.locator("li")).toHaveCount(0);
+  const commands = await page.evaluate(() =>
+    (window as ProToolsWindow).__moshCmdTrace?.map((entry) => entry.command) ?? []);
+  expect(commands).toEqual(expect.arrayContaining([
+    "create_annotation",
+    "edit_annotation",
+    "remove_annotation",
+    "set_transport",
+  ]));
 });
 
 test("tutorial-backed Zoom controls preserve the editing focus workflow", async ({ page }, testInfo) => {

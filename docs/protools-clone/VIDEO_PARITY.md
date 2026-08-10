@@ -25,7 +25,8 @@ Grabber. Mosh follows the documented 25/75 contract.
 ## Primary official corpus
 
 The titles and channel attribution for V01-V12 were rechecked through YouTube's
-oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
+oEmbed metadata on 2026-08-10. V13 was rechecked through public YouTube metadata;
+all thirteen report the author as **Avid Pro Tools**.
 
 | ID | Avid video | Timecoded evidence |
 |---|---|---|
@@ -42,6 +43,7 @@ oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 | V10B | [Pro Tools Tech Tips: Playlist Comping](https://www.youtube.com/watch?v=JnsKGu4ZqiU) | Official Avid visual corroboration: stacked vocal playlist lanes, timeline-aligned waveform alternatives, and assembled material in the main lane. It has music rather than useful narration, so V10 and Avid help remain the behavioral authority. |
 | V11 | [Fast Start: Mixing Fundamentals](https://www.youtube.com/watch?v=MDcgJju4WOY) | 3:09 fader; 3:36 pan; 6:26 inserts; 7:23 existing vocal send; 7:28-7:48 several sources share one reverb return; 8:04 send selection; 8:08-8:13 send-fader increase; 8:22 shared-return CPU rationale; 8:32 mix bus; 9:02 mix-bus fader; 9:26 mix-bus inserts. |
 | V12 | [Zoom](https://www.youtube.com/watch?v=hyPdxSg48M0) | 0:00 Zoom cluster; 0:05 horizontal controls; 0:11 Option/Alt-scroll; 0:18 R/T out/in with Edit Keyboard Focus; 0:28 presets 1-5; 0:35 Command/Control-click stores a preset; 0:41 lower scrollbar controls; 0:44 separate audio-waveform and MIDI-note vertical zoom. Full-window frames place the compact Zoom cluster between Edit Modes and Edit Tools. |
+| V13 | [How to Use Memory Locations in Pro Tools](https://www.youtube.com/watch?v=0jC0h3AgC1g) | 0:20 add on Marker ruler; 0:27 multiple rulers; 0:41 keypad Enter; 1:00 ruler/list recall; 1:06 edit; 1:08 Option/Alt-delete; 1:13 stored selections/zoom/track visibility; 1:30 period-number-period exact recall; 1:37 period plus/minus stepping; 1:57 last-location recall; 2:14 chronological following; 2:42 filtering. Frames show a dark floating table over the Edit Window while marker rulers remain visible. |
 
 V05 (2025) and V06 (2026) take precedence over older visuals when the interface
 differs. Full documentation and non-video references live in [RESEARCH.md](./RESEARCH.md).
@@ -103,6 +105,7 @@ native, physical-device, or audio-output acceptance.
 | Edit Window zones | V01, V05, C01 | `MATCH` | `?shell=protools` Chromium zones test; fresh wide/compact producer-flow captures. |
 | Edit modes/tools | V01, V02, C02 | `MATCH` | F1–F10 Chromium state proof and Smart Tool classifier tests. |
 | Zoom navigation and media scaling | V12 plus Avid Zoomer/zoom-controls help | `MATCH/PARTIAL` | An original compact cluster sits between Edit Modes and Edit Tools; −/+, R/T with timeline focus, Option/Alt-wheel, and project-scoped presets 1-5 preserve a centered time anchor. Independent A−/A+ waveform and M−/M+ MIDI-note controls scale the two canvas families without changing clip gain, notes, or the command trace. F5 Zoomer click/drag previews and fits a time range, cancels on pointer cancellation or project replacement, and changes no project data. Focused Chromium measures increased waveform and MIDI/drum canvas ink at 200% versus 50%. Single Zoom mode and the dedicated lower scrollbar controls remain gaps. |
+| Memory Locations | V13 | `MATCH/PARTIAL` | The Marker ruler and nonmodal list use persisted beat-anchored annotations with chronological numbering, current-playhead add, direct recall, double-click/edit, Option/Alt-remove, name/number search, numeric-keypad Enter, period-number-period exact recall, and period plus/minus stepping. Creation/edit/removal/navigation stay on `create_annotation`, `edit_annotation`, `remove_annotation`, and `set_transport`, so undo, save/reload, JSONL, and multiplayer behavior remain canonical. Focused component tests cover modal focus/project invalidation; serial Chromium captures the wide floating table and compact full-width sheet. Multiple marker rulers, track markers, stored edit selections/zoom/track visibility, advanced filters/manage/import, and independently stored slot numbers remain gaps. |
 | Recording/routing | V03, V04, V05 | `MATCH/ADAPTED` | Producer flow asserts unassigned/Auto/disarmed, routed/Monitor In/armed, active record, stopped take, and command trace. Track inspector replaces the full I/O matrix. |
 | Track controls | V03, V05, V11 | `ADAPTED` | Header exposes select/arm/solo/mute and actual output; inspector owns deeper routing, mix, and inserts. Expanded header density is optional follow-up. |
 | Static clip gain | V06, C03 | `MATCH` | Selected-clip line/handle, local drag preview, keyboard control, dB-amplitude waveform response, epoch cancellation, inspector agreement, and `set_clip_gain` commit. |

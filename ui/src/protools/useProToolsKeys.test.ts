@@ -54,6 +54,10 @@ const SNAPSHOT: Snapshot = {
     loopStart: 0,
     loopEnd: 0,
   },
+  annotations: [
+    { id: "marker-1", text: "Verse", beat: 4 },
+    { id: "marker-2", text: "Hook", beat: 12 },
+  ],
 };
 
 function Harness() {
@@ -280,6 +284,90 @@ describe("useProToolsKeys", () => {
     act(() => window.dispatchEvent(event));
 
     expect(useProTools.getState().trackViews).toEqual({});
+    expect(execCalls).toEqual([]);
+  });
+
+  it("opens a new Memory Location at the playhead with numeric keypad Enter", () => {
+    useStore.setState({ transport: { ...SNAPSHOT.transport, position: 3.5 } });
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", code: "NumpadEnter", bubbles: true, cancelable: true,
+    })));
+
+    expect(useProTools.getState().memoryLocationsOpen).toBe(true);
+    expect(useProTools.getState().memoryLocationEditor).toEqual({ mode: "create", seconds: 3.5 });
+    expect(execCalls).toEqual([]);
+  });
+
+  it("recalls a numbered Memory Location with period-number-period", async () => {
+    for (const init of [
+      { key: ".", code: "NumpadDecimal" },
+      { key: "2", code: "Numpad2" },
+      { key: ".", code: "NumpadDecimal" },
+    ]) {
+      act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+        ...init, bubbles: true, cancelable: true,
+      })));
+    }
+
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_transport",
+      args: { position: 6 },
+    }));
+  });
+
+  it("steps to the next and previous Memory Locations with period plus or minus", async () => {
+    useStore.setState({ transport: { ...SNAPSHOT.transport, position: 2.5 } });
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ".", code: "NumpadDecimal", bubbles: true, cancelable: true,
+    })));
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "+", code: "NumpadAdd", bubbles: true, cancelable: true,
+    })));
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_transport",
+      args: { position: 6 },
+    }));
+
+    execCalls = [];
+    useStore.setState({ transport: { ...SNAPSHOT.transport, position: 5 } });
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ".", code: "NumpadDecimal", bubbles: true, cancelable: true,
+    })));
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "-", code: "NumpadSubtract", bubbles: true, cancelable: true,
+    })));
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_transport",
+      args: { position: 2 },
+    }));
+  });
+
+  it("uses double period for the last recalled location but forgets it after project replacement", async () => {
+    const press = (key: string, code: string) => act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key, code, bubbles: true, cancelable: true,
+    })));
+    press(".", "NumpadDecimal");
+    press("1", "Numpad1");
+    press(".", "NumpadDecimal");
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_transport",
+      args: { position: 2 },
+    }));
+
+    execCalls = [];
+    press(".", "NumpadDecimal");
+    press(".", "NumpadDecimal");
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_transport",
+      args: { position: 2 },
+    }));
+
+    execCalls = [];
+    useStore.setState({ projectEpoch: 8 });
+    press(".", "NumpadDecimal");
+    press(".", "NumpadDecimal");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(execCalls).toEqual([]);
   });
 });

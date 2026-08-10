@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { isEditableTarget } from "../interaction/keymap";
 import { useStore, type State } from "../store";
 import type { Snapshot } from "../types";
@@ -7,6 +7,11 @@ import { applyHorizontalZoom, applyHorizontalZoomStep } from "./proToolsZoom";
 import type { ProToolsTool } from "./smartTool";
 import { nextTabPosition } from "./tabNavigation";
 import { nextCommonProToolsTrackView } from "./trackViews";
+import {
+  adjacentMemoryLocation,
+  memoryLocationAtNumber,
+  numberedMemoryLocations,
+} from "./memoryLocations";
 
 const EDIT_MODE_KEYS: Readonly<Partial<Record<string, ProToolsEditMode>>> = {
   F1: "shuffle",
@@ -61,11 +66,22 @@ function peaksAmplitude(bucket: readonly [number, number] | undefined): number {
 }
 
 export function useProToolsKeys(): void {
+  const memorySequence = useRef<{ digits: string; startedAt: number } | null>(null);
+  const lastRecalledLocation = useRef<number | null>(null);
+  const memoryEpoch = useRef(useStore.getState().projectEpoch);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented
         || isEditableTarget(event.target)
         || isEditableTarget(document.activeElement)) return;
+
+      const currentEpoch = useStore.getState().projectEpoch;
+      if (currentEpoch !== memoryEpoch.current) {
+        memoryEpoch.current = currentEpoch;
+        memorySequence.current = null;
+        lastRecalledLocation.current = null;
+      }
 
       const mode = EDIT_MODE_KEYS[event.key];
       if (mode && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -84,6 +100,65 @@ export function useProToolsKeys(): void {
       }
 
       const noModifiers = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+      const now = performance.now();
+      if (memorySequence.current && now - memorySequence.current.startedAt > 1_500) {
+        memorySequence.current = null;
+      }
+      const seekMemoryLocation = (seconds: number) => {
+        lastRecalledLocation.current = seconds;
+        void useStore.getState().exec("set_transport", { position: seconds });
+      };
+      if (noModifiers && event.code === "NumpadEnter") {
+        event.preventDefault();
+        useProTools.getState().requestNewMemoryLocation(useStore.getState().transport.position);
+        memorySequence.current = null;
+        return;
+      }
+      if (noModifiers && event.code === "NumpadDecimal") {
+        event.preventDefault();
+        const sequence = memorySequence.current;
+        if (!sequence) {
+          memorySequence.current = { digits: "", startedAt: now };
+          return;
+        }
+        memorySequence.current = null;
+        if (sequence.digits) {
+          const snapshot = useStore.getState().snapshot;
+          if (!snapshot) return;
+          const location = memoryLocationAtNumber(
+            numberedMemoryLocations(snapshot),
+            Number(sequence.digits),
+          );
+          if (location) seekMemoryLocation(location.seconds);
+        } else if (lastRecalledLocation.current !== null) {
+          seekMemoryLocation(lastRecalledLocation.current);
+        }
+        return;
+      }
+      const memoryDigit = /^Numpad\d$/.test(event.code) ? event.code.slice(-1) : null;
+      if (noModifiers && memorySequence.current && memoryDigit !== null) {
+        event.preventDefault();
+        memorySequence.current = {
+          digits: `${memorySequence.current.digits}${memoryDigit}`.slice(0, 4),
+          startedAt: now,
+        };
+        return;
+      }
+      if (noModifiers && memorySequence.current
+        && (event.code === "NumpadAdd" || event.code === "NumpadSubtract")) {
+        event.preventDefault();
+        memorySequence.current = null;
+        const store = useStore.getState();
+        if (!store.snapshot) return;
+        const location = adjacentMemoryLocation(
+          numberedMemoryLocations(store.snapshot),
+          store.transport.position,
+          event.code === "NumpadAdd" ? 1 : -1,
+        );
+        if (location) seekMemoryLocation(location.seconds);
+        return;
+      }
+
       if (noModifiers && ownsEditKeyboardFocus(document.activeElement)) {
         const zoomKey = event.key.toLowerCase();
         if (zoomKey === "r" || zoomKey === "t") {
