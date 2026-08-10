@@ -194,6 +194,42 @@ describe("Pro Tools selected-track inspector", () => {
 
     expect(useStore.getState().lastError).toBe("no input device");
   });
+
+  it("opens an Aux return with its bus input, mix controls, and insert rack", async () => {
+    const aux: Snapshot["tracks"][number] = {
+      id: "plate-return",
+      index: 1,
+      name: "Plate",
+      type: "audio",
+      clips: [],
+      isReturn: true,
+      returnBus: 0,
+      volumeDb: -4,
+      pan: 0,
+      plugins: [],
+    };
+    useStore.setState({
+      snapshot: { ...SNAPSHOT, tracks: [...SNAPSHOT.tracks, aux], buses: [
+        { bus: 0, name: "Plate", trackId: aux.id },
+      ] },
+      selectedTrackId: aux.id,
+    });
+    renderDock();
+
+    expect(host.querySelector(".pt-detail-title")?.textContent).toBe("Aux — Plate");
+    expect(host.querySelector("[data-testid=pt-aux-input]")?.textContent).toBe("Bus — Plate");
+    expect(host.querySelector("[data-testid=pt-monitor-automatic]")).toBeNull();
+    expect(host.querySelector("[data-testid=pt-device-rack]")?.getAttribute("aria-label"))
+      .toBe("Inserts on Plate");
+
+    const name = host.querySelector<HTMLInputElement>("[data-testid=pt-track-name]");
+    if (!name) throw new Error("Aux name field is missing");
+    act(() => setInputValue(name, "Vocal Plate"));
+    await act(async () => name.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+
+    expect(exec).toHaveBeenCalledWith("rename_bus", { bus: 0, name: "Vocal Plate" });
+    expect(exec).not.toHaveBeenCalledWith("rename_track", expect.anything());
+  });
 });
 
 describe("Pro Tools track header routing feedback", () => {

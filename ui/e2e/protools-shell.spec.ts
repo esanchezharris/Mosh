@@ -231,6 +231,66 @@ test("Playlists expose recorded takes and audition the chosen whole take", async
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });
 
+test("Sends route a track through a named Aux return and its insert rack", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+
+  const sourceHeader = page.getByTestId("pt-track-header").first();
+  const sourceTrackId = await sourceHeader.getAttribute("data-track-id");
+  if (!sourceTrackId) throw new Error("send source track id is absent");
+  await sourceHeader.getByTestId("pt-track-select").click();
+  const sends = page.getByTestId("pt-sends");
+  await expect(sends).toBeVisible();
+  await expect(sends).toContainText("No Aux returns");
+
+  await sends.getByTestId("pt-add-bus").click();
+  const busName = sends.getByTestId("pt-new-bus-name");
+  await expect(busName).toBeFocused();
+  await busName.fill("Vocal Plate");
+  await busName.press("Enter");
+
+  await expect(page.getByTestId("pt-aux-input")).toHaveText("Bus — Vocal Plate");
+  await expect(page.locator(".pt-detail-title")).toHaveText("Aux — Vocal Plate");
+  await expect(page.getByTestId("pt-device-rack")).toHaveAttribute("aria-label", "Inserts on Vocal Plate");
+  await page.getByTestId("pt-add-insert").click();
+  await page.getByTestId("plugin-browser-search").fill("Reverb");
+  await page.locator(".prow-load").filter({ hasText: "Reverb" }).click();
+  await expect(page.getByTestId("pt-device-rack")).toContainText("Reverb");
+
+  await sourceHeader.getByTestId("pt-track-select").click();
+  const assign = page.getByTestId("pt-add-send-0");
+  await expect(assign).toBeVisible();
+  await assign.click();
+  await expect.poll(() => page.evaluate((trackId) => {
+    const snapshot = (window as ProToolsWindow).__moshStore?.getState().snapshot;
+    return snapshot?.tracks.find((track) => track.id === trackId)?.sends?.[0]?.bus;
+  }, sourceTrackId)).toBe(0);
+
+  const level = page.getByTestId("pt-send-level-0");
+  await level.fill("-9");
+  await expect.poll(() => page.evaluate((trackId) => {
+    const snapshot = (window as ProToolsWindow).__moshStore?.getState().snapshot;
+    return snapshot?.tracks.find((track) => track.id === trackId)?.sends?.[0]?.db;
+  }, sourceTrackId)).toBe(-9);
+  await expect(page.getByTestId("pt-send-level-readout-0")).toHaveText("-9.0 dB");
+  await page.screenshot({ path: testInfo.outputPath("protools-sends-wide.png"), animations: "disabled" });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await level.scrollIntoViewIfNeeded();
+  await expect(sends).toBeInViewport();
+  await expect(level).toBeInViewport();
+  await expect(page.getByTestId("pt-send-level-readout-0")).toHaveText("-9.0 dB");
+  await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
+  await page.screenshot({ path: testInfo.outputPath("protools-sends-compact.png"), animations: "disabled" });
+
+  const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  const commands = trace.map((entry) => entry.command);
+  for (const command of ["create_bus", "load_builtin", "add_send", "set_send_level"])
+    expect(commands).toContain(command);
+  expect(trace.filter((entry) => !entry.ok)).toEqual([]);
+});
+
 test("Spot mode opens a keyboard modal and moves the clip through the command seam", async ({ page }, testInfo) => {
   // Given: the Pro Tools shell is in Spot mode with a rendered clip focused.
   await page.setViewportSize({ width: 1440, height: 900 });

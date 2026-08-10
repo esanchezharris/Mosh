@@ -13,6 +13,7 @@ import { useStore } from "../store";
 import type { Track } from "../types";
 import { appliedFailure } from "./commandFeedback";
 import { ProToolsDeviceRack } from "./ProToolsDeviceRack";
+import { ProToolsSends } from "./ProToolsSends";
 
 const VOLUME_DEFAULT_DB = 0;
 const PAN_DEFAULT = 0;
@@ -67,6 +68,7 @@ export function ProToolsTrackInspector({ track }: { readonly track: Track }) {
   const trackOutputs = useStore((state) => state.trackOutputs);
   const loadRouting = useStore((state) => state.loadRouting);
   const loadMidiInputs = useStore((state) => state.loadMidiInputs);
+  const buses = useStore((state) => state.snapshot?.buses ?? []);
   const [name, setName] = useState(track.name);
   const [nameInvalid, setNameInvalid] = useState(false);
 
@@ -79,6 +81,9 @@ export function ProToolsTrackInspector({ track }: { readonly track: Track }) {
   const inputValue = currentTrackInput(track);
   const outputs = trackOutputOptions(trackOutputs, track.id);
   const outputValue = currentTrackOutput(track);
+  const returnBus = track.isReturn
+    ? buses.find((bus) => bus.trackId === track.id || bus.bus === track.returnBus)
+    : undefined;
 
   const commitName = () => {
     const next = name.trim();
@@ -87,7 +92,9 @@ export function ProToolsTrackInspector({ track }: { readonly track: Track }) {
       return;
     }
     setNameInvalid(false);
-    if (next !== track.name) void exec("rename_track", { trackId: track.id, name: next });
+    if (next === track.name) return;
+    if (returnBus) void exec("rename_bus", { bus: returnBus.bus, name: next });
+    else void exec("rename_track", { trackId: track.id, name: next });
   };
   const setMonitor = async (mode: "off" | "automatic" | "on") => {
     const result = await exec("set_input_monitor", { trackId: track.id, mode });
@@ -98,8 +105,8 @@ export function ProToolsTrackInspector({ track }: { readonly track: Track }) {
   return (
     <div className="pt-track-inspector" data-testid="pt-track-inspector">
       <header className="pt-detail-head">
-        <span className="pt-detail-title">Track — {track.name}</span>
-        <span className="pt-device-rack-label">I/O · Mix · Inserts A–E</span>
+        <span className="pt-detail-title">{returnBus ? "Aux" : "Track"} — {track.name}</span>
+        <span className="pt-device-rack-label">{returnBus ? "Return" : "I/O"} · Mix · Inserts · Sends</span>
       </header>
       <div className="pt-track-inspector-body">
         <section className="pt-track-channel" aria-label={`${track.name} routing and mix`}>
@@ -116,23 +123,29 @@ export function ProToolsTrackInspector({ track }: { readonly track: Track }) {
           {nameInvalid && <span id="pt-track-name-error" className="pt-field-error" role="alert">Track name cannot be empty.</span>}
           <div className="pt-routing-grid">
             <span className="pt-field-label">Input</span>
-            <IoMenu label={`Input source for ${track.name}`} testId="pt-io-input"
-              display={optionLabel(inputs, inputValue, "No Input", track.input?.name)} options={inputs} value={inputValue}
-              onPick={(deviceID) => void exec("set_track_input", { trackId: track.id, deviceID })} />
+            {returnBus ? (
+              <span className="pt-aux-input" data-testid="pt-aux-input">Bus — {returnBus.name}</span>
+            ) : (
+              <IoMenu label={`Input source for ${track.name}`} testId="pt-io-input"
+                display={optionLabel(inputs, inputValue, "No Input", track.input?.name)} options={inputs} value={inputValue}
+                onPick={(deviceID) => void exec("set_track_input", { trackId: track.id, deviceID })} />
+            )}
             <span className="pt-field-label">Output</span>
             <IoMenu label={`Output destination for ${track.name}`} testId="pt-io-output"
               display={optionLabel(outputs, outputValue, "Default output", track.output?.name)} options={outputs} value={outputValue}
               onPick={(value) => void exec("set_track_output", trackOutputPatch(value, track.id))} />
           </div>
-          <div className="pt-monitor-group" role="group" aria-label={`Input monitoring for ${track.name}`}>
-            <span className="pt-field-label">Monitor</span>
-            {(["off", "automatic", "on"] as const).map((mode) => (
-              <button key={mode} type="button" data-testid={`pt-monitor-${mode}`}
-                aria-pressed={(track.monitor ?? "automatic") === mode} onClick={() => void setMonitor(mode)}>
-                {mode === "automatic" ? "Auto" : mode === "on" ? "In" : "Off"}
-              </button>
-            ))}
-          </div>
+          {!returnBus && (
+            <div className="pt-monitor-group" role="group" aria-label={`Input monitoring for ${track.name}`}>
+              <span className="pt-field-label">Monitor</span>
+              {(["off", "automatic", "on"] as const).map((mode) => (
+                <button key={mode} type="button" data-testid={`pt-monitor-${mode}`}
+                  aria-pressed={(track.monitor ?? "automatic") === mode} onClick={() => void setMonitor(mode)}>
+                  {mode === "automatic" ? "Auto" : mode === "on" ? "In" : "Off"}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="pt-mix-grid">
             <label>Volume
               <input type="range" min={-70} max={6} step={0.5} value={track.volumeDb ?? VOLUME_DEFAULT_DB}
@@ -149,6 +162,7 @@ export function ProToolsTrackInspector({ track }: { readonly track: Track }) {
               <output>{(track.pan ?? PAN_DEFAULT).toFixed(2)}</output>
             </label>
           </div>
+          <ProToolsSends track={track} />
         </section>
         <ProToolsDeviceRack track={track} embedded />
       </div>

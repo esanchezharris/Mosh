@@ -24,7 +24,7 @@ Grabber. Mosh follows the documented 25/75 contract.
 
 ## Primary official corpus
 
-The titles and channel attribution for V01-V09 were rechecked through YouTube's
+The titles and channel attribution for V01-V11 were rechecked through YouTube's
 oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 
 | ID | Avid video | Timecoded evidence |
@@ -40,7 +40,7 @@ oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 | V09 | [Track Views](https://www.youtube.com/watch?v=VyEEufPAZ5s) | 0:00 Track View selector; 0:04 audio Waveform; 0:11 automation; 0:21 Playlists; 0:26 instrument Clips/Notes; 0:40 Minus toggles audio Waveform/Volume; 0:53 Minus toggles instrument Clips/Notes; 0:56 automation-lanes disclosure. |
 | V10 | [Playlist Comping](https://www.youtube.com/watch?v=8X3KQ3Cq8Co) | 0:00 comping definition; 0:12 vocal takes in separate playlists; 0:22 audition/select best parts into a comp; 0:28 word/syllable swaps; 0:33 guitar/drum use. Full-window frames show a main comp lane above aligned, waveform-bearing playlist rows. |
 | V10B | [Pro Tools Tech Tips: Playlist Comping](https://www.youtube.com/watch?v=JnsKGu4ZqiU) | Official Avid visual corroboration: stacked vocal playlist lanes, timeline-aligned waveform alternatives, and assembled material in the main lane. It has music rather than useful narration, so V10 and Avid help remain the behavioral authority. |
-| V11 | [Fast Start: Mixing Fundamentals](https://www.youtube.com/watch?v=MDcgJju4WOY) | Fader, pan, inserts, sends, buses, and mix hierarchy. |
+| V11 | [Fast Start: Mixing Fundamentals](https://www.youtube.com/watch?v=MDcgJju4WOY) | 3:09 fader; 3:36 pan; 6:26 inserts; 7:23 existing vocal send; 7:28-7:48 several sources share one reverb return; 8:04 send selection; 8:08-8:13 send-fader increase; 8:22 shared-return CPU rationale; 8:32 mix bus; 9:02 mix-bus fader; 9:26 mix-bus inserts. |
 
 V05 (2025) and V06 (2026) take precedence over older visuals when the interface
 differs. Full documentation and non-video references live in [RESEARCH.md](./RESEARCH.md).
@@ -111,6 +111,7 @@ native, physical-device, or audio-output acceptance.
 | Track Views | V09 plus Avid Track View help | `MATCH/PARTIAL` | Each header has a contextual Waveform/Playlists/Volume or Clips/Notes selector; the selected track follows the main-keyboard Minus toggle; Waveform/Clips use the full row by default, Volume is a full-height mixer-fader automation view, and the disclosure button adds a secondary Volume lane. Multiple simultaneous automation lanes, Warp, and direct inline note editing remain explicit follow-ups. |
 | MIDI editor | V08 | `MATCH/PARTIAL` | Double-click opens the bottom piano roll/controller direction; multi-track editor selection needs deeper proof. |
 | Inserts | V05, V11 | `ADAPTED` | Searchable catalog preserves load/open/bypass/remove/persistence behavior instead of copying nested menus. |
+| Sends / Aux returns | V11 plus Avid Sends help | `ADAPTED/PARTIAL` | A source track can create a named Aux, assign/remove a post-fader send, edit its level, open/rename/delete the return, and use the return's fader, pan, output, and insert rack. Focused Chromium proves `create_bus`, `load_builtin`, `add_send`, and `set_send_level` in one trace at wide and compact sizes. Mosh currently has post-fader sends only; pre-fader switching, send mute/pan/automation, a dedicated Mix Window, and native audible proof remain gaps. |
 | Playlists / comping | V10, V10B plus Avid alternate-take help | `ADAPTED/PARTIAL` | Audio Track View expands the locked header/lane pair into a main clip row plus aligned waveform-bearing playlist rows. Lazy `list_takes` preserves per-take descriptions/peaks; choosing a row sends undoable `set_current_take`, rejects stale-project responses, and reports lock/command failures. This is whole-take audition only: region promotion, ratings, swipe comping, and word/syllable assembly remain explicit gaps. |
 | Universe overview | V01 | `DEFERRED` | Revisit after session-critical editing; do not displace timeline height by default. |
 
