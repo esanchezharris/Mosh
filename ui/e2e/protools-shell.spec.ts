@@ -87,6 +87,43 @@ test("mode, tool, Smart Tool, and resizable headers are keyboard operable", asyn
   await expect(resizer).toHaveAttribute("aria-valuenow", String(before + 8));
 });
 
+test("Spot mode opens a keyboard modal and moves the clip through the command seam", async ({ page }, testInfo) => {
+  // Given: the Pro Tools shell is in Spot mode with a rendered clip focused.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  await page.keyboard.press("F3");
+  const clip = page.getByTestId("pt-lane").first().getByTestId("v2-clip").first();
+  const clipId = await clip.getAttribute("data-clip-id");
+  if (!clipId) throw new Error("Spot clip id is absent");
+  await clip.focus();
+
+  // When: Enter activates the focused clip's Grabber placement path.
+  await page.keyboard.press("Enter");
+
+  // Then: a true fixed modal opens with Start focused.
+  const backdrop = page.getByTestId("pt-spot-backdrop");
+  const dialog = page.getByTestId("pt-spot-dialog");
+  const start = page.getByTestId("pt-spot-start");
+  await expect(dialog).toBeVisible();
+  await expect(backdrop).toHaveCSS("position", "fixed");
+  await expect(start).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("protools-spot-dialog-wide.png") });
+
+  // And: the same modal remains contained at the compact shell breakpoint.
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(dialog).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("protools-spot-dialog-compact.png") });
+
+  // When: a precise destination is confirmed.
+  await start.fill("00:06.000");
+  await dialog.getByRole("button", { name: "Spot", exact: true }).click();
+
+  // Then: the backend snapshot reflects the move and focus returns to the clip.
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => clipStart(page, clipId)).toBeCloseTo(6, 5);
+  await expect(clip).toBeFocused();
+});
+
 test("clip navigation opens the shared editor and track selection closes it", async ({ page }) => {
   await bootProTools(page);
   const midiEntry = page.getByTestId("pt-clip-list-item").filter({ hasText: "MIDI" }).first();

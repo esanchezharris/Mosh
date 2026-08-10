@@ -14,6 +14,7 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 | [Edit Window](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/sess2.windows.13.03.html) | The timeline displays audio, MIDI, and automation. Each track exposes record, solo, mute, and automation controls. Edit Window views are independently showable. | Linked "Pro Tools Edit window" figure on the page. |
 | [Edit Window Toolbar Controls and Displays](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/sess2.windows.13.05.html) | Toolbar groups include Edit Modes, Edit Tools, counters and selection indicators, MIDI indicators, Grid, and Nudge. | Linked Edit mode buttons, Edit tools, and Edit window indicators figures. |
 | [Edit Modes](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/ed2.ModesTools.24.02.html) | Shuffle, Slip, Spot, and Grid change clip/note placement and editing behavior. | Linked Edit mode buttons figure. |
+| [Spotting Clips](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/Arr3.clips.33.13.html) | With Spot mode enabled, clicking an existing clip with the Grabber opens the Spot dialog. The dialog chooses a Time Scale, accepts a precise locate value, and moves the clip when confirmed. | Linked Spot dialog figure. Mosh uses the documented Start locate field; Sync Point, Original Time Stamp, and User Time Stamp require clip metadata Mosh does not expose. |
 | [Edit Tools](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/ed2.ModesTools.24.12.html) | Zoomer, Trimmer, Selector, Grabber, Scrubber, Pencil, and the multifunction Smart Tool form the editing tool set. | Linked Edit tools and Smart Tool figures. |
 | [Timebase Rulers](https://apps.avid.com/proToolsFirstHelp/version12.3/enu/Pro%20Tools%20First%20Help/Arr1.conductors.31.03.html) | Bars|Beats is tempo-relative. Minutes:Seconds is absolute. Rulers define timeline and edit selections. | Linked Bars|Beats and Minutes:Seconds ruler figures. The Avid glossary and reference guide also define Samples and Timecode timebases. |
 | [Edit Window and Mix Window keyboard shortcuts](https://apps.avid.com/ProToolsFirstHelp/version2019.5/enu/keyshortcuts.6.10.html) | Space starts/stops. F1-F4 choose Shuffle, Slip, Spot, Grid. F5-F8 and F10 choose Zoomer, Trimmer, Selector, Grabber, Pencil. Tab locates the next transient when enabled and the next clip boundary when disabled. | Shortcut table, sections "Playback," "Edit Modes and Edit Tools," and "Edit Selection, Definition, and Navigation." |
@@ -34,6 +35,7 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 - Track List and Clip List are supporting navigation surfaces, not a Live-style content browser.
 - The MIDI Editor can appear as a pane inside the Edit Window in addition to the track pane. Mosh's bottom editor is therefore consistent with documented Pro Tools structure.
 - Smart Tool is contextual. Its pointer affordance and action must follow media type and pointer region rather than act as a cosmetic toggle.
+- In Spot mode, activating a clip through its Grabber intent opens a modal placement surface instead of beginning a free drag. The placement value uses the selected Time Scale and commits the clip Start through the normal move command.
 - Tab changes navigation target according to Tab to Transients. When transient data is unavailable in Mosh, a clip-boundary fallback is honest and matches the documented disabled behavior.
 
 ## Mosh adaptations and explicit non-claims
@@ -41,7 +43,8 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 - The bottom status strip is a Mosh continuity affordance. No authoritative Avid status-bar contract was found, so it must not be presented as a pixel clone.
 - The requested Classic theme uses a `#C0C0C0` base as a Mosh interpretation of older gray Pro Tools surfaces. It does not copy Avid textures, icons, logos, or artwork.
 - Compact behavior will collapse or overlay supporting lists before shrinking the timeline below usability. This is a responsive adaptation for Mosh's WebView, not a claim about Pro Tools mobile behavior.
-- Exact Spot dialog behavior, per-clip gain, and Memory Locations are intentionally outside this delivery.
+- The first Spot dialog slice supports precise Start placement in the four shell time scales. Timecode follows the shell's existing fixed 30 fps ruler until project timecode-rate metadata exists; Sync Point and timestamp recall remain explicit adaptations until Mosh exposes those fields additively.
+- Per-clip gain and Memory Locations remain outside this delivery.
 
 ## Design consequences
 
