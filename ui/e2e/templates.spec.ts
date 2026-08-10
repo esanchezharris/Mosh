@@ -61,14 +61,17 @@ test.describe("template applied", () => {
     await expect.poll(() => clipNum(clip, "data-clip-start")).toBeGreaterThan(0);
   });
 
-  test("pro tools: clip body time-selects, header moves (Smart Tool)", async ({ page }) => {
+  test("pro tools: clip body moves, header time-selects (Smart Tool)", async ({ page }) => {
     await applyTemplate(page, "protools");
     const clip = await singleMidiClip(page);
+    // MIDI body = Grabber: the clip moves.
     await dragClipBy(page, clip, 140);
-    await expect(page.getByTestId("range-band")).toBeVisible();
-    expect(await clipNum(clip, "data-clip-start")).toBe(0);
-    await dragClipHeaderBy(page, clip, 120);
     await expect.poll(() => clipNum(clip, "data-clip-start")).toBeGreaterThan(0);
+    const movedStart = await clipNum(clip, "data-clip-start");
+    // Upper/header band = Selector: create a range without moving the clip again.
+    await dragClipHeaderBy(page, clip, 120);
+    await expect(page.getByTestId("range-band")).toBeVisible();
+    expect(await clipNum(clip, "data-clip-start")).toBe(movedStart);
   });
 
   test("fl: switching to FL pops the floating drum sequencer for a drum clip", async ({ page }) => {
