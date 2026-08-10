@@ -42,6 +42,28 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     const auto action = args.getProperty ("action", var()).toString();
     bool finalizedRecording = false;
 
+    // Live 12's Space vs ⇧Space (Continue Playback): a NORMAL stop returns the
+    // playhead to the insert marker — the last play-start or explicit seek — and
+    // a continue-start (action:"continue") marks the NEXT stop to leave the
+    // playhead where it halted. TE's stop() never moves the position, so both
+    // behaviours live here. insertMarkerSec / playStartedViaContinue are playback
+    // machine state: NOT undoable, not in the snapshot (position outcomes are the
+    // observable), and updated outside the hasAudio gate so headless semantics
+    // match the device path exactly.
+    const double posAtEntry = transport.getPosition().inSeconds();
+    const bool wantsPlay = action == "play" || (action == "toggle" && ! transport.isPlaying());
+    const bool wantsStop = action == "stop" || (action == "toggle" && transport.isPlaying())
+                        || (action == "continue" && transport.isPlaying());
+    const bool wantsContinueStart = action == "continue" && ! transport.isPlaying();
+
+    if (wantsPlay || action == "record")
+    {
+        insertMarkerSec = args.hasProperty ("position") ? (double) args.getProperty ("position", 0.0) : posAtEntry;
+        playStartedViaContinue = false;
+    }
+    else if (wantsContinueStart)
+        playStartedViaContinue = true;   // marker deliberately untouched
+
     if (recording::shouldFinalizeBeforeTransportAction (transport.isRecording(), action))
     {
         const auto stopResult = cmdStopRecording (var (new DynamicObject()));
@@ -63,16 +85,21 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
 
     // Play/record touch the audio device; skip them in no-audio (headless) mode.
     if (! finalizedRecording
-        && (action == "play" || (action == "toggle" && ! transport.isPlaying()))
+        && (action == "play" || (action == "toggle" && ! transport.isPlaying())
+            || (action == "continue" && ! transport.isPlaying()))
         && eng.hasAudio())
     {
         eng.ensurePlaybackContext();
         transport.play (false);
     }
-    else if (! finalizedRecording
-             && (action == "stop" || (action == "toggle" && transport.isPlaying())))
+    else if (! finalizedRecording && wantsStop)
     {
         transport.stop (false, false);
+        // Live's Space: stop returns to the insert marker — unless this play was
+        // started with ⇧Space (Continue Playback), which leaves it where it halted.
+        if (! playStartedViaContinue && ! args.hasProperty ("position"))
+            transport.setPosition (tracktion::TimePosition::fromSeconds (insertMarkerSec));
+        playStartedViaContinue = false;
     }
     else if (! finalizedRecording && action == "record" && eng.hasAudio())
     {
@@ -87,16 +114,39 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
         // and the engine reads mergeRecordings/quantisation at landing time.
         applyRecordOptionsToDevices();
         eng.ensurePlaybackContext();
+        // REC-NO-INPUT — refuse a record that can capture NOTHING. TE records only
+        // from record-ACTIVE input instances (enabled AND targeted); with none —
+        // no input devices at all (e.g. output switched to a mic-less loopback),
+        // or an armed track whose input selection died in the device switch — the
+        // transport would sit inert or capture a silent nothing that lands no take.
+        // Either way the user got zero feedback (live repro, 2026-08): refuse with a
+        // named reason that rides the result to the error bar. Headless is untouched
+        // (this whole branch is hasAudio-gated; the graceful no-op stays).
+        bool anyRecordActive = false;
+        for (auto* inst : eng.edit().getAllInputDevices())
+            if (inst != nullptr && inst->isRecordingActive()) { anyRecordActive = true; break; }
+        if (! anyRecordActive)
+        {
+            const juce::String reason = "no armed track with a usable input — arm a track and pick an input in Settings > Audio";
+            logLine ("set_transport", args, false, reason, false);
+            return errResult ("set_transport", reason);
+        }
         transport.record (false);
     }
 
     if (action == "to_end")
         transport.setPosition (tracktion::TimePosition::fromSeconds (eng.edit().getLength().inSeconds()));
     else if (action == "to_start")
+    {
         transport.setPosition (tracktion::TimePosition());
+        insertMarkerSec = 0.0;   // an explicit seek moves the insert marker (Live's ruler)
+    }
 
     if (args.hasProperty ("position"))
+    {
         transport.setPosition (tracktion::TimePosition::fromSeconds ((double) args.getProperty ("position", 0.0)));
+        insertMarkerSec = (double) args.getProperty ("position", 0.0);   // seek = marker move
+    }
 
     if (args.hasProperty ("loop"))
         transport.looping = (bool) args.getProperty ("loop", false);

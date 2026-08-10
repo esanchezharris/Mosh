@@ -230,7 +230,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     logLine ("reload", args, true, {}, false);
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("reload");
     return okResult ("reload");
 }
 
@@ -1089,13 +1089,17 @@ juce::var MoshOps::currentAudioSelection()
 
 juce::var MoshOps::cmdListAudioDevices (const juce::var&)
 {
-    // Read-only enumeration — no transaction, no log line. Headless (no audio) the
-    // engine never adds system device types (MoshEngine addSystemAudioIODeviceTypes
-    // returns false), so `types` is a well-formed empty array and audioEnabled:false.
+    // Read-only enumeration — no transaction, no log line. The scan is gated on
+    // REGISTERED DEVICE TYPES, not on an open device: CoreAudio enumeration does
+    // not need one, and the DEGRADED state (audioRequested but the open failed —
+    // the Settings panel is exactly where the user recovers from it) must still
+    // see every device. Headless (no audio) the engine never adds system device
+    // types (MoshEngine addSystemAudioIODeviceTypes returns false), so `types`
+    // stays the well-formed empty array and audioEnabled:false, as before.
     auto& dm = adm();
 
     Array<var> types;
-    if (eng.hasAudio())
+    if (! dm.getAvailableDeviceTypes().isEmpty())
         for (auto* type : dm.getAvailableDeviceTypes())
         {
             if (type == nullptr) continue;
@@ -1308,10 +1312,13 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
 
 juce::var MoshOps::cmdSetAudioDevice (const juce::var& args)
 {
-    // Graceful degradation: headless / no-audio session has no device to drive.
+    // Graceful degradation: a HEADLESS / no-audio session has no device to drive.
     // Log the failed attempt (undoable:false) so the JSONL trail records it, then
-    // return a real, honest error (NOT a crash).
-    if (! eng.hasAudio())
+    // return a real, honest error (NOT a crash). The DEGRADED state (audio was
+    // requested but the open failed) is NOT refused: picking a working device from
+    // the Settings panel is exactly how the user recovers, and JUCE's
+    // AudioDeviceManager can open it without the engine's own flag.
+    if (! eng.hasAudio() && ! eng.audioRequested())
     {
         logLine ("set_audio_device", args, false, "no audio device in this session", false);
         return errResult ("set_audio_device", "no audio device in this session");
@@ -1320,9 +1327,15 @@ juce::var MoshOps::cmdSetAudioDevice (const juce::var& args)
     const auto err = applyAudioDeviceSetup (args);
     if (err.isNotEmpty())
     {
+        // The failure rides the command result (the Settings row surfaces it);
+        // the session's audioDeviceError is untouched, so the banner stays honest
+        // about the CURRENT state (still no working device).
         logLine ("set_audio_device", args, false, err, false);
         return errResult ("set_audio_device", err);
     }
+
+    if (! eng.hasAudio())
+        eng.adoptOpenedAudioDevice();   // a successful pick from the degraded state IS the recovery
 
     logLine ("set_audio_device", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
@@ -1462,7 +1475,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
-    emitSnapshotInvalidated();
+    emitProjectReplaced ("new_project");
 
     auto* data = new DynamicObject();
     data->setProperty ("editFile", eng.editFile().getFullPathName());
@@ -1488,7 +1501,7 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
-    emitSnapshotInvalidated();
+    emitProjectReplaced (commandName);
 
     auto* data = new DynamicObject();
     data->setProperty ("editFile", eng.editFile().getFullPathName());

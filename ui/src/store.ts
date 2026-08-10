@@ -38,6 +38,7 @@ import { createJobsSlice, type JobsSlice } from "./store/jobs";
 import { createCatalogsSlice, type CatalogsSlice } from "./store/catalogs";
 import { landedRecordingClipIds, type RecordingCommandData } from "./recordingLifecycle";
 import { cancelTransportActions, enqueueTransportAction } from "./transportActionQueue";
+import { useShell } from "./v2/shellState";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -74,6 +75,11 @@ export type State = {
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
+  // Triplet arrangement grid (⌘3, Live's Options → Triplet Grid). UI-local like
+  // snap/snapDivision; the lane grid paint does NOT draw triplet lines (documented
+  // in PARITY.md) — this governs snapping only.
+  snapTriplet: boolean;
+  setSnapTriplet: (b: boolean) => void;
   // CAP-CLP-017 — RIPPLE EDIT mode. When on, dragging or trimming a clip carries every
   // later clip on the SAME track with it (move_clip/trim_clip {ripple:true}) instead of
   // leaving a hole or an overlap.
@@ -235,6 +241,18 @@ export type State = {
 type StateGet = () => State;
 type StateSet = (state: Partial<State> | ((state: State) => Partial<State>)) => void;
 
+// App mounts under React.StrictMode in development, which deliberately replays
+// effects. The bridge and settings subscriptions live for the page lifetime, so
+// wiring them twice would reduce every native event twice (notably advancing a
+// project-replacement epoch by two in the dev/e2e shell).
+let storeInitialized = false;
+
+function clearProjectLocalShellRange(): void {
+  const shell = useShell.getState();
+  shell.setTimeRange(null);
+  shell.setTimeRangeDragging(false);
+}
+
 async function startRecording(get: StateGet, set: StateSet, projectEpoch: number, bar?: number): Promise<void> {
   if (get().projectEpoch !== projectEpoch) return;
   if (get().projectTransitioning) {
@@ -259,7 +277,7 @@ async function startRecording(get: StateGet, set: StateSet, projectEpoch: number
     const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
     if (!arm.ok || arm.command !== "arm_track" || armApplied !== true) {
       s.pushAgentUtter("UHOH", "can't — no input");
-      set({ lastError: "No audio input available — check your microphone connection and permissions." });
+      set({ lastError: "No usable audio input — check Settings → Audio (device and input selection)." });
       return;
     }
   }
@@ -327,9 +345,15 @@ async function refreshSnapshot(
     // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
     const banner = versionBannerError(snap);
     if (banner) set({ lastError: banner });
-    // Prune selection / fetch peaks for current clips.
+    // Prune selection / fetch peaks for current clips. Only emit a new Set when
+    // pruning actually REMOVED something — an unchanged reference swap would fire
+    // every selection subscriber on EVERY refresh (and, for the live shell's
+    // selection-follow, would read as a phantom deselect after any command).
     const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
-    set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+    set((s) => {
+      const kept = [...s.selection].filter((id) => ids.has(id));
+      return kept.length === s.selection.size ? {} : { selection: new Set(kept) };
+    });
     // Prune the inline-FX expand set against current tracks (mirror the selection
     // prune) so a removed track's id can't make a later id-reused track open by itself.
     const trackIds = new Set(snap.tracks.map((t) => t.id));
@@ -392,6 +416,7 @@ export const useStore = create<State>((set, get, api) => ({
   snap: true,
   snapDivision: "1/4",
   snapAuto: false,
+  snapTriplet: false,  // ⌘3 (ableton preset) — the arrangement's triplet grid; off elsewhere
   ripple: false,   // CAP-CLP-017 — OFF by default; a hidden ripple mode destroys arrangements
   selection: new Set<string>(),
   peaks: {},
@@ -409,10 +434,11 @@ export const useStore = create<State>((set, get, api) => ({
   },
 
   exec: async (command, args = {}, transaction) => {
-    const replacesProject = ["new_project", "open_project", "open_recent", "reload", "recover_session"].includes(command);
+    const replacesProject = ["new_project", "open_project", "open_recent", "reload", "recover_session", "open_without_plugins"].includes(command);
     let transitionEpoch: number | undefined;
     if (replacesProject) {
       cancelTransportActions();
+      clearProjectLocalShellRange();
       set((state) => ({
         projectEpoch: state.projectEpoch + 1,
         projectTransitioning: true,
@@ -423,9 +449,12 @@ export const useStore = create<State>((set, get, api) => ({
     }
     let res: CommandResult;
     try {
-      res = await executeCommand<CommandResult>(
-        transaction ? { command, args, transaction } : { command, args },
-      );
+      res = await executeCommand<CommandResult>({
+        command,
+        args,
+        ...(transaction ? { transaction } : {}),
+        ...(replacesProject ? { _moshProjectEpochPrepared: true } : {}),
+      });
     } catch (error) {
       if (replacesProject && get().projectEpoch === transitionEpoch)
         set({ projectTransitioning: false });
@@ -480,6 +509,8 @@ export const useStore = create<State>((set, get, api) => ({
   invalidateMemory: () => invalidateMemoryHydration(),
 
   init: () => {
+    if (storeInitialized) return;
+    storeInitialized = true;
     // Thin dispatcher over the per-rail handlers in store/events.ts (verbatim body
     // motion). The order + conditions here are load-bearing and must not change:
     // transport / levels / spectrum are the 30 Hz telemetry rails that deliberately
@@ -487,6 +518,25 @@ export const useStore = create<State>((set, get, api) => ({
     onEvent("mosh_event", (raw) => {
       const ev = raw as MoshEvent;
       if (ev.type === "snapshot_invalidated") {
+        const projectReplaced = ev.payload !== null
+          && typeof ev.payload === "object"
+          && (ev.payload as { projectReplaced?: unknown }).projectReplaced === true;
+        const epochManagedByUi = projectReplaced
+          && (ev.payload as { epochManagedByUi?: unknown }).epochManagedByUi === true;
+        if (projectReplaced) {
+          cancelTransportActions();
+          clearProjectLocalShellRange();
+          set((state) => ({
+            projectEpoch: state.projectEpoch + (epochManagedByUi ? 0 : 1),
+            projectTransitioning: epochManagedByUi ? state.projectTransitioning : false,
+            takeDecisionPending: false,
+            lastTakeClipId: null,
+            selection: new Set<string>(),
+            selectedTrackId: null,
+            expandedTracks: new Set<string>(),
+            timeRange: null,
+          }));
+        }
         onSnapshotInvalidated(ev, set, get);
       } else if (ev.type === "transport") {
         onTransport(ev, set);
@@ -584,6 +634,7 @@ export const useStore = create<State>((set, get, api) => ({
   setPianoRollBeatPx: (v) => set({ pianoRollBeatPx: Math.max(12, Math.min(160, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
+  setSnapTriplet: (b) => set({ snapTriplet: b }),
   setSnapDivision: (d) => set({ snapDivision: d, snapAuto: false }),
   setSnapAuto: (b) => set({ snapAuto: b }),
   setRipple: (b) => set({ ripple: b }),
@@ -611,7 +662,8 @@ export const useStore = create<State>((set, get, api) => ({
     const snapDivision = get().effectiveSnapDivision();
     // SES-001 — snap over the piecewise tempo map (the grid restarts at every
     // tempo/meter change; constant-tempo sessions behave exactly as before).
-    return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision);
+    // snapTriplet (⌘3, ableton preset) shortens every step to 2/3 — see time.ts.
+    return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision, get().snapTriplet);
   },
 
   ensurePeaks: (clipId) => {

@@ -17,29 +17,22 @@ if (NOT NPM_EXECUTABLE)
     return()
 endif()
 
-# Track the actual React sources so a UI change triggers a rebuild (not just
-# package.json/vite.config.ts). CONFIGURE_DEPENDS re-globs at build time.
-file(GLOB_RECURSE MOSH_UI_SOURCES CONFIGURE_DEPENDS
-     "${MOSH_UI_DIR}/src/*.ts"
-     "${MOSH_UI_DIR}/src/*.tsx"
-     "${MOSH_UI_DIR}/src/*.css")
-
-# Vite build → ui/dist (single-file: vite-plugin-singlefile inlines JS+CSS into
-# one index.html — required so the JUCE WebView's resource-provider scheme runs
-# the bundle; external module scripts silently don't execute there).
-add_custom_command(
-    OUTPUT  "${MOSH_UI_DIST}/index.html"
-    COMMAND ${NPM_EXECUTABLE} install --no-audit --no-fund
-    COMMAND ${NPM_EXECUTABLE} run build
-    WORKING_DIRECTORY "${MOSH_UI_DIR}"
-    DEPENDS "${MOSH_UI_DIR}/package.json"
-            "${MOSH_UI_DIR}/vite.config.ts"
-            "${MOSH_UI_DIR}/index.html"
-            ${MOSH_UI_SOURCES}
-    COMMENT "Building Mosh UI (Vite) → ui/dist"
+# Freshness is checked EXPLICITLY by cmake/BuildUIFresh.cmake (run-time glob +
+# mtime compare inside the script), NOT by Ninja's OUTPUT/DEPENDS heuristic —
+# that heuristic fired unreliably for UI-only edits (configure-time glob
+# staleness + output-mtime comparison) and a plain full build could ship a STALE
+# staged bundle (verified 2026-08-07, the freeze wave's UI never reached the
+# app). Custom targets are always "dirty", so the check itself runs on every
+# build; the script no-ops in milliseconds when everything is fresh.
+add_custom_target(MoshUI
+    COMMAND ${CMAKE_COMMAND}
+            -DMODE=build
+            "-DMOSH_UI_DIR=${MOSH_UI_DIR}"
+            "-DMOSH_UI_DIST=${MOSH_UI_DIST}"
+            "-DNPM_EXECUTABLE=${NPM_EXECUTABLE}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/BuildUIFresh.cmake"
+    COMMENT "Checking UI bundle freshness (Vite build if ui/src is newer)"
     VERBATIM)
-
-add_custom_target(MoshUI DEPENDS "${MOSH_UI_DIST}/index.html")
 
 # Stage the built bundle where WebBridge can serve it after the app links.
 add_dependencies(Mosh MoshUI)
@@ -60,13 +53,17 @@ add_custom_command(TARGET Mosh POST_BUILD
     VERBATIM)
 
 # The POST_BUILD staging above only runs when the Mosh target itself relinks.
-# UI-only iterations (no C++ change) rebuild the bundle via MoshUI but never
-# relink Mosh, so the app would ship a STALE bundle. This ALL target always
-# restages the freshest dist after the app exists (it depends on Mosh + MoshUI),
-# closing that gap. Build it (or the default `all`) to guarantee a fresh bundle.
+# This ALL target is the backstop for every other build: it restages whenever
+# ui/dist is newer than the staged copy (or the stage is missing) and no-ops on
+# clean trees, so a plain full build ALWAYS lands the freshest dist in the app
+# while an up-to-date tree keeps the staged mtimes (and the ad-hoc signature
+# refresh downstream stays cheap). Runs after Mosh + MoshUI.
 add_custom_target(MoshStageUI ALL
-    COMMAND ${CMAKE_COMMAND} -E rm -rf "${MOSH_UI_STAGE_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${MOSH_UI_DIST}" "${MOSH_UI_STAGE_DIR}"
-    COMMENT "Restaging UI bundle into the app (UI-only-safe)"
+    COMMAND ${CMAKE_COMMAND}
+            -DMODE=stage
+            "-DMOSH_UI_DIST=${MOSH_UI_DIST}"
+            "-DMOSH_UI_STAGE_DIR=${MOSH_UI_STAGE_DIR}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/BuildUIFresh.cmake"
+    COMMENT "Checking staged UI bundle (restage if dist is newer)"
     VERBATIM)
 add_dependencies(MoshStageUI Mosh MoshUI)

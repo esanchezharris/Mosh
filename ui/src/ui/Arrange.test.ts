@@ -5,6 +5,7 @@ import { Arrange } from "./Arrange";
 import { useStore } from "../store";
 import { useDrumWindow } from "./dock/useFloatingWindow";
 import type { CommandResult, Snapshot, Track } from "../types";
+import { useSettings } from "../settings/store";
 
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
@@ -60,6 +61,9 @@ describe("Arrange clip open routing", () => {
   let root: Root;
 
   beforeEach(() => {
+    // These tests pin MOSH-bundle behavior; the live shell's default bundle
+    // (ableton under uiShell "live") would otherwise change every gesture/feel result.
+    useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" } });
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -86,6 +90,7 @@ describe("Arrange clip open routing", () => {
   });
 
   afterEach(() => {
+    useSettings.setState({ values: {} });
     act(() => root.unmount());
     host.remove();
     useDrumWindow.setState({ clipId: null });

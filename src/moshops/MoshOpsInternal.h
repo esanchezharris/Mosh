@@ -116,6 +116,61 @@ namespace mosh
     // (juce::String / juce::DynamicObject — MoshOps.cpp's file-level
     // `using namespace juce` does not exist here); comments kept unedited.
 
+    // Downsample a reader to `buckets` [min,max] pairs for a waveform overview.
+    // Shared by get_clip_peaks (clip source), file_peaks (un-imported file), and
+    // list_takes (per-take sources) — promoted from MoshOps.Mixer.cpp's anonymous
+    // namespace for the take-lanes wave (same verbatim body, `inline` added).
+    inline juce::Array<juce::var> bucketedPeaks (juce::AudioFormatReader& reader, int buckets)
+    {
+        const auto total = (juce::int64) reader.lengthInSamples;
+        const int chans = (int) reader.numChannels;
+        const juce::int64 perBucket = juce::jmax ((juce::int64) 1, total / juce::jmax (1, buckets));
+
+        juce::Array<juce::var> peaks;
+        juce::AudioBuffer<float> buf (juce::jmax (1, chans), (int) juce::jmin (perBucket, (juce::int64) 65536));
+        for (int b = 0; b < buckets; ++b)
+        {
+            const juce::int64 startSample = (juce::int64) b * perBucket;
+            if (startSample >= total) break;
+            const int n = (int) juce::jmin (perBucket, total - startSample, (juce::int64) buf.getNumSamples());
+            buf.clear();
+            reader.read (&buf, 0, n, startSample, true, chans > 1);
+            float mn = 0.0f, mx = 0.0f;
+            for (int c = 0; c < buf.getNumChannels(); ++c)
+            {
+                auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
+                mn = juce::jmin (mn, r.getStart());
+                mx = juce::jmax (mx, r.getEnd());
+            }
+            juce::Array<juce::var> pair; pair.add (mn); pair.add (mx);
+            peaks.add (juce::var (pair));
+        }
+        return peaks;
+    }
+
+    // Tracktion identifies a current take by parsing the clip source as a ProjectItemID.
+    // Recorded/direct-file takes store a path instead, so getCurrentTake() returns -1
+    // even while that take is playing. Match the raw source strings as the fallback all
+    // public take projections share; -1 remains honest when no take source matches.
+    inline int effectiveCurrentTakeIndex (te::WaveAudioClip& clip)
+    {
+        const int tracktionIndex = clip.getCurrentTake();
+        if (tracktionIndex >= 0)
+            return tracktionIndex;
+
+        const auto clipSource = clip.state[te::IDs::source].toString();
+        int takeIndex = 0;
+        for (auto take : clip.state.getChildWithName (te::IDs::TAKES))
+        {
+            if (! take.hasProperty (te::IDs::source))
+                continue;
+            if (take[te::IDs::source].toString() == clipSource)
+                return takeIndex;
+            ++takeIndex;
+        }
+        return -1;
+    }
+
    #if MOSH_HAVE_ANIRA
     inline RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
    #endif

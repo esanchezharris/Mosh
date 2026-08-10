@@ -445,7 +445,7 @@ export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChr
   const SHORTCUTS: [string, string][] = [
     ["⌘N · ⌘O", "New · Open project"],
     ["⌘S · ⇧⌘S", "Save · Save As"],
-    ["⌘E", "Export audio"],
+    ["⇧⌘R", "Export audio"],
     ["⌘Z · ⇧⌘Z", "Undo · Redo"],
     ["⌘X · ⌘C · ⌘V", "Cut · Copy · Paste clip"],
     ["Space", "Play / pause"],

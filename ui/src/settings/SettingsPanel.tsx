@@ -17,7 +17,9 @@ import { useSettings } from "./store";
 import { settingsByCategory, type SettingDef } from "./schema";
 import { TEMPLATES } from "./templates";
 import { eventToCombo } from "../interaction/keymap";
-import { isV2Active } from "../v2/shellFlag";
+import { effectiveInteractionSetting } from "../interaction/config";
+import { activeShell, isV2Active } from "../v2/shellFlag";
+import { settingHiddenForShell } from "./shellVisibility";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import {
   outputDeviceOptions,
@@ -31,7 +33,14 @@ import {
 function SettingControl({ def }: { def: SettingDef }) {
   const raw = useSettings((s) => s.values[def.id]);
   const set = useSettings((s) => s.set);
-  const value = raw !== undefined ? raw : def.default;
+  // keymap/gestureTable resolve through the live shell's default bundle
+  // (effectiveInteractionSetting): with no override persisted, an unset control
+  // must SHOW the value the app is actually using — displaying "mosh" while the
+  // live shell resolves ableton was exactly the confusion that hid this bug.
+  const value = raw !== undefined ? raw
+    : def.id === "keymap" || def.id === "gestureTable"
+      ? effectiveInteractionSetting(def.id)
+      : def.default;
 
   switch (def.type) {
     case "enum":
@@ -153,14 +162,38 @@ function TemplatePicker() {
 }
 
 // ── backend-owned Engine block — wired to its EXISTING MoshOps commands ──────
-function EngineSettings({ snapshot }: { snapshot: Snapshot }) {
+// (Named export: the no-device recovery pickers are component-tested directly.)
+export function EngineSettings({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
+  const audioDevices = useStore((s) => s.audioDevices);
+  const loadAudioDevices = useStore((s) => s.loadAudioDevices);
+  // The Device row enumerates like AudioRouting does: CoreAudio lists regardless
+  // of an open device, so the DEGRADED startup (saved interface unplugged) still
+  // offers the switch — that is exactly when this row matters.
+  useEffect(() => { void loadAudioDevices(); }, [loadAudioDevices]);
+  const outs = outputDeviceOptions(audioDevices);
+  const outVal = audioDevices?.current.outputDevice ?? "";
+  const setOutput = async (value: string) => {
+    await exec("set_audio_device", { outputDevice: value });
+    await loadAudioDevices();
+    await refresh();
+  };
   const s = snapshot.session;
   return (
     <div className="pop-group">
       <div className="pop-label">Engine</div>
-      <div className="pop-row"><span>Device</span><span className="tc">{s.audioDeviceName ?? (s.audioEnabled ? "default" : "—")}</span></div>
+      <label className="pop-row"><span>Device</span>
+        {outs.length > 0 ? (
+          <select aria-label="Engine device" value={outVal}
+                  onChange={(e) => void setOutput(e.target.value)}>
+            {!outs.includes(outVal) && <option value="" disabled>Select output…</option>}
+            {outs.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        ) : (
+          <span className="tc">{s.audioDeviceName ?? (s.audioEnabled ? "default" : "—")}</span>
+        )}
+      </label>
       <div className="pop-row"><span>Sample rate</span><span className="tc">{s.sampleRate} Hz</span></div>
       <label className="pop-row"><span>Buffer</span>
         <select value={String(s.bufferSize ?? 512)} onChange={(e) => void exec("set_buffer_size", { bufferSize: Number(e.target.value) }).then(() => refresh())}>
@@ -181,14 +214,14 @@ function EngineSettings({ snapshot }: { snapshot: Snapshot }) {
 // loadAudioDevices, list_wave_inputs via loadRouting); every change rides an
 // EXISTING MoshOps command (set_audio_device / set_track_input) and re-fetches.
 // No new mutation path, no audio concepts cross the seam — just option lists.
-function AudioRouting({ snapshot }: { snapshot: Snapshot }) {
+// (Named export: the no-device recovery pickers are component-tested directly.)
+export function AudioRouting({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
   const audioDevices = useStore((s) => s.audioDevices);
   const waveInputs = useStore((s) => s.waveInputs);
   const loadAudioDevices = useStore((s) => s.loadAudioDevices);
   const loadRouting = useStore((s) => s.loadRouting);
-
   // Lazy-load both enumerations when Settings opens (no-op when not native).
   useEffect(() => { void loadAudioDevices(); void loadRouting(); }, [loadAudioDevices, loadRouting]);
 
@@ -211,24 +244,40 @@ function AudioRouting({ snapshot }: { snapshot: Snapshot }) {
   // Group (submix) and return tracks have no hardware input — only real audio/drum
   // tracks can be armed from an input device.
   const tracks = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
+  // The pickers ride ENUMERATION, not an open device: the DEGRADED state (audio
+  // requested but the open failed — engine enumerates CoreAudio regardless) is
+  // exactly when the user needs to switch outputs. Only a session with NOTHING
+  // enumerable (headless, no device types) gets the note. set_audio_device opens
+  // the pick and recovers the session engine-side.
+  const enumerable = outs.length > 0 || ins.length > 0;
+  const degraded = audioDevices != null && !audioDevices.audioEnabled && enumerable;
+  const outVal = audioDevices?.current.outputDevice ?? "";
+  const inVal = audioDevices?.current.inputDevice ?? "";
 
   return (
     <div className="pop-group">
       <div className="pop-label">Audio routing</div>
 
-      {audioDevices && !audioDevices.audioEnabled ? (
+      {audioDevices && !enumerable ? (
         <div className="pop-note">No audio device in this session.</div>
       ) : (
         <>
+          {degraded && (
+            <div className="pop-note" role="status" data-testid="audio-degraded-note">
+              No device is open — pick an output to re-enable audio.
+            </div>
+          )}
           <label className="pop-row"><span>Output device</span>
-            <select aria-label="Output device" value={audioDevices?.current.outputDevice ?? ""}
+            <select aria-label="Output device" value={outVal}
                     onChange={(e) => void setDevice("output", e.target.value)}>
+              {!outs.includes(outVal) && <option value="" disabled>Select output…</option>}
               {outs.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </label>
           <label className="pop-row"><span>Input device</span>
-            <select aria-label="Input device" value={audioDevices?.current.inputDevice ?? ""}
+            <select aria-label="Input device" value={inVal}
                     onChange={(e) => void setDevice("input", e.target.value)}>
+              {!ins.includes(inVal) && <option value="" disabled>Select input…</option>}
               {ins.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </label>
@@ -289,15 +338,16 @@ export function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
 
 // The v2 shell is a single Mosh-native design with no skin/keymap/gesture/layout axis,
 // so those settings (+ the DAW template picker) are hidden there — they'd be inert
-// (effects pins data-skin=mosh) and confusing. Classic shows everything, unchanged.
-const V2_HIDDEN_CATEGORIES = new Set(["Layout", "Interaction", "Feel", "Keys"]);
-const v2HidesSetting = (category: string, id: string) =>
-  V2_HIDDEN_CATEGORIES.has(category) || id === "skin";
+// (effects pins data-skin=mosh) and confusing. The live clone keeps every
+// live-effective axis (audio, keys, feel, layout, templates) and hides only the
+// classic visual skin (settings/shellVisibility.ts owns the per-shell rules).
+// Classic shows everything, unchanged.
 
 export function SettingsPanel({ snapshot }: { snapshot: Snapshot }) {
   const v2 = isV2Active();
+  const shell = activeShell();
   const groups = settingsByCategory()
-    .map((g) => ({ ...g, settings: v2 ? g.settings.filter((d) => !v2HidesSetting(g.category, d.id)) : g.settings }))
+    .map((g) => ({ ...g, settings: g.settings.filter((d) => !settingHiddenForShell(shell, g.category, d.id)) }))
     .filter((g) => g.settings.length > 0);
   return (
     <>

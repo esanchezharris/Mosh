@@ -100,7 +100,13 @@ function moduleGraph(entry: string): string[] {
 // by concurrent sessions. ~20 duplicated lines buy independence from a merge conflict on
 // a file this test only reads structurally.
 const graph = moduleGraph(join(SRC, "v2", "AppV2.tsx"));
-const searched = graph.filter((f) =>
+// The live shell (ui/src/live) is a second shipped consumer of the same gesture
+// tables. Searching its graph too is what keeps this guard honest in BOTH
+// directions: a gesture implemented only there (the ableton table's empty-lane
+// dblclick → create_clip, Arrangement.tsx's onEmptyDblClick) reads as implemented
+// rather than padding GESTURE_GAPS — and a gesture implemented NOWHERE still fails.
+const liveGraph = moduleGraph(join(SRC, "live", "AppLive.tsx"));
+const searched = [...new Set([...graph, ...liveGraph])].filter((f) =>
   !f.startsWith(join(SRC, "agent"))         // the command catalog names everything
   && !f.startsWith(join(SRC, "interaction")) // the gesture tables name every action — see header
   && !f.endsWith("bridge.mock.ts"));         // the dev backend implements everything
@@ -141,14 +147,14 @@ describe("gesture reachability — the shipped shell honours its gesture table (
       expect(isImplemented(a), `probe broken: ${a} is wired in v2 but read as missing`).toBe(true);
   });
 
-  it("every shipped preset's gesture-table action is implemented in v2, or declared with a reason", () => {
+  it("every shipped preset's gesture-table action is implemented in a shipped shell (v2 or live), or declared with a reason", () => {
     const undeclared = tableActions.filter((a) => !isImplemented(a) && !(a in GESTURE_GAPS));
     expect(
       undeclared,
-      "These gestures are promised by ui/src/interaction/gestureTables.ts but the shipped v2 "
-      + "shell implements nothing for them. A gesture is not a command, so NO other gate in "
-      + "this repo can see this. Either implement the gesture, or add it to GESTURE_GAPS with "
-      + "a reason.",
+      "These gestures are promised by ui/src/interaction/gestureTables.ts but no shipped "
+      + "shell (v2 or live) implements anything for them. A gesture is not a command, so NO "
+      + "other gate in this repo can see this. Either implement the gesture, or add it to "
+      + "GESTURE_GAPS with a reason.",
     ).toEqual([]);
   });
 

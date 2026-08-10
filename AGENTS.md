@@ -7,7 +7,10 @@ conformance scoreboard (`docs/FEATURE_AUDIT.md`), the pinned Tracktion/JUCE
 patches (`patches/` 0001–0006), tempo ramps + audio warp, AU hosting, the iOS companion + the phone
 **DAWN recording pad** (#239/#267), **2-player multiplayer** (PR #74), **always-on voice**
 (PR #71), the DAW project-file importers (`ui/src/import/`), audio→MIDI (`/transcribe`),
-the from-scratch **v2 UI shell** (default; classic preserved in `AppLegacy.tsx`),
+the from-scratch **v2 UI shell** (classic preserved in `AppLegacy.tsx`), and — since the
+2026-08-06 clone cutover — the **Live-12 Arrangement-View clone shell** (`ui/src/live/`,
+`uiShell: "live"`, the **default**; v2/classic stay selectable; spec + parity audit in
+`docs/live-clone/`),
 **generative render layers on any track** (MIDI/drum auto-bounce), the single generative
 tier (the synthetic Tier-A neural insert was removed; the real-time RAVE insert is gated
 behind `MOSH_ENABLE_ANIRA`), **Finish-My-Song Phases 1–3** (lyrics → skeleton → sing),
@@ -41,11 +44,17 @@ The owner merges; most lanes touch engine/auth/packaging/relay/state and are own
 
 ## Verify before any merge
 ```sh
+scripts/auto-loop/memory-preflight.sh
 cmake --build build
 APP=build/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh
 MOSH_NO_AUDIO=1 "$APP" --selftest        # ~1200+ checks (gate-dependent), 0 failed, 0 JUCE assertions
 MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # focused undo battery
 ```
+The canonical gate runs the same preflight automatically before any suite. It
+fails closed below 25% free memory, above 4 GiB used swap, below 32 GiB free on
+the Data volume, or above 64 direct Codex app-server children. Thresholds are
+overridable through the `MOSH_*` variables named in the script for stricter
+machine-local policies.
 Run it 3× for determinism and paste the tallies in the PR/commit — the LOCAL
 battery is THE merge gate. **CI is best-effort signal only:** GitHub Actions were
 removed 2026-06-15, re-added 2026-07-07 as a PR gate (`.github/workflows/ci.yml` +

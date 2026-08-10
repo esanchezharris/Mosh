@@ -61,9 +61,13 @@ public:
         why the button tracks the playhead while the transport is STOPPED. */
     juce::var muteAutomationAtPlayhead();
 
-    /** The single entry point — bound to the WebView's execute_command. Thin wrapper around
-        executeImpl that also feeds the A3 crash-recovery journal. */
+    /** The single command spine for native, remote, and internal callers. Thin wrapper
+        around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
+
+    /** WebView execute_command entry point. Project-replacement commands carry an
+        internal flag only when the UI store advanced its epoch before dispatch. */
+    juce::var executeFromUi (const juce::var& command);
 
     /** Browser-only read path. list_directory is pure filesystem I/O and may block on
         a large, cloud-backed, or disconnected directory, so WebBridge invokes this
@@ -170,6 +174,7 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    juce::String validateBootstrapBundle (const juce::var& args) const;
     // PR-2 — shared content-addressing/serialize body (no upload) for the whole
     // project; cmdMpSerializeProject uploads synchronously right after (kept
     // behavior-compatible with direct-call tests), serializeProjectForBootstrapAnswer
@@ -195,9 +200,10 @@ private:
     // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
     juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
     juce::var cmdMpApplyStructural  (const juce::var& args);
-    // Resolve the lock key (the affected track's logicalId, or the session key) for
-    // a guarded command, given its scope + args. Engine-coupled (findTrack/findClip).
-    juce::String lockKeyFor (LockManager::Scope scope, const juce::var& args);
+    // Resolve every affected lock key (track logicalIds or the session key) for a
+    // guarded command. Clip scope includes singular clipId and every valid clipIds
+    // entry; unresolvable targets stay empty so command handlers own shape errors.
+    std::vector<juce::String> lockKeysFor (LockManager::Scope scope, const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
@@ -221,6 +227,8 @@ private:
     juce::var cmdMoveClip       (const juce::var& args);
     juce::var cmdTrimClip       (const juce::var& args);
     juce::var cmdSplitClip      (const juce::var& args);
+    juce::var cmdConsolidateClips (const juce::var& args);
+    juce::var cmdCropClip      (const juce::var& args);
     juce::var cmdRemoveClip     (const juce::var& args);
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
@@ -350,6 +358,8 @@ private:
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
     juce::var cmdQuantizeNotes  (const juce::var& args);
+    juce::var cmdTransformVelocities (const juce::var& args);
+    juce::var cmdTransformNotes  (const juce::var& args);
     // Stage 5 — Tier-B generative layer (RenderLayer flow)
     juce::var cmdCreateRenderLayer (const juce::var& args);
     juce::var cmdSetRenderParam   (const juce::var& args);
@@ -359,6 +369,16 @@ private:
     // WAV — the auto-bounce that lets generative render layers run on MIDI/drum clips
     // (the model is audio→audio). Offline, synchronous, mirrors cmdExportAudio's render.
     bool bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav);
+    // Render a WHOLE track's output (all its clips through the track's instrument+FX
+    // chain, no master bus) over [startSec,endSec] — the Live-12 Bounce primitive
+    // (Bounce Track in Place / Bounce to New Track). Same offline path as the clip form.
+    bool bounceTrackToWav (te::Track& track, double startSec, double endSec, const juce::File& destWav);
+    juce::var cmdBounceTrack (const juce::var& args);
+    juce::var cmdFreezeTrack (const juce::var& args);
+    juce::var cmdUnfreezeTrack (const juce::var& args);
+    // The shared offline-render body behind both bounce wrappers (nullptr = all clips).
+    bool bounceRenderToWavImpl (te::Track& track, double startSec, double endSec, const juce::File& destWav,
+                                const juce::Array<te::Clip*>* onlyTheseClips);
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
@@ -750,6 +770,7 @@ private:
 
     void  emit (const juce::String& type, juce::var payload = {});
     void  emitSnapshotInvalidated();
+    void  emitProjectReplaced (const juce::String& reason);
     // Scoped invalidation: a provably track-local mutation (mixer volume/pan/mute, plugin
     // param) emits snapshot_invalidated carrying JUST that track's var, so the UI patches one
     // track instead of re-pulling the whole snapshot (measured 330 ms / 3.7 MiB at 100 tracks).
@@ -897,6 +918,13 @@ private:
     juce::int64 seq = 0;
     juce::File  logFile;
 
+    // Live 12's Space vs ⇧Space (Continue Playback) — cmdSetTransport's insert
+    // marker (the position a normal stop returns to) and whether the current play
+    // was started via continue (its stop leaves the playhead where it halted).
+    // Playback machine state: NOT undoable, never in the snapshot.
+    double insertMarkerSec = 0.0;
+    bool   playStartedViaContinue = false;
+
     // ── CAP-PRJ-005 — the undo-transaction MIRROR ────────────────────────────────
     // mosh-log.jsonl and the UndoManager are two different lists and they do not line
     // up: the log records EVERY command (set_metronome, set_project_settings, transport
@@ -991,6 +1019,7 @@ private:
     juce::File        txnLedgerFile;
     juce::int64       editRevision_ = 0;   // bumped by beginTxn / cmdUndo / cmdRedo
     int               execDepth_    = 0;   // the guard governs the OUTERMOST execute only
+    bool              projectEpochManagedByUi_ = false;
     // Set by txnPreDispatch when it admits a manifested command, consumed by
     // txnPostDispatch to record that command's outcome against its manifest entry.
     int               pendingTxnIndex_ = -1;

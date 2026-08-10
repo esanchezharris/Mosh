@@ -207,11 +207,14 @@ export function gridLines(map: TempoMap, fromSec: number, toSec: number, maxLine
 }
 
 /** Snap a time to the local musical grid (beat-domain rounding, so snapping
-    stays musical through ramps; the grid restarts at explicit changes). */
-export function snapTimeMap(map: TempoMap, t: number, division: SnapDiv): number {
+    stays musical through ramps; the grid restarts at explicit changes).
+    `triplet` shortens every step to 2/3 (three in the space of two) — the
+    arrangement's ⌘3 grid; absent/false is byte-identical to before. */
+export function snapTimeMap(map: TempoMap, t: number, division: SnapDiv, triplet = false): number {
   const seg = segAt(map, t);
   const m: Meter = { tempo: seg.tempo, num: seg.num, den: seg.den };
-  const stepBars = division === "bar" ? 1 : snapStepBeats(m, division) / m.num;
+  let stepBars = division === "bar" ? 1 : snapStepBeats(m, division) / m.num;
+  if (triplet) stepBars *= 2 / 3;
   const barF = barPosAt(map, t);
   const snapped = Math.round(barF / stepBars) * stepBars;
   return Math.max(0, barPosToSec(map, snapped));

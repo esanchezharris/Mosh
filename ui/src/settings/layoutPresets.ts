@@ -30,6 +30,11 @@ export const LAYOUT_PRESETS: Record<string, LayoutPreset> = {
   protools: { left: { collapsed: true }, right: { collapsed: true }, drumWindow: "close", mainView: "arrange" },
   // Logic — Library (left) + Inspector (right, our Session rail), arrange in the middle.
   logic: { left: { collapsed: false, size: 230 }, right: { collapsed: false, size: 300 }, drumWindow: "close", mainView: "arrange" },
+  // Live (clone) — the Ableton resting shape at its measured browser width (SPEC §1,
+  // docs/live-clone/SPEC.md). Unreachable from the schema today (the `layout` enum has
+  // no "live" value; the template pins "ableton"), registered so a future layout option
+  // lands as a one-line schema edit rather than a hunt for the preset table.
+  live: { left: { collapsed: false, size: 338 }, right: { collapsed: true }, drumWindow: "close", mainView: "arrange" },
 };
 
 export type LayoutDeps = {

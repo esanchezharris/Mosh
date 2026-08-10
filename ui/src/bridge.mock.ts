@@ -19,6 +19,8 @@ import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
+import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
+import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
@@ -39,6 +41,9 @@ let trackSeq = 10;
 const landedLayers = new Set<string>();
 const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
+// Live 12's Space vs ⇧Space marker memory (mirrors MoshOps::cmdSetTransport)
+let mockInsertMarker = 0;
+let mockViaContinue = false;
 let sectionSeq = 3; // seed uses sec-1..3
 const nextSectionId = () => "sec-" + ++sectionSeq;
 let annotationSeq = 1; // seed uses ann-1
@@ -112,6 +117,15 @@ function bassLine(bars: number): MidiNote[] {
   return notes;
 }
 
+// REC-NO-INPUT dev/e2e fixture (declared before seedSnapshot, which reads it):
+// ?mockNoInput=1 models a session with NO usable input (e.g. output on a
+// mic-less loopback) — list_wave_inputs enumerates nothing, arm_track degrades
+// EXACTLY like the engine (ok, applied:false, reason "no input device"), and
+// set_transport record refuses with the engine's REC-NO-INPUT named error.
+// ?mockNoInput=armed additionally pre-arms the first track — the
+// stale-armed-after-device-switch case (arm skipped, the refusal does the talking).
+const MOCK_NO_INPUT = new URLSearchParams(window.location.search).get("mockNoInput");
+
 function seedSnapshot(): Snapshot {
   // Demo-accurate typed seed (dev/preview only): Drums = a drum step-grid (MIDI on a
   // drum track), Bass = MIDI note blocks, Keys = an audio waveform. 8s clips = 16 beats
@@ -120,6 +134,9 @@ function seedSnapshot(): Snapshot {
     {
       id: nextTrackId(), index: 0, name: "Drums", type: "drum",
       volumeDb: 0, pan: 0, mute: false, solo: false, isInstrument: true,
+      // REC-NO-INPUT fixture: ?mockNoInput=armed pre-arms this track (the
+      // stale-armed-after-device-switch case — the record refusal does the talking).
+      ...(MOCK_NO_INPUT === "armed" ? { armed: true } : {}),
       clips: [midiClip("loop", 0, 8, drumPattern(4))],
       plugins: [],
     },
@@ -163,6 +180,15 @@ function seedSnapshot(): Snapshot {
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
+      // Dev/e2e boot fixture (no engine side — the failed-open state is HARDWARE):
+      // ?mockAudioDead=1 seeds the DEGRADED session, so the Settings recovery
+      // pickers + banner-clear flow are exercisable end-to-end. list_audio_devices
+      // mirrors the engine while the error is set (enumerates regardless;
+      // audioEnabled:false, empty selection); set_audio_device clears it.
+      ...(new URLSearchParams(window.location.search).get("mockAudioDead") === "1"
+        ? { audioEnabled: false,
+            audioDeviceError: 'Audio device "External Headphones" could not open. Running WITHOUT audio — playback and recording are off. Press Retry.' }
+        : {}),
       // REC-001 — seeded with the SAME defaults MoshOps::recordOptionsToVar returns for a
       // project that has never set them (overdub on, everything else off/none). A mock
       // that seeded something else would make the recording panel render one way in dev
@@ -398,11 +424,11 @@ const mockManifestDigest = (name: string, manifest: readonly unknown[]): string 
 const MOCK_TXN_SAFE = new Set([
   "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
   "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
-  "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
+  "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
   "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
   "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
   "stretch_clip", "set_clip_warp",
-  "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes",
+  "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
   "add_drum_pattern", "assign_sample", "set_drum_lane", "load_drum_kit",
   "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
   "set_plugin_param", "bypass_plugin",
@@ -413,6 +439,22 @@ const MOCK_TXN_SAFE = new Set([
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
   "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
+]);
+
+// Mirrors the engine's central FREEZE GUARD (MoshOps.cpp executeImpl): on a frozen
+// track these clip-content / device mutations refuse with "track is frozen".
+// Whole-clip structure (move/duplicate/remove/rename), mixer and project ops stay
+// allowed — Live's rule. A DIVERGENCE HERE IS A BUG (same class as MOCK_TXN_SAFE).
+const MOCK_FROZEN_LOCKED = new Set([
+  "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
+  "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
+  "set_clip_gain", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
+  "normalize_clip", "set_clip_warp", "stretch_clip",
+  "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
+  "set_plugin_param", "bypass_plugin", "open_plugin_editor",
+  "set_track_automation_mode", "write_automation_curve",
+  "add_automation_point", "set_automation_point", "remove_automation_point",
+  "clear_automation", "replace_instrument", "hot_swap_instrument",
 ]);
 
 // Mirrors TransactionSafe.h's readOnlyDuringTransaction(): reads stay available while a
@@ -489,6 +531,9 @@ const DEFAULT_OK = new Set([
   // .tracktionedit with third-party plugin nodes scrubbed out, and the dev mock hosts no
   // plugins and has no project file to reload.
   "open_without_plugins",
+]);
+const PROJECT_REPLACEMENTS = new Set([
+  "new_project", "open_project", "open_recent", "reload", "recover_session", "open_without_plugins",
 ]);
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
@@ -634,6 +679,10 @@ export function mockOnEvent(eventId: string, fn: Listener): () => void {
  * store.ts's real onEvent("mosh_event", ...) reducer instead of duplicating its logic. */
 export function __mockEmitForTests(type: string, payload?: unknown): void {
   emit(type, payload);
+}
+if (MOCK_ENABLED && typeof window !== "undefined") {
+  (window as Window & { __moshMockEmitForTests?: typeof __mockEmitForTests })
+    .__moshMockEmitForTests = __mockEmitForTests;
 }
 const invalidate = () => { emit("snapshot_invalidated"); emitMuteAutomation(); };
 
@@ -910,6 +959,21 @@ const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
   { id: "ott", name: "OTT", format: "VST3", manufacturer: "Xfer", isInstrument: false },
 ];
+// AUD-SCAN fidelity — the cold-start scan only catalogs VST3 bundles carrying
+// moduleinfo.json; the rest (all Valhalla, Waves shells, most FabFilter…) only show
+// up after the deep sweep (rescan_plugins with allowAU). The catalog is therefore a
+// `let` that the deep path GROWS, and the sweep is async (progress events, then a
+// bigger list) — matching the native backend so the UI's rescan affordance has real
+// behaviour to drive in dev/e2e. The VST3-only path stays synchronous (it was).
+const DEEP_SCAN_EXTRA = [
+  { id: "au:supermassive", name: "Valhalla Supermassive", format: "AudioUnit", manufacturer: "Valhalla DSP", isInstrument: false },
+  { id: "au:soothe", name: "soothe2", format: "AudioUnit", manufacturer: "oeksound", isInstrument: false },
+  // A second INSTRUMENT so the hot-swap path (load_plugin replaceInstrument) has an
+  // A→B pair to drive in e2e.
+  { id: "au:serum2", name: "Serum 2", format: "AudioUnit", manufacturer: "Xfer", isInstrument: true },
+];
+let mockPluginCatalog = [...VST3S];
+let mockDeepScanned = false;
 const COLORS = [
   { name: "grit", astd_max: 0.55, peak_layer: 2, more_sign: 1, verdict: "STRONG", no_stack_with: [] as string[] },
   { name: "brightness", astd_max: 0.5, peak_layer: 3, more_sign: 1, verdict: "STRONG", no_stack_with: ["air"] },
@@ -1074,7 +1138,32 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
   return { applied: true, discarded: false, clips: landed };
 }
 
+// Deterministic per-take peaks for the mock's list_takes (take-lanes wave) —
+// seeded by (clipId, takeIndex) so two takes on one clip always differ and a
+// replayed list reproduces itself. [min,max] bucket pairs, the engine's shape.
+function mockTakePeaks(clipId: string, takeIndex: number): [number, number][] {
+  let h = 0n;
+  const M = (1n << 64n) - 1n;
+  for (const c of `${clipId}|take${takeIndex}`) h = (h * 31n + BigInt(c.codePointAt(0)!)) & M;
+  const rand = splitmix64(h);
+  const out: [number, number][] = [];
+  for (let b = 0; b < 120; b++) {
+    const v = rand() * 2 - 1;
+    out.push([Math.min(0, v * 0.9), Math.max(0, v * 0.9)]);
+  }
+  return out;
+}
+
 function dispatch(command: string, args: Record<string, unknown>): CommandResult {
+  // FREEZE GUARD — mirrors the engine's central lock in executeImpl (checked
+  // BEFORE the command body, exactly like the native seam).
+  if (MOCK_FROZEN_LOCKED.has(command)) {
+    const tid = str(args.trackId);
+    const t = tid
+      ? snapshot.tracks.find((tr) => tr.id === tid)
+      : snapshot.tracks.find((tr) => tr.clips.some((c) => c.id === str(args.clipId)));
+    if (t?.frozen) return err(command, "track is frozen (unfreeze it first)");
+  }
   switch (command) {
     case "set_transport": {
       const action = str(args.action);
@@ -1098,16 +1187,38 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
 
       const t = snapshot.transport;
-      if (action === "toggle") {
-        const playing = !t.playing;
-        snapshot.transport = { ...t, playing };
-        playing ? startPlayback() : stopPlayback();
+      // Live 12's Space vs ⇧Space: a normal stop RETURNS to the insert marker
+      // (last play-start or explicit seek); a continue-start makes the next stop
+      // LEAVE the playhead. Mirrors MoshOps::cmdSetTransport's marker memory.
+      const posArg = "position" in args ? Math.max(0, num(args.position)) : null;
+      if (action === "play" || action === "record" || (action === "toggle" && !t.playing)
+          || (action === "continue" && !t.playing)) {
+        // REC-NO-INPUT fixture — mirrors the engine's record refusal: with no usable
+        // input the record branch errors with the named reason (a record START only;
+        // toggling an active recording OFF always works).
+        if (action === "record" && MOCK_NO_INPUT && !t.recording)
+          return err(command, "no armed track with a usable input — arm a track and pick an input in Settings > Audio");
+        if (action === "continue") {
+          mockViaContinue = true;
+        } else {
+          mockInsertMarker = posArg ?? t.position;
+          mockViaContinue = false;
+        }
+        if (action === "record") {
+          snapshot.transport = { ...t, recording: !t.recording, playing: true };
+        } else {
+          snapshot.transport = { ...t, playing: true };
+        }
+        startPlayback();
+        if (posArg != null) snapshot.transport = { ...snapshot.transport, position: posArg };
         emit("transport", snapshot.transport);
         return ok(command, snapshot.transport);
       }
-      if (action === "stop") {
+      if (action === "toggle" || action === "stop" || action === "continue") {
         stopPlayback();
-        snapshot.transport = { ...t, playing: false, recording: false, position: num(args.position, 0) };
+        const position = posArg ?? (mockViaContinue ? t.position : mockInsertMarker);
+        mockViaContinue = false;
+        snapshot.transport = { ...t, playing: false, recording: false, position };
         emit("transport", snapshot.transport);
         return ok(command, snapshot.transport);
       }
@@ -1117,6 +1228,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         return ok(command, snapshot.transport);
       }
       if (action === "to_start") {
+        mockInsertMarker = 0;   // an explicit seek moves the insert marker
         snapshot.transport = { ...t, position: 0 };
         emit("transport", snapshot.transport);
         return ok(command, snapshot.transport);
@@ -1129,7 +1241,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       // direct field sets: position / loop
       const next: Transport = { ...t };
-      if ("position" in args) next.position = Math.max(0, num(args.position));
+      if ("position" in args) { next.position = Math.max(0, num(args.position)); mockInsertMarker = next.position; }
       if ("loop" in args) { next.looping = Boolean(args.loop); next.loopStart = num(args.loopStart, t.loopStart); next.loopEnd = num(args.loopEnd, t.loopEnd); }
       snapshot.transport = next;
       emit("transport", snapshot.transport);
@@ -1169,6 +1281,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       for (const t of snapshot.tracks) if (ids.includes(t.id)) t.parentId = g.id;
       invalidate();
       return ok(command, { trackId: g.id });
+    }
+    case "ungroup_track": {
+      // Mirrors MoshOps::cmdUngroupTrack — the folder's children return to the top
+      // level (parentId cleared) and the folder itself is removed, one undo step.
+      const g = snapshot.tracks.find((t) => t.isGroup && t.id === str(args.trackId));
+      if (!g) return err(command, "no group track: " + str(args.trackId));
+      pushUndo();
+      for (const t of snapshot.tracks) if (t.parentId === g.id) delete t.parentId;
+      snapshot.tracks = snapshot.tracks.filter((t) => t.id !== g.id);
+      invalidate();
+      return ok(command);
     }
     case "set_track_type": {
       const t = findTrack(str(args.trackId));
@@ -1815,6 +1938,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         else return err(command, `split point outside clip: time ${tReq} (relative candidate ${rel}) not strictly inside [${s0}, ${s1}]`);
       }
       pushUndo();
+      if (f.clip.type === "midi") {
+        // MIDI halves keep their type and partition their notes at the cut (the
+        // engine's splitClip does exactly this; the wave-only path below predates
+        // MIDI splitting in the mock — consolidate_clips' e2e exposed it).
+        const beatsPerSec = (snapshot.session.tempo ?? 120) / 60;
+        const cutBeat = (t - f.clip.start) * beatsPerSec;
+        const leftNotes = (f.clip.notes ?? []).filter((n) => n.start < cutBeat);
+        const rightNotes = (f.clip.notes ?? [])
+          .filter((n) => n.start >= cutBeat)
+          .map((n) => ({ ...n, start: n.start - cutBeat }));
+        const right = midiClip(f.clip.name, t, f.clip.start + f.clip.length - t, rightNotes);
+        f.clip.notes = leftNotes;
+        f.clip.length = t - f.clip.start;
+        f.track.clips.push(right);
+        invalidate(); return ok(command, { clipId: right.id });
+      }
       const right = waveClip(f.clip.name, t, f.clip.start + f.clip.length - t);
       right.offset = f.clip.offset + (t - f.clip.start);
       f.clip.length = t - f.clip.start;
@@ -1824,6 +1963,62 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "remove_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo(); f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); invalidate(); return ok(command);
+    }
+    case "bounce_track": {
+      // Mirrors cmdBounceTrack's STATE changes (the audio render itself is engine-verified
+      // in the native selftest; the mock models the resulting clip/track structure).
+      const t = snapshot.tracks.find((tr) => tr.id === str(args.trackId));
+      if (!t || t.isGroup || t.isReturn) return err(command, "no bounceable track (groups, returns and the master bus can't be bounced)");
+      const mode = str(args.mode);
+      if (mode !== "inPlace" && mode !== "newTrack") return err(command, "mode must be inPlace|newTrack");
+      const lastEnd = t.clips.reduce((m, c) => Math.max(m, c.start + c.length), 0);
+      if (lastEnd <= 1e-4) return err(command, "track has no clips to bounce");
+      pushUndo();
+      const rendered: Clip = { id: nextClipId(), name: t.name, type: "wave",
+                               start: 0, length: lastEnd, offset: 0, hasRenderLayer: false };
+      if (mode === "inPlace") {
+        t.clips = [rendered];
+        invalidate();
+        return ok(command, { mode, length: lastEnd, trackId: t.id, clipId: rendered.id });
+      }
+      const idx = snapshot.tracks.indexOf(t);
+      const nt: Track = { id: nextTrackId(), index: idx + 1, name: `${t.name} (bounce)`, type: "audio",
+                          volumeDb: 0, pan: 0, mute: false, solo: false, clips: [rendered], plugins: [] } as Track;
+      snapshot.tracks.splice(idx + 1, 0, nt);
+      snapshot.tracks.forEach((tr, i) => (tr.index = i));
+      invalidate();
+      return ok(command, { mode, length: lastEnd, trackId: nt.id, clipId: rendered.id, sourceTrackId: t.id });
+    }
+    case "freeze_track": {
+      // Mirrors cmdFreezeTrack's STATE changes (the audio render itself is
+      // engine-verified in the native selftest): the clips become one wave clip
+      // spanning [0, last end], every device is parked (enabled false), and the
+      // additive frozen marker goes on the track. Undo semantics ride pushUndo,
+      // same as the engine's single transaction.
+      const t = snapshot.tracks.find((tr) => tr.id === str(args.trackId));
+      if (!t || t.isGroup || t.isReturn) return err(command, "no freezable track (groups, returns and the master bus can't be frozen)");
+      if (t.frozen) return err(command, "track is already frozen");
+      const lastEnd = t.clips.reduce((m, c) => Math.max(m, c.start + c.length), 0);
+      if (lastEnd <= 1e-4) return err(command, "track has no clips to freeze");
+      pushUndo();
+      const rendered: Clip = { id: nextClipId(), name: t.name, type: "wave",
+                               start: 0, length: lastEnd, offset: 0, hasRenderLayer: false };
+      t.clips = [rendered];
+      for (const p of t.plugins ?? []) p.enabled = false;
+      t.frozen = true;
+      invalidate();
+      return ok(command, { clipId: rendered.id });
+    }
+    case "unfreeze_track": {
+      // Mirrors cmdUnfreezeTrack: devices back on, marker gone, rendered clips STAY.
+      const t = snapshot.tracks.find((tr) => tr.id === str(args.trackId));
+      if (!t) return err(command, "no track");
+      if (!t.frozen) return err(command, "track is not frozen");
+      pushUndo();
+      for (const p of t.plugins ?? []) p.enabled = true;
+      delete t.frozen;   // additive-absent — the snapshot's unfrozen shape
+      invalidate();
+      return ok(command);
     }
     // ARR-011 — remove everything in [start, end] across ALL tracks (or an optional
     // trackIds subset — a real JSON array, deliberately NOT in the agent catalog).
@@ -2002,6 +2197,101 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const dup = waveClip(f.clip.name, f.clip.start + f.clip.length, f.clip.length);
       f.track.clips.push(dup); invalidate(); return ok(command, { clipId: dup.id });
     }
+    case "consolidate_clips": {
+      // Mirrors MoshOps::cmdConsolidateClips — MIDI-only merge, one undo step, notes
+      // re-anchored clip-local. The mock's session tempo drives seconds→beats (its
+      // clips are seconds, its notes clip-local beats; the tempo map is a UI-side
+      // concern here — the seed and every test project are constant-tempo).
+      const ids = (Array.isArray(args.clipIds) ? args.clipIds : []).map(String);
+      const found = ids.map((id) => findClip(id)).filter((f): f is NonNullable<typeof f> => !!f);
+      if (found.length === 0) return err(command, "no clips found");
+      const track = found[0].track;
+      let midiCount = 0, waveCount = 0;
+      for (const f of found) {
+        if (f.track !== track) return err(command, "consolidate works within one track");
+        if (f.clip.type === "midi") midiCount++;
+        else if (f.clip.type === "wave") waveCount++;
+        else return err(command, "consolidate works on MIDI and audio clips");
+      }
+      if (midiCount > 0 && waveCount > 0)
+        return err(command, "a mixed MIDI + audio selection can't consolidate — consolidate per type (Live's rule)");
+      if (waveCount > 0) {
+        // WAVE path — mirrors the engine's render-consolidate at the structure level
+        // (audio content is engine-verified in the native selftest).
+        const spanStart = Math.min(...found.map((f) => f.clip.start));
+        const spanEnd = Math.max(...found.map((f) => f.clip.start + f.clip.length));
+        const selected = new Set(found.map((f) => f.clip));
+        for (const c of track.clips)
+          if (!selected.has(c) && c.start + c.length > spanStart + 1e-4 && c.start < spanEnd - 1e-4)
+            return err(command, "an unselected clip overlaps the span — include it or move it before consolidating");
+        pushUndo();
+        track.clips = track.clips.filter((c) => !selected.has(c));
+        const merged: Clip = { id: nextClipId(), name: found[0].clip.name, type: "wave",
+                               start: spanStart, length: spanEnd - spanStart, offset: 0,
+                               hasRenderLayer: false };
+        track.clips.push(merged);
+        invalidate();
+        return ok(command, { newClipId: merged.id, file: `/mock/consolidate/${track.id}.wav` });
+      }
+      pushUndo();
+      const spanStart = Math.min(...found.map((f) => f.clip.start));
+      const spanEnd = Math.max(...found.map((f) => f.clip.start + f.clip.length));
+      const beatsPerSec = (snapshot.session.tempo ?? 120) / 60;
+      const notes: MidiNote[] = [];
+      for (const f of found)
+        for (const n of f.clip.notes ?? [])
+          notes.push({ i: notes.length, pitch: n.pitch, velocity: n.velocity,
+                       start: (f.clip.start - spanStart) * beatsPerSec + n.start,
+                       length: n.length, ...(n.mute ? { mute: true } : {}) });
+      track.clips = track.clips.filter((c) => !ids.includes(c.id));
+      const merged: Clip = { id: nextClipId(), name: found[0].clip.name, type: "midi",
+                             start: spanStart, length: spanEnd - spanStart, offset: 0,
+                             hasRenderLayer: false, notes };
+      track.clips.push(merged); invalidate();
+      return ok(command, { newClipId: merged.id, noteCount: notes.length });
+    }
+    case "crop_clip": {
+      // Mirrors MoshOps::cmdCropClip — trim each given clip to its intersection with
+      // the passed range; MIDI notes outside the crop are removed, crossing notes
+      // clipped to the edge and re-anchored clip-local; audio edge-trims with the
+      // offset advanced. One undo step; the same no-selection/no-overlap/already-
+      // covering refusals as the engine.
+      const start = num(args.start), end = num(args.end);
+      if (!(end > start)) return err(command, "crop needs a time selection (start < end)");
+      const ids = (Array.isArray(args.clipIds) ? args.clipIds : []).map(String);
+      const found = ids.map((id) => findClip(id)).filter((f): f is NonNullable<typeof f> => !!f);
+      if (found.length === 0) return err(command, "no clips found");
+      const plans = found.map((f) => {
+        const cs = f.clip.start, ce = f.clip.start + f.clip.length;
+        const s = Math.max(cs, start), e = Math.min(ce, end);
+        return { f, s, e, startMoved: s > cs + 1e-9, endMoved: e < ce - 1e-9 };
+      }).filter((p) => p.e > p.s);
+      if (plans.length === 0) return err(command, "the time selection does not overlap the clip(s)");
+      if (!plans.some((p) => p.startMoved || p.endMoved))
+        return err(command, "the time selection already covers the clip(s)");
+      pushUndo();
+      const beatsPerSec = (snapshot.session.tempo ?? 120) / 60;
+      for (const p of plans) {
+        if (!p.startMoved && !p.endMoved) continue;
+        const c = p.f.clip;
+        if (c.type === "midi" && c.notes) {
+          const cropStartBeat = (p.s - c.start) * beatsPerSec;
+          const cropEndBeat = (p.e - c.start) * beatsPerSec;
+          const kept: MidiNote[] = [];
+          for (const n of c.notes) {
+            const ns = n.start, ne = n.start + n.length;
+            if (ns >= cropEndBeat - 1e-4 || ne <= cropStartBeat + 1e-4) continue;   // fully outside
+            const s2 = Math.max(ns, cropStartBeat), e2 = Math.min(ne, cropEndBeat);
+            kept.push({ ...n, i: kept.length, start: s2 - cropStartBeat, length: e2 - s2 });
+          }
+          c.notes = kept;
+        } else {
+          c.offset = Math.max(0, c.offset + (p.s - c.start));
+        }
+        c.start = p.s; c.length = p.e - p.s;
+      }
+      invalidate(); return ok(command);
+    }
     case "rename_clip": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.name = str(args.name, f.clip.name); invalidate(); return ok(command); }
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
@@ -2040,6 +2330,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_clip_loop": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       const enabled = Boolean(args.enabled);
+      // MIDI branch — mirrors cmdSetClipLoop's MIDI case: content-relative seconds
+      // converted to beats at the session tempo (mock sessions are constant-tempo),
+      // stored as the additive midiLoop*Beats fields (absent when not looping).
+      if (f.clip.type === "midi") {
+        const curLenBeats = f.clip.midiLoopLengthBeats ?? 0;
+        const beatsPerSec = (snapshot.session.tempo ?? 120) / 60;
+        const length = "length" in args ? num(args.length) : (curLenBeats > 0 ? curLenBeats / beatsPerSec : f.clip.length);
+        if (enabled && !(length > 0)) return err(command, "loop length must be greater than 0 when enabled");
+        pushUndo();
+        if (enabled) {
+          f.clip.midiLoopStartBeats = Math.max(0, "start" in args ? num(args.start) * beatsPerSec : curLenBeats > 0 ? (f.clip.midiLoopStartBeats ?? 0) : 0);
+          f.clip.midiLoopLengthBeats = length * beatsPerSec;
+        } else {
+          delete f.clip.midiLoopStartBeats;
+          delete f.clip.midiLoopLengthBeats;
+        }
+        invalidate();
+        return ok(command, {
+          clipId: f.clip.id,
+          loopEnabled: enabled,
+          midiLoopStartBeats: f.clip.midiLoopStartBeats ?? 0,
+          midiLoopLengthBeats: f.clip.midiLoopLengthBeats ?? 0,
+        });
+      }
       const length = "length" in args ? num(args.length) : (f.clip.loopLength || f.clip.length);
       if (enabled && !(length > 0)) return err(command, "loop length must be greater than 0 when enabled");
       pushUndo();
@@ -2137,6 +2451,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // non-undoable recording lifecycle; later comp selection remains undoable.
     case "arm_track": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      // REC-NO-INPUT fixture: degrade EXACTLY like the engine with no input
+      // instances (ok, applied:false, reason "no input device"; the arm doesn't stick)
+      if (MOCK_NO_INPUT && args.armed)
+        return ok(command, { trackId: t.id, armed: true, applied: false, reason: "no input device" });
       t.armed = Boolean(args.armed); invalidate();
       return ok(command, { trackId: t.id, armed: t.armed, applied: true });
     }
@@ -2159,7 +2477,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "list_takes": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       const takes = f.clip.takes ?? [];
-      return ok(command, { takes, numTakes: f.clip.numTakes ?? takes.length, currentTakeIndex: f.clip.currentTakeIndex ?? 0 });
+      // Per-take peaks (take-lanes wave) — deterministic per (clip, take index),
+      // distinct across takes, mirroring the engine's additive field shape
+      // ([min,max] bucket pairs) so the lanes draw real ink in dev/e2e.
+      const withPeaks = takes.map((tk) => ({ ...tk, peaks: mockTakePeaks(f.clip.id, tk.index) }));
+      return ok(command, { takes: withPeaks, numTakes: f.clip.numTakes ?? takes.length, currentTakeIndex: f.clip.currentTakeIndex ?? 0 });
     }
     case "set_current_take": {
       const f = findClip(str(args.clipId)); if (!f?.clip.takes) return err(command, "clip has no takes");
@@ -2464,7 +2786,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { released: 0, held: 0 });
 
     // ── plugins ────────────────────────────────────────────────
-    case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
+    case "list_plugins": return ok(command, { plugins: mockPluginCatalog, counts: { vst3: VST3S.length, au: mockPluginCatalog.length - VST3S.length, total: mockPluginCatalog.length } });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
     // FIT-003 — an explicit case (was a bare DEFAULT_OK passthrough returning no
     // `status`, which store.rescanPlugins() then read as `undefined !== "scanning"`
@@ -2478,11 +2800,24 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "rescan_plugins": {
       const fmt = str(args.format, "all");
       if (fmt === "au" && !args.allowAU) return err(command, "Audio Unit scanning is off — pass allowAU:true (or set MOSH_SCAN_AU=1)");
-      return ok(command, { status: "done", count: VST3S.length });
+      // The deep sweep (allowAU) is async like the native OOP scan: a progress sample,
+      // then done with the grown catalog (see DEEP_SCAN_EXTRA above). The store keeps
+      // scanProgress alive on status:"scanning" and the done event refreshes the list.
+      if (args.allowAU) {
+        emit("plugin_scan_progress", { format: fmt, done: false, count: mockPluginCatalog.length, elapsedMs: 0 });
+        scheduleMock(() => {
+          if (!mockDeepScanned) { mockPluginCatalog.push(...DEEP_SCAN_EXTRA); mockDeepScanned = true; }
+          emit("plugin_scan_progress", { format: fmt, done: true, count: mockPluginCatalog.length, elapsedMs: 250 });
+        // 250ms: long enough for e2e to observe the in-flight status line, short
+        // enough to stay instant-feeling in dev.
+        }, 250);
+        return ok(command, { status: "scanning" });
+      }
+      return ok(command, { status: "done", count: mockPluginCatalog.length });
     }
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
-    case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });
+    case "list_wave_inputs": return ok(command, { inputs: MOCK_NO_INPUT ? [] : MOCK_WAVE_INPUTS, audioEnabled: true });
     case "list_midi_inputs": return ok(command, { inputs: MOCK_MIDI_INPUTS, audioEnabled: true });
     case "list_track_outputs": return ok(command, {
       outputs: MOCK_OUTPUT_DEVICES,
@@ -2525,23 +2860,35 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── settings / export / command log (topbar utilities) ───────────────────
-    case "list_audio_devices": return ok(command, {
-      types: [{ name: "CoreAudio", outputs: ["MacBook Pro Speakers", "External Headphones"], inputs: ["MacBook Pro Microphone", "Scarlett 2i2"] }],
-      current: { ...mockAudioSel, sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
-      sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512, audioEnabled: true,
-      // CAP-TRN-005 — click destinations, by te::OutputDevice NAME (not the deviceID the
-      // track-output pickers use). Sentinel first, then wave outs, then the MIDI sentinel
-      // + MIDI outs, exactly as cmdListAudioDevices builds it — so the metronome panel's
-      // "reveal the MIDI notes once a MIDI destination is chosen" branch is reachable in
-      // dev and e2e.
-      clickOutputs: [
-        { name: DEFAULT_CLICK_OUTPUT, isMidi: false },
-        { name: "MacBook Pro Speakers", isMidi: false },
-        { name: "External Headphones", isMidi: false },
-        { name: "(default MIDI output)", isMidi: true },
-        { name: "IAC Driver Bus 1", isMidi: true },
-      ],
-    });
+    case "list_audio_devices": {
+      // DEGRADED mirror (AUD-017 follow-up): a set audioDeviceError models the
+      // failed-open state — the engine enumerates CoreAudio REGARDLESS of an open
+      // device (enumeration is gated on registered types, not hasAudio), so the
+      // Settings pickers still offer the switch; audioEnabled goes false and the
+      // current selection reads empty. set_audio_device clears it (recovery).
+      const dead = Boolean(snapshot.session?.audioDeviceError);
+      return ok(command, {
+        types: [{ name: "CoreAudio", outputs: ["MacBook Pro Speakers", "External Headphones"], inputs: ["MacBook Pro Microphone", "Scarlett 2i2"] }],
+        current: { ...mockAudioSel,
+                   outputDevice: dead ? "" : mockAudioSel.outputDevice,
+                   inputDevice: dead ? "" : mockAudioSel.inputDevice,
+                   sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
+        sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512,
+        audioEnabled: !dead,
+        // CAP-TRN-005 — click destinations, by te::OutputDevice NAME (not the deviceID the
+        // track-output pickers use). Sentinel first, then wave outs, then the MIDI sentinel
+        // + MIDI outs, exactly as cmdListAudioDevices builds it — so the metronome panel's
+        // "reveal the MIDI notes once a MIDI destination is chosen" branch is reachable in
+        // dev and e2e.
+        clickOutputs: [
+          { name: DEFAULT_CLICK_OUTPUT, isMidi: false },
+          { name: "MacBook Pro Speakers", isMidi: false },
+          { name: "External Headphones", isMidi: false },
+          { name: "(default MIDI output)", isMidi: true },
+          { name: "IAC Driver Bus 1", isMidi: true },
+        ],
+      });
+    }
     case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
     case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
     case "set_audio_device": {
@@ -2550,6 +2897,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (typeof args.outputDevice === "string") mockAudioSel.outputDevice = args.outputDevice;
       if (typeof args.inputDevice === "string") mockAudioSel.inputDevice = args.inputDevice;
       if (typeof args.type === "string") mockAudioSel.type = args.type;
+      // DEGRADED-recovery mirror: a successful pick from the failed-open state IS
+      // the recovery engine-side (adoptOpenedAudioDevice) — audio comes back and
+      // the banner clears. From the healthy state the pick changes nothing here.
+      if (snapshot.session?.audioDeviceError) {
+        snapshot.session.audioDeviceError = "";
+        snapshot.session.audioEnabled = true;
+        invalidate();
+      }
       return ok(command);
     }
     case "retry_audio_device": {
@@ -2602,7 +2957,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
-      invalidate();
       return ok(command);
     }
 
@@ -2620,7 +2974,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
-      invalidate();
       return ok(command);
     }
     case "relink_clip": return ok(command);   // gap 3 — re-point a missing wave source (mock no-op)
@@ -2716,8 +3069,26 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "load_plugin": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const v = VST3S.find((x) => x.id === str(args.pluginId)); if (!v) return err(command, "unknown plugin");
+      const v = mockPluginCatalog.find((x) => x.id === str(args.pluginId)); if (!v) return err(command, "unknown plugin");
+      // Mirrors the native wave-3 guard (MoshOps::cmdLoadPlugin): an instrument on a
+      // track holding WAVE clips is silent-by-construction and refused with the way
+      // out named. Empty/MIDI-only tracks stay loadable (that's how one starts).
+      if (v.isInstrument && (t.type ?? "audio") === "audio"
+          && t.clips.some((c) => c.type === "wave"))
+        return err(command, `${v.name} is an instrument — instruments go on instrument tracks (⇧⌘T), not audio tracks`);
       pushUndo(); t.plugins = t.plugins ?? [];
+      // Hot-swap (mirrors cmdLoadPlugin): replaceInstrument + an incoming instrument
+      // + one already in the chain ⇒ the new one takes its slot. Effects never swap.
+      if (Boolean(args.replaceInstrument) && v.isInstrument) {
+        const idx = t.plugins.findIndex((p) => p.isInstrument);
+        if (idx >= 0) {
+          const removed = t.plugins[idx];
+          t.plugins.splice(idx, 1, { index: idx, name: v.name, type: v.format, enabled: true, external: true, isInstrument: true, params: mkParams(6) });
+          reindex(t);
+          invalidate();
+          return ok(command, { index: idx, name: v.name, replaced: true, replacedName: removed.name });
+        }
+      }
       t.plugins.push({ index: t.plugins.length, name: v.name, type: v.format, enabled: true, external: true, isInstrument: v.isInstrument, params: mkParams(6) });
       invalidate(); return ok(command);
     }
@@ -3351,6 +3722,108 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command, { moved, swung });
     }
+    case "transform_velocities": {
+      // Mirrors cmdTransformVelocities — Live 12's velocity tool row. Targets = an
+      // explicit noteIndexes array, else ALL notes; the math + deterministic seed
+      // live in midi/velocityTransform.ts (the engine's own FNV seed is the same
+      // contract — replay reproduces, per environment).
+      const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
+      const mode = str(args.mode);
+      if (mode !== "randomize" && mode !== "ramp" && mode !== "deviate")
+        return err(command, "mode must be randomize|ramp|deviate");
+      if (mode === "ramp" && (!("lo" in args) || !("hi" in args)))
+        return err(command, "ramp needs 'lo' and 'hi'");
+      if (mode !== "ramp" && !("amount" in args)) return err(command, "mode needs 'amount'");
+      const notes = f.clip.notes;
+      let targets: { i: number }[];
+      if (Array.isArray(args.noteIndexes)) {
+        if (args.noteIndexes.length === 0) return err(command, "'noteIndexes' is empty");
+        targets = [];
+        for (const v of args.noteIndexes) {
+          const i = num(v, -1);
+          if (i < 0 || i >= notes.length || notes[i] == null) return err(command, "bad noteIndex");
+          targets.push({ i });
+        }
+      } else {
+        targets = notes.map((_, i) => ({ i }));
+      }
+      if (targets.length === 0) return err(command, "no notes to transform");
+      const payload = targets.map(({ i }) => ({ start: notes[i].start, pitch: notes[i].pitch, velocity: notes[i].velocity }));
+      const out = transformVelocities(payload, mode, {
+        amount: num(args.amount, 0), lo: num(args.lo, 1), hi: num(args.hi, 127), clipId: f.clip.id,
+      });
+      pushUndo();
+      let changed = 0;
+      targets.forEach(({ i }, k) => {
+        if (notes[i].velocity !== out[k]) { notes[i].velocity = out[k]; changed++; }
+      });
+      invalidate();
+      return ok(command, { mode, changed });
+    }
+    case "transform_notes": {
+      // Mirrors cmdTransformNotes — Live 12's Transform tools row (Reverse / Invert /
+      // Legato / Humanize / ×2 / /2 / Set Length / Add Interval / Fit to Scale).
+      // Targets = an explicit noteIndexes array, else ALL notes; the math +
+      // deterministic humanize seed live in midi/noteTransform.ts (same
+      // replay-determinism contract as the engine); fitToScale reads the mock's
+      // session.key through the same resolveKey the engine defaults match.
+      const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
+      const mode = str(args.mode);
+      if (!["reverse", "invert", "legato", "humanize", "x2", "d2", "setLength", "addInterval", "fitToScale"].includes(mode))
+        return err(command, "mode must be reverse|invert|legato|humanize|x2|d2|setLength|addInterval|fitToScale");
+      if (mode === "humanize" && !("amount" in args)) return err(command, "humanize needs 'amount'");
+      if (mode === "setLength" && (!("lengthBeats" in args) || num(args.lengthBeats) <= 1e-4))
+        return err(command, "setLength needs 'lengthBeats' (beats > 0)");
+      if (mode === "addInterval" && !("semitones" in args)) return err(command, "addInterval needs 'semitones'");
+      const notes = f.clip.notes;
+      let targets: { i: number }[];
+      if (Array.isArray(args.noteIndexes)) {
+        if (args.noteIndexes.length === 0) return err(command, "'noteIndexes' is empty");
+        if (args.noteIndexes.length > notes.length) return err(command, "too many noteIndexes");
+        targets = [];
+        const seen = new Set<number>();
+        for (const v of args.noteIndexes) {
+          if (typeof v !== "number" || !Number.isInteger(v)) return err(command, "bad noteIndex");
+          const i = v;
+          if (i < 0 || i >= notes.length || notes[i] == null) return err(command, "bad noteIndex");
+          if (seen.has(i)) continue;
+          seen.add(i);
+          targets.push({ i });
+        }
+      } else {
+        targets = notes.map((_, i) => ({ i }));
+      }
+      if (targets.length === 0) return err(command, "no notes to transform");
+      const payload = targets.map(({ i }) => ({
+        start: notes[i].start, length: notes[i].length, pitch: notes[i].pitch, velocity: notes[i].velocity,
+      }));
+      const out = transformNotes(payload, mode as NoteTransformMode, {
+        amount: num(args.amount, 0), clipId: f.clip.id,
+        lengthBeats: num(args.lengthBeats), semitones: num(args.semitones),
+        key: snapshot.session.key,
+        clipNotes: notes.map((n) => ({ start: n.start, pitch: n.pitch })),
+      });
+      pushUndo();
+      let changed = 0, added = 0;
+      if (mode === "addInterval") {
+        // `out` is the tones to ADD (the source notes are untouched).
+        for (const t of out) {
+          notes.push({ i: notes.length, pitch: t.pitch, start: t.start, length: t.length, velocity: t.velocity });
+          added++;
+        }
+        if (added > 0) reindexNotes(f.clip);
+      } else {
+        targets.forEach(({ i }, k) => {
+          const n = notes[i], o = out[k];
+          if (n.start !== o.start || n.length !== o.length || n.pitch !== o.pitch || n.velocity !== o.velocity) {
+            n.start = o.start; n.length = o.length; n.pitch = o.pitch; n.velocity = o.velocity;
+            changed++;
+          }
+        });
+      }
+      invalidate();
+      return ok(command, { mode, changed, added });
+    }
 
     // ── content browser (read-only directory listing) ────────────────────────
     case "list_directory": {
@@ -3627,6 +4100,7 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     command: string;
     args?: Record<string, unknown>;
     transaction?: { transactionId?: unknown; requestId?: unknown; index?: unknown };
+    _moshProjectEpochPrepared?: unknown;
   };
 
   // FS-B2a guard, before dispatch — so a refusal mutates nothing, exactly as in the engine.
@@ -3671,6 +4145,14 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     for (const k of ["trackId", "clipId", "index", "busNumber", "groupId"])
       if (data[k] !== undefined) resultIds[k] = data[k];
     w.__moshCmdTrace.push({ command: c.command, args: c.args ?? {}, ok: res.ok, resultIds });
+  }
+  if (res.ok && PROJECT_REPLACEMENTS.has(c.command)) {
+    emit("snapshot_invalidated", {
+      projectReplaced: true,
+      reason: c.command,
+      epochManagedByUi: c._moshProjectEpochPrepared === true,
+    });
+    emitMuteAutomation();
   }
   return Promise.resolve(res as unknown as T);
 }

@@ -72,12 +72,12 @@ inline const std::set<juce::String>& registry()
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
         "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
         // ── clips ──
-        "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
+        "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
         "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
         "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
         "stretch_clip", "set_clip_warp",
         // ── MIDI ──
-        "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes",
+        "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
         // ── drums ──
         "add_drum_pattern", "assign_sample", "set_drum_lane", "load_drum_kit",
         // ── plugins (per-track rack) ──

@@ -4,22 +4,12 @@
 
 namespace mosh::trackcommit
 {
-
-juce::String serialize (te::Track& track)
+namespace
 {
-    // The whole track subtree as XML. The caller flushed Edit state first, so
-    // plugin chunks/state are already written into the tree (unlike a display
-    // projection such as trackToVar, which caps params and drops VST3 chunks).
-    auto copy = track.state.createCopy();
-    if (auto xml = copy.createXml())
-        return xml->toString();
-    return {};
-}
-
-ApplyResult apply (te::Edit& edit, const juce::String& blob)
+ApplyResult parseIncoming (const juce::String& blob, const juce::String& expectedLogicalId,
+                           juce::ValueTree* parsed)
 {
     ApplyResult r;
-
     auto xml = juce::parseXML (blob);
     if (xml == nullptr)
     {
@@ -33,6 +23,11 @@ ApplyResult apply (te::Edit& edit, const juce::String& blob)
         r.error = "blob is not a valid ValueTree";
         return r;
     }
+    if (incoming.getType().toString() != "TRACK")
+    {
+        r.error = "blob root is not a track";
+        return r;
+    }
 
     const auto lid = logicalid::track (incoming);
     if (lid.isEmpty())
@@ -40,7 +35,39 @@ ApplyResult apply (te::Edit& edit, const juce::String& blob)
         r.error = "incoming track has no moshLogicalId";
         return r;
     }
+    if (expectedLogicalId.isNotEmpty() && lid != expectedLogicalId)
+    {
+        r.error = "incoming track logicalId does not match commit envelope";
+        return r;
+    }
+
+    r.ok = true;
     r.logicalId = lid;
+    if (parsed != nullptr)
+        *parsed = std::move (incoming);
+    return r;
+}
+}
+
+juce::String serialize (te::Track& track)
+{
+    // The whole track subtree as XML. The caller flushed Edit state first, so
+    // plugin chunks/state are already written into the tree (unlike a display
+    // projection such as trackToVar, which caps params and drops VST3 chunks).
+    auto copy = track.state.createCopy();
+    if (auto xml = copy.createXml())
+        return xml->toString();
+    return {};
+}
+
+ApplyResult apply (te::Edit& edit, const juce::String& blob,
+                   const juce::String& expectedLogicalId)
+{
+    juce::ValueTree incoming;
+    auto r = parseIncoming (blob, expectedLogicalId, &incoming);
+    if (! r.ok)
+        return r;
+    const auto lid = r.logicalId;
 
     // Fresh copy + remap EditItemIDs so they cannot collide with anything live in
     // this engine (the peer's ids are allocator-dependent and meaningless here).
@@ -73,6 +100,11 @@ ApplyResult apply (te::Edit& edit, const juce::String& blob)
 
     r.ok = true;
     return r;
+}
+
+ApplyResult validate (const juce::String& blob, const juce::String& expectedLogicalId)
+{
+    return parseIncoming (blob, expectedLogicalId, nullptr);
 }
 
 }

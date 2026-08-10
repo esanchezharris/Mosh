@@ -189,6 +189,8 @@ if (MOSH_BUILD_APP)
         src/app/MenuController.cpp
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
+        src/app/selftest/MultiplayerAudioRefSelfTest.cpp
+        src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.
@@ -379,6 +381,11 @@ if (MOSH_BUILD_APP)
         # getUserMedia) — Obj-C++ with ARC; mirrors the NativeSpeech.mm pattern.
         target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)
         set_source_files_properties(src/webview/WebViewCameraPermission.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+
+        # WKWebView first-responder install (DOM keyboard input in the packaged app) —
+        # same retry-from-WebViewShell discipline as the camera delegate above.
+        target_sources(Mosh PRIVATE src/webview/WebViewKeyboardFocus.mm)
+        set_source_files_properties(src/webview/WebViewKeyboardFocus.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework WebKit")
 
         # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the

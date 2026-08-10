@@ -88,7 +88,10 @@ export function useTransportControls({
           if (!projectIsCurrent(projectEpoch)) return;
           const armData = arm.data as RecordingCommandData | undefined;
           if (!arm.ok || arm.command !== "arm_track" || armData?.applied !== true) {
-            showFailure(failureMessage(arm, "No audio input available — check your microphone connection and permissions."));
+            // The engine's applied:false reason is the hardcoded generic "no input
+            // device" — show the GUIDED message instead (names why AND the fix).
+            // A hard command error (arm.error) still rides through verbatim.
+            showFailure(arm.error ?? "No usable audio input — check Settings → Audio (device and input selection).");
             return;
           }
         }

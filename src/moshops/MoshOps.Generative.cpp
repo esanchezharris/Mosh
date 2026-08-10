@@ -516,7 +516,22 @@ bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, c
 {
     auto* track = clip.getTrack();
     if (track == nullptr || endSec <= startSec + 1.0e-4) return false;
+    juce::Array<te::Clip*> only; only.add (&clip);
+    return bounceRenderToWavImpl (*track, startSec, endSec, destWav, &only);
+}
 
+bool MoshOps::bounceTrackToWav (te::Track& track, double startSec, double endSec, const juce::File& destWav)
+{
+    if (endSec <= startSec + 1.0e-4) return false;
+    return bounceRenderToWavImpl (track, startSec, endSec, destWav, nullptr);
+}
+
+// The shared offline-render body behind both bounce forms (see the two wrappers).
+// `onlyTheseClips == nullptr` renders EVERY clip on the track; a non-null set restricts
+// it (the generative auto-bounce's no-neighbour-bleed rule).
+bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double endSec, const juce::File& destWav,
+                                     const juce::Array<te::Clip*>* onlyTheseClips)
+{
     auto& edit = eng.edit();
 
     // Render exclusivity (01 §5): detach the Edit from the device before an offline
@@ -539,9 +554,9 @@ bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, c
     if (params.blockSizeForAudio <= 0) params.blockSizeForAudio = 512;
     params.time = { tracktion::TimePosition::fromSeconds (startSec),
                     tracktion::TimePosition::fromSeconds (endSec) };       // the clip's edit-time window
-    juce::Array<te::Track*> just; just.add (track);
+    juce::Array<te::Track*> just; just.add (&track);
     params.tracksToDo = te::toBitSet (just);                              // ONLY this clip's track…
-    params.allowedClips.add (&clip);                                      // …and ONLY this clip (no neighbour bleed)
+    if (onlyTheseClips != nullptr) params.allowedClips = *onlyTheseClips;  // …and ONLY those clips (no neighbour bleed)
     params.usePlugins = true;            // we WANT the instrument + insert FX (that's the clip's sound)
     params.useMasterPlugins = false;     // bounce the track's own signal, not the full master mix
     params.createMidiFile = false;

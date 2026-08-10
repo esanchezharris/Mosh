@@ -111,6 +111,13 @@
   --font-body: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* ── tooltips (--tip-*) — the MoshTip skin. Same dual-shell discipline as --pr-*:
+     var()-based here so the classic light block flips them for free; re-pinned
+     wholesale under .v2-shell (00-tokens.css), which keeps dark panels in both. */
+  --tip-bg: var(--ink-raise);
+  --tip-text: var(--bone);
+  --tip-line: var(--ink-line);
+
   --head-w: 208px;
   --lane-h: 76px;
   --ruler-h: 30px;
@@ -879,6 +886,24 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .drop-overlay span { padding: 12px 22px; background: var(--ink-raise); color: var(--lime);
   border: 1px solid var(--lime-dim); border-radius: 10px; font-size: 14px; letter-spacing: 0.04em; }
 
+/* ── tooltip (MoshTip — chrome pilot) ──────────────────────────────────────────────
+   Portaled to <body> by Base UI, so z-index must clear the modal layer (.modal-backdrop
+   is 50) — a tip on a control inside a dialog is exactly where you want it. */
+.mosh-tip {
+  z-index: 80;
+  max-width: 260px;
+  padding: 6px 9px;
+  background: var(--tip-bg);
+  color: var(--tip-text);
+  border: 1px solid var(--tip-line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+  line-height: 1.45;
+  font-family: var(--font-body);
+  user-select: none;
+}
+
 /* ── modal plugin browser ───────────────────────────────────────────────────*/
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 50; }
 /* #44 — restate the classic text token: inside the v2 shell the inherited color is the
@@ -1038,6 +1063,10 @@ button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink
 .pr-head .pr-meta { color: var(--pr-text-dim); font-size: 11px; }
 .pr-vel { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--pr-text-dim); }
 .pr-vel input { accent-color: var(--pr-note); }
+/* Fixed-width readout (the same aim-tax rule as .pr-swing-val): without it the header
+   reflows as the value crosses digit counts. The whole control is visibility-toggled,
+   never unmounted — see PianoRoll.tsx. */
+.pr-vel .tc { min-width: 3ch; text-align: right; display: inline-block; }
 /* 2x3 grid: [corner | ruler] / [keys | scroll] / [vel gutter | vel lane].
    Exactly ONE element owns overflow (.pr-scroll). Its siblings are overflow:hidden
    viewports whose scroll offsets are written from .pr-scroll's onScroll — the same
@@ -1084,6 +1113,9 @@ button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink
 .pr-note.sel { background: var(--pr-note-sel); box-shadow: 0 0 0 1px var(--pr-note-ring) inset; }
 .pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
 .pr-lasso { position: absolute; background: var(--pr-lasso); border: 1px solid var(--pr-lasso-edge); pointer-events: none; }
+/* The draw-mode pencil's in-flight note (live shell): a real .pr-note under the
+   tokens, only dimmed and disarmed — it must not catch the pointerup that commits it. */
+.pr-draw-ghost { pointer-events: none; opacity: 0.45; }
 .pr-foot { padding: 7px 14px; border-top: 1px solid var(--pr-line-bar); font-size: 10px; color: var(--pr-text-dim); }
 .pr-zoom .btn { min-width: 26px; font-family: var(--font-mono); }
 /* Quantize swing (#552). The readout is mono and fixed-width so the toolbar doesn't
@@ -1119,6 +1151,22 @@ button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink
 
 /* Velocity lane — one bar per note, bottom-anchored, mirroring the drum sequencer's
    velocity graph so the two editors read as one family. */
+/* Live 12's velocity tool row — a compact strip inside the vel viewport (docked
+   piano roll only; the modal mount doesn't render it). */
+.pr-veltools {
+  display: flex; align-items: center; gap: 5px; height: 17px; padding: 0 6px;
+  background: var(--pr-vel-bg); border-bottom: 1px solid var(--pr-line-bar);
+  font-size: 9px; color: var(--pr-text-dim);
+}
+.pr-veltools-label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 8px; margin-right: 2px; }
+.pr-veltools .btn { height: 13px; padding: 0 5px; font-size: 8.5px; }
+.pr-veltools-field {
+  width: 28px; height: 13px; padding: 0 3px; text-align: right;
+  background: var(--pr-grid-bg); color: var(--pr-text); border: 1px solid var(--pr-line-bar);
+  border-radius: 3px; font: inherit; font-size: 8.5px;
+}
+.pr-veltools-field:focus { outline: 1px solid var(--pr-accent, currentColor); }
+.pr-vel-lane.with-tools { height: calc(100% - 17px); }
 .pr-vel-gutter {
   background: var(--pr-vel-bg); border-right: 1px solid var(--pr-line-bar); border-top: 1px solid var(--pr-line-bar);
   display: flex; align-items: flex-start; justify-content: flex-end; padding: 3px 4px 0 0;
@@ -1571,3 +1619,8 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .dp-insp { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--pr-line-bar); }
 .dp-field { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--pr-text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 .dp-foot { font-size: 10px; color: var(--pr-text-dim); }
+
+.pr-note.pr-loop-ghost { opacity: 0.35; pointer-events: none; border-style: dashed; }
+
+.pr-loopbar { display: inline-flex; align-items: center; min-width: 0; }
+.pr-loopbar .live-loopbar-row { padding: 0; }

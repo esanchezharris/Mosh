@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { defaultSettings, type SettingValue } from "../settings/schema";
-import { buildFeel, buildKeymap, gestureTableName } from "./config";
+import { buildFeel, buildKeymap, gestureTableName, effectiveInteractionSetting, liveKeymap, liveGestureTable } from "./config";
+import { useSettings } from "../settings/store";
 import { resolveKey } from "./keymap";
 import { FEEL_DEFAULTS } from "./feel";
 import { EditorAction as A } from "./actions";
@@ -47,5 +48,53 @@ describe("buildKeymap", () => {
   it("ignores a whitespace-only override", () => {
     const km = buildKeymap(getterFrom({ "key.play_pause": "   " }));
     expect(resolveKey(km, { key: " " })).toBe(A.PLAY_PAUSE); // still the preset Space
+  });
+});
+
+// The live shell's default interaction bundle (resolve-time only): uiShell "live"
+// plus NO explicit keymap/gestureTable override must resolve to ableton — that was
+// the wild bug: the clone booted with the mosh bundle and every Live key was dead.
+describe("effectiveInteractionSetting — the live shell's default bundle", () => {
+  const backup = { ...useSettings.getState() };
+  beforeEach(() => {
+    useSettings.setState({ template: null, values: {}, keyOverrides: {} });
+  });
+  afterAll(() => {
+    useSettings.setState(backup, true);
+  });
+
+  it("live shell + no overrides at all → ableton (absence of uiShell means live: the schema default)", () => {
+    expect(effectiveInteractionSetting("keymap")).toBe("ableton");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("ableton");
+    // …and the resolution reaches the ACTIVE bundle, not just the getter
+    expect(resolveKey(liveKeymap(), { key: "e", metaKey: true })).toBe(A.SPLIT);
+    expect(liveGestureTable().some((r) => r.region === "clip.header")).toBe(true);
+  });
+
+  it("live shell + explicit 'mosh' keymap → mosh wins (an explicit choice, even the default value)", () => {
+    useSettings.setState({ values: { uiShell: "live", keymap: "mosh" } });
+    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
+    expect(resolveKey(liveKeymap(), { key: "e", metaKey: true })).toBeNull();
+    // gestureTable is independently unset → still ableton
+    expect(effectiveInteractionSetting("gestureTable")).toBe("ableton");
+  });
+
+  it("live shell + a non-default explicit bundle → the user's bundle wins", () => {
+    useSettings.setState({ values: { uiShell: "live", keymap: "fl", gestureTable: "fl" } });
+    expect(effectiveInteractionSetting("keymap")).toBe("fl");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("fl");
+  });
+
+  it("other shells + unset → the schema default (mosh), unchanged", () => {
+    useSettings.setState({ values: { uiShell: "v2" } });
+    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("mosh");
+    useSettings.setState({ values: { uiShell: "classic" } });
+    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
+  });
+
+  it("non-interaction ids pass straight through", () => {
+    expect(effectiveInteractionSetting("feel.dragThreshold")).toBe(FEEL_DEFAULTS.dragThreshold);
+    expect(effectiveInteractionSetting("uiShell")).toBe("live"); // the schema default itself
   });
 });

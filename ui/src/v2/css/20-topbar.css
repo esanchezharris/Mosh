@@ -252,6 +252,28 @@
    supplies `bottom` instead of `top`. Both come from the inline style. */
 .v2-menu-panel-fixed { position: fixed; right: auto; top: auto; }
 
+/* Floating variant — for menus migrated to MoshMenu (Base UI). The library's Positioner
+   owns placement (flip / shift / viewport clamp), so this skin carries NO positioning at
+   all: no absolute/fixed, no top/right — adding any would fight the transform the
+   Positioner writes. Visuals mirror .v2-menu-panel; keyboard highlight (and hover, via
+   Base UI) lands on [data-highlighted], mirroring the :hover rule above. */
+.v2-menu-panel-floating {
+  z-index: 60;
+  min-width: 232px;
+  padding: 8px;
+  /* The Positioner measures the space in the flip direction and publishes it; without
+     this clamp a menu taller than that space overflows the viewport edge (the flipped
+     add-track menu at a short window ran 7px off the top — v2-shell.spec pins it). */
+  max-height: var(--available-height, none);
+  overflow-y: auto;
+  background: var(--v2-surface-2);
+  border: 1px solid var(--v2-line-strong);
+  border-radius: 14px;
+  box-shadow: var(--v2-shadow);
+  backdrop-filter: blur(20px);
+}
+.v2-menu-panel-floating .v2-menu button[data-highlighted] { background: var(--v2-accent-soft); }
+
 /* REC-001 — the take-behaviour panel. A settings sheet rather than a menu: rows are
    label-over-hint with their control on the right, so each toggle explains what it does
    without a tooltip. Every colour is a token (the theme guard rejects raw hex). */

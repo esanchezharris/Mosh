@@ -55,12 +55,11 @@ namespace mosh
         end-to-end. presence/selection/webrtc/locks/mp_state are UNCHANGED (still
         applied immediately inline) — they are not state that must serialize
         against a stem transfer.
-      - The host's bootstrap answer is split: the message-thread part
-        (MoshOps::serializeProjectForBootstrapAnswer, called from provideBootstrap_)
-        does the engine-touching content-addressing/serialize and returns
-        {tracks, annotations, stemFiles[]} WITHOUT uploading; one worker job then
-        uploads every stem THEN publishes bootstrap_state (in-job ordering
-        guarantees the guest's prefetch finds the blobs already on the relay).
+      - The host's bootstrap answer uses two ordered jobs: a message-thread apply
+        barrier captures {tracks, annotations, stemFiles[]} only after every prior
+        relay-ordered state apply, then a worker job uploads every stem and publishes
+        bootstrap_state (in-job ordering guarantees the guest's prefetch finds the
+        blobs already on the relay).
       - Why a DEDICATED worker rather than reusing the poll thread: a multi-minute
         transfer on the poll thread would stop it from calling client_.poll()
         (no /mp/events heartbeat) and so from touch()-ing this peer's own held
@@ -93,22 +92,30 @@ public:
     // P6 bootstrap: host serializes the whole project (returns the bundle);
     // joiner adopts a received bundle.
     using ProvideBootstrapFn = std::function<juce::var()>;
-    using ApplyBootstrapFn   = std::function<void (const juce::var& bundle)>;
+    using ValidateBootstrapFn = std::function<juce::String (const juce::var& bundle)>;
+    using ApplyBootstrapFn   = std::function<juce::var (const juce::var& bundle)>;
     // Apply a peer's session-global scalar op ({command, args}) locally.
     using ApplyStructuralFn  = std::function<void (const juce::var& msg)>;
 
     MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
-                        ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap,
+                        ProvideBootstrapFn provideBootstrap, ValidateBootstrapFn validateBootstrap,
+                        ApplyBootstrapFn applyBootstrap,
                         ApplyStructuralFn applyStructural);
     ~MultiplayerSession();
 
-    /** Create a room (this peer joins) + start polling. Returns the code, or "". */
+    /** Create a room (this peer joins) + start polling. Returns the code, or "".
+        An active room must be left explicitly before creating another. */
     juce::String createSession (const juce::String& name, const juce::String& color);
-    /** Join a room by code + start polling. */
+    /** Join a room by code + start polling. An active room must be left first. */
     bool joinSession (const juce::String& code, const juce::String& name, const juce::String& color);
     /** Stop polling + leave the room; aborts any in-flight/queued stem transfer
         (PR-2) before pushing an inactive mp_state. */
     void leaveSession();
+
+    /** Request a fresh full-project bootstrap. A newer request supersedes any
+        unanswered older request, keeping correlation bounded and legacy fallback
+        unambiguous. */
+    void requestBootstrap();
 
     bool         active()   const { return running_.load(); }
     juce::String roomCode() const { return client_.roomCode(); }
@@ -117,6 +124,11 @@ public:
     /** True when MOSH_MP_SYNC_TRANSFER=1 pins every transfer path back to fully
         synchronous/inline behaviour (the PR-2 kill switch). */
     bool syncTransferMode() const { return syncMode_; }
+
+    /** Test seam: replace the dispatcher used by subsequently-created transfer
+        queues. Must be called while inactive. Production keeps the default JUCE
+        message-thread dispatcher. */
+    void setTransferDispatcherForSelfTest (TransferQueue::Dispatcher dispatcher);
 
     /** PR-2: snapshot the directory stem transfers resolve `audio/by-hash/` under
         (the edit file's parent dir) for the worker thread to use later — call
@@ -171,9 +183,14 @@ public:
     void releaseStem (const juce::String& hash);
 
 private:
+    using SessionGeneration = std::shared_ptr<std::atomic<bool>>;
+
+    static bool sessionIsActive (const SessionGeneration& generation);
+    void beginSessionGeneration();
+    void invalidateSessionGeneration();
     void startPoll();
     void stopPoll();
-    void pollLoop();
+    void pollLoop (SessionGeneration generation);
 
     // PR-2 helpers (defined in the .cpp; kept private -- MoshOps only sees the
     // public surface above).
@@ -192,20 +209,25 @@ private:
     // explicitly aborting one) -- the null-safe abort-check every prefetch closure
     // polls, so a stale in-flight transfer notices a leaveSession() promptly.
     bool transferAborting() const;
+    void clearPendingBootstrapRequests();
+    bool acceptBootstrapState (const juce::var& msg, const juce::String& self, int frameSequence);
 
     MultiplayerClient client_;
     ApplyCommitFn      applyCommit_;
     EmitFn             emit_;
     SyncLocksFn        syncLocks_;
     ProvideBootstrapFn provideBootstrap_;
+    ValidateBootstrapFn validateBootstrap_;
     ApplyBootstrapFn   applyBootstrap_;
     ApplyStructuralFn  applyStructural_;
     std::map<juce::String, int> heldEpochs_;   // logicalId -> granted epoch (commit fencing); message-thread only
     OutboundQueue      outbox_;                 // message thread enqueues; poll thread publishes
     std::thread        pollThread_;
     std::atomic<bool>  running_ { false };
+    SessionGeneration  sessionGeneration_;       // unique cancellation identity for one create/join lifetime
 
     const bool         syncMode_;                // MOSH_MP_SYNC_TRANSFER kill switch, latched at construction
+    TransferQueue::Dispatcher transferDispatcher_;
     // PR-2 — dedicated stem-transfer worker. A TransferQueue is NOT restartable
     // after abort() (by design — see TransferQueue.h), so this is recreated fresh
     // by createSession()/joinSession() and torn down by leaveSession() (which
@@ -218,6 +240,9 @@ private:
 
     std::mutex              inFlightMutex_;
     std::set<juce::String>  inFlightStems_;         // guarded by inFlightMutex_ -- see claimStem/releaseStem doc
+
+    std::mutex                  bootstrapMutex_;
+    std::map<juce::String, int> pendingBootstrapRequests_; // requestId -> publish sequence, consumed once
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MultiplayerSession)
 };

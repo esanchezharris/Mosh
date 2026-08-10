@@ -7,7 +7,9 @@
 // it, and effects.ts is itself imported by the settings store, so a settings import
 // here would create an evaluation cycle. Keep it dependency-free.
 
-export type ShellId = "classic" | "v2";
+// "live" is the additive Live-12-Arrangement clone shell (ui/src/live) — same
+// registration seam as v2: a uiShell enum value plus this dev-only override.
+export type ShellId = "classic" | "v2" | "live";
 
 export function devShellOverride(): ShellId | null {
   // import.meta.env may be undefined in some non-Vite contexts; guard defensively.
@@ -19,6 +21,7 @@ export function devShellOverride(): ShellId | null {
   try {
     const q = new URLSearchParams(window.location.search).get("shell");
     if (q === "v2") return "v2";
+    if (q === "live") return "live";
     if (q === "classic" || q === "legacy") return "classic"; // accept "legacy" as an alias
     return null;
   } catch {
@@ -29,5 +32,9 @@ export function devShellOverride(): ShellId | null {
 // Resolve the active shell from an explicit uiShell value, honoring the dev override.
 // Pure (no store read) so both the reactive store path and effects.ts can share it.
 export function resolveShell(uiShell: unknown): ShellId {
-  return devShellOverride() ?? (uiShell === "v2" ? "v2" : "classic");
+  const over = devShellOverride();
+  if (over) return over;
+  if (uiShell === "v2") return "v2";
+  if (uiShell === "live") return "live";
+  return "classic";
 }

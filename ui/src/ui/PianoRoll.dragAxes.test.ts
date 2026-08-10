@@ -181,6 +181,19 @@ describe("piano-roll drag axis independence", () => {
     expect(clickGrid(1.3, true)?.start).toBeCloseTo(1.3, 6);
   });
 
+  it("a drawn note starts at the grid line AT OR BELOW the click, never ahead of it", () => {
+    // The "half a beat off the grid" bug: entry used round-to-nearest, so a click
+    // at beat 1.6 on the 1-beat grid drew the note at beat 2 — up to half a step
+    // from the pointer, and AHEAD of it. Entry floors, like every reference DAW's
+    // pencil; round stays only on the drag paths (see the tests above).
+    mount();
+    expect(clickGrid(1.6)?.start).toBe(1);
+    exec.mockClear();
+    expect(clickGrid(1.9)?.start).toBe(1);
+    exec.mockClear();
+    expect(clickGrid(2.0)?.start).toBe(2);
+  });
+
   it("a vertical wiggle on the resize grip does not quantize an off-grid length", () => {
     mount();
     expect(dragGrip(0, 3)).toBeUndefined();

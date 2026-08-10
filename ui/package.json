@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Mosh arrangement UI \u2014 React/Vite in a JUCE 8 WebView. Swappable frontend (03).",
+  "description": "Mosh arrangement UI — React/Vite in a JUCE 8 WebView. Swappable frontend (03).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -35,6 +35,7 @@
     "synthesize": "tsx scripts/synthesizeDriver.mts"
   },
   "dependencies": {
+    "@base-ui/react": "^1.7.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

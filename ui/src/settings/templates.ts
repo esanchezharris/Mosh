@@ -63,6 +63,22 @@ export const TEMPLATES: Template[] = [
       "feel.dragThreshold": 3, "feel.edgeGrabPx": 7, "feel.snapStrength": 1,
     },
   },
+  {
+    // The Live-12 Arrangement-View clone (ui/src/live). Unlike the five DAW templates
+    // above — which re-skin whichever shell is mounted — this one also pins uiShell:
+    // the clone IS its own shell, so choosing the template switches the interface AND
+    // loads the Ableton interaction bundle (gesture table + keymap + feel) with it.
+    // Reversible via Settings → Layout → Interface (the other templates deliberately
+    // do NOT pin uiShell, so they never move you OFF this shell on their own).
+    name: "live",
+    label: "Live (clone)",
+    values: {
+      uiShell: "live",
+      skin: "ableton", theme: "dark", layout: "ableton",
+      gestureTable: "ableton", keymap: "ableton",
+      "feel.dragThreshold": 4, "feel.edgeGrabPx": 5, "feel.snapStrength": 1,
+    },
+  },
 ];
 
 const BY_NAME: Record<string, Template> = Object.fromEntries(

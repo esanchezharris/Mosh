@@ -27,13 +27,20 @@ namespace trackcommit
         juce::String error;
     };
 
+    /** Parse and validate a serialized track without mutating an Edit. */
+    ApplyResult validate (const juce::String& blob,
+                          const juce::String& expectedLogicalId = {});
+
     /** Apply a serialized track blob to `edit`: find the local track with the same
         moshLogicalId and REPLACE it (remove + re-add a remapped copy at the same
         position), or CREATE it if absent. ALL ValueTree mutations use a nullptr
         UndoManager — the local user's undo stack is never touched — and nothing is
         emitted (no relay echo; the caller repaints locally by other means).
         EditItemIDs are remapped fresh to avoid collisions; moshLogicalId (a plain
-        property, not an EditItemID) is preserved. */
-    ApplyResult apply (te::Edit& edit, const juce::String& blob);
+        property, not an EditItemID) is preserved. When expectedLogicalId is
+        non-empty, it must match the embedded moshLogicalId before any remap or
+        splice; empty preserves the legacy internal blob-only caller contract. */
+    ApplyResult apply (te::Edit& edit, const juce::String& blob,
+                       const juce::String& expectedLogicalId = {});
 }
 }

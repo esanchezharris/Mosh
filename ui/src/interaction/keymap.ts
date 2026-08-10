@@ -13,6 +13,7 @@ export type Keymap = Partial<Record<Action, KeyCombo | KeyCombo[]>>;
 // (a DOM KeyboardEvent satisfies it).
 export interface KeyEventLike {
   key: string;
+  code?: string; // physical key ("KeyF") — real KeyboardEvents carry it; the Alt-letter fix reads it
   shiftKey?: boolean;
   altKey?: boolean;
   metaKey?: boolean;
@@ -28,6 +29,18 @@ export function normalizeKeyName(key: string): string {
   return key;
 }
 
+// macOS Option TRANSFORMS letter keys: ⌥f sends key "ƒ", ⌥⇧f sends "Ï" — never the
+// letter an Alt-binding names, so "Mod+Shift+Alt+F" could never match a real ⌥⇧⌘F
+// keydown. The physical `code` ("KeyF") is layout- and transform-proof, so with Alt
+// held the letter comes from the code. Letters only: digits/punctuation keep `key`
+// (no binding names the transformed forms either, but non-Alt behavior is untouched
+// by construction — shifted symbols like + vs = ride `key` and stay exactly as before).
+function altLetterFromCode(e: KeyEventLike): string | null {
+  if (!e.altKey || !e.code) return null;
+  const m = /^Key([A-Z])$/.exec(e.code);
+  return m ? m[1] : null;
+}
+
 // A keyboard event → canonical combo string ("Mod+Shift+Z"). A lone modifier press
 // yields "" so the resolver ignores it (no action fires while just holding Cmd).
 export function eventToCombo(e: KeyEventLike): KeyCombo {
@@ -36,7 +49,12 @@ export function eventToCombo(e: KeyEventLike): KeyCombo {
   if (e.metaKey || e.ctrlKey) parts.push("Mod");
   if (e.shiftKey) parts.push("Shift");
   if (e.altKey) parts.push("Alt");
-  parts.push(normalizeKeyName(e.key));
+  // ⇧= sends the shifted SYMBOL (key "+", US layout), but ZOOM_IN binds the physical
+  // ⌘⇧= chord as "Mod+Shift+=" — normalize the Equal code's shifted form back to "=".
+  // Shift-only and non-Alt (the Alt pin keeps its transformed key); without Shift the
+  // key already arrives as "=", so everything else rides e.key byte-identically.
+  const shiftedEqual = e.shiftKey && !e.altKey && e.code === "Equal";
+  parts.push(altLetterFromCode(e) ?? (shiftedEqual ? "=" : normalizeKeyName(e.key)));
   return parts.join("+");
 }
 
@@ -93,6 +111,7 @@ const A = EditorAction;
 // home-end/tool-switch). The live three are byte-for-byte the same combos.
 const MOSH: Keymap = {
   [A.PLAY_PAUSE]: "Space",
+  [A.CONTINUE_PLAY]: "Shift+Space",
   [A.RECORD]: "R",
   [A.UNDO]: "Mod+Z",
   [A.REDO]: "Mod+Shift+Z",
@@ -133,7 +152,61 @@ const MOSH: Keymap = {
 // keyboard, which owns single letters whenever it is armed. Nothing is bound here that
 // does not have a live handler: a preset entry with no action behind it is a key that
 // silently does nothing.
-const ABLETON: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.RECORD]: "F9" };
+//
+// The Live-12 arrangement block below (SPEC §8) IS global — every handler exists (the
+// shared dispatcher gates Mod+1..4 and 0 to the arrangement while an editor is open,
+// so the editor's own layer keeps them there).
+//
+// The MOSH core binds bare 1/2/3 to its modal tools (Move/Split/Range). Live binds
+// NOTHING there — in the clone those digits were silently switching a modal tool
+// nobody asked for. The ableton preset drops exactly those three (kept everywhere else).
+const MOSH_NO_MODAL_TOOLS: Keymap = { ...MOSH };
+delete MOSH_NO_MODAL_TOOLS[A.TOOL_MOVE];
+delete MOSH_NO_MODAL_TOOLS[A.TOOL_SPLIT];
+delete MOSH_NO_MODAL_TOOLS[A.TOOL_RANGE];
+
+const ABLETON: Keymap = {
+  ...MOSH_NO_MODAL_TOOLS,
+  [A.SPLIT]: "Mod+E",
+  [A.RECORD]: "F9",
+  [A.LOOP_TOGGLE]: "Mod+L",
+  [A.SELECT_LOOP]: "Mod+Shift+L",
+  [A.RENAME]: "Mod+R",
+  // Live's menu says ⌘0 (Edit → Activate/Deactivate Clip(s)); the arrangement also
+  // accepts plain 0 — both bound, matching Live.
+  [A.DEACTIVATE]: ["0", "Mod+0"],
+  [A.QUANTIZE]: "Mod+U",
+  [A.SETTINGS]: "Mod+,",
+  [A.AUTOMATION_VIEW]: "A",
+  [A.SELECT_ALL]: "Mod+A",
+  [A.INVERT_SELECTION]: "Mod+Shift+A",
+  [A.INSERT_AUDIO_TRACK]: "Mod+T",
+  [A.INSERT_MIDI_TRACK]: "Mod+Shift+T",
+  [A.INSERT_MIDI_CLIP]: "Mod+Shift+M",
+  [A.NUDGE_UP]: "ArrowUp",
+  [A.NUDGE_DOWN]: "ArrowDown",
+  [A.GROUP]: "Mod+G",
+  [A.UNGROUP]: "Mod+Shift+G",
+  [A.INSERT_SILENCE]: "Mod+I",
+  [A.CREATE_FADE]: "Alt+Mod+F",
+  [A.CONSOLIDATE]: "Mod+J",
+  [A.CROP]: "Mod+Shift+J",
+  [A.BOUNCE]: "Mod+B",
+  [A.FREEZE_TRACK]: "Mod+Shift+Alt+F",   // ⌥⇧⌘F — Live 12's Freeze Track (toggle)
+  [A.FIND]: "Mod+F",
+  [A.GRID_NARROW]: "Mod+1",
+  [A.GRID_WIDEN]: "Mod+2",
+  [A.GRID_TRIPLET]: "Mod+3",
+  [A.SNAP_TOGGLE]: "Mod+4",
+  // ⌘+ in both physical forms (⌘= and ⌘⇧=) — a chord nobody should have to think about.
+  [A.ZOOM_IN]: ["Mod+=", "Mod+Shift+="],
+  [A.ZOOM_OUT]: "Mod+-",
+  // X is Live's zoom-BACK (no history exists yet — PARITY.md); Z is View › Zoom to
+  // Time Selection. Both land on the same zoom-to-fit until a zoom history exists.
+  [A.ZOOM_BACK]: "X",
+  [A.ZOOM_TO_SELECTION]: "Z",
+  [A.EXPAND_CLIP]: "Alt+Mod+E",
+};
 const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
 
 // Pro Tools — Separate Clip = ⌘E; Selector = F7, Grabber = F8; Record = ⌘Space

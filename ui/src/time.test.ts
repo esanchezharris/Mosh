@@ -224,3 +224,17 @@ describe("gridLines", () => {
     expect(Array.isArray(marks)).toBe(true);
   });
 });
+
+describe("snapTimeMap — triplet grid (⌘3, Live's Triplet Grid)", () => {
+  const map = tempoMapFrom({ tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4 });
+  it("shortens every step to 2/3 (1/4T = 1/3s at 120bpm)", () => {
+    // straight 1/4 grid: 0.5s steps; triplet: 0.5 * 2/3 = 1/3s steps
+    expect(snapTimeMap(map, 0.4, "1/4", true)).toBeCloseTo(1 / 3, 9);
+    expect(snapTimeMap(map, 0.6, "1/4", true)).toBeCloseTo(2 / 3, 9);
+    expect(snapTimeMap(map, 0.1, "1/4", true)).toBeCloseTo(0, 9);
+  });
+  it("triplet=false is byte-identical to the omitted argument", () => {
+    expect(snapTimeMap(map, 0.4, "1/4", false)).toBe(snapTimeMap(map, 0.4, "1/4"));
+    expect(snapTimeMap(map, 0.74, "1/8", false)).toBe(snapTimeMap(map, 0.74, "1/8"));
+  });
+});

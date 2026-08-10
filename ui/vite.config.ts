@@ -77,6 +77,13 @@ function moshiBrain(env: Record<string, string>): Plugin {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       server.middlewares.use("/api/brain/chat", (req: any, res: any) => {
         if (req.method !== "POST") return send(res, 405, { error: "POST only" });
+        // Hermetic e2e (playwright.config's webServer sets this): the suite's contract
+        // is "the brain is unreachable under Playwright" (agent-loop.spec relies on the
+        // chatWithFallback → loopBrainMock path; everything else falls back to the demo
+        // brain). With the owner's real provider keys in ui/.env.local the endpoint is
+        // LIVE — a real LLM answers with non-deterministic plans, and a hung upstream
+        // costs seconds — so e2e forces the fast failure the specs were written for.
+        if (env.MOSH_E2E_HERMETIC_BRAIN) return send(res, 503, { error: "hermetic e2e brain — unreachable by contract" });
         let raw = "";
         req.on("data", (c: unknown) => (raw += c));
         req.on("end", async () => {

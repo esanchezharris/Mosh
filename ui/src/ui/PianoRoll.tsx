@@ -4,7 +4,7 @@
 // Note positions are in BEATS (the seam stays in musical/seconds terms); the grid
 // is derived through time.ts from the clip-local meter.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import type { MidiNote } from "../types";
@@ -14,13 +14,17 @@ import { liveFeel } from "../interaction/config";
 import { DrumSequencer } from "./DrumSequencer";
 import { DrumPads } from "./drum/DrumPads";
 import { centerScrollTopForNotes } from "./pianoRollScroll";
-import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx } from "./pianoRollGeom";
+import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx, snapDownBeat } from "./pianoRollGeom";
 import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
+import { editorKeyFocused } from "../hooks/editorFocus";
 import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
-import { moveEdits, resizeEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, type GestureGeom } from "./pianoRollEdit";
+import { moveEdits, resizeEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
+import { expandLoopedNotes } from "../midi/midiLoop";
+import { ClipLoopBar } from "../live/ClipLoopBar";
 import { marqueeHit, toggleSelection, selectAtPitch, selectAll, invertSelection, stepSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
 import { notePreview } from "../audio/notePreview";
+import { MoshTip } from "../chrome/Tooltip";
 import { wireNotePreview } from "../audio/wireNotePreview";
 import { qwertyState, onQwertyChange, setQwertyActive } from "../hooks/useQwertyMidi";
 import type { QwertyState } from "../interaction/qwertyMidi";
@@ -28,6 +32,11 @@ import { stepReduce, STEP_INITIAL, type StepState } from "./stepRecord";
 import { visiblePitches, pitchAxis, PITCH_MIN, PITCH_MAX, type FoldMode } from "./pianoRollView";
 import { copyNotes, pasteAt, duplicateAfter, setClipboard, getClipboard } from "./pianoRollClipboard";
 import { effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
+// Live shell's draw mode (the control-bar pencil, live/liveState.ts). Read here
+// rather than passed as a prop so the docked editor and the control bar can't drift;
+// the slice defaults false and only the live shell ever toggles it, so the modal
+// mounts in classic/v2 are never affected. `docked &&` below is the second gate.
+import { useLive } from "../live/liveState";
 
 const ROW_H = 15;
 // The roll spans the FULL MIDI range: it used to stop at 36..96, so notes outside that
@@ -49,7 +58,51 @@ type Drag = {
 };
 type GridDrag = { pointerId: number; x0: number; y0: number; moved: boolean };
 
-export function PianoRoll() {
+// `docked` is the live shell's clip-view dock (ui/src/live/DetailDock.tsx): the same
+// editor, minus the modal trappings — no backdrop, no close-on-backdrop, no pop-in
+// animation (live.css's `.live-shell .pr.docked` owns the paint side). Escape still
+// clears editingClipId through the shared escape stack either way, and classic/v2
+// mount this with the default (modal) — their behaviour is byte-identical.
+// A small numeric field for the tool rows: uncontrolled, commits on Enter/blur.
+// Defaults keep the velocity row's 1..127 integer clamp byte-identical; the
+// Transform row's fields opt into signed (semitones) or decimal (beats) domains.
+function ToolField({ testId, ariaLabel, value, onCommit, min = 1, max = 127, integer = true }: {
+  testId: string;
+  ariaLabel: string;
+  value: number;
+  onCommit: (v: number) => void;
+  min?: number;
+  max?: number;
+  integer?: boolean;
+}) {
+  const commit = (el: HTMLInputElement) => {
+    let v = Number(el.value);
+    if (Number.isFinite(v)) {
+      if (integer) v = Math.round(v);
+      onCommit(Math.min(max, Math.max(min, v)));
+    }
+    else el.value = String(value);
+  };
+  return (
+    <input
+      className="pr-veltools-field"
+      data-testid={testId}
+      aria-label={ariaLabel}
+      inputMode="numeric"
+      key={value}
+      defaultValue={value}
+      onKeyDown={(e) => { if (e.key === "Enter") { commit(e.currentTarget); e.currentTarget.blur(); } e.stopPropagation(); }}
+      onBlur={(e) => commit(e.currentTarget)}
+    />
+  );
+}
+
+export function PianoRoll({ docked = false, expandControl }: {
+  docked?: boolean;
+  /** Live's Expanded Clip View (⌥⌘E) — the live shell's docked mount passes this;
+   *  the modal mounts (classic/v2) never do, so their header is byte-identical. */
+  expandControl?: { expanded: boolean; onToggle: () => void };
+}) {
   const editingClipId = useStore((s) => s.editingClipId);
   const close = useStore((s) => s.closePianoRoll);
   const snapshot = useStore((s) => s.snapshot);
@@ -98,12 +151,44 @@ export function PianoRoll() {
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
   const [previews, setPreviews] = useState<Map<number, MidiNote>>(() => new Map());
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // Live draw mode (pencil): while a draw drag is in flight this is the note it will
+  // commit on release, rendered as a ghost. null between gestures and whenever the
+  // marquee owns the drag (draw mode off / the modal mounts).
+  const [drawGhost, setDrawGhost] = useState<{ start: number; length: number; pitch: number } | null>(null);
+  // Always subscribed (rules of hooks); only the docked mount acts on it.
+  const liveDraw = useLive((s) => s.drawMode);
+  const drawActive = docked && liveDraw;
   const [velocityDraft, setVelocityDraft] = useState<number | null>(null);
   // In-flight velocity-lane edits, keyed by note index. The REF is authoritative and the
   // state is only a mirror for rendering: pointerdown/move/up can arrive in one
   // synchronous batch, and React would not have flushed a state update before the commit
   // in pointerup read it back — so a whole drag could commit nothing.
   const [velDrafts, setVelDrafts] = useState<Record<number, number>>({});
+  // Live 12 velocity tool row field state — declared UP HERE, above the
+  // `if (!clip) return null` guard (hooks must run on every render, clip or not).
+  const [randAmt, setRandAmt] = useState(16);
+  const [devAmt, setDevAmt] = useState(16);
+  const [rampLo, setRampLo] = useState(1);
+  const [rampHi, setRampHi] = useState(127);
+  // Live 12 Transform row field state (Humanize amount, Live's 10% default) —
+  // same hook-order rule as the velocity fields above.
+  const [humAmt, setHumAmt] = useState(10);
+  // Set Length (null = follow the current grid step) and Add Interval (Live's
+  // fifth default) — the straggler fields of Live's Transform panel cluster.
+  const [lenBeats, setLenBeats] = useState<number | null>(null);
+  const [intervalSemis, setIntervalSemis] = useState(7);
+  // MIDI clip loop ghosts (Live's brace repeats) — same hook-order rule: computed
+  // above the clip guard, null-safe; display-only, never part of the edit index map.
+  const clipBeatsForLoop = clip ? clip.length / Math.max(1.0e-9, beatSeconds(meterAt(tempoMapFrom(snapshot?.session), clip.start))) : 0;
+  const loopGhosts = useMemo(
+    () => expandLoopedNotes(
+      clip?.notes ?? [],
+      clipBeatsForLoop,
+      clip?.midiLoopStartBeats ?? 0,
+      clip?.midiLoopLengthBeats ?? 0,
+    ).filter((n) => n.ghost),
+    [clip?.notes, clipBeatsForLoop, clip?.midiLoopStartBeats, clip?.midiLoopLengthBeats],
+  );
   const velDragRef = useRef<{ active: boolean; startX: number; drafts: Map<number, number> }>({ active: false, startX: 0, drafts: new Map() });
   const dragRef = useRef<Drag | null>(null);
   const gridDragRef = useRef<GridDrag | null>(null);
@@ -144,7 +229,10 @@ export function PianoRoll() {
   useEffect(() => { setMode("piano"); }, [editingClipId]);
   // Move focus into the dialog on open so aria-modal is honest (outside is inert) and
   // keyboard users land inside the editor rather than on the trigger behind the backdrop.
-  useEffect(() => { if (editingClipId) panelRef.current?.focus(); }, [editingClipId]);
+  // The DOCKED mount skips this: it is not modal, and stealing focus from the clip the
+  // user just clicked is how the arrangement lost every focus-scoped key (the
+  // editorKeyFocused() gates in useKeyboardShortcuts exist on this rule).
+  useEffect(() => { if (editingClipId && !docked) panelRef.current?.focus(); }, [editingClipId, docked]);
   // On open (and when returning to Piano from the Drums view), centre the
   // vertical scroll on the clip's notes so off-screen material (e.g. a low
   // bassline near E2/A2) is framed instead of an apparently empty grid scrolled
@@ -233,6 +321,7 @@ export function PianoRoll() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      if (docked && !editorKeyFocused()) return;
       const mod = e.metaKey || e.ctrlKey;
       const sel = selectedNotes;
       const take = () => { e.preventDefault(); e.stopPropagation(); };
@@ -480,7 +569,15 @@ export function PianoRoll() {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, e.clientX - rect.left), y = Math.max(0, e.clientY - rect.top);
     if (Math.hypot(x - gd.x0, y - gd.y0) > 4) gd.moved = true;
-    if (gd.moved) setLasso({ x0: gd.x0, y0: gd.y0, x1: x, y1: y });
+    if (!gd.moved) return;
+    if (drawActive) {
+      // Draw mode: the drag paints a note, not a marquee. The ghost tracks the drag
+      // through the same pure helper the commit uses, so preview and result agree.
+      const span = drawNoteSpan({ downBeat: gd.x0 / beatPx, currentBeat: x / beatPx, stepBeats, bypassSnap: e.altKey });
+      setDrawGhost({ ...span, pitch: lockPitch(pitchAt(gd.y0)) });
+      return;
+    }
+    setLasso({ x0: gd.x0, y0: gd.y0, x1: x, y1: y });
   };
   const onGridUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
@@ -519,11 +616,24 @@ export function PianoRoll() {
     const x = Math.max(0, e.clientX - rect.left), y = Math.max(0, e.clientY - rect.top);
     const wasMoved = gd.moved || Math.hypot(x - gd.x0, y - gd.y0) > 4;
     setLasso(null);
+    setDrawGhost(null);
     if (!wasMoved) {
-      const start = Math.max(0, snapBeat(x / beatPx, e.altKey)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
+      // Draw-start FLOORS to the grid line at/below the pointer (snapDownBeat — see
+      // pianoRollGeom.ts for why round here drops the note half a step from the click).
+      const start = Math.max(0, e.altKey ? x / beatPx : snapDownBeat(x / beatPx, stepBeats)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
       // AUDITION 2/4 — hear what you just drew.
       if (auditionTrackId) notePreview.tap(auditionTrackId, pitch);
       void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
+      return;
+    }
+    // Draw mode: a moved drag commits the painted note (floor-snapped start, snapped
+    // length ≥ one grid step — drawNoteSpan owns the arithmetic) instead of opening
+    // the marquee. The pitch comes from where the drag STARTED, like every DAW's pencil.
+    if (drawActive) {
+      const span = drawNoteSpan({ downBeat: gd.x0 / beatPx, currentBeat: x / beatPx, stepBeats, bypassSnap: e.altKey });
+      const pitch = lockPitch(pitchAt(gd.y0));
+      if (auditionTrackId) notePreview.tap(auditionTrackId, pitch);
+      void exec("add_note", { clipId: clip.id, pitch, start: span.start, length: span.length, velocity: 100 });
       return;
     }
     // Shift-marquee ADDS to the selection rather than replacing it, so several sweeps can
@@ -535,7 +645,7 @@ export function PianoRoll() {
   // stuck-note release is one line rather than one per exit.
   const onGridCancel = () => {
     dragRef.current = null; gridDragRef.current = null;
-    setPreviewNotes(new Map()); setLasso(null);
+    setPreviewNotes(new Map()); setLasso(null); setDrawGhost(null);
     notePreview.release("pr-drag");
   };
 
@@ -603,6 +713,29 @@ export function PianoRoll() {
   const selNote = selectedIndex != null ? (clip.notes ?? []).find((n) => n.i === selectedIndex) : undefined;
   const velocityValue = velocityDraft ?? selNote?.velocity ?? 100;
   const setDraftVelocity = (value: number) => { const next = Math.round(Math.min(127, Math.max(1, value))); velocityDraftRef.current = next; setVelocityDraft(next); };
+
+  // Live 12 velocity tool row state + the single-command apply (one undo step).
+  const applyVelocityTool = (mode: "randomize" | "ramp" | "deviate") => {
+    const args: Record<string, unknown> = { clipId: clip.id, mode };
+    if (mode === "ramp") { args.lo = rampLo; args.hi = rampHi; }
+    else args.amount = mode === "randomize" ? randAmt : devAmt;
+    // Live's rule: the selection if any, else every note in the clip.
+    if (selectedNotes.size > 0) args.noteIndexes = [...selectedNotes];
+    void exec("transform_velocities", args);
+  };
+  // Live 12 Transform tool row — same single-command apply (one undo step), same
+  // target rule (the selection if any, else every note). The engine owns the math.
+  const applyTransformTool = (mode: "reverse" | "invert" | "legato" | "humanize" | "x2" | "d2"
+                                    | "setLength" | "addInterval" | "fitToScale") => {
+    const args: Record<string, unknown> = { clipId: clip.id, mode };
+    if (mode === "humanize") args.amount = humAmt;
+    // Set Length defaults to the CURRENT GRID STEP (Live's field follows the grid);
+    // a typed value sticks until cleared. Snap off ⇒ 1 beat.
+    if (mode === "setLength") args.lengthBeats = lenBeats ?? (stepBeats > 0 ? stepBeats : 1);
+    if (mode === "addInterval") args.semitones = intervalSemis;
+    if (selectedNotes.size > 0) args.noteIndexes = [...selectedNotes];
+    void exec("transform_notes", args);
+  };
   const commitVelocity = () => {
     if (!selNote) return;
     const next = velocityDraftRef.current;
@@ -611,11 +744,9 @@ export function PianoRoll() {
     void exec("set_note", { clipId: clip.id, noteIndex: selNote.i, velocity: next });
   };
 
-  return (
-    <div className="modal-backdrop" onClick={close}>
-      <div className="pr" data-testid="piano-roll" role="dialog" aria-modal="true"
-        ref={panelRef} tabIndex={-1} style={{ outline: "none" }}
-        aria-label={`${mode === "drums" ? "Drum machine" : "Piano roll"} · ${clip.name}`} onClick={(e) => e.stopPropagation()}>
+  // The panel's content is identical in both mounts; only the frame differs.
+  const prContent = (
+    <>
         <div className="pr-head">
           <strong className="display">{mode === "drums" ? "Drum Machine" : "Piano Roll"} · {clip.name}</strong>
           <span className="pr-meta tc">{(clip.notes ?? []).length} notes · {m.tempo} BPM · {m.num}/{m.den}</span>
@@ -629,9 +760,22 @@ export function PianoRoll() {
               <button className="btn" data-testid="pr-tab-pads" aria-pressed={mode === "pads"} onClick={() => setMode("pads")}>Pads</button>
             )}
           </div>
+          {/* Live 12's loop brace sits in the clip panel's header — here, in the
+              roll's own header row (no extra dock row; the fixed-height dock's grid
+              keeps its room). MIDI clips only; set_clip_loop's MIDI branch. */}
+          {mode === "piano" && clip.type === "midi" && (
+            <span className="pr-loopbar" data-testid="live-dock-loopbar">
+              <ClipLoopBar clip={clip} />
+            </span>
+          )}
           <span className="spacer" />
-          {mode === "piano" && selNote && (
-            <label className="pr-vel" title="Velocity of the selected note">vel
+          {/* The velocity control is ALWAYS mounted in piano mode — visibility-hidden
+              without a selection, never unmounted. The "editor jumps when I delete a
+              note" jank was this block appearing/disappearing and reflowing every
+              header control to its right on each select/delete. */}
+          {mode === "piano" && (
+            <label className="pr-vel" style={{ visibility: selNote ? "visible" : "hidden" }}
+              aria-hidden={!selNote}>vel
               <input aria-label="Selected note velocity" type="range" min={1} max={127} step={1} value={velocityValue}
                 onChange={(e) => setDraftVelocity(Number(e.target.value))} onPointerUp={commitVelocity} onKeyUp={commitVelocity} onBlur={commitVelocity} />
               <span className="tc">{velocityValue}</span>
@@ -639,58 +783,67 @@ export function PianoRoll() {
           )}
           {/* Ableton's Preview switch (the headphone) and the computer-keyboard toggle.
               Both are producer preferences, so they live in settings and persist. */}
-          <button className="btn" data-testid="pr-preview" aria-pressed={notePreviewOn}
-            onClick={() => {
-              const next = !notePreviewOn;
-              useSettings.getState().set("notePreview", next);
-              if (!next) notePreview.releaseAll();
-            }}
-            title={notePreviewOn
-              ? "Preview ON — notes sound through the track's instrument as you draw, drag, or select them."
-              : "Preview OFF — editing is silent. Click to hear notes as you edit."}>
-            {notePreviewOn ? "🎧" : "🎧̸"} Preview
-          </button>
-          <button className="btn" data-testid="pr-qwerty" aria-pressed={qwerty.active}
-            onClick={() => setQwertyActive(!qwerty.active)}
-            title={qwerty.active
-              ? `Computer MIDI keyboard ON — A-K play white keys, W/E/T/Y/U black. Z/X octave, C/V velocity. While it is on, single-letter shortcuts need Shift.`
-              : "Play notes with the computer keyboard (Ableton's M)."}>
-            ⌨ {qwerty.active ? `C${qwerty.octave} · v${qwerty.velocity}` : "Keys"}
-          </button>
+          <MoshTip side="bottom" label={notePreviewOn
+            ? "Preview ON — notes sound through the track's instrument as you draw, drag, or select them."
+            : "Preview OFF — editing is silent. Click to hear notes as you edit."}>
+            <button className="btn" data-testid="pr-preview" aria-pressed={notePreviewOn}
+              onClick={() => {
+                const next = !notePreviewOn;
+                useSettings.getState().set("notePreview", next);
+                if (!next) notePreview.releaseAll();
+              }}>
+              {notePreviewOn ? "🎧" : "🎧̸"} Preview
+            </button>
+          </MoshTip>
+          <MoshTip side="bottom" label={qwerty.active
+            ? `Computer MIDI keyboard ON — A-K play white keys, W/E/T/Y/U black. Z/X octave, C/V velocity. While it is on, single-letter shortcuts need Shift.`
+            : "Play notes with the computer keyboard (Ableton's M)."}>
+            <button className="btn" data-testid="pr-qwerty" aria-pressed={qwerty.active}
+              onClick={() => setQwertyActive(!qwerty.active)}>
+              ⌨ {qwerty.active ? `C${qwerty.octave} · v${qwerty.velocity}` : "Keys"}
+            </button>
+          </MoshTip>
           {mode === "piano" && (
             <span className="seg" role="group" aria-label="Fold">
-              <button className="btn" data-testid="pr-fold" aria-pressed={fold === "content"}
-                onClick={() => setFold(fold === "content" ? "off" : "content")}
-                title="Fold (F) — show only the pitches this clip actually uses. Essential on a drum clip: eight rows instead of 128.">Fold</button>
-              <button className="btn" data-testid="pr-fold-scale" aria-pressed={fold === "scale"}
-                onClick={() => setFold(fold === "scale" ? "off" : "scale")}
-                title={`Fold to Scale (G) — show only rows in ${keyLabel(snapshot?.session.key ?? {})}, plus any pitch that already has a note (so nothing you wrote can be hidden).`}>Scale</button>
+              <MoshTip side="bottom" label="Fold (F) — show only the pitches this clip actually uses. Essential on a drum clip: eight rows instead of 128.">
+                <button className="btn" data-testid="pr-fold" aria-pressed={fold === "content"}
+                  onClick={() => setFold(fold === "content" ? "off" : "content")}>Fold</button>
+              </MoshTip>
+              <MoshTip side="bottom" label={`Fold to Scale (G) — show only rows in ${keyLabel(snapshot?.session.key ?? {})}, plus any pitch that already has a note (so nothing you wrote can be hidden).`}>
+                <button className="btn" data-testid="pr-fold-scale" aria-pressed={fold === "scale"}
+                  onClick={() => setFold(fold === "scale" ? "off" : "scale")}>Scale</button>
+              </MoshTip>
             </span>
           )}
           {mode === "piano" && (
-            <button className="btn" data-testid="pr-scale-highlight" aria-pressed={scaleHighlight}
-              onClick={() => setScaleHighlight(!scaleHighlight)}
-              title="Highlight scale (K) — dim the out-of-key rows without constraining what you draw.">Key</button>
+            <MoshTip side="bottom" label="Highlight scale (K) — dim the out-of-key rows without constraining what you draw.">
+              <button className="btn" data-testid="pr-scale-highlight" aria-pressed={scaleHighlight}
+                onClick={() => setScaleHighlight(!scaleHighlight)}>Key</button>
+            </MoshTip>
           )}
           {mode === "piano" && (
             <span className="seg pr-grid-ctl" role="group" aria-label="Grid">
-              <button className="btn" data-testid="pr-grid-adaptive" aria-pressed={grid.adaptive}
-                onClick={() => setGrid({ ...grid, adaptive: !grid.adaptive })}
-                title="Adaptive grid — follow the zoom instead of a fixed division.">
-                {gridLabel(m, grid, beatPx)}
-              </button>
-              <button className="btn" data-testid="pr-grid-triplet" aria-pressed={grid.triplet}
-                onClick={() => setGrid({ ...grid, triplet: !grid.triplet })} title="Triplet grid (T)">T</button>
+              <MoshTip side="bottom" label="Adaptive grid — follow the zoom instead of a fixed division.">
+                <button className="btn" data-testid="pr-grid-adaptive" aria-pressed={grid.adaptive}
+                  onClick={() => setGrid({ ...grid, adaptive: !grid.adaptive })}>
+                  {gridLabel(m, grid, beatPx)}
+                </button>
+              </MoshTip>
+              <MoshTip side="bottom" label="Triplet grid (T)">
+                <button className="btn" data-testid="pr-grid-triplet" aria-pressed={grid.triplet}
+                  onClick={() => setGrid({ ...grid, triplet: !grid.triplet })}>T</button>
+              </MoshTip>
             </span>
           )}
           {mode === "piano" && (
-            <button className="btn" data-testid="pr-scale-lock" aria-pressed={scaleLock}
-              onClick={() => useSettings.getState().set("scaleLock", !scaleLock)}
-              title={scaleLock
-                ? `Scale lock ON — a note you draw, or drag to a new pitch, snaps to ${keyLabel(snapshot?.session.key ?? {})}. Notes you don't move keep their pitch, and so does a note you only slide in time.`
-                : `Scale lock OFF — click to snap notes you draw or re-pitch to ${keyLabel(snapshot?.session.key ?? {})} (set the key in the topbar).`}>
-              Scale {keyLabel(snapshot?.session.key ?? {})}
-            </button>
+            <MoshTip side="bottom" label={scaleLock
+              ? `Scale lock ON — a note you draw, or drag to a new pitch, snaps to ${keyLabel(snapshot?.session.key ?? {})}. Notes you don't move keep their pitch, and so does a note you only slide in time.`
+              : `Scale lock OFF — click to snap notes you draw or re-pitch to ${keyLabel(snapshot?.session.key ?? {})} (set the key in the topbar).`}>
+              <button className="btn" data-testid="pr-scale-lock" aria-pressed={scaleLock}
+                onClick={() => useSettings.getState().set("scaleLock", !scaleLock)}>
+                Scale {keyLabel(snapshot?.session.key ?? {})}
+              </button>
+            </MoshTip>
           )}
           {mode === "piano" && (
             <span className="seg pr-zoom" role="group" aria-label="Zoom">
@@ -706,26 +859,36 @@ export function PianoRoll() {
                   control (never the other way round: a swing slider over an engine with no
                   swing is an inert surface). 0 is straight, so leaving it alone is exactly
                   the quantize this button has always done. */}
-              <input
-                type="range" min={0} max={100} step={1} value={swingPct}
-                data-testid="pr-quantize-swing"
-                aria-label="Quantize swing (percent)"
-                title="Swing — delay every second subdivision of the grid and leave the on-beats where they are. 0 is straight; 100 is the MPC 75% maximum, where the off-beat sits exactly halfway to the next on-beat. Around 67 is the classic triplet feel."
-                onChange={(e) => setSwingPct(Number(e.target.value))}
-              />
+              <MoshTip side="bottom" label="Swing — delay every second subdivision of the grid and leave the on-beats where they are. 0 is straight; 100 is the MPC 75% maximum, where the off-beat sits exactly halfway to the next on-beat. Around 67 is the classic triplet feel.">
+                <input
+                  type="range" min={0} max={100} step={1} value={swingPct}
+                  data-testid="pr-quantize-swing"
+                  aria-label="Quantize swing (percent)"
+                  onChange={(e) => setSwingPct(Number(e.target.value))}
+                />
+              </MoshTip>
               <span className="pr-swing-val" data-testid="pr-quantize-swing-val">
                 {swingPct === 0 ? "straight" : `swing ${swingPct}`}
               </span>
             </span>
           )}
           {mode === "piano" && (
-            <button className="btn" data-testid="pr-quantize"
-              title="Snap every note in the clip to the grid shown here, using the swing amount beside this button"
-              onClick={() => exec("quantize_notes", {
-                clipId: clip.id, division: effectiveStepBeats(m, grid, beatPx), swing: swingPct,
-              })}>
-              Quantize {gridLabel(m, grid, beatPx)}
-            </button>
+            <MoshTip side="bottom" label="Snap every note in the clip to the grid shown here, using the swing amount beside this button">
+              <button className="btn" data-testid="pr-quantize"
+                onClick={() => exec("quantize_notes", {
+                  clipId: clip.id, division: effectiveStepBeats(m, grid, beatPx), swing: swingPct,
+                })}>
+                Quantize {gridLabel(m, grid, beatPx)}
+              </button>
+            </MoshTip>
+          )}
+          {expandControl && (
+            <MoshTip side="bottom" label={expandControl.expanded
+              ? "Shrink the clip view (⌥⌘E) — bring the arrangement back"
+              : "Expand Clip View (⌥⌘E) — the editor fills the window"}>
+              <button className="btn" data-testid="pr-expand" aria-pressed={expandControl.expanded}
+                onClick={expandControl.onToggle}>⤢</button>
+            </MoshTip>
           )}
           <button className="btn x" onClick={close}>✕</button>
         </div>
@@ -807,6 +970,16 @@ export function PianoRoll() {
                 return <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}${off ? " off-key" : ""}${root ? " root" : ""}`} style={{ top: yOf(p), height: ROW_H }} />;
               })}
               {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * beatPx }} />)}
+              {/* MIDI clip loop ghosts — the loop region's repeats painted dimmer and
+                  DISARMED (Live's editor ghosts): display-only, never selectable —
+                  editing stays indexed into the real notes. */}
+              {loopGhosts.map((n, gi) => {
+                const b = noteBox(n);
+                return (
+                  <div key={`ghost-${gi}`} className="pr-note pr-loop-ghost" aria-hidden
+                    style={{ left: b.x, top: b.y, width: b.w, height: b.h }} />
+                );
+              })}
               {notes.map((n) => {
                 const b = noteBox(n);
                 return (
@@ -821,6 +994,19 @@ export function PianoRoll() {
                 );
               })}
               {lasso && <div className="pr-lasso" style={{ left: Math.min(lasso.x0, lasso.x1), top: Math.min(lasso.y0, lasso.y1), width: Math.abs(lasso.x1 - lasso.x0), height: Math.abs(lasso.y1 - lasso.y0) }} />}
+              {/* Draw-mode ghost: the note a pencil drag will commit on release. Same
+                  box math as a real note, painted through the same tokens (the ghost
+                  rule in mosh.css only dims + disarms it — no literals, per the
+                  pianoRollCss guard). */}
+              {drawGhost && (
+                <div className="pr-note pr-draw-ghost" data-testid="pr-draw-ghost" aria-hidden
+                  style={{
+                    left: drawGhost.start * beatPx,
+                    top: yOf(drawGhost.pitch) + 1,
+                    width: Math.max(6, drawGhost.length * beatPx - 1),
+                    height: ROW_H - 2,
+                  }} />
+              )}
               <div className="pr-playhead" data-testid="pr-playhead" aria-hidden />
               {/* Step-record insert marker — where the next typed note lands. Shown only
                   while the computer keyboard is armed, so it never clutters mouse editing. */}
@@ -837,7 +1023,62 @@ export function PianoRoll() {
               release, so a gesture is one undo step instead of a flood. */}
           <div className="pr-vel-gutter"><span>vel</span></div>
           <div className="pr-vel-vp">
-            <div className="pr-vel-lane" ref={velRef} style={{ width: gridW }} data-testid="pr-vel-lane"
+            {/* Live 12's Transform tools row (docked mount only): Reverse / Invert /
+                Legato / Humanize ±amount / ×2 / /2, then the panel's second cluster
+                Set Length / Add Interval / Fit to Scale — one transform_notes
+                command per apply, so one undo step. Targets: the selection if any,
+                else every note (Live's rule, same as the velocity tools below). */}
+            {docked && mode === "piano" && (
+              <div className="pr-veltools" data-testid="pr-transformtools" role="group" aria-label="Transform tools">
+                <span className="pr-veltools-label">Transform</span>
+                <button className="btn" data-testid="pr-xf-reverse" title="Mirror the targets in time inside their own span (pitches and lengths kept)"
+                  onClick={() => applyTransformTool("reverse")}>Reverse</button>
+                <button className="btn" data-testid="pr-xf-invert" title="Flip pitches around the highest target pitch"
+                  onClick={() => applyTransformTool("invert")}>Invert</button>
+                <button className="btn" data-testid="pr-xf-legato" title="Extend each note to the next note's start (the last reaches the span end)"
+                  onClick={() => applyTransformTool("legato")}>Legato</button>
+                <button className="btn" data-testid="pr-xf-humanize" title="Small random timing + velocity deviation (deterministic per command)"
+                  onClick={() => applyTransformTool("humanize")}>Humanize</button>
+                <ToolField testId="pr-xf-humanize-amt" ariaLabel="Humanize amount" value={humAmt} onCommit={setHumAmt} />
+                <button className="btn" data-testid="pr-xf-x2" title="Double starts (relative to the span) and lengths"
+                  onClick={() => applyTransformTool("x2")}>×2</button>
+                <button className="btn" data-testid="pr-xf-d2" title="Halve starts (relative to the span) and lengths"
+                  onClick={() => applyTransformTool("d2")}>/2</button>
+                {/* Live's second cluster: Set Length (field follows the grid step
+                    until typed), Add Interval (signed semitones, Live's fifth
+                    default), Fit to Scale (snaps to the session key). */}
+                <ToolField testId="pr-xf-setlen-beats" ariaLabel="Set Length (beats)" min={0.0625} max={64} integer={false}
+                  value={lenBeats ?? (stepBeats > 0 ? stepBeats : 1)} onCommit={(v) => setLenBeats(v)} />
+                <button className="btn" data-testid="pr-xf-setlen" title="Set every target note's length to the field value (starts unchanged)"
+                  onClick={() => applyTransformTool("setLength")}>Set Length</button>
+                <ToolField testId="pr-xf-interval-semis" ariaLabel="Add Interval (semitones)" min={-24} max={24}
+                  value={intervalSemis} onCommit={setIntervalSemis} />
+                <button className="btn" data-testid="pr-xf-interval" title="Add a chord tone at +N semitones above each target note (skips duplicates)"
+                  onClick={() => applyTransformTool("addInterval")}>Add Interval</button>
+                <button className="btn" data-testid="pr-xf-fitscale" title="Snap every target pitch to the session key (nearest in-scale, ties down)"
+                  onClick={() => applyTransformTool("fitToScale")}>Fit to Scale</button>
+              </div>
+            )}
+            {/* Live 12's velocity tool row (docked mount only): Randomize ±n, Ramp
+                lo→hi across the targets in time order, Deviation ±offset — one
+                transform_velocities command per apply, so one undo step. Targets:
+                the selection if any, else every note (Live's rule). */}
+            {docked && mode === "piano" && (
+              <div className="pr-veltools" data-testid="pr-veltools" role="group" aria-label="Velocity tools">
+                <span className="pr-veltools-label">Velocity</span>
+                <button className="btn" data-testid="pr-vt-randomize" title="Randomize velocities by ±amount around each note's current value"
+                  onClick={() => applyVelocityTool("randomize")}>Randomize</button>
+                <ToolField testId="pr-vt-randomize-amt" ariaLabel="Randomize amount" value={randAmt} onCommit={setRandAmt} />
+                <button className="btn" data-testid="pr-vt-ramp" title="Ramp velocities from lo to hi across the targets in time order"
+                  onClick={() => applyVelocityTool("ramp")}>Ramp</button>
+                <ToolField testId="pr-vt-ramp-lo" ariaLabel="Ramp start velocity" value={rampLo} onCommit={setRampLo} />
+                <ToolField testId="pr-vt-ramp-hi" ariaLabel="Ramp end velocity" value={rampHi} onCommit={setRampHi} />
+                <button className="btn" data-testid="pr-vt-deviate" title="Apply a uniform random offset in [-amount, +amount] to each velocity"
+                  onClick={() => applyVelocityTool("deviate")}>Deviation</button>
+                <ToolField testId="pr-vt-deviate-amt" ariaLabel="Deviation amount" value={devAmt} onCommit={setDevAmt} />
+              </div>
+            )}
+            <div className={`pr-vel-lane${docked && mode === "piano" ? " with-tools" : ""}`} ref={velRef} style={{ width: gridW }} data-testid="pr-vel-lane"
               onPointerDown={onVelDown} onPointerMove={onVelMove} onPointerUp={onVelUp}
               onPointerCancel={onVelCancel} onLostPointerCapture={onVelCancel}>
               {notes.map((n) => (
@@ -851,6 +1092,25 @@ export function PianoRoll() {
         </div>
         <div className="pr-foot">click to add · drag to move · Option-drag to bypass snap · drag the right edge to resize · drag a velocity bar below · ⌘-scroll to zoom · Esc to close</div></>
         )}
+    </>
+  );
+  // Docked (the live shell's clip-view dock): no modal frame — no backdrop, no
+  // close-on-backdrop, no aria-modal claim (the arrangement behind stays live), and
+  // live.css's `.pr.docked` drops the pop-in animation. The header's ✕ and Escape
+  // both still clear editingClipId, exactly as in the modal.
+  const ariaLabel = `${mode === "drums" ? "Drum machine" : "Piano roll"} · ${clip.name}`;
+  if (docked) return (
+    <div className="pr docked" data-testid="piano-roll" role="dialog"
+      ref={panelRef} tabIndex={-1} style={{ outline: "none" }} aria-label={ariaLabel}>
+      {prContent}
+    </div>
+  );
+  return (
+    <div className="modal-backdrop" onClick={close}>
+      <div className="pr" data-testid="piano-roll" role="dialog" aria-modal="true"
+        ref={panelRef} tabIndex={-1} style={{ outline: "none" }}
+        aria-label={ariaLabel} onClick={(e) => e.stopPropagation()}>
+        {prContent}
       </div>
     </div>
   );

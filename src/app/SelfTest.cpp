@@ -1,10 +1,12 @@
 #include "SelfTest.h"
+#include "selftest/MultiplayerAudioRefSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Lyrics.h"
+#include "state/Ids.h"
 #include "state/Migrations.h"
 #include "state/TrackIcons.h"
 #include "state/SafeMode.h"
@@ -90,6 +92,15 @@ namespace
         c->setProperty ("command", name);
         if (! args.isVoid()) c->setProperty ("args", args);
         return ops.execute (juce::var (c));
+    }
+
+    juce::var uiProjectCmd (MoshOps& ops, const juce::String& name, juce::var args = juce::var())
+    {
+        auto* c = new juce::DynamicObject();
+        c->setProperty ("command", name);
+        c->setProperty ("_moshProjectEpochPrepared", true);
+        if (! args.isVoid()) c->setProperty ("args", args);
+        return ops.executeFromUi (juce::var (c));
     }
 
     juce::var args1 (const char* k, juce::var v)
@@ -608,7 +619,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // check can inspect the payload).
     std::vector<String> eventTypes;
     var lastEvent;
-    ops.setEventSink ([&] (const var& e) { eventTypes.push_back (e.getProperty ("type", var()).toString()); lastEvent = e; });
+    var lastMpCommitDone;
+    bool sawProjectReplacementEvent = false;
+    String lastProjectReplacementReason;
+    bool lastProjectReplacementManagedByUi = false;
+    ops.setEventSink ([&] (const var& e)
+    {
+        eventTypes.push_back (e.getProperty ("type", var()).toString());
+        lastEvent = e;
+        if (e.getProperty ("type", var()).toString() == "mp_commit_done")
+            lastMpCommitDone = e;
+        if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
+            && (bool) e.getProperty ("payload", var()).getProperty ("projectReplaced", false))
+        {
+            sawProjectReplacementEvent = true;
+            const auto payload = e.getProperty ("payload", var());
+            lastProjectReplacementReason = payload.getProperty ("reason", var()).toString();
+            lastProjectReplacementManagedByUi = (bool) payload.getProperty ("epochManagedByUi", false);
+        }
+    });
 
     auto hadEvent = [&] (const String& t) {
         for (auto& e : eventTypes) if (e == t) return true; return false; };
@@ -1638,6 +1667,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             }
         }
 
+        // Wave-3 integrity guard: an INSTRUMENT is refused on a track that holds
+        // audio clips (silent-by-construction: a front-of-chain instrument clears
+        // the track buffer) — the refusal must name the way out. The allowed path
+        // (instrument on an empty / MIDI-clip track) is exercised just below.
+        if (instId.isNotEmpty())
+        {
+            auto refused = cmd (ops, "load_plugin", objN ({{ "trackId", tid }, { "pluginId", instId }}));
+            check (! ok (refused), "load_plugin (instrument) refused on an audio track holding clips");
+            check (refused.getProperty ("error", var()).toString().contains ("instrument tracks"),
+                   "the refusal names the fix (instrument tracks)");
+        }
+
         // MIDI synth: new track + MIDI clip + instrument.
         auto ct = cmd (ops, "create_track", args1 ("name", "Synth"));
         const auto synthTid = ct["data"].getProperty ("trackId", var()).toString();
@@ -1655,6 +1696,35 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               if (auto* arr = trk.getProperty ("plugins", var()).getArray())
                 for (auto& p : *arr) if ((bool) p.getProperty ("isInstrument", false)) hasInst = true; }
             check (hasInst, "instrument appears in the synth track chain");
+
+            // Hot-swap (Live's browser load): without replaceInstrument a second
+            // instrument APPENDS; with it, the new one takes the first instrument's
+            // slot — and one undo restores the pre-swap chain.
+            auto instNames = [&]() {
+                juce::StringArray names;
+                auto trk = trackById (synthTid);
+                if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                    for (auto& p : *arr)
+                        if ((bool) p.getProperty ("isInstrument", false))
+                            names.add (p.getProperty ("name", var()).toString());
+                return names;
+            };
+            const auto beforeAppend = instNames();
+            { auto* a = new DynamicObject(); a->setProperty ("trackId", synthTid); a->setProperty ("pluginId", instId);
+              check (ok (cmd (ops, "load_plugin", var (a))), "load_plugin without the flag appends"); }
+            check (instNames().size() == beforeAppend.size() + 1, "append stacks the second instrument");
+            { auto* a = new DynamicObject(); a->setProperty ("trackId", synthTid); a->setProperty ("pluginId", instId);
+              a->setProperty ("replaceInstrument", true);
+              auto r = cmd (ops, "load_plugin", var (a));
+              check (ok (r), "load_plugin replaceInstrument swaps");
+              check ((bool) r["data"].getProperty ("replaced", false), "the swap reports replaced:true");
+              check (r["data"].getProperty ("replacedName", var()).toString() == beforeAppend[0],
+                     "the swap removed the FIRST instrument (4OSC, auto-loaded by add_midi_clip)"); }
+            const auto afterSwap = instNames();
+            check (afterSwap.size() == beforeAppend.size() + 1, "the swap replaces, never stacks");
+            check (! afterSwap.contains (beforeAppend[0]), "the swapped-out instrument is gone");
+            cmd (ops, "undo");
+            check (instNames().contains (beforeAppend[0]), "one undo restores the swapped-out instrument");
         }
     }
 
@@ -1876,6 +1946,29 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (len > 0.0 && std::abs (endPos - len) < 0.05, "to_end moves the playhead to the edit length");
         cmd (ops, "set_transport", args1 ("action", "to_start"));
         check ((double) ops.snapshot()["transport"].getProperty ("position", -1.0) < 0.01, "to_start returns the playhead to 0");
+
+        // Live 12's Space vs ⇧Space (Continue Playback): a normal stop RETURNS to
+        // the insert marker (last play-start / explicit seek); a continue-start's
+        // stop LEAVES the playhead. Position outcomes are the observable; the
+        // marker itself is engine machine state (not undoable, not in the snapshot).
+        auto pos = [&] { return (double) ops.snapshot()["transport"].getProperty ("position", -1.0); };
+        auto setPos = [&] (double p) {
+            auto* a = new DynamicObject(); a->setProperty ("action", "seek"); a->setProperty ("position", p);
+            cmd (ops, "set_transport", var (a));
+        };
+        setPos (2.0);
+        cmd (ops, "set_transport", args1 ("action", "play"));      // marker := 2
+        setPos (6.0);                                            // a seek moves the marker
+        cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (std::abs (pos() - 6.0) < 0.01, "Space stop RETURNS to the insert marker (the last seek)");
+        cmd (ops, "set_transport", args1 ("action", "continue"));  // ⇧Space: play from current
+        setPos (9.0);
+        cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (std::abs (pos() - 9.0) < 0.01, "⇧Space stop LEAVES the playhead where it halted");
+        cmd (ops, "set_transport", args1 ("action", "play"));      // marker := 9
+        cmd (ops, "set_transport", args1 ("action", "toggle"));    // stop via toggle
+        check (std::abs (pos() - 9.0) < 0.01, "toggle-stop returns to the marker too");
+        cmd (ops, "set_transport", args1 ("action", "to_start"));
 
         // Leave a clean musical default for later stages.
         cmd (ops, "set_tempo", args1 ("bpm", 120.0));
@@ -5883,6 +5976,272 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (lands (cG, { 0.03, 0.22, 0.54, 0.71 }), "ONE undo restores the whole swung quantize");
         }
 
+        // ── transform_velocities (Live 12's velocity tool row) ───────────────
+        {
+            auto vels = [&] (const String& cid) {
+                std::vector<int> out;
+                // Bind before getArray — a var temporary's array header dies with it.
+                const auto ns = clipNotes (cid);
+                if (auto* arr = ns.getArray())
+                    for (auto& n : *arr)
+                        out.push_back ((int) n.getProperty ("velocity", -1));
+                return out;
+            };
+            const auto vt = cmd (ops, "create_track", args1 ("name", "VelTools"))["data"].getProperty ("trackId", var()).toString();
+            auto* vo = new DynamicObject(); vo->setProperty ("trackId", vt); vo->setProperty ("length", 8.0);
+            const auto vc = cmd (ops, "add_midi_clip", var (vo))["data"].getProperty ("clipId", var()).toString();
+            // fixture: starts 0/2/4/6 beats, velocities 40/80/100/127
+            cmd (ops, "add_note", objN ({{ "clipId", vc }, { "pitch", 60 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 40 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", vc }, { "pitch", 62 }, { "start", 2.0 }, { "length", 1.0 }, { "velocity", 80 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", vc }, { "pitch", 64 }, { "start", 4.0 }, { "length", 1.0 }, { "velocity", 100 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", vc }, { "pitch", 65 }, { "start", 6.0 }, { "length", 1.0 }, { "velocity", 127 }}));
+
+            check (! ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "smear" }}))),
+                   "transform_velocities rejects an unknown mode");
+            check (! ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "ramp" }, { "lo", 1 }}))),
+                   "transform_velocities ramp without hi errors");
+
+            // RAMP on ALL notes: linear 20→120 in time order (n=4 → 20, 53, 87, 120)
+            check (ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "ramp" }, { "lo", 20 }, { "hi", 120 }}))),
+                   "transform_velocities ramp ok");
+            { const auto v = vels (vc);
+              check (v.size() == 4 && v[0] == 20 && v[1] == 53 && v[2] == 87 && v[3] == 120,
+                     "ramp lands 20/53/87/120 in time order"); }
+            check (ok (cmd (ops, "undo", objN ({}))), "undo after ramp ok");
+            { const auto v = vels (vc);
+              check (v.size() == 4 && v[0] == 40 && v[1] == 80 && v[2] == 100 && v[3] == 127,
+                     "ONE undo restores every velocity"); }
+
+            // RAMP on a SELECTION: noteIndexes [0, 3] only → 20 and 120, others put
+            check (ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "ramp" }, { "lo", 20 }, { "hi", 120 },
+                                                                { "noteIndexes", Array<var> { 0, 3 } }}))),
+                   "transform_velocities ramp on a selection ok");
+            { const auto v = vels (vc);
+              check (v.size() == 4 && v[0] == 20 && v[1] == 80 && v[2] == 100 && v[3] == 120,
+                     "ramp touches ONLY the selected notes"); }
+            cmd (ops, "undo", objN ({}));
+
+            // RAMP clamps out-of-range lo/hi to the 1..127 rails
+            check (ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "ramp" }, { "lo", 0 }, { "hi", 200 }}))),
+                   "transform_velocities ramp extreme lo/hi ok (clamped)");
+            { const auto v = vels (vc);
+              check (v.size() == 4 && v[0] == 1 && v[3] == 127, "ramp clamps lo/hi to 1..127"); }
+            cmd (ops, "undo", objN ({}));
+
+            // RANDOMIZE ±25: every velocity within 25 of its fixture value, and the
+            // SAME command replayed produces the SAME numbers (deterministic seed —
+            // the JSONL log stays a program). Undo between runs restores the fixture.
+            check (ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "randomize" }, { "amount", 25 }}))),
+                   "transform_velocities randomize ok");
+            const auto run1 = vels (vc);
+            { bool inRange = run1.size() == 4;
+              const int base[] = { 40, 80, 100, 127 };
+              for (int i = 0; i < 4 && inRange; ++i)
+                  inRange = run1[i] >= std::max (1, base[i] - 26) && run1[i] <= std::min (127, base[i] + 26);
+              check (inRange, "randomize stays within ±amount (clamped)"); }
+            cmd (ops, "undo", objN ({}));
+            check (ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "randomize" }, { "amount", 25 }}))),
+                   "transform_velocities randomize replay ok");
+            { const auto run2 = vels (vc);
+              check (run2 == run1, "a replayed randomize is DETERMINISTIC (seeded per command)"); }
+            cmd (ops, "undo", objN ({}));
+
+            // DEVIATE 0 is the identity; deviate also seeds deterministically but
+            // independently of randomize (the two modes are distinct tools).
+            auto dev0 = cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "deviate" }, { "amount", 0 }}));
+            check (ok (dev0) && (int) dev0["data"].getProperty ("changed", -1) == 0, "deviate 0 changes nothing");
+        }
+
+        // ── transform_notes (Live 12's Transform tools row) ──────────────────
+        // Reverse / Invert / Legato / Humanize / ×2 / /2 over the targets' own
+        // span; deterministic humanize; ONE undo per apply.
+        {
+            // (start, pitch, length, velocity) sorted by start then pitch — the
+            // sequence may re-sort when starts move, so assert on the sorted set.
+            using Note4 = std::tuple<double, int, double, int>;
+            auto notesOf = [&] (const String& cid) {
+                std::vector<Note4> out;
+                const auto ns = clipNotes (cid);   // bind before getArray
+                if (auto* arr = ns.getArray())
+                    for (auto& n : *arr)
+                        out.emplace_back ((double) n.getProperty ("start", -1.0),
+                                          (int) n.getProperty ("pitch", -1),
+                                          (double) n.getProperty ("length", -1.0),
+                                          (int) n.getProperty ("velocity", -1));
+                std::sort (out.begin(), out.end(), [] (const Note4& a, const Note4& b) {
+                    if (std::get<0> (a) != std::get<0> (b)) return std::get<0> (a) < std::get<0> (b);
+                    return std::get<1> (a) < std::get<1> (b);
+                });
+                return out;
+            };
+            auto matchNotes = [] (const std::vector<Note4>& got, const std::vector<Note4>& want) {
+                if (got.size() != want.size()) return false;
+                for (size_t i = 0; i < got.size(); ++i)
+                    if (std::abs (std::get<0> (got[i]) - std::get<0> (want[i])) > 1.0e-6
+                        || std::get<1> (got[i]) != std::get<1> (want[i])
+                        || std::abs (std::get<2> (got[i]) - std::get<2> (want[i])) > 1.0e-6
+                        || std::get<3> (got[i]) != std::get<3> (want[i]))
+                        return false;
+                return true;
+            };
+            const auto nt = cmd (ops, "create_track", args1 ("name", "NoteTools"))["data"].getProperty ("trackId", var()).toString();
+            auto* no = new DynamicObject(); no->setProperty ("trackId", nt); no->setProperty ("length", 8.0);
+            const auto nc = cmd (ops, "add_midi_clip", var (no))["data"].getProperty ("clipId", var()).toString();
+            // fixture: span [0,8] with a chord at 4 (two same-start notes)
+            cmd (ops, "add_note", objN ({{ "clipId", nc }, { "pitch", 60 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 40 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", nc }, { "pitch", 64 }, { "start", 2.0 }, { "length", 1.0 }, { "velocity", 80 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", nc }, { "pitch", 67 }, { "start", 4.0 }, { "length", 2.0 }, { "velocity", 100 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", nc }, { "pitch", 70 }, { "start", 4.0 }, { "length", 1.0 }, { "velocity", 90 }}));
+            cmd (ops, "add_note", objN ({{ "clipId", nc }, { "pitch", 72 }, { "start", 7.0 }, { "length", 1.0 }, { "velocity", 127 }}));
+            const std::vector<Note4> fixture {
+                { 0.0, 60, 1.0, 40 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 2.0, 100 },
+                { 4.0, 70, 1.0, 90 }, { 7.0, 72, 1.0, 127 } };
+            check (matchNotes (notesOf (nc), fixture), "transform fixture: 5 notes as planted");
+            auto undoRestores = [&] (const char* what) {
+                check (ok (cmd (ops, "undo", objN ({}))), what);
+                check (matchNotes (notesOf (nc), fixture), "ONE undo restores the fixture exactly");
+            };
+
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "smear" }}))),
+                   "transform_notes rejects an unknown mode");
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }}))),
+                   "transform_notes humanize without amount errors");
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                              { "noteIndexes", Array<var> { 0, 0, 0, 0, 0, 0 } }}))),
+                   "transform_notes rejects noteIndexes larger than the clip's note count");
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                              { "noteIndexes", Array<var> { 0.5 } }}))),
+                   "transform_notes rejects a non-integral noteIndex");
+
+            // REVERSE: mirror inside the span [0,8]; pitches/lengths ride along
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "reverse" }}))), "reverse ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 72, 1.0, 127 }, { 2.0, 67, 2.0, 100 }, { 3.0, 70, 1.0, 90 },
+                                              { 5.0, 64, 1.0, 80 }, { 7.0, 60, 1.0, 40 } }),
+                   "reverse mirrors every note inside the span");
+            undoRestores ("undo after reverse ok");
+
+            // INVERT: flip around the top pitch 72
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "invert" }}))), "invert ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 84, 1.0, 40 }, { 2.0, 80, 1.0, 80 }, { 4.0, 74, 1.0, 90 },
+                                              { 4.0, 77, 2.0, 100 }, { 7.0, 72, 1.0, 127 } }),
+                   "invert flips pitches around the highest target pitch");
+            undoRestores ("undo after invert ok");
+
+            // LEGATO: onsets 0/2/4/7 → 0→2, 2→4, both 4.0 notes →7, 7→spanEnd 8
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" }}))), "legato ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 2.0, 40 }, { 2.0, 64, 2.0, 80 }, { 4.0, 67, 3.0, 100 },
+                                              { 4.0, 70, 3.0, 90 }, { 7.0, 72, 1.0, 127 } }),
+                   "legato extends to the next distinct onset, chord tones included");
+            undoRestores ("undo after legato ok");
+
+            auto duplicateLegato = cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                                        { "noteIndexes", Array<var> { 4, 0, 0, 2 } }}));
+            check (ok (duplicateLegato)
+                       && (int) duplicateLegato["data"].getProperty ("changed", -1) == 2,
+                   "transform_notes deduplicates repeated noteIndexes before Legato");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 4.0, 40 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 3.0, 100 },
+                                              { 4.0, 70, 1.0, 90 }, { 7.0, 72, 1.0, 127 } }),
+                   "duplicate-selection Legato transforms every selected note exactly once");
+            undoRestores ("undo after duplicate-selection legato ok");
+
+            // An explicit selection arrives in gesture order, not necessarily time
+            // order. Legato must still use the next SELECTED onset, and must leave an
+            // unselected chord tone at the same start untouched.
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "legato" },
+                                                           { "noteIndexes", Array<var> { 4, 0, 2 } }}))),
+                   "legato on an unsorted selection ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 4.0, 40 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 3.0, 100 },
+                                              { 4.0, 70, 1.0, 90 }, { 7.0, 72, 1.0, 127 } }),
+                   "legato orders selected onsets by time, independent of noteIndexes order");
+            undoRestores ("undo after unsorted-selection legato ok");
+
+            // ×2 / /2 around the span start 0
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "x2" }}))), "x2 ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 2.0, 40 }, { 4.0, 64, 2.0, 80 }, { 8.0, 67, 4.0, 100 },
+                                              { 8.0, 70, 2.0, 90 }, { 14.0, 72, 2.0, 127 } }),
+                   "x2 doubles starts relative to the span start AND lengths");
+            undoRestores ("undo after x2 ok");
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "d2" }}))), "d2 ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 0.5, 40 }, { 1.0, 64, 0.5, 80 }, { 2.0, 67, 1.0, 100 },
+                                              { 2.0, 70, 0.5, 90 }, { 3.5, 72, 0.5, 127 } }),
+                   "d2 halves starts relative to the span start AND lengths");
+            undoRestores ("undo after d2 ok");
+
+            // SELECTION: reverse on noteIndexes [0, 4] (60@0-1 and 72@7-8) only —
+            // the transform works inside the SELECTION's span, others untouched.
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "reverse" },
+                                                           { "noteIndexes", Array<var> { 0, 4 } }}))),
+                   "reverse on a selection ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 72, 1.0, 127 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 2.0, 100 },
+                                              { 4.0, 70, 1.0, 90 }, { 7.0, 60, 1.0, 40 } }),
+                   "the selection reverse touches ONLY the selected notes");
+            undoRestores ("undo after the selection reverse ok");
+
+            // HUMANIZE: amount 0 is the identity; amount 10 stays in range, keeps
+            // lengths/pitches, and replays DETERMINISTICALLY (undo between runs).
+            auto hum0 = cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 0 }}));
+            check (ok (hum0) && (int) hum0["data"].getProperty ("changed", -1) == 0, "humanize 0 changes nothing");
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 10 }}))),
+                   "humanize ok");
+            const auto run1 = notesOf (nc);
+            { bool inRange = run1.size() == fixture.size();
+              for (size_t i = 0; i < run1.size() && inRange; ++i)
+                  inRange = std::abs (std::get<0> (run1[i]) - std::get<0> (fixture[i])) <= 0.025 + 1.0e-9
+                         && std::abs (std::get<2> (run1[i]) - std::get<2> (fixture[i])) < 1.0e-9
+                         && std::get<1> (run1[i]) == std::get<1> (fixture[i])
+                         && std::abs (std::get<3> (run1[i]) - std::get<3> (fixture[i])) <= 11
+                         && std::get<3> (run1[i]) >= 1 && std::get<3> (run1[i]) <= 127;
+              check (inRange, "humanize: timing within ±(amount% of a 16th), velocity within ±amount, pitches/lengths untouched"); }
+            check (! matchNotes (run1, fixture), "humanize actually moved something");
+            undoRestores ("undo after humanize ok");
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 10 }}))),
+                   "humanize replay ok");
+            check (matchNotes (notesOf (nc), run1), "a replayed humanize is DETERMINISTIC (seeded per command)");
+            undoRestores ("undo after the humanize replay ok");
+
+            // SET LENGTH: every target's length to the field value, starts unchanged
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "setLength" }}))),
+                   "setLength without lengthBeats errors");
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "setLength" }, { "lengthBeats", 0.0 }}))),
+                   "setLength rejects a zero length");
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "setLength" }, { "lengthBeats", 0.5 }}))),
+                   "setLength ok");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 0.5, 40 }, { 2.0, 64, 0.5, 80 }, { 4.0, 67, 0.5, 100 },
+                                              { 4.0, 70, 0.5, 90 }, { 7.0, 72, 0.5, 127 } }),
+                   "setLength sets every length, starts/pitches unchanged");
+            undoRestores ("undo after setLength ok");
+
+            // ADD INTERVAL: a chord tone at +N per target — 67→70 is SKIPPED (the 70
+            // chord tone already sounds at start 4); sources never mutated.
+            check (! ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "addInterval" }}))),
+                   "addInterval without semitones errors");
+            auto ai0 = cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "addInterval" }, { "semitones", 0 }}));
+            check (ok (ai0) && (int) ai0["data"].getProperty ("added", -1) == 0,
+                   "addInterval 0 adds nothing (every candidate is a unison dupe)");
+            auto ai3 = cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "addInterval" }, { "semitones", 3 }}));
+            check (ok (ai3) && (int) ai3["data"].getProperty ("added", -1) == 4,
+                   "addInterval +3 adds four tones (the chord dupe skipped)");
+            check (matchNotes (notesOf (nc), { { 0.0, 60, 1.0, 40 }, { 0.0, 63, 1.0, 40 },
+                                              { 2.0, 64, 1.0, 80 }, { 2.0, 67, 1.0, 80 },
+                                              { 4.0, 67, 2.0, 100 }, { 4.0, 70, 1.0, 90 }, { 4.0, 73, 1.0, 90 },
+                                              { 7.0, 72, 1.0, 127 }, { 7.0, 75, 1.0, 127 } }),
+                   "addInterval stacks the chord tones, sources untouched");
+            undoRestores ("undo after addInterval ok");
+
+            // FIT TO SCALE: snap to the session key, ties DOWNWARD. Set D major for a
+            // decisive pin (three out-of-key pitches, all ties), then restore A minor.
+            check (ok (cmd (ops, "set_key", objN ({{ "tonic", "D" }, { "mode", "major" }}))), "set_key D major ok");
+            check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "fitToScale" }}))), "fitToScale ok");
+            // D major = D E F# G A B C#: 60(C)→59(B) over 61(C#), 70(Bb)→69(A) over
+            // 71(B), 72(C)→71(B) over 73(C#) — all equidistant, all resolve DOWN.
+            check (matchNotes (notesOf (nc), { { 0.0, 59, 1.0, 40 }, { 2.0, 64, 1.0, 80 }, { 4.0, 67, 2.0, 100 },
+                                              { 4.0, 69, 1.0, 90 }, { 7.0, 71, 1.0, 127 } }),
+                   "fitToScale snaps out-of-key pitches into the session key (ties down)");
+            undoRestores ("undo after fitToScale ok");
+            check (ok (cmd (ops, "set_key", objN ({{ "tonic", "A" }, { "mode", "minor" }}))),
+                   "restored the default key (A minor)");
+        }
+
         const int before = clipNotes (mClip).size();
         check (ok (cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}))), "remove_note ok");
         check (clipNotes (mClip).size() == before - 1, "remove_note removes a note");
@@ -5907,6 +6266,660 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}));
         check (clipNotes (mClip).size() == 0, "remove every note empties the sequence");
         check (clipExists (mClip), "an emptied MIDI clip is NOT auto-deleted (stays in the arrangement)");
+    }
+
+    // ─── crop_clip (⇧⌘J — Live's Crop Clip) ───
+    // Trim each given clip to its intersection with a passed time range. MIDI notes
+    // outside the crop are removed, crossing notes clipped to the edge (Tracktion's
+    // own trimBeyondEnds); audio trims with offset adjust. No-op/error shapes pin
+    // the user-facing failures; ONE undo must restore bounds AND notes AND offset.
+    section ("crop_clip");
+    {
+        auto cropClipNotes = [&] (const String& cid) -> var {
+            auto snap = ops.snapshot();
+            if (auto* tracks = snap["tracks"].getArray())
+                for (auto& tr : *tracks)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == cid)
+                                return c.getProperty ("notes", var());
+            return {};
+        };
+        auto cropClip = [&] (const String& cid) -> var {
+            auto snap = ops.snapshot();
+            if (auto* tracks = snap["tracks"].getArray())
+                for (auto& tr : *tracks)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == cid) return c;
+            return {};
+        };
+        auto noteStarts = [&] (const String& cid) {
+            std::vector<double> out;
+            // Bind the notes var before getArray(): reading the array off a var
+            // TEMPORARY is a use-after-free (the codebase's own rule — the array
+            // header dies with the temporary and size() reads garbage).
+            const auto ns = cropClipNotes (cid);
+            if (auto* arr = ns.getArray())
+                for (auto& n : *arr)
+                    out.push_back ((double) n.getProperty ("start", -1.0));
+            std::sort (out.begin(), out.end());
+            return out;
+        };
+
+        const auto crTrack = cmd (ops, "create_track", args1 ("name", "Crop"))["data"].getProperty ("trackId", var()).toString();
+        // 120 BPM ⇒ 1 beat = 0.5s. Clip [0,8s); notes (beats): A[0,1] fully before
+        // the crop, B[2,4] crossing the start edge, C[8,2] fully inside, D[10,6]
+        // crossing the end edge. Crop to [2s,6s] = beats [4,12].
+        auto* mo = new DynamicObject();
+        mo->setProperty ("trackId", crTrack); mo->setProperty ("start", 0.0); mo->setProperty ("length", 8.0);
+        const auto mcid = cmd (ops, "add_midi_clip", var (mo))["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 60 }, { "start", 0.0 },  { "length", 1.0 }, { "velocity", 90 }}))), "crop fixture note A");
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 62 }, { "start", 2.0 },  { "length", 4.0 }, { "velocity", 90 }}))), "crop fixture note B");
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 64 }, { "start", 8.0 },  { "length", 2.0 }, { "velocity", 90 }}))), "crop fixture note C");
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 65 }, { "start", 10.0 }, { "length", 6.0 }, { "velocity", 90 }}))), "crop fixture note D");
+
+        // an 8s tone clip on a second track, cropped in the SAME call (multi-clip).
+        // A UNIQUE name: an earlier section already wrote a 1s tone-330.wav into this
+        // shared session, and reusing the path inherits the stale audio-file cache.
+        const auto toneTrack = cmd (ops, "create_track", args1 ("name", "CropTone"))["data"].getProperty ("trackId", var()).toString();
+        const auto tone = cmd (ops, "add_test_tone_clip",
+                               objN ({{ "trackId", toneTrack }, { "seconds", 8.0 }, { "freq", 330.0 }, { "name", "crop-tone-8s" }}));
+        check (ok (tone), "crop fixture: add_test_tone_clip ok");
+        const auto toneId = tone["data"].getProperty ("clipId", var()).toString();
+
+        check (! ok (cmd (ops, "crop_clip", objN ({{ "clipIds", Array<var> { mcid } }, { "start", 4.0 }, { "end", 4.0 }}))),
+               "crop_clip with an EMPTY range errors (no time selection)");
+        check (! ok (cmd (ops, "crop_clip", objN ({{ "clipIds", Array<var> { mcid } }, { "start", 100.0 }, { "end", 101.0 }}))),
+               "crop_clip with NO overlap errors");
+        check (! ok (cmd (ops, "crop_clip", objN ({{ "clipIds", Array<var> { mcid } }, { "start", 0.0 }, { "end", 16.0 }}))),
+               "crop_clip already covering the whole clip errors (a real no-op is reported)");
+
+        { auto* a = new DynamicObject();
+          a->setProperty ("clipIds", Array<var> { mcid, toneId });
+          a->setProperty ("start", 2.0); a->setProperty ("end", 6.0);
+          check (ok (cmd (ops, "crop_clip", var (a))), "crop_clip ok (MIDI + audio, one call)"); }
+
+        // MIDI clip bounds are the intersection…
+        check (std::abs ((double) cropClip (mcid).getProperty ("start", -1.0) - 2.0) < 0.01, "crop: MIDI clip start = 2s");
+        check (std::abs ((double) cropClip (mcid).getProperty ("length", -1.0) - 4.0) < 0.01, "crop: MIDI clip length = 4s");
+        // …and the notes: A removed, B clipped to the start edge (lands at beat 0,
+        // length 2), C kept (beat 4), D clipped to the end edge (beat 6, length 2).
+        { const auto starts = noteStarts (mcid);
+          check (starts.size() == 3, "crop: outside note removed, crossing notes clipped (3 notes left)");
+          check (starts.size() == 3
+                 && std::abs (starts[0] - 0.0) < 1.0e-6
+                 && std::abs (starts[1] - 4.0) < 1.0e-6
+                 && std::abs (starts[2] - 6.0) < 1.0e-6,
+                 "crop: notes re-anchored to the crop start (beats 0 / 4 / 6)"); }
+        { const auto nsLens = cropClipNotes (mcid);   // bind before getArray (as noteStarts)
+          if (auto* arr = nsLens.getArray())
+          {
+              bool lensOk = arr->size() == 3;
+              for (auto& n : *arr)
+                  if (std::abs ((double) n.getProperty ("length", -1.0) - 2.0) > 1.0e-6) lensOk = false;
+              check (lensOk, "crop: both crossing notes clipped to exactly 2 beats");
+          } }
+
+        // audio clip: an edge-trim — start 2s, length 4s, offset advanced 2s
+        check (std::abs ((double) cropClip (toneId).getProperty ("start", -1.0) - 2.0) < 0.01, "crop: audio clip start = 2s");
+        check (std::abs ((double) cropClip (toneId).getProperty ("length", -1.0) - 4.0) < 0.01, "crop: audio clip length = 4s");
+        check (std::abs ((double) cropClip (toneId).getProperty ("offset", -1.0) - 2.0) < 0.01, "crop: audio offset advanced by the trimmed 2s");
+
+        // ONE undo restores everything: both clips' bounds AND the removed/clipped notes.
+        check (ok (cmd (ops, "undo", objN ({}))), "undo after crop ok");
+        check (std::abs ((double) cropClip (mcid).getProperty ("start", -1.0) - 0.0) < 0.01, "undo restores MIDI clip start");
+        check (std::abs ((double) cropClip (mcid).getProperty ("length", -1.0) - 8.0) < 0.01, "undo restores MIDI clip length");
+        check (noteStarts (mcid).size() == 4, "undo restores ALL FOUR notes (one undo step)");
+        check (std::abs ((double) cropClip (toneId).getProperty ("start", -1.0) - 0.0) < 0.01, "undo restores audio clip start");
+        check (std::abs ((double) cropClip (toneId).getProperty ("offset", -1.0) - 0.0) < 0.01, "undo restores audio offset");
+    }
+
+    // ─── bounce_track (Live 12's Bounce) ───
+    // Offline-render a track's full output through its chain. inPlace replaces the
+    // track's clips with the render (devices stay); newTrack lands it below the
+    // untouched source. ONE undo restores the pre-bounce state exactly.
+    section ("bounce_track");
+    {
+        auto trackClipTypes = [&] (const String& tid) {
+            std::vector<String> out;
+            const auto t = trackById (tid);
+            if (auto* clips = t.getProperty ("clips", var()).getArray())
+                for (auto& c : *clips)
+                    out.push_back (c.getProperty ("type", "?").toString());
+            return out;
+        };
+        auto trackClipIds = [&] (const String& tid) {
+            std::vector<String> out;
+            const auto t = trackById (tid);
+            if (auto* clips = t.getProperty ("clips", var()).getArray())
+                for (auto& c : *clips)
+                    out.push_back (c.getProperty ("id", "?").toString());
+            return out;
+        };
+        auto wavPeak = [] (const juce::File& f) {
+            // The format manager owns the file→reader wiring (no manual stream
+            // juggling — a raw stream + owning reader double-frees here).
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            float peak = 0.0f;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                              (int) juce::jmin ((juce::int64) 1 << 20, reader->lengthInSamples));
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    peak = juce::jmax (peak, buf.getMagnitude (ch, 0, buf.getNumSamples()));
+            }
+            return peak;
+        };
+
+        const auto bsTrack = cmd (ops, "create_track", args1 ("name", "BounceSrc"))["data"].getProperty ("trackId", var()).toString();
+        auto* bo = new DynamicObject(); bo->setProperty ("trackId", bsTrack); bo->setProperty ("start", 0.0); bo->setProperty ("length", 2.0);
+        const auto bsClip = cmd (ops, "add_midi_clip", var (bo))["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "add_note", objN ({{ "clipId", bsClip }, { "pitch", 60 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 100 }}));
+        cmd (ops, "add_note", objN ({{ "clipId", bsClip }, { "pitch", 64 }, { "start", 1.0 }, { "length", 1.0 }, { "velocity", 100 }}));
+        const int pluginsBefore = trackById (bsTrack)["plugins"].size();
+        check (pluginsBefore > 0, "bounce fixture: 4OSC auto-loaded on the MIDI track");
+
+        check (! ok (cmd (ops, "bounce_track", objN ({{ "trackId", bsTrack }, { "mode", "sideways" }}))),
+               "bounce_track rejects an unknown mode");
+        const auto emptyTrack = cmd (ops, "create_track", args1 ("name", "BounceEmpty"))["data"].getProperty ("trackId", var()).toString();
+        check (! ok (cmd (ops, "bounce_track", objN ({{ "trackId", emptyTrack }, { "mode", "inPlace" }}))),
+               "bounce_track refuses an empty track");
+        const auto busRes = cmd (ops, "create_bus", args1 ("name", "BounceBus"));
+        const auto returnId = busRes["data"].getProperty ("trackId", var()).toString();
+        check (returnId.isNotEmpty() && ! ok (cmd (ops, "bounce_track", objN ({{ "trackId", returnId }, { "mode", "inPlace" }}))),
+               "bounce_track refuses a return track");
+
+        // inPlace: clips replaced by the render, devices stay
+        auto bip = cmd (ops, "bounce_track", objN ({{ "trackId", bsTrack }, { "mode", "inPlace" }}));
+        check (ok (bip), "bounce_track inPlace ok");
+        const auto bipFile = juce::File (bip["data"].getProperty ("file", var()).toString());
+        check (bipFile.existsAsFile() && bipFile.getSize() > 0, "bounce: the rendered WAV exists");
+        check (wavPeak (bipFile) > 0.01f, "bounce: the render is NON-SILENT (the 4OSC notes are in it)");
+        { const auto types = trackClipTypes (bsTrack);
+          check (types.size() == 1 && types[0] == "wave", "inPlace: exactly one WAVE clip replaces the MIDI clips"); }
+        check (std::abs ((double) trackById (bsTrack)["clips"][0].getProperty ("start", -1.0)) < 1.0e-6
+               && std::abs ((double) trackById (bsTrack)["clips"][0].getProperty ("length", -1.0) - 2.0) < 0.01,
+               "inPlace: the render spans [0, last clip end]");
+        check (trackById (bsTrack)["plugins"].size() == pluginsBefore,
+               "inPlace: the device chain stays in place");
+
+        check (ok (cmd (ops, "undo", objN ({}))), "undo after inPlace bounce ok");
+        { const auto ids = trackClipIds (bsTrack);
+          check (ids.size() == 1 && ids[0] == bsClip, "ONE undo restores the ORIGINAL clip id"); }
+        { const auto t = trackById (bsTrack);
+          int notes = 0;
+          if (auto* clips = t["clips"].getArray()) for (auto& c : *clips) notes += c.getProperty ("notes", var()).size();
+          check (notes == 2, "undo restores the notes"); }
+        check (trackById (bsTrack)["plugins"].size() == pluginsBefore, "undo: devices intact");
+
+        // newTrack: source untouched, render below
+        const int tracksBefore = (int) ops.snapshot()["tracks"].size();
+        auto bnt = cmd (ops, "bounce_track", objN ({{ "trackId", bsTrack }, { "mode", "newTrack" }}));
+        check (ok (bnt), "bounce_track newTrack ok");
+        check ((int) ops.snapshot()["tracks"].size() == tracksBefore + 1, "newTrack: one new track");
+        const auto newId = bnt["data"].getProperty ("trackId", var()).toString();
+        { const auto ids = trackClipIds (bsTrack);
+          check (ids.size() == 1 && ids[0] == bsClip, "newTrack: the SOURCE track is untouched"); }
+        { const auto types = trackClipTypes (newId);
+          check (types.size() == 1 && types[0] == "wave", "newTrack: the bounce track holds the wave render"); }
+        check (wavPeak (juce::File (bnt["data"].getProperty ("file", var()).toString())) > 0.01f,
+               "newTrack: its render is non-silent too");
+        // placement: directly below the source in the visible ordering
+        { int srcIx = -1, newIx = -1;
+          const auto snapTracks = ops.snapshot()["tracks"];   // bind — getArray off a var temporary is UB
+          if (auto* tracks = snapTracks.getArray())
+              for (int i = 0; i < tracks->size(); ++i)
+              {
+                  const auto tid = (*tracks)[i].getProperty ("id", var()).toString();
+                  if (tid == bsTrack) srcIx = i;
+                  if (tid == newId) newIx = i;
+              }
+          check (newIx == srcIx + 1, "newTrack: lands DIRECTLY below the source"); }
+        check (ok (cmd (ops, "undo", objN ({}))), "undo after newTrack bounce ok");
+        check ((int) ops.snapshot()["tracks"].size() == tracksBefore, "ONE undo removes the bounce track");
+    }
+
+    // ─── freeze_track / unfreeze_track (Live 12's Freeze Track ⌥⇧⌘F) ───
+    // Freeze renders [0, lastClipEnd] through the chain, swaps the clips for the
+    // render, parks every device (setEnabled false), and stamps the additive
+    // moshFrozen marker. A central guard at the command seam then refuses
+    // clip-content + device mutations on the frozen track. Unfreeze enables the
+    // devices + drops the marker — the rendered clips STAY (undo(freeze) is how
+    // the originals return; undo(unfreeze) re-freezes).
+    section ("freeze_track");
+    {
+        auto wavPeak = [] (const juce::File& f) {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            float peak = 0.0f;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                              (int) juce::jmin ((juce::int64) 1 << 20, reader->lengthInSamples));
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    peak = juce::jmax (peak, buf.getMagnitude (ch, 0, buf.getNumSamples()));
+            }
+            return peak;
+        };
+        auto clipTypesOf = [&] (const String& tid) {
+            std::vector<String> out;
+            const auto t = trackById (tid);
+            if (auto* clips = t.getProperty ("clips", var()).getArray())
+                for (auto& c : *clips)
+                    out.push_back (c.getProperty ("type", "?").toString());
+            return out;
+        };
+        // (enabled, total) over the rack — plugins carry `enabled` additively.
+        auto pluginsEnabledOf = [&] (const String& tid) {
+            int enabled = 0, total = 0;
+            const auto t = trackById (tid);
+            if (auto* ps = t.getProperty ("plugins", var()).getArray())
+                for (auto& p : *ps)
+                {
+                    ++total;
+                    if ((bool) p.getProperty ("enabled", true)) ++enabled;
+                }
+            return std::pair<int, int> (enabled, total);
+        };
+
+        // Fixture: a MIDI track — add_midi_clip auto-loads the 4OSC instrument.
+        const auto fzTrack = cmd (ops, "create_track", args1 ("name", "FreezeSrc"))["data"].getProperty ("trackId", var()).toString();
+        auto* fo = new DynamicObject(); fo->setProperty ("trackId", fzTrack); fo->setProperty ("start", 0.0); fo->setProperty ("length", 2.0);
+        const auto fzMidiClip = cmd (ops, "add_midi_clip", var (fo))["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "add_note", objN ({{ "clipId", fzMidiClip }, { "pitch", 60 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 100 }}));
+        cmd (ops, "add_note", objN ({{ "clipId", fzMidiClip }, { "pitch", 64 }, { "start", 1.0 }, { "length", 1.0 }, { "velocity", 100 }}));
+        const auto pe0 = pluginsEnabledOf (fzTrack);
+        check (pe0.second > 0 && pe0.first == pe0.second, "freeze fixture: devices loaded and ENABLED");
+
+        // Validation.
+        check (! ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", fzTrack }}))),
+               "unfreeze refuses a non-frozen track");
+        const auto fzEmpty = cmd (ops, "create_track", args1 ("name", "FreezeEmpty"))["data"].getProperty ("trackId", var()).toString();
+        check (! ok (cmd (ops, "freeze_track", objN ({{ "trackId", fzEmpty }}))),
+               "freeze refuses a clip-less track");
+        const auto fzReturn = cmd (ops, "create_bus", args1 ("name", "FreezeBus"))["data"].getProperty ("trackId", var()).toString();
+        check (fzReturn.isNotEmpty() && ! ok (cmd (ops, "freeze_track", objN ({{ "trackId", fzReturn }}))),
+               "freeze refuses a return track");
+
+        // Freeze.
+        auto fz = cmd (ops, "freeze_track", objN ({{ "trackId", fzTrack }}));
+        check (ok (fz), "freeze_track ok");
+        const auto fzFile = juce::File (fz["data"].getProperty ("file", var()).toString());
+        check (fzFile.existsAsFile() && fzFile.getSize() > 0, "freeze: the rendered WAV exists");
+        check (wavPeak (fzFile) > 0.01f, "freeze: the render is NON-SILENT (the 4OSC notes are in it)");
+        { const auto types = clipTypesOf (fzTrack);
+          check (types.size() == 1 && types[0] == "wave", "freeze: exactly one WAVE clip replaces the MIDI clips"); }
+        check ((bool) trackById (fzTrack).getProperty ("frozen", false), "freeze: the track carries the frozen marker");
+        { const auto pe = pluginsEnabledOf (fzTrack);
+          check (pe.second == pe0.second && pe.first == 0, "freeze: chain KEPT, every device disabled"); }
+        check (! ok (cmd (ops, "freeze_track", objN ({{ "trackId", fzTrack }}))),
+               "freeze refuses an already-frozen track");
+
+        // The frozen-editing lock at the command seam.
+        const auto fzClipId = trackById (fzTrack)["clips"][0].getProperty ("id", var()).toString();
+        { const auto r = cmd (ops, "set_note", objN ({{ "clipId", fzClipId }, { "noteId", "n0" }, { "pitch", 60 }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "lock: set_note refused on a frozen track"); }
+        { const auto r = cmd (ops, "load_plugin", objN ({{ "trackId", fzTrack }, { "type", "mosh-filter" }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "lock: load_plugin refused on a frozen track"); }
+        { const auto r = cmd (ops, "set_clip_loop", objN ({{ "clipId", fzClipId }, { "loop", true }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "lock: set_clip_loop refused on a frozen track"); }
+        // Whole-clip structure stays allowed (Live lets you move the frozen clip).
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", fzClipId }, { "start", 1.0 }}))),
+               "lock: move_clip stays allowed on a frozen track");
+        check (std::abs ((double) trackById (fzTrack)["clips"][0].getProperty ("start", -1.0) - 1.0) < 0.01,
+               "move_clip moved the frozen clip");
+        check (ok (cmd (ops, "undo", objN ({}))), "undo the frozen-clip move ok");
+        check (std::abs ((double) trackById (fzTrack)["clips"][0].getProperty ("start", -1.0)) < 0.01,
+               "undo restored the frozen clip's position");
+
+        // Unfreeze: devices back on, marker gone, rendered clips STAY.
+        check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", fzTrack }}))), "unfreeze_track ok");
+        check (! trackById (fzTrack).hasProperty ("frozen"), "unfreeze: the marker is gone");
+        { const auto pe = pluginsEnabledOf (fzTrack);
+          check (pe.second == pe0.second && pe.first == pe.second, "unfreeze: every device re-enabled"); }
+        { const auto types = clipTypesOf (fzTrack);
+          check (types.size() == 1 && types[0] == "wave", "unfreeze: the rendered clip STAYS (the track's audio)"); }
+
+        // undo(unfreeze) re-freezes; undo(freeze) restores the originals exactly.
+        check (ok (cmd (ops, "undo", objN ({}))), "undo the unfreeze ok");
+        check ((bool) trackById (fzTrack).getProperty ("frozen", false), "undo(unfreeze) RE-FREEZES the track");
+        { const auto pe = pluginsEnabledOf (fzTrack);
+          check (pe.first == 0, "undo(unfreeze): devices disabled again"); }
+        check (ok (cmd (ops, "undo", objN ({}))), "undo the freeze ok");
+        { const auto t = trackById (fzTrack);
+          check (! t.hasProperty ("frozen"), "undo(freeze): the marker is gone");
+          int notes = 0;
+          if (auto* clips = t["clips"].getArray()) for (auto& c : *clips) notes += c.getProperty ("notes", var()).size();
+          check (notes == 2, "undo(freeze) restores the ORIGINAL MIDI clips + notes"); }
+        { const auto pe = pluginsEnabledOf (fzTrack);
+          check (pe.second == pe0.second && pe.first == pe.second, "undo(freeze): devices restored enabled"); }
+
+        // Persistence: re-freeze, save, reload — the marker + parked chain survive.
+        check (ok (cmd (ops, "freeze_track", objN ({{ "trackId", fzTrack }}))), "re-freeze for the persistence check ok");
+        const auto fzSessionEdit = eng.editFile();
+        check (ok (cmd (ops, "save")), "save with the frozen track ok");
+        check (ok (cmd (ops, "open_project", args1 ("file", fzSessionEdit.getFullPathName()))), "reload ok");
+        String fzId2;
+        { bool foundFrozen = false, anyEnabled = false, foundWave = false;
+          const auto snapTracks = ops.snapshot()["tracks"];   // bind — getArray off a var temporary is UB
+          if (auto* tracks = snapTracks.getArray())
+              for (auto& t : *tracks)
+                  if (t.getProperty ("name", var()).toString() == "FreezeSrc")
+                  {
+                      fzId2 = t.getProperty ("id", var()).toString();
+                      foundFrozen = (bool) t.getProperty ("frozen", false);
+                      if (auto* ps = t.getProperty ("plugins", var()).getArray())
+                          for (auto& p : *ps) if ((bool) p.getProperty ("enabled", true)) anyEnabled = true;
+                      if (auto* clips = t.getProperty ("clips", var()).getArray())
+                          for (auto& c : *clips) if (c.getProperty ("type", "?").toString() == "wave") foundWave = true;
+                  }
+          check (fzId2.isNotEmpty(), "reload: the frozen track is still there");
+          check (foundFrozen, "save/reload keeps the track FROZEN (marker persisted)");
+          check (! anyEnabled, "save/reload: the devices are still disabled");
+          check (foundWave, "save/reload: the rendered clip persists"); }
+        // The lock still bites after a reload (guard reads live state, not the session).
+        { const auto r = cmd (ops, "load_plugin", objN ({{ "trackId", fzId2 }, { "type", "mosh-filter" }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "lock: load_plugin refused after save/reload"); }
+        // Teardown — leave the session unfrozen for the sections that follow.
+        check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", fzId2 }}))), "teardown: unfroze the persistence fixture");
+
+        // Regression: freeze is a state-preserving park, not an "enable every
+        // device" operation. Keep this separate from the all-enabled fixture
+        // above, which remains the pin for the ordinary flow.
+        const auto fzBypassTrack = cmd (ops, "create_track", args1 ("name", "FreezeBypass"))["data"].getProperty ("trackId", var()).toString();
+        auto* bypassClipArgs = new DynamicObject();
+        bypassClipArgs->setProperty ("trackId", fzBypassTrack);
+        bypassClipArgs->setProperty ("start", 0.0);
+        bypassClipArgs->setProperty ("length", 2.0);
+        const auto fzBypassClip = cmd (ops, "add_midi_clip", var (bypassClipArgs))["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "add_note", objN ({{ "clipId", fzBypassClip }, { "pitch", 67 }, { "start", 0.0 }, { "length", 1.0 }, { "velocity", 100 }}))),
+               "freeze bypass fixture: note added");
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", fzBypassTrack }, { "type", "compressor" }}))),
+               "freeze bypass fixture: compressor loaded");
+        int bypassCompressorIndex = -1;
+        { const auto t = trackById (fzBypassTrack);
+          if (auto* ps = t.getProperty ("plugins", var()).getArray())
+              for (auto& p : *ps)
+                  if (p.getProperty ("type", var()).toString() == "compressor")
+                      bypassCompressorIndex = (int) p.getProperty ("index", -1); }
+        check (bypassCompressorIndex >= 0, "freeze bypass fixture: compressor index resolved");
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", fzBypassTrack }, { "index", bypassCompressorIndex }, { "bypassed", true }}))),
+               "freeze bypass fixture: compressor deliberately bypassed");
+
+        auto rawFreezeTrack = [&] (const String& tid) -> te::AudioTrack* {
+            for (auto* candidate : te::getAudioTracks (eng.edit()))
+                if (candidate != nullptr && candidate->itemID.toString() == tid)
+                    return candidate;
+            return nullptr;
+        };
+        const auto& preFreezeEnabledId = ids::moshPreFreezeEnabled;
+        auto enabledStatesOf = [&] (const String& tid) {
+            Array<bool> states;
+            if (auto* raw = rawFreezeTrack (tid))
+                for (auto* p : raw->pluginList.getPlugins())
+                    if (p != nullptr) states.add (p->isEnabled());
+            return states;
+        };
+        auto savedStatesMatch = [&] (const String& tid, const Array<bool>& expected) {
+            auto* raw = rawFreezeTrack (tid);
+            if (raw == nullptr || raw->pluginList.getPlugins().size() != expected.size()) return false;
+            for (int i = 0; i < expected.size(); ++i)
+            {
+                auto p = raw->pluginList.getPlugins()[i];
+                if (p == nullptr || ! p->state.hasProperty (preFreezeEnabledId)
+                    || (bool) p->state.getProperty (preFreezeEnabledId) != expected[i]) return false;
+            }
+            return true;
+        };
+        auto hasNoSavedStates = [&] (const String& tid) {
+            if (auto* raw = rawFreezeTrack (tid))
+                for (auto* p : raw->pluginList.getPlugins())
+                    if (p != nullptr && p->state.hasProperty (preFreezeEnabledId)) return false;
+            return true;
+        };
+        const auto bypassPreFreezeStates = enabledStatesOf (fzBypassTrack);
+        check (bypassPreFreezeStates.contains (false), "freeze bypass fixture: chain includes a deliberately bypassed device");
+
+        auto fzBypass = cmd (ops, "freeze_track", objN ({{ "trackId", fzBypassTrack }}));
+        check (ok (fzBypass), "freeze bypass fixture: freeze_track ok");
+        { const auto parked = pluginsEnabledOf (fzBypassTrack);
+          check (parked.second > 0 && parked.first == 0,
+                 "freeze bypass fixture: every rack device is parked disabled"); }
+        check (savedStatesMatch (fzBypassTrack, bypassPreFreezeStates),
+               "freeze records each device's pre-freeze enabled state through the plugin ValueTree");
+
+        const auto frozenBypassClip = trackById (fzBypassTrack)["clips"][0].getProperty ("id", var()).toString();
+        { const auto r = cmd (ops, "set_clip_loop", objN ({{ "clipId", frozenBypassClip }, { "loop", true }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "freeze guard: singular clipId mutation is refused"); }
+        const auto guardTrack = cmd (ops, "create_track", args1 ("name", "FreezeGuardOther"))["data"].getProperty ("trackId", var()).toString();
+        const auto guardClip = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", guardTrack }, { "seconds", 2.0 }, { "freq", 330.0 }}))["data"].getProperty ("clipId", var()).toString();
+        { const auto r = cmd (ops, "set_clip_loop", objN ({{ "trackId", guardTrack }, { "clipId", frozenBypassClip }, { "loop", true }}));
+          check (! ok (r) && r.getProperty ("error", var()).toString().contains ("frozen"),
+                 "freeze guard: an unfrozen trackId cannot mask a frozen singular clipId"); }
+        Array<var> mixedFrozenClipIds { guardClip, frozenBypassClip };
+        const auto pluralGuard = cmd (ops, "crop_clip", objN ({{ "trackId", guardTrack }, { "clipIds", mixedFrozenClipIds }, { "start", 0.0 }, { "end", 1.0 }}));
+        check (! ok (pluralGuard) && pluralGuard.getProperty ("error", var()).toString().contains ("frozen"),
+               "freeze guard: an unfrozen trackId and first clipId cannot mask a later frozen clipId in a mixed multi-clip mutation");
+        if (ok (pluralGuard)) cmd (ops, "undo"); // keep the RED run isolated from later assertions
+
+        check (ok (cmd (ops, "save")), "freeze bypass fixture: save frozen state ok");
+        check (ok (cmd (ops, "open_project", args1 ("file", eng.editFile().getFullPathName()))),
+               "freeze bypass fixture: reload frozen state ok");
+        String reloadedBypassTrack;
+        { const auto snapTracks = ops.snapshot()["tracks"];
+          if (auto* ts = snapTracks.getArray())
+              for (auto& t : *ts)
+                  if (t.getProperty ("name", var()).toString() == "FreezeBypass")
+                      reloadedBypassTrack = t.getProperty ("id", var()).toString(); }
+        check (reloadedBypassTrack.isNotEmpty(), "freeze bypass fixture: track found after reload");
+        check (savedStatesMatch (reloadedBypassTrack, bypassPreFreezeStates),
+               "freeze bypass fixture: saved enabled states persist through save/reload");
+
+        check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", reloadedBypassTrack }}))),
+               "freeze bypass fixture: unfreeze_track ok");
+        check (enabledStatesOf (reloadedBypassTrack) == bypassPreFreezeStates,
+               "unfreeze restores each device's saved enabled state, including bypass");
+        check (hasNoSavedStates (reloadedBypassTrack), "unfreeze removes every pre-freeze state property");
+        check (ok (cmd (ops, "undo")), "freeze bypass fixture: undo unfreeze ok");
+        { const auto parked = pluginsEnabledOf (reloadedBypassTrack);
+          check (savedStatesMatch (reloadedBypassTrack, bypassPreFreezeStates)
+                 && parked.second > 0 && parked.first == 0,
+                 "undo unfreeze restores parked rack devices and their saved states"); }
+        check (ok (cmd (ops, "redo")), "freeze bypass fixture: redo unfreeze ok");
+        check (enabledStatesOf (reloadedBypassTrack) == bypassPreFreezeStates
+               && hasNoSavedStates (reloadedBypassTrack),
+               "redo unfreeze restores bypass and removes the saved states again");
+
+        check (ok (cmd (ops, "freeze_track", objN ({{ "trackId", reloadedBypassTrack }}))),
+               "freeze legacy fixture: freeze_track ok");
+        if (auto* raw = rawFreezeTrack (reloadedBypassTrack))
+            for (auto* p : raw->pluginList.getPlugins())
+                if (p != nullptr) p->state.removeProperty (preFreezeEnabledId, nullptr);
+        check (ok (cmd (ops, "unfreeze_track", objN ({{ "trackId", reloadedBypassTrack }}))),
+               "freeze legacy fixture: unfreeze_track accepts a frozen legacy session");
+        { const auto legacyStates = enabledStatesOf (reloadedBypassTrack);
+          check (! legacyStates.contains (false) && hasNoSavedStates (reloadedBypassTrack),
+                 "legacy frozen sessions without saved device state default every device enabled"); }
+    }
+
+    // ─── consolidate_clips — the WAVE path (⌘J on audio) ───
+    // Two tone clips + a gap render through the track's chain into one WAV clip
+    // at the span start; mixed MIDI+audio sets and unselected-overlaps refuse.
+    section ("consolidate_clips — audio");
+    {
+        auto wavPeak = [] (const juce::File& f) {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            float peak = 0.0f;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                              (int) juce::jmin ((juce::int64) 1 << 20, reader->lengthInSamples));
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    peak = juce::jmax (peak, buf.getMagnitude (ch, 0, buf.getNumSamples()));
+            }
+            return peak;
+        };
+        auto clipsOf = [&] (const String& tid) {
+            std::vector<std::pair<String, std::pair<double, double>>> out;   // type, start, length
+            const auto t = trackById (tid);
+            if (auto* clips = t.getProperty ("clips", var()).getArray())
+                for (auto& c : *clips)
+                    out.push_back ({ c.getProperty ("type", "?").toString(),
+                                     { (double) c.getProperty ("start", -1.0), (double) c.getProperty ("length", -1.0) } });
+            return out;
+        };
+
+        const auto ct = cmd (ops, "create_track", args1 ("name", "ConsAudio"))["data"].getProperty ("trackId", var()).toString();
+        const auto cA = cmd (ops, "add_test_tone_clip",
+                             objN ({{ "trackId", ct }, { "seconds", 1.0 }, { "freq", 220.0 }, { "name", "cons-a" }}))
+                          ["data"].getProperty ("clipId", var()).toString();
+        const auto cB = cmd (ops, "add_test_tone_clip",
+                             objN ({{ "trackId", ct }, { "seconds", 1.0 }, { "freq", 330.0 }, { "name", "cons-b" }}))
+                          ["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", cB }, { "start", 2.0 }}))), "cons fixture: gap clip moved to 2s");
+
+        // mixed set: a MIDI clip in the selection refuses plainly
+        const auto cM = cmd (ops, "add_midi_clip", objN ({{ "trackId", ct }, { "start", 5.0 }, { "length", 1.0 }}))
+                          ["data"].getProperty ("clipId", var()).toString();
+        check (! ok (cmd (ops, "consolidate_clips", objN ({{ "clipIds", Array<var> { cA, cM } }}))),
+               "consolidate refuses a mixed MIDI + audio selection");
+        check (! ok (cmd (ops, "consolidate_clips", objN ({{ "clipIds", Array<var> () }}))),
+               "consolidate with an empty selection errors");
+        cmd (ops, "remove_clip", objN ({{ "clipId", cM }}));
+
+        auto cons = cmd (ops, "consolidate_clips", objN ({{ "clipIds", Array<var> { cA, cB } }}));
+        check (ok (cons), "consolidate_clips on two wave clips ok");
+        const auto consFile = juce::File (cons["data"].getProperty ("file", var()).toString());
+        check (consFile.existsAsFile() && consFile.getSize() > 0, "consolidate: the rendered WAV exists");
+        check (wavPeak (consFile) > 0.01f, "consolidate: the render is NON-SILENT (both tones went through the chain)");
+        { const auto cs = clipsOf (ct);
+          check (cs.size() == 1, "consolidate: exactly one clip remains");
+          check (cs.size() == 1 && cs[0].first == "wave"
+                 && std::abs (cs[0].second.first - 0.0) < 0.01
+                 && std::abs (cs[0].second.second - 3.0) < 0.01,
+                 "consolidate: one WAVE clip at the span start, covering the gap (0..3s)"); }
+
+        check (ok (cmd (ops, "undo", objN ({}))), "undo after audio consolidate ok");
+        { const auto cs = clipsOf (ct);
+          bool restored = cs.size() == 2;
+          if (restored)
+              restored = cs[0].first == "wave" && std::abs (cs[0].second.first - 0.0) < 0.01
+                      && cs[1].first == "wave" && std::abs (cs[1].second.first - 2.0) < 0.01;
+          check (restored, "ONE undo restores BOTH original clips at their positions"); }
+        { // id equality with the originals (byte-for-byte restore)
+          std::vector<String> got;
+          const auto t = trackById (ct);
+          if (auto* clips = t.getProperty ("clips", var()).getArray())
+              for (auto& c : *clips) got.push_back (c.getProperty ("id", "?").toString());
+          std::sort (got.begin(), got.end());
+          std::vector<String> want { cA, cB };
+          std::sort (want.begin(), want.end());
+          check (got == want, "undo restores the ORIGINAL clip ids"); }
+
+        // the unselected-overlap refusal: a third clip left out of the set, overlapping the span
+        const auto cC = cmd (ops, "add_test_tone_clip",
+                             objN ({{ "trackId", ct }, { "seconds", 1.0 }, { "freq", 440.0 }, { "name", "cons-c" }}))
+                          ["data"].getProperty ("clipId", var()).toString();
+        check (! ok (cmd (ops, "consolidate_clips", objN ({{ "clipIds", Array<var> { cA, cB } }}))),
+               "consolidate refuses when an UNSELECTED clip overlaps the span");
+    }
+
+    // ─── MIDI clip looping (Live 12's brace) ───
+    // set_clip_loop's MIDI branch: content-relative seconds → beats at the clip's
+    // tempo; the repeat is proven through an offline bounce's onset count, not
+    // asserted from state alone.
+    section ("set_clip_loop — MIDI");
+    {
+        // Tail-energy profile, not onset counting: a looped render carries energy
+        // all the way to the file's end; an unlooped one-note render is silent in
+        // the final quarter. (Onset thresholding flapped run to run on pluck tails.)
+        auto wavEnergyProfile = [] (const juce::File& f) -> std::pair<double, double> {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            double peak = 0.0, tail = 0.0;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> buf (1, (int) reader->lengthInSamples);
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                const int tailStart = (int) (buf.getNumSamples() * 0.75);
+                for (int i = 0; i < buf.getNumSamples(); ++i)
+                {
+                    const float a = std::abs (buf.getSample (0, i));
+                    peak = juce::jmax (peak, (double) a);
+                    if (i >= tailStart) tail += (double) a;
+                }
+                tail /= juce::jmax (1, buf.getNumSamples() - tailStart);
+            }
+            return { peak, tail };
+        };
+
+        const auto lt = cmd (ops, "create_track", args1 ("name", "MidiLoop"))["data"].getProperty ("trackId", var()).toString();
+        auto* lo = new DynamicObject(); lo->setProperty ("trackId", lt); lo->setProperty ("start", 0.0); lo->setProperty ("length", 8.0);
+        const auto lc = cmd (ops, "add_midi_clip", var (lo))["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "add_note", objN ({{ "clipId", lc }, { "pitch", 64 }, { "start", 0.0 }, { "length", 0.5 }, { "velocity", 110 }}));
+        // A — the unlooped baseline render (one note, silent last quarter).
+        auto lb0 = cmd (ops, "bounce_track", objN ({{ "trackId", lt }, { "mode", "inPlace" }}));
+
+        const auto baselineProfile = wavEnergyProfile (juce::File (lb0["data"].getProperty ("file", var()).toString()));
+        // The ambient session can carry a hot tail for ANY render (proven ambient,
+        // not loop-related — a virgin one-note clip shows it too), so the loop proof
+        // is RELATIONAL: looped energy exceeds the unlooped baseline, and deactivate
+        // returns EXACTLY to the baseline.
+        cmd (ops, "undo");   // undo the baseline bounce (MIDI clip returns)
+        check (! ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", lc }, { "enabled", true }, { "start", 0.0 }, { "length", 0.0 }}))),
+               "midi loop: enabling with a zero length errors");
+        auto loopRes = cmd (ops, "set_clip_loop", objN ({{ "clipId", lc }, { "enabled", true }, { "start", 0.0 }, { "length", 0.5 }}));
+        check (ok (loopRes), "midi loop: set_clip_loop on a MIDI clip ok");
+        check ((bool) loopRes["data"].getProperty ("loopEnabled", false), "midi loop: loopEnabled echoed true");
+        check (std::abs ((double) loopRes["data"].getProperty ("midiLoopLengthBeats", -1.0) - 1.0) < 0.01,
+               "midi loop: 0.5s at 120bpm is ONE beat (engine truth echoed)");
+        { const auto t = trackById (lt)["clips"][0];
+          check (std::abs ((double) t.getProperty ("midiLoopStartBeats", -1.0) - 0.0) < 0.01
+              && std::abs ((double) t.getProperty ("midiLoopLengthBeats", -1.0) - 1.0) < 0.01,
+              "midi loop: the snapshot carries the additive beat fields"); }
+
+        // The repeat is REAL: bouncing the looped clip repeats the note across the
+        // clip (16 beat-interval repeats over 8s), not once.
+        auto lb = cmd (ops, "bounce_track", objN ({{ "trackId", lt }, { "mode", "inPlace" }}));
+        check (ok (lb), "midi loop: bounce of the looped clip ok");
+        const auto loopedProfile = wavEnergyProfile (juce::File (lb["data"].getProperty ("file", var()).toString()));
+        check (loopedProfile.first > 0.01 && loopedProfile.second > baselineProfile.second * 1.1,
+               "midi loop: the render REPEATS the notes (last-quarter energy > 1.1× the unlooped baseline)");
+        cmd (ops, "undo");   // undo the bounce (the MIDI clip returns)
+        cmd (ops, "undo");   // undo the loop set
+        check (! trackById (lt)["clips"][0].hasProperty ("midiLoopStartBeats"),
+               "midi loop: ONE undo restores the un-looped state");
+
+        // save/reload keeps the loop; deactivate removes it and the notes play once.
+        cmd (ops, "set_clip_loop", objN ({{ "clipId", lc }, { "enabled", true }, { "start", 0.0 }, { "length", 0.5 }}));
+        check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "midi loop: save+reload ok");
+        check (std::abs ((double) trackById (lt)["clips"][0].getProperty ("midiLoopLengthBeats", -1.0) - 1.0) < 0.01,
+               "midi loop: the loop survives save/reload");
+        cmd (ops, "set_clip_loop", objN ({{ "clipId", lc }, { "enabled", false }}));
+        check (! trackById (lt)["clips"][0].hasProperty ("midiLoopStartBeats"),
+               "midi loop: deactivate removes the snapshot fields (notes play once)");
+        auto lb2 = cmd (ops, "bounce_track", objN ({{ "trackId", lt }, { "mode", "inPlace" }}));
+        // A→B→C profile comparison, same session: C must match the unlooped baseline.
+        auto lb3 = cmd (ops, "bounce_track", objN ({{ "trackId", lt }, { "mode", "inPlace" }}));
+        const auto disabledProfile = wavEnergyProfile (juce::File (lb3["data"].getProperty ("file", var()).toString()));
+        check (std::abs (disabledProfile.second - baselineProfile.second) < 0.005,
+               "midi loop: deactivated, the render returns EXACTLY to the unlooped baseline profile");
+        cmd (ops, "undo");   // bounce
     }
 
     // ─── Wave 8: sends / returns / aux buses ───
@@ -6172,6 +7185,145 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (controllerLog.contains ("\"controllerLabel\": \"flagged\""), "mark_take records flagged label");
         }
 
+        // ── Take lanes (audio), positive fixture: per-take PEAKS (take-lanes wave) ──
+        // Headless recording can't land real takes (no input device), so the take
+        // tree is built directly — addTake(File), TE's :934 direct-file form — over
+        // two tone files with different freqs, then list_takes must report both
+        // takes each with a non-empty [min,max] peaks array (the additive field).
+        {
+            const auto tfTrack = cmd (ops, "create_track", args1 ("name", "TakeFx"))["data"].getProperty ("trackId", var()).toString();
+            const auto toneA = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tfTrack }, { "seconds", 1.0 }, { "freq", 220.0 }}))["data"].getProperty ("clipId", var()).toString();
+            const auto toneB = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tfTrack }, { "seconds", 1.0 }, { "freq", 880.0 }}))["data"].getProperty ("clipId", var()).toString();
+            check (toneA.isNotEmpty() && toneB.isNotEmpty() && toneA != toneB, "take-peaks fixture: two tone clips");
+            te::WaveAudioClip* wa = nullptr;
+            juce::File fileA, fileB;
+            for (auto* tr : te::getAllTracks (eng.edit()))
+                if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                    for (auto* c : at->getClips())
+                        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                        {
+                            if (w->itemID.toString() == toneA) { wa = w; fileA = w->getCurrentSourceFile(); }
+                            if (w->itemID.toString() == toneB) fileB = w->getCurrentSourceFile();
+                        }
+            check (wa != nullptr && fileA.existsAsFile() && fileB.existsAsFile(),
+                   "take-peaks fixture: the clip and both source files resolved");
+            wa->addTake (fileA);
+            wa->addTake (fileB);
+            auto ltp = cmd (ops, "list_takes", objN ({{ "clipId", toneA }}));
+            check (ok (ltp), "list_takes on a take-bearing clip ok");
+            check ((int) ltp["data"].getProperty ("numTakes", -1) == 2, "numTakes is 2");
+            const auto takesVar = ltp["data"].getProperty ("takes", var());   // bound — not a temporary
+            check (takesVar.size() == 2, "list_takes reports both takes");
+            int withPeaks = 0;
+            bool shapesOk = true, distinct = false;
+            juce::String firstPeaks;
+            if (auto* tarr = takesVar.getArray())
+                for (auto& tv : *tarr)
+                {
+                    const auto pk = tv.getProperty ("peaks", var());
+                    if (! pk.isArray() || pk.size() == 0) continue;
+                    ++withPeaks;
+                    const auto b0 = pk[0];
+                    shapesOk = shapesOk && b0.isArray() && b0.size() == 2;   // [min,max] pairs
+                    const auto s = juce::JSON::toString (pk);
+                    if (firstPeaks.isEmpty()) firstPeaks = s;
+                    else distinct = s != firstPeaks;
+                }
+            check (withPeaks == 2, "EVERY take carries a non-empty peaks array (additive)");
+            check (shapesOk, "take peaks are [min,max] pairs — the main-lane shape");
+            check (distinct, "the two takes' peaks DIFFER (220 Hz vs 880 Hz sources)");
+
+            auto takeClipSnapshot = [&ops, &toneA]() -> juce::var
+            {
+                auto snap = ops.snapshot();
+                auto tracksVar = snap.getProperty ("tracks", var());
+                if (auto* trackArr = tracksVar.getArray())
+                    for (auto& trackVar : *trackArr)
+                    {
+                        auto clipsVar = trackVar.getProperty ("clips", var());
+                        if (auto* clipArr = clipsVar.getArray())
+                            for (auto& clipVar : *clipArr)
+                                if (clipVar.getProperty ("id", var()).toString() == toneA)
+                                    return clipVar;
+                    }
+                return {};
+            };
+            auto currentTakeFlags = [] (const juce::var& clipVar)
+            {
+                int count = 0;
+                auto takes = clipVar.getProperty ("takes", var());
+                if (auto* arr = takes.getArray())
+                    for (auto& take : *arr)
+                        if ((bool) take.getProperty ("isCurrent", false))
+                            ++count;
+                return count;
+            };
+
+            // ── set_current_take on DIRECT-FILE takes (data-loss guard) ──
+            // TE's setCurrentTake DELETES a take whose source doesn't resolve to a
+            // project item (loop-overdub lands exactly those) — a real session went
+            // 2 takes → 0. The seam switch must keep every take, move the playing
+            // source, and undo cleanly.
+            auto sct = cmd (ops, "set_current_take", objN ({{ "clipId", toneA }, { "takeIndex", 1 }}));
+            check (ok (sct), "set_current_take on a direct-file take ok");
+            check (wa->getCurrentSourceFile() == fileB, "the switch repoints the playing source at the take's file");
+            { auto lt2 = cmd (ops, "list_takes", objN ({{ "clipId", toneA }}));
+              check ((int) lt2["data"].getProperty ("numTakes", -1) == 2, "the take SURVIVES the switch (numTakes still 2)");
+              check ((int) lt2["data"].getProperty ("currentTakeIndex", -1) == 1, "the current index follows the switch"); }
+            { const auto clip = takeClipSnapshot();
+              check ((int) clip.getProperty ("currentTakeIndex", -1) == 1,
+                     "the main snapshot follows a direct-file take switch");
+              check (currentTakeFlags (clip) == 1 && (bool) clip["takes"][1].getProperty ("isCurrent", false),
+                     "the main snapshot marks only the switched direct-file take current"); }
+            check (ok (cmd (ops, "undo", objN ({}))), "undo after the take switch ok");
+            check (wa->getCurrentSourceFile() == fileA, "ONE undo restores the original playing source");
+            { auto lt3 = cmd (ops, "list_takes", objN ({{ "clipId", toneA }}));
+              check ((int) lt3["data"].getProperty ("numTakes", -1) == 2, "the take tree is intact after the undo too"); }
+            { const auto clip = takeClipSnapshot();
+              check ((int) clip.getProperty ("currentTakeIndex", -1) == 0,
+                     "the main snapshot current take follows undo");
+              check (currentTakeFlags (clip) == 1 && (bool) clip["takes"][0].getProperty ("isCurrent", false),
+                     "the main snapshot restores exactly one current-take marker on undo"); }
+
+            // The switched source actually RENDERS: remove the other clip so the
+            // track holds only the take clip, switch back to take 1, bounce, and
+            // measure real energy (the bounce path is the proven offline render).
+            check (ok (cmd (ops, "remove_clip", objN ({{ "clipId", toneB }}))), "remove the non-take clip for the render check");
+            check (ok (cmd (ops, "set_current_take", objN ({{ "clipId", toneA }, { "takeIndex", 1 }}))), "re-switch to take 1 ok");
+            const double originalTakeStart = wa->getPosition().getStart().inSeconds();
+            double latestOtherEnd = 0.0;
+            for (auto* tr : te::getAudioTracks (eng.edit()))
+                if (tr != nullptr)
+                    for (auto* c : tr->getClips())
+                        if (c != wa)
+                            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (c))
+                                latestOtherEnd = juce::jmax (latestOtherEnd, wave->getPosition().getEnd().inSeconds());
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", toneA }, { "start", latestOtherEnd + 1.0 }}))),
+                   "move the take clip latest for the producer-controller projection check");
+            { const auto controller = ops.snapshot().getProperty ("controller", var());
+              const auto take = controller.getProperty ("take", var());
+              check (take.getProperty ("clipId", var()).toString() == toneA
+                         && (int) take.getProperty ("currentTakeIndex", -1) == 1,
+                     "the producer-controller snapshot follows the direct-file take switch"); }
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", toneA }, { "start", originalTakeStart }}))),
+                   "restore the take clip position after the producer-controller projection check");
+            auto tb = cmd (ops, "bounce_track", objN ({{ "trackId", tfTrack }, { "mode", "inPlace" }}));
+            check (ok (tb), "bounce of the take track ok");
+            { juce::AudioFormatManager rfm;
+              rfm.registerBasicFormats();
+              std::unique_ptr<juce::AudioFormatReader> rdr (rfm.createReaderFor (
+                  juce::File (tb["data"].getProperty ("file", var()).toString())));
+              float peak = 0.0f;
+              if (rdr != nullptr)
+              {
+                  juce::AudioBuffer<float> rbuf ((int) rdr->numChannels, (int) rdr->lengthInSamples);
+                  rdr->read (&rbuf, 0, rbuf.getNumSamples(), 0, true, true);
+                  for (int ch = 0; ch < rbuf.getNumChannels(); ++ch)
+                      peak = juce::jmax (peak, rbuf.getMagnitude (ch, 0, rbuf.getNumSamples()));
+              }
+              check (peak > 0.01f, "the switched take's source RENDERS non-silent (880 Hz tone)"); }
+        }
+
         // ── CTL-001: live MIDI controller -> armed instrument track ──
         // Headless there is no MIDI input device enumerated (the engine only adds them
         // once CoreAudio/MIDI is up + ensurePlaybackContext enables them, both audio-
@@ -6376,8 +7528,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // new_project -> ok, empty tracks, editFile path changed, fresh file on disk.
         auto npFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new.mosh");
         npFile.deleteFile();
-        auto np = cmd (ops, "new_project", args1 ("name", "selftest-new"));
+        sawProjectReplacementEvent = false;
+        lastProjectReplacementReason.clear();
+        lastProjectReplacementManagedByUi = false;
+        auto np = uiProjectCmd (ops, "new_project", args1 ("name", "selftest-new"));
         check (ok (np), "new_project ok");
+        check (sawProjectReplacementEvent,
+               "UI new_project marks snapshot_invalidated as a project replacement");
+        check (lastProjectReplacementReason == "new_project",
+               "UI new_project identifies the replacement reason");
+        check (lastProjectReplacementManagedByUi,
+               "UI new_project reports that the store prepared the project epoch");
         check (tracks (ops) == 0, "new_project starts with zero tracks");
         const auto newEdit = sess().getProperty ("editFile", var()).toString();
         check (newEdit != sessionEdit.getFullPathName(), "new_project changed session.editFile path");
@@ -6423,8 +7584,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         npFile2.deleteFile();
         check (ok (cmd (ops, "new_project", args1 ("name", "selftest-new2"))), "second new_project ok");
         check (tracks (ops) == 0, "second new project is empty");
+        sawProjectReplacementEvent = false;
+        lastProjectReplacementReason.clear();
+        lastProjectReplacementManagedByUi = true;
         auto op = cmd (ops, "open_project", args1 ("file", newEdit));
         check (ok (op), "open_project ok");
+        check (sawProjectReplacementEvent,
+               "direct open_project marks snapshot_invalidated as a project replacement");
+        check (lastProjectReplacementReason == "open_project",
+               "direct open_project identifies the replacement reason");
+        check (! lastProjectReplacementManagedByUi,
+               "direct open_project leaves project epoch ownership to event consumers");
         check (tracks (ops) == 1, "open_project round-trips the saved track count");
 
         // save_as(tmp) -> ok, file exists non-empty, subsequent save targets the new path.
@@ -9081,14 +10251,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "loop: enabled with length 0 rejected");
         check (! (bool) clipById (lcid).getProperty ("loopEnabled", true), "loop: rejected zero-length call left the clip un-looped");
 
-        // Type rejection: audio-clip-only, mirrors set_clip_gain/set_clip_reverse.
+        // MIDI joined the seam (midi-loop wave): the same command now works on MIDI
+        // clips — and writes the MIDI loop fields, NOT the wave-only loopEnabled set.
         {
             auto midiLoop = cmd (ops, "add_midi_clip", objN ({{ "trackId", lt }, { "length", 1.0 }}));
             const auto midiLoopCid = midiLoop["data"].getProperty ("clipId", var()).toString();
-            auto rej = cmd (ops, "set_clip_loop", objN ({{ "clipId", midiLoopCid }, { "enabled", true }, { "length", 1.0 }}));
-            check (! ok (rej), "loop: set_clip_loop on a MIDI clip rejected");
-            check (! (bool) clipById (midiLoopCid).getProperty ("loopEnabled", false),
-                   "loop: rejected MIDI clip was not mutated");
+            auto acc = cmd (ops, "set_clip_loop", objN ({{ "clipId", midiLoopCid }, { "enabled", true }, { "length", 1.0 }}));
+            check (ok (acc), "loop: set_clip_loop works on a MIDI clip (midi-loop wave)");
+            check (std::abs ((double) clipById (midiLoopCid).getProperty ("midiLoopLengthBeats", -1.0) - 2.0) < 0.01,
+                   "loop: the MIDI clip carries the beat fields (1s @ 120bpm = 2 beats)");
+            check (! clipById (midiLoopCid).hasProperty ("loopEnabled"),
+                   "loop: the WAVE-only loop fields stay absent on a MIDI clip");
+            cmd (ops, "undo");
             cmd (ops, "remove_clip", args1 ("clipId", midiLoopCid));   // tidy
         }
         check (! ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", "nope" }, { "enabled", true }}))),
@@ -9222,6 +10396,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "routing: a non-MIDI deviceID resolves to the wave family");
         check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
+        // Explicit clear (Live's "No Input"): present-but-empty deviceID removes the
+        // choice — the snapshot omits `input` — and it stays undoable:false (a
+        // preference like the set). An ABSENT deviceID remains a malformed call.
+        auto stc = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "" }}));
+        check (ok (stc), "routing: set_track_input empty deviceID clears (No Input)");
+        check ((bool) stc["data"].getProperty ("cleared", false), "routing: clear reports cleared:true");
+        check (! trackById (ra).hasProperty ("input"), "routing: cleared input omits the input field");
+        check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-1-2" }}))),
+               "routing: input re-set after a clear");
+        check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-1-2",
+               "routing: re-set input in the snapshot");
+        check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "" }}))),
+               "routing: clear again ok");
+        check (ok (cmd (ops, "save")) && ok (cmd (ops, "reload")), "routing: save+reload ok (post-clear)");
+        check (! trackById (ra).hasProperty ("input"), "routing: the cleared state persists across save/reload");
+        check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}))),
+               "routing: restore the in-3-4 choice for the output probes below");
         check (! ok (cmd (ops, "set_track_input", args1 ("trackId", ra))), "routing: set_track_input missing deviceID errors");
         check (! ok (cmd (ops, "set_track_input", objN ({{ "trackId", "nope" }, { "deviceID", "x" }}))),
                "routing: set_track_input bad trackId errors");
@@ -9838,6 +11029,242 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "applied track survives the undo (apply is outside the undo system)");
     }
 
+    section ("Multiplayer: commit envelope identity binds the applied track");
+    {
+        MoshEngine identityEng (false, true, "session-mp-commit-identity");
+        MoshOps    identityOps (identityEng);
+        std::vector<String> identityEvents;
+        identityOps.setEventSink ([&] (const var& event)
+        {
+            identityEvents.push_back (event.getProperty ("type", var()).toString());
+        });
+
+        check (ok (cmd (identityOps, "new_project", args1 ("name", "mp-commit-identity"))),
+               "commit identity fixture project created");
+        const auto created = cmd (identityOps, "create_track", args1 ("name", "Commit Victim"));
+        check (ok (created), "commit identity victim created");
+        const auto victimTrackId = created.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        const auto serialized = cmd (identityOps, "mp_serialize_track", args1 ("trackId", victimTrackId));
+        check (ok (serialized), "commit identity victim serialized");
+        const auto victimBlob = serialized.getProperty ("data", var()).getProperty ("blob", var()).toString();
+        const auto victimLogicalId = serialized.getProperty ("data", var()).getProperty ("logicalId", var()).toString();
+        check (victimBlob.isNotEmpty() && victimLogicalId.isNotEmpty(),
+               "commit identity fixture carries blob and logicalId");
+        check (ok (cmd (identityOps, "rename_track",
+                        objN ({ { "trackId", victimTrackId }, { "name", "Commit Victim Preserved" } }))),
+               "commit identity victim diverged after serialization");
+
+        auto trackIdForLogicalId = [&] (const String& logicalId)
+        {
+            return trackSnapshotByLogicalId (identityOps, logicalId)
+                .getProperty ("id", var()).toString();
+        };
+        auto trackNameForLogicalId = [&] (const String& logicalId)
+        {
+            return trackSnapshotByLogicalId (identityOps, logicalId)
+                .getProperty ("name", var()).toString();
+        };
+        auto trackNamedExists = [&] (const String& name)
+        {
+            auto snapshot = identityOps.snapshot();
+            if (auto* tracksArray = snapshot.getProperty ("tracks", var()).getArray())
+                for (auto& track : *tracksArray)
+                    if (track.getProperty ("name", var()).toString() == name)
+                        return true;
+            return false;
+        };
+        auto setPeerTrackLock = [&] (bool active, const String& logicalId)
+        {
+            if (! active)
+                return cmd (identityOps, "mp_sync_locks", objN ({ { "active", false } }));
+
+            auto* locks = new DynamicObject();
+            locks->setProperty (logicalId, "other");
+            return cmd (identityOps, "mp_sync_locks",
+                        objN ({ { "active", true }, { "selfPeer", "me" }, { "locks", var (locks) } }));
+        };
+        const auto logFile = identityEng.sessionDir().getChildFile ("mosh-log.jsonl");
+        const String decoyLogicalId = "peer-controlled-decoy-logical-id";
+
+        section ("Multiplayer: mismatched commit envelope is a no-op");
+        {
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Mismatch Undo Sentinel"))),
+                   "mismatched commit undo sentinel created");
+            check (ok (setPeerTrackLock (true, victimLogicalId)),
+                   "mismatched commit fixture activates the peer track lock");
+
+            const auto trackIdBefore = trackIdForLogicalId (victimLogicalId);
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* mismatch = new DynamicObject();
+            mismatch->setProperty ("type", "commit");
+            mismatch->setProperty ("logicalId", decoyLogicalId);
+            mismatch->setProperty ("blob", victimBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (mismatch));
+
+            check (trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "mismatched commit preserves the victim's content");
+            check (trackIdForLogicalId (victimLogicalId) == trackIdBefore,
+                   "mismatched commit does not replace the victim track");
+            check (tracks (identityOps) == trackCountBefore
+                       && ! trackSnapshotByLogicalId (identityOps, decoyLogicalId).isObject(),
+                   "mismatched commit creates no decoy track");
+            check (logFile.getSize() == logBytesBefore,
+                   "mismatched commit writes no command-log record");
+            check (identityEvents.size() == eventsBefore,
+                   "mismatched commit emits no snapshot invalidation or event");
+            check (! ok (cmd (identityOps, "rename_track",
+                              objN ({ { "trackId", trackIdForLogicalId (victimLogicalId) },
+                                      { "name", "LOCK BYPASS LEAKED" } }))),
+                   "mismatched commit leaves the peer track lock enforced");
+            check (ok (setPeerTrackLock (false, victimLogicalId)),
+                   "mismatched commit fixture deactivates the peer track lock");
+            check (ok (cmd (identityOps, "undo")), "undo after mismatched commit succeeds");
+            check (! trackNamedExists ("Mismatch Undo Sentinel")
+                       && trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "mismatched commit leaves the local undo head and victim untouched");
+        }
+
+        section ("Multiplayer: missing commit envelope identity is a no-op");
+        {
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Missing Undo Sentinel"))),
+                   "missing-identity commit undo sentinel created");
+            check (ok (setPeerTrackLock (true, victimLogicalId)),
+                   "missing-identity fixture activates the peer track lock");
+
+            const auto trackIdBefore = trackIdForLogicalId (victimLogicalId);
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* missing = new DynamicObject();
+            missing->setProperty ("type", "commit");
+            missing->setProperty ("blob", victimBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (missing));
+
+            check (trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "missing-identity commit preserves the victim's content");
+            check (trackIdForLogicalId (victimLogicalId) == trackIdBefore,
+                   "missing-identity commit does not replace the victim track");
+            check (tracks (identityOps) == trackCountBefore,
+                   "missing-identity commit creates no track");
+            check (logFile.getSize() == logBytesBefore && identityEvents.size() == eventsBefore,
+                   "missing-identity commit writes no log and emits no event");
+            check (! ok (cmd (identityOps, "rename_track",
+                              objN ({ { "trackId", trackIdForLogicalId (victimLogicalId) },
+                                      { "name", "MISSING ID LOCK BYPASS LEAKED" } }))),
+                   "missing-identity commit leaves the peer track lock enforced");
+            check (ok (setPeerTrackLock (false, victimLogicalId)),
+                   "missing-identity fixture deactivates the peer track lock");
+            check (ok (cmd (identityOps, "undo")), "undo after missing-identity commit succeeds");
+            check (! trackNamedExists ("Missing Undo Sentinel")
+                       && trackNameForLogicalId (victimLogicalId) == "Commit Victim Preserved",
+                   "missing-identity commit leaves the local undo head and victim untouched");
+        }
+
+        section ("Multiplayer: non-string commit envelope identity is a no-op");
+        {
+            String coercionBlob;
+            if (auto coercionXml = parseXML (victimBlob))
+            {
+                auto coercionTree = ValueTree::fromXml (*coercionXml);
+                if (coercionTree.isValid())
+                {
+                    coercionTree.setProperty (ids::moshLogicalId, "1", nullptr);
+                    if (auto rewrittenXml = coercionTree.createXml())
+                        coercionBlob = rewrittenXml->toString();
+                }
+            }
+            check (coercionBlob.isNotEmpty(),
+                   "non-string identity fixture derives a valid blob whose logicalId is the string 1");
+
+            const auto directApply = cmd (identityOps, "apply_remote_track", args1 ("blob", coercionBlob));
+            check (ok (directApply)
+                       && directApply.getProperty ("data", var()).getProperty ("logicalId", var()).toString() == "1"
+                       && directApply.getProperty ("data", var()).getProperty ("mode", var()).toString() == "created",
+                   "blob-only internal apply creates the string-1 fixture track");
+            const auto coercionTrackId = trackIdForLogicalId ("1");
+            check (coercionTrackId.isNotEmpty(), "string-1 fixture track resolves by logical identity");
+            check (ok (cmd (identityOps, "rename_track",
+                            objN ({ { "trackId", coercionTrackId },
+                                    { "name", "Coercion Target Preserved" } }))),
+                   "string-1 fixture target diverged after direct apply");
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Coercion Undo Sentinel"))),
+                   "non-string identity undo sentinel created");
+            check (ok (setPeerTrackLock (true, "1")),
+                   "non-string identity fixture activates the peer track lock");
+
+            const auto trackIdBefore = trackIdForLogicalId ("1");
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* coercion = new DynamicObject();
+            coercion->setProperty ("type", "commit");
+            coercion->setProperty ("logicalId", true);
+            coercion->setProperty ("blob", coercionBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (coercion));
+
+            check (trackNameForLogicalId ("1") == "Coercion Target Preserved",
+                   "non-string identity commit preserves the target's content");
+            check (trackIdForLogicalId ("1") == trackIdBefore,
+                   "non-string identity commit does not replace the target track");
+            check (tracks (identityOps) == trackCountBefore,
+                   "non-string identity commit creates no track");
+            check (logFile.getSize() == logBytesBefore,
+                   "non-string identity commit writes no command-log record");
+            check (identityEvents.size() == eventsBefore,
+                   "non-string identity commit emits no snapshot invalidation or event");
+            check (! ok (cmd (identityOps, "rename_track",
+                              objN ({ { "trackId", trackIdForLogicalId ("1") },
+                                      { "name", "NON-STRING ID LOCK BYPASS LEAKED" } }))),
+                   "non-string identity commit leaves the peer track lock enforced");
+            check (ok (setPeerTrackLock (false, "1")),
+                   "non-string identity fixture deactivates the peer track lock");
+            check (ok (cmd (identityOps, "undo")), "undo after non-string identity commit succeeds");
+            check (! trackNamedExists ("Coercion Undo Sentinel")
+                       && trackNameForLogicalId ("1") == "Coercion Target Preserved",
+                   "non-string identity commit leaves the local undo head and target untouched");
+        }
+
+        section ("Multiplayer: matched commit envelope still applies");
+        {
+            check (ok (cmd (identityOps, "create_track", args1 ("name", "Matched Undo Sentinel"))),
+                   "matched commit undo sentinel created");
+            const auto trackIdBefore = trackIdForLogicalId (victimLogicalId);
+            const auto trackCountBefore = tracks (identityOps);
+            const auto logBytesBefore = logFile.getSize();
+            const auto eventsBefore = identityEvents.size();
+            auto* matched = new DynamicObject();
+            matched->setProperty ("type", "commit");
+            matched->setProperty ("logicalId", victimLogicalId);
+            matched->setProperty ("blob", victimBlob);
+
+            identityOps.applyMultiplayerCommitForSelfTest (var (matched));
+
+            check (trackNameForLogicalId (victimLogicalId) == "Commit Victim",
+                   "matched commit applies the serialized victim content");
+            check (trackIdForLogicalId (victimLogicalId).isNotEmpty()
+                       && trackIdForLogicalId (victimLogicalId) != trackIdBefore,
+                   "matched commit replaces the intended victim track");
+            check (tracks (identityOps) == trackCountBefore,
+                   "matched commit replacement preserves the track count");
+            check (logFile.getSize() == logBytesBefore,
+                   "matched peer commit remains absent from the local command log");
+            check (identityEvents.size() == eventsBefore + 1
+                       && identityEvents.back() == "snapshot_invalidated",
+                   "matched commit emits exactly one snapshot invalidation");
+            check (ok (cmd (identityOps, "undo")), "undo after matched commit succeeds");
+            check (! trackNamedExists ("Matched Undo Sentinel")
+                       && trackNameForLogicalId (victimLogicalId) == "Commit Victim",
+                   "matched commit remains outside the local undo stack");
+        }
+
+        identityOps.setEventSink ({});
+    }
+
     section ("Multiplayer: lock guard at the mutation path (MP-001 P3)");
     {
         // The guard sits at the single chokepoint MoshOps::execute(). When a session
@@ -9862,6 +11289,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // A clip on Lock A, added BEFORE locking, to exercise clip-scoped guarding.
         auto addc = cmd (ops, "add_test_tone_clip", objN ({ { "trackId", aId }, { "seconds", 1.0 } }));
         const auto aClipId = addc.getProperty ("data", juce::var()).getProperty ("clipId", juce::var()).toString();
+        const auto aMidiClipOne = cmd (ops, "add_midi_clip",
+                                       objN ({ { "trackId", aId }, { "start", 2.0 }, { "length", 1.0 } }))
+                                      ["data"].getProperty ("clipId", juce::var()).toString();
+        const auto aMidiClipTwo = cmd (ops, "add_midi_clip",
+                                       objN ({ { "trackId", aId }, { "start", 3.0 }, { "length", 1.0 } }))
+                                      ["data"].getProperty ("clipId", juce::var()).toString();
+        const auto bClipId = cmd (ops, "add_test_tone_clip",
+                                  objN ({ { "trackId", bId }, { "seconds", 1.0 } }))
+                                 ["data"].getProperty ("clipId", juce::var()).toString();
+        check (aClipId.isNotEmpty() && aMidiClipOne.isNotEmpty() && aMidiClipTwo.isNotEmpty()
+                   && bClipId.isNotEmpty(),
+               "lock-test clip fixtures resolved across both tracks");
 
         // Activate: the OTHER peer holds Lock A AND the session (structural) lock.
         auto* locks = new juce::DynamicObject();
@@ -9881,6 +11320,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         if (aClipId.isNotEmpty())
             check (! ok (cmd (ops, "set_clip_gain", objN ({ { "clipId", aClipId }, { "gain", 0.5 } }))),
                    "clip mutation on a peer-locked track's clip is BLOCKED (clip->track->logicalId)");
+        check (! ok (cmd (ops, "consolidate_clips",
+                          objN ({ { "clipIds", Array<var> { aMidiClipOne, aMidiClipTwo } } }))),
+               "clipIds consolidation on a peer-locked track is BLOCKED");
+        check (! ok (cmd (ops, "crop_clip",
+                          objN ({ { "clipIds", Array<var> { aClipId, bClipId } },
+                                  { "start", 0.1 }, { "end", 0.9 } }))),
+               "multi-track crop is BLOCKED when any selected track is peer-locked");
         check (! ok (cmd (ops, "create_track", args1 ("name", "Nope"))),
                "session-global op BLOCKED while the session lock is peer-held");
 
@@ -9931,6 +11377,72 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((int) bundle.getProperty ("count", 0) == 2, "serialized a 2-track project bundle");
         check (bundle.getProperty ("annotations", juce::var()).toString().isNotEmpty(), "bundle carries the annotations subtree");
 
+        // C010: a bootstrap is a whole-project transaction. Reject every malformed
+        // envelope before touching the current project, its undo head, events, or log.
+        auto bootstrapRejectsWithoutMutation = [&] (const juce::var& candidate,
+                                                     const juce::String& label)
+        {
+            const auto tracksBefore = tracks (ops);
+            const auto annotationsBefore = JSON::toString (ops.snapshot().getProperty ("annotations", var()), true);
+            const auto logBefore = eng.sessionDir().getChildFile ("mosh-log.jsonl").getSize();
+            sawProjectReplacementEvent = false;
+
+            const auto rejected = cmd (ops, "mp_apply_bootstrap", candidate);
+            check (! ok (rejected), label + " rejects");
+            check (tracks (ops) == tracksBefore, label + " preserves every local track");
+            check (JSON::toString (ops.snapshot().getProperty ("annotations", var()), true) == annotationsBefore,
+                   label + " preserves local annotations");
+            check (! sawProjectReplacementEvent, label + " emits no project replacement");
+            check (eng.sessionDir().getChildFile ("mosh-log.jsonl").getSize() == logBefore,
+                   label + " writes no JSONL record");
+        };
+
+        bootstrapRejectsWithoutMutation (objN ({}), "bootstrap missing tracks");
+        bootstrapRejectsWithoutMutation (args1 ("tracks", "not-an-array"), "bootstrap non-array tracks");
+
+        juce::var firstEntry;
+        if (auto* bundleTracks = bundle.getProperty ("tracks", var()).getArray();
+            bundleTracks != nullptr && ! bundleTracks->isEmpty())
+            firstEntry = bundleTracks->getFirst();
+        check (firstEntry.isObject(), "bootstrap preflight fixture has a valid track entry");
+
+        auto mismatchEntry = JSON::parse (JSON::toString (firstEntry, true));
+        if (auto* o = mismatchEntry.getDynamicObject()) o->setProperty ("logicalId", "wrong-envelope-id");
+        bootstrapRejectsWithoutMutation (args1 ("tracks", var (Array<var> { mismatchEntry })),
+                                         "bootstrap envelope/blob identity mismatch");
+
+        const auto firstLogicalId = firstEntry.getProperty ("logicalId", var()).toString();
+        ValueTree wrongTrackRoot ("NOT_A_TRACK");
+        wrongTrackRoot.setProperty (ids::moshLogicalId, firstLogicalId, nullptr);
+        auto wrongRootEntry = objN ({ { "logicalId", firstLogicalId },
+                                     { "blob", wrongTrackRoot.createXml()->toString() },
+                                     { "audioRefs", var (Array<var>()) } });
+        bootstrapRejectsWithoutMutation (args1 ("tracks", var (Array<var> { wrongRootEntry })),
+                                         "bootstrap non-track blob root");
+
+        bootstrapRejectsWithoutMutation (
+            args1 ("tracks", var (Array<var> { firstEntry, var ("malformed-entry") })),
+            "bootstrap partial malformed bundle");
+        bootstrapRejectsWithoutMutation (
+            args1 ("tracks", var (Array<var> { firstEntry, firstEntry })),
+            "bootstrap duplicate logical identity");
+        bootstrapRejectsWithoutMutation (
+            objN ({ { "tracks", var (Array<var>()) }, { "annotations", "<WRONG_ROOT/>" } }),
+            "bootstrap wrong annotation root");
+        bootstrapRejectsWithoutMutation (
+            objN ({ { "tracks", var (Array<var>()) },
+                    { "annotations", "<MOSH_ANNOTATIONS><WRONG_CHILD/></MOSH_ANNOTATIONS>" } }),
+            "bootstrap wrong annotation child");
+
+        auto badRefEntry = JSON::parse (JSON::toString (firstEntry, true));
+        auto* badRef = new DynamicObject();
+        badRef->setProperty ("hash", "not-a-sha256");
+        badRef->setProperty ("ext", "../wav");
+        if (auto* o = badRefEntry.getDynamicObject())
+            o->setProperty ("audioRefs", var (Array<var> { var (badRef) }));
+        bootstrapRejectsWithoutMutation (args1 ("tracks", var (Array<var> { badRefEntry })),
+                                         "bootstrap unsafe audio reference");
+
         // REGRESSION (bootstrap audio late-join): the bundle must carry per-track by-hash
         // audioRefs so a late-joiner can fetch PRE-EXISTING audio, not just structure/MIDI.
         // Before the fix mp_serialize_project never content-addressed/uploaded → the bundle
@@ -9957,12 +11469,58 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "bootstrap by-hash ref has no spurious '../' (" + hostRef + ")");
         }
 
+        const auto tracksBeforeTxnRefusal = tracks (ops);
+        check (ok (txnBegin (ops, "bootstrap-refusal-txn", "bootstrap refusal",
+                             txnManifest ({ { "bootstrap-next", "create_track" } }))),
+               "bootstrap transaction-refusal fixture opens");
+        const auto refusedDuringTxn = cmd (ops, "mp_apply_bootstrap", bundle);
+        check (! ok (refusedDuringTxn)
+                   && refusedDuringTxn.getProperty ("error", var()).toString()
+                                          .containsIgnoreCase ("transaction_in_progress"),
+               "bootstrap is refused at execute while an agent transaction is open");
+        check (tracks (ops) == tracksBeforeTxnRefusal,
+               "transaction refusal preserves the project before dispatch");
+        check (ok (cmd (ops, "batch_rollback", args1 ("transactionId", "bootstrap-refusal-txn"))),
+               "bootstrap transaction-refusal fixture rolls back cleanly");
+
+        const auto logLinesBeforeEmpty = StringArray::fromLines (
+            eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()).size();
+        sawProjectReplacementEvent = false;
+        const auto emptyApply = cmd (ops, "mp_apply_bootstrap",
+                                     objN ({ { "tracks", var (Array<var>()) },
+                                             { "annotations", "" } }));
+        check (ok (emptyApply)
+                   && (int) emptyApply.getProperty ("data", var()).getProperty ("applied", -1) == 0,
+               "explicit empty bootstrap is a valid project adoption");
+        check (tracks (ops) == 0 && ops.snapshot().getProperty ("annotations", var()).size() == 0,
+               "valid empty bootstrap clears tracks and annotations");
+        check (sawProjectReplacementEvent, "valid empty bootstrap emits one project replacement");
+        const auto logLinesAfterEmpty = StringArray::fromLines (
+            eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()).size();
+        check (logLinesAfterEmpty == logLinesBeforeEmpty + 1
+                   && commandLogHasRecord (eng, "mp_apply_bootstrap", true, false),
+               "valid empty bootstrap writes one undoable:false JSONL record");
+        cmd (ops, "undo");
+        check (tracks (ops) == 0, "undo cannot resurrect the pre-bootstrap project");
+
+        sawProjectReplacementEvent = false;
+        lastProjectReplacementReason.clear();
+        lastProjectReplacementManagedByUi = true;
         check (ok (cmd (ops, "new_project", args1 ("name", "mp-boot-dst"))), "new_project (joiner wipe) ok");
         check (tracks (ops) == 0, "joiner starts empty before bootstrap");
+        check (sawProjectReplacementEvent,
+               "direct new_project marks snapshot_invalidated as a project replacement");
+        check (lastProjectReplacementReason == "new_project",
+               "direct new_project identifies the replacement reason");
+        check (! lastProjectReplacementManagedByUi,
+               "direct new_project leaves project epoch ownership to event consumers");
 
+        sawProjectReplacementEvent = false;
         auto app = cmd (ops, "mp_apply_bootstrap", objN ({ { "tracks", bundle.getProperty ("tracks", juce::var()) },
                                                            { "annotations", bundle.getProperty ("annotations", juce::var()) } }));
         check (ok (app), "mp_apply_bootstrap ok");
+        check (sawProjectReplacementEvent,
+               "mp_apply_bootstrap marks snapshot_invalidated as a project replacement");
         // The joiner adopts the host's annotation (id + author + text preserved).
         bool joinerHasAnn = false;
         { auto arr = ops.snapshot().getProperty ("annotations", juce::var());
@@ -9974,6 +11532,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (joinerHasAnn, "joiner adopts the host's pre-existing annotation via bootstrap");
         check ((int) app.getProperty ("data", juce::var()).getProperty ("applied", 0) == 2, "bootstrap applied 2 tracks");
         check (tracks (ops) == 2, "joiner now holds the host's 2 tracks");
+        auto appliedTracks = ops.snapshot().getProperty ("tracks", var());
+        check (appliedTracks.size() == 2
+                   && appliedTracks[0].getProperty ("name", var()).toString() == "Boot A"
+                   && appliedTracks[1].getProperty ("name", var()).toString() == "Boot B",
+               "matched multi-track bootstrap preserves envelope order");
         check (lidByName (ops, "Boot A") == lidA && lidA.isNotEmpty(), "Boot A logicalId preserved across bootstrap");
         check (lidByName (ops, "Boot B") == lidB && lidB.isNotEmpty(), "Boot B logicalId preserved across bootstrap");
         int aClips = 0;
@@ -10003,6 +11566,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Multiplayer: structural sync (scalar session-global ops)");
     {
         auto tempoNow = [] (MoshOps& o) { return (double) o.snapshot()["session"].getProperty ("tempo", 0.0); };
+        check (ok (cmd (ops, "new_project", args1 ("name", "mp-structural-authority"))),
+               "structural authority fixture project created");
+        const auto sentinelCreated = cmd (ops, "create_track", args1 ("name", "Structural Sentinel"));
+        check (ok (sentinelCreated), "structural authority sentinel track created");
+        const auto sentinelTrackId = sentinelCreated.getProperty ("data", juce::var())
+                                                    .getProperty ("trackId", juce::var()).toString();
+        const auto fixtureEditFile = eng.editFile().getFullPathName();
+        auto sentinelExists = [&]
+        {
+            const auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& track : *arr)
+                    if (track.getProperty ("id", juce::var()).toString() == sentinelTrackId)
+                        return true;
+            return false;
+        };
+        check (sentinelTrackId.isNotEmpty() && sentinelExists(),
+               "structural authority sentinel exists before the peer attack");
+
         cmd (ops, "set_tempo", objN ({ { "bpm", 120.0 } }));
         check (std::abs (tempoNow (ops) - 120.0) < 0.01, "baseline tempo is 120");
 
@@ -10018,11 +11600,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "local tempo change blocked while the peer holds the session lock");
         check (std::abs (tempoNow (ops) - 120.0) < 0.01, "tempo unchanged after the blocked local change");
 
+        // An authenticated peer controls both fields of a structural frame. Project/file/
+        // transport/agent/local-only/unknown commands must be rejected BEFORE the remote
+        // lock bypass and generic execute boundary. `new_project` is the malicious control:
+        // the pre-fix handler replaced this fixture project, removed its sentinel, logged the
+        // command, emitted a project-replacement event, and still returned outer ok:true.
+        const auto logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+        const auto logBytesBeforeAttack = logFile.getSize();
+        const auto eventsBeforeAttack = eventTypes.size();
+        auto rejectedProjectCommand = cmd (
+            ops, "mp_apply_structural",
+            objN ({ { "command", "new_project" },
+                    { "args", objN ({ { "name", "peer-controlled-project-replacement" } }) } }));
+        check (! ok (rejectedProjectCommand)
+                   && rejectedProjectCommand.getProperty ("command", juce::var()).toString() == "mp_apply_structural",
+               "peer structural new_project is explicitly rejected by mp_apply_structural");
+        check (eng.editFile().getFullPathName() == fixtureEditFile,
+               "rejected peer project command preserves the current project");
+        check (sentinelExists(), "rejected peer project command preserves the sentinel track");
+        check (logFile.getSize() == logBytesBeforeAttack,
+               "rejected peer project command writes no command-log record");
+        check (eventTypes.size() == eventsBeforeAttack,
+               "rejected peer project command emits no event");
+
+        // A rejection must not enter or leak applyingRemote_: this local command remains
+        // subject to the peer-held session lock immediately after the malicious frame.
+        check (! ok (cmd (ops, "set_tempo", objN ({ { "bpm", 150.0 } }))),
+               "rejected peer frame does not leak the remote lock bypass");
+        check (std::abs (tempoNow (ops) - 120.0) < 0.01,
+               "tempo unchanged after the post-rejection local lock check");
+
         // Applying the PEER's structural op bypasses the guard and lands (echo-free).
         check (ok (cmd (ops, "mp_apply_structural",
                         objN ({ { "command", "set_tempo" }, { "args", objN ({ { "bpm", 145.0 } }) } }))),
                "mp_apply_structural ok");
         check (std::abs (tempoNow (ops) - 145.0) < 0.01, "peer's tempo change applied (guard bypassed)");
+
+        const auto logBytesBeforeMalformed = logFile.getSize();
+        const auto eventsBeforeMalformed = eventTypes.size();
+        check (! ok (cmd (ops, "mp_apply_structural", objN ({ { "args", objN ({ { "bpm", 90.0 } }) } }))),
+               "malformed peer structural frame without a command is rejected");
+        check (! ok (cmd (ops, "mp_apply_structural",
+                          objN ({ { "command", "peer_unknown_command" }, { "args", juce::var (new juce::DynamicObject()) } }))),
+               "unknown peer structural command is rejected");
+        check (! ok (cmd (ops, "mp_apply_structural",
+                          objN ({ { "command", "set_tempo" }, { "args", "peer-controlled-non-object" } }))),
+               "allowlisted peer structural command with non-object args is rejected");
+        check (std::abs (tempoNow (ops) - 145.0) < 0.01,
+               "malformed, unknown, and non-object peer frames do not mutate tempo");
+        check (logFile.getSize() == logBytesBeforeMalformed && eventTypes.size() == eventsBeforeMalformed,
+               "malformed, unknown, and non-object peer frames write no log and emit no event");
 
         check (ok (cmd (ops, "mp_sync_locks", objN ({ { "active", false } }))), "session deactivated");
     }
@@ -10222,6 +11849,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // relay + needs MOSH_RELAY_URL) so it stays OUT of the deterministic core run.
     if (std::getenv ("MOSH_SELFTEST_MP") != nullptr)
     {
+        runMultiplayerAudioRefSelfTest (
+            eng, ops, { [] (const String& name) { section (name); },
+                        [] (bool condition, const String& message) { check (condition, message); },
+                        [&eventTypes] (const String& expected)
+                        {
+                            int count = 0;
+                            for (const auto& type : eventTypes)
+                                if (type == expected)
+                                    ++count;
+                            return count;
+                        } });
         section ("Multiplayer: native relay round-trip (P2, gated MOSH_SELFTEST_MP)");
 
         MultiplayerClient a, b;   // both resolve the relay from MOSH_RELAY_URL
@@ -10330,6 +11968,485 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && ! privateSessionLog.contains (privateCreatedCode),
                "multiplayer JSONL omits private room, name, color, and returned-code values");
 
+        section ("Multiplayer C010: bootstrap request authority + one-shot adoption");
+        {
+            auto pumpFor = [] (int milliseconds)
+            {
+                auto* mm = MessageManager::getInstanceWithoutCreating();
+                const auto deadline = Time::getMillisecondCounter() + (uint32) milliseconds;
+                while (Time::getMillisecondCounter() < deadline)
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (25);
+                    else Thread::sleep (25);
+                }
+            };
+            auto hasTrackNamed = [] (MoshOps& target, const String& name)
+            {
+                const auto snapshot = target.snapshot();
+                const auto tracks = snapshot.getProperty ("tracks", var());
+                if (auto* array = tracks.getArray())
+                    for (const auto& track : *array)
+                        if (track.getProperty ("name", var()).toString() == name)
+                            return true;
+                return false;
+            };
+            auto waitForRequest = [&pumpFor] (MultiplayerClient& host)
+            {
+                var request;
+                const auto deadline = Time::getMillisecondCounter() + (uint32) 3000;
+                while (! request.isObject() && Time::getMillisecondCounter() < deadline)
+                {
+                    for (const auto& frame : host.poll())
+                    {
+                        auto message = frame.getProperty ("msg", var());
+                        if (message.getProperty ("type", var()).toString() == "bootstrap_request")
+                            request = message;
+                    }
+                    if (! request.isObject()) pumpFor (25);
+                }
+                return request;
+            };
+
+            const auto savedSelftestSession = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
+            ::unsetenv ("MOSH_SELFTEST_SESSION");
+            auto authorityEngine = std::make_unique<MoshEngine> (false, true, "session-c010-bootstrap-authority");
+            if (savedSelftestSession.isNotEmpty())
+                ::setenv ("MOSH_SELFTEST_SESSION", savedSelftestSession.toRawUTF8(), 1);
+            else
+                ::unsetenv ("MOSH_SELFTEST_SESSION");
+            MoshOps authorityOps (*authorityEngine);
+            check (authorityEngine->sessionDir() != eng.sessionDir(),
+                   "C010 authority engine has a distinct owned session root");
+            int projectReplacements = 0;
+            authorityOps.setEventSink ([&projectReplacements] (const var& event)
+            {
+                if (event.getProperty ("type", var()).toString() == "snapshot_invalidated"
+                    && (bool) event.getProperty ("payload", var()).getProperty ("projectReplaced", false))
+                    ++projectReplacements;
+            });
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-source"))),
+                   "C010 source project initialized");
+            check (ok (cmd (authorityOps, "create_track", args1 ("name", "C010 Host Track"))),
+                   "C010 source track created");
+            const auto sourceSerialized = cmd (authorityOps, "mp_serialize_project");
+            check (ok (sourceSerialized), "C010 source project serialized");
+            const auto sourceBundle = sourceSerialized.getProperty ("data", var());
+            check (sourceBundle.getProperty ("tracks", var()).size() == 1,
+                   "C010 source bundle contains one valid track");
+
+            // Only the newest locally issued request remains authoritative. This
+            // bounds pending state and keeps requestless mixed-version fallback
+            // unambiguous even after reconnect/resync asks again.
+            MultiplayerClient supersessionHost;
+            const auto supersessionCode = supersessionHost.createSession ("SupersessionHost", "#090909");
+            int supersessionApplies = 0;
+            MultiplayerSession supersessionGuest (
+                [] (const var&) {},
+                [] (const String&, var) {},
+                [] (bool, const String&, const std::map<String, String>&) {},
+                [] () -> var { return {}; },
+                [] (const var&) -> String { return {}; },
+                [&supersessionApplies] (const var&) -> var
+                {
+                    ++supersessionApplies;
+                    return {};
+                },
+                [] (const var&) {});
+            check (supersessionGuest.joinSession (supersessionCode, "SupersessionGuest", "#101010"),
+                   "supersession guest joined");
+            const auto supersededRequest = waitForRequest (supersessionHost);
+            supersessionGuest.requestBootstrap();
+            const auto currentRequest = waitForRequest (supersessionHost);
+            const auto supersededId = supersededRequest.getProperty ("requestId", var()).toString();
+            const auto currentId = currentRequest.getProperty ("requestId", var()).toString();
+            check (supersededId.isNotEmpty() && currentId.isNotEmpty() && supersededId != currentId,
+                   "a newer bootstrap request supersedes a distinct older request");
+            auto supersessionState = [&sourceBundle, &supersessionGuest] (const String& requestId)
+            {
+                return objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                               { "to", supersessionGuest.selfPeer() },
+                               { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                               { "annotations", sourceBundle.getProperty ("annotations", var()) } });
+            };
+            supersessionHost.publish (supersessionState (supersededId));
+            pumpFor (500);
+            check (supersessionApplies == 0,
+                   "a response to the superseded bootstrap request is ignored");
+            supersessionHost.publish (supersessionState (currentId));
+            const auto supersessionDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+            while (supersessionApplies == 0 && Time::getMillisecondCounter() < supersessionDeadline)
+                pumpFor (25);
+            check (supersessionApplies == 1,
+                   "only the current bootstrap request is accepted once");
+            supersessionGuest.leaveSession();
+            supersessionHost.leave();
+
+            // A room member may send a bootstrap state, but a creator has no locally
+            // pending request and therefore must ignore it before prefetch or mutation.
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-unsolicited"))),
+                   "unsolicited victim project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Unsolicited Sentinel"));
+            cmd (authorityOps, "create_annotation",
+                 objN ({ { "annotationId", "unsolicited-ann" }, { "text", "keep" }, { "beat", 1.0 } }));
+            check (hasTrackNamed (authorityOps, "Unsolicited Sentinel"),
+                   "unsolicited sentinel exists before network traffic");
+            projectReplacements = 0;
+            const auto unsolicitedSession = cmd (authorityOps, "mp_create_session",
+                                                  objN ({ { "name", "Victim" }, { "color", "#111111" } }));
+            const auto unsolicitedCode = unsolicitedSession.getProperty ("data", var())
+                                                              .getProperty ("code", var()).toString();
+            MultiplayerClient attacker;
+            check (attacker.joinSession (unsolicitedCode, "Member", "#222222"),
+                   "unsolicited attacker joined as a real room member");
+            const auto unsolicitedLogBefore = authorityEngine->sessionDir()
+                .getChildFile ("mosh-log.jsonl").getSize();
+            attacker.publish (objN ({ { "type", "bootstrap_state" },
+                                      { "tracks", var (Array<var>()) }, { "annotations", "" } }));
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Unsolicited Sentinel"),
+                   "unsolicited bootstrap preserves the victim track");
+            check (authorityOps.snapshot().getProperty ("annotations", var()).size() == 1,
+                   "unsolicited bootstrap preserves the victim annotation");
+            check (projectReplacements == 0,
+                   "unsolicited bootstrap emits no project replacement");
+            check (authorityEngine->sessionDir().getChildFile ("mosh-log.jsonl").getSize()
+                       == unsolicitedLogBefore,
+                   "unsolicited bootstrap writes no JSONL record");
+            attacker.leave();
+            cmd (authorityOps, "mp_leave_session");
+
+            MultiplayerClient correlatedHost;
+            const auto correlatedCode = correlatedHost.createSession ("RawHost", "#333333");
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-correlated"))),
+                   "correlated guest project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Correlation Sentinel"));
+            check (hasTrackNamed (authorityOps, "Correlation Sentinel"),
+                   "correlation sentinel exists before network traffic");
+            projectReplacements = 0;
+            const auto joined = cmd (authorityOps, "mp_join_session",
+                                     objN ({ { "code", correlatedCode }, { "name", "Guest" }, { "color", "#444444" } }));
+            const auto self = joined.getProperty ("data", var()).getProperty ("selfPeer", var()).toString();
+            const auto request = waitForRequest (correlatedHost);
+            const auto requestId = request.getProperty ("requestId", var()).toString();
+            check (requestId.isNotEmpty(), "join publishes a non-empty unpredictable bootstrap requestId");
+
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                             { "to", "wrong-target" },
+                                             { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                             { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", "unknown-request" },
+                                             { "to", self },
+                                             { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                             { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                             { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                             { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            correlatedHost.publish (objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                             { "to", self }, { "tracks", "malformed" },
+                                             { "annotations", "" } }));
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Correlation Sentinel")
+                       && ! hasTrackNamed (authorityOps, "C010 Host Track"),
+                   "wrong-target, unknown-ID, partial, and malformed correlated frames are no-ops");
+
+            auto validState = objN ({ { "type", "bootstrap_state" }, { "requestId", requestId },
+                                      { "to", self },
+                                      { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                      { "annotations", sourceBundle.getProperty ("annotations", var()) } });
+            correlatedHost.publish (validState);
+            const auto applyDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+            while (! hasTrackNamed (authorityOps, "C010 Host Track")
+                   && Time::getMillisecondCounter() < applyDeadline)
+                pumpFor (25);
+            check (hasTrackNamed (authorityOps, "C010 Host Track") && projectReplacements == 1,
+                   "matched targeted bootstrap applies exactly once");
+            cmd (authorityOps, "create_track", args1 ("name", "Replay Sentinel"));
+            correlatedHost.publish (validState);
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Replay Sentinel") && projectReplacements == 1,
+                   "replayed bootstrap is rejected after one-shot consumption");
+            bool mutatingEcho = false;
+            for (const auto& frame : correlatedHost.poll())
+            {
+                const auto echoType = frame.getProperty ("msg", var())
+                                           .getProperty ("type", var()).toString();
+                if (echoType == "commit" || echoType == "structural" || echoType == "bootstrap_state")
+                    mutatingEcho = true;
+            }
+            check (! mutatingEcho, "accepted bootstrap produces no mutating relay echo");
+            cmd (authorityOps, "mp_leave_session");
+            correlatedHost.leave();
+
+            MultiplayerClient legacyHost;
+            const auto legacyCode = legacyHost.createSession ("LegacyHost", "#555555");
+            legacyHost.publish (objN ({ { "type", "bootstrap_state" },
+                                         { "tracks", var (Array<var>()) },
+                                         { "annotations", "" } }));
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-legacy"))),
+                   "legacy guest project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Legacy History Sentinel"));
+            check (hasTrackNamed (authorityOps, "Legacy History Sentinel"),
+                   "legacy retained-history sentinel exists before join");
+            check (ok (cmd (authorityOps, "mp_join_session",
+                            objN ({ { "code", legacyCode }, { "name", "LegacyGuest" }, { "color", "#666666" } }))),
+                   "legacy fallback guest joined");
+            check (waitForRequest (legacyHost).isObject(), "legacy fallback observed one pending local request");
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Legacy History Sentinel"),
+                   "retained requestless bootstrap older than the request is ignored");
+            legacyHost.publish (objN ({ { "type", "bootstrap_state" },
+                                         { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                         { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            const auto legacyDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+            while (! hasTrackNamed (authorityOps, "C010 Host Track")
+                   && Time::getMillisecondCounter() < legacyDeadline)
+                pumpFor (25);
+            check (hasTrackNamed (authorityOps, "C010 Host Track"),
+                   "fresh legacy response remains compatible after retained history is ignored");
+            cmd (authorityOps, "mp_leave_session");
+            legacyHost.leave();
+
+            MultiplayerClient transactionHost;
+            const auto transactionCode = transactionHost.createSession ("TxnHost", "#777777");
+            check (ok (cmd (authorityOps, "new_project", args1 ("name", "c010-transaction"))),
+                   "transaction guest project initialized");
+            cmd (authorityOps, "create_track", args1 ("name", "Transaction Sentinel"));
+            check (hasTrackNamed (authorityOps, "Transaction Sentinel"),
+                   "transaction sentinel exists before network traffic");
+            const auto transactionJoin = cmd (authorityOps, "mp_join_session",
+                                              objN ({ { "code", transactionCode }, { "name", "TxnGuest" }, { "color", "#888888" } }));
+            const auto transactionSelf = transactionJoin.getProperty ("data", var())
+                                                        .getProperty ("selfPeer", var()).toString();
+            const auto transactionRequest = waitForRequest (transactionHost);
+            check (ok (txnBegin (authorityOps, "live-bootstrap-txn", "live bootstrap refusal",
+                                 txnManifest ({ { "live-next", "create_track" } }))),
+                   "live bootstrap transaction fixture opens");
+            transactionHost.publish (objN ({ { "type", "bootstrap_state" },
+                                               { "requestId", transactionRequest.getProperty ("requestId", var()) },
+                                               { "to", transactionSelf },
+                                               { "tracks", sourceBundle.getProperty ("tracks", var()) },
+                                               { "annotations", sourceBundle.getProperty ("annotations", var()) } }));
+            pumpFor (750);
+            check (hasTrackNamed (authorityOps, "Transaction Sentinel")
+                       && ! hasTrackNamed (authorityOps, "C010 Host Track"),
+                   "live matched bootstrap is refused before mutation during an agent transaction");
+            check (txnField (txnStatus (authorityOps, "live-bootstrap-txn"), "status") == "open",
+                   "live bootstrap refusal leaves the agent transaction unchanged");
+            check (ok (cmd (authorityOps, "batch_rollback", args1 ("transactionId", "live-bootstrap-txn"))),
+                   "live bootstrap transaction fixture rolls back cleanly");
+            cmd (authorityOps, "mp_leave_session");
+            transactionHost.leave();
+
+            if (std::getenv ("MOSH_MP_SYNC_TRANSFER") == nullptr)
+            {
+                section ("Multiplayer C013: bootstrap capture follows queued commits");
+
+                check (ok (cmd (authorityOps, "new_project", args1 ("name", "c013-capture-order"))),
+                       "capture-order responder project initialized");
+                const auto created = cmd (authorityOps, "create_track", args1 ("name", "C013 Before"));
+                const auto trackId = created.getProperty ("data", var())
+                                            .getProperty ("trackId", var()).toString();
+                check (ok (created) && trackId.isNotEmpty(),
+                       "capture-order responder created the Before track");
+                check (ok (cmd (authorityOps, "rename_track",
+                                objN ({ { "trackId", trackId }, { "name", "C013 After" } }))),
+                       "capture-order fixture prepared the After state");
+                const auto serializedAfter = cmd (authorityOps, "mp_serialize_track",
+                                                  args1 ("trackId", trackId));
+                const auto serializedData = serializedAfter.getProperty ("data", var());
+                const auto afterBlob = serializedData.getProperty ("blob", var()).toString();
+                const auto logicalId = serializedData.getProperty ("logicalId", var()).toString();
+                check (ok (serializedAfter) && afterBlob.isNotEmpty() && logicalId.isNotEmpty(),
+                       "capture-order fixture serialized a valid After commit");
+                check (ok (cmd (authorityOps, "rename_track",
+                                objN ({ { "trackId", trackId }, { "name", "C013 Before" } }))),
+                       "capture-order responder restored the observable Before state");
+
+                const auto responder = cmd (authorityOps, "mp_create_session",
+                                            objN ({ { "name", "CaptureResponder" },
+                                                    { "color", "#c01313" } }));
+                const auto responderCode = responder.getProperty ("data", var())
+                                                     .getProperty ("code", var()).toString();
+                check (ok (responder) && responderCode.isNotEmpty(),
+                       "capture-order responder created an owned relay room");
+                MultiplayerClient requester;
+                check (requester.joinSession (responderCode, "CaptureRequester", "#13c013"),
+                       "capture-order requester joined the responder");
+                const auto lock = requester.tryLock (logicalId);
+                const auto epoch = (int) lock.getProperty ("epoch", 0);
+                check ((bool) lock.getProperty ("granted", false) && epoch > 0,
+                       "capture-order requester acquired the track epoch");
+
+                auto* commit = new DynamicObject();
+                commit->setProperty ("type", "commit");
+                commit->setProperty ("logicalId", logicalId);
+                commit->setProperty ("epoch", epoch);
+                commit->setProperty ("blob", afterBlob);
+                const auto commitSequence = requester.publish (var (commit));
+
+                const String requestId ("c013-capture-order-request");
+                auto* request = new DynamicObject();
+                request->setProperty ("type", "bootstrap_request");
+                request->setProperty ("requestId", requestId);
+                const auto requestSequence = requester.publish (var (request));
+                check (commitSequence > 0 && requestSequence > commitSequence,
+                       "capture-order relay sequenced commit before bootstrap request");
+
+                // Keep the message thread parked until the responder's poll thread
+                // has fetched both relay-ordered frames and queued its callback.
+                Thread::sleep (750);
+
+                var answer;
+                int answerSequence = 0;
+                const auto answerDeadline = Time::getMillisecondCounter() + (uint32) 5000;
+                while (! answer.isObject() && Time::getMillisecondCounter() < answerDeadline)
+                {
+                    pumpFor (25);
+                    for (const auto& frame : requester.poll())
+                    {
+                        const auto message = frame.getProperty ("msg", var());
+                        if (message.getProperty ("type", var()).toString() == "bootstrap_state"
+                            && message.getProperty ("requestId", var()).toString() == requestId
+                            && message.getProperty ("to", var()).toString() == requester.peerId())
+                        {
+                            answer = message;
+                            answerSequence = (int) frame.getProperty ("seq", 0);
+                        }
+                    }
+                }
+                check (answer.isObject() && answerSequence > requestSequence,
+                       "capture-order responder published one correlated answer after the request");
+
+                String answerName;
+                const auto answerTracks = answer.getProperty ("tracks", var());
+                if (auto* tracks = answerTracks.getArray())
+                    for (const auto& track : *tracks)
+                        if (track.getProperty ("logicalId", var()).toString() == logicalId)
+                        {
+                            const auto answerBlob = track.getProperty ("blob", var()).toString();
+                            if (auto xml = parseXML (answerBlob))
+                                answerName = ValueTree::fromXml (*xml).getProperty ("name").toString();
+                        }
+                check (answerName == "C013 After",
+                       "capture-order bootstrap answer includes the earlier queued commit");
+
+                const auto settleDeadline = Time::getMillisecondCounter() + (uint32) 3000;
+                while (! hasTrackNamed (authorityOps, "C013 After")
+                       && Time::getMillisecondCounter() < settleDeadline)
+                    pumpFor (25);
+                check (hasTrackNamed (authorityOps, "C013 After"),
+                       "capture-order responder itself settles on After");
+
+                requester.leave();
+                cmd (authorityOps, "mp_leave_session");
+
+                section ("Multiplayer C014: handed-off bootstrap capture is bound to its room");
+
+                // Given an old-room bootstrap capture that the transfer worker has
+                // already handed off, but the message thread has not executed yet.
+                std::mutex handedOffMutex;
+                std::vector<std::function<void()>> handedOffCallbacks;
+                std::atomic<int> bootstrapCaptures { 0 };
+                std::atomic<int> structuralApplies { 0 };
+                MultiplayerSession generationResponder (
+                    [] (const var&) {},
+                    [] (const String&, var) {},
+                    [] (bool, const String&, const std::map<String, String>&) {},
+                    [&bootstrapCaptures] () -> var
+                    {
+                        bootstrapCaptures.fetch_add (1);
+                        auto* answer = new DynamicObject();
+                        answer->setProperty ("tracks", Array<var>());
+                        answer->setProperty ("annotations", Array<var>());
+                        answer->setProperty ("stemFiles", Array<var>());
+                        return var (answer);
+                    },
+                    [] (const var&) -> String { return {}; },
+                    [] (const var&) -> var { return {}; },
+                    [&structuralApplies] (const var&) { structuralApplies.fetch_add (1); });
+                generationResponder.setTransferDispatcherForSelfTest (
+                    [&handedOffMutex, &handedOffCallbacks] (std::function<void()> apply)
+                    {
+                        const std::lock_guard<std::mutex> lock (handedOffMutex);
+                        handedOffCallbacks.push_back (std::move (apply));
+                    });
+
+                const auto oldCode = generationResponder.createSession ("GenerationOld", "#c01401");
+                MultiplayerClient oldRequester;
+                check (oldCode.isNotEmpty()
+                           && oldRequester.joinSession (oldCode, "GenerationRequester", "#c01402"),
+                       "generation fixture created and joined the old room");
+                const String oldRequestId ("c014-old-room-request");
+                oldRequester.publish (objN ({ { "type", "structural" },
+                                               { "command", "set_tempo" },
+                                               { "args", objN ({ { "bpm", 123.0 } }) } }));
+                oldRequester.publish (objN ({ { "type", "bootstrap_request" },
+                                               { "requestId", oldRequestId } }));
+
+                const auto handoffDeadline = Time::getMillisecondCounter() + (uint32) 5000;
+                bool callbacksWereHandedOff = false;
+                while (! callbacksWereHandedOff && Time::getMillisecondCounter() < handoffDeadline)
+                {
+                    pumpFor (25);
+                    const std::lock_guard<std::mutex> lock (handedOffMutex);
+                    callbacksWereHandedOff = handedOffCallbacks.size() >= 2;
+                }
+                check (callbacksWereHandedOff,
+                       "old-room structural apply and bootstrap capture reached the dispatcher before leave");
+
+                generationResponder.leaveSession();
+                oldRequester.leave();
+                const auto replacementCode = generationResponder.createSession ("GenerationNew", "#c01403");
+                MultiplayerClient replacementObserver;
+                check (replacementCode.isNotEmpty()
+                           && replacementObserver.joinSession (replacementCode, "GenerationObserver", "#c01404"),
+                       "same responder entered a replacement room");
+
+                // When the callback authorized by the old room finally executes.
+                std::vector<std::function<void()>> staleCallbacks;
+                {
+                    const std::lock_guard<std::mutex> lock (handedOffMutex);
+                    staleCallbacks = std::move (handedOffCallbacks);
+                }
+                for (auto& callback : staleCallbacks)
+                    if (callback)
+                        callback();
+
+                // Then neither project capture nor publication may migrate to the
+                // replacement session.
+                check (structuralApplies.load() == 0,
+                       "old-room handed-off structural apply cannot mutate the replacement project");
+                check (bootstrapCaptures.load() == 0,
+                       "old-room handed-off capture cannot read the replacement project");
+                bool stalePublished = false;
+                const auto staleDeadline = Time::getMillisecondCounter() + (uint32) 1500;
+                while (! stalePublished && Time::getMillisecondCounter() < staleDeadline)
+                {
+                    for (const auto& frame : replacementObserver.poll())
+                    {
+                        const auto message = frame.getProperty ("msg", var());
+                        stalePublished = message.getProperty ("type", var()).toString() == "bootstrap_state"
+                            && message.getProperty ("requestId", var()).toString() == oldRequestId;
+                    }
+                    if (! stalePublished)
+                        Thread::sleep (25);
+                }
+                check (! stalePublished,
+                       "old-room handed-off capture cannot publish into the replacement room");
+
+                const auto replacementRoom = generationResponder.roomCode();
+                check (generationResponder.createSession ("GenerationNested", "#c01405").isEmpty()
+                           && generationResponder.roomCode() == replacementRoom,
+                       "active session rejects create without changing rooms");
+                check (! generationResponder.joinSession (replacementRoom, "GenerationNested", "#c01406")
+                           && generationResponder.roomCode() == replacementRoom,
+                       "active session rejects join without changing rooms");
+
+                replacementObserver.leave();
+                generationResponder.leaveSession();
+            }
+        }
+
         // P4 — audio stems. Content-addressing + the by-hash rewrite run on any
         // relay; the upload/peer-download round-trip now runs against WHATEVER
         // relay MOSH_RELAY_URL points at — cloud or local. (Previously gated to
@@ -10350,6 +12467,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         cmd (ops, "add_test_tone_clip", objN ({ { "trackId", stemTrk }, { "seconds", 1.0 } }));
 
+        lastMpCommitDone = var();
         auto commitRes = cmd (ops, "mp_commit_track", args1 ("trackId", stemTrk));
         check (ok (commitRes), "mp_commit_track ok (with audio)");
         // MOSH_MP_SYNC_TRANSFER (the PR-2 kill switch, gated separately below) pins this
@@ -10370,7 +12488,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // additive mp_commit_done event before assuming the stem has actually landed
         // on the relay's blob store (a bounded drain, mirroring the async-outbox
         // check below; the shared event sink set at the top of this function
-        // captures it into lastEvent).
+        // captures the latest completion separately from noisy presence events).
         {
             auto* mmc = juce::MessageManager::getInstanceWithoutCreating();
             bool committed = false;
@@ -10379,11 +12497,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             {
                 if (mmc != nullptr) mmc->runDispatchLoopUntil (50);
                 else juce::Thread::sleep (50);
-                committed = lastEvent.getProperty ("type", juce::var()).toString() == "mp_commit_done"
-                            && lastEvent.getProperty ("payload", juce::var()).getProperty ("logicalId", juce::var()).toString() == stemLogicalId;
+                committed = lastMpCommitDone.getProperty ("payload", juce::var())
+                                               .getProperty ("logicalId", juce::var()).toString() == stemLogicalId;
             }
             check (committed, "mp_commit_track's async transfer completed (mp_commit_done observed)");
-            check ((bool) lastEvent.getProperty ("payload", juce::var()).getProperty ("ok", false),
+            check ((bool) lastMpCommitDone.getProperty ("payload", juce::var()).getProperty ("ok", false),
                    "mp_commit_done reports ok:true");
         }
 
@@ -10410,10 +12528,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // resolving via the worker's prefetch stage (the "receive path" case).
         section ("Multiplayer PR-2: stem transfer order + receive path (live session)");
         {
-            MoshEngine ordHostEng (false, true, "pr2-order-host");
+            MoshEngine ordHostEng (false, true, "session-pr2-order-host");
             MoshOps    ordHostOps (ordHostEng);
-            MoshEngine ordGuestEng (false, true, "pr2-order-guest");
+            MoshEngine ordGuestEng (false, true, "session-pr2-order-guest");
             MoshOps    ordGuestOps (ordGuestEng);
+            check (ordHostEng.sessionDir() != ordGuestEng.sessionDir(),
+                   "order: host and guest use distinct owned session roots");
 
             auto ordSess = cmd (ordHostOps, "mp_create_session", objN ({ { "name", "OrdHost" }, { "color", "#101010" } }));
             check (ok (ordSess), "order: host created a session");
@@ -10515,7 +12635,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             section ("Multiplayer PR-2: no-freeze proxy (MOSH_RELAY_BLOB_DELAY_MS)");
 
-            MoshEngine nfEng (false, true, "pr2-nofreeze-host");
+            MoshEngine nfEng (false, true, "session-pr2-nofreeze-host");
             MoshOps    nfOps (nfEng);
             juce::var nfLastEvent;
             nfOps.setEventSink ([&] (const juce::var& e) { nfLastEvent = e; });
@@ -10573,7 +12693,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             section ("Multiplayer PR-2: MOSH_MP_SYNC_TRANSFER kill switch");
 
-            MoshEngine syncEng (false, true, "pr2-syncswitch-host");
+            MoshEngine syncEng (false, true, "session-pr2-syncswitch-host");
             MoshOps    syncOps (syncEng);
 
             auto syncSess = cmd (syncOps, "mp_create_session", objN ({ { "name", "Sync" }, { "color", "#666666" } }));
@@ -10635,7 +12755,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 },
                 [] (bool, const juce::String&, const std::map<juce::String, juce::String>&) {},   // syncLocks
                 [] () -> juce::var { return {}; },                                       // provideBootstrap
-                [] (const juce::var&) {},                                               // applyBootstrap
+                [] (const juce::var&) -> juce::String { return {}; },                   // validateBootstrap
+                [] (const juce::var&) -> juce::var { return {}; },                      // applyBootstrap
                 [] (const juce::var&) {});                                              // applyStructural
 
             const auto failCode = failSess.createSession ("FailHost", "#facade");
@@ -10759,10 +12880,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // not a same-directory coincidence.
         section ("Multiplayer P4: self-healing stem fetch (mp_fetch_missing_stems)");
         {
-            MoshEngine hostEng (false, true, "mp-selfheal-host");
+            MoshEngine hostEng (false, true, "session-mp-selfheal-host");
             MoshOps    hostOps (hostEng);
-            MoshEngine guestEng (false, true, "mp-selfheal-guest");
+            MoshEngine guestEng (false, true, "session-mp-selfheal-guest");
             MoshOps    guestOps (guestEng);
+            check (hostEng.sessionDir() != guestEng.sessionDir(),
+                   "self-heal: host and guest use distinct owned session roots");
 
             auto hostSess = cmd (hostOps, "mp_create_session", objN ({ { "name", "SHHost" }, { "color", "#111111" } }));
             check (ok (hostSess), "self-heal: host created a session");
@@ -10991,10 +13114,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // cloud relay now also works against relay/server.py.
         section ("Multiplayer P4: bootstrap end-to-end on the local relay");
         {
-            MoshEngine bootHostEng (false, true, "mp-bootstrap-host");
+            MoshEngine bootHostEng (false, true, "session-mp-bootstrap-host");
             MoshOps    bootHostOps (bootHostEng);
-            MoshEngine bootGuestEng (false, true, "mp-bootstrap-guest");
+            MoshEngine bootGuestEng (false, true, "session-mp-bootstrap-guest");
             MoshOps    bootGuestOps (bootGuestEng);
+            check (bootHostEng.sessionDir() != bootGuestEng.sessionDir(),
+                   "bootstrap: host and guest use distinct owned session roots");
 
             auto bhSess = cmd (bootHostOps, "mp_create_session", objN ({ { "name", "BHost" }, { "color", "#333333" } }));
             check (ok (bhSess), "bootstrap: host created a session");
@@ -11752,6 +13877,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "set_note",             objN ({ { "clipId", mmc }, { "noteIndex", 0 }, { "velocity", 70 } }) },
             { "quantize_notes",       objN ({ { "clipId", mmc }, { "division", 0.25 }, { "strength", 1.0 } }) },
             { "remove_note",          objN ({ { "clipId", mmc }, { "noteIndex", 0 } }) },
+            { "crop_clip",            objN ({ { "clipIds", Array<var> { mmc } }, { "start", 1.0 }, { "end", 3.0 } }) },
             { "load_builtin",         objN ({ { "trackId", mt }, { "type", "compressor" } }) },
             { "bypass_plugin",        objN ({ { "trackId", mt }, { "index", eqIx }, { "bypassed", true } }) },
             { "set_plugin_param",     objN ({ { "trackId", mt }, { "index", eqIx }, { "paramIndex", 0 }, { "value", 0.7 } }) },

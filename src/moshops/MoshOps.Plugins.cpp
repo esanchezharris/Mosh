@@ -594,10 +594,6 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
 
 juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
 {
-    // A2 — persist any unsaved work BEFORE an op that can crash the process in-place
-    // (hosting a third-party VST3/AU is the #1 in-process-teardown crash). The on-disk save
-    // becomes the recovery point, making the crash near-lossless without the full replay.
-    eng.saveIfDirty();
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_plugin", "no track");
 
@@ -606,6 +602,50 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     if (! pluginHost.findDescription (pluginId, desc))
         return errResult ("load_plugin", "unknown plugin: " + pluginId);
 
+    // An instrument on a track that HOLDS AUDIO CLIPS is silent-by-construction:
+    // a front-of-chain instrument clears the track buffer, so the wave clips stop
+    // sounding and the stack reads as a broken load (the owner's Serum×4-on-the-
+    // audio-track bug). Empty or MIDI-only "audio" tracks stay loadable — that IS
+    // how an instrument track starts (⇧⌘T creates one; there is no separate midi
+    // track type). Drum/group tracks are unaffected. load_builtin is deliberately
+    // NOT guarded here (the default-instrument paths drive it on purpose).
+    if (desc.isInstrument
+        && track->state.getProperty (ids::trackType, "audio").toString() == "audio")
+    {
+        bool hasWaveClips = false;
+        for (auto* c : track->getClips())
+            if (dynamic_cast<te::WaveAudioClip*> (c)) { hasWaveClips = true; break; }
+        if (hasWaveClips)
+            return errResult ("load_plugin",
+                desc.name
+                + " is an instrument — instruments go on instrument tracks (⇧⌘T), not audio tracks");
+    }
+
+    // A2 — persist any unsaved work BEFORE an op that can crash the process in-place
+    // (hosting a third-party VST3/AU is the #1 in-process-teardown crash). The on-disk save
+    // becomes the recovery point, making the crash near-lossless without the full replay.
+    eng.saveIfDirty();
+
+    // Live's hot-swap: replaceInstrument:true + an INCOMING instrument + an instrument
+    // already in the chain ⇒ the new one takes the old one's slot, in THIS transaction
+    // (one undo restores the previous instrument). Effects never swap — a chain of
+    // effects is legal. Default (flag absent) keeps the agent/chain append semantics.
+    int swapIndex = -1;
+    te::Plugin* swapOut = nullptr;
+    if ((bool) args.getProperty ("replaceInstrument", false) && desc.isInstrument)
+    {
+        auto plugins = track->pluginList.getPlugins();
+        for (int i = 0; i < plugins.size(); ++i)
+        {
+            auto* p = plugins[i].get();
+            if (p == nullptr) continue;
+            bool isInst = false;
+            if (auto* ext = dynamic_cast<te::ExternalPlugin*> (p)) isInst = ext->isSynth();
+            else if (const auto* bspec = findBuiltin (p->getPluginType())) isInst = bspec->isInstrument;
+            if (isInst) { swapIndex = i; swapOut = p; break; }
+        }
+    }
+
     beginTxn ("load_plugin");
     // MUST use the Edit's PluginCache so the inserted plugin IS the one we hold
     // (PluginManager::createNewPlugin yields a different instance → insertPlugin
@@ -613,13 +653,29 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     auto plugin = eng.edit().getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, desc);
     if (plugin == nullptr) return errResult ("load_plugin", "create failed");
 
+    // The swap removes AFTER the new instance exists — a create failure leaves the
+    // old instrument untouched.
+    juce::String replacedName;
+    if (swapOut != nullptr)
+    {
+        replacedName = swapOut->getName();
+        pluginHost.closeEditor (*swapOut);
+        swapOut->deleteFromParent();
+    }
+
     int index = (int) args.getProperty ("index", -1);
+    if (swapOut != nullptr) index = swapIndex;   // the swap fills the slot the old one left
     if (index < 0) index = track->pluginList.getPlugins().size();   // append (−1 does not append)
     track->pluginList.insertPlugin (plugin, index, nullptr);
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
     data->setProperty ("name", plugin->getName());
+    if (swapOut != nullptr)
+    {
+        data->setProperty ("replaced", true);
+        data->setProperty ("replacedName", replacedName);
+    }
     if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
         addExternalPluginMetadata (*data, *ext);
     logLine ("load_plugin", args, true, {}, true);

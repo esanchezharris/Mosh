@@ -25,7 +25,9 @@ private:
     void timerCallback() override;
 
     bool loaded = false;
-    int camPermAttempts = 0;
+    int webviewInstallAttempts = 0;
+    bool camInstalled = false;
+    bool kbdInstalled = false;
     WebBridge webBridge;
     std::unique_ptr<juce::WebBrowserComponent> webView;
 

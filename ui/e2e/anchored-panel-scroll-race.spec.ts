@@ -57,14 +57,17 @@ test("a panel survives the scroll caused by the very click that opened it", asyn
   await expect(page.getByTestId("v2-track-add-drum")).toBeVisible();
 });
 
-test("a scroll that happens AFTER the panel is open still dismisses it", async ({ page }) => {
-  // The other half: the fix must not defeat the deliberate dismiss-on-scroll behaviour
-  // (v2-edgecases.spec pins it for the topbar overflow menu — a fixed-position panel that
-  // stays put while its trigger scrolls away is worse than one that closes).
+test("a scroll after the panel is open re-anchors it to the trigger instead of dismissing it", async ({ page }) => {
+  // BEHAVIOUR CHANGE (chrome pilot, 2026-08-06): the add-track menu is a MoshMenu (Base UI)
+  // now. The old useAnchoredPanel dismissed on any scroll because its fixed-position panel
+  // could not follow the trigger; Floating UI's autoUpdate REPOSITIONS the popup with its
+  // anchor, so the menu survives scroll and stays attached — strictly better than closing.
+  // (The topbar overflow menu still uses useAnchoredPanel and still dismisses on scroll;
+  // v2-edgecases.spec pins that one.)
   await bootV2(page);
   await page.getByTestId("v2-track-add").click();
   await expect(page.getByTestId("v2-track-add-drum")).toBeVisible();
 
   await page.evaluate(() => document.dispatchEvent(new Event("scroll")));
-  await expect(page.getByTestId("v2-track-add-drum")).toHaveCount(0);
+  await expect(page.getByTestId("v2-track-add-drum")).toBeVisible();
 });

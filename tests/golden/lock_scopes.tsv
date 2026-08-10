@@ -28,6 +28,7 @@ batch_end	Unguarded
 batch_rollback	Unguarded
 batch_status	Unguarded
 block_plugin	Unguarded
+bounce_track	Track
 bounce_layer_to_clip	Clip
 build_lyrics_from_clip	Clip
 build_skeleton_from_clip	Clip
@@ -45,6 +46,7 @@ clear_plugin_blocklist	Unguarded
 compile_render	Clip
 complete_lyrics	Track
 confirm_skeleton	Track
+consolidate_clips	Clip
 create_annotation	SessionGlobal
 create_bus	SessionGlobal
 create_group_track	SessionGlobal
@@ -52,6 +54,7 @@ create_lyric_sheet	Track
 create_render_layer	Clip
 create_section	SessionGlobal
 create_track	SessionGlobal
+crop_clip	Clip
 delete_time_range	SessionGlobal
 detect_clip_bpm	Unguarded
 disable_track_meter	Unguarded
@@ -65,6 +68,7 @@ export_stems	Unguarded
 file_peaks	Unguarded
 fill_lyric_gap	Track
 freeze_layer	Clip
+freeze_track	Track
 generate_beat_recipe	SessionGlobal
 get_clip_peaks	Unguarded
 get_command_log	Unguarded
@@ -218,8 +222,11 @@ submit_training_job	Unguarded
 suggest_next_line	Track
 training_job_status	Unguarded
 transcribe_clip	Clip
+transform_notes	Clip
+transform_velocities	Clip
 trim_clip	Clip
 undo	Unguarded
 unfreeze_layer	Clip
+unfreeze_track	Track
 ungroup_track	SessionGlobal
 write_automation_curve	Track

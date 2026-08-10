@@ -40,7 +40,10 @@ The split is enforced in one place — `LockManager::classify()`
   layer…) — clip-scoped, committed with their track.
 - **Session-global ops** — `create_track` / bus / group, **tempo**, **key**, master
   volume/pan, metronome, tempo-map. Scalars (tempo/key/master) use **last-writer-wins**
-  ([MultiplayerSession.cpp:182](src/multiplayer/MultiplayerSession.cpp:182)).
+  ([MultiplayerSession.cpp:182](src/multiplayer/MultiplayerSession.cpp:182)). Incoming peer
+  structural frames are restricted to the same closed command registry Mosh uses for
+  outbound structural broadcasts; project/file/export/agent/transport/local-only and
+  unknown commands are rejected before command execution.
 - **Locks + presence** — who's editing which track, name, colour, online status.
 
 ## Track locks & commit-on-move
@@ -54,6 +57,12 @@ auto-frees after a ~90 s lease. Presence uses the same grace: an active peer's p
 membership alive, while a peer that stays silent for 90 s is removed from the roster, releases
 its locks, and stops occupying one of the two room slots. Rejoining with the same peer id inside
 the grace window is idempotent; after expiry the peer must join the room again.
+
+Incoming commits are identity-bound before they can touch the Edit: the frame's `logicalId` must
+be a non-empty string that matches the serialized track's embedded `moshLogicalId`. A missing,
+non-string, or mismatched identity is ignored without replacing or creating a track, emitting an
+event, or entering the local undo history. This check applies to the live peer callback; the
+backend-only direct `apply_remote_track` command keeps its legacy/internal blob-only form.
 
 **Practical consequence:** your peer sees your work on a track **when you finish with it /
 move off it**, not keystroke-by-keystroke. Park on a track and your changes checkpoint after
@@ -94,6 +103,25 @@ The session control lives in the topbar's **2-player (B-5) pop**
 - **Host:** open the pop → set your name + colour → **Create session** → a **room code**
   appears (read-only, click to select). Share it (paste into Discord).
 - **Guest:** open the pop → set name + colour → paste the code → **Join**.
+
+### Bootstrap acceptance and data safety
+
+Joining issues a locally generated unpredictable `requestId`. A new-form bootstrap answer
+echoes that ID and is addressed to the joiner's relay-frame peer ID; the joiner consumes the
+pending request exactly once. Unknown IDs, wrong recipients, partial correlation fields,
+unsolicited states, and replays are ignored before any stem prefetch or project mutation.
+For mixed versions, an old request still receives the old response shape, and a new requester
+accepts one fully legacy response only while exactly one local request is pending and the
+response relay sequence is newer than that request. Retained requestless history from before
+the join cannot consume or suppress the new request.
+
+The entire bundle is preflighted before prefetch and again before replacement: `tracks` must be
+an explicit array; every envelope identity must uniquely match a real serialized track root;
+audio references require a 64-hex hash plus a short alphanumeric extension; and annotation XML
+must contain only the annotation schema. A valid explicit empty project remains valid. Any
+malformed entry rejects the whole bundle without changing tracks, annotations, events, JSONL,
+or undo state. A successful adoption is one non-undoable project-replacement event and one
+sanitized log record, clears stale local undo history, and never echoes back to the relay.
 - Once connected, both see a **roster** (peer name, colour swatch, online dot) and a **Leave**
   control. Session state rides the `mp_state` event, off-snapshot.
 
@@ -156,9 +184,10 @@ The session control lives in the topbar's **2-player (B-5) pop**
     (download any missing stems, then apply) routed through the SAME single-worker FIFO — even
     `structural` (which has nothing to download) — so a fast tempo change enqueued right after a
     slow commit upload can never apply before it: **global apply order is preserved** end-to-end.
-  - The host's bootstrap answer is split: the engine-touching content-address/serialize step
-    stays on the message thread; the worker uploads every stem and THEN publishes
-    `bootstrap_state`.
+  - The host's bootstrap answer is split into two ordered jobs. A message-thread apply barrier
+    captures the project only after every earlier relay-ordered state apply; the worker then
+    uploads every stem and publishes `bootstrap_state`. A commit immediately followed by a
+    bootstrap request therefore cannot produce a correctly correlated but stale answer.
   - Why a **dedicated** worker (not the existing poll thread): a multi-minute transfer on the
     poll thread would stop it from calling `/mp/events` and so from refreshing this peer's own
     held lock leases — the relay auto-frees a lock after **90s of silence**

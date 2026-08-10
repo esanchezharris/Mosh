@@ -6,8 +6,8 @@ import type { Snapshot, CommandResult } from "./types";
 // as SA3 re-imagine, on the model-agnostic target+strength surface. This exercises the
 // dev mock the WebView/e2e run against.
 
-const exec = (command: string, args: Record<string, unknown> = {}) =>
-  mockExecute<CommandResult>({ command, args });
+const exec = <T = unknown>(command: string, args: Record<string, unknown> = {}) =>
+  mockExecute<CommandResult<T>>({ command, args });
 const snap = () => mockSnapshot<Snapshot>();
 const clipById = async (id: string) =>
   (await snap()).tracks.flatMap((t) => t.clips).find((c) => c.id === id);
@@ -47,5 +47,65 @@ describe("mock transform render layer (Route B)", () => {
 
     expect((await exec("accept_render", { clipId })).ok).toBe(true);
     expect((await clipById(clipId))?.renderLayer?.userKept).toBe(true);
+  });
+});
+
+describe("bridge.mock transform_notes noteIndexes parity", () => {
+  beforeEach(() => __resetMockForTests());
+
+  async function midiFixture() {
+    const s = await snap();
+    const clip = s.tracks.flatMap((track) => track.clips).find((candidate) => candidate.type === "midi");
+    expect(clip?.notes?.length).toBeGreaterThan(1);
+    return clip!;
+  }
+
+  it("rejects an explicit selection larger than the clip note count", async () => {
+    const clip = await midiFixture();
+    const result = await exec("transform_notes", {
+      clipId: clip.id,
+      mode: "invert",
+      noteIndexes: Array((clip.notes?.length ?? 0) + 1).fill(0),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("too many noteIndexes");
+  });
+
+  it("rejects fractional note indexes instead of truncating them", async () => {
+    const clip = await midiFixture();
+    const result = await exec("transform_notes", {
+      clipId: clip.id,
+      mode: "invert",
+      noteIndexes: [0.5],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("bad noteIndex");
+  });
+
+  it("rejects an integer index outside the clip note range", async () => {
+    const clip = await midiFixture();
+    const result = await exec("transform_notes", {
+      clipId: clip.id,
+      mode: "invert",
+      noteIndexes: [clip.notes?.length ?? 0],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("bad noteIndex");
+  });
+
+  it("deduplicates explicit indexes before transforming and counting changes", async () => {
+    const clip = await midiFixture();
+    const result = await exec<{ changed: number }>("transform_notes", {
+      clipId: clip.id,
+      mode: "humanize",
+      amount: 100,
+      noteIndexes: [0, 0],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.changed).toBe(1);
   });
 });

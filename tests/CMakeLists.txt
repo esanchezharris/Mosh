@@ -33,6 +33,7 @@ target_sources(MoshTests PRIVATE
     test_remote_companion.cpp
     test_recording_landing.cpp
     test_multiplayer_logical_id.cpp
+    test_multiplayer_audio_ref.cpp
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
     test_multiplayer_transfer_queue.cpp
@@ -61,6 +62,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/multiplayer/AudioRefValidation.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/TransferQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp

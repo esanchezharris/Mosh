@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gridBeatsFor } from "./pianoRollGeom";
+import { gridBeatsFor, snapDownBeat } from "./pianoRollGeom";
 
 // The bug this exists to prevent: the grid was sized `ceil(clipBeats) + 4` from the CLIP
 // alone, so a short clip in an ~830px viewport produced a 504px grid and the remaining
@@ -55,5 +55,29 @@ describe("gridBeatsFor", () => {
     // The old rule floored a clip at 8 beats; 4/4 keeps that exactly.
     const beats = gridBeatsFor({ clipBeats: 1, beatsPerBar: 4, beatPx: BEAT_PX, viewportW: 0 });
     expect(beats).toBe(16); // max(8 floor, …) + 8 tail
+  });
+});
+
+describe("snapDownBeat (note-draw entry snap)", () => {
+  // The shipped bug: entry used round-to-nearest, so a click at beat 1.4 on a
+  // 1-beat grid drew the note at beat 1... but a click at 1.6 drew it at 2 — up
+  // to a half beat from the pointer, possibly AHEAD of it ("notes land half a
+  // beat off the grid"). Pencil entry floors in every reference DAW.
+  it("floors to the grid line at or below the pointer", () => {
+    expect(snapDownBeat(1.4, 1)).toBe(1);
+    expect(snapDownBeat(1.6, 1)).toBe(1); // round would say 2 — the bug
+    expect(snapDownBeat(0.49, 0.5)).toBe(0);
+    expect(snapDownBeat(3.75, 0.25)).toBeCloseTo(3.75, 9);
+  });
+
+  it("keeps a click exactly on a line ON that line despite fp dust", () => {
+    expect(snapDownBeat(2 - 1e-9, 1)).toBe(2); // 1.999999999 must not floor to 1
+    expect(snapDownBeat(2, 1)).toBe(2);
+  });
+
+  it("is the identity with the grid off or degenerate", () => {
+    expect(snapDownBeat(1.4, 0)).toBe(1.4);
+    expect(snapDownBeat(1.4, NaN)).toBe(1.4);
+    expect(snapDownBeat(NaN, 1)).toBeNaN();
   });
 });

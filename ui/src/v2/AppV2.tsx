@@ -26,6 +26,7 @@ import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
 import { ChangeToast } from "./ChangeToast";
 import { MemoryToast } from "./MemoryToast";
+import { MoshTipProvider } from "../chrome/Tooltip";
 import "./shell.css";
 
 export function AppV2() {
@@ -56,6 +57,7 @@ export function AppV2() {
   }
 
   return (
+    <MoshTipProvider delay={350}>
     <div className="v2-shell" data-testid="v2-shell"
       data-left-open={leftOpen} data-right-open={rightOpen}>
       {snapshot && <TopBar snapshot={snapshot} />}
@@ -96,5 +98,6 @@ export function AppV2() {
       <ChangeToast />
       <MemoryToast />
     </div>
+    </MoshTipProvider>
   );
 }

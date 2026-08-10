@@ -22,10 +22,12 @@ import { readShellCss } from "../v2/cssSource";
 const here = dirname(fileURLToPath(import.meta.url));
 const mosh = readFileSync(join(here, "mosh.css"), "utf8");
 const shell = readShellCss();
+const live = readFileSync(join(here, "../live/live.css"), "utf8");
 
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
 const moshCode = stripComments(mosh);
 const shellCode = stripComments(shell);
+const liveCode = stripComments(live);
 
 /** Every rule whose selector is panel-scoped to the piano roll (`.pr`, `.pr-foo`, …).
  *  Deliberately excludes `.pr-name` / `.pr-meta` when they appear on a PLUGIN row —
@@ -56,6 +58,7 @@ function tokensIn(css: string, blockSelector: string): Map<string, string> {
 const ROOT = tokensIn(moshCode, ":root");
 const LIGHT = tokensIn(moshCode, '[data-theme="light"]');
 const V2 = tokensIn(shellCode, ".v2-shell");
+const LIVE = tokensIn(liveCode, ".live-shell");
 
 /** Lengths, not colours: sizes are theme-invariant, so they need neither a light twin
  *  nor a v2 re-pin. Anything that resolves to a colour does need both. */
@@ -137,5 +140,49 @@ describe("piano roll: v2 re-pins the whole family", () => {
       if (!value.includes("var(--v2-")) bad.push(`${name}: ${value}`);
     }
     expect(bad, "v2 --pr-* values should derive from --v2-* tokens").toEqual([]);
+  });
+
+  it("pins every SURFACE to an opaque token, never the glass trio", () => {
+    // The "transparent piano roll" bug: v2's --v2-surface family is glass
+    // (rgba alpha 0.62–0.74) for in-shell panels that blur over the ground. The
+    // piano roll is a MODAL — pinned to glass, its panel/grid/keys composited
+    // against the ARRANGEMENT, so the timeline's own clips and lines showed
+    // through the editor's grid. Surfaces must use the -solid twins instead.
+    const SURFACES = ["--pr-panel", "--pr-grid-bg", "--pr-key-white-bg", "--pr-key-black-bg", "--pr-ruler-bg", "--pr-vel-bg"];
+    const GLASS = ["var(--v2-surface)", "var(--v2-surface-2)", "var(--v2-surface-sunken)"];
+    const bad: string[] = [];
+    for (const name of SURFACES) {
+      const value = V2.get(name);
+      expect(value, `v2 never re-pins ${name}`).toBeDefined();
+      if (value && GLASS.includes(value)) bad.push(`${name}: ${value}`);
+    }
+    expect(bad, "modal surfaces must be opaque (-solid), not glass").toEqual([]);
+  });
+});
+
+describe("piano roll: the live shell re-pins the whole family", () => {
+  it("covers every --pr-* colour token the classic shell defines", () => {
+    // Same mechanism as v2's guard: a token defined only in mosh.css resolves to the
+    // CLASSIC value inside .live-shell — cream in the light theme, on the dock's dark
+    // panel. The live re-pin lives in ui/src/live/live.css's base block.
+    const classic = prColorTokens(ROOT);
+    const uncovered = classic.filter((n) => !LIVE.has(n));
+    expect(uncovered, "--pr-* colour tokens the live shell never re-pins").toEqual([]);
+  });
+
+  it("pins every SURFACE to an opaque value (the docked editor sits over the lanes)", () => {
+    // The docked mount is not a modal, but the glass lesson is identical: a
+    // translucent surface would composite the arrangement's own lanes and gridlines
+    // through the editor's grid. --live-* tokens are opaque by construction, so the
+    // check is "no alpha-channel literal" on the surfaces.
+    const SURFACES = ["--pr-panel", "--pr-grid-bg", "--pr-key-white-bg", "--pr-key-black-bg", "--pr-ruler-bg", "--pr-vel-bg"];
+    const TRANSLUCENT = /rgba\([^)]*,\s*0?\.\d|hsla\(/;
+    const bad: string[] = [];
+    for (const name of SURFACES) {
+      const value = LIVE.get(name);
+      expect(value, `live never re-pins ${name}`).toBeDefined();
+      if (value && TRANSLUCENT.test(value)) bad.push(`${name}: ${value}`);
+    }
+    expect(bad, "editor surfaces must be opaque, not translucent").toEqual([]);
   });
 });

@@ -56,6 +56,15 @@
   --v2-surface: rgba(24, 24, 25, 0.64);
   --v2-surface-2: rgba(33, 33, 35, 0.74);
   --v2-surface-sunken: rgba(12, 12, 13, 0.62);
+  /* Opaque twins of the glass trio, for MODAL surfaces (the piano roll's --pr-*
+     re-pin below). A translucent editor panel composites against the ARRANGEMENT
+     behind it, so the timeline's own clips and lane lines bleed through the
+     editor's grid — the "transparent piano roll, confusing lines" bug. Values are
+     the light theme's panel set, which is opaque already (panels stay dark in
+     both themes), so the modal renders identically in either theme. */
+  --v2-surface-solid: #1b1b1d;
+  --v2-surface-2-solid: #242427;
+  --v2-surface-sunken-solid: #141416;
   --v2-line: rgba(255, 255, 255, 0.09);
   --v2-line-strong: rgba(255, 255, 255, 0.18);
   --v2-text: #ededee;
@@ -232,14 +241,17 @@
      hardcoded a near-black background while the label colour flipped DARK with the
      light theme. Both sides are tokens now, and pianoRollCss.test.ts fails the build
      if a bare literal is reintroduced. */
-  --pr-panel: var(--v2-surface);
+  /* The surfaces are the -solid twins, NOT the glass trio: this whole panel is a
+     modal, and a translucent modal shows the arrangement through its own grid
+     (pianoRollCss.test.ts fails the build if a glass token creeps back in). */
+  --pr-panel: var(--v2-surface-solid);
   --pr-text: var(--v2-text);
   --pr-text-dim: var(--v2-dim);
-  --pr-grid-bg: var(--v2-surface-sunken);
+  --pr-grid-bg: var(--v2-surface-sunken-solid);
   --pr-line: var(--v2-line);
   --pr-line-bar: var(--v2-line-strong);
   --pr-row-alt: rgba(255, 255, 255, 0.05);
-  --pr-key-white-bg: var(--v2-surface-2);
+  --pr-key-white-bg: var(--v2-surface-2-solid);
   --pr-key-black-bg: var(--v2-ink);
   --pr-key-text: var(--v2-dim);
   --pr-key-line: var(--v2-line);
@@ -251,13 +263,20 @@
   --pr-lasso-edge: color-mix(in srgb, var(--v2-accent) 45%, transparent);
   --pr-offkey: rgba(255, 255, 255, 0.07);
   --pr-playhead: var(--v2-playhead);
-  --pr-ruler-bg: var(--v2-surface-sunken);
+  --pr-ruler-bg: var(--v2-surface-sunken-solid);
   --pr-ruler-text: var(--v2-faint);
-  --pr-vel-bg: var(--v2-surface-sunken);
+  --pr-vel-bg: var(--v2-surface-sunken-solid);
   --pr-vel-bar: color-mix(in srgb, var(--v2-accent) 55%, transparent);
   --pr-vel-bar-sel: var(--v2-accent);
   /* The ruler is the same height as the arrangement's, so the two read as one system. */
   --pr-ruler-h: var(--v2-ruler-h);
+
+  /* Tooltips (MoshTip) — v2 keeps dark panels in both themes, so re-pin rather than
+     inherit the classic light flip. Opaque (-solid): a translucent tip is unreadable
+     over the timeline, the same lesson as the piano-roll glass bug. */
+  --tip-bg: var(--v2-surface-2-solid);
+  --tip-text: var(--v2-text);
+  --tip-line: var(--v2-line-strong);
 
   position: absolute;
   inset: 0;

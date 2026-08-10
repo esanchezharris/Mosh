@@ -81,3 +81,12 @@ export const useShell = create<ShellState>((set) => ({
   setTimeRange: (r) => set({ timeRange: r }),
   setTimeRangeDragging: (b) => set({ timeRangeDragging: b }),
 }));
+
+if (
+  (import.meta.env.MODE === "development" ||
+    import.meta.env.MODE === "e2e" ||
+    import.meta.env.MODE === "test") &&
+  typeof window !== "undefined"
+) {
+  (window as unknown as { __moshShellStore?: typeof useShell }).__moshShellStore = useShell;
+}
