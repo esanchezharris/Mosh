@@ -120,12 +120,6 @@
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.62);
 }
 .protools-shell .pt-lane .v2-clip canvas { filter: drop-shadow(0 0 0.5px var(--pt-wave-outline)); }
-.protools-shell .pt-audio-clip-stack > .v2-clip.wave canvas {
-  transform: scaleY(var(--pt-clip-gain-scale, 1));
-  transform-origin: center;
-  transition: transform var(--pt-motion-micro);
-  will-change: transform;
-}
 .protools-shell .pt-lane .v2-trim { z-index: 5; }
 .protools-shell .v2-clip[data-pt-intent="selector"] { cursor: text; }
 .protools-shell .v2-clip[data-pt-intent="grabber"] { cursor: grab; }

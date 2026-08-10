@@ -15,6 +15,27 @@ async function gainPoints(page: Page, clipId: string): Promise<ClipGainPoint[]> 
   }, clipId);
 }
 
+async function waveformSpanAt(page: Page, clipId: string, ratio: number): Promise<number> {
+  return page.evaluate(({ id, xRatio }) => {
+    const clip = document.querySelector<HTMLElement>(`[data-clip-id="${CSS.escape(id)}"]`);
+    const canvas = clip?.querySelector<HTMLCanvasElement>("canvas");
+    const context = canvas?.getContext("2d", { willReadFrequently: true });
+    if (!canvas || !context || canvas.width <= 0 || canvas.height <= 0) return 0;
+    const centerX = Math.min(canvas.width - 1, Math.max(0, Math.floor(canvas.width * xRatio)));
+    let first = canvas.height;
+    let last = -1;
+    for (let x = Math.max(0, centerX - 2); x <= Math.min(canvas.width - 1, centerX + 2); x += 1) {
+      const pixels = context.getImageData(x, 0, 1, canvas.height).data;
+      for (let y = 0; y < canvas.height; y += 1) {
+        if (pixels[y * 4 + 3] === 0) continue;
+        first = Math.min(first, y);
+        last = Math.max(last, y);
+      }
+    }
+    return last >= first ? last - first + 1 : 0;
+  }, { id: clipId, xRatio: ratio });
+}
+
 test("Avid V06 clip gain line adds, rides, nudges, and clears clip-local breakpoints", async ({ page }) => {
   await bootProTools(page);
   const clip = page.locator('[data-testid="v2-clip"].wave').first();
@@ -35,6 +56,8 @@ test("Avid V06 clip gain line adds, rides, nudges, and clears clip-local breakpo
   await point.focus();
   await point.press("ArrowUp");
   await expect.poll(async () => (await gainPoints(page, clipId))[0]?.gainDb).toBe(0.5);
+  const spanBeforeDrag = await waveformSpanAt(page, clipId, 0.45);
+  expect(spanBeforeDrag).toBeGreaterThan(0);
 
   const pointBounds = await point.boundingBox();
   if (!pointBounds) throw new Error("clip gain breakpoint has no Chromium bounds");
@@ -45,6 +68,7 @@ test("Avid V06 clip gain line adds, rides, nudges, and clears clip-local breakpo
   await page.mouse.up();
   await expect.poll(async () => (await gainPoints(page, clipId))[0]?.gainDb).toBeGreaterThan(0.5);
   await expect.poll(async () => (await gainPoints(page, clipId))[0]?.t).toBeGreaterThan(0);
+  await expect.poll(() => waveformSpanAt(page, clipId, 0.45)).toBeGreaterThan(spanBeforeDrag);
 
   await point.focus();
   await point.press("Delete");

@@ -51,7 +51,12 @@ function inkOf(el: Element | null, token: string, fallback: string): string {
  *  in the outgoing theme's ink until something else invalidated it. */
 const useThemeKey = () => useSettings((s) => String(s.get("theme") ?? ""));
 
-export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
+export const ClipWave = memo(function ClipWave({ peaks, width, amplitudeAt }: {
+  peaks?: Peaks;
+  width: number;
+  /** Optional shell-local amplitude multiplier at a normalized horizontal position. */
+  amplitudeAt?: (ratio: number) => number;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const themeKey = useThemeKey();
   useEffect(() => {
@@ -64,7 +69,9 @@ export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks
     for (let x = 0; x < w; x++) {
       const p = peaks[Math.min(n - 1, Math.floor((x / w) * n))];
       if (!p) continue;
-      const top = mid + p[0] * mid * 0.92, bot = mid + p[1] * mid * 0.92;
+      const amplitude = Math.max(0, amplitudeAt?.((x + 0.5) / w) ?? 1);
+      const top = mid + p[0] * mid * 0.92 * amplitude;
+      const bot = mid + p[1] * mid * 0.92 * amplitude;
       if (outline !== "transparent") {
         ctx.fillStyle = outline;
         ctx.fillRect(x - 1, top - 1, 3, Math.max(2, bot - top + 2));
@@ -72,7 +79,7 @@ export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks
       ctx.fillStyle = fill;
       ctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
-  }, [peaks, width, themeKey]);
+  }, [peaks, width, amplitudeAt, themeKey]);
   return <canvas ref={ref} />;
 });
 

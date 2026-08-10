@@ -18,6 +18,7 @@ type Props = {
   readonly clip: Clip;
   readonly selected: boolean;
   readonly staticGainDb: number;
+  readonly onPreviewPointsChange: (points: readonly ClipGainPoint[] | null) => void;
 };
 
 type PointDrag = {
@@ -34,7 +35,8 @@ type PointDrag = {
 const samePoints = (left: readonly ClipGainPoint[], right: readonly ClipGainPoint[]) =>
   JSON.stringify(left) === JSON.stringify(right);
 
-export function ProToolsClipGainEnvelope({ clip, selected, staticGainDb }: Props) {
+export function ProToolsClipGainEnvelope({ clip, selected, staticGainDb,
+  onPreviewPointsChange }: Props) {
   const exec = useStore((state) => state.exec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const playhead = useStore((state) => state.transport.position);
@@ -50,10 +52,12 @@ export function ProToolsClipGainEnvelope({ clip, selected, staticGainDb }: Props
   const points = previewPoints ?? snapshotPoints;
 
   const cancelDraft = () => {
+    writeToken.current += 1;
     const current = drag.current;
     if (current) releasePointer(current.element, current.pointerId);
     drag.current = null;
     setPreviewPoints(null);
+    onPreviewPointsChange(null);
   };
 
   useEffect(() => cancelDraft(), [clip.id, clip.clipGainPoints, projectEpoch]);
@@ -66,12 +70,19 @@ export function ProToolsClipGainEnvelope({ clip, selected, staticGainDb }: Props
     if (samePoints(next, previous)) return;
     const token = ++writeToken.current;
     setPreviewPoints(next);
+    onPreviewPointsChange(next);
     void exec("write_clip_gain_curve", { clipId: clip.id, points: next }).then(
       (result) => {
-        if (!result.ok && writeToken.current === token) setPreviewPoints(null);
+        if (!result.ok && writeToken.current === token) {
+          setPreviewPoints(null);
+          onPreviewPointsChange(null);
+        }
       },
       () => {
-        if (writeToken.current === token) setPreviewPoints(null);
+        if (writeToken.current === token) {
+          setPreviewPoints(null);
+          onPreviewPointsChange(null);
+        }
       },
     );
   };
@@ -120,6 +131,7 @@ export function ProToolsClipGainEnvelope({ clip, selected, staticGainDb }: Props
       clip.length,
     );
     setPreviewPoints(current.points);
+    onPreviewPointsChange(current.points);
   };
 
   const onPointPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { pushEscapeHandler } from "../hooks/escapeStack";
 import { useStore } from "../store";
-import type { Clip } from "../types";
+import type { Clip, ClipGainPoint } from "../types";
 import {
   CLIP_GAIN_MAX_DB,
   CLIP_GAIN_MIN_DB,
@@ -16,6 +16,7 @@ import { ProToolsClipGainEnvelope } from "./ProToolsClipGainEnvelope";
 type ProToolsClipGainProps = {
   readonly clip: Clip;
   readonly onPreviewGainChange: (gainDb: number | null) => void;
+  readonly onPreviewPointsChange: (points: readonly ClipGainPoint[] | null) => void;
 };
 
 type GainOverlayStyle = React.CSSProperties & {
@@ -30,7 +31,8 @@ type GainDrag = {
   valueDb: number;
 };
 
-export function ProToolsClipGain({ clip, onPreviewGainChange }: ProToolsClipGainProps) {
+export function ProToolsClipGain({ clip, onPreviewGainChange,
+  onPreviewPointsChange }: ProToolsClipGainProps) {
   const pxPerSec = useStore((state) => state.pxPerSec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const selected = useStore((state) => state.selection.has(clip.id));
@@ -143,7 +145,8 @@ export function ProToolsClipGain({ clip, onPreviewGainChange }: ProToolsClipGain
     <span className={`pt-clip-gain${selected ? " is-selected" : ""}`}
       data-testid="pt-clip-gain" style={overlayStyle}>
       <span className="pt-clip-gain-line" data-testid="pt-clip-gain-line" aria-hidden="true" />
-      <ProToolsClipGainEnvelope clip={clip} selected={selected} staticGainDb={gainDb} />
+      <ProToolsClipGainEnvelope clip={clip} selected={selected} staticGainDb={gainDb}
+        onPreviewPointsChange={onPreviewPointsChange} />
       {selected && (
         <>
           <span ref={handleRef} className="pt-clip-gain-handle" data-testid="pt-clip-gain-handle"

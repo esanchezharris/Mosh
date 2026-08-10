@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import type { Clip, Snapshot, Track } from "../types";
+import { useCallback, useEffect, useState } from "react";
+import type { Clip, ClipGainPoint, Snapshot, Track } from "../types";
 import { ClipView } from "../v2/lanes/ClipView";
 import { clipGainAmplitude } from "./clipGain";
+import { clipGainOffsetAt } from "./clipGainEnvelope";
 import { CLIP_VISUAL_HEADER_PX, TRACK_ROW_HEIGHT } from "./layout";
 import { ProToolsClipGain } from "./ProToolsClipGain";
 import { ProToolsFadeHandles } from "./ProToolsFadeHandles";
@@ -14,28 +15,31 @@ type ProToolsAudioClipProps = {
   readonly track: Track;
 };
 
-type AudioClipStackStyle = React.CSSProperties & {
-  "--pt-clip-gain-scale": number;
-};
+const EMPTY_GAIN_POINTS: readonly ClipGainPoint[] = [];
 
 export function ProToolsAudioClip({ clip, snapshot, track }: ProToolsAudioClipProps) {
   const smartToolEnabled = useProTools((state) => state.smartToolEnabled);
   const activeTool = useProTools((state) => state.activeTool);
   const [previewGain, setPreviewGain] = useState<number | null>(null);
+  const [previewPoints, setPreviewPoints] = useState<readonly ClipGainPoint[] | null>(null);
   const gainDb = previewGain ?? clip.gainDb ?? 0;
-  const stackStyle: AudioClipStackStyle = {
-    "--pt-clip-gain-scale": clipGainAmplitude(gainDb),
-  };
+  const gainPoints = previewPoints ?? clip.clipGainPoints ?? EMPTY_GAIN_POINTS;
+  const waveAmplitudeAt = useCallback((ratio: number) => clipGainAmplitude(
+    gainDb + clipGainOffsetAt(gainPoints, ratio * clip.length),
+  ), [gainDb, gainPoints, clip.length]);
 
   useEffect(() => setPreviewGain(null), [clip.id, clip.gainDb]);
+  useEffect(() => setPreviewPoints(null), [clip.id, clip.clipGainPoints]);
 
   return (
-    <span className="pt-audio-clip-stack" data-testid="pt-audio-clip-stack" style={stackStyle}>
+    <span className="pt-audio-clip-stack" data-testid="pt-audio-clip-stack">
       <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
         clipHeaderPx={(TRACK_ROW_HEIGHT - 30) / 2} clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
-        gestureTable={() => proToolsGestureTable("audio", smartToolEnabled, activeTool)} />
+        gestureTable={() => proToolsGestureTable("audio", smartToolEnabled, activeTool)}
+        waveAmplitudeAt={waveAmplitudeAt} />
       <ProToolsFadeHandles clip={clip} />
-      <ProToolsClipGain clip={clip} onPreviewGainChange={setPreviewGain} />
+      <ProToolsClipGain clip={clip} onPreviewGainChange={setPreviewGain}
+        onPreviewPointsChange={setPreviewPoints} />
     </span>
   );
 }

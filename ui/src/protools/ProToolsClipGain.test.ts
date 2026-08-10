@@ -6,6 +6,10 @@ import type { CommandResult, Snapshot } from "../types";
 import { ProToolsTimeline } from "./ProToolsTimeline";
 import { useProTools } from "./proToolsState";
 
+const waveProbe = vi.hoisted(() => ({
+  renders: [] as Array<{ amplitudeAt?: (ratio: number) => number }>,
+}));
+
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
   return { ...actual, onEvent: vi.fn(() => () => {}), pickFiles: vi.fn(), pickSaveFile: vi.fn() };
@@ -13,7 +17,13 @@ vi.mock("../bridge", async () => {
 
 vi.mock("../ui/clipRenderers", async () => {
   const actual = await vi.importActual<typeof import("../ui/clipRenderers")>("../ui/clipRenderers");
-  return { ...actual, ClipWave: () => React.createElement("canvas") };
+  return {
+    ...actual,
+    ClipWave: (props: { amplitudeAt?: (ratio: number) => number }) => {
+      waveProbe.renders.push(props);
+      return React.createElement("canvas");
+    },
+  };
 });
 
 const CLIP_ID = "audio-clip";
@@ -92,12 +102,19 @@ describe("Pro Tools inline clip gain", () => {
     return envelope;
   };
 
+  const waveAmplitudeAt = () => {
+    const amplitudeAt = waveProbe.renders.at(-1)?.amplitudeAt;
+    if (!amplitudeAt) throw new Error("Pro Tools did not supply envelope-aware waveform scaling");
+    return amplitudeAt;
+  };
+
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
+    waveProbe.renders.length = 0;
     useStore.setState({
       snapshot: SNAPSHOT,
       transport: SNAPSHOT.transport,
@@ -128,7 +145,7 @@ describe("Pro Tools inline clip gain", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the selected clip value and scales its waveform from snapshot gain", () => {
+  it("shows the selected clip value and supplies static waveform amplitude", () => {
     // Given: a selected audio clip whose static gain is -6 dB.
     const control = slider();
     const stack = host.querySelector<HTMLElement>("[data-testid=pt-audio-clip-stack]");
@@ -136,13 +153,22 @@ describe("Pro Tools inline clip gain", () => {
     if (!stack || !line) throw new Error("inline gain feedback did not render");
 
     // When: the timeline paints the clip from the snapshot.
-    const scale = Number(stack.style.getPropertyValue("--pt-clip-gain-scale"));
+    const scale = waveAmplitudeAt()(0.5);
 
     // Then: assistive value text, the gain line, and the dB amplitude transform agree.
     expect(control.getAttribute("aria-valuenow")).toBe("-6");
     expect(control.getAttribute("aria-valuetext")).toBe("-6.0 dB");
     expect(scale).toBeCloseTo(0.5011872336, 8);
     expect(line.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("maps the waveform amplitude through static and dynamic gain at each horizontal position", () => {
+    renderWithPoints([{ t: 0, gainDb: -6 }, { t: 2, gainDb: 0 }, { t: 4, gainDb: 6 }]);
+    const amplitudeAt = waveAmplitudeAt();
+
+    expect(amplitudeAt(0)).toBeCloseTo(10 ** (-12 / 20), 8);
+    expect(amplitudeAt(0.5)).toBeCloseTo(10 ** (-6 / 20), 8);
+    expect(amplitudeAt(1)).toBeCloseTo(1, 8);
   });
 
   it("keeps an upward pointer draft local until release and commits its exact gain", () => {
@@ -153,6 +179,7 @@ describe("Pro Tools inline clip gain", () => {
     // When: the producer drags 20 px upward, then releases.
     pointer(control, "pointermove", { pointerId: 4, buttons: 1, clientY: 40 });
     expect(control.getAttribute("aria-valuenow")).toBe("-1");
+    expect(waveAmplitudeAt()(0.5)).toBeCloseTo(10 ** (-1 / 20), 8);
     expect(exec).not.toHaveBeenCalled();
     pointer(control, "pointerup", { pointerId: 4, clientY: 40 });
 
@@ -274,6 +301,7 @@ describe("Pro Tools inline clip gain", () => {
     pointer(point, "pointerdown", { pointerId: 21, button: 0, clientX: 100, clientY: 20 });
     pointer(point, "pointermove", { pointerId: 21, buttons: 1, clientX: 150, clientY: 0 });
     expect(point.getAttribute("aria-valuenow")).toBe("5");
+    expect(waveAmplitudeAt()(0.375)).toBeCloseTo(10 ** (-1 / 20), 8);
     expect(exec).not.toHaveBeenCalled();
     pointer(point, "pointerup", { pointerId: 21, clientX: 150, clientY: 0 });
 
@@ -291,9 +319,11 @@ describe("Pro Tools inline clip gain", () => {
 
     pointer(point, "pointerdown", { pointerId: 22, button: 0, clientX: 100, clientY: 20 });
     pointer(point, "pointermove", { pointerId: 22, buttons: 1, clientX: 150, clientY: 0 });
+    expect(waveAmplitudeAt()(0.375)).toBeCloseTo(10 ** (-1 / 20), 8);
     pointer(point, "pointercancel", { pointerId: 22, clientX: 150, clientY: 0 });
     expect(exec).not.toHaveBeenCalled();
     expect(point.getAttribute("aria-valuenow")).toBe("0");
+    expect(waveAmplitudeAt()(0.25)).toBeCloseTo(10 ** (-6 / 20), 8);
 
     pointer(point, "pointerdown", { pointerId: 23, button: 0, clientX: 100, clientY: 20 });
     pointer(point, "pointermove", { pointerId: 23, buttons: 1, clientX: 150, clientY: 0 });

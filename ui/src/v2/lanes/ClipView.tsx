@@ -67,10 +67,12 @@ const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).
 
 type DragKind = "move" | "trim-l" | "trim-r" | "stretch" | "time";
 
-export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHeaderPx, gestureTable }: {
+export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHeaderPx,
+  gestureTable, waveAmplitudeAt }: {
   clip: Clip; trackType: string; snapshot: Snapshot;
   clipHeaderPx?: number; clipVisualHeaderPx?: number;
   gestureTable?: () => GestureTable;
+  waveAmplitudeAt?: (ratio: number) => number;
 }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const selection = useStore((s) => s.selection);
@@ -345,7 +347,7 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
       aria-haspopup="menu" aria-expanded={menu !== null}
       data-testid="v2-clip" data-clip-id={clip.id} title={clip.name}
     >
-      {clip.type === "wave" && <ClipWave peaks={peaks} width={width} />}
+      {clip.type === "wave" && <ClipWave peaks={peaks} width={width} amplitudeAt={waveAmplitudeAt} />}
       {clip.type === "midi" && (drumClip
         ? <ClipDrumGrid notes={shownNotes} width={width} bs={bs} secToPx={secToPx} />
         : <ClipMidi notes={shownNotes} width={width} bs={bs} secToPx={secToPx} />)}
