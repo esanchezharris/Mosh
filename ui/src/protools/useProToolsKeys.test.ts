@@ -620,7 +620,7 @@ describe("useProToolsKeys", () => {
     expect(execCalls).toEqual([]);
 
     act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "+",
+      key: "=",
       code: "Equal",
       metaKey: true,
       shiftKey: true,

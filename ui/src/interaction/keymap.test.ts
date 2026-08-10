@@ -118,13 +118,16 @@ describe("per-DAW keymaps", () => {
     expect(resolveKey(getKeymap("fl"), ev({ key: "d", metaKey: true }))).toBeNull();
     expect(resolveKey(getKeymap("mosh"), ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
   });
-  it("pro tools: ⌘E separates, ⌘Space records, shared routing grouping stays unclaimed, Return → start", () => {
+  it("pro tools: shell-owned grouping, tools, nudge, and Edit/Mix keys stay unclaimed", () => {
     const pt = getKeymap("protools");
     expect(resolveKey(pt, ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
     expect(resolveKey(pt, ev({ key: " ", metaKey: true }))).toBe(A.RECORD);
     expect(resolveKey(pt, ev({ key: "g", metaKey: true }))).toBeNull();
     expect(resolveKey(pt, ev({ key: "F7" }))).toBeNull();
     expect(resolveKey(pt, ev({ key: "F8" }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "=", code: "Equal", metaKey: true }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "+", code: "Equal", metaKey: true, shiftKey: true }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "-", code: "Minus", metaKey: true }))).toBeNull();
     expect(resolveKey(pt, ev({ key: "Enter" }))).toBe(A.TO_START);
     // differs from mosh: F7 unbound, Home → start, plain R still records on mosh
     expect(resolveKey(getKeymap("mosh"), ev({ key: "F7" }))).toBeNull();

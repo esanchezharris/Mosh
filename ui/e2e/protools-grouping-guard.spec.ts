@@ -4,7 +4,13 @@ import { bootProTools } from "./helpers";
 
 type ProToolsGroupingWindow = Window & {
   __moshStore?: {
-    getState: () => { snapshot: Snapshot | null };
+    getState: () => {
+      snapshot: Snapshot | null;
+      exec: (command: string, args?: Record<string, unknown>) => Promise<{
+        ok: boolean;
+        error?: string;
+      }>;
+    };
   };
   __moshCmdTrace?: Array<{ command: string; args?: Record<string, unknown> }>;
 };
@@ -42,6 +48,17 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   await expect(page.getByTestId("pt-track-group-row")).toContainText("Rhythm");
   await expect.poll(() => trackGroupCount(page)).toBe(1);
   await expect.poll(() => groupTrackCount(page)).toBe(0);
+  await page.getByTestId("pt-track-group-toggle").click();
+  await expect.poll(async () => (await trackGroupDefinitions(page))[0]?.enabled).toBe(false);
+  await page.getByTestId("pt-track-group-toggle").click();
+  await expect.poll(async () => (await trackGroupDefinitions(page))[0]?.enabled).toBe(true);
+  const createdGroupId = (await trackGroupDefinitions(page))[0]?.id;
+  if (!createdGroupId) throw new Error("Created Track Group id is unavailable");
+  await execInGroupingPage(page, "rename_track_group", {
+    groupId: createdGroupId,
+    name: "Rhythm Native Rename",
+  });
+  await expect(page.getByTestId("pt-track-group-row")).toContainText("Rhythm Native Rename");
 
   const [firstTrack, secondTrack] = await trackMix(page);
   if (!firstTrack || !secondTrack) throw new Error("Track Group fixtures are missing");
@@ -141,6 +158,10 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   await expect(page.getByTestId("pt-track-select").first()).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("pt-track-select").nth(1)).toHaveAttribute("aria-pressed", "false");
 
+  await page.getByTestId("pt-track-group-menu").nth(1).click();
+  await page.getByTestId("pt-track-group-remove").click();
+  await expect.poll(() => trackGroupCount(page)).toBe(1);
+
   const commands = await page.evaluate(() => (
     (window as ProToolsGroupingWindow).__moshCmdTrace?.map((entry) => entry.command) ?? []
   ));
@@ -148,7 +169,10 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
     "create_track_group",
     "configure_track_group",
     "duplicate_track_group",
+    "rename_track_group",
+    "set_track_group_enabled",
     "set_track_group_members",
+    "remove_track_group",
     "set_track_volume",
     "set_track_mute",
     "set_track_groups_suspended",
@@ -212,6 +236,19 @@ async function commandTraceLength(page: Page): Promise<number> {
   return page.evaluate(() => (
     (window as ProToolsGroupingWindow).__moshCmdTrace?.length ?? 0
   ));
+}
+
+async function execInGroupingPage(
+  page: Page,
+  command: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  const result = await page.evaluate(async ({ commandName, commandArgs }) => {
+    const store = (window as ProToolsGroupingWindow).__moshStore;
+    if (!store) throw new Error("__moshStore is unavailable");
+    return store.getState().exec(commandName, commandArgs);
+  }, { commandName: command, commandArgs: args });
+  if (!result.ok) throw new Error(result.error ?? `${command} failed`);
 }
 
 async function groupTrackCount(page: Page): Promise<number> {

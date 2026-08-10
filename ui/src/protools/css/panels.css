@@ -229,6 +229,18 @@
   font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .pt-clip-list-items { margin: 0; padding: 0; overflow: auto; list-style: none; }
+.pt-clip-group-rename {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 4px;
+  align-items: center;
+  padding: 6px;
+  border-bottom: 1px solid var(--pt-border);
+  background: var(--pt-inset);
+}
+.pt-clip-group-rename label { grid-column: 1 / -1; color: var(--pt-text-muted); font-size: 9px; }
+.pt-clip-group-rename input { min-width: 0; }
+.pt-clip-group-rename button { min-height: 24px; }
 .pt-clip-list-item {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) auto;

@@ -143,6 +143,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   // ── track grouping — no agent story yet ───────────────────────────────────────
   create_group_track: "track grouping v0 has no agent story yet — candidate for a later batch",
   ungroup_track: "track grouping v0 has no agent story yet — candidate for a later batch",
+  rename_track_group: "configure_track_group is the canonical agent operation because it updates name, type, members, and linked attributes atomically; this older rename-only seam remains for replay compatibility",
 
   // ── hardware-controller telemetry ─────────────────────────────────────────────
   mark_take: "fire-and-forget controller telemetry (logs + re-emits an event) — no session mutation to verify",

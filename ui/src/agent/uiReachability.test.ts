@@ -14,11 +14,11 @@
 // The surface is computed as the MODULE GRAPH reachable from the v2 shell's entry point,
 // not as a set of directories. That distinction is load-bearing, and I got it wrong first:
 // a directory scan that included ui/src/ui counted `add_midi_clip` as reachable because
-// classic's Topbar.tsx references it — but classic is NOT the default shell, so a command
-// only reachable there is precisely the bug this test exists to catch. ui/src/ui is a
+// classic's Topbar.tsx references it — but classic is not a primary production shell, so a
+// command only reachable there is precisely the bug this test exists to catch. ui/src/ui is a
 // SHARED component library (v2 imports 22 modules out of it) mixed in with classic-only
 // files, so it can be neither wholly included nor wholly excluded. Walking imports from
-// AppV2 resolves that exactly, and stays correct as files move between the two.
+// The union of AppV2 and AppProTools resolves that exactly, and stays correct as files move.
 //
 // Within that graph the probe is a string-literal search rather than a call-graph. That is
 // deliberate: it is cheap, has no false NEGATIVES (a command genuinely wired up always
@@ -27,7 +27,7 @@
 //
 // WHAT THIS DOES NOT CATCH, stated plainly so nobody trusts it further than it goes.
 // Module reachability is not user reachability. A command counts as reachable if its name
-// appears in ANY module the v2 graph imports — even in a code path that never renders.
+// appears in ANY module either primary-shell graph imports — even in a code path that never renders.
 // This test is therefore a FLOOR — it catches a command with no reference anywhere in the
 // shell graph (that is how it found all 22 originally) and ratchets the gap list — but it
 // is not a substitute for a test of the specific gesture. High-value paths get their own:
@@ -65,7 +65,7 @@ function resolveImport(fromDir: string, spec: string): string | null {
   return null;
 }
 
-// Modules the v2 graph pulls in for a HELPER but never renders. One entry = one path = one
+// Modules a primary shell pulls in for a HELPER but never renders. One entry = one path = one
 // written reason, reviewed like UI_REACH_GAPS — not a convenience list.
 //
 // The walk STOPS at these rather than merely skipping them, because the leak is transitive:
@@ -102,12 +102,17 @@ function moduleGraph(entry: string, stopAt: readonly string[] = []): string[] {
   return [...seen];
 }
 
-// The DEFAULT shell. `ui/src/settings/schema.ts` defaults `uiShell` to "v2", and
-// App.tsx mounts AppV2 for it — so this graph is what a shipped user actually touches.
+// Pro Tools is the fresh-install default; v2 remains the complete general-purpose shell.
+// Their union is the primary production surface. Live is a focused compatibility shell and
+// classic is legacy, so neither is allowed to mask a missing primary-shell affordance.
 // bridge.mock is the dev BACKEND (it implements every command); it is not in this graph,
 // and including it would make everything look reachable — the exact mistake to avoid.
 const classicOnly = Object.keys(CLASSIC_ONLY_MODULES).map((p) => join(SRC, p));
-const graph = moduleGraph(join(SRC, "v2", "AppV2.tsx"), classicOnly);
+const PRIMARY_SHELL_ENTRIES = [
+  join(SRC, "v2", "AppV2.tsx"),
+  join(SRC, "protools", "AppProTools.tsx"),
+];
+const graph = [...new Set(PRIMARY_SHELL_ENTRIES.flatMap((entry) => moduleGraph(entry, classicOnly)))];
 
 // Two parts of the graph must be walked through but never SEARCHED, because each mentions
 // every command name and would make the whole test vacuous:
@@ -135,20 +140,20 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
   });
 
   it("every declared classic-only boundary is real and load-bearing", () => {
-    // A boundary that names a file which does not exist, or one the v2 graph never reached
+    // A boundary that names a file which does not exist, or one the primary graphs never reached
     // anyway, silently excludes nothing while looking like it tightened the probe. That is
     // the same shape as the leak this whole mechanism exists to close, so it must fail.
     //
-    // An EMPTY map is legal — it means the v2 graph currently needs no declared boundary
+    // An EMPTY map is legal — it means the primary graphs currently need no declared boundary
     // (v2 stopped importing Arrange.tsx when the clip renderers moved to their own module,
     // so the classic subtree is out of the graph structurally). The per-entry checks and
     // the shrink check below are the mechanism, and they still run in full the moment a
     // future entry is added.
-    const unstopped = moduleGraph(join(SRC, "v2", "AppV2.tsx"));
+    const unstopped = [...new Set(PRIMARY_SHELL_ENTRIES.flatMap((entry) => moduleGraph(entry)))];
     for (const rel of Object.keys(CLASSIC_ONLY_MODULES)) {
       const abs = join(SRC, rel);
       expect(existsSync(abs), `${rel} does not exist`).toBe(true);
-      expect(unstopped.includes(abs), `${rel} is not in the v2 graph — excluding it does nothing`).toBe(true);
+      expect(unstopped.includes(abs), `${rel} is not in the primary shell graph — excluding it does nothing`).toBe(true);
     }
     // With entries present, the exclusion must actually shrink the searched surface, or it
     // is decoration. (With no entries there is nothing to shrink: the stopped and unstopped

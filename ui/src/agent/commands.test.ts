@@ -75,3 +75,43 @@ describe("catalog — Phase-A closure commands (coverage-audit additions)", () =
     expect(validateCommand("list_plugins", {})).toBeNull();
   });
 });
+
+describe("catalog — Pro Tools grouping commands", () => {
+  for (const command of [
+    "set_track_active",
+    "create_track_group",
+    "configure_track_group",
+    "duplicate_track_group",
+    "set_track_group_members",
+    "set_track_group_enabled",
+    "set_track_groups_suspended",
+    "remove_track_group",
+    "create_clip_group",
+    "ungroup_clip_group",
+    "regroup_clip_group",
+    "rename_clip_group",
+  ]) {
+    it(`has ${command}`, () => expect(AGENT_COMMAND_MAP.has(command)).toBe(true));
+  }
+
+  it("validates scalar group identifiers while native validates member arrays", () => {
+    expect(validateCommand("set_track_active", { trackId: "t1", active: false })).toBeNull();
+    expect(validateCommand("set_track_active", { trackId: "t1", active: "false" })).not.toBeNull();
+    expect(validateCommand("create_track_group", {
+      name: "Rhythm",
+      kind: "edit_mix",
+      trackIds: ["t1", "t2"],
+    })).toBeNull();
+    expect(validateCommand("configure_track_group", {
+      groupId: "g1",
+      name: "Rhythm",
+      kind: "mix",
+      trackIds: ["t1", "t2"],
+      mixAttributes: ["main_volume"],
+    })).toBeNull();
+    expect(validateCommand("set_track_group_enabled", { groupId: "g1", enabled: false })).toBeNull();
+    expect(validateCommand("set_track_groups_suspended", { suspended: true })).toBeNull();
+    expect(validateCommand("rename_clip_group", { clipId: "c1", name: "Hook Stack" })).toBeNull();
+    expect(validateCommand("rename_clip_group", { clipId: "c1" })).not.toBeNull();
+  });
+});

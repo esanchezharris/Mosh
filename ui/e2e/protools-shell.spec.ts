@@ -103,7 +103,8 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   expect(toolbar.height / viewport.height).toBeGreaterThan(0.05);
   expect(toolbar.height / viewport.height).toBeLessThan(0.13);
   expect(rulers.height / viewport.height).toBeGreaterThan(0.05);
-  expect(rulers.height / viewport.height).toBeLessThan(0.12);
+  // Four visible timebases plus their fixed labels remain a compact ruler bank.
+  expect(rulers.height / viewport.height).toBeLessThan(0.14);
   expect(trackList.width / viewport.width).toBeGreaterThan(0.07);
   expect(trackList.width / viewport.width).toBeLessThan(0.16);
   expect(clipList.width / viewport.width).toBeGreaterThan(0.09);
@@ -161,6 +162,13 @@ test("tutorial-backed Clip Groups select, move, ungroup, and regroup as one obje
   expect(after[0] - before[0]).toBeCloseTo(after[1] - before[1], 5);
   await expect.poll(() => storeVal<number>(page, "selection.size")).toBe(2);
 
+  await page.getByTestId("pt-clip-group-menu").click();
+  await page.getByTestId("pt-clip-group-rename").click();
+  await expect(page.getByTestId("pt-clip-group-name")).toBeFocused();
+  await page.getByTestId("pt-clip-group-name").fill("Rhythm Bed");
+  await page.getByTestId("pt-clip-group-rename-save").click();
+  await expect(groupRow).toContainText("Rhythm Bed");
+
   await page.keyboard.press("Meta+Alt+U");
   await expect.poll(() => storeVal<boolean>(page, "snapshot.clipGroups.0.active")).toBe(false);
   await expect(page.locator("[data-clip-group-id]")).toHaveCount(0);
@@ -180,6 +188,7 @@ test("tutorial-backed Clip Groups select, move, ungroup, and regroup as one obje
     (window as ProToolsWindow).__moshCmdTrace?.map((entry) => entry.command) ?? []);
   expect(commands).toEqual(expect.arrayContaining([
     "create_clip_group",
+    "rename_clip_group",
     "move_clip",
     "ungroup_clip_group",
     "regroup_clip_group",
@@ -784,7 +793,7 @@ test("Tab navigates and Cmd/Ctrl plus nudges through the command seam", async ({
   const clipId = await clip.getAttribute("data-clip-id");
   if (!clipId) throw new Error("selected clip id is absent");
   const start = await clipStart(page, clipId);
-  await page.keyboard.press(process.platform === "darwin" ? "Meta++" : "Control++");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+=" : "Control+Shift+=");
   await expect.poll(() => clipStart(page, clipId)).toBeCloseTo(start + 0.25, 5);
 
   const positionBefore = await storeVal<number>(page, "transport.position");

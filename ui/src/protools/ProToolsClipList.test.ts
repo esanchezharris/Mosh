@@ -138,4 +138,32 @@ describe("Pro Tools Clip List groups", () => {
 
     expect(exec).toHaveBeenCalledWith("ungroup_clip_group", { clipId: "kick" });
   });
+
+  it("renames the selected Clip Group with an inline keyboard form", async () => {
+    act(() => useStore.setState({ selection: new Set(["kick", "bass-clip"]) }));
+    const trigger = host.querySelector<HTMLButtonElement>("[data-testid=pt-clip-group-menu]");
+    if (!trigger) throw new Error("Clip Group menu trigger is missing");
+    await act(async () => trigger.click());
+    const rename = document.querySelector<HTMLButtonElement>("[data-testid=pt-clip-group-rename]");
+    expect(rename?.getAttribute("aria-disabled")).toBe("false");
+    await act(async () => rename?.click());
+
+    const input = host.querySelector<HTMLInputElement>("[data-testid=pt-clip-group-name]");
+    expect(input).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "Hook Stack");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      host.querySelector<HTMLFormElement>("[data-testid=pt-clip-group-rename-form]")?.requestSubmit();
+    });
+
+    expect(exec).toHaveBeenCalledWith("rename_clip_group", {
+      clipId: "kick",
+      name: "Hook Stack",
+    });
+    expect(host.querySelector("[data-testid=pt-clip-group-rename-form]")).toBeNull();
+  });
 });

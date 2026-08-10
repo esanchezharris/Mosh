@@ -235,7 +235,7 @@ export function useProToolsKeys(onOpenFades?: () => void): void {
       let direction: -1 | 0 | 1 = 0;
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {
         if (event.key === "-" || event.key === "_") direction = -1;
-        if (event.key === "+") direction = 1;
+        if (event.key === "+" || (event.code === "Equal" && event.shiftKey)) direction = 1;
       }
       if (direction === 0) return;
       const store = useStore.getState();

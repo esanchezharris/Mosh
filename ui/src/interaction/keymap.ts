@@ -216,9 +216,13 @@ const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
 // creates a routing folder/submix. The Pro Tools shell does not render those
 // group rows, so inheriting this binding silently changed routing and then hid
 // the result. Omit it until the additive Edit Group model exists; Pro Tools Clip
-// Groups are a separate ⌥⌘G workflow.
+// Groups are a separate ⌥⌘G workflow. Pro Tools also owns ⌘/Ctrl +/- as its
+// local Nudge controls and ⌘/Ctrl = as the Edit/Mix switch, so shared zoom must
+// not consume either physical Equal/Minus chord before the shell sees it.
 const PROTOOLS_CORE: Keymap = { ...MOSH_NO_MODAL_TOOLS };
 delete PROTOOLS_CORE[A.GROUP];
+delete PROTOOLS_CORE[A.ZOOM_IN];
+delete PROTOOLS_CORE[A.ZOOM_OUT];
 
 const PROTOOLS: Keymap = {
   ...PROTOOLS_CORE,

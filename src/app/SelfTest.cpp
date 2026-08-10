@@ -7390,13 +7390,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // copied take trees preserve every source; only the middle segment changes
             // current take, and the whole edit is one undo transaction.
             const double compClipStart = wa->getPosition().getStart().inSeconds();
+            const double compClipEnd = wa->getPosition().getEnd().inSeconds();
             const double compStart = compClipStart + 0.2;
             const double compEnd = compClipStart + 0.7;
             check (! ok (cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
                        { "start", juce::String (compStart) }, { "end", compEnd } }))),
                    "promote_take_region rejects string-valued timeline bounds");
             check (! ok (cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
-                       { "start", compStart }, { "end", compClipStart + 1.2 } }))),
+                       { "start", compStart }, { "end", compClipEnd + 0.2 } }))),
                    "promote_take_region rejects a range outside the visible clip");
             auto promoted = cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
                                   { "start", compStart }, { "end", compEnd } }));

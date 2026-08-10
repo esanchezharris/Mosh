@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { useStore } from "../store";
 import type { Clip, Snapshot } from "../types";
@@ -21,21 +22,44 @@ const MEDIA_LABELS = {
 } as const satisfies Readonly<Record<Clip["type"], string>>;
 
 export function ProToolsClipList({ snapshot, open, onOpenChange }: ProToolsClipListProps) {
+  const projectEpoch = useStore((state) => state.projectEpoch);
   const selection = useStore((state) => state.selection);
   const select = useStore((state) => state.select);
   const setSelectedTrack = useStore((state) => state.setSelectedTrack);
   const openPianoRoll = useStore((state) => state.openPianoRoll);
   const exec = useStore((state) => state.exec);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const [renameDraft, setRenameDraft] = useState<{
+    readonly groupId: string;
+    readonly clipId: string;
+    readonly name: string;
+  } | null>(null);
   const entries = proToolsClipListEntries(snapshot);
   const selectedClipIds = snapshot.tracks.flatMap((track) => track.clips)
     .filter((clip) => selection.has(clip.id) && !clip.hidden)
     .map((clip) => clip.id);
   const activeMember = selectedClipIds.find((clipId) => activeClipGroupForClip(snapshot, clipId));
+  const activeGroup = activeMember ? activeClipGroupForClip(snapshot, activeMember) : null;
   const canGroup = selectedClipIds.length >= 2
     && selectedClipIds.every((clipId) => !activeClipGroupForClip(snapshot, clipId));
   const canRegroup = Boolean(snapshot.lastUngroupedClipGroupId
     && snapshot.clipGroups?.some((group) =>
       group.id === snapshot.lastUngroupedClipGroupId && !group.active));
+
+  useEffect(() => {
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [renameDraft?.groupId]);
+  useEffect(() => setRenameDraft(null), [projectEpoch]);
+
+  const commitRename = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!renameDraft) return;
+    const name = renameDraft.name.trim();
+    if (!name) return;
+    const result = await exec("rename_clip_group", { clipId: renameDraft.clipId, name });
+    if (result.ok) setRenameDraft(null);
+  };
 
   const openClip = (entry: ProToolsClipListEntry) => {
     select([...entry.clipIds]);
@@ -78,6 +102,19 @@ export function ProToolsClipList({ snapshot, open, onOpenChange }: ProToolsClipL
                 onPick={() => { void exec("regroup_clip_group", {}); }}>
                 <span>Regroup</span><kbd>⌘⌥R</kbd>
               </MoshMenuItem>
+              <MoshMenuItem testId="pt-clip-group-rename" disabled={!activeGroup || !activeMember}
+                ariaLabel="Rename selected Clip Group"
+                onPick={() => {
+                  if (activeGroup && activeMember) {
+                    setRenameDraft({
+                      groupId: activeGroup.id,
+                      clipId: activeMember,
+                      name: activeGroup.name,
+                    });
+                  }
+                }}>
+                <span>Rename Group…</span>
+              </MoshMenuItem>
             </div>
           </MoshMenu>
         )}
@@ -97,6 +134,28 @@ export function ProToolsClipList({ snapshot, open, onOpenChange }: ProToolsClipL
             <ul className="pt-clip-list-items">
               {entries.map((entry) => {
                 const selected = entry.clipIds.some((clipId) => selection.has(clipId));
+                if (entry.kind === "group" && renameDraft?.groupId === entry.id) {
+                  return (
+                    <li key={entry.id}>
+                      <form className="pt-clip-group-rename" data-testid="pt-clip-group-rename-form"
+                        aria-label={`Rename ${entry.name} Clip Group`} onSubmit={(event) => void commitRename(event)}>
+                        <label htmlFor={`pt-clip-group-name-${entry.id}`}>Clip Group name</label>
+                        <input ref={renameInputRef} id={`pt-clip-group-name-${entry.id}`}
+                          data-testid="pt-clip-group-name" value={renameDraft.name}
+                          onChange={(event) => setRenameDraft({ ...renameDraft, name: event.currentTarget.value })}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              setRenameDraft(null);
+                            }
+                          }} />
+                        <button type="submit" data-testid="pt-clip-group-rename-save"
+                          disabled={!renameDraft.name.trim()}>Save</button>
+                        <button type="button" onClick={() => setRenameDraft(null)}>Cancel</button>
+                      </form>
+                    </li>
+                  );
+                }
                 return (
                   <li key={entry.id}>
                     <button

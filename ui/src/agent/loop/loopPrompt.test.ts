@@ -422,7 +422,9 @@ describe("legacy prompt byte-stability pin", () => {
     // transform_notes (Live 12's Transform tools row). Same recompute rule.
     // Moved again 2026-08-07 (transform stragglers): transform_notes's description
     // covers setLength / addInterval / fitToScale. Same rule.
-    expect(hash).toBe("f7fd9c32e2b0acb72c7061ac594e6db987e03b6a0e114f829f434c11f9106911");
+    // Moved again 2026-08-10 (Pro Tools grouping): the catalog gained Clip Groups,
+    // Edit/Mix Track Groups, and track active-state controls. Same recompute rule.
+    expect(hash).toBe("5bd994613bf54eb7c0c405e6eb4449b58c87f6739235eb93264ee23046990ae2");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved
