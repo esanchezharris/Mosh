@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { Clip, Snapshot, Track } from "../types";
 import {
   buildProToolsUniverseTracks,
+  proToolsUniverseFrameInTrackWindow,
+  proToolsUniverseGlobalY,
   proToolsUniverseFrame,
   proToolsUniverseTarget,
+  proToolsUniverseTrackWindow,
 } from "./proToolsUniverse";
 
 const clip = (id: string, start: number, length: number, hidden = false): Clip => ({
@@ -99,5 +102,59 @@ describe("Pro Tools Universe geometry", () => {
       .toEqual({ scrollLeft: 800, scrollTop: 184 });
     expect(proToolsUniverseTarget({ x: -1, y: -1 }, viewport))
       .toEqual({ scrollLeft: 0, scrollTop: 0 });
+  });
+
+  it("shows a bounded track window only when the chosen height cannot fit the session", () => {
+    expect(proToolsUniverseTrackWindow(18, 72, 0)).toEqual({
+      start: 0,
+      end: 10,
+      visibleCount: 10,
+      maxStart: 8,
+      scrollable: true,
+      canScrollUp: false,
+      canScrollDown: true,
+    });
+    expect(proToolsUniverseTrackWindow(18, 72, 99)).toEqual({
+      start: 8,
+      end: 18,
+      visibleCount: 10,
+      maxStart: 8,
+      scrollable: true,
+      canScrollUp: true,
+      canScrollDown: false,
+    });
+    expect(proToolsUniverseTrackWindow(18, 160, 8)).toEqual({
+      start: 0,
+      end: 18,
+      visibleCount: 18,
+      maxStart: 0,
+      scrollable: false,
+      canScrollUp: false,
+      canScrollDown: false,
+    });
+  });
+
+  it("maps overview navigation through the currently shown track window", () => {
+    const window = proToolsUniverseTrackWindow(18, 72, 8);
+    expect(proToolsUniverseGlobalY(0, window, 18)).toBeCloseTo(8 / 18);
+    expect(proToolsUniverseGlobalY(0.5, window, 18)).toBeCloseTo(13 / 18);
+    expect(proToolsUniverseGlobalY(1, window, 18)).toBe(1);
+  });
+
+  it("clips the current-view frame into the visible Universe track window", () => {
+    const window = proToolsUniverseTrackWindow(18, 72, 8);
+    const visible = proToolsUniverseFrameInTrackWindow(
+      { left: 0.25, top: 0.5, width: 0.5, height: 0.25 },
+      window,
+      18,
+    );
+    expect(visible).toMatchObject({ left: 0.25, width: 0.5, visible: true });
+    expect(visible.top).toBeCloseTo(0.1);
+    expect(visible.height).toBeCloseTo(0.45);
+    expect(proToolsUniverseFrameInTrackWindow(
+      { left: 0, top: 0, width: 0.5, height: 0.25 },
+      window,
+      18,
+    )).toEqual({ left: 0, top: 0, width: 0.5, height: 0, visible: false });
   });
 });

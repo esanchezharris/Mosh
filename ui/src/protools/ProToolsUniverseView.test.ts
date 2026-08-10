@@ -42,6 +42,13 @@ const SNAPSHOT: Snapshot = {
   transport: { playing: false, recording: false, position: 12, looping: false, loopStart: 0, loopEnd: 0 },
 };
 
+const LARGE_SNAPSHOT: Snapshot = {
+  ...SNAPSHOT,
+  tracks: Array.from({ length: 18 }, (_, index) => (
+    track(`Track ${String(index + 1).padStart(2, "0")}`, index, [])
+  )),
+};
+
 function setViewportMetrics(timeline: HTMLDivElement): void {
   Object.defineProperties(timeline, {
     clientWidth: { configurable: true, value: 400 },
@@ -83,9 +90,9 @@ describe("ProToolsUniverse view", () => {
     vi.unstubAllGlobals();
   });
 
-  const render = (): void => {
+  const render = (snapshot: Snapshot = SNAPSHOT): void => {
     act(() => root.render(React.createElement(ProToolsUniverse, {
-      snapshot: SNAPSHOT,
+      snapshot,
       timelineRef: { current: timeline },
     })));
   };
@@ -189,6 +196,37 @@ describe("ProToolsUniverse view", () => {
       bubbles: true,
     })));
     expect(useProTools.getState().universeHeight).toBe(72);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("scrolls a bounded large-session track window and resets it for a replacement project", () => {
+    useProTools.setState({ universeOpen: true, universeHeight: 72 });
+    render(LARGE_SNAPSHOT);
+    const shownTrackIds = () => (
+      [...host.querySelectorAll<HTMLElement>("[data-testid=pt-universe-track]")]
+        .map((row) => row.dataset.trackId)
+    );
+    const down = host.querySelector<HTMLButtonElement>("[data-testid=pt-universe-scroll-down]");
+    const up = host.querySelector<HTMLButtonElement>("[data-testid=pt-universe-scroll-up]");
+    if (!down || !up) throw new Error("Universe track-window controls are missing");
+
+    expect(shownTrackIds()).toEqual(Array.from(
+      { length: 10 },
+      (_, index) => `Track ${String(index + 1).padStart(2, "0")}`,
+    ));
+    expect(up.disabled).toBe(true);
+    expect(down.disabled).toBe(false);
+
+    act(() => down.click());
+    expect(shownTrackIds()[0]).toBe("Track 02");
+    expect(up.disabled).toBe(false);
+    for (let step = 0; step < 7; step += 1) act(() => down.click());
+    expect(shownTrackIds().at(-1)).toBe("Track 18");
+    expect(down.disabled).toBe(true);
+
+    act(() => useStore.setState({ projectEpoch: 92 }));
+    expect(shownTrackIds()[0]).toBe("Track 01");
+    expect(up.disabled).toBe(true);
     expect(exec).not.toHaveBeenCalled();
   });
 });
