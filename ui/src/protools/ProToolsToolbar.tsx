@@ -3,14 +3,15 @@ import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { MoshTip } from "../chrome/Tooltip";
-import { secondsToBBSMap, tempoMapFrom } from "../time";
 import type { Snapshot } from "../types";
 import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconStop } from "../ui/icons";
 import { useTransportControls } from "../v2/useTransportControls";
 import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
 import { ProToolsPunchControls } from "./ProToolsPunchControls";
 import { ProToolsSelectionLinkControl } from "./ProToolsSelectionLinkControl";
+import { ProToolsSelectionIndicators } from "./ProToolsSelectionIndicators";
 import { ProToolsZoomControls } from "./ProToolsZoomControls";
+import { formatSpotTime } from "./spotTime";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
 import type { ProToolsTool } from "./smartTool";
 
@@ -66,6 +67,7 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
   const toggleClassicTheme = useProTools((s) => s.toggleClassicTheme);
   const memoryLocationsOpen = useProTools((s) => s.memoryLocationsOpen);
   const setMemoryLocationsOpen = useProTools((s) => s.setMemoryLocationsOpen);
+  const mainTimeScale = useProTools((s) => s.mainTimeScale);
   const setShell = useSettings((s) => s.set);
   const fallbackTrackId = selectedTrackId
     ?? snapshot.tracks.find((track) => track.type === "audio")?.id
@@ -119,9 +121,11 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
         <ProToolsSelectionLinkControl />
       </div>
 
+      <ProToolsSelectionIndicators snapshot={snapshot} />
+
       <div className="pt-toolbar-group pt-transport-group" role="group" aria-label="Transport">
         <span className="pt-main-counter" data-testid="pt-main-counter">
-          {secondsToBBSMap(tempoMapFrom(snapshot.session), transportState.position)}
+          {formatSpotTime(transportState.position, mainTimeScale, snapshot)}
         </span>
         <button type="button" aria-label={transportState.playing ? "Pause" : "Play"}
           aria-pressed={transportState.playing} onClick={() => void transport.togglePlay()}>

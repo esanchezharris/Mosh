@@ -156,7 +156,7 @@ export const meterAt = (map: TempoMap, sec: number): Meter => {
 };
 
 /** Continuous bar position (fractional) at a time. */
-const barPosAt = (map: TempoMap, sec: number): number => {
+export const barPosAt = (map: TempoMap, sec: number): number => {
   const s = segAt(map, sec);
   return s.startBarF + Math.max(0, sec - s.startSec) / s.barSec;
 };

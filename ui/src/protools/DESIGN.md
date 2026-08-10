@@ -11,6 +11,7 @@ This contract is scoped to `.protools-shell`. Existing Mosh shells keep their ow
 - Tutorial parity reference: reviewed official Avid Edit Window, recording, I/O, Clip Gain, automation, and MIDI Editor videos at the timecodes recorded in `docs/protools-clone/RESEARCH.md`. Extracted structural ratios and before/during/after behavior only; source frames remain private and uncommitted.
 - Selection-link reference: reviewed Avid's Timeline/Edit selection documentation, OBEDIA's linked-selection demonstrations, and the beui.dev `switch` source. The Pro Tools control keeps native pressed semantics and immediate state feedback, but omits the spring thumb because a dense editing toolbar benefits from the shell's existing depressed-button grammar.
 - Selection-marker reference: Avid's Timeline Selections help identifies the down arrow as Start, the up arrow as End, Time Grabber as the drag tool, and Grid as the movement constraint. The beui.dev `range-slider` source supplies pointer-capture and slider-keyboard semantics; Mosh keeps direct, unsmoothed movement so the marker remains sample/grid legible and reduced-motion safe.
+- Selection-indicator reference: Avid's counter help defines Start/End/Length as editable Edit-window fields following the Main Time Scale, with Forward Slash field cycling and Enter acceptance. Sound On Sound corroborates that these fields remain the Edit selection while an unlinked extended Transport owns Timeline. Mosh uses native text inputs and a native scale selector instead of copying Avid counter art.
 - Automation conflict resolution: Avid's Smart Tool help page explicitly assigns Selector to the bottom 75% and Trim to the top 25% of automation/controller views. That authority preserves the existing classifier despite simplified “half” language in the short automation video.
 - Skipped generated imagery and broad style search: the user supplied a concrete Pro Tools reference target and prohibited proprietary art reuse; original CSS geometry and existing Mosh renderers are the fidelity contract.
 
@@ -131,6 +132,16 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Safety**: pointer cancellation restores the prior range; project replacement clears an in-flight range; link changes cannot redirect a gesture after pointer-down.
 - **Mutation**: boundary movement changes view state only. Playback, Punch, or another explicit command may consume the resulting Timeline range later.
 - **Motion**: direct position updates with no spring or tween; focus and active feedback use existing color/opacity tokens only.
+
+### Edit Selection indicators
+
+- **Structure**: a compact three-row Start, End, and Length input stack beside the Main Counter, plus one Main Time Scale selector shared by the counter cluster.
+- **States**: collapsed insertion display, linked Edit/Timeline range, independent Edit range, focused draft, invalid draft, and project replacement.
+- **Accessibility**: native labelled text inputs expose their active time scale and validation state. Forward Slash cycles Start → End → Length; Enter accepts; Escape cancels. The shell-level unmodified Slash shortcut focuses and selects Start outside editable controls.
+- **Behavior**: Start and End are locations; Length is a duration from Start. A valid accepted value updates the Edit range. When Link T/E is off, the independent Timeline range does not move. Absolute formats reuse the Spot parser; Bars+Beats duration uses zero-based bars, beats, and sixteenths as an explicit shell-resolution adaptation.
+- **Safety**: drafts remain local, invalid or out-of-visible-range values do not apply, blur/Escape cancel them, and `projectEpoch` invalidates every pending entry.
+- **Mutation**: accepted values update UI-local Edit-selection state only; no snapshot mutation or `store.exec` call occurs.
+- **Layout**: the vertical counter stack stays inside one toolbar group; the toolbar remains horizontally scrollable at compact width rather than hiding controls.
 
 ### Link Timeline and Edit Selection control
 

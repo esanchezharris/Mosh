@@ -180,6 +180,25 @@ describe("useProToolsKeys", () => {
     expect(execCalls).toEqual([]);
   });
 
+  it("focuses the Edit Selection Start indicator with unmodified Slash", () => {
+    const start = document.createElement("input");
+    start.id = "pt-selection-start";
+    start.value = "2.1.1";
+    document.body.appendChild(start);
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "/",
+      code: "NumpadDivide",
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    expect(document.activeElement).toBe(start);
+    expect(start.selectionStart).toBe(0);
+    expect(start.selectionEnd).toBe(start.value.length);
+    start.remove();
+  });
+
   it("tabs to the next clip boundary when transient data is unavailable", async () => {
     useStore.setState({ transport: { ...SNAPSHOT.transport, position: 1 } });
 

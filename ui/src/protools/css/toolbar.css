@@ -136,6 +136,64 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.035em;
 }
+.pt-selection-indicators {
+  flex: 0 0 146px;
+  min-width: 146px;
+  align-items: stretch;
+  padding-top: 19px;
+}
+.pt-selection-heading {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  left: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  color: var(--pt-text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+}
+.pt-selection-heading select {
+  width: 76px;
+  min-height: 14px;
+  height: 14px;
+  padding: 0 12px 0 3px;
+  font: 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-selection-grid { display: grid; align-content: center; gap: 1px; width: 100%; }
+.pt-selection-field {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  color: var(--pt-text-muted);
+  font: 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-selection-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--pt-border);
+  border-radius: 1px;
+  outline: none;
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pt-selection-field input:focus-visible { box-shadow: 0 0 0 2px var(--pt-focus-ring); }
+.pt-selection-field input[aria-invalid="true"] { border-color: var(--pt-danger); }
+.pt-selection-error {
+  max-width: 138px;
+  padding-top: 2px;
+  color: var(--pt-danger);
+  font: 8px/1.2 system-ui, sans-serif;
+}
 .pt-record-button span {
   display: block;
   width: 9px;

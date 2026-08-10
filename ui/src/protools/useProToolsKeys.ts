@@ -111,6 +111,16 @@ export function useProToolsKeys(): void {
         return;
       }
 
+      if ((event.code === "Slash" || event.code === "NumpadDivide")
+        && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        const start = document.getElementById("pt-selection-start");
+        if (!(start instanceof HTMLInputElement)) return;
+        event.preventDefault();
+        start.focus();
+        start.select();
+        return;
+      }
+
       const noModifiers = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
       const now = performance.now();
       if (memorySequence.current && now - memorySequence.current.startedAt > 1_500) {

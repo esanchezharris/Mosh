@@ -22,6 +22,7 @@ describe("Pro Tools shell state", () => {
       rulersVisible: state.rulersVisible,
       clipListOpen: state.clipListOpen,
       nudgeValue: state.nudgeValue,
+      mainTimeScale: state.mainTimeScale,
       classicTheme: state.classicTheme,
       automationClipboard: state.automationClipboard,
       trackViews: state.trackViews,
@@ -52,6 +53,7 @@ describe("Pro Tools shell state", () => {
       },
       clipListOpen: true,
       nudgeValue: 0.25,
+      mainTimeScale: "barsBeats",
       classicTheme: false,
       automationClipboard: null,
       trackViews: {},
@@ -211,13 +213,16 @@ describe("Pro Tools shell state", () => {
     const state = useProTools.getState();
     state.setEditMode("grid");
     state.setTrackHeaderWidth(240);
+    state.setMainTimeScale("samples");
 
     state.resetForProject(projectEpoch);
     expect(useProTools.getState().editMode).toBe("grid");
+    expect(useProTools.getState().mainTimeScale).toBe("samples");
 
     state.resetForProject(projectEpoch + 1);
     expect(useProTools.getState().editMode).toBe("slip");
     expect(useProTools.getState().trackHeaderWidth).toBe(160);
+    expect(useProTools.getState().mainTimeScale).toBe("barsBeats");
   });
 
   it("keeps the automation clipboard within one project epoch", () => {

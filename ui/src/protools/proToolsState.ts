@@ -9,6 +9,7 @@ import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 import { clampTrackHeightScale } from "./trackHeightZoom";
 import type { ProToolsTrackView } from "./trackViews";
 import type { TimeRangeSel } from "../v2/shellState";
+import type { SpotTimeScale } from "./spotTime";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
 export type ProToolsRuler = "markers" | "barsBeats" | "timecode" | "minutesSeconds" | "samples";
@@ -34,6 +35,7 @@ type ProToolsViewState = {
   readonly rulersVisible: ProToolsRulersVisible;
   readonly clipListOpen: boolean;
   readonly nudgeValue: number;
+  readonly mainTimeScale: SpotTimeScale;
   readonly classicTheme: boolean;
   readonly hoveredIntent: ProToolsIntent | null;
   readonly automationClipboard: AutomationClipboard | null;
@@ -61,6 +63,7 @@ type ProToolsActions = {
   readonly toggleRuler: (ruler: ProToolsRuler) => void;
   readonly setClipListOpen: (open: boolean) => void;
   readonly setNudgeValue: (seconds: number) => void;
+  readonly setMainTimeScale: (scale: SpotTimeScale) => void;
   readonly toggleClassicTheme: () => void;
   readonly setHoveredIntent: (intent: ProToolsIntent | null) => void;
   readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
@@ -100,6 +103,7 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   },
   clipListOpen: true,
   nudgeValue: 0.25,
+  mainTimeScale: "barsBeats",
   classicTheme: false,
   hoveredIntent: null,
   automationClipboard: null,
@@ -145,6 +149,7 @@ export const useProTools = create<ProToolsState>((set) => ({
   })),
   setClipListOpen: (clipListOpen) => set({ clipListOpen }),
   setNudgeValue: (seconds) => set({ nudgeValue: Math.min(60, Math.max(0.001, seconds)) }),
+  setMainTimeScale: (mainTimeScale) => set({ mainTimeScale }),
   toggleClassicTheme: () => set((state) => ({ classicTheme: !state.classicTheme })),
   setHoveredIntent: (hoveredIntent) => set({ hoveredIntent }),
   setAutomationClipboard: (automationClipboard) => set({ automationClipboard }),
