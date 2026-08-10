@@ -313,6 +313,22 @@
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
+.pt-automation-menu {
+  position: fixed;
+  z-index: 150;
+  min-width: 150px;
+}
+.pt-automation-menu button { justify-content: space-between; }
+.pt-automation-menu button:disabled {
+  color: var(--pt-text-muted);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pt-automation-menu kbd {
+  color: currentColor;
+  font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.72;
+}
 .pt-marquee {
   position: absolute;
   z-index: 12;

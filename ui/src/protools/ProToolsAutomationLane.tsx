@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useStore } from "../store";
 import type { Track } from "../types";
 import { ProToolsAutomationCurve } from "./ProToolsAutomationCurve";
+import { ProToolsAutomationMenu } from "./ProToolsAutomationMenu";
 import { firstAutomationTarget } from "./automationEditing";
 import { useProToolsAutomationLane } from "./useProToolsAutomationLane";
 
@@ -25,6 +26,12 @@ export function ProToolsAutomationLane({ track, width }: Props) {
     pxPerSec,
     position,
   });
+  const laneRef = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState<{ readonly x: number; readonly y: number } | null>(null);
+  const closeMenu = () => {
+    setMenu(null);
+    laneRef.current?.focus();
+  };
   const laneStyle: LaneStyle = { "--pt-track-color": track.color ?? "var(--pt-selected)" };
   const selectionStyle: CSSProperties | undefined = interaction.selection ? {
     left: interaction.selection.start * pxPerSec,
@@ -32,12 +39,20 @@ export function ProToolsAutomationLane({ track, width }: Props) {
   } : undefined;
 
   return (
-    <div className="pt-automation-lane-frame" style={laneStyle}>
-      <button type="button" className="pt-automation-lane"
+    <>
+      <div className="pt-automation-lane-frame" style={laneStyle}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.ctrlKey) return;
+          setMenu({ x: event.clientX, y: event.clientY });
+        }}>
+      <button ref={laneRef} type="button" className="pt-automation-lane"
         data-testid="protools-automation-lane" data-track-id={track.id} disabled={!target}
-        aria-keyshortcuts="Enter Space Escape"
+        data-mosh-edit-owner="protools-automation"
+        aria-keyshortcuts="Enter Space Escape Meta+C Meta+X Meta+V"
         aria-label={target
-          ? `${track.name} automation, ${target.paramName}. Drag the lower area to select, drag the upper area to trim, or press Enter or Space to add a breakpoint at the playhead. Plus or Minus nudges selected points.`
+          ? `${track.name} automation, ${target.paramName}. Drag the lower area to select, drag the upper area to trim, Control-drag to draw a line, Control-Command-drag to draw freehand, or press Enter or Space to add a breakpoint at the playhead. Plus or Minus nudges selected points.`
           : `${track.name} automation, no target`}
         onPointerMove={interaction.onPointerMove}
         onPointerLeave={() => interaction.setHoveredIntent(null)}
@@ -58,7 +73,14 @@ export function ProToolsAutomationLane({ track, width }: Props) {
       </button>
       <ProToolsAutomationCurve trackId={track.id} target={target}
         points={interaction.renderedPoints} selection={interaction.selection}
-        pxPerSec={pxPerSec} width={width} />
-    </div>
+        pxPerSec={pxPerSec} width={width} onEditKeyDown={interaction.onEditKeyDown} />
+      </div>
+      {menu && (
+        <ProToolsAutomationMenu x={menu.x} y={menu.y} label={target?.paramName ?? "Automation"}
+          canCopy={interaction.clipboard.canCopy} canPaste={interaction.clipboard.canPaste}
+          onCut={interaction.clipboard.cut} onCopy={interaction.clipboard.copy}
+          onPaste={interaction.clipboard.paste} onClose={closeMenu} />
+      )}
+    </>
   );
 }

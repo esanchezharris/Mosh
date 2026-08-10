@@ -60,6 +60,7 @@ describe("ProToolsAutomationLane", () => {
         return { ok: true, command };
       }),
     });
+    useProTools.getState().resetForProject();
     useProTools.getState().setNudgeValue(0.25);
     act(() => root.render(React.createElement(ProToolsAutomationLane, { track: TRACK, width: 800 })));
   });
@@ -90,9 +91,9 @@ describe("ProToolsAutomationLane", () => {
 
     expect(lane?.tagName).toBe("BUTTON");
     expect(lane?.getAttribute("type")).toBe("button");
-    expect(lane?.getAttribute("aria-keyshortcuts")).toBe("Enter Space Escape");
+    expect(lane?.getAttribute("aria-keyshortcuts")).toBe("Enter Space Escape Meta+C Meta+X Meta+V");
     expect(lane?.getAttribute("aria-label")).toBe(
-      "Audio automation, Level. Drag the lower area to select, drag the upper area to trim, or press Enter or Space to add a breakpoint at the playhead. Plus or Minus nudges selected points.",
+      "Audio automation, Level. Drag the lower area to select, drag the upper area to trim, Control-drag to draw a line, Control-Command-drag to draw freehand, or press Enter or Space to add a breakpoint at the playhead. Plus or Minus nudges selected points.",
     );
   });
 
@@ -273,7 +274,9 @@ describe("ProToolsAutomationLane", () => {
     })));
     pointer(point, "pointerup", { pointerId: 19, clientX: 150, clientY: 17 });
 
-    expect(point.getAttribute("aria-keyshortcuts")).toBe("Delete Backspace Escape");
+    expect(point.getAttribute("aria-keyshortcuts")).toBe(
+      "Delete Backspace Escape Meta+C Meta+X Meta+V",
+    );
     expect(execCalls).toEqual([]);
   });
 
@@ -319,5 +322,290 @@ describe("ProToolsAutomationLane", () => {
 
     await act(async () => { await Promise.resolve(); });
     expect(point?.getAttribute("aria-label")).toContain("20 percent");
+  });
+
+  it("copies selected automation without touching the clip clipboard", () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", { pointerId: 23, button: 0, clientX: 50, clientY: 20 });
+    pointer(surface, "pointermove", { pointerId: 23, buttons: 1, clientX: 350, clientY: 20 });
+    pointer(surface, "pointerup", { pointerId: 23, clientX: 350, clientY: 20 });
+
+    act(() => surface.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "c", metaKey: true, bubbles: true, cancelable: true,
+    })));
+
+    expect(useProTools.getState().automationClipboard).toEqual({
+      duration: 3,
+      sourceParamName: "Level",
+      points: [{ t: 0.5, v: 0.2 }, { t: 2.5, v: 0.7 }],
+    });
+    expect(useStore.getState().clipboard).toBeNull();
+    expect(execCalls).toEqual([]);
+  });
+
+  it("keeps automation clipboard shortcuts when a breakpoint owns focus", () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", { pointerId: 31, button: 0, clientX: 50, clientY: 20 });
+    pointer(surface, "pointermove", { pointerId: 31, buttons: 1, clientX: 350, clientY: 20 });
+    pointer(surface, "pointerup", { pointerId: 31, clientX: 350, clientY: 20 });
+    const point = host.querySelector<HTMLElement>('[data-testid="pt-automation-point-0"]');
+    if (!point) throw new Error("first automation point is missing");
+    point.focus();
+
+    act(() => point.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "c", metaKey: true, bubbles: true, cancelable: true,
+    })));
+
+    expect(point.dataset.moshEditOwner).toBe("protools-automation");
+    expect(useProTools.getState().automationClipboard?.points).toEqual([
+      { t: 0.5, v: 0.2 }, { t: 2.5, v: 0.7 },
+    ]);
+    expect(execCalls).toEqual([]);
+  });
+
+  it("cuts selected automation in descending index order inside one undo batch", async () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", { pointerId: 24, button: 0, clientX: 50, clientY: 20 });
+    pointer(surface, "pointermove", { pointerId: 24, buttons: 1, clientX: 350, clientY: 20 });
+    pointer(surface, "pointerup", { pointerId: 24, clientX: 350, clientY: 20 });
+
+    act(() => surface.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "x", metaKey: true, bubbles: true, cancelable: true,
+    })));
+
+    await vi.waitFor(() => expect(execCalls).toEqual([
+      { command: "batch_begin", args: { name: "cut automation" } },
+      { command: "remove_automation_point", args: {
+        trackId: "track-1", pluginIndex: 3, paramIndex: 2, pointIndex: 1,
+      } },
+      { command: "remove_automation_point", args: {
+        trackId: "track-1", pluginIndex: 3, paramIndex: 2, pointIndex: 0,
+      } },
+      { command: "batch_end", args: {} },
+    ]));
+  });
+
+  it("pastes automation relative to the edit insertion through one curve command", async () => {
+    act(() => useProTools.getState().setAutomationClipboard({
+      duration: 3,
+      sourceParamName: "Level",
+      points: [{ t: 0.5, v: 0.2 }, { t: 2.5, v: 0.7 }],
+    }));
+    const surface = lane();
+
+    act(() => surface.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "v", metaKey: true, bubbles: true, cancelable: true,
+    })));
+
+    await vi.waitFor(() => expect(execCalls).toEqual([{
+      command: "write_automation_curve",
+      args: {
+        trackId: "track-1",
+        pluginIndex: 3,
+        paramIndex: 2,
+        apply: "replace",
+        replaceStart: 3,
+        replaceEnd: 6,
+        points: [{ t: 3.5, v: 0.2 }, { t: 5.5, v: 0.7 }],
+      },
+    }]));
+  });
+
+  it("previews and commits a Control-drag line Pencil only on release", async () => {
+    const surface = lane();
+
+    pointer(surface, "pointerdown", {
+      pointerId: 25, button: 0, clientX: 100, clientY: 19, ctrlKey: true,
+    });
+    pointer(surface, "pointermove", {
+      pointerId: 25, buttons: 1, clientX: 300, clientY: 9, ctrlKey: true,
+    });
+    expect(execCalls).toEqual([]);
+    expect(host.querySelectorAll(".pt-automation-point")).toHaveLength(3);
+    pointer(surface, "pointerup", {
+      pointerId: 25, clientX: 300, clientY: 9, ctrlKey: true,
+    });
+
+    await vi.waitFor(() => expect(execCalls).toEqual([{
+      command: "write_automation_curve",
+      args: {
+        trackId: "track-1", pluginIndex: 3, paramIndex: 2, apply: "replace",
+        replaceStart: 1, replaceEnd: 3,
+        points: [{ t: 1, v: 0.2 }, { t: 3, v: 0.7 }],
+      },
+    }]));
+  });
+
+  it("commits a Control-Command freehand Pencil as one ordered curve segment", async () => {
+    const surface = lane();
+
+    pointer(surface, "pointerdown", {
+      pointerId: 26, button: 0, clientX: 100, clientY: 19, ctrlKey: true, metaKey: true,
+    });
+    pointer(surface, "pointermove", {
+      pointerId: 26, buttons: 1, clientX: 200, clientY: 13, ctrlKey: true, metaKey: true,
+    });
+    pointer(surface, "pointermove", {
+      pointerId: 26, buttons: 1, clientX: 300, clientY: 9, ctrlKey: true, metaKey: true,
+    });
+    expect(execCalls).toEqual([]);
+    pointer(surface, "pointerup", {
+      pointerId: 26, clientX: 300, clientY: 9, ctrlKey: true, metaKey: true,
+    });
+
+    await vi.waitFor(() => expect(execCalls).toEqual([{
+      command: "write_automation_curve",
+      args: {
+        trackId: "track-1", pluginIndex: 3, paramIndex: 2, apply: "replace",
+        replaceStart: 1, replaceEnd: 3,
+        points: [{ t: 1, v: 0.2 }, { t: 2, v: 0.5 }, { t: 3, v: 0.7 }],
+      },
+    }]));
+  });
+
+  it("does not turn the Mac Control Pencil clutch into a context menu", async () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", {
+      pointerId: 32, button: 0, clientX: 100, clientY: 19, ctrlKey: true, metaKey: true,
+    });
+    act(() => surface.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: 100, clientY: 19,
+      ctrlKey: true, metaKey: true,
+    })));
+    expect(document.body.querySelector('[data-testid="pt-automation-menu"]')).toBeNull();
+    pointer(surface, "pointermove", {
+      pointerId: 32, buttons: 1, clientX: 200, clientY: 13, ctrlKey: true, metaKey: true,
+    });
+    pointer(surface, "pointerup", {
+      pointerId: 32, clientX: 300, clientY: 9, ctrlKey: true, metaKey: true,
+    });
+
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "write_automation_curve",
+      args: {
+        trackId: "track-1", pluginIndex: 3, paramIndex: 2, apply: "replace",
+        replaceStart: 1, replaceEnd: 2,
+        points: [{ t: 1, v: 0.2 }, { t: 2, v: 0.5 }],
+      },
+    }));
+  });
+
+  it("cancels a Pencil preview when the browser cancels its pointer", () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", {
+      pointerId: 28, button: 0, clientX: 100, clientY: 19, ctrlKey: true,
+    });
+    pointer(surface, "pointermove", {
+      pointerId: 28, buttons: 1, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+    expect(host.querySelector('[data-testid="pt-automation-point-1"]')?.getAttribute("aria-label"))
+      .toContain("90 percent");
+
+    pointer(surface, "pointercancel", {
+      pointerId: 28, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+    pointer(surface, "pointerup", {
+      pointerId: 28, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+
+    expect(host.querySelector('[data-testid="pt-automation-point-1"]')?.getAttribute("aria-label"))
+      .toContain("70 percent");
+    expect(execCalls).toEqual([]);
+  });
+
+  it("does not commit a Pencil gesture into a replacement project", () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", {
+      pointerId: 29, button: 0, clientX: 100, clientY: 19, ctrlKey: true,
+    });
+    pointer(surface, "pointermove", {
+      pointerId: 29, buttons: 1, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+
+    act(() => useStore.setState({ projectEpoch: 51 }));
+    pointer(surface, "pointerup", {
+      pointerId: 29, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+
+    expect(execCalls).toEqual([]);
+  });
+
+  it("rolls back a Pencil preview when its curve command fails", async () => {
+    act(() => useStore.setState({
+      exec: vi.fn(async (command: string): Promise<CommandResult> => ({
+        ok: false, command, error: "pencil curve rejected",
+      })),
+    }));
+    const surface = lane();
+    pointer(surface, "pointerdown", {
+      pointerId: 30, button: 0, clientX: 100, clientY: 19, ctrlKey: true,
+    });
+    pointer(surface, "pointermove", {
+      pointerId: 30, buttons: 1, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+    expect(host.querySelector('[data-testid="pt-automation-point-1"]')?.getAttribute("aria-label"))
+      .toContain("90 percent");
+    pointer(surface, "pointerup", {
+      pointerId: 30, clientX: 300, clientY: 5, ctrlKey: true,
+    });
+
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector('[data-testid="pt-automation-point-1"]')?.getAttribute("aria-label"))
+      .toContain("70 percent");
+  });
+
+  it("offers Cut, Copy, and Paste from an accessible right-click menu", async () => {
+    const surface = lane();
+    pointer(surface, "pointerdown", { pointerId: 27, button: 0, clientX: 50, clientY: 20 });
+    pointer(surface, "pointermove", { pointerId: 27, buttons: 1, clientX: 350, clientY: 20 });
+    pointer(surface, "pointerup", { pointerId: 27, clientX: 350, clientY: 20 });
+
+    act(() => surface.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: 200, clientY: 20,
+    })));
+    const menu = document.body.querySelector<HTMLElement>('[data-testid="pt-automation-menu"]');
+    const copy = document.body.querySelector<HTMLButtonElement>('[data-testid="pt-automation-copy"]');
+    const paste = document.body.querySelector<HTMLButtonElement>('[data-testid="pt-automation-paste"]');
+    expect(menu?.getAttribute("role")).toBe("menu");
+    expect(menu?.getAttribute("aria-label")).toBe("Level automation edit actions");
+    expect(copy?.disabled).toBe(false);
+    expect(paste?.disabled).toBe(true);
+
+    act(() => copy?.click());
+    expect(document.body.querySelector('[data-testid="pt-automation-menu"]')).toBeNull();
+    expect(useProTools.getState().automationClipboard?.sourceParamName).toBe("Level");
+    expect(document.activeElement).toBe(surface);
+
+    act(() => surface.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: 200, clientY: 20,
+    })));
+    const enabledPaste = document.body.querySelector<HTMLButtonElement>('[data-testid="pt-automation-paste"]');
+    expect(enabledPaste?.disabled).toBe(false);
+    act(() => enabledPaste?.click());
+
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "write_automation_curve",
+      args: {
+        trackId: "track-1", pluginIndex: 3, paramIndex: 2, apply: "replace",
+        replaceStart: 3, replaceEnd: 6,
+        points: [{ t: 3.5, v: 0.2 }, { t: 5.5, v: 0.7 }],
+      },
+    }));
+  });
+
+  it("closes the automation context menu with Escape and restores lane focus", () => {
+    const surface = lane();
+    surface.focus();
+    act(() => surface.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, clientX: 200, clientY: 20,
+    })));
+    expect(document.body.querySelector('[data-testid="pt-automation-menu"]')).not.toBeNull();
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape", bubbles: true, cancelable: true,
+    })));
+
+    expect(document.body.querySelector('[data-testid="pt-automation-menu"]')).toBeNull();
+    expect(document.activeElement).toBe(surface);
   });
 });

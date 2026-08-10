@@ -35,7 +35,7 @@ oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 | V04 | [I/O Setup: Inputs and Outputs](https://www.youtube.com/watch?v=U45vpVRYr38) | 0:00 device-dependent I/O; 0:12 path grid; 0:40 rename/create/default paths; 0:54 outputs exposed to tracks. |
 | V05 | [Learn Pro Tools in 1 Hour](https://www.youtube.com/watch?v=2ywNbOLePOo) | 0:58 tracks; 10:25 clips; 22:27 audio recording; 31:48 arrange/mix; 35:08 clip editing; 51:05 mixing; 56:06 inserts; 1:01:25 automation. |
 | V06 | [How to Use Clip Gain](https://www.youtube.com/watch?v=-jQceBZ8tPI) | 0:04 clip versus track volume; 0:16 lower-left gain control; 0:42 dynamic gain; 0:58 gain line; 1:04 breakpoints. |
-| V07 | [Editing Automation](https://www.youtube.com/watch?v=HjoNFBxyXYg) | 0:00 Smart Tool; 0:15 selection; 0:24 trim; 0:40 nudge; 0:45 node move; 0:56 delete. |
+| V07 | [Editing Automation](https://www.youtube.com/watch?v=HjoNFBxyXYg) | 0:00 Smart Tool; 0:15 selection; 0:18-0:25 cut/copy/paste; 0:24 trim; 0:40 nudge; 0:45 node move; 0:56 delete; 1:03 Control line Pencil; 1:09 Control+Command freehand. |
 | V08 | [MIDI Editor](https://www.youtube.com/watch?v=FDqKlSMKCGw) | 0:00 double-click MIDI clip; 0:27 independent modes/tools; 0:34 keyboard; 0:43 controller lane; 0:51 Track List; 1:13 Smart Tool. |
 | V09 | [Track Views](https://www.youtube.com/watch?v=VyEEufPAZ5s) | Track display and automation-view selection. |
 | V10 | [Playlist Comping](https://www.youtube.com/watch?v=8X3KQ3Cq8Co) | Playlist-based take comping; additive follow-up scope. |
@@ -106,7 +106,7 @@ native, physical-device, or audio-output acceptance.
 | Dynamic clip gain | V06, C03 | `GAP` | Requires an additive breakpoint model and command contract; static gain must not fake it. |
 | Automation Smart Tool | V07 plus Avid help | `MATCH` | Authoritative top-25/lower-75 classifier and Command/Control breakpoint tests. |
 | Automation range/node editing | V07 | `MATCH` | Lower-band persistent range, upper-band trim preview, numeric Nudge, direct node move, and Option/Alt or Delete removal have focused component tests plus one serial Chromium before/during/after command trace. |
-| Automation clipboard/Pencil | V07 | `GAP` | Cut/copy/paste of selected automation and Control Pencil/freehand authoring remain explicit follow-ups; selection/trim must not be counted as those behaviors. |
+| Automation clipboard/Pencil | V07 | `MATCH` | ⌘C/⌘X/⌘V and the accessible right-click menu own the selected automation range, including native macOS Edit-menu forwarding; Control-drag writes a line and Control+Command-drag writes one ordered freehand segment, each previewed locally and committed once. |
 | MIDI editor | V08 | `MATCH/PARTIAL` | Double-click opens the bottom piano roll/controller direction; multi-track editor selection needs deeper proof. |
 | Inserts | V05, V11 | `ADAPTED` | Searchable catalog preserves load/open/bypass/remove/persistence behavior instead of copying nested menus. |
 | Playlist comping | V10 | `DEFERRED` | Requires additive take/playlists project-model work. |

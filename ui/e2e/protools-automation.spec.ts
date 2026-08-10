@@ -116,3 +116,79 @@ test("Avid V07 automation selection, trim, nudge, move, and delete remain comman
   expect(trace.filter((entry) => entry.command === "remove_automation_point")).toHaveLength(1);
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });
+
+test("Avid V07 automation clipboard and Pencil paths remain context-owned", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  const trackId = await page.getByTestId("pt-track-header").first().getAttribute("data-track-id");
+  if (!trackId) throw new Error("automation track id is absent");
+  for (const [time, value] of [[1, 0.2], [3, 0.7], [5, 0.4]]) {
+    await execInPage(page, "add_automation_point", {
+      trackId, pluginIndex: 100, paramIndex: 0, time, value,
+    });
+  }
+
+  const lane = page.locator(`[data-testid="protools-automation-lane"][data-track-id="${trackId}"]`);
+  const pxPerSec = await page.evaluate(() =>
+    (window as ProToolsWindow).__moshStore?.getState().pxPerSec ?? 0);
+  const bounds = await lane.boundingBox();
+  if (!bounds || pxPerSec <= 0) throw new Error("automation lane geometry is unavailable");
+
+  await page.mouse.move(bounds.x + pxPerSec * 0.5, bounds.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + pxPerSec * 3.5, bounds.y + 20, { steps: 6 });
+  await page.mouse.up();
+  await lane.press("Meta+c");
+  const traceAfterCopy = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  expect(traceAfterCopy.filter((entry) => entry.command === "copy" || entry.command === "paste_clip"))
+    .toEqual([]);
+
+  await execInPage(page, "set_transport", { position: 7 });
+  await lane.click({ button: "right", position: { x: pxPerSec * 2, y: 20 } });
+  const menu = page.getByTestId("pt-automation-menu");
+  await expect(menu).toBeVisible();
+  await expect(page.getByTestId("pt-automation-paste")).toBeEnabled();
+  await page.getByTestId("pt-automation-paste").click();
+  await expect.poll(() => automationPoints(page, trackId)).toEqual([
+    { t: 1, v: 0.2 }, { t: 3, v: 0.7 }, { t: 5, v: 0.4 },
+    { t: 7.5, v: 0.2 }, { t: 9.5, v: 0.7 },
+  ]);
+
+  await lane.press("Meta+x");
+  await expect.poll(() => automationPoints(page, trackId)).toEqual([
+    { t: 5, v: 0.4 }, { t: 7.5, v: 0.2 }, { t: 9.5, v: 0.7 },
+  ]);
+
+  await page.keyboard.down("Control");
+  await page.mouse.move(bounds.x + pxPerSec, bounds.y + 19);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + pxPerSec * 3, bounds.y + 9, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up("Control");
+  await expect.poll(() => automationPoints(page, trackId)).toEqual([
+    { t: 1, v: 0.2 }, { t: 3, v: 0.7 }, { t: 5, v: 0.4 },
+    { t: 7.5, v: 0.2 }, { t: 9.5, v: 0.7 },
+  ]);
+
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Meta");
+  await page.mouse.move(bounds.x + pxPerSec * 2, bounds.y + 19);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + pxPerSec * 2.5, bounds.y + 13);
+  await page.mouse.move(bounds.x + pxPerSec * 4, bounds.y + 7, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up("Meta");
+  await page.keyboard.up("Control");
+  await expect.poll(() => automationPoints(page, trackId)).toEqual([
+    { t: 1, v: 0.2 }, { t: 2, v: 0.2 }, { t: 2.5, v: 0.5 },
+    { t: 2.875, v: 0.575 }, { t: 3.25, v: 0.65 }, { t: 3.625, v: 0.725 },
+    { t: 4, v: 0.8 },
+    { t: 5, v: 0.4 }, { t: 7.5, v: 0.2 }, { t: 9.5, v: 0.7 },
+  ]);
+
+  await page.screenshot({ path: testInfo.outputPath("protools-automation-clipboard-pencil.png") });
+  const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  expect(trace.filter((entry) => entry.command === "write_automation_curve")).toHaveLength(3);
+  expect(trace.filter((entry) => entry.command === "remove_automation_point")).toHaveLength(2);
+  expect(trace.filter((entry) => !entry.ok)).toEqual([]);
+});

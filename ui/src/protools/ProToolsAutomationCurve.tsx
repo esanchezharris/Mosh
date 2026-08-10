@@ -26,6 +26,7 @@ type Props = {
   readonly selection: AutomationRange | null;
   readonly pxPerSec: number;
   readonly width: number;
+  readonly onEditKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => boolean;
 };
 
 type PointGesture = {
@@ -46,7 +47,7 @@ function pointTop(value: number): number {
 }
 
 export function ProToolsAutomationCurve(props: Props) {
-  const { trackId, target, points, selection, pxPerSec, width } = props;
+  const { trackId, target, points, selection, pxPerSec, width, onEditKeyDown } = props;
   const exec = useStore((state) => state.exec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const [previewPoints, setPreviewPoints] = useState<readonly AutoPoint[] | null>(null);
@@ -170,6 +171,7 @@ export function ProToolsAutomationCurve(props: Props) {
     event: ReactKeyboardEvent<HTMLButtonElement>,
     point: IndexedAutomationPoint,
   ) => {
+    if (onEditKeyDown(event)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -202,7 +204,9 @@ export function ProToolsAutomationCurve(props: Props) {
         return (
           <button key={point.pointIndex} type="button" className="pt-automation-point"
             data-testid={`pt-automation-point-${point.pointIndex}`} data-selected={selected}
-            aria-pressed={selected} aria-keyshortcuts="Delete Backspace Escape" style={pointStyle}
+            data-mosh-edit-owner="protools-automation"
+            aria-pressed={selected}
+            aria-keyshortcuts="Delete Backspace Escape Meta+C Meta+X Meta+V" style={pointStyle}
             aria-label={`${target.paramName} automation point ${point.pointIndex + 1}, ${point.t.toFixed(3)} seconds, ${Math.round(point.v * 100)} percent`}
             onPointerDown={(event) => onPointerDown(event, point)}
             onPointerMove={onPointerMove} onPointerUp={onPointerUp}

@@ -203,6 +203,30 @@ describe("useKeyboardShortcuts", () => {
     arrangementClip.remove();
   });
 
+  it("forwards native Cut, Copy, and Paste to a focused Pro Tools automation editor", () => {
+    const automationLane = document.createElement("button");
+    automationLane.dataset.moshEditOwner = "protools-automation";
+    const received: string[] = [];
+    automationLane.addEventListener("keydown", (event) => {
+      received.push(event.key);
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    document.body.appendChild(automationLane);
+    automationLane.focus();
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      bridgeMock.eventHandlers.get("mosh_menu")?.({ action: "cut" });
+      bridgeMock.eventHandlers.get("mosh_menu")?.({ action: "copy" });
+      bridgeMock.eventHandlers.get("mosh_menu")?.({ action: "paste" });
+    });
+
+    expect(received).toEqual(["x", "c", "v"]);
+    expect(execCalls).toEqual([]);
+    automationLane.remove();
+  });
+
   it("dispatches Record through the app action dispatcher", async () => {
     useStore.setState({
       selectedTrackId: "record-track",

@@ -20,6 +20,8 @@ import {
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { classifyProToolsIntent } from "./smartTool";
 import { useProTools } from "./proToolsState";
+import { useProToolsAutomationClipboard } from "./useProToolsAutomationClipboard";
+import { useProToolsAutomationPencil } from "./useProToolsAutomationPencil";
 
 type SelectGesture = {
   readonly kind: "select";
@@ -41,8 +43,6 @@ type TrimGesture = {
   valuePoints: readonly AutoPoint[];
 };
 
-type LaneGesture = SelectGesture | TrimGesture;
-
 type Options = {
   readonly trackId: string;
   readonly target: AutomationTarget | null;
@@ -62,9 +62,18 @@ export function useProToolsAutomationLane(options: Options) {
   const [selection, setSelection] = useState<AutomationRange | null>(null);
   const [previewPoints, setPreviewPoints] = useState<readonly AutoPoint[] | null>(null);
   const [trimReadout, setTrimReadout] = useState<number | null>(null);
-  const gesture = useRef<LaneGesture | null>(null);
+  const gesture = useRef<SelectGesture | TrimGesture | null>(null);
   const previewToken = useRef(0);
-  const renderedPoints = previewPoints ?? snapshotPoints;
+  const basePoints = previewPoints ?? snapshotPoints;
+  const pencil = useProToolsAutomationPencil({ trackId, target, points: basePoints, pxPerSec });
+  const renderedPoints = pencil.previewPoints ?? basePoints;
+  const clipboard = useProToolsAutomationClipboard({
+    trackId,
+    target,
+    points: renderedPoints,
+    selection,
+    position,
+  });
 
   const releaseGesture = () => {
     const current = gesture.current;
@@ -78,6 +87,7 @@ export function useProToolsAutomationLane(options: Options) {
     const current = gesture.current;
     if (current?.kind === "select") setSelection(current.previousRange);
     releaseGesture();
+    pencil.cancel();
     setPreviewPoints(null);
   };
 
@@ -159,7 +169,7 @@ export function useProToolsAutomationLane(options: Options) {
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0 || !target) return;
+    if (event.button !== 0 || !target || pencil.onPointerDown(event)) return;
     const intent = intentAt(event, event.metaKey || event.ctrlKey ? "click" : "drag");
     setHoveredIntent(intent);
     if (intent === "breakpoint") {
@@ -204,6 +214,7 @@ export function useProToolsAutomationLane(options: Options) {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (pencil.onPointerMove(event)) return;
     const current = gesture.current;
     if (!current || current.pointerId !== event.pointerId) {
       setHoveredIntent(intentAt(event, "drag"));
@@ -223,6 +234,7 @@ export function useProToolsAutomationLane(options: Options) {
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (pencil.onPointerUp(event)) return;
     const current = gesture.current;
     if (!current || current.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -239,6 +251,7 @@ export function useProToolsAutomationLane(options: Options) {
   };
 
   const onPointerCancel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (pencil.onPointerCancel(event)) return;
     if (gesture.current?.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
@@ -252,6 +265,7 @@ export function useProToolsAutomationLane(options: Options) {
       setSelection(null);
       return;
     }
+    if (clipboard.onKeyDown(event)) return;
     const direction = event.key === "+" || event.code === "NumpadAdd" ? 1
       : event.key === "-" || event.code === "NumpadSubtract" ? -1 : 0;
     if (direction !== 0 && selection) {
@@ -269,6 +283,8 @@ export function useProToolsAutomationLane(options: Options) {
   };
 
   return {
+    clipboard,
+    onEditKeyDown: clipboard.onKeyDown,
     onKeyDown,
     onPointerCancel,
     onPointerDown,

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { AutomationClipboard } from "./automationEditing";
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
@@ -18,6 +19,7 @@ type ProToolsViewState = {
   readonly nudgeValue: number;
   readonly classicTheme: boolean;
   readonly hoveredIntent: ProToolsIntent | null;
+  readonly automationClipboard: AutomationClipboard | null;
 };
 
 type ProToolsActions = {
@@ -31,6 +33,7 @@ type ProToolsActions = {
   readonly setNudgeValue: (seconds: number) => void;
   readonly toggleClassicTheme: () => void;
   readonly setHoveredIntent: (intent: ProToolsIntent | null) => void;
+  readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -53,6 +56,7 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   nudgeValue: 0.25,
   classicTheme: false,
   hoveredIntent: null,
+  automationClipboard: null,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -69,6 +73,7 @@ export const useProTools = create<ProToolsState>((set) => ({
   setNudgeValue: (seconds) => set({ nudgeValue: Math.min(60, Math.max(0.001, seconds)) }),
   toggleClassicTheme: () => set((state) => ({ classicTheme: !state.classicTheme })),
   setHoveredIntent: (hoveredIntent) => set({ hoveredIntent }),
+  setAutomationClipboard: (automationClipboard) => set({ automationClipboard }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

@@ -36,6 +36,26 @@ const emptyAgentPromptSpace = (target: EventTarget | null, action: string): bool
 // semantics unchanged by construction.
 const dispatch = (id: ActionId) => runAction(id, ctx());
 
+const NATIVE_EDIT_KEYS: Partial<Record<ActionId, string>> = {
+  cut: "x",
+  copy: "c",
+  paste: "v",
+};
+
+function forwardNativeEditAction(action: ActionId): boolean {
+  const key = NATIVE_EDIT_KEYS[action];
+  const owner = document.activeElement;
+  if (!key || !(owner instanceof HTMLElement)
+    || owner.dataset.moshEditOwner !== "protools-automation") return false;
+  owner.dispatchEvent(new KeyboardEvent("keydown", {
+    key,
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  }));
+  return true;
+}
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -223,6 +243,7 @@ export function useKeyboardShortcuts() {
     return onEvent("mosh_menu", (raw) => {
       const p = (raw ?? {}) as { action?: ActionId; file?: string };
       if (!p.action) return;
+      if (forwardNativeEditAction(p.action)) return;
       void runAction(p.action, ctx(), p.file ? { file: p.file } : {});
     });
   }, []);

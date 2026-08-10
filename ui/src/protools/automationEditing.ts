@@ -25,6 +25,12 @@ export type AutomationReplacementBounds = {
   readonly end: number;
 };
 
+export type AutomationClipboard = {
+  readonly duration: number;
+  readonly sourceParamName: string;
+  readonly points: readonly AutoPoint[];
+};
+
 type PointMove = {
   readonly point: AutoPoint;
   readonly deltaX: number;
@@ -112,6 +118,69 @@ export function automationReplacementBounds(
 ): AutomationReplacementBounds | null {
   const times = [...before, ...after].map((point) => point.t);
   return times.length > 0 ? { start: Math.min(...times), end: Math.max(...times) } : null;
+}
+
+export function automationClipboardFromSelection(
+  points: readonly AutoPoint[],
+  range: AutomationRange,
+  sourceParamName: string,
+): AutomationClipboard | null {
+  const selected = points.filter((point) => automationPointIsSelected(point, range));
+  if (selected.length === 0) return null;
+  return {
+    duration: round(range.end - range.start),
+    sourceParamName,
+    points: selected.map((point) => ({ t: round(point.t - range.start), v: point.v })),
+  };
+}
+
+export function selectedAutomationPointIndices(
+  points: readonly AutoPoint[],
+  range: AutomationRange,
+): readonly number[] {
+  return points.map((point, index) => ({ point, index }))
+    .filter(({ point }) => automationPointIsSelected(point, range))
+    .map(({ index }) => index)
+    .sort((left, right) => right - left);
+}
+
+export function automationPointsForPaste(
+  clipboard: AutomationClipboard,
+  insertionTime: number,
+): readonly AutoPoint[] {
+  return clipboard.points.map((point) => ({
+    t: round(Math.max(0, insertionTime) + point.t),
+    v: point.v,
+  }));
+}
+
+export function automationLinePoints(start: AutoPoint, end: AutoPoint): readonly AutoPoint[] {
+  const normalizedStart = { t: round(Math.max(0, start.t)), v: round(clampValue(start.v)) };
+  const normalizedEnd = { t: round(Math.max(0, end.t)), v: round(clampValue(end.v)) };
+  if (normalizedStart.t === normalizedEnd.t) return [normalizedEnd];
+  return normalizedStart.t < normalizedEnd.t
+    ? [normalizedStart, normalizedEnd]
+    : [normalizedEnd, normalizedStart];
+}
+
+export function normalizeAutomationSamples(samples: readonly AutoPoint[]): readonly AutoPoint[] {
+  const byTime = new Map<number, AutoPoint>();
+  for (const sample of samples) {
+    const point = { t: round(Math.max(0, sample.t)), v: round(clampValue(sample.v)) };
+    byTime.set(point.t, point);
+  }
+  return [...byTime.values()].sort((left, right) => left.t - right.t);
+}
+
+export function automationSegmentPreview(
+  points: readonly AutoPoint[],
+  segment: readonly AutoPoint[],
+): readonly AutoPoint[] {
+  if (segment.length === 0) return points;
+  const start = segment[0].t;
+  const end = segment[segment.length - 1].t;
+  return [...points.filter((point) => point.t < start || point.t > end), ...segment]
+    .sort((left, right) => left.t - right.t);
 }
 
 export function moveAutomationPoint({ point, deltaX, deltaY, pxPerSec }: PointMove): AutoPoint {

@@ -22,6 +22,7 @@ describe("Pro Tools shell state", () => {
       clipListOpen: state.clipListOpen,
       nudgeValue: state.nudgeValue,
       classicTheme: state.classicTheme,
+      automationClipboard: state.automationClipboard,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -37,6 +38,7 @@ describe("Pro Tools shell state", () => {
       clipListOpen: true,
       nudgeValue: 0.25,
       classicTheme: false,
+      automationClipboard: null,
     });
   });
 
@@ -79,5 +81,22 @@ describe("Pro Tools shell state", () => {
     state.resetForProject(projectEpoch + 1);
     expect(useProTools.getState().editMode).toBe("slip");
     expect(useProTools.getState().trackHeaderWidth).toBe(160);
+  });
+
+  it("keeps the automation clipboard within one project epoch", () => {
+    const clipboard = {
+      duration: 3,
+      sourceParamName: "Level",
+      points: [{ t: 0.5, v: 0.2 }, { t: 2.5, v: 0.7 }],
+    };
+
+    useProTools.getState().setAutomationClipboard(clipboard);
+    expect(useProTools.getState().automationClipboard).toEqual(clipboard);
+
+    useProTools.getState().resetForProject(projectEpoch);
+    expect(useProTools.getState().automationClipboard).toEqual(clipboard);
+
+    useProTools.getState().resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().automationClipboard).toBeNull();
   });
 });
