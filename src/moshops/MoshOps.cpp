@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include "MoshOps.h"
+#include "moshops/RecoveryIds.h"
 #include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
@@ -544,6 +545,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "rename_section")    return cmdRenameSection (args);
     if (name == "move_section")      return cmdMoveSection (args);
     if (name == "remove_section")    return cmdRemoveSection (args);
+    if (name == "create_clip_group")  return cmdCreateClipGroup (args);
+    if (name == "ungroup_clip_group") return cmdUngroupClipGroup (args);
+    if (name == "regroup_clip_group") return cmdRegroupClipGroup (args);
+    if (name == "rename_clip_group")  return cmdRenameClipGroup (args);
     // LYR-001 — Finish-My-Song lyric sheet (per-track).
     if (name == "create_lyric_sheet")   return cmdCreateLyricSheet (args);
     if (name == "remove_lyric_sheet")   return cmdRemoveLyricSheet (args);
@@ -839,7 +844,11 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope, const 
                 addTrackKey (clip->getTrack());
         };
         if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
+        {
             addTrackKey (c->getTrack());
+            if (const auto group = findClipGroupForClip (c->itemID.toString(), true); group.isValid())
+                for (auto* member : clipGroupMembers (group)) addTrackKey (member->getTrack());
+        }
         if (auto* clipIds = args.getProperty ("clipIds", var()).getArray())
             for (auto& clipId : *clipIds)
                 addClipTrack (clipId);
@@ -3145,6 +3154,10 @@ juce::var MoshOps::snapshot()
     // SEC-001 — named song sections (Intro/Verse/Hook/…) from the MOSH_SECTIONS tree.
     root->setProperty ("sections", sectionsToVar());
     root->setProperty ("annotations", annotationsToVar());
+    root->setProperty ("clipGroups", clipGroupsToVar());
+    if (const auto groups = edit.state.getChildWithName (ids::MOSH_CLIP_GROUPS); groups.isValid())
+        if (const auto groupId = groups[ids::lastUngroupedClipGroupId].toString(); groupId.isNotEmpty())
+            root->setProperty ("lastUngroupedClipGroupId", groupId);
 
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())
@@ -3939,6 +3952,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_section", "rename_section", "move_section", "remove_section",
+        "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
         "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
         "set_tempo", "set_time_signature", "set_metronome", "set_key", "set_project_settings" };
     return replayable.contains (name);
@@ -3955,20 +3969,12 @@ void MoshOps::appendRecoveryJournal (const juce::String& name, const juce::var& 
     recoveryJournalFile.appendText (JSON::toString (var (o), true) + "\n");
 }
 
-// Replace any top-level string arg whose VALUE is a journaled id with its freshly-assigned
-// id (value-based, since different commands carry the id under different keys).
+// Replace any string arg whose VALUE is a journaled id with its freshly-assigned id.
+// Recursive substitution is required for multi-target commands whose ids live in arrays
+// (create_clip_group, consolidate_clips, crop_clip) or nested object payloads.
 juce::var MoshOps::substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap)
 {
-    auto* in = args.getDynamicObject();
-    if (in == nullptr) return args;
-    auto* out = new DynamicObject();
-    for (auto& p : in->getProperties())
-    {
-        auto v = p.value;
-        if (v.isString()) { const auto s = v.toString(); if (idMap.contains (s)) v = idMap[s]; }
-        out->setProperty (p.name, v);
-    }
-    return var (out);
+    return recovery::substituteIds (args, idMap);
 }
 
 juce::var MoshOps::cmdRecoverSession (const juce::var& args)

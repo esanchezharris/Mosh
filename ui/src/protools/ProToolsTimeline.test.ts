@@ -44,10 +44,39 @@ const SNAPSHOT: Snapshot = {
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
 };
 
-function Harness() {
+const GROUP_SNAPSHOT: Snapshot = {
+  ...SNAPSHOT,
+  tracks: [
+    SNAPSHOT.tracks[0]!,
+    {
+      id: "audio-track",
+      index: 1,
+      name: "Keys",
+      type: "midi",
+      clips: [{
+        id: "keys-clip",
+        name: "Pickup",
+        type: "midi",
+        start: 0,
+        length: 4,
+        offset: 0,
+        hasRenderLayer: false,
+        notes: [],
+      }],
+    },
+  ],
+  clipGroups: [{
+    id: "clip-group-1",
+    name: "Verse Group",
+    clipIds: ["midi-clip", "keys-clip"],
+    active: true,
+  }],
+};
+
+function Harness({ snapshot = SNAPSHOT }: { readonly snapshot?: Snapshot }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   return React.createElement(ProToolsTimeline, {
-    snapshot: SNAPSHOT,
+    snapshot,
     contentWidth: 600,
     scrollRef,
     onScroll: () => {},
@@ -132,6 +161,58 @@ describe("ProToolsTimeline pointer capture", () => {
 
     // Then: the real clip drag reaches the command seam.
     expect(exec).toHaveBeenCalledWith("trim_clip", expect.objectContaining({ clipId: "midi-clip" }));
+  });
+
+  it("renders a Clip Group affordance and expands keyboard selection to every member", () => {
+    act(() => {
+      useStore.setState({ snapshot: GROUP_SNAPSHOT, selection: new Set<string>() });
+      root.render(React.createElement(Harness, { snapshot: GROUP_SNAPSHOT }));
+    });
+    const element = host.querySelector<HTMLElement>('[data-clip-id="midi-clip"]');
+    if (!element) throw new Error("grouped MIDI clip did not render");
+
+    expect(element.dataset.clipGroupId).toBe("clip-group-1");
+    expect(element.getAttribute("aria-label")).toContain("Verse Group");
+    act(() => element.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    expect([...useStore.getState().selection]).toEqual(["midi-clip", "keys-clip"]);
+  });
+
+  it("removes a grouped selection in one undo batch and refuses ambiguous member-only edits", async () => {
+    act(() => {
+      useStore.setState({ snapshot: GROUP_SNAPSHOT, selection: new Set<string>() });
+      root.render(React.createElement(Harness, { snapshot: GROUP_SNAPSHOT }));
+    });
+    const element = host.querySelector<HTMLElement>('[data-clip-id="midi-clip"]');
+    if (!element) throw new Error("grouped MIDI clip did not render");
+    element.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 400, bottom: 60, width: 400, height: 60, x: 0, y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+    await act(async () => element.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 100,
+      clientY: 30,
+    })));
+    const menu = document.querySelector<HTMLElement>('[data-testid="v2-clip-menu"]');
+    if (!menu) throw new Error("grouped clip menu did not open");
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    expect(items[0]?.disabled).toBe(true);
+    expect(items[1]?.disabled).toBe(true);
+    const remove = items.find((item) => item.textContent === "Remove Clip Group");
+    if (!remove) throw new Error("Remove Clip Group action is missing");
+    await act(async () => remove.click());
+
+    expect(exec.mock.calls).toContainEqual(["batch_begin", { name: "remove clip group" }]);
+    expect(exec.mock.calls).toContainEqual(["remove_clip", { clipId: "midi-clip" }]);
+    expect(exec.mock.calls).toContainEqual(["remove_clip", { clipId: "keys-clip" }]);
+    expect(exec.mock.calls).toContainEqual(["batch_end", {}]);
   });
 
   it("opens Spot placement after a Grabber click without moving the clip", () => {

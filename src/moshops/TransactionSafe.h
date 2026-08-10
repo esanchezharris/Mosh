@@ -73,6 +73,7 @@ inline const std::set<juce::String>& registry()
         "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
         // ── clips ──
         "move_clip", "trim_clip", "split_clip", "promote_take_region", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
+        "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
         "duplicate_clip", "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade",
         "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
         "stretch_clip", "set_clip_warp",

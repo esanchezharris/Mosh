@@ -340,6 +340,16 @@ juce::var MoshOps::cmdMoveClip (const juce::var& args)
     const auto   origPos  = clip->getPosition();
     const double oldStart = origPos.getStart().inSeconds();
     const double oldEnd   = origPos.getEnd().inSeconds();
+    const auto clipGroup = findClipGroupForClip (id, true);
+    const auto groupedMembers = clipGroup.isValid() ? clipGroupMembers (clipGroup)
+                                                    : std::vector<te::Clip*> {};
+
+    if (clipGroup.isValid() && ripple)
+        return errResult ("move_clip", "ripple move is not supported for a clip group");
+    if (clipGroup.isValid() && args.hasProperty ("trackId"))
+        if (auto* dest = findTrack (args.getProperty ("trackId", var()).toString());
+            dest != nullptr && dest != clip->getTrack())
+            return errResult ("move_clip", "moving a multitrack clip group between tracks is not supported");
 
     // Validated BEFORE any side effect (no transaction opened, nothing mutated): ripple
     // has no defined meaning across a track change. The neighbours it would carry live on
@@ -353,7 +363,18 @@ juce::var MoshOps::cmdMoveClip (const juce::var& args)
 
     beginTxn ("move_clip");
     const double newStart = juce::jmax (0.0, (double) args.getProperty ("start", oldStart));
-    clip->setStart (tracktion::TimePosition::fromSeconds (newStart), false, true);   // keep length
+    if (clipGroup.isValid())
+    {
+        double earliestStart = oldStart;
+        for (auto* member : groupedMembers)
+            earliestStart = juce::jmin (earliestStart, member->getPosition().getStart().inSeconds());
+        const double delta = juce::jmax (newStart - oldStart, -earliestStart);
+        for (auto* member : groupedMembers)
+            member->setStart (tracktion::TimePosition::fromSeconds (
+                member->getPosition().getStart().inSeconds() + delta), false, true);
+    }
+    else
+        clip->setStart (tracktion::TimePosition::fromSeconds (newStart), false, true);   // keep length
 
     // Optional move to another track.
     if (args.hasProperty ("trackId"))

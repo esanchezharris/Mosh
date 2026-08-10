@@ -335,6 +335,24 @@
   outline-offset: -2px;
   filter: brightness(1.12);
 }
+.protools-shell .pt-lane .v2-clip.pt-clip-group-member {
+  box-shadow: inset 0 -2px color-mix(in srgb, var(--pt-selected) 76%, var(--pt-wave-outline));
+}
+.protools-shell .pt-lane .v2-clip .pt-clip-group-badge {
+  position: absolute;
+  z-index: 4;
+  right: 3px;
+  bottom: 3px;
+  padding: 1px 3px;
+  border: 1px solid color-mix(in srgb, var(--pt-wave-outline) 58%, transparent);
+  border-radius: 2px;
+  color: var(--pt-text);
+  background: color-mix(in srgb, var(--pt-inset) 88%, transparent);
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  text-transform: uppercase;
+}
 .protools-shell .pt-lane .v2-clip > .v2-clip-label,
 .protools-shell .pt-lane .v2-clip.hdr > .v2-clip-label {
   inset: 0 0 auto 0;

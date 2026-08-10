@@ -225,6 +225,7 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.Live.cpp
         src/moshops/MoshOps.Record.cpp
         src/moshops/MoshOps.Clips.cpp
+        src/moshops/MoshOps.Groups.cpp
         src/moshops/MoshOps.Tracks.cpp
         src/moshops/MoshOps.TempoProject.cpp
         src/moshops/MoshOps.Plugins.cpp

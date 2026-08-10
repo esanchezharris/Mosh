@@ -68,12 +68,15 @@ const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).
 type DragKind = "move" | "trim-l" | "trim-r" | "stretch" | "time";
 
 export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHeaderPx,
-  gestureTable, waveAmplitudeAt, midiVerticalZoom }: {
+  gestureTable, waveAmplitudeAt, midiVerticalZoom, linkedClipIds, clipGroupId, clipGroupName }: {
   clip: Clip; trackType: string; snapshot: Snapshot;
   clipHeaderPx?: number; clipVisualHeaderPx?: number;
   gestureTable?: () => GestureTable;
   waveAmplitudeAt?: (ratio: number) => number;
   midiVerticalZoom?: number;
+  linkedClipIds?: readonly string[];
+  clipGroupId?: string;
+  clipGroupName?: string;
 }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const selection = useStore((s) => s.selection);
@@ -153,13 +156,17 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
   const pos: DragPos = preview ?? { start: clip.start, length: clip.length, offset: clip.offset };
   const left = pos.start * pxPerSec;
   const width = Math.max(4, pos.length * pxPerSec);
-  const selected = selection.has(clip.id);
+  const selectableClipIds = linkedClipIds?.length ? linkedClipIds : [clip.id];
+  const selected = selectableClipIds.some((clipId) => selection.has(clipId));
   // Drum vs melodic by the clip's own pitches (GM percussion), with the drum track as a
   // fallback for an empty/ambiguous clip — matches the legacy detection.
   const drumClip = clip.type === "midi" && (isDrumClip(clip.notes) || trackType === "drum");
   const kind = clip.type === "wave" ? "wave" : clip.type === "midi" ? (drumClip ? "drum" : "midi") : "block";
 
-  const selectClip = (additive: boolean) => { select([clip.id], additive); setSelectedClip(clip.id); };
+  const selectClip = (additive: boolean) => {
+    select([...selectableClipIds], additive);
+    setSelectedClip(clip.id);
+  };
   const closeMenu = (restoreFocus: boolean) => {
     setMenu(null);
     if (restoreFocus) window.setTimeout(() => clipRef.current?.focus(), 0);
@@ -362,13 +369,15 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
       // that does not change what a drag does, which is the kind of surface this whole
       // programme exists to remove. Under Ableton/Pro Tools it is the ONLY place a clip
       // can be grabbed to move, so it has to be visible.
-      className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}${headerPx() > 0 ? " hdr" : ""}`}
+      className={`v2-clip ${kind}${selected ? " sel" : ""}${clipGroupId ? " pt-clip-group-member" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}${headerPx() > 0 ? " hdr" : ""}`}
       style={{ left, width, "--v2-clip-hdr": `${clipVisualHeaderPx ?? headerPx()}px` } as React.CSSProperties}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onContextMenu={onContext}
       onKeyDown={onKeyDown}
-      role="button" tabIndex={0} aria-label={`${clip.name} ${kind} clip`} aria-pressed={selected}
+      role="button" tabIndex={0}
+      aria-label={`${clip.name} ${kind} clip${clipGroupName ? `, member of ${clipGroupName}` : ""}`}
+      aria-pressed={selected}
       aria-haspopup="menu" aria-expanded={menu !== null}
-      data-testid="v2-clip" data-clip-id={clip.id} title={clip.name}
+      data-testid="v2-clip" data-clip-id={clip.id} data-clip-group-id={clipGroupId} title={clip.name}
     >
       {clip.type === "wave" && <ClipWave peaks={peaks} width={width} amplitudeAt={waveAmplitudeAt} />}
       {clip.type === "midi" && (drumClip
@@ -377,6 +386,10 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
         : <ClipMidi notes={shownNotes} width={width} bs={bs} secToPx={secToPx}
             verticalZoom={midiVerticalZoom} />)}
       <span className="v2-clip-label">{clip.name}</span>
+      {clipGroupName && (
+        <span className="v2-clip-badge pt-clip-group-badge" aria-hidden="true"
+          title={`Clip Group: ${clipGroupName}`}>grp</span>
+      )}
       {clip.renderLayer?.reimagineActive && (
         <span className="v2-clip-badge reimagine" data-testid="v2-clip-reimagine"
           title="A re-imagined render is playing beneath this clip; the MIDI is muted but still editable. Reset in the generative drawer to restore it.">✨</span>
@@ -394,15 +407,16 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
       <div className="v2-trim r" style={{ width: edgeGrab }} />
       {menu && (
         <ClipMenu clip={clip} x={menu.x} y={menu.y} time={menu.time} splitLabel={menu.splitLabel} onClose={closeMenu}
-          drumClip={drumClip} beatsPerBar={meterOf(snapshot).num} />
+          drumClip={drumClip} beatsPerBar={meterOf(snapshot).num}
+          linkedClipIds={selectableClipIds} />
       )}
     </div>
   );
 }
 
-function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar }: {
+function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar, linkedClipIds }: {
   clip: Clip; x: number; y: number; time: number; splitLabel: string; onClose: (restoreFocus: boolean) => void;
-  drumClip: boolean; beatsPerBar: number;
+  drumClip: boolean; beatsPerBar: number; linkedClipIds: readonly string[];
 }) {
   const exec = useStore((s) => s.exec);
   const setMemoryToast = useStore((s) => s.setMemoryToast);
@@ -456,11 +470,25 @@ function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar
     const res = await saveDrumPatternCard(exec, card);
     if (res.ok) setMemoryToast({ text: `pattern "${card.name}"`, scope: "global", kind: "drum_pattern", ts: res.ts });
   };
+  const grouped = linkedClipIds.length > 1;
+  const removeTargets = async () => {
+    if (!grouped) {
+      await exec("remove_clip", { clipId: clip.id });
+      return;
+    }
+    await useStore.getState().runAtomic("remove clip group", async (run) => {
+      for (const clipId of linkedClipIds) await run("remove_clip", { clipId });
+    });
+  };
   return createPortal(
     <div ref={menuRef} className="v2-clipmenu" role="menu" aria-label={`${clip.name} clip actions`}
       data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()} onKeyDown={onMenuKeyDown}>
-      <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>{splitLabel}</button>
-      <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
+      <button role="menuitem" tabIndex={-1} disabled={grouped}
+        title={grouped ? "Ungroup before splitting a Clip Group" : undefined}
+        onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>{splitLabel}</button>
+      <button role="menuitem" tabIndex={-1} disabled={grouped}
+        title={grouped ? "Ungroup before duplicating a Clip Group" : undefined}
+        onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
       {/* #554 — select every copy of this loop, project-wide. UI-LOCAL: selection never
           crosses the seam, so there is no command here and never will be. Keyed on the
           SOURCE file (name only for MIDI, which has none), matching Reaper and Pro Tools.
@@ -488,7 +516,8 @@ function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar
           onClick={() => run(() => void exec("build_skeleton_from_clip", { clipId: clip.id }))}>Build flow from this take</button>
       )}
       <div className="v2-clipmenu-sep" />
-      <button role="menuitem" tabIndex={-1} className="danger" onClick={() => run(() => void exec("remove_clip", { clipId: clip.id }))}>Remove</button>
+      <button role="menuitem" tabIndex={-1} className="danger"
+        onClick={() => run(() => void removeTargets())}>{grouped ? "Remove Clip Group" : "Remove"}</button>
     </div>,
     document.body,
   );

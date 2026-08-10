@@ -110,6 +110,82 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   expect(clipList.width / viewport.width).toBeLessThan(0.18);
 });
 
+test("tutorial-backed Clip Groups select, move, ungroup, and regroup as one object", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  const members = await page.evaluate(() => {
+    const snapshot = (window as ProToolsWindow).__moshStore?.getState().snapshot;
+    if (!snapshot) throw new Error("__moshStore snapshot is unavailable");
+    const ids = snapshot.tracks.slice(0, 2).map((track) => track.clips[0]?.id);
+    if (ids.some((id) => !id)) throw new Error("Clip Group fixture members are unavailable");
+    return ids as string[];
+  });
+  await execInPage(page, "create_clip_group", {
+    clipIds: members,
+    name: "Rhythm Group",
+  });
+
+  const groupId = await page.evaluate(() => {
+    const group = (window as ProToolsWindow).__moshStore?.getState().snapshot?.clipGroups?.[0];
+    if (!group) throw new Error("Clip Group snapshot is unavailable");
+    return group.id;
+  });
+  await expect(page.locator(`[data-clip-group-id="${groupId}"]`)).toHaveCount(2);
+  const groupRow = page.locator('[data-testid="pt-clip-list-item"][data-entry-kind="group"]');
+  await expect(groupRow).toHaveCount(1);
+  await expect(groupRow).toContainText("Rhythm Group");
+  await expect(groupRow).toContainText("2 clips");
+
+  // Blank MIDI space is Marquee under the Smart Tool. Choose the explicit
+  // Grabber, as a Pro Tools producer would, so this pointer gesture proves the
+  // grouped move rather than depending on the fixture's note geometry.
+  await page.keyboard.press("F8");
+  await expect(page.getByRole("button", { name: "Grabber" })).toHaveAttribute("aria-pressed", "true");
+  const leader = page.locator(`[data-clip-id="${members[0]}"]`);
+  const leaderBox = await leader.boundingBox();
+  if (!leaderBox) throw new Error("Clip Group leader has no browser geometry");
+  const before = await Promise.all(members.map((clipId) => clipStart(page, clipId)));
+  await page.mouse.move(
+    leaderBox.x + leaderBox.width / 2,
+    leaderBox.y + leaderBox.height * 0.75,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    leaderBox.x + leaderBox.width / 2 + 80,
+    leaderBox.y + leaderBox.height * 0.75,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  const after = await Promise.all(members.map((clipId) => clipStart(page, clipId)));
+  expect(after[0]).toBeGreaterThan(before[0]);
+  expect(after[0] - before[0]).toBeCloseTo(after[1] - before[1], 5);
+  await expect.poll(() => storeVal<number>(page, "selection.size")).toBe(2);
+
+  await page.keyboard.press("Meta+Alt+U");
+  await expect.poll(() => storeVal<boolean>(page, "snapshot.clipGroups.0.active")).toBe(false);
+  await expect(page.locator("[data-clip-group-id]")).toHaveCount(0);
+  await page.keyboard.press("Meta+Alt+R");
+  await expect.poll(() => storeVal<boolean>(page, "snapshot.clipGroups.0.active")).toBe(true);
+  await expect(page.locator(`[data-clip-group-id="${groupId}"]`)).toHaveCount(2);
+  await page.screenshot({ path: testInfo.outputPath("protools-clip-groups-wide.png"), animations: "disabled" });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
+  await page.getByTestId("pt-clip-list-toggle").click();
+  await expect(groupRow).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("protools-clip-groups-compact.png"), animations: "disabled" });
+
+  const commands = await page.evaluate(() =>
+    (window as ProToolsWindow).__moshCmdTrace?.map((entry) => entry.command) ?? []);
+  expect(commands).toEqual(expect.arrayContaining([
+    "create_clip_group",
+    "move_clip",
+    "ungroup_clip_group",
+    "regroup_clip_group",
+  ]));
+});
+
 test("tutorial-backed Memory Locations persist markers and recall the timeline", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);

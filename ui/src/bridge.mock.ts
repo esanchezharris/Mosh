@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, ClipGainPoint, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -35,12 +35,14 @@ export const MOCK_ENABLED: boolean =
 const SR = 48000;
 let clipSeq = 100;
 let trackSeq = 10;
+let clipGroupSeq = 0;
 // Layers whose render has already been landed on the "Neural Renders" lane, so a second
 // accept/bounce does not duplicate the clip (native guards the same way, via its internal
 // landedClipId). Module-local rather than a snapshot field — see the accept_render branch.
 const landedLayers = new Set<string>();
 const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
+const nextClipGroupId = () => `clip-group-${++clipGroupSeq}`;
 // Live 12's Space vs ⇧Space marker memory (mirrors MoshOps::cmdSetTransport)
 let mockInsertMarker = 0;
 let mockViaContinue = false;
@@ -477,6 +479,7 @@ const MOCK_TXN_SAFE = new Set([
   "create_bus", "add_send", "set_send_level", "remove_send",
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
+  "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
   "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
 ]);
 
@@ -1922,6 +1925,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "move_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      const activeGroup = (snapshot.clipGroups ?? []).find((group) =>
+        group.active && group.clipIds.includes(f.clip.id));
+      const groupMembers = activeGroup
+        ? activeGroup.clipIds.map((id) => findClip(id)).filter((member) => member !== null)
+        : [f];
       // CAP-CLP-017 — the cross-track refusal is validated BEFORE any mutation, exactly
       // like the native handler: ripple describes a distance on the track the clip is
       // leaving, so it has no meaning across a move to another one.
@@ -1930,9 +1938,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         if (dest && dest !== f.track)
           return err(command, "ripple:true cannot be combined with a move to another track");
       }
+      if (activeGroup && args.ripple)
+        return err(command, "ripple move is not supported for a clip group");
+      if (activeGroup && "trackId" in args) {
+        const dest = findTrack(str(args.trackId));
+        if (dest && dest !== f.track)
+          return err(command, "moving a multitrack clip group between tracks is not supported");
+      }
       pushUndo();
       const oldStart = f.clip.start, oldEnd = f.clip.start + f.clip.length;
-      f.clip.start = Math.max(0, num(args.start, f.clip.start));
+      const requestedDelta = num(args.start, f.clip.start) - f.clip.start;
+      const earliestStart = Math.min(...groupMembers.map((member) => member.clip.start));
+      const delta = Math.max(requestedDelta, -earliestStart);
+      for (const member of groupMembers) member.clip.start += delta;
       if ("trackId" in args) { // move across tracks
         const dest = findTrack(str(args.trackId));
         if (dest && dest !== f.track) { f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); dest.clips.push(f.clip); }
@@ -1948,6 +1966,66 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
               c.start = Math.max(0, c.start + delta);
       }
       invalidate(); return ok(command);
+    }
+    case "create_clip_group": {
+      const ids = Array.isArray(args.clipIds)
+        ? [...new Set(args.clipIds.map(String))]
+        : [];
+      if (ids.length === 0) return err(command, "clipIds must contain at least one clip");
+      if (ids.some((id) => !findClip(id))) return err(command, "clipIds contains an unknown clip");
+      if ((snapshot.clipGroups ?? []).some((group) =>
+        group.active && group.clipIds.some((id) => ids.includes(id))))
+        return err(command, "one or more clips are already grouped");
+      pushUndo();
+      const group: ClipGroup = {
+        id: nextClipGroupId(),
+        name: str(args.name).trim() || "Clip Group",
+        clipIds: ids,
+        active: true,
+      };
+      (snapshot.clipGroups ??= []).push(group);
+      invalidate();
+      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
+    }
+    case "ungroup_clip_group": {
+      const clipId = str(args.clipId);
+      const group = (snapshot.clipGroups ?? []).find((candidate) =>
+        candidate.active && candidate.clipIds.includes(clipId));
+      if (!group) return err(command, "active clip group not found");
+      pushUndo();
+      group.active = false;
+      snapshot.lastUngroupedClipGroupId = group.id;
+      invalidate();
+      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
+    }
+    case "regroup_clip_group": {
+      const groupId = str(args.groupId) || snapshot.lastUngroupedClipGroupId || "";
+      const group = (snapshot.clipGroups ?? []).find((candidate) => candidate.id === groupId);
+      if (!group || group.active) return err(command, "no ungrouped clip group is available to regroup");
+      const existingIds = group.clipIds.filter((id) => findClip(id));
+      if (existingIds.length === 0) return err(command, "the clip group's members no longer exist");
+      if ((snapshot.clipGroups ?? []).some((candidate) =>
+        candidate.active && candidate.id !== group.id
+          && candidate.clipIds.some((id) => existingIds.includes(id))))
+        return err(command, "one or more former members now belong to another clip group");
+      pushUndo();
+      group.clipIds = existingIds;
+      group.active = true;
+      delete snapshot.lastUngroupedClipGroupId;
+      invalidate();
+      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
+    }
+    case "rename_clip_group": {
+      const clipId = str(args.clipId);
+      const group = (snapshot.clipGroups ?? []).find((candidate) =>
+        candidate.clipIds.includes(clipId));
+      const name = str(args.name).trim();
+      if (!group) return err(command, "clip group not found");
+      if (!name) return err(command, "clip group name cannot be empty");
+      pushUndo();
+      group.name = name;
+      invalidate();
+      return ok(command, { groupId: group.id, clipIds: [...group.clipIds] });
     }
     case "trim_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
@@ -4364,6 +4442,7 @@ export function __resetMockForTests(): void {
   // seq climbs across resets and cross-call id matching silently breaks.
   clipSeq = 100;
   trackSeq = 10;
+  clipGroupSeq = 0;
   snapshot = seedSnapshot();
   mockProjects.clear();
   recentPaths = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];

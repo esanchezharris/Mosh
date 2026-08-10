@@ -253,6 +253,16 @@ export type Clip = {
   takes?: ClipTake[];
 };
 
+/** Pro Tools-style arrangement group. Unlike a routing folder, this owns no signal
+ *  path: active members select and move as one clip object. Inactive definitions are
+ *  retained so the documented Regroup command can restore the last Ungroup. */
+export type ClipGroup = {
+  id: string;
+  name: string;
+  clipIds: string[];
+  active: boolean;
+};
+
 export type ControllerEventName =
   | "TRANSPORT_TOGGLE"
   | "TRANSPORT_SCRUB"
@@ -804,6 +814,10 @@ export type Snapshot = {
   buses?: Bus[];
   sections?: Section[];
   annotations?: Annotation[];
+  /** Additive Pro Tools-style arrangement groups; absent means no clip groups. */
+  clipGroups?: ClipGroup[];
+  /** The dormant definition eligible for Pro Tools Regroup. */
+  lastUngroupedClipGroupId?: string;
   audio?: AudioSelection;
   training?: TrainingState;
 };

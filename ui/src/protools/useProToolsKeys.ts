@@ -23,6 +23,7 @@ import {
 } from "./memoryLocations";
 import { transientCandidates } from "./proToolsTransientCandidates";
 import { proToolsShownTracks } from "./proToolsTrackVisibility";
+import { handleProToolsClipGroupShortcut } from "./proToolsClipGroups";
 
 const EDIT_MODE_KEYS: Readonly<Partial<Record<string, ProToolsEditMode>>> = {
   F1: "shuffle",
@@ -84,6 +85,8 @@ export function useProToolsKeys(onOpenFades?: () => void): void {
       }
 
       if (handleProToolsFadesShortcut(event, onOpenFades)) return;
+
+      if (handleProToolsClipGroupShortcut(event)) return;
 
       if (event.code === "Slash" && event.shiftKey
         && !event.metaKey && !event.ctrlKey && !event.altKey) {

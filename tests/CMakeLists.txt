@@ -26,6 +26,7 @@ target_sources(MoshTests PRIVATE
     test_safe_mode.cpp
     test_count_in.cpp
     test_sections.cpp
+    test_clip_groups.cpp
     test_lyrics.cpp
     test_agent_memory.cpp
     test_agent_txn.cpp

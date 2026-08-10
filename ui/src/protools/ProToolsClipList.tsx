@@ -1,16 +1,17 @@
+import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { useStore } from "../store";
-import type { Clip, Snapshot, Track } from "../types";
-import { IconChevronLeft, IconChevronRight } from "../ui/icons";
+import type { Clip, Snapshot } from "../types";
+import { IconChevronLeft, IconChevronRight, IconLayers } from "../ui/icons";
+import {
+  activeClipGroupForClip,
+  proToolsClipListEntries,
+  type ProToolsClipListEntry,
+} from "./proToolsClipGroups";
 
 type ProToolsClipListProps = {
   readonly snapshot: Snapshot;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-};
-
-type ClipListEntry = {
-  readonly clip: Clip;
-  readonly track: Track;
 };
 
 const MEDIA_LABELS = {
@@ -24,16 +25,22 @@ export function ProToolsClipList({ snapshot, open, onOpenChange }: ProToolsClipL
   const select = useStore((state) => state.select);
   const setSelectedTrack = useStore((state) => state.setSelectedTrack);
   const openPianoRoll = useStore((state) => state.openPianoRoll);
-  const entries: readonly ClipListEntry[] = snapshot.tracks.flatMap((track) =>
-    track.clips
-      .filter((clip) => !clip.hidden)
-      .map((clip) => ({ clip, track })),
-  );
+  const exec = useStore((state) => state.exec);
+  const entries = proToolsClipListEntries(snapshot);
+  const selectedClipIds = snapshot.tracks.flatMap((track) => track.clips)
+    .filter((clip) => selection.has(clip.id) && !clip.hidden)
+    .map((clip) => clip.id);
+  const activeMember = selectedClipIds.find((clipId) => activeClipGroupForClip(snapshot, clipId));
+  const canGroup = selectedClipIds.length >= 2
+    && selectedClipIds.every((clipId) => !activeClipGroupForClip(snapshot, clipId));
+  const canRegroup = Boolean(snapshot.lastUngroupedClipGroupId
+    && snapshot.clipGroups?.some((group) =>
+      group.id === snapshot.lastUngroupedClipGroupId && !group.active));
 
-  const openClip = (entry: ClipListEntry) => {
-    select([entry.clip.id]);
+  const openClip = (entry: ProToolsClipListEntry) => {
+    select([...entry.clipIds]);
     setSelectedTrack(entry.track.id);
-    openPianoRoll(entry.clip.id);
+    if (entry.kind === "clip") openPianoRoll(entry.clip.id);
   };
 
   return (
@@ -44,6 +51,36 @@ export function ProToolsClipList({ snapshot, open, onOpenChange }: ProToolsClipL
     >
       <header className="pt-clip-list-head">
         {open && <span>Clip List</span>}
+        {open && (
+          <MoshMenu
+            label="Clip Group actions"
+            align="end"
+            trigger={(
+              <button type="button" className="pt-clip-group-menu-trigger"
+                data-testid="pt-clip-group-menu" aria-label="Clip Group actions">
+                <IconLayers size={12} />
+              </button>
+            )}
+          >
+            <div className="pt-menu pt-clip-group-menu" data-testid="pt-clip-group-actions">
+              <MoshMenuItem testId="pt-clip-group-create" disabled={!canGroup}
+                ariaLabel="Group selected clips, Command Option G"
+                onPick={() => { void exec("create_clip_group", { clipIds: selectedClipIds }); }}>
+                <span>Group</span><kbd>⌘⌥G</kbd>
+              </MoshMenuItem>
+              <MoshMenuItem testId="pt-clip-group-ungroup" disabled={!activeMember}
+                ariaLabel="Ungroup selected clip group, Command Option U"
+                onPick={() => { if (activeMember) void exec("ungroup_clip_group", { clipId: activeMember }); }}>
+                <span>Ungroup</span><kbd>⌘⌥U</kbd>
+              </MoshMenuItem>
+              <MoshMenuItem testId="pt-clip-group-regroup" disabled={!canRegroup}
+                ariaLabel="Regroup last clip group, Command Option R"
+                onPick={() => { void exec("regroup_clip_group", {}); }}>
+                <span>Regroup</span><kbd>⌘⌥R</kbd>
+              </MoshMenuItem>
+            </div>
+          </MoshMenu>
+        )}
         <button
           type="button"
           className="pt-clip-list-toggle"
@@ -59,20 +96,25 @@ export function ProToolsClipList({ snapshot, open, onOpenChange }: ProToolsClipL
           : (
             <ul className="pt-clip-list-items">
               {entries.map((entry) => {
-                const selected = selection.has(entry.clip.id);
+                const selected = entry.clipIds.some((clipId) => selection.has(clipId));
                 return (
-                  <li key={entry.clip.id}>
+                  <li key={entry.id}>
                     <button
                       type="button"
                       className="pt-clip-list-item"
                       data-testid="pt-clip-list-item"
+                      data-entry-kind={entry.kind}
                       data-selected={selected}
                       aria-current={selected ? "true" : undefined}
                       onClick={() => openClip(entry)}
                     >
-                      <span className="pt-clip-list-kind">{MEDIA_LABELS[entry.clip.type]}</span>
-                      <span className="pt-clip-list-name" title={entry.clip.name}>{entry.clip.name}</span>
-                      <span className="pt-clip-list-track">{entry.track.name}</span>
+                      <span className="pt-clip-list-kind">
+                        {entry.kind === "group" ? "Group" : MEDIA_LABELS[entry.clip.type]}
+                      </span>
+                      <span className="pt-clip-list-name" title={entry.name}>{entry.name}</span>
+                      <span className="pt-clip-list-track">
+                        {entry.kind === "group" ? `${entry.memberCount} clips` : entry.track.name}
+                      </span>
                       <span className="pt-clip-list-time">{entry.clip.start.toFixed(2)} s</span>
                     </button>
                   </li>

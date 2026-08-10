@@ -77,6 +77,9 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("set_clip_reverse")   == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_crossfade") == Scope::Clip);
     REQUIRE (LockManager::classify ("normalize_clip")     == Scope::Clip);
+    REQUIRE (LockManager::classify ("create_clip_group")  == Scope::Clip);
+    REQUIRE (LockManager::classify ("ungroup_clip_group") == Scope::Clip);
+    REQUIRE (LockManager::classify ("rename_clip_group")  == Scope::Clip);
 }
 
 TEST_CASE ("classify: render-layer mutations are clip-scoped", "[multiplayer][lock]")
@@ -254,6 +257,7 @@ namespace
             // Structural: create/rename/remove a track, bus, or group -- these
             // change the session's track list itself, not one existing track.
             "create_track", "create_bus", "create_group_track", "ungroup_track",
+            "regroup_clip_group",
             "rename_bus", "remove_bus",
             // Song-structure sections/annotations span the whole timeline.
             "create_section", "rename_section", "move_section", "remove_section",

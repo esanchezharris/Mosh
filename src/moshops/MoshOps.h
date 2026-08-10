@@ -105,6 +105,10 @@ private:
     juce::var cmdRenameSection  (const juce::var& args);
     juce::var cmdMoveSection    (const juce::var& args);
     juce::var cmdRemoveSection  (const juce::var& args);
+    juce::var cmdCreateClipGroup  (const juce::var& args);
+    juce::var cmdUngroupClipGroup (const juce::var& args);
+    juce::var cmdRegroupClipGroup (const juce::var& args);
+    juce::var cmdRenameClipGroup  (const juce::var& args);
     // LYR-001 — Finish-My-Song lyric sheet (MOSH_LYRICSHEET on a track; undoable).
     juce::var cmdCreateLyricSheet  (const juce::var& args);
     juce::var cmdRemoveLyricSheet  (const juce::var& args);
@@ -531,6 +535,9 @@ private:
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
     juce::var sectionsToVar();
     juce::var annotationsToVar();
+    juce::var clipGroupsToVar();
+    juce::ValueTree findClipGroupForClip (const juce::String& clipId, bool activeOnly);
+    std::vector<te::Clip*> clipGroupMembers (const juce::ValueTree& group);
 
     // LYR-001 — a track's MOSH_LYRICSHEET as a snapshot object (read-only; never
     // creates the tree). { id, grid, language, topic, mood, explicit, rhymeStrictness,

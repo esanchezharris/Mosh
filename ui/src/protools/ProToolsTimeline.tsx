@@ -14,6 +14,7 @@ import { ProToolsEditSelectionOverlay } from "./ProToolsEditSelectionOverlay";
 import { ProToolsPlaylists } from "./ProToolsPlaylists";
 import { ProToolsPunchOverlay } from "./ProToolsPunchOverlay";
 import { proToolsSelectionSecondAt } from "./proToolsEditSelection";
+import { proToolsClipSelection } from "./proToolsClipGroups";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { proToolsEditableLaneTarget } from "./proToolsLaneTarget";
 import { useProTools } from "./proToolsState";
@@ -57,6 +58,14 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
   const clipMap = useMemo(() => new Map(tracks.flatMap((track) =>
     track.clips.map((clip) => [clip.id, { clip, track }] as const))), [tracks]);
+  const clipGroupsByClipId = useMemo(() => {
+    const groups = new Map<string, NonNullable<Snapshot["clipGroups"]>[number]>();
+    for (const group of snapshot.clipGroups ?? []) {
+      if (!group.active) continue;
+      for (const clipId of group.clipIds) groups.set(clipId, group);
+    }
+    return groups;
+  }, [snapshot.clipGroups]);
   const beatsInSeconds = beatSeconds(meterFrom(snapshot.session));
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const marqueeRef = useRef<Marquee | null>(null);
@@ -157,7 +166,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     if (e.button !== 0) return;
     if (editMode === "spot" && current.intent === "grabber") {
       e.preventDefault(); e.stopPropagation();
-      select([current.clip.id]);
+      select([...proToolsClipSelection(snapshot, current.clip.id)]);
       current.element.focus();
       spotCandidate.current = {
         pointerId: e.pointerId,
@@ -169,7 +178,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     }
     if (current.intent === "velocity-trim" && current.clip.notes?.length) {
       e.preventDefault(); e.stopPropagation();
-      select([current.clip.id]);
+      select([...proToolsClipSelection(snapshot, current.clip.id)]);
       velocityDrag.current = {
         pointerId: e.pointerId,
         startY: e.clientY,
@@ -274,9 +283,9 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
       const ids = clipMap.size > 0 && end - start >= 0.02
         ? (snapshot.tracks.find((track) => track.id === area.trackId)?.clips ?? [])
             .filter((clip) => clip.start < end && clip.start + clip.length > start)
-            .map((clip) => clip.id)
+            .flatMap((clip) => proToolsClipSelection(snapshot, clip.id))
         : [];
-      select(ids, false);
+      select([...new Set(ids)], false);
     }
     if (handled) releasePointer(e.currentTarget, e.pointerId);
   };
@@ -332,7 +341,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     const match = element?.dataset.clipId ? clipMap.get(element.dataset.clipId) : null;
     if (!match) return;
     e.preventDefault(); e.stopPropagation();
-    select([match.clip.id]);
+    select([...proToolsClipSelection(snapshot, match.clip.id)]);
     onSpotClip(match.clip);
   };
 
@@ -389,14 +398,19 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
               } as React.CSSProperties}>
               {!primaryAutomation && track.clips.filter((clip) => !clip.hidden).map((clip) => {
                 if (clip.type === "wave") {
-                  return <ProToolsAudioClip key={clip.id} clip={clip} snapshot={snapshot} track={track} />;
+                  return <ProToolsAudioClip key={clip.id} clip={clip} snapshot={snapshot} track={track}
+                    group={clipGroupsByClipId.get(clip.id)} />;
                 }
+                const group = clipGroupsByClipId.get(clip.id);
                 return (
                   <span key={clip.id}>
                     <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
                       clipHeaderPx={0}
                       clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
                       midiVerticalZoom={midiNoteZoom}
+                      linkedClipIds={group?.clipIds}
+                      clipGroupId={group?.id}
+                      clipGroupName={group?.name}
                       gestureTable={() => proToolsGestureTable("midi", smartToolEnabled, activeTool)} />
                   </span>
                 );

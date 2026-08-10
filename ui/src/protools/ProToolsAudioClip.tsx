@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Clip, ClipGainPoint, Snapshot, Track } from "../types";
+import type { Clip, ClipGainPoint, ClipGroup, Snapshot, Track } from "../types";
 import { ClipView } from "../v2/lanes/ClipView";
 import { clipGainAmplitude } from "./clipGain";
 import { clipGainOffsetAt } from "./clipGainEnvelope";
@@ -14,11 +14,12 @@ type ProToolsAudioClipProps = {
   readonly clip: Clip;
   readonly snapshot: Snapshot;
   readonly track: Track;
+  readonly group?: ClipGroup;
 };
 
 const EMPTY_GAIN_POINTS: readonly ClipGainPoint[] = [];
 
-export function ProToolsAudioClip({ clip, snapshot, track }: ProToolsAudioClipProps) {
+export function ProToolsAudioClip({ clip, snapshot, track, group }: ProToolsAudioClipProps) {
   const smartToolEnabled = useProTools((state) => state.smartToolEnabled);
   const activeTool = useProTools((state) => state.activeTool);
   const audioWaveformZoom = useProTools((state) => state.audioWaveformZoom);
@@ -40,7 +41,10 @@ export function ProToolsAudioClip({ clip, snapshot, track }: ProToolsAudioClipPr
       <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
         clipHeaderPx={Math.max(8, (trackHeight - 30) / 2)} clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
         gestureTable={() => proToolsGestureTable("audio", smartToolEnabled, activeTool)}
-        waveAmplitudeAt={waveAmplitudeAt} />
+        waveAmplitudeAt={waveAmplitudeAt}
+        linkedClipIds={group?.clipIds}
+        clipGroupId={group?.id}
+        clipGroupName={group?.name} />
       <ProToolsFadeHandles clip={clip} track={track} />
       <ProToolsClipGain clip={clip} onPreviewGainChange={setPreviewGain}
         onPreviewPointsChange={setPreviewPoints} />
