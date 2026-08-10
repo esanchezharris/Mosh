@@ -3,6 +3,7 @@ import { isEditableTarget } from "../interaction/keymap";
 import { useStore, type State } from "../store";
 import type { Snapshot } from "../types";
 import { useProTools, type ProToolsEditMode } from "./proToolsState";
+import { applyHorizontalZoom, applyHorizontalZoomStep } from "./proToolsZoom";
 import type { ProToolsTool } from "./smartTool";
 import { nextTabPosition } from "./tabNavigation";
 import { nextCommonProToolsTrackView } from "./trackViews";
@@ -27,6 +28,10 @@ type ReadonlyPeaks = Readonly<Record<string, readonly (readonly [number, number]
 
 function ownsTabToTransientNavigation(element: Element | null): boolean {
   if (element === document.body) return true;
+  return element?.closest(".pt-timeline-scroll, [data-clip-id]") !== null;
+}
+
+function ownsEditKeyboardFocus(element: Element | null): boolean {
   return element?.closest(".pt-timeline-scroll, [data-clip-id]") !== null;
 }
 
@@ -76,6 +81,22 @@ export function useProToolsKeys(): void {
         proTools.setActiveTool(tool);
         if (proTools.smartToolEnabled) proTools.toggleSmartTool();
         return;
+      }
+
+      const noModifiers = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+      if (noModifiers && ownsEditKeyboardFocus(document.activeElement)) {
+        const zoomKey = event.key.toLowerCase();
+        if (zoomKey === "r" || zoomKey === "t") {
+          event.preventDefault();
+          applyHorizontalZoomStep(zoomKey === "t" ? 1 : -1);
+          return;
+        }
+        const presetIndex = /^[1-5]$/.test(event.key) ? Number(event.key) - 1 : -1;
+        if (presetIndex >= 0) {
+          event.preventDefault();
+          applyHorizontalZoom(useProTools.getState().horizontalZoomPresets[presetIndex] ?? 80);
+          return;
+        }
       }
 
       if ((event.key === "-" || event.code === "NumpadSubtract")

@@ -87,6 +87,57 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   expect(clipList.width / viewport.width).toBeLessThan(0.18);
 });
 
+test("tutorial-backed horizontal zoom preserves the editing focus workflow", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  const timeline = page.getByTestId("pt-timeline");
+  await timeline.focus();
+  const traceBefore = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace?.length ?? 0);
+
+  await page.keyboard.press("r");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(56);
+  await page.keyboard.press("t");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(80);
+
+  await page.getByTestId("pt-zoom-preset-5").click();
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(320);
+  await page.getByTestId("pt-zoom-preset-3").click();
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(80);
+
+  await timeline.focus();
+  await page.keyboard.press("F5");
+  await expect(page.getByRole("button", { name: "Zoomer" })).toHaveAttribute("aria-pressed", "true");
+  const bounds = await timeline.boundingBox();
+  if (!bounds) throw new Error("timeline bounds are missing");
+  const y = bounds.y + Math.min(150, bounds.height / 2);
+  await page.mouse.move(bounds.x + 160, y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + Math.min(bounds.width - 80, 680), y, { steps: 4 });
+  await expect(page.locator(".pt-zoom-marquee")).toBeVisible();
+  await page.mouse.up();
+  await expect(page.locator(".pt-zoom-marquee")).toHaveCount(0);
+  const afterRange = await storeVal<number>(page, "pxPerSec");
+  expect(afterRange).toBeGreaterThan(80);
+
+  await page.keyboard.down("Alt");
+  await page.mouse.wheel(0, 100);
+  await page.keyboard.up("Alt");
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBeLessThan(afterRange);
+  await page.screenshot({ path: testInfo.outputPath("protools-zoom-wide.png"), animations: "disabled" });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  const zoomGroup = page.getByRole("group", { name: "Horizontal Zoom" });
+  await zoomGroup.scrollIntoViewIfNeeded();
+  await expect(zoomGroup).toBeInViewport();
+  await expect(page.getByTestId("pt-zoom-in")).toBeVisible();
+  await expect(page.getByTestId("pt-zoom-preset-5")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("protools-zoom-compact.png"), animations: "disabled" });
+
+  const traceAfter = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace?.length ?? 0);
+  expect(traceAfter).toBe(traceBefore);
+});
+
 test("mode, tool, Smart Tool, and resizable headers are keyboard operable", async ({ page }) => {
   await bootProTools(page);
   const shell = page.getByTestId("protools-shell");

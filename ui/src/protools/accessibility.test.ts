@@ -70,6 +70,8 @@ describe("Pro Tools accessibility tokens", () => {
 
   it("keeps compact toolbar groups reachable by horizontal scrolling", () => {
     expect(toolbar).toContain("overflow-x: auto;");
+    expect(toolbar).toContain(".pt-zoom-presets button {");
+    expect(toolbar).toContain("min-height: 24px;");
     expect(responsive).toContain(".pt-toolbar-group { flex: 0 0 auto; }");
     expect(responsive).not.toContain(".pt-grid-group { display: none; }");
     expect(responsive).not.toContain(".pt-view-group { display: none; }");

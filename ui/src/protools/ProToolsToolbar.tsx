@@ -8,6 +8,7 @@ import type { Snapshot } from "../types";
 import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconStop } from "../ui/icons";
 import { useTransportControls } from "../v2/useTransportControls";
 import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
+import { ProToolsZoomControls } from "./ProToolsZoomControls";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
 import type { ProToolsTool } from "./smartTool";
 
@@ -92,6 +93,8 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
           </MoshTip>
         ))}
       </div>
+
+      <ProToolsZoomControls />
 
       <div className="pt-toolbar-group pt-tool-group" role="group" aria-label="Edit Tools">
         <span className="pt-toolbar-label">Edit Tools</span>

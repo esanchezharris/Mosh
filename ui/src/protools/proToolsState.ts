@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AutomationClipboard } from "./automationEditing";
+import { clampHorizontalZoom, DEFAULT_HORIZONTAL_ZOOM_PRESETS } from "./proToolsZoom";
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 import type { ProToolsTrackView } from "./trackViews";
 
@@ -23,6 +24,7 @@ type ProToolsViewState = {
   readonly automationClipboard: AutomationClipboard | null;
   readonly trackViews: Readonly<Record<string, ProToolsTrackView>>;
   readonly automationLanesVisible: Readonly<Record<string, boolean>>;
+  readonly horizontalZoomPresets: readonly number[];
 };
 
 type ProToolsActions = {
@@ -39,6 +41,7 @@ type ProToolsActions = {
   readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
   readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
   readonly toggleAutomationLane: (trackId: string) => void;
+  readonly setHorizontalZoomPreset: (index: number, pxPerSec: number) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -64,6 +67,7 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   automationClipboard: null,
   trackViews: {},
   automationLanesVisible: {},
+  horizontalZoomPresets: [...DEFAULT_HORIZONTAL_ZOOM_PRESETS],
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -90,6 +94,12 @@ export const useProTools = create<ProToolsState>((set) => ({
       [trackId]: !state.automationLanesVisible[trackId],
     },
   })),
+  setHorizontalZoomPreset: (index, pxPerSec) => set((state) => {
+    if (!Number.isInteger(index) || index < 0 || index >= state.horizontalZoomPresets.length) return state;
+    const horizontalZoomPresets = [...state.horizontalZoomPresets];
+    horizontalZoomPresets[index] = clampHorizontalZoom(pxPerSec);
+    return { horizontalZoomPresets };
+  }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

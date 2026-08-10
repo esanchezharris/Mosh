@@ -12,6 +12,7 @@ import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
 import { ProToolsPlaylists } from "./ProToolsPlaylists";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
+import { applyHorizontalZoomRange, applyHorizontalZoomStep } from "./proToolsZoom";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
 import { proToolsTrackRowHeight, resolveProToolsTrackView } from "./trackViews";
 
@@ -26,6 +27,7 @@ type Props = {
 type ClipMatch = { clip: Clip; track: Track };
 type Marquee = { pointerId: number; trackId: string; startX: number; x: number; top: number };
 type SpotCandidate = { pointerId: number; clip: Clip; epoch: number };
+type ZoomArea = { pointerId: number; startX: number; x: number; epoch: number; zoomOut: boolean };
 
 export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, onSpotClip }: Props) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -44,11 +46,14 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const beatsInSeconds = beatSeconds(meterFrom(snapshot.session));
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const marqueeRef = useRef<Marquee | null>(null);
+  const [zoomArea, setZoomArea] = useState<ZoomArea | null>(null);
+  const zoomAreaRef = useRef<ZoomArea | null>(null);
   const velocityDrag = useRef<{
     pointerId: number; startY: number; clip: Clip; epoch: number;
   } | null>(null);
   const spotCandidate = useRef<SpotCandidate | null>(null);
   const lastIntentClip = useRef<HTMLElement | null>(null);
+  const zoomerEnabled = !smartToolEnabled && activeTool === "zoomer";
 
   const hit = (e: React.PointerEvent): (ClipMatch & { element: HTMLElement; intent: ProToolsIntent; blank: boolean }) | null => {
     if (!(e.target instanceof HTMLElement)) return null;
@@ -87,6 +92,23 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   };
 
   const onPointerDownCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (zoomerEnabled && e.button === 0) {
+      e.preventDefault(); e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const next = {
+        pointerId: e.pointerId,
+        startX: x,
+        x,
+        epoch: useStore.getState().projectEpoch,
+        zoomOut: e.altKey,
+      };
+      zoomAreaRef.current = next;
+      setZoomArea(next);
+      setHoveredIntent("zoomer");
+      capturePointer(e.currentTarget, e.pointerId);
+      return;
+    }
     const current = hit(e);
     if (!current || e.button !== 0) return;
     if (editMode === "spot" && current.intent === "grabber") {
@@ -131,6 +153,14 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   };
 
   const onPointerMoveCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (zoomAreaRef.current?.pointerId === e.pointerId) {
+      e.preventDefault(); e.stopPropagation();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const next = { ...zoomAreaRef.current, x: e.clientX - rect.left };
+      zoomAreaRef.current = next;
+      setZoomArea(next);
+      return;
+    }
     if (velocityDrag.current || marqueeRef.current) {
       e.preventDefault(); e.stopPropagation();
       if (marqueeRef.current) {
@@ -145,6 +175,17 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   };
 
   const finishGesture = (e: React.PointerEvent<HTMLDivElement>) => {
+    const zoom = zoomAreaRef.current;
+    if (zoom?.pointerId === e.pointerId) {
+      e.preventDefault(); e.stopPropagation();
+      zoomAreaRef.current = null;
+      setZoomArea(null);
+      releasePointer(e.currentTarget, e.pointerId);
+      if (useStore.getState().projectEpoch !== zoom.epoch || !scrollRef.current) return;
+      if (!applyHorizontalZoomRange(scrollRef.current, zoom.startX, zoom.x))
+        applyHorizontalZoomStep(zoom.zoomOut ? -1 : 1, e.clientX);
+      return;
+    }
     const spot = spotCandidate.current;
     if (spot?.pointerId === e.pointerId) {
       e.preventDefault(); e.stopPropagation();
@@ -189,13 +230,19 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     const velocity = velocityDrag.current;
     const area = marqueeRef.current;
     const spot = spotCandidate.current;
+    const zoom = zoomAreaRef.current;
     const cancelled = velocity?.pointerId === e.pointerId
       || area?.pointerId === e.pointerId
-      || spot?.pointerId === e.pointerId;
+      || spot?.pointerId === e.pointerId
+      || zoom?.pointerId === e.pointerId;
     if (!cancelled) return;
     e.preventDefault(); e.stopPropagation();
     if (velocity?.pointerId === e.pointerId) velocityDrag.current = null;
     if (spot?.pointerId === e.pointerId) spotCandidate.current = null;
+    if (zoom?.pointerId === e.pointerId) {
+      zoomAreaRef.current = null;
+      setZoomArea(null);
+    }
     if (area?.pointerId === e.pointerId) {
       marqueeRef.current = null;
       setMarquee(null);
@@ -204,6 +251,19 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   };
 
   const onKeyDownCapture = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (zoomerEnabled && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault(); e.stopPropagation();
+      if (!(e.target instanceof HTMLElement) || !scrollRef.current) return;
+      const element = e.target.closest<HTMLElement>("[data-clip-id]");
+      const match = element?.dataset.clipId ? clipMap.get(element.dataset.clipId) : null;
+      if (match) applyHorizontalZoomRange(
+        scrollRef.current,
+        match.clip.start * pxPerSec,
+        (match.clip.start + match.clip.length) * pxPerSec,
+      );
+      else applyHorizontalZoomStep(1);
+      return;
+    }
     if (editMode !== "spot" || (e.key !== "Enter" && e.key !== " ")) return;
     if (!smartToolEnabled && activeTool !== "grabber") return;
     if (!(e.target instanceof HTMLElement)) return;
@@ -228,7 +288,13 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     : TRACK_ROW_HEIGHT;
 
   return (
-    <div ref={scrollRef} className="pt-timeline-scroll" data-testid="pt-timeline" onScroll={onScroll}
+    <div ref={scrollRef} className="pt-timeline-scroll" data-testid="pt-timeline"
+      data-zoom-tool={zoomerEnabled} onScroll={onScroll}
+      onWheel={(event) => {
+        if (!event.altKey || event.deltaY === 0) return;
+        event.preventDefault();
+        applyHorizontalZoomStep(event.deltaY < 0 ? 1 : -1, event.clientX);
+      }}
       role="region" aria-label="Editing timeline" tabIndex={0}>
       <div className="pt-timeline-content" style={{ width: contentWidth }}
         onPointerDownCapture={onPointerDownCapture} onPointerMoveCapture={onPointerMoveCapture}
@@ -277,6 +343,10 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           top: marquee.top,
           width: Math.abs(marquee.x - marquee.startX),
           height: marqueeHeight,
+        }} />}
+        {zoomArea && <div className="pt-zoom-marquee" style={{
+          left: Math.min(zoomArea.startX, zoomArea.x),
+          width: Math.abs(zoomArea.x - zoomArea.startX),
         }} />}
         <div className="pt-playhead" data-testid="pt-playhead" style={{ left: position * pxPerSec }} aria-hidden="true" />
       </div>

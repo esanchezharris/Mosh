@@ -71,6 +71,20 @@ describe("ProToolsTimeline pointer capture", () => {
     return element;
   };
 
+  const timeline = () => {
+    const scroll = host.querySelector<HTMLDivElement>(".pt-timeline-scroll");
+    const content = host.querySelector<HTMLDivElement>(".pt-timeline-content");
+    if (!scroll || !content) throw new Error("timeline did not render");
+    Object.defineProperty(scroll, "clientWidth", { configurable: true, value: 400 });
+    scroll.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300, x: 0, y: 0, toJSON: () => ({}),
+    }) as DOMRect;
+    content.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 600, bottom: 300, width: 600, height: 300, x: 0, y: 0, toJSON: () => ({}),
+    }) as DOMRect;
+    return { scroll, content };
+  };
+
   const dispatchPointer = (element: HTMLElement, type: string, init: PointerEventInit) => {
     act(() => element.dispatchEvent(new PointerEvent(type, { bubbles: true, ...init })));
   };
@@ -227,5 +241,56 @@ describe("ProToolsTimeline pointer capture", () => {
     // Then: the transient selection gesture is removed without selecting a clip.
     expect(host.querySelector(".pt-marquee")).toBeNull();
     expect(useStore.getState().selection).toEqual(new Set<string>());
+  });
+
+  it("uses Option-wheel for anchored horizontal zoom", () => {
+    const { scroll } = timeline();
+
+    act(() => scroll.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      altKey: true,
+      deltaY: -20,
+    })));
+
+    expect(useStore.getState().pxPerSec).toBe(112);
+  });
+
+  it("zooms to an F5 Zoomer drag range without sending a project command", () => {
+    const { content } = timeline();
+    act(() => {
+      useProTools.getState().setActiveTool("zoomer");
+      useProTools.getState().toggleSmartTool();
+    });
+
+    dispatchPointer(content, "pointerdown", { pointerId: 30, button: 0, clientX: 100, clientY: 100 });
+    dispatchPointer(content, "pointermove", { pointerId: 30, buttons: 1, clientX: 300, clientY: 100 });
+    expect(host.querySelector(".pt-zoom-marquee")).not.toBeNull();
+    dispatchPointer(content, "pointerup", { pointerId: 30, button: 0, clientX: 300, clientY: 100 });
+
+    expect(host.querySelector(".pt-zoom-marquee")).toBeNull();
+    expect(useStore.getState().pxPerSec).toBe(180);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("abandons an F5 Zoomer drag on pointer cancellation or project replacement", () => {
+    const { content } = timeline();
+    act(() => {
+      useProTools.getState().setActiveTool("zoomer");
+      useProTools.getState().toggleSmartTool();
+    });
+
+    dispatchPointer(content, "pointerdown", { pointerId: 31, button: 0, clientX: 80, clientY: 100 });
+    dispatchPointer(content, "pointermove", { pointerId: 31, buttons: 1, clientX: 260, clientY: 100 });
+    dispatchPointer(content, "pointercancel", { pointerId: 31, clientX: 260, clientY: 100 });
+    expect(useStore.getState().pxPerSec).toBe(100);
+    expect(host.querySelector(".pt-zoom-marquee")).toBeNull();
+
+    dispatchPointer(content, "pointerdown", { pointerId: 32, button: 0, clientX: 80, clientY: 100 });
+    dispatchPointer(content, "pointermove", { pointerId: 32, buttons: 1, clientX: 260, clientY: 100 });
+    act(() => useStore.setState({ projectEpoch: 42 }));
+    dispatchPointer(content, "pointerup", { pointerId: 32, clientX: 260, clientY: 100 });
+    expect(useStore.getState().pxPerSec).toBe(100);
+    expect(exec).not.toHaveBeenCalled();
   });
 });

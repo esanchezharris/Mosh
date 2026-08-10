@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProTools } from "./proToolsState";
+import { DEFAULT_HORIZONTAL_ZOOM_PRESETS } from "./proToolsZoom";
 
 describe("Pro Tools shell state", () => {
   let projectEpoch = 0;
@@ -25,6 +26,7 @@ describe("Pro Tools shell state", () => {
       automationClipboard: state.automationClipboard,
       trackViews: state.trackViews,
       automationLanesVisible: state.automationLanesVisible,
+      horizontalZoomPresets: state.horizontalZoomPresets,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -43,6 +45,7 @@ describe("Pro Tools shell state", () => {
       automationClipboard: null,
       trackViews: {},
       automationLanesVisible: {},
+      horizontalZoomPresets: DEFAULT_HORIZONTAL_ZOOM_PRESETS,
     });
   });
 

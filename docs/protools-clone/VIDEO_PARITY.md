@@ -24,7 +24,7 @@ Grabber. Mosh follows the documented 25/75 contract.
 
 ## Primary official corpus
 
-The titles and channel attribution for V01-V11 were rechecked through YouTube's
+The titles and channel attribution for V01-V12 were rechecked through YouTube's
 oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 
 | ID | Avid video | Timecoded evidence |
@@ -41,6 +41,7 @@ oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 | V10 | [Playlist Comping](https://www.youtube.com/watch?v=8X3KQ3Cq8Co) | 0:00 comping definition; 0:12 vocal takes in separate playlists; 0:22 audition/select best parts into a comp; 0:28 word/syllable swaps; 0:33 guitar/drum use. Full-window frames show a main comp lane above aligned, waveform-bearing playlist rows. |
 | V10B | [Pro Tools Tech Tips: Playlist Comping](https://www.youtube.com/watch?v=JnsKGu4ZqiU) | Official Avid visual corroboration: stacked vocal playlist lanes, timeline-aligned waveform alternatives, and assembled material in the main lane. It has music rather than useful narration, so V10 and Avid help remain the behavioral authority. |
 | V11 | [Fast Start: Mixing Fundamentals](https://www.youtube.com/watch?v=MDcgJju4WOY) | 3:09 fader; 3:36 pan; 6:26 inserts; 7:23 existing vocal send; 7:28-7:48 several sources share one reverb return; 8:04 send selection; 8:08-8:13 send-fader increase; 8:22 shared-return CPU rationale; 8:32 mix bus; 9:02 mix-bus fader; 9:26 mix-bus inserts. |
+| V12 | [Zoom](https://www.youtube.com/watch?v=hyPdxSg48M0) | 0:00 Zoom cluster; 0:05 horizontal controls; 0:11 Option/Alt-scroll; 0:18 R/T out/in with Edit Keyboard Focus; 0:28 presets 1-5; 0:35 Command/Control-click stores a preset; 0:41 lower scrollbar controls; 0:44 separate audio-waveform and MIDI-note vertical zoom. Full-window frames place the compact Zoom cluster between Edit Modes and Edit Tools. |
 
 V05 (2025) and V06 (2026) take precedence over older visuals when the interface
 differs. Full documentation and non-video references live in [RESEARCH.md](./RESEARCH.md).
@@ -101,6 +102,7 @@ native, physical-device, or audio-output acceptance.
 |---|---|---|---|
 | Edit Window zones | V01, V05, C01 | `MATCH` | `?shell=protools` Chromium zones test; fresh wide/compact producer-flow captures. |
 | Edit modes/tools | V01, V02, C02 | `MATCH` | F1–F10 Chromium state proof and Smart Tool classifier tests. |
+| Horizontal zoom | V12 plus Avid Zoomer/zoom-controls help | `MATCH/PARTIAL` | An original compact cluster sits between Edit Modes and Edit Tools; −/+, R/T with timeline focus, Option/Alt-wheel, and project-scoped presets 1-5 preserve a centered time anchor. F5 Zoomer click/drag previews and fits a time range, cancels on pointer cancellation or project replacement, and changes no project command trace. Separate audio-waveform/MIDI-note vertical zoom, Single Zoom mode, and the lower scrollbar control remain gaps. |
 | Recording/routing | V03, V04, V05 | `MATCH/ADAPTED` | Producer flow asserts unassigned/Auto/disarmed, routed/Monitor In/armed, active record, stopped take, and command trace. Track inspector replaces the full I/O matrix. |
 | Track controls | V03, V05, V11 | `ADAPTED` | Header exposes select/arm/solo/mute and actual output; inspector owns deeper routing, mix, and inserts. Expanded header density is optional follow-up. |
 | Static clip gain | V06, C03 | `MATCH` | Selected-clip line/handle, local drag preview, keyboard control, dB-amplitude waveform response, epoch cancellation, inspector agreement, and `set_clip_gain` commit. |

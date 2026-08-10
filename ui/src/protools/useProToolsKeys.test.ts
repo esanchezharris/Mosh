@@ -81,6 +81,7 @@ describe("useProToolsKeys", () => {
       peaks: {},
       projectEpoch: 7,
       selectedTrackId: "track-1",
+      pxPerSec: 80,
       exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
         return { ok: true, command };
@@ -190,6 +191,48 @@ describe("useProToolsKeys", () => {
       command: "set_transport",
       args: { position: 2 },
     }));
+    canvas.remove();
+  });
+
+  it("uses R and T for horizontal zoom while the editing timeline owns focus", () => {
+    const canvas = document.createElement("div");
+    canvas.className = "pt-timeline-scroll";
+    canvas.tabIndex = 0;
+    document.body.appendChild(canvas);
+    canvas.focus();
+
+    act(() => canvas.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "r", bubbles: true, cancelable: true,
+    })));
+    expect(useStore.getState().pxPerSec).toBe(56);
+
+    act(() => canvas.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "t", bubbles: true, cancelable: true,
+    })));
+    expect(useStore.getState().pxPerSec).toBe(80);
+    canvas.remove();
+  });
+
+  it("recalls zoom presets 1-5 only from the editing timeline", () => {
+    useProTools.getState().setHorizontalZoomPreset(0, 160);
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    act(() => outside.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "1", bubbles: true, cancelable: true,
+    })));
+    expect(useStore.getState().pxPerSec).toBe(80);
+
+    const canvas = document.createElement("div");
+    canvas.className = "pt-timeline-scroll";
+    canvas.tabIndex = 0;
+    document.body.appendChild(canvas);
+    canvas.focus();
+    act(() => canvas.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "1", bubbles: true, cancelable: true,
+    })));
+    expect(useStore.getState().pxPerSec).toBe(160);
+    outside.remove();
     canvas.remove();
   });
 

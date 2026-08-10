@@ -490,6 +490,17 @@
   background: color-mix(in srgb, var(--pt-selected) 16%, transparent);
   pointer-events: none;
 }
+.pt-timeline-scroll[data-zoom-tool="true"] { cursor: zoom-in; }
+.pt-zoom-marquee {
+  position: absolute;
+  z-index: 13;
+  top: var(--pt-track-title-h);
+  bottom: 0;
+  border: 1px solid var(--pt-selected);
+  background: color-mix(in srgb, var(--pt-selected) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-on-selected) 30%, transparent);
+  pointer-events: none;
+}
 .pt-playhead {
   position: absolute;
   z-index: 11;

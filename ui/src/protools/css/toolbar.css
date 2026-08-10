@@ -70,6 +70,33 @@
   line-height: 1;
 }
 .pt-smart-button { min-width: 48px !important; font-weight: 700; }
+.pt-zoom-group {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-rows: 25px 24px;
+  align-content: end;
+  gap: 2px;
+  padding: 17px 4px 3px;
+}
+.pt-zoom-step-row,
+.pt-zoom-presets { display: flex; align-items: center; gap: 2px; }
+.pt-zoom-step-row button { min-width: 26px; min-height: 25px; padding: 1px 5px; font-size: 14px; }
+.pt-zoom-step-row output {
+  display: grid;
+  width: 34px;
+  height: 23px;
+  place-items: center;
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-zoom-presets button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 3px;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .pt-session-group { flex: 0 0 auto; padding-top: 18px; }
 .pt-session-button { min-width: 58px !important; font-weight: 700; }
 .pt-transport-group { padding-top: 4px; align-items: center; }
