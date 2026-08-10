@@ -178,6 +178,59 @@ test("Track Views follow contextual selectors, Minus toggles, and automation dis
   await page.screenshot({ path: testInfo.outputPath("protools-track-views-compact.png"), animations: "disabled" });
 });
 
+test("Playlists expose recorded takes and audition the chosen whole take", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  await sessionAction(page, "new_project");
+  await page.getByTestId("pt-add-track").click();
+  await page.getByTestId("pt-add-track-audio").click();
+
+  const header = page.getByTestId("pt-track-header").first();
+  const trackId = await header.getAttribute("data-track-id");
+  if (!trackId) throw new Error("recorded playlist track id is absent");
+  const lane = page.locator(`[data-testid="pt-lane"][data-track-id="${trackId}"]`);
+  await header.getByTestId("pt-track-select").click();
+  await page.getByTestId("pt-io-input").click();
+  await page.getByTestId("pt-io-input-option").filter({ hasText: "Input 1-2" }).click();
+  await header.getByTestId("pt-track-arm").click();
+
+  const toolbar = page.getByTestId("pt-toolbar");
+  const record = toolbar.getByRole("button", { name: "Record", exact: true });
+  const stop = toolbar.getByRole("button", { name: "Stop", exact: true });
+  for (let take = 0; take < 2; take += 1) {
+    await record.click();
+    await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(true);
+    await stop.click();
+    await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(false);
+  }
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.numTakes")).toBe(2);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.currentTakeIndex")).toBe(1);
+
+  await header.getByTestId("pt-track-view").selectOption("playlists");
+  await expect(header).toHaveAttribute("data-track-view", "playlists");
+  await expect(lane).toHaveAttribute("data-track-view", "playlists");
+  await expect(header).toHaveCSS("height", "144px");
+  await expect(lane).toHaveCSS("height", "144px");
+  const playlists = lane.getByTestId("pt-playlists");
+  await expect(playlists.getByTestId("pt-playlist-bar")).toHaveCount(2);
+  await expect(playlists.getByRole("button", { name: /Take 2 on Audio, current/ })).toHaveAttribute("aria-pressed", "true");
+
+  await playlists.getByRole("button", { name: /Take 1 on Audio/ }).click();
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.currentTakeIndex")).toBe(0);
+  await expect(playlists.getByRole("button", { name: /Take 1 on Audio, current/ })).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: testInfo.outputPath("protools-playlists-wide.png"), animations: "disabled" });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
+  await expect(playlists).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("protools-playlists-compact.png"), animations: "disabled" });
+
+  const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  expect(trace.map((entry) => entry.command)).toContain("set_current_take");
+  expect(trace.filter((entry) => !entry.ok)).toEqual([]);
+});
+
 test("Spot mode opens a keyboard modal and moves the clip through the command seam", async ({ page }, testInfo) => {
   // Given: the Pro Tools shell is in Spot mode with a rendered clip focused.
   await page.setViewportSize({ width: 1440, height: 900 });

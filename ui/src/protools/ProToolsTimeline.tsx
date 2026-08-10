@@ -9,10 +9,11 @@ import { midiPointerIsBlank } from "./midiBlankHit";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { ProToolsAudioClip } from "./ProToolsAudioClip";
 import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
+import { ProToolsPlaylists } from "./ProToolsPlaylists";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
-import { resolveProToolsTrackView } from "./trackViews";
+import { proToolsTrackRowHeight, resolveProToolsTrackView } from "./trackViews";
 
 type Props = {
   snapshot: Snapshot;
@@ -214,6 +215,18 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
     onSpotClip(match.clip);
   };
 
+  const marqueeTrack = marquee ? tracks.find((track) => track.id === marquee.trackId) : undefined;
+  const marqueeTrackView = marqueeTrack
+    ? resolveProToolsTrackView(marqueeTrack, trackViews[marqueeTrack.id])
+    : undefined;
+  const marqueeHeight = marqueeTrack && marqueeTrackView
+    ? proToolsTrackRowHeight(
+        marqueeTrack,
+        marqueeTrackView,
+        marqueeTrackView !== "volume" && Boolean(automationLanesVisible[marqueeTrack.id]),
+      )
+    : TRACK_ROW_HEIGHT;
+
   return (
     <div ref={scrollRef} className="pt-timeline-scroll" data-testid="pt-timeline" onScroll={onScroll}
       role="region" aria-label="Editing timeline" tabIndex={0}>
@@ -227,11 +240,13 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           const trackView = resolveProToolsTrackView(track, trackViews[track.id]);
           const primaryAutomation = trackView === "volume";
           const secondaryAutomation = !primaryAutomation && Boolean(automationLanesVisible[track.id]);
+          const rowHeight = proToolsTrackRowHeight(track, trackView, secondaryAutomation);
           return (
             <div key={track.id} className="pt-lane" data-testid="pt-lane" data-track-id={track.id}
               data-track-view={trackView} data-secondary-automation={secondaryAutomation}
               style={{
-                height: TRACK_ROW_HEIGHT,
+                height: rowHeight,
+                "--pt-main-lane-h": `${TRACK_ROW_HEIGHT}px`,
                 "--pt-track-color": track.color ?? "var(--pt-selected)",
                 "--pt-beat-px": `${beatsInSeconds * pxPerSec}px`,
               } as React.CSSProperties}>
@@ -248,6 +263,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
                   </span>
                 );
               })}
+              {trackView === "playlists" && <ProToolsPlaylists track={track} />}
               {(primaryAutomation || secondaryAutomation) && (
                 <ProToolsAutomationLane track={track} width={contentWidth}
                   primary={primaryAutomation} targetName="Volume" />
@@ -260,7 +276,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           left: Math.min(marquee.startX, marquee.x),
           top: marquee.top,
           width: Math.abs(marquee.x - marquee.startX),
-          height: TRACK_ROW_HEIGHT,
+          height: marqueeHeight,
         }} />}
         <div className="pt-playhead" data-testid="pt-playhead" style={{ left: position * pxPerSec }} aria-hidden="true" />
       </div>

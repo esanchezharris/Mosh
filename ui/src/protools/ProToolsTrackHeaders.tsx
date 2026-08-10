@@ -3,10 +3,15 @@ import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { IconLayers, IconPlus } from "../ui/icons";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
-import { TRACK_ROW_HEIGHT } from "./layout";
 import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
-import { proToolsTrackViewOptions, resolveProToolsTrackView } from "./trackViews";
+import {
+  PROTOOLS_PLAYLIST_ROW_HEIGHT,
+  proToolsPlaylistRowCount,
+  proToolsTrackRowHeight,
+  proToolsTrackViewOptions,
+  resolveProToolsTrackView,
+} from "./trackViews";
 
 type ProToolsTrackHeadersProps = {
   readonly snapshot: Snapshot;
@@ -42,6 +47,8 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
   const selected = selectedTrackId === track.id;
   const trackViewOptions = proToolsTrackViewOptions(track);
   const trackView = resolveProToolsTrackView(track, requestedTrackView);
+  const playlistRows = proToolsPlaylistRowCount(track);
+  const rowHeight = proToolsTrackRowHeight(track, trackView, automationLaneVisible);
 
   const selectTrack = () => {
     clearSelection();
@@ -60,7 +67,8 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
       data-testid="pt-track-header"
       data-track-id={track.id}
       data-selected={selected}
-      style={{ height: TRACK_ROW_HEIGHT }}
+      data-track-view={trackView}
+      style={{ height: rowHeight }}
     >
       <span
         className="pt-track-color"
@@ -129,6 +137,27 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
           <IconLayers size={12} />
         </button>
       </div>
+      {trackView === "playlists" && (
+        <div className="pt-playlist-header-rows" data-testid="pt-playlist-header-rows">
+          {playlistRows === 0 ? (
+            <span data-testid="pt-playlist-header-row"
+              style={{ height: PROTOOLS_PLAYLIST_ROW_HEIGHT }}>No alternate playlists</span>
+          ) : Array.from({ length: playlistRows }, (_, takeIndex) => {
+            const current = track.clips.some((clip) => clip.type === "wave"
+              && (clip.numTakes ?? 0) > takeIndex
+              && (clip.currentTakeIndex ?? 0) === takeIndex);
+            return (
+              <span key={takeIndex} data-testid="pt-playlist-header-row" data-current={current}
+                style={{ height: PROTOOLS_PLAYLIST_ROW_HEIGHT }}>
+                Playlist {takeIndex + 1}
+              </span>
+            );
+          })}
+          {automationLaneVisible && (
+            <span className="pt-playlist-automation-label">Volume automation</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

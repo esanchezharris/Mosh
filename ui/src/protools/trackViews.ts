@@ -1,6 +1,9 @@
 import type { Track } from "../types";
+import { TRACK_ROW_HEIGHT } from "./layout";
 
-export type ProToolsTrackView = "waveform" | "volume" | "clips" | "notes";
+export type ProToolsTrackView = "waveform" | "playlists" | "volume" | "clips" | "notes";
+
+export const PROTOOLS_PLAYLIST_ROW_HEIGHT = 26;
 
 export type ProToolsTrackViewOption = {
   readonly value: ProToolsTrackView;
@@ -9,6 +12,7 @@ export type ProToolsTrackViewOption = {
 
 const AUDIO_VIEWS: readonly ProToolsTrackViewOption[] = [
   { value: "waveform", label: "Waveform" },
+  { value: "playlists", label: "Playlists" },
   { value: "volume", label: "Volume" },
 ];
 
@@ -42,7 +46,25 @@ export function nextCommonProToolsTrackView(
   track: Track,
   requested: ProToolsTrackView | undefined,
 ): ProToolsTrackView {
-  const options = proToolsTrackViewOptions(track);
   const current = resolveProToolsTrackView(track, requested);
-  return options.find((option) => option.value !== current)?.value ?? current;
+  if (proToolsTrackIsMidi(track)) return current === "notes" ? "clips" : "notes";
+  return current === "volume" ? "waveform" : "volume";
+}
+
+export function proToolsPlaylistRowCount(track: Track): number {
+  return track.clips.reduce((rows, clip) => clip.type === "wave"
+    ? Math.max(rows, (clip.numTakes ?? 0) > 1 ? clip.numTakes ?? 0 : 0)
+    : rows, 0);
+}
+
+export function proToolsTrackRowHeight(
+  track: Track,
+  requested: ProToolsTrackView | undefined,
+  automationLaneVisible = false,
+): number {
+  if (resolveProToolsTrackView(track, requested) !== "playlists") return TRACK_ROW_HEIGHT;
+  const playlistRows = Math.max(1, proToolsPlaylistRowCount(track));
+  return TRACK_ROW_HEIGHT
+    + playlistRows * PROTOOLS_PLAYLIST_ROW_HEIGHT
+    + (automationLaneVisible ? 28 : 0);
 }

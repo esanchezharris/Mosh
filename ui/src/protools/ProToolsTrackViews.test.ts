@@ -144,7 +144,8 @@ describe("Pro Tools Track Views", () => {
     const midiSelect = midiHeader?.querySelector<HTMLSelectElement>("[data-testid=pt-track-view]");
 
     expect(audioSelect?.value).toBe("waveform");
-    expect(Array.from(audioSelect?.options ?? []).map((option) => option.text)).toEqual(["Waveform", "Volume"]);
+    expect(Array.from(audioSelect?.options ?? []).map((option) => option.text))
+      .toEqual(["Waveform", "Playlists", "Volume"]);
     expect(midiSelect?.value).toBe("clips");
     expect(Array.from(midiSelect?.options ?? []).map((option) => option.text)).toEqual(["Clips", "Notes"]);
 
