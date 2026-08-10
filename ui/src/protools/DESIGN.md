@@ -156,6 +156,14 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Mutation**: rename, mute, and gain commit only through `rename_clip`, `set_clip_mute`, and `set_clip_gain`. Gain remains local while a pointer or keyboard gesture is active, accepts `-48…+24 dB`, and commits only on completion.
 - **Safety**: a `projectEpoch` change resets all drafts and prevents a stale editor gesture from addressing the replacement project.
 
+### Insert browser and rack
+
+- **Structure**: Add Insert opens the shared catalog in a modal; existing insert cards expose Open, Power, and Remove without hiding commands in a context menu.
+- **States**: catalog loading, filtered, no results, VST3 scan in progress, scan or quarantine error, frozen track, enabled, bypassed.
+- **Accessibility**: the search receives initial focus; focus stays inside the modal; Escape/backdrop/Close dismiss; focus returns to Add Insert.
+- **Mutation**: catalog entries route through shared `load_plugin`/`load_builtin`; rack actions use `open_plugin_editor`, `bypass_plugin`, and `remove_plugin` through `store.exec`.
+- **Safety**: the shell exposes VST3-only rescan for tonight's required hosted-plugin workflow. Scan progress and quarantine failures remain visible; AudioUnit-wide scanning is intentionally unavailable here.
+
 ### Spot placement dialog
 
 - **Structure**: modal title and clip identity, native Time Scale select, one editable Start field, validation message, Cancel, and Spot confirmation.

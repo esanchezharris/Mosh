@@ -62,7 +62,8 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
   return (
     <>
       <div className="modal-filters">
-        <input autoFocus placeholder="Filter by name or vendor…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input autoFocus data-testid="plugin-browser-search" aria-label="Search plugins"
+          placeholder="Filter by name or vendor…" value={q} onChange={(e) => setQ(e.target.value)} />
         {(["all", "inst", "fx"] as const).map((k) => (
           <button key={k} className={`btn${kind === k ? " on" : ""}`} onClick={() => setKind(k)}>{k === "all" ? "All" : k === "inst" ? "Instruments" : "Effects"}</button>
         ))}
