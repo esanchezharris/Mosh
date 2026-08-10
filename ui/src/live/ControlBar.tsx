@@ -201,6 +201,10 @@ function ShellMenu() {
       }
     >
       <div className="live-menu" role="menu">
+        <MoshMenuItem testId="live-switch-protools" ariaLabel="Switch to the Pro Tools interface"
+          onPick={() => setShell("uiShell", "protools")}>
+          Switch to Pro Tools
+        </MoshMenuItem>
         <MoshMenuItem testId="live-switch-v2" ariaLabel="Switch to the Mosh (new) interface"
           onPick={() => setShell("uiShell", "v2")}>
           Switch to Mosh (new)

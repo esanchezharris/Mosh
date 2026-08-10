@@ -13,4 +13,10 @@ describe("Pro Tools shell routing", () => {
     expect(devShellOverride()).toBe("protools");
     expect(resolveShell("live")).toBe("protools");
   });
+
+  it("keeps the Live query override when Pro Tools is the persisted or default shell", () => {
+    window.history.replaceState({}, "", "/?shell=live");
+    expect(devShellOverride()).toBe("live");
+    expect(resolveShell("protools")).toBe("live");
+  });
 });

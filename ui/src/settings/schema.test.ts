@@ -45,6 +45,10 @@ describe("defaultSettings", () => {
     expect(Object.keys(defs).sort()).toEqual(SETTINGS.map((d) => d.id).sort());
     for (const d of SETTINGS) expect(defs[d.id]).toEqual(d.default);
   });
+
+  it("uses Pro Tools for fresh settings", () => {
+    expect(defaultSettings().uiShell).toBe("protools");
+  });
 });
 
 describe("settingsByCategory", () => {

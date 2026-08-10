@@ -1,10 +1,11 @@
+import type { RefObject } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { MoshTip } from "../chrome/Tooltip";
 import { secondsToBBSMap, tempoMapFrom } from "../time";
 import type { Snapshot } from "../types";
-import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconStop } from "../ui/icons";
+import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconStop } from "../ui/icons";
 import { useTransportControls } from "../v2/useTransportControls";
 import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
@@ -33,8 +34,12 @@ const RULERS: readonly { id: ProToolsRuler; label: string }[] = [
   { id: "samples", label: "Samples" },
 ];
 
-export function ProToolsToolbar({ snapshot, onOpenSettings }: {
-  snapshot: Snapshot; onOpenSettings: () => void;
+export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleMoshi, moshiButtonRef }: {
+  snapshot: Snapshot;
+  onOpenSettings: () => void;
+  moshiOpen: boolean;
+  onToggleMoshi: () => void;
+  moshiButtonRef: RefObject<HTMLButtonElement>;
 }) {
   const exec = useStore((s) => s.exec);
   const transportState = useStore((s) => s.transport);
@@ -129,6 +134,17 @@ export function ProToolsToolbar({ snapshot, onOpenSettings }: {
         </label>
         <button type="button" className="pt-transient-button" aria-pressed={tabToTransient}
           onClick={() => setTabToTransient(!tabToTransient)}>Tab to Transients</button>
+      </div>
+
+      <div className="pt-toolbar-group pt-moshi-group">
+        <span className="pt-toolbar-label">Assistant</span>
+        <MoshTip side="bottom" label={moshiOpen ? "Close Moshi" : "Ask Moshi without changing the Edit Window layout"}>
+          <button ref={moshiButtonRef} type="button" className="pt-moshi-button" data-testid="pt-ask-moshi"
+            aria-expanded={moshiOpen} aria-controls={moshiOpen ? "pt-moshi-drawer" : undefined}
+            aria-pressed={moshiOpen} onClick={onToggleMoshi}>
+            <IconSpark size={13} /><span>Ask Moshi</span>
+          </button>
+        </MoshTip>
       </div>
 
       <div className="pt-toolbar-spacer" />

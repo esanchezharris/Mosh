@@ -102,6 +102,8 @@
 .pt-toolbar-spacer { flex: 1 1 auto; min-width: 2px; }
 .pt-view-group { padding-top: 4px; align-items: center; }
 .pt-classic-button { min-width: 48px !important; }
+.pt-moshi-group { flex: 0 0 auto; }
+.pt-moshi-button { display: flex; align-items: center; gap: 5px; min-width: 92px !important; font-weight: 700; }
 
 .pt-menu {
   display: grid;

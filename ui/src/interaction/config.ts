@@ -49,10 +49,9 @@ export function buildKeymap(get: Getter): Keymap {
 // Resolve-time ONLY (nothing is materialized): with no EXPLICIT keymap/gestureTable
 // override persisted — and an explicit "mosh" IS an explicit choice — each DAW shell
 // resolves these two settings to its native interaction bundle. Every explicit user
-// choice resolves exactly as before. The Live default also fixes the historical
-// "the live shell boots with the mosh bundle and its Live keys are dead" mismatch
-// (uiShell defaults to "live" while keymap/gestureTable default to "mosh"; the
-// ableton bundle only ever materialized if the user picked the template by hand).
+// choice resolves exactly as before. A fresh Pro Tools shell therefore receives its
+// native bundle even though keymap/gestureTable retain "mosh" as their schema values;
+// an explicitly persisted Live shell receives the Ableton bundle by the same rule.
 // activeKeymap() in settings/store.ts mirrors this resolution for key.* rebind
 // buckets — the two must agree or rebinds land in the wrong keymap's bucket.
 export function effectiveInteractionSetting(id: string): SettingValue {

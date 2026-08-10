@@ -164,6 +164,13 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Mutation**: catalog entries route through shared `load_plugin`/`load_builtin`; rack actions use `open_plugin_editor`, `bypass_plugin`, and `remove_plugin` through `store.exec`.
 - **Safety**: the shell exposes VST3-only rescan for tonight's required hosted-plugin workflow. Scan progress and quarantine failures remain visible; AudioUnit-wide scanning is intentionally unavailable here.
 
+### Ask Moshi drawer
+
+- **Structure**: one toolbar trigger opens a nonmodal bottom-right overlay containing the shared AgentComposer, task drawer, and change toast. At compact width it becomes a full-width bottom sheet.
+- **States**: closed by default, composing, listening, working/Stop, completed/task Undo, applied/change Undo, and error.
+- **Accessibility**: opening focuses the composer; Escape or Close dismisses; focus returns to the toolbar trigger; the drawer is complementary rather than modal.
+- **Layout**: the closed drawer has no DOM or layout footprint. The open drawer overlays instead of resizing the timeline.
+
 ### Spot placement dialog
 
 - **Structure**: modal title and clip identity, native Time Scale select, one editable Start field, validation message, Cancel, and Spot confirmation.

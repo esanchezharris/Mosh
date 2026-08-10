@@ -47,7 +47,13 @@ describe("Pro Tools Session menu", () => {
     useStore.setState({ snapshot: SNAPSHOT, transport: SNAPSHOT.transport, exec, refresh: vi.fn(async () => {}) });
     act(() => root.render(
       React.createElement(MoshTipProvider, { delay: 0 },
-        React.createElement(ProToolsToolbar, { snapshot: SNAPSHOT, onOpenSettings: vi.fn() })),
+        React.createElement(ProToolsToolbar, {
+          snapshot: SNAPSHOT,
+          onOpenSettings: vi.fn(),
+          moshiOpen: false,
+          onToggleMoshi: vi.fn(),
+          moshiButtonRef: React.createRef<HTMLButtonElement>(),
+        })),
     ));
   });
 

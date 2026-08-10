@@ -33,7 +33,7 @@ import {
 function SettingControl({ def }: { def: SettingDef }) {
   const raw = useSettings((s) => s.values[def.id]);
   const set = useSettings((s) => s.set);
-  // keymap/gestureTable resolve through the live shell's default bundle
+  // keymap/gestureTable resolve through the active DAW shell's default bundle
   // (effectiveInteractionSetting): with no override persisted, an unset control
   // must SHOW the value the app is actually using — displaying "mosh" while the
   // live shell resolves ableton was exactly the confusion that hid this bug.

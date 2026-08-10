@@ -12,6 +12,7 @@ import { AudioDeviceNotice } from "../ui/AudioDeviceNotice";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
 import { ProToolsArrangement } from "./ProToolsArrangement";
 import { ProToolsDetailDock } from "./ProToolsDetailDock";
+import { ProToolsMoshiDrawer } from "./ProToolsMoshiDrawer";
 import { ProToolsStatusBar } from "./ProToolsStatusBar";
 import { ProToolsToolbar } from "./ProToolsToolbar";
 import { useProTools } from "./proToolsState";
@@ -29,6 +30,8 @@ export function AppProTools() {
   const classicTheme = useProTools((s) => s.classicTheme);
   const resetForProject = useProTools((s) => s.resetForProject);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [moshiOpen, setMoshiOpen] = useState(false);
+  const moshiButtonRef = useRef<HTMLButtonElement>(null);
   const dragging = useFileDrop();
 
   useKeyboardShortcuts();
@@ -56,7 +59,9 @@ export function AppProTools() {
       <div className="protools-shell" data-testid="protools-shell"
         data-pt-theme={classicTheme ? "classic" : "dark"}
         data-edit-mode={editMode}>
-        {snapshot && <ProToolsToolbar snapshot={snapshot} onOpenSettings={() => setSettingsOpen(true)} />}
+        {snapshot && <ProToolsToolbar snapshot={snapshot} onOpenSettings={() => setSettingsOpen(true)}
+          moshiOpen={moshiOpen} onToggleMoshi={() => setMoshiOpen((open) => !open)}
+          moshiButtonRef={moshiButtonRef} />}
         {displayError && <div className="pt-error-bar" role="alert" data-testid="pt-error">⚠ {displayError}</div>}
         <RecoveryNotice />
         <AudioDeviceNotice />
@@ -68,6 +73,8 @@ export function AppProTools() {
         </main>
         <ProToolsDetailDock />
         <ProToolsStatusBar snapshot={snapshot} />
+        <ProToolsMoshiDrawer open={moshiOpen} onClose={() => setMoshiOpen(false)}
+          returnFocusRef={moshiButtonRef} />
         {settingsOpen && snapshot && (
           <SettingsOverlay onClose={() => setSettingsOpen(false)} />
         )}
