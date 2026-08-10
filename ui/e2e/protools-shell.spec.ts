@@ -355,7 +355,7 @@ test("Track Views follow contextual selectors, Minus toggles, and automation dis
   await page.screenshot({ path: testInfo.outputPath("protools-track-views-compact.png"), animations: "disabled" });
 });
 
-test("Playlists expose recorded takes and audition the chosen whole take", async ({ page }, testInfo) => {
+test("Playlists audition whole takes and promote a selected phrase into the main comp", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
   await sessionAction(page, "new_project");
@@ -395,6 +395,26 @@ test("Playlists expose recorded takes and audition the chosen whole take", async
   await playlists.getByRole("button", { name: /Take 1 on Audio/ }).click();
   await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.currentTakeIndex")).toBe(0);
   await expect(playlists.getByRole("button", { name: /Take 1 on Audio, current/ })).toHaveAttribute("aria-pressed", "true");
+
+  const alternate = playlists.getByRole("button", { name: /Take 2 on Audio/ });
+  const alternateBox = await alternate.boundingBox();
+  if (!alternateBox) throw new Error("alternate playlist bounds are absent");
+  const selectionY = alternateBox.y + alternateBox.height / 2;
+  await page.mouse.move(alternateBox.x + alternateBox.width * 0.25, selectionY);
+  await page.mouse.down();
+  await page.mouse.move(alternateBox.x + alternateBox.width * 0.75, selectionY, { steps: 4 });
+  await page.mouse.up();
+  const compSelection = playlists.getByTestId("pt-playlist-comp-selection");
+  await expect(compSelection).toBeVisible();
+  await expect(compSelection.getByTestId("pt-playlist-promote")).toHaveAccessibleName(/Promote Take 2/);
+  await page.screenshot({ path: testInfo.outputPath("protools-playlists-comp-selection-wide.png"), animations: "disabled" });
+
+  await compSelection.getByTestId("pt-playlist-promote").click();
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.length")).toBe(3);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.currentTakeIndex")).toBe(0);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.1.currentTakeIndex")).toBe(1);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.2.currentTakeIndex")).toBe(0);
+  await expect(compSelection).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("protools-playlists-wide.png"), animations: "disabled" });
 
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -403,8 +423,15 @@ test("Playlists expose recorded takes and audition the chosen whole take", async
   await expect(playlists).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("protools-playlists-compact.png"), animations: "disabled" });
 
+  await execInPage(page, "undo");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.length")).toBe(1);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.currentTakeIndex")).toBe(0);
+  await execInPage(page, "redo");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.length")).toBe(3);
+
   const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
   expect(trace.map((entry) => entry.command)).toContain("set_current_take");
+  expect(trace.map((entry) => entry.command)).toContain("promote_take_region");
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });
 

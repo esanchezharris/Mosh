@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { validateCommand, AGENT_COMMAND_MAP } from "./commands";
 
 describe("catalog — performer-mode commands exposed", () => {
-  for (const c of ["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "list_takes", "set_current_take", "keep_take"])
+  for (const c of ["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "list_takes", "set_current_take", "promote_take_region", "keep_take"])
     it(`has ${c}`, () => expect(AGENT_COMMAND_MAP.has(c)).toBe(true));
 
   it("set_transport accepts an action string (+ optional loop/position)", () => {
@@ -23,6 +23,10 @@ describe("catalog — performer-mode commands exposed", () => {
     expect(validateCommand("list_takes", { clipId: "c1" })).toBeNull();
     expect(validateCommand("set_current_take", { clipId: "c1", takeIndex: 1 })).toBeNull();
     expect(validateCommand("set_current_take", { clipId: "c1" })).not.toBeNull();
+    expect(validateCommand("promote_take_region", {
+      clipId: "c1", takeIndex: 1, start: 2.5, end: 3.25,
+    })).toBeNull();
+    expect(validateCommand("promote_take_region", { clipId: "c1", takeIndex: 1, start: 2.5 })).not.toBeNull();
     expect(validateCommand("keep_take", { clipId: "c1" })).toBeNull();
   });
 });

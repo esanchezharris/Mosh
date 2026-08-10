@@ -283,6 +283,9 @@ private:
     // Take lanes (audio): expose Tracktion's native take tree — list/select/keep.
     juce::var cmdListTakes      (const juce::var& args);
     juce::var cmdSetCurrentTake (const juce::var& args);
+    // Pro Tools playlist comping: split at absolute timeline bounds and switch
+    // only the middle segment to the requested take. One undo transaction.
+    juce::var cmdPromoteTakeRegion (const juce::var& args);
     juce::var cmdKeepTake       (const juce::var& args);
     juce::var cmdMarkTake       (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);

@@ -89,6 +89,19 @@ describe("Pro Tools Playlists view", () => {
   let exec: ReturnType<typeof vi.fn>;
   const originalState = useStore.getState();
 
+  const pointer = (element: HTMLElement, type: string, init: PointerEventInit) => {
+    act(() => element.dispatchEvent(new PointerEvent(type, { bubbles: true, ...init })));
+  };
+
+  const playlist = (takeIndex: number) => {
+    const button = host.querySelector<HTMLButtonElement>(
+      `[data-testid="pt-playlist-bar"][data-take-index="${takeIndex}"]`,
+    );
+    if (!button) throw new Error(`playlist ${takeIndex} is missing`);
+    button.getBoundingClientRect = () => DOMRect.fromRect({ x: 100, width: 400, height: 24 });
+    return button;
+  };
+
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
@@ -154,6 +167,86 @@ describe("Pro Tools Playlists view", () => {
 
     expect(exec).toHaveBeenCalledWith("set_current_take", { clipId: "vocal-clip", takeIndex: 1 });
     expect(SNAPSHOT.tracks[0]?.clips[0]?.currentTakeIndex).toBe(0);
+  });
+
+  it("promotes a dragged region through one command without mutating the snapshot", async () => {
+    await act(async () => root.render(React.createElement(Harness)));
+    await vi.waitFor(() => expect(host.querySelectorAll("[data-testid=pt-playlist-bar]")).toHaveLength(2));
+    exec.mockClear();
+    const second = playlist(1);
+
+    pointer(second, "pointerdown", { pointerId: 31, button: 0, clientX: 200 });
+    pointer(second, "pointermove", { pointerId: 31, buttons: 1, clientX: 350 });
+    pointer(second, "pointerup", { pointerId: 31, clientX: 350 });
+
+    const promote = host.querySelector<HTMLButtonElement>("[data-testid=pt-playlist-promote]");
+    expect(promote?.getAttribute("aria-label")).toContain("Lead Take 2");
+    expect(host.querySelector<HTMLElement>("[data-testid=pt-playlist-comp-selection]")?.style.left).toBe("200px");
+    expect(host.querySelector<HTMLElement>("[data-testid=pt-playlist-comp-selection]")?.style.width).toBe("150px");
+    if (!promote) throw new Error("playlist promotion control is missing");
+    await act(async () => promote.click());
+
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledWith("promote_take_region", {
+      clipId: "vocal-clip",
+      takeIndex: 1,
+      start: 2,
+      end: 3.5,
+    });
+    expect(SNAPSHOT.tracks[0]?.clips).toHaveLength(1);
+    expect(SNAPSHOT.tracks[0]?.clips[0]?.currentTakeIndex).toBe(0);
+  });
+
+  it("offers a keyboard range and clears drafts on Escape, pointer cancellation, and project replacement", async () => {
+    await act(async () => root.render(React.createElement(Harness)));
+    await vi.waitFor(() => expect(host.querySelectorAll("[data-testid=pt-playlist-bar]")).toHaveLength(2));
+    exec.mockClear();
+    const second = playlist(1);
+
+    act(() => second.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+    expect(host.querySelector<HTMLElement>("[data-testid=pt-playlist-comp-selection]")?.style.width).toBe("400px");
+    act(() => second.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape", bubbles: true, cancelable: true,
+    })));
+    expect(host.querySelector("[data-testid=pt-playlist-comp-selection]")).toBeNull();
+
+    pointer(second, "pointerdown", { pointerId: 32, button: 0, clientX: 200 });
+    pointer(second, "pointermove", { pointerId: 32, buttons: 1, clientX: 350 });
+    pointer(second, "pointercancel", { pointerId: 32, clientX: 350 });
+    expect(host.querySelector("[data-testid=pt-playlist-comp-selection]")).toBeNull();
+
+    pointer(second, "pointerdown", { pointerId: 33, button: 0, clientX: 200 });
+    pointer(second, "pointermove", { pointerId: 33, buttons: 1, clientX: 350 });
+    expect(host.querySelector("[data-testid=pt-playlist-comp-selection]")).not.toBeNull();
+    await act(async () => {
+      useStore.setState({ projectEpoch: 121 });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(host.querySelector("[data-testid=pt-playlist-comp-selection]")).toBeNull());
+    pointer(second, "pointerup", { pointerId: 33, clientX: 350 });
+    expect(exec).not.toHaveBeenCalledWith("promote_take_region", expect.anything());
+  });
+
+  it("keeps a rejected comp range visible and surfaces the command error", async () => {
+    exec.mockImplementation(async (command: string): Promise<CommandResult> => command === "list_takes"
+      ? { ok: true, command, data: { takes: TAKES, currentTakeIndex: 0 } }
+      : { ok: false, command, error: "playlist region is locked by another editor" });
+    await act(async () => root.render(React.createElement(Harness)));
+    await vi.waitFor(() => expect(host.querySelectorAll("[data-testid=pt-playlist-bar]")).toHaveLength(2));
+    const second = playlist(1);
+    act(() => second.dispatchEvent(new KeyboardEvent("keydown", {
+      key: " ", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+    const promote = host.querySelector<HTMLButtonElement>("[data-testid=pt-playlist-promote]");
+    if (!promote) throw new Error("playlist promotion control is missing");
+
+    await act(async () => promote.click());
+
+    expect(useStore.getState().lastError).toBe("playlist region is locked by another editor");
+    expect(host.querySelector("[data-testid=pt-playlist-comp-selection]")).not.toBeNull();
   });
 
   it("surfaces a take-selection failure without changing the current playlist", async () => {

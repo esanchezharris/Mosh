@@ -507,6 +507,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
         static const juce::StringArray frozenLocked {
             "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
             "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
+            "promote_take_region",
             "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
             "normalize_clip", "set_clip_warp", "stretch_clip",
             "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
@@ -631,6 +632,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_input_monitor") return cmdSetInputMonitor (args);
     if (name == "list_takes")        return cmdListTakes (args);
     if (name == "set_current_take")  return cmdSetCurrentTake (args);
+    if (name == "promote_take_region") return cmdPromoteTakeRegion (args);
     if (name == "keep_take")         return cmdKeepTake (args);
     if (name == "mark_take")         return cmdMarkTake (args);
     if (name == "set_master_volume") return broadcastStructuralIfActive (name, args, cmdSetMasterVolume (args));
@@ -3927,6 +3929,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "set_track_icon", "move_track",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
+        "promote_take_region",
         "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "relink_clip", "set_clip_warp",
         "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",

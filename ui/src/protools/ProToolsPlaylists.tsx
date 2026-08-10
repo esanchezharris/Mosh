@@ -5,6 +5,7 @@ import { ClipWave } from "../ui/clipRenderers";
 import { useProTools } from "./proToolsState";
 import { scaledTrackHeights } from "./trackHeightZoom";
 import { proToolsPlaylistRowCount } from "./trackViews";
+import { usePlaylistComping } from "./usePlaylistComping";
 
 type TakesInfo = {
   readonly takes: readonly ClipTake[];
@@ -72,6 +73,7 @@ export function ProToolsPlaylists({ track }: { readonly track: Track }) {
       return info ? { ...current, [clipId]: { ...info, currentTakeIndex: takeIndex } } : current;
     });
   };
+  const comping = usePlaylistComping({ pxPerSec, projectEpoch, selectTake, setLastError });
 
   if (rows === 0) return (
     <div className="pt-playlists is-empty" data-testid="pt-playlists" role="status">
@@ -91,6 +93,7 @@ export function ProToolsPlaylists({ track }: { readonly track: Track }) {
             const currentTakeIndex = info?.currentTakeIndex ?? clip.currentTakeIndex ?? 0;
             const current = currentTakeIndex === takeIndex;
             const label = take?.description?.trim() || `Playlist ${takeIndex + 1}`;
+            const target = { clip, takeIndex, label, current };
             return (
               <button key={`${clip.id}:${takeIndex}`} type="button" className="pt-playlist-bar"
                 data-testid="pt-playlist-bar" data-playlist-clip-id={clip.id}
@@ -99,8 +102,13 @@ export function ProToolsPlaylists({ track }: { readonly track: Track }) {
                 aria-label={`${label} on ${track.name}${current ? ", current" : ""}`}
                 title={current ? `${label} — current` : `Make ${label} current`}
                 style={{ left: clip.start * pxPerSec, width: Math.max(32, clip.length * pxPerSec) }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={() => { if (!current) void selectTake(clip.id, takeIndex); }}>
+                aria-keyshortcuts={!current ? "Shift+Enter Shift+Space" : undefined}
+                onPointerDown={(event) => comping.begin(event, target)}
+                onPointerMove={comping.update}
+                onPointerUp={comping.end}
+                onPointerCancel={comping.cancel}
+                onKeyDown={(event) => comping.keyDown(event, target)}
+                onClick={() => comping.click(target)}>
                 {take?.peaks && take.peaks.length > 0 && (
                   <span className="pt-playlist-wave" aria-hidden="true">
                     <ClipWave peaks={take.peaks} width={Math.max(24, clip.length * pxPerSec - 8)} />
@@ -112,6 +120,24 @@ export function ProToolsPlaylists({ track }: { readonly track: Track }) {
           })}
         </div>
       ))}
+      {comping.selection && (
+        <div className="pt-playlist-comp-selection" data-testid="pt-playlist-comp-selection"
+          style={{
+            top: comping.selection.takeIndex * playlistRowHeight + 2,
+            left: comping.selection.start * pxPerSec,
+            width: Math.max(1, (comping.selection.end - comping.selection.start) * pxPerSec),
+            height: Math.max(20, playlistRowHeight - 4),
+          }}>
+          <button type="button" data-testid="pt-playlist-promote"
+            disabled={comping.promoting}
+            aria-label={`Promote ${comping.selection.label} ${comping.selection.start.toFixed(2)}–${comping.selection.end.toFixed(2)} seconds to main playlist`}
+            title="Promote selected range to main playlist"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); void comping.promote(); }}>
+            {comping.promoting ? "Promoting…" : "↑ Main"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -161,6 +161,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_input_monitor", desc: "Set a track's input monitoring", args: [S("trackId"), S("mode", false, '"off"|"automatic"|"on"')] },
   { command: "list_takes", desc: "List the take lanes on a clip", args: [S("clipId")] },
   { command: "set_current_take", desc: "Select which take lane is active", args: [S("clipId"), N("takeIndex")] },
+  { command: "promote_take_region", desc: "Promote one time range from an alternate take into the main playlist; splits the clip at the range boundaries and preserves every take", args: [S("clipId"), N("takeIndex"), N("start", true, "absolute timeline seconds"), N("end", true, "absolute timeline seconds")] },
   { command: "keep_take", desc: "Keep the current take lane, remove the rest", args: [S("clipId")] },
 
   // ── history / session ─────────────────────────────────────────────────────
@@ -350,6 +351,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_input_monitor": return `Set input monitoring`;
     case "list_takes": return `Listed the takes`;
     case "set_current_take": return `Switched to take ${a.takeIndex}`;
+    case "promote_take_region": return `Promoted take ${a.takeIndex} from ${a.start}–${a.end}s`;
     case "keep_take": return `Kept the take`;
     case "undo": return `Undid the last change`;
     case "redo": return `Redid a change`;

@@ -14,6 +14,7 @@
 #include "state/Ids.h"
 #include "state/TrackIcons.h"
 #include "multiplayer/LogicalId.h"
+#include <cmath>
 
 namespace mosh
 {
@@ -34,6 +35,52 @@ juce::String captureStateForClip (te::Clip& clip)
         return state.joinIntoString ("\n");
     }
 
+    return {};
+}
+
+juce::ValueTree takeChildAt (te::WaveAudioClip& clip, int targetIndex)
+{
+    int index = 0;
+    for (auto child : clip.state.getChildWithName (te::IDs::TAKES))
+    {
+        if (! child.hasProperty (te::IDs::source))
+            continue;
+        if (index == targetIndex)
+            return child;
+        ++index;
+    }
+    return {};
+}
+
+// Tracktion's WaveAudioClip::setCurrentTake assumes each take source is a
+// ProjectItemID. Loop-overdub recordings can instead carry a direct file path;
+// passing one of those to Tracktion's fallback deletes the take. Keep that
+// safety rule in one helper so whole-take audition and region promotion cannot
+// drift apart.
+juce::String switchTakePreservingDirectFile (
+    te::WaveAudioClip& clip,
+    int takeIndex,
+    MoshEngine& engine,
+    juce::UndoManager& undo)
+{
+    const auto takeChild = takeChildAt (clip, takeIndex);
+    if (! takeChild.isValid())
+        return "no take at index";
+    const auto resolvesToProjectItem =
+        engine.edit().engine.getProjectManager().getProjectItem (
+            te::ProjectItemID::fromProperty (takeChild, te::IDs::source)) != nullptr;
+    if (resolvesToProjectItem)
+    {
+        clip.setCurrentTake (takeIndex);
+        return {};
+    }
+
+    const auto takeSource = takeChild[te::IDs::source];
+    if (clip.state[te::IDs::source] != takeSource)
+    {
+        clip.state.setProperty (te::IDs::source, takeSource, &undo);
+        engine.edit().restartPlayback();
+    }
     return {};
 }
 }
@@ -1210,38 +1257,108 @@ juce::var MoshOps::cmdSetCurrentTake (const juce::var& args)
     // current — a path never parses to a project-item id — so every public take
     // projection uses effectiveCurrentTakeIndex's raw source-string fallback.)
     // Takes that DO resolve keep TE's own path.
-    juce::ValueTree takeChild;
-    {
-        int i = 0;
-        for (auto c : w->state.getChildWithName (te::IDs::TAKES))
-        {
-            if (! c.hasProperty (te::IDs::source)) continue;
-            if (i == idx) { takeChild = c; break; }
-            ++i;
-        }
-    }
+    const auto takeChild = takeChildAt (*w, idx);
     if (! takeChild.isValid()) return errResult ("set_current_take", "no take at index");
-    const auto resolvesToProjectItem =
-        eng.edit().engine.getProjectManager().getProjectItem (
-            te::ProjectItemID::fromProperty (takeChild, te::IDs::source)) != nullptr;
 
     beginTxn ("set_current_take");
-    if (resolvesToProjectItem)
+    if (const auto error = switchTakePreservingDirectFile (*w, idx, eng, undoManager()); error.isNotEmpty())
     {
-        w->setCurrentTake (idx);
-    }
-    else
-    {
-        const auto takeSource = takeChild[te::IDs::source];
-        if (w->state[te::IDs::source] != takeSource)
-        {
-            w->state.setProperty (te::IDs::source, takeSource, &undoManager());
-            eng.edit().restartPlayback();   // SourceFileReference's own change does the same
-        }
+        undoManager().undoCurrentTransactionOnly();
+        return errResult ("set_current_take", error);
     }
     logLine ("set_current_take", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_current_take");
+}
+
+juce::var MoshOps::cmdPromoteTakeRegion (const juce::var& args)
+{
+    auto* source = dynamic_cast<te::WaveAudioClip*> (
+        findClip (args.getProperty ("clipId", var()).toString()));
+    if (source == nullptr) return errResult ("promote_take_region", "no wave clip");
+    auto* clipTrack = dynamic_cast<te::ClipTrack*> (source->getTrack());
+    if (clipTrack == nullptr) return errResult ("promote_take_region", "clip has no editable track");
+    const int takeCount = source->getNumTakes (false);
+    if (takeCount <= 0) return errResult ("promote_take_region", "clip has no takes");
+
+    if (! args.hasProperty ("takeIndex") || ! args.hasProperty ("start") || ! args.hasProperty ("end"))
+        return errResult ("promote_take_region", "takeIndex, start, and end are required");
+    const auto isNumeric = [] (const var& value)
+    {
+        return value.isInt() || value.isInt64() || value.isDouble();
+    };
+    const auto takeVar = args.getProperty ("takeIndex", var());
+    if (! isNumeric (takeVar))
+        return errResult ("promote_take_region", "take index out of range");
+    const double takeNumber = (double) takeVar;
+    if (! std::isfinite (takeNumber) || std::floor (takeNumber) != takeNumber
+        || takeNumber < 0.0 || takeNumber >= (double) takeCount)
+        return errResult ("promote_take_region", "take index out of range");
+    const int takeIndex = (int) takeNumber;
+    const auto startVar = args.getProperty ("start", var());
+    const auto endVar = args.getProperty ("end", var());
+    if (! isNumeric (startVar) || ! isNumeric (endVar))
+        return errResult ("promote_take_region", "start and end must be finite timeline seconds");
+    const double requestedStart = (double) startVar;
+    const double requestedEnd = (double) endVar;
+    if (! std::isfinite (requestedStart) || ! std::isfinite (requestedEnd))
+        return errResult ("promote_take_region", "start and end must be finite timeline seconds");
+
+    const double clipStart = source->getPosition().getStart().inSeconds();
+    const double clipEnd = source->getPosition().getEnd().inSeconds();
+    constexpr double kRangeEps = 1.0e-6;
+    constexpr double kSplitMargin = 1.001e-3; // Tracktion splitClip reduces each edge by 1 ms.
+    if (requestedStart < clipStart - kRangeEps || requestedEnd > clipEnd + kRangeEps
+        || requestedEnd <= requestedStart + kRangeEps)
+        return errResult ("promote_take_region",
+            "range must be inside the visible clip with start before end");
+    const double rangeStart = requestedStart <= clipStart + kSplitMargin ? clipStart : requestedStart;
+    const double rangeEnd = requestedEnd >= clipEnd - kSplitMargin ? clipEnd : requestedEnd;
+    if (rangeEnd <= rangeStart + kSplitMargin)
+        return errResult ("promote_take_region", "range must be longer than 1 ms");
+    if (! takeChildAt (*source, takeIndex).isValid())
+        return errResult ("promote_take_region", "no take at index");
+
+    beginTxn ("promote_take_region");
+    te::WaveAudioClip* middle = source;
+    te::WaveAudioClip* tail = nullptr;
+    if (rangeStart > clipStart + kRangeEps)
+    {
+        middle = dynamic_cast<te::WaveAudioClip*> (
+            clipTrack->splitClip (*middle, tracktion::TimePosition::fromSeconds (rangeStart)));
+        if (middle == nullptr)
+        {
+            undoManager().undoCurrentTransactionOnly();
+            return errResult ("promote_take_region", "could not split at range start");
+        }
+    }
+    if (rangeEnd < clipEnd - kRangeEps)
+    {
+        tail = dynamic_cast<te::WaveAudioClip*> (
+            clipTrack->splitClip (*middle, tracktion::TimePosition::fromSeconds (rangeEnd)));
+        if (tail == nullptr)
+        {
+            undoManager().undoCurrentTransactionOnly();
+            return errResult ("promote_take_region", "could not split at range end");
+        }
+    }
+    if (const auto error = switchTakePreservingDirectFile (*middle, takeIndex, eng, undoManager());
+        error.isNotEmpty())
+    {
+        undoManager().undoCurrentTransactionOnly();
+        return errResult ("promote_take_region", error);
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", middle->itemID.toString());
+    if (tail != nullptr) data->setProperty ("newClipId", tail->itemID.toString());
+    data->setProperty ("takeIndex", takeIndex);
+    data->setProperty ("start", rangeStart);
+    data->setProperty ("end", rangeEnd);
+    data->setProperty ("applied", true);
+    logLine ("promote_take_region", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("promote_take_region", var (data));
 }
 
 juce::var MoshOps::cmdKeepTake (const juce::var& args)

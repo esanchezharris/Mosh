@@ -129,7 +129,7 @@ describe("REACHABILITY ledger", () => {
       "set_clip_gain", "write_clip_gain_curve", "export_audio", "export_stems", "set_master_volume",
       "load_master_builtin", "create_bus", "add_send", "set_clip_warp",
       "stretch_clip", "quantize_notes", "set_tempo", "set_time_signature",
-      "set_key", "set_count_in", "arm_track", "set_current_take",
+      "set_key", "set_count_in", "arm_track", "set_current_take", "promote_take_region",
       "set_track_automation_mode", "delete_time_range", "create_group_track",
     ];
     const seen = new Set(rows.flatMap((r) => r.commands));

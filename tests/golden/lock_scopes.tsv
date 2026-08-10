@@ -131,6 +131,7 @@ open_project	Unguarded
 open_recent	SessionGlobal
 open_without_plugins	Unguarded
 paste_clip	Track
+promote_take_region	Clip
 quantize_notes	Clip
 recover_session	SessionGlobal
 redo	Unguarded

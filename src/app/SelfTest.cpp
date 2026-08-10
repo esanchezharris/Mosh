@@ -7252,6 +7252,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! ok (lt), "list_takes on a missing clip errors (dispatched, not unknown)");
             check (lt["error"].toString().contains ("wave clip"), "list_takes error is the handler's (no wave clip)");
             check (! ok (cmd (ops, "set_current_take", objN ({{ "clipId", "no-such-clip" }, { "takeIndex", 0 }}))), "set_current_take on a missing clip errors");
+            check (! ok (cmd (ops, "promote_take_region", objN ({{ "clipId", "no-such-clip" }, { "takeIndex", 0 }, { "start", 0.0 }, { "end", 1.0 }}))),
+                   "promote_take_region on a missing clip errors");
             check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", "no-such-clip" }}))), "keep_take on a missing clip errors");
             auto mark = cmd (ops, "mark_take", objN ({
                 { "source", "phone_controller" },
@@ -7368,6 +7370,67 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                      "the main snapshot current take follows undo");
               check (currentTakeFlags (clip) == 1 && (bool) clip["takes"][0].getProperty ("isCurrent", false),
                      "the main snapshot restores exactly one current-take marker on undo"); }
+
+            // ── playlist comping: promote only the selected phrase ──
+            // Avid's playlist workflow assembles word/syllable ranges into the main
+            // playlist. The MoshOps representation is three ordinary audio clips whose
+            // copied take trees preserve every source; only the middle segment changes
+            // current take, and the whole edit is one undo transaction.
+            const double compClipStart = wa->getPosition().getStart().inSeconds();
+            const double compStart = compClipStart + 0.2;
+            const double compEnd = compClipStart + 0.7;
+            check (! ok (cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
+                       { "start", juce::String (compStart) }, { "end", compEnd } }))),
+                   "promote_take_region rejects string-valued timeline bounds");
+            check (! ok (cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
+                       { "start", compStart }, { "end", compClipStart + 1.2 } }))),
+                   "promote_take_region rejects a range outside the visible clip");
+            auto promoted = cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
+                                  { "start", compStart }, { "end", compEnd } }));
+            check (ok (promoted), "promote_take_region on a direct-file take ok");
+            const auto promotedId = promoted["data"].getProperty ("clipId", var()).toString();
+            const auto tailId = promoted["data"].getProperty ("newClipId", var()).toString();
+            check (promotedId.isNotEmpty() && tailId.isNotEmpty() && promotedId != toneA && tailId != promotedId,
+                   "region promotion returns the new middle and tail clip ids");
+            auto compSegments = [&eng, &tfTrack]
+            {
+                std::vector<te::WaveAudioClip*> out;
+                for (auto* tr : te::getAudioTracks (eng.edit()))
+                    if (tr != nullptr && tr->itemID.toString() == tfTrack)
+                        for (auto* c : tr->getClips())
+                            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (c); wave != nullptr && wave->hasAnyTakes())
+                                out.push_back (wave);
+                std::sort (out.begin(), out.end(), [] (auto* a, auto* b) {
+                    return a->getPosition().getStart() < b->getPosition().getStart();
+                });
+                return out;
+            };
+            { const auto segments = compSegments();
+              check (segments.size() == 3, "region promotion splits the take clip into three comp segments");
+              if (segments.size() == 3)
+              {
+                  check (segments[0]->getCurrentSourceFile() == fileA
+                      && segments[1]->getCurrentSourceFile() == fileB
+                      && segments[2]->getCurrentSourceFile() == fileA,
+                      "only the promoted middle segment plays the chosen take");
+                  check (segments[0]->getNumTakes (false) == 2
+                      && segments[1]->getNumTakes (false) == 2
+                      && segments[2]->getNumTakes (false) == 2,
+                      "every comp segment preserves the complete take tree");
+              } }
+            check (ok (cmd (ops, "undo", objN ({}))), "one undo restores the unsplit take clip");
+            { const auto segments = compSegments();
+              check (segments.size() == 1 && segments[0]->getCurrentSourceFile() == fileA,
+                     "undo restores one original-source take clip"); }
+            check (ok (cmd (ops, "redo", objN ({}))), "redo restores the promoted comp region");
+            check (compSegments().size() == 3, "redo restores all three comp segments");
+            check (ok (cmd (ops, "undo", objN ({}))), "final comp undo restores the fixture for render proof");
+            { auto compLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+              bool promotionUndoable = false;
+              for (auto& ln : juce::StringArray::fromLines (compLog))
+                  if (ln.contains ("\"command\": \"promote_take_region\"") && ln.contains ("\"undoable\": true"))
+                      promotionUndoable = true;
+              check (promotionUndoable, "promote_take_region is JSONL-recorded undoable:true"); }
 
             // The switched source actually RENDERS: remove the other clip so the
             // track holds only the take clip, switch back to take 1, bounce, and

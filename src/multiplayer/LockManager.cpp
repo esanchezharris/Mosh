@@ -106,7 +106,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // Clip-scoped: mutate clip content. MoshOps resolves the singular clipId and
     // every valid clipIds entry to all affected tracks' logicalIds before guarding.
     static const std::set<juce::String> clip {
-        "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
+        "move_clip", "trim_clip", "split_clip", "promote_take_region", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
         // clip-ops wave — reverse / auto-crossfade / normalize all carry a clipId like
         // gain/mute/fade; same clip-scoped key resolution.

@@ -463,6 +463,7 @@ const MOCK_TXN_SAFE = new Set([
   "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
   "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
   "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
+  "promote_take_region",
   "duplicate_clip", "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade",
   "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
   "stretch_clip", "set_clip_warp",
@@ -486,6 +487,7 @@ const MOCK_TXN_SAFE = new Set([
 const MOCK_FROZEN_LOCKED = new Set([
   "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
   "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
+  "promote_take_region",
   "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
   "normalize_clip", "set_clip_warp", "stretch_clip",
   "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
@@ -2551,6 +2553,72 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       f.clip.currentTakeIndex = idx;
       invalidate(); return ok(command);
     }
+    case "promote_take_region": {
+      const f = findClip(str(args.clipId));
+      if (!f || f.clip.type !== "wave") return err(command, "no wave clip");
+      if (!f.clip.takes || f.clip.takes.length === 0) return err(command, "clip has no takes");
+      const takeIndex = args.takeIndex;
+      const start = args.start;
+      const end = args.end;
+      if (typeof takeIndex !== "number" || !Number.isInteger(takeIndex)
+        || takeIndex < 0 || takeIndex >= f.clip.takes.length)
+        return err(command, "take index out of range");
+      if (typeof start !== "number" || typeof end !== "number"
+        || !Number.isFinite(start) || !Number.isFinite(end))
+        return err(command, "start and end must be finite timeline seconds");
+      const clipStart = f.clip.start;
+      const clipEnd = clipStart + f.clip.length;
+      const EPS = 1e-6;
+      if (start < clipStart - EPS || end > clipEnd + EPS || end <= start + EPS)
+        return err(command, "range must be inside the visible clip with start before end");
+
+      const rangeStart = Math.max(clipStart, start);
+      const rangeEnd = Math.min(clipEnd, end);
+      const original = JSON.parse(JSON.stringify(f.clip)) as Clip;
+      const hasLeft = rangeStart > clipStart + EPS;
+      const hasRight = rangeEnd < clipEnd - EPS;
+      pushUndo();
+
+      const segments: Clip[] = [];
+      if (hasLeft) {
+        const left = JSON.parse(JSON.stringify(original)) as Clip;
+        left.length = rangeStart - clipStart;
+        left.fadeOutSec = 0;
+        segments.push(left);
+      }
+      const middle = JSON.parse(JSON.stringify(original)) as Clip;
+      middle.id = hasLeft ? nextClipId() : original.id;
+      middle.start = rangeStart;
+      middle.length = rangeEnd - rangeStart;
+      middle.offset = original.offset + (rangeStart - clipStart);
+      if (hasLeft) middle.fadeInSec = 0;
+      if (hasRight) middle.fadeOutSec = 0;
+      middle.takes?.forEach((take) => { take.isCurrent = take.index === takeIndex; });
+      middle.currentTakeIndex = takeIndex;
+      segments.push(middle);
+
+      let tail: Clip | undefined;
+      if (hasRight) {
+        tail = JSON.parse(JSON.stringify(original)) as Clip;
+        tail.id = nextClipId();
+        tail.start = rangeEnd;
+        tail.length = clipEnd - rangeEnd;
+        tail.offset = original.offset + (rangeEnd - clipStart);
+        tail.fadeInSec = 0;
+        segments.push(tail);
+      }
+      const sourceIndex = f.track.clips.findIndex((clip) => clip.id === original.id);
+      f.track.clips.splice(sourceIndex, 1, ...segments);
+      invalidate();
+      return ok(command, {
+        clipId: middle.id,
+        ...(tail ? { newClipId: tail.id } : {}),
+        takeIndex,
+        start: rangeStart,
+        end: rangeEnd,
+        applied: true,
+      });
+    }
     case "keep_take": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       if (!f.clip.takes || f.clip.takes.length === 0) return err(command, "clip has no takes");
@@ -4262,7 +4330,7 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     if (!w.__moshCmdTrace) w.__moshCmdTrace = [];
     const data = (res as { data?: Record<string, unknown> }).data ?? {};
     const resultIds: Record<string, unknown> = {};
-    for (const k of ["trackId", "clipId", "index", "busNumber", "groupId"])
+    for (const k of ["trackId", "clipId", "newClipId", "index", "busNumber", "groupId"])
       if (data[k] !== undefined) resultIds[k] = data[k];
     w.__moshCmdTrace.push({ command: c.command, args: c.args ?? {}, ok: res.ok, resultIds });
   }

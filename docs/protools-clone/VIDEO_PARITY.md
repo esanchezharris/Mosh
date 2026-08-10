@@ -25,8 +25,9 @@ Grabber. Mosh follows the documented 25/75 contract.
 ## Primary official corpus
 
 The titles and channel attribution for V01-V12 were rechecked through YouTube's
-oEmbed metadata on 2026-08-10. V13 was rechecked through public YouTube metadata;
-all thirteen report the author as **Avid Pro Tools**.
+oEmbed metadata on 2026-08-10. V13-V14 were rechecked through public YouTube
+metadata; V01-V13 report the author as **Avid Pro Tools**, while V14 is published
+by Avid's verified corporate channel.
 
 | ID | Avid video | Timecoded evidence |
 |---|---|---|
@@ -44,6 +45,7 @@ all thirteen report the author as **Avid Pro Tools**.
 | V11 | [Fast Start: Mixing Fundamentals](https://www.youtube.com/watch?v=MDcgJju4WOY) | 3:09 fader; 3:36 pan; 6:26 inserts; 7:23 existing vocal send; 7:28-7:48 several sources share one reverb return; 8:04 send selection; 8:08-8:13 send-fader increase; 8:22 shared-return CPU rationale; 8:32 mix bus; 9:02 mix-bus fader; 9:26 mix-bus inserts. |
 | V12 | [Zoom](https://www.youtube.com/watch?v=hyPdxSg48M0) | 0:00 Zoom cluster; 0:05 horizontal controls; 0:11 Option/Alt-scroll; 0:18 R/T out/in with Edit Keyboard Focus; 0:28 presets 1-5; 0:35 Command/Control-click stores a preset; 0:41 lower scrollbar controls; 0:44 separate audio-waveform and MIDI-note vertical zoom. Full-window frames place the compact Zoom cluster between Edit Modes and Edit Tools. |
 | V13 | [How to Use Memory Locations in Pro Tools](https://www.youtube.com/watch?v=0jC0h3AgC1g) | 0:20 add on Marker ruler; 0:27 multiple rulers; 0:41 keypad Enter; 1:00 ruler/list recall; 1:06 edit; 1:08 Option/Alt-delete; 1:13 stored selections/zoom/track visibility; 1:30 period-number-period exact recall; 1:37 period plus/minus stepping; 1:57 last-location recall; 2:14 chronological following; 2:42 filtering. Frames show a dark floating table over the Edit Window while marker rulers remain visible. |
+| V14 | [Pro Tools 2018: Comp Together the Best Takes](https://www.youtube.com/watch?v=AEd0g84Ajz0) | 0:12 designate a target playlist in Waveform view; 0:16 send clip selections to it; 0:21 selector-menu and row target controls; 0:28 keyboard assignment; 0:33 cycle alternate takes and move/copy the best selection; 0:46 grouped drums/background vocals; 0:56 blue/orange target-state feedback; 1:06 cycle audio inside a clip selection; 1:13 audition a phrase while the surrounding comp remains visible; 1:24 original-audio feedback. This is the authority for the remaining target-playlist and selection-cycle gap. |
 
 V05 (2025) and V06 (2026) take precedence over older visuals when the interface
 differs. Full documentation and non-video references live in [RESEARCH.md](./RESEARCH.md).
@@ -98,6 +100,25 @@ Focus, Escape/cancel, pointer cancellation, `projectEpoch` replacement, undo, sa
 reload are explicit where applicable. Browser evidence does not replace packaged,
 native, physical-device, or audio-output acceptance.
 
+## Tutorial parity packet
+
+Each video-backed slice must leave one compact packet that a later reviewer can rerun:
+
+| Field | Required evidence |
+|---|---|
+| Authority | Official Avid URL and current help-page link; third-party material is corroboration only. |
+| Reference state | Version/date, full-window timestamp, viewport/crop, visible panels, selected track/clip, edit mode/tool, zoom, and keyboard-focus state. |
+| Visual contract | Ordered zones, normalized geometry, control/state visibility, and any deliberate Mosh adaptation; never copied pixels or artwork. |
+| Behavior contract | Given/When/Then with pointer and keyboard paths, intermediate feedback, cancellation, and final edit result. |
+| Mutation seam | Exact `store.exec(command, args)` call, result-envelope handling, undo/redo, JSONL, replay, lock scope, and save/reload expectations. |
+| Proof | Focused unit/component test, one real Chromium three-state trace, fresh 1440×900 and 720×720 captures, and a native test whenever audio, persistence, or Tracktion behavior is claimed. |
+| Verdict | `MATCH`, `ADAPTED`, `PARTIAL`, `GAP`, `CONFLICT`, or `DEFERRED`, with residual gaps named in the same row. |
+
+The source video is evidence, not the oracle by itself: current Avid documentation wins
+on behavior, and Mosh passes only when the observable editing outcome and state feedback
+match. Literal video-frame pixel diffs remain invalid because presenter crop, scaling,
+compression, and Pro Tools version can change independently of the workflow.
+
 ## Pro Tools parity ledger
 
 | Area | Evidence | Status | Mosh proof / next action |
@@ -117,7 +138,7 @@ native, physical-device, or audio-output acceptance.
 | MIDI editor | V08 | `MATCH/PARTIAL` | Double-click opens the bottom piano roll/controller direction; multi-track editor selection needs deeper proof. |
 | Inserts | V05, V11 | `ADAPTED` | Searchable catalog preserves load/open/bypass/remove/persistence behavior instead of copying nested menus. |
 | Sends / Aux returns | V11 plus Avid Sends help | `ADAPTED/PARTIAL` | A source track can create a named Aux, assign/remove a post-fader send, edit its level, open/rename/delete the return, and use the return's fader, pan, output, and insert rack. Focused Chromium proves `create_bus`, `load_builtin`, `add_send`, and `set_send_level` in one trace at wide and compact sizes. Mosh currently has post-fader sends only; pre-fader switching, send mute/pan/automation, a dedicated Mix Window, and native audible proof remain gaps. |
-| Playlists / comping | V10, V10B plus Avid alternate-take help | `ADAPTED/PARTIAL` | Audio Track View expands the locked header/lane pair into a main clip row plus aligned waveform-bearing playlist rows. Lazy `list_takes` preserves per-take descriptions/peaks; choosing a row sends undoable `set_current_take`, rejects stale-project responses, and reports lock/command failures. This is whole-take audition only: region promotion, ratings, swipe comping, and word/syllable assembly remain explicit gaps. |
+| Playlists / comping | V10, V10B, V14 plus Avid alternate-take help | `MATCH/ADAPTED/PARTIAL` | Audio Track View expands the locked header/lane pair into a main clip row plus aligned waveform-bearing playlist rows. Lazy `list_takes` preserves per-take descriptions/peaks; clicking a row sends undoable `set_current_take` for whole-take audition. Dragging a non-current waveform selects a timeline range and exposes an accessible `↑ Main` promotion; Shift+Enter/Space selects the full clip without a pointer. `promote_take_region` validates a wave-only in-bounds range, copies the complete take tree through Tracktion splits, switches only the middle segment, returns recovery-rebindable ids, and records the edit as one undoable/replayable/clip-locked transaction. Focused mock tests prove a Take 1 / Take 2 / Take 1 three-segment comp, undo/redo, JSONL, and snapshot immutability; serial Chromium proves record → audition → region promotion at wide and compact sizes. A compiled native selftest covers direct-file preservation plus undo/redo and awaits the canonical serial native gate, so native playback is not claimed by this slice yet. The browser result matches V10's word/syllable assembly with an explicit Mosh promotion button rather than copied Avid art. V14 now makes the next acceptance target precise: designate a visible target playlist, preserve blue/orange-equivalent target state, cycle an edit selection through alternates while the surrounding comp remains stable, and apply it coherently to grouped tracks. Playlist ratings and named playlist management also remain gaps. |
 | Universe overview | V01 | `DEFERRED` | Revisit after session-critical editing; do not displace timeline height by default. |
 
 ## Parity definition

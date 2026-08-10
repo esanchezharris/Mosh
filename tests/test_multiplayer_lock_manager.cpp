@@ -62,6 +62,7 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("move_clip")      == Scope::Clip);
     REQUIRE (LockManager::classify ("trim_clip")      == Scope::Clip);
     REQUIRE (LockManager::classify ("split_clip")     == Scope::Clip);
+    REQUIRE (LockManager::classify ("promote_take_region") == Scope::Clip);
     REQUIRE (LockManager::classify ("add_note")       == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_gain")  == Scope::Clip);
     REQUIRE (LockManager::classify ("write_clip_gain_curve") == Scope::Clip);
