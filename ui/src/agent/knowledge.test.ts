@@ -415,6 +415,12 @@ describe("AG-KB-AUTO: parameter automation + clip-ops (set_track_automation_mode
     ).toBe("automation-write-curve-bulk");
   });
 
+  it("clip gain: riding phrases inside one clip -> clip-local dynamic envelope", () => {
+    expect(
+      top("ride the loud and quiet words inside this one audio clip without changing the whole track fader"),
+    ).toBe("clip-gain-dynamic-envelope");
+  });
+
   it("automation: one exact point or wiping a messy curve -> add_automation_point / clear_automation", () => {
     expect(
       top("this automation curve got messy, I just want to wipe it clean instead of deleting points one by one"),

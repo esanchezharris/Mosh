@@ -193,6 +193,14 @@ export type MidiNote = {
   mute?: boolean;
 };
 
+export type ClipGainPoint = {
+  /** Seconds from the clip's current visible start; may be negative after a head trim. */
+  t: number;
+  /** Dynamic dB offset applied after the clip's static gain. */
+  gainDb: number;
+  curve?: number;
+};
+
 export type Clip = {
   id: string;
   name: string;
@@ -205,6 +213,8 @@ export type Clip = {
   // same track beneath the muted source. Filtered out of the lanes (it's not a clip to manage).
   hidden?: boolean;
   gainDb?: number;
+  /** Clip-local dynamic gain envelope. Absent means no dynamic envelope. */
+  clipGainPoints?: ClipGainPoint[];
   // G4b — clip-edge fades (wave clips only). Seconds; type is 1=linear 2=convex
   // 3=concave 4=sCurve (optional — the v1 UI only drives durations).
   fadeInSec?: number;

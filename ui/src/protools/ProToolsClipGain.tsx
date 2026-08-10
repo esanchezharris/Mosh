@@ -11,6 +11,7 @@ import {
   clipGainLinePercent,
 } from "./clipGain";
 import { capturePointer, releasePointer } from "./pointerCapture";
+import { ProToolsClipGainEnvelope } from "./ProToolsClipGainEnvelope";
 
 type ProToolsClipGainProps = {
   readonly clip: Clip;
@@ -142,6 +143,7 @@ export function ProToolsClipGain({ clip, onPreviewGainChange }: ProToolsClipGain
     <span className={`pt-clip-gain${selected ? " is-selected" : ""}`}
       data-testid="pt-clip-gain" style={overlayStyle}>
       <span className="pt-clip-gain-line" data-testid="pt-clip-gain-line" aria-hidden="true" />
+      <ProToolsClipGainEnvelope clip={clip} selected={selected} staticGainDb={gainDb} />
       {selected && (
         <>
           <span ref={handleRef} className="pt-clip-gain-handle" data-testid="pt-clip-gain-handle"

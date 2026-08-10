@@ -7,6 +7,7 @@
 #include "DrumPattern.h"
 #include "AutomationMode.h"
 #include "AutomationCurveWrite.h"
+#include "ClipGainEnvelope.h"
 #include "ExportRange.h"
 #include "ScanProgress.h"
 #include "StemExport.h"
@@ -506,7 +507,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
         static const juce::StringArray frozenLocked {
             "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
             "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
-            "set_clip_gain", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
+            "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
             "normalize_clip", "set_clip_warp", "stretch_clip",
             "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
             "set_plugin_param", "bypass_plugin", "open_plugin_editor",
@@ -607,6 +608,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "write_clip_gain_curve") return cmdWriteClipGainCurve (args);
     if (name == "set_clip_fade")     return cmdSetClipFade (args);
     if (name == "set_clip_reverse")  return cmdSetClipReverse (args);
     if (name == "set_clip_loop")     return cmdSetClipLoop (args);
@@ -3461,6 +3463,8 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("sourceMissing", ! srcFile.existsAsFile());   // gap 3 — relink cue
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
         o->setProperty ("gainDb", w->getGainDB());
+        if (auto points = clipGainEnvelopeToVar (*w); ! points.isVoid())
+            o->setProperty ("clipGainPoints", points);
         // G4b — clip fades: additive, unconditional (mirrors gainDb) so the snapshot always
         // reflects the current fade even when it's the 0/0 default. getFadeIn()/getFadeOut()
         // would auto-crossfade-adjust when autoCrossfade is on AND a neighbor overlaps; Mosh
@@ -3923,7 +3927,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "set_track_icon", "move_track",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",
+        "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "relink_clip", "set_clip_warp",
         "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
         "create_section", "rename_section", "move_section", "remove_section",

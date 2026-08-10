@@ -126,7 +126,7 @@ describe("REACHABILITY ledger", () => {
     // is the coverage ledger's job — scripts/daw-conformance/coverage_check.py.)
     const CORE = [
       "set_clip_fade", "set_clip_reverse", "normalize_clip", "set_clip_loop",
-      "set_clip_gain", "export_audio", "export_stems", "set_master_volume",
+      "set_clip_gain", "write_clip_gain_curve", "export_audio", "export_stems", "set_master_volume",
       "load_master_builtin", "create_bus", "add_send", "set_clip_warp",
       "stretch_clip", "quantize_notes", "set_tempo", "set_time_signature",
       "set_key", "set_count_in", "arm_track", "set_current_take",

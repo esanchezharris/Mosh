@@ -231,3 +231,4 @@ unfreeze_layer	Clip
 unfreeze_track	Track
 ungroup_track	SessionGlobal
 write_automation_curve	Track
+write_clip_gain_curve	Clip

@@ -64,6 +64,7 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("split_clip")     == Scope::Clip);
     REQUIRE (LockManager::classify ("add_note")       == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_gain")  == Scope::Clip);
+    REQUIRE (LockManager::classify ("write_clip_gain_curve") == Scope::Clip);
     // G4A — the clip Inspector's gain/mute/rename commands were agent-only until now
     // (no UI surface); set_clip_gain was already covered above, these two were not.
     REQUIRE (LockManager::classify ("rename_clip")    == Scope::Clip);

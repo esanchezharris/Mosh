@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Snapshot, Clip, ClipGainPoint, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -51,6 +51,44 @@ const nextAnnotationId = () => "ann-" + ++annotationSeq;
 
 // G4b — fade curve name -> te::AudioFadeCurve::Type int (1..4), mirroring the native enum.
 const FADE_CURVE_TYPE: Record<string, number> = { linear: 1, convex: 2, concave: 3, sCurve: 4 };
+
+function parseMockClipGainPoints(input: unknown): { ok: true; points: ClipGainPoint[] } | { ok: false; error: string } {
+  let value = input;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return { ok: false, error: "points string must be valid JSON" };
+    }
+  }
+  if (!Array.isArray(value)) return { ok: false, error: "points must be an array" };
+  if (value.length > 4096) return { ok: false, error: "points must contain at most 4096 items" };
+
+  const points: ClipGainPoint[] = [];
+  let previousT = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index];
+    if (item === null || typeof item !== "object")
+      return { ok: false, error: "each point must be an object" };
+    const record = item as Record<string, unknown>;
+    const t = record.t;
+    const gainDb = record.gainDb;
+    const curve = record.curve;
+    if (typeof t !== "number" || typeof gainDb !== "number" || !Number.isFinite(t) || !Number.isFinite(gainDb))
+      return { ok: false, error: "point t and gainDb must be finite numbers" };
+    if (Math.abs(t) > 604_800)
+      return { ok: false, error: "point t must be within seven days of the visible clip start" };
+    if (index > 0 && t <= previousT)
+      return { ok: false, error: "points must be strictly ascending in t" };
+    if (gainDb < -48 || gainDb > 6)
+      return { ok: false, error: "point gainDb must be -48..+6" };
+    if (curve !== undefined && (typeof curve !== "number" || !Number.isFinite(curve) || curve < -1 || curve > 1))
+      return { ok: false, error: "point curve must be -1..1" };
+    points.push(curve === undefined ? { t, gainDb } : { t, gainDb, curve });
+    previousT = t;
+  }
+  return { ok: true, points };
+}
 
 // CAP-TRN-005 — te::DeviceManager::getDefaultAudioOutDeviceName(false), verbatim. The
 // engine's findOutputDeviceWithName resolves this exact string to the current default
@@ -425,7 +463,7 @@ const MOCK_TXN_SAFE = new Set([
   "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
   "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
   "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
-  "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
+  "duplicate_clip", "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade",
   "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
   "stretch_clip", "set_clip_warp",
   "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
@@ -448,7 +486,7 @@ const MOCK_TXN_SAFE = new Set([
 const MOCK_FROZEN_LOCKED = new Set([
   "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
   "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
-  "set_clip_gain", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
+  "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
   "normalize_clip", "set_clip_warp", "stretch_clip",
   "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
   "set_plugin_param", "bypass_plugin", "open_plugin_editor",
@@ -2197,8 +2235,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "duplicate_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo();
-      const dup = waveClip(f.clip.name, f.clip.start + f.clip.length, f.clip.length);
-      f.track.clips.push(dup); invalidate(); return ok(command, { clipId: dup.id });
+      const dup: Clip = {
+        ...f.clip,
+        id: nextClipId(),
+        start: f.clip.start + f.clip.length,
+        notes: f.clip.notes?.map((note) => ({ ...note })),
+        clipGainPoints: f.clip.clipGainPoints?.map((point) => ({ ...point })),
+      };
+      f.track.clips.push(dup); invalidate(); return ok(command, { newClipId: dup.id });
     }
     case "consolidate_clips": {
       // Mirrors MoshOps::cmdConsolidateClips — MIDI-only merge, one undo step, notes
@@ -2298,6 +2342,18 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "rename_clip": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.name = str(args.name, f.clip.name); invalidate(); return ok(command); }
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
+    case "write_clip_gain_curve": {
+      const found = findClip(str(args.clipId));
+      if (!found) return err(command, "clip not found");
+      if (found.clip.type !== "wave") return err(command, "not an audio clip");
+      const parsed = parseMockClipGainPoints(args.points);
+      if (!parsed.ok) return err(command, parsed.error);
+      pushUndo();
+      if (parsed.points.length === 0) delete found.clip.clipGainPoints;
+      else found.clip.clipGainPoints = parsed.points;
+      invalidate();
+      return ok(command, { pointCount: parsed.points.length });
+    }
     // G4b — clip fades: clamps each dimension present in args to [0, clip.length]
     // (mirrors the engine's no-boundary-move clamp). Curve names map to the same
     // te::AudioFadeCurve::Type ints (1..4) the native snapshot carries. Like

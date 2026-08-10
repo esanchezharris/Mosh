@@ -125,6 +125,12 @@ namespace mosh::ids
     // stay correct. Same reasoning as a colour storing "#rrggbb" rather than "swatch 3".
     // The vocabulary of legal names lives in state/TrackIcons.h.
     MOSH_DECLARE_ID (trackIcon)
+
+    // Pro Tools dynamic Clip Gain — identifies the hidden clip-local VolumeAndPanPlugin
+    // whose absolute automation curve applies the per-breakpoint gain offsets. It lives
+    // inside the audio clip's own plugin list, so Tracktion moves, duplicates, saves and
+    // reloads it with the clip rather than leaking the envelope onto the track fader.
+    MOSH_DECLARE_ID (moshClipGainEnvelope)
     // FL drum-lane mute/solo: comma-separated GM pitches whose sampler pad is muted /
     // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
     MOSH_DECLARE_ID (drumMute)

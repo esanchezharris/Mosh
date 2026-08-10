@@ -233,6 +233,7 @@ private:
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
+    juce::var cmdWriteClipGainCurve (const juce::var& args);
     // G4b — clip fades (fade-in/fade-out + curve type). Audio-clip-only, mirrors
     // cmdSetClipGain; fades render NATIVELY through AudioClipBase (no src/state change).
     juce::var cmdSetClipFade    (const juce::var& args);

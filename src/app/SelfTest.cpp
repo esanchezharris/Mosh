@@ -2094,6 +2094,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "undo restores prior clip gain (+24)");
         cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}));   // sane default for downstream
 
+        // Avid V06 parity — dynamic Clip Gain is a clip-local envelope, separate from
+        // the static fader above and from the track's volume automation. The whole
+        // curve is one undo transaction; signed times preserve source-relative points
+        // hidden by a head trim.
+        {
+            juce::Array<var> gainPoints;
+            auto addGainPoint = [&] (double t, double gainDb, double curve = 0.0)
+            {
+                auto* point = new DynamicObject();
+                point->setProperty ("t", t);
+                point->setProperty ("gainDb", gainDb);
+                if (curve != 0.0) point->setProperty ("curve", curve);
+                gainPoints.add (var (point));
+            };
+            addGainPoint (-0.25, -9.0, -0.2);
+            addGainPoint (0.0, 0.0);
+            addGainPoint (0.75, 4.5, 0.4);
+            auto* gainArgs = new DynamicObject();
+            gainArgs->setProperty ("clipId", cid);
+            gainArgs->setProperty ("points", var (gainPoints));
+            check (ok (cmd (ops, "write_clip_gain_curve", var (gainArgs))),
+                   "write_clip_gain_curve accepts a signed clip-local envelope");
+            auto curve = clipById (cid).getProperty ("clipGainPoints", var());
+            check (curve.isArray() && curve.size() == 3, "clip gain curve reflects in snapshot");
+            check (std::abs ((double) curve[0].getProperty ("t", 99.0) - (-0.25)) < 0.01
+                   && std::abs ((double) curve[2].getProperty ("gainDb", 99.0) - 4.5) < 0.05,
+                   "clip gain snapshot preserves signed time and dB offsets");
+
+            check (ok (cmd (ops, "undo")), "undo write_clip_gain_curve ok");
+            check (! clipById (cid).hasProperty ("clipGainPoints"),
+                   "undo removes the clip-local gain envelope");
+            check (ok (cmd (ops, "redo")), "redo write_clip_gain_curve ok");
+            check (clipById (cid).getProperty ("clipGainPoints", var()).size() == 3,
+                   "redo restores the clip-local gain envelope");
+
+            juce::Array<var> invalidPoints;
+            auto* invalid = new DynamicObject();
+            invalid->setProperty ("t", 0.0);
+            invalid->setProperty ("gainDb", 6.5);
+            invalidPoints.add (var (invalid));
+            auto* invalidArgs = new DynamicObject();
+            invalidArgs->setProperty ("clipId", cid);
+            invalidArgs->setProperty ("points", var (invalidPoints));
+            check (! ok (cmd (ops, "write_clip_gain_curve", var (invalidArgs))),
+                   "write_clip_gain_curve rejects out-of-range dB before mutation");
+            check (clipById (cid).getProperty ("clipGainPoints", var()).size() == 3,
+                   "rejected clip gain envelope leaves the prior curve intact");
+        }
+
         // G4b — clip fades (fade-in / fade-out, + optional curve type). Audio-clip-only,
         // undoable, JSONL-logged undoable:true, snapshot-invalidating. Fades render NATIVELY
         // through Tracktion's AudioClipBase — no src/state schema change (free persistence
@@ -2145,6 +2194,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "save"); cmd (ops, "reload");
         check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "clip fadeInSec persists across save/reload");
         check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "clip fadeOutSec persists across save/reload");
+        check (clipById (cid).getProperty ("clipGainPoints", var()).size() == 3,
+               "clip gain envelope persists across save/reload");
 
         // JSONL: set_clip_fade logged undoable:true (mirror the warp assert).
         {
@@ -2369,6 +2420,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (et).getProperty ("clips", var()).size() == before + 1, "duplicate adds a clip to the track");
         const auto newId = dup["data"].getProperty ("newClipId", var()).toString();
         check ((double) clipById (newId).getProperty ("start", 0.0) > 0.5, "duplicate lands after the original");
+        check (clipById (newId).getProperty ("clipGainPoints", var()).size() == 3,
+               "duplicate carries its clip-local gain envelope");
         // duplicate is undoable (was uncovered): undo drops the copy, redo restores it.
         check (ok (cmd (ops, "undo")), "undo duplicate_clip ok");
         check (trackById (et).getProperty ("clips", var()).size() == before, "undo removes the duplicated clip");

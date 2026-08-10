@@ -13,6 +13,8 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "ClipLoopPhase.h"
+#include "ClipGainCurveWrite.h"
+#include "ClipGainEnvelope.h"
 #include "state/Ids.h"
 #include "engine/SourceRef.h"
 #include <limits>
@@ -716,6 +718,37 @@ juce::var MoshOps::cmdSetClipGain (const juce::var& args)
     return okResult ("set_clip_gain");
 }
 
+juce::var MoshOps::cmdWriteClipGainCurve (const juce::var& args)
+{
+    auto* clip = dynamic_cast<te::AudioClipBase*> (
+        findClip (args.getProperty ("clipId", var()).toString()));
+    if (clip == nullptr) return errResult ("write_clip_gain_curve", "not an audio clip");
+
+    const auto parsed = parseClipGainCurvePoints (args.getProperty ("points", var()));
+    if (! parsed.ok) return errResult ("write_clip_gain_curve", parsed.error);
+
+    if (parsed.points.empty() && findClipGainEnvelopePlugin (*clip) == nullptr)
+    {
+        auto* data = new DynamicObject();
+        data->setProperty ("pointCount", 0);
+        return okResult ("write_clip_gain_curve", var (data));
+    }
+
+    beginTxn ("write_clip_gain_curve");
+    if (const auto error = replaceClipGainEnvelope (*clip, parsed.points, undoManager());
+        error.isNotEmpty())
+    {
+        undoManager().undoCurrentTransactionOnly();
+        return errResult ("write_clip_gain_curve", error);
+    }
+
+    logLine ("write_clip_gain_curve", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("pointCount", (int) parsed.points.size());
+    return okResult ("write_clip_gain_curve", var (data));
+}
+
 // G4b — clip fades. String -> AudioFadeCurve::Type, default linear (mirrors the enum
 // tracktion_AudioFadeCurve.h ships: linear=1, convex=2, concave=3, sCurve=4).
 static te::AudioFadeCurve::Type fadeCurveFromName (const juce::String& name)
@@ -1203,6 +1236,19 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
     auto pos = clip->getPosition();
     const double newStart = pos.getEnd().inSeconds();
     const double len = pos.getLength().inSeconds();
+    ClipGainCurveWriteResult sourceGainCurve;
+    bool hasSourceGainCurve = false;
+    if (auto* sourceAudio = dynamic_cast<te::AudioClipBase*> (clip))
+    {
+        const auto points = clipGainEnvelopeToVar (*sourceAudio);
+        if (! points.isVoid())
+        {
+            sourceGainCurve = parseClipGainCurvePoints (points);
+            if (! sourceGainCurve.ok)
+                return errResult ("duplicate_clip", "source clip gain curve is invalid: " + sourceGainCurve.error);
+            hasSourceGainCurve = true;
+        }
+    }
 
     beginTxn ("duplicate_clip");
     te::Clip* dup = nullptr;
@@ -1210,7 +1256,18 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
     {
         auto nc = track->insertWaveClip (clip->getName(), w->getCurrentSourceFile(),
             { { tracktion::TimePosition::fromSeconds (newStart), pos.getLength() }, pos.getOffset() }, false);
-        if (nc != nullptr) { nc->setGainDB (w->getGainDB()); dup = nc.get(); }
+        if (nc != nullptr)
+        {
+            nc->setGainDB (w->getGainDB());
+            if (hasSourceGainCurve)
+                if (const auto error = replaceClipGainEnvelope (*nc, sourceGainCurve.points, undoManager());
+                    error.isNotEmpty())
+                {
+                    undoManager().undoCurrentTransactionOnly();
+                    return errResult ("duplicate_clip", error);
+                }
+            dup = nc.get();
+        }
     }
     else if (auto* m = dynamic_cast<te::MidiClip*> (clip))
     {
@@ -1637,12 +1694,20 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
     // track auto-create) so a malformed descriptor errors out with zero side effects
     // (no orphan track left behind, no empty transaction opened).
     File waveSource;
+    ClipGainCurveWriteResult pastedGainCurve;
+    const bool hasPastedGainCurve = clipVar.hasProperty ("clipGainPoints");
     if (type == "wave")
     {
         const auto sourcePath = clipVar.getProperty ("sourceFile", var()).toString();
         if (sourcePath.isEmpty()) return errResult ("paste_clip", "wave clip missing 'sourceFile'");
         waveSource = File (sourcePath);
         if (! waveSource.existsAsFile()) return errResult ("paste_clip", "source file not found: " + sourcePath);
+        if (hasPastedGainCurve)
+        {
+            pastedGainCurve = parseClipGainCurvePoints (clipVar.getProperty ("clipGainPoints", var()));
+            if (! pastedGainCurve.ok)
+                return errResult ("paste_clip", "clip gain curve is invalid: " + pastedGainCurve.error);
+        }
     }
 
     auto* track = findTrack (trackId);
@@ -1667,6 +1732,13 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
               tracktion::TimeDuration::fromSeconds (offset) }, false);
         if (nc == nullptr) return errResult ("paste_clip", "insertWaveClip failed");
         nc->setGainDB ((float) (double) clipVar.getProperty ("gainDb", 0.0));
+        if (hasPastedGainCurve)
+            if (const auto error = replaceClipGainEnvelope (*nc, pastedGainCurve.points, undoManager());
+                error.isNotEmpty())
+            {
+                undoManager().undoCurrentTransactionOnly();
+                return errResult ("paste_clip", error);
+            }
         pasted = nc.get();
     }
     else // midi

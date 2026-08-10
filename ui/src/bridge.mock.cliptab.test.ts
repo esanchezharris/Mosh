@@ -80,6 +80,53 @@ describe("clip inspector: rename_clip / set_clip_mute / set_clip_gain via the mo
     expect((await findClip(clipId)).gainDb).toBe(6);
   });
 
+  it("write_clip_gain_curve persists a clip-local envelope and undo/clear round-trip", async () => {
+    const { clipId } = await waveClip();
+    const points = [
+      { t: -0.25, gainDb: -9, curve: -0.2 },
+      { t: 0.5, gainDb: 0 },
+      { t: 1.5, gainDb: 4.5, curve: 0.4 },
+    ];
+
+    const written = await exec("write_clip_gain_curve", { clipId, points });
+    expect(written.ok).toBe(true);
+    expect((await findClip(clipId)).clipGainPoints).toEqual(points);
+
+    await exec("undo", {});
+    expect((await findClip(clipId)).clipGainPoints).toBeUndefined();
+    await exec("redo", {});
+    expect((await findClip(clipId)).clipGainPoints).toEqual(points);
+
+    const duplicated = await exec("duplicate_clip", { clipId });
+    expect(duplicated.ok).toBe(true);
+    const duplicateId = (duplicated.data as { newClipId: string }).newClipId;
+    expect((await findClip(duplicateId)).clipGainPoints).toEqual(points);
+
+    const cleared = await exec("write_clip_gain_curve", { clipId, points: [] });
+    expect(cleared.ok).toBe(true);
+    expect((await findClip(clipId)).clipGainPoints).toBeUndefined();
+  });
+
+  it("write_clip_gain_curve accepts JSON and rejects malformed envelopes before mutation", async () => {
+    const { clipId } = await waveClip();
+    const written = await exec("write_clip_gain_curve", {
+      clipId,
+      points: '[{"t":0,"gainDb":-3},{"t":1,"gainDb":2}]',
+    });
+    expect(written.ok).toBe(true);
+    const before = (await findClip(clipId)).clipGainPoints;
+
+    for (const points of [
+      [{ t: 1, gainDb: 0 }, { t: 1, gainDb: -3 }],
+      [{ t: 0, gainDb: 6.1 }],
+      [{ t: "later", gainDb: 0 }],
+    ]) {
+      const rejected = await exec("write_clip_gain_curve", { clipId, points });
+      expect(rejected.ok).toBe(false);
+      expect((await findClip(clipId)).clipGainPoints).toEqual(before);
+    }
+  });
+
   it("set_clip_mute and rename_clip also work on a MIDI clip (gain is wave-only in the UI, not blocked by the mock)", async () => {
     const { clipId } = await midiClip();
     const r1 = await exec("set_clip_mute", { clipId, mute: true });

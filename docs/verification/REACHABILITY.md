@@ -22,7 +22,7 @@ Row format (the guard parses these columns exactly):
 | Clip fades (in/out + curve) | set_clip_fade | reachable | testid:v2-clip-fadein | clip-edit-fades.spec.ts |
 | Clip reverse | set_clip_reverse | reachable | testid:v2-clip-reverse | clip-edit-fades.spec.ts |
 | Clip normalize | normalize_clip | reachable | testid:v2-clip-normalize | clip-edit-fades.spec.ts |
-| Clip gain / mute / rename | set_clip_gain, set_clip_mute, rename_clip | reachable | testid:v2-clip-gain | clip-edit-fades.spec.ts |
+| Clip gain / mute / rename | set_clip_gain, write_clip_gain_curve, set_clip_mute, rename_clip | reachable | testid:pt-clip-gain-point | protools-clip-gain.spec.ts |
 | Clip loop region | set_clip_loop | reachable | testid:v2-clip-loop | clip-edit-fades.spec.ts |
 | Clip crossfade | set_clip_crossfade | reachable | testid:v2-clip-crossfade | clip-edit-fades.spec.ts |
 | Export (range / tail / format) | export_audio | reachable | testid:export-run | export-dialog.spec.ts |

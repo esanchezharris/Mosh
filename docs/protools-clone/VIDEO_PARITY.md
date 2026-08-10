@@ -34,7 +34,7 @@ oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 | V03 | [Recording Audio](https://www.youtube.com/watch?v=lG7JXfc8Hl8) | 0:00 input/output; 0:25 record mode; 0:36 track/global arm; 0:46 cursor plus record/stop; 1:05 F12. |
 | V04 | [I/O Setup: Inputs and Outputs](https://www.youtube.com/watch?v=U45vpVRYr38) | 0:00 device-dependent I/O; 0:12 path grid; 0:40 rename/create/default paths; 0:54 outputs exposed to tracks. |
 | V05 | [Learn Pro Tools in 1 Hour](https://www.youtube.com/watch?v=2ywNbOLePOo) | 0:58 tracks; 10:25 clips; 22:27 audio recording; 31:48 arrange/mix; 35:08 clip editing; 51:05 mixing; 56:06 inserts; 1:01:25 automation. |
-| V06 | [How to Use Clip Gain](https://www.youtube.com/watch?v=-jQceBZ8tPI) | 0:04 clip versus track volume; 0:16 lower-left gain control; 0:42 dynamic gain; 0:58 gain line; 1:04 breakpoints. |
+| V06 | [How to Use Clip Gain](https://www.youtube.com/watch?v=-jQceBZ8tPI) | 0:04 clip versus track volume; 0:18 lower-left gain control; 0:42 dynamic gain; 0:58 gain line; 1:04 Grabber breakpoints; 1:13 vertical gain/horizontal timing. |
 | V07 | [Editing Automation](https://www.youtube.com/watch?v=HjoNFBxyXYg) | 0:00 Smart Tool; 0:15 selection; 0:18-0:25 cut/copy/paste; 0:24 trim; 0:40 nudge; 0:45 node move; 0:56 delete; 1:03 Control line Pencil; 1:09 Control+Command freehand. |
 | V08 | [MIDI Editor](https://www.youtube.com/watch?v=FDqKlSMKCGw) | 0:00 double-click MIDI clip; 0:27 independent modes/tools; 0:34 keyboard; 0:43 controller lane; 0:51 Track List; 1:13 Smart Tool. |
 | V09 | [Track Views](https://www.youtube.com/watch?v=VyEEufPAZ5s) | Track display and automation-view selection. |
@@ -94,7 +94,7 @@ Focus, Escape/cancel, pointer cancellation, `projectEpoch` replacement, undo, sa
 reload are explicit where applicable. Browser evidence does not replace packaged,
 native, physical-device, or audio-output acceptance.
 
-## Live parity ledger
+## Pro Tools parity ledger
 
 | Area | Evidence | Status | Mosh proof / next action |
 |---|---|---|---|
@@ -103,7 +103,7 @@ native, physical-device, or audio-output acceptance.
 | Recording/routing | V03, V04, V05 | `MATCH/ADAPTED` | Producer flow asserts unassigned/Auto/disarmed, routed/Monitor In/armed, active record, stopped take, and command trace. Track inspector replaces the full I/O matrix. |
 | Track controls | V03, V05, V11 | `ADAPTED` | Header exposes select/arm/solo/mute and actual output; inspector owns deeper routing, mix, and inserts. Expanded header density is optional follow-up. |
 | Static clip gain | V06, C03 | `MATCH` | Selected-clip line/handle, local drag preview, keyboard control, dB-amplitude waveform response, epoch cancellation, inspector agreement, and `set_clip_gain` commit. |
-| Dynamic clip gain | V06, C03 | `GAP` | Requires an additive breakpoint model and command contract; static gain must not fake it. |
+| Dynamic clip gain | V06, C03 | `MATCH/PARTIAL` | A clip-local gain line supports Grabber line-click creation, vertical gain and horizontal timing moves, accessible breakpoint nudge/delete, rollback, undo, persistence, duplication, and `write_clip_gain_curve`. The engine curve is independent of track volume and static clip gain. Per-segment waveform-amplitude redraw and packaged audible proof remain open, so this is not yet a full visual/native `MATCH`. |
 | Automation Smart Tool | V07 plus Avid help | `MATCH` | Authoritative top-25/lower-75 classifier and Command/Control breakpoint tests. |
 | Automation range/node editing | V07 | `MATCH` | Lower-band persistent range, upper-band trim preview, numeric Nudge, direct node move, and Option/Alt or Delete removal have focused component tests plus one serial Chromium before/during/after command trace. |
 | Automation clipboard/Pencil | V07 | `MATCH` | ⌘C/⌘X/⌘V and the accessible right-click menu own the selected automation range, including native macOS Edit-menu forwarding; Control-drag writes a line and Control+Command-drag writes one ordered freehand segment, each previewed locally and committed once. |

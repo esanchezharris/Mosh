@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
 import type { CommandResult, Snapshot } from "../types";
 import { ProToolsTimeline } from "./ProToolsTimeline";
+import { useProTools } from "./proToolsState";
 
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
@@ -43,10 +44,10 @@ const SNAPSHOT: Snapshot = {
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
 };
 
-function Harness() {
+function Harness({ snapshot = SNAPSHOT }: { readonly snapshot?: Snapshot }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   return React.createElement(ProToolsTimeline, {
-    snapshot: SNAPSHOT,
+    snapshot,
     contentWidth: 800,
     scrollRef,
     onScroll: () => {},
@@ -70,6 +71,27 @@ describe("Pro Tools inline clip gain", () => {
     act(() => element.dispatchEvent(new PointerEvent(type, { bubbles: true, ...init })));
   };
 
+  const renderWithPoints = (points: NonNullable<Snapshot["tracks"][number]["clips"][number]["clipGainPoints"]>) => {
+    const snapshot: Snapshot = {
+      ...SNAPSHOT,
+      tracks: [{
+        ...SNAPSHOT.tracks[0],
+        clips: [{ ...SNAPSHOT.tracks[0].clips[0], clipGainPoints: points }],
+      }],
+    };
+    act(() => root.render(React.createElement(Harness, { snapshot })));
+  };
+
+  const setEnvelopeRect = () => {
+    const envelope = host.querySelector<SVGSVGElement>("[data-testid=pt-clip-gain-envelope]");
+    if (!envelope) throw new Error("dynamic clip gain envelope did not render");
+    vi.spyOn(envelope, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 100,
+      width: 400, height: 100, toJSON: () => ({}),
+    });
+    return envelope;
+  };
+
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
@@ -86,6 +108,7 @@ describe("Pro Tools inline clip gain", () => {
       ensurePeaks: vi.fn(),
       exec,
     });
+    useProTools.setState({ smartToolEnabled: true, activeTool: "selector", nudgeValue: 0.25 });
     act(() => root.render(React.createElement(Harness)));
   });
 
@@ -211,5 +234,115 @@ describe("Pro Tools inline clip gain", () => {
     // Then: its gain remains legible without adding an inactive focus target.
     expect(host.querySelector("[data-testid=pt-clip-gain-line]")).not.toBeNull();
     expect(host.querySelector("[data-testid=pt-clip-gain-handle]")).toBeNull();
+  });
+
+  it("renders clip-local breakpoint sliders and a line grounded in the static gain", () => {
+    renderWithPoints([{ t: 1, gainDb: 0 }, { t: 3, gainDb: 3 }]);
+
+    const points = [...host.querySelectorAll<HTMLElement>("[data-testid=pt-clip-gain-point]")];
+    expect(points).toHaveLength(2);
+    expect(points[0].getAttribute("aria-valuetext")).toContain("-6.0 dB clip gain");
+    expect(points[1].getAttribute("aria-valuetext")).toContain("+3.0 dB dynamic");
+    expect(host.querySelector("[data-testid=pt-clip-gain-envelope]")).not.toBeNull();
+  });
+
+  it("adds a breakpoint by clicking the gain line without claiming the rest of the clip", () => {
+    const envelope = setEnvelopeRect();
+    const line = host.querySelector<SVGPathElement>("[data-testid=pt-clip-gain-line-hit]");
+    if (!line) throw new Error("gain line hit target did not render");
+
+    act(() => line.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 20, button: 0, clientX: 200, clientY: 50,
+    })));
+
+    expect(envelope).not.toBeNull();
+    expect(exec).toHaveBeenCalledWith("write_clip_gain_curve", {
+      clipId: CLIP_ID,
+      points: [{ t: 2, gainDb: 0 }],
+    });
+
+    act(() => useProTools.setState({ smartToolEnabled: false, activeTool: "selector" }));
+    expect(host.querySelector("[data-testid=pt-clip-gain-line-hit]")).toBeNull();
+  });
+
+  it("previews a breakpoint move locally and commits the whole curve once", () => {
+    renderWithPoints([{ t: 1, gainDb: 0 }, { t: 3, gainDb: -6 }]);
+    setEnvelopeRect();
+    const point = host.querySelector<HTMLElement>("[data-testid=pt-clip-gain-point]");
+    if (!point) throw new Error("clip gain breakpoint did not render");
+
+    pointer(point, "pointerdown", { pointerId: 21, button: 0, clientX: 100, clientY: 20 });
+    pointer(point, "pointermove", { pointerId: 21, buttons: 1, clientX: 150, clientY: 0 });
+    expect(point.getAttribute("aria-valuenow")).toBe("5");
+    expect(exec).not.toHaveBeenCalled();
+    pointer(point, "pointerup", { pointerId: 21, clientX: 150, clientY: 0 });
+
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledWith("write_clip_gain_curve", {
+      clipId: CLIP_ID,
+      points: [{ t: 1.5, gainDb: 5 }, { t: 3, gainDb: -6 }],
+    });
+  });
+
+  it("cancels a breakpoint draft on pointercancel and project replacement", () => {
+    renderWithPoints([{ t: 1, gainDb: 0 }, { t: 3, gainDb: -6 }]);
+    setEnvelopeRect();
+    const point = host.querySelector<HTMLElement>("[data-testid=pt-clip-gain-point]")!;
+
+    pointer(point, "pointerdown", { pointerId: 22, button: 0, clientX: 100, clientY: 20 });
+    pointer(point, "pointermove", { pointerId: 22, buttons: 1, clientX: 150, clientY: 0 });
+    pointer(point, "pointercancel", { pointerId: 22, clientX: 150, clientY: 0 });
+    expect(exec).not.toHaveBeenCalled();
+    expect(point.getAttribute("aria-valuenow")).toBe("0");
+
+    pointer(point, "pointerdown", { pointerId: 23, button: 0, clientX: 100, clientY: 20 });
+    pointer(point, "pointermove", { pointerId: 23, buttons: 1, clientX: 150, clientY: 0 });
+    act(() => useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 })));
+    pointer(point, "pointerup", { pointerId: 23, clientX: 150, clientY: 0 });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("rolls an optimistic breakpoint edit back when MoshOps rejects it", async () => {
+    renderWithPoints([{ t: 1, gainDb: 0 }, { t: 3, gainDb: -6 }]);
+    let settle: ((result: CommandResult) => void) | undefined;
+    const pending = new Promise<CommandResult>((resolve) => { settle = resolve; });
+    exec.mockImplementation(() => pending);
+    act(() => useStore.setState({ exec }));
+    const point = host.querySelector<HTMLElement>("[data-testid=pt-clip-gain-point]")!;
+
+    act(() => point.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "ArrowUp", bubbles: true, cancelable: true,
+    })));
+    expect(point.getAttribute("aria-valuenow")).toBe("0.5");
+
+    await act(async () => {
+      settle?.({ ok: false, command: "write_clip_gain_curve", error: "track is frozen" });
+      await pending;
+    });
+    expect(point.getAttribute("aria-valuenow")).toBe("0");
+  });
+
+  it("supports keyboard gain, time, and delete edits through one envelope command", () => {
+    renderWithPoints([{ t: 1, gainDb: 0 }, { t: 3, gainDb: -6 }]);
+    const points = [...host.querySelectorAll<HTMLElement>("[data-testid=pt-clip-gain-point]")];
+    const key = (element: HTMLElement, value: string) => act(() => element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }),
+    ));
+
+    key(points[0], "ArrowUp");
+    expect(exec).toHaveBeenLastCalledWith("write_clip_gain_curve", {
+      clipId: CLIP_ID,
+      points: [{ t: 1, gainDb: 0.5 }, { t: 3, gainDb: -6 }],
+    });
+    key(points[1], "ArrowLeft");
+    expect(exec).toHaveBeenLastCalledWith("write_clip_gain_curve", {
+      clipId: CLIP_ID,
+      points: [{ t: 1, gainDb: 0.5 }, { t: 2.75, gainDb: -6 }],
+    });
+    key(points[1], "Delete");
+    expect(exec).toHaveBeenLastCalledWith("write_clip_gain_curve", {
+      clipId: CLIP_ID,
+      points: [{ t: 1, gainDb: 0.5 }],
+    });
   });
 });

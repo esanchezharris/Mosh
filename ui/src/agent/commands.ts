@@ -85,6 +85,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "insert_time", desc: "Open empty timeline at a point and push EVERYTHING after it later — clips on every track (split at the point), their automation, the master bus, tempo/time-signature changes, song sections, annotations and the loop. The inverse of a ripple delete; use it to make room for another 8 bars before the chorus", args: [N("start", true, "seconds"), N("duration", true, "seconds of space to open")] },
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
+  { command: "write_clip_gain_curve", desc: "Replace one wave clip's dynamic gain envelope in ONE undoable call; points are signed seconds from the visible clip start and dB offsets from its static clip gain (-48..+6). An empty array clears it", args: [S("clipId"), S("points", true, 'JSON array of {"t":seconds,"gainDb":dB,"curve"?:-1..1} ascending in t')] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
   { command: "set_clip_fade", desc: "Set a clip's fade-in / fade-out (seconds)",
     args: [S("clipId"), N("fadeInSec", false, "seconds"), N("fadeOutSec", false, "seconds"),
@@ -311,6 +312,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "insert_time": return `Opened ${a.duration}s of space at ${a.start}s — everything after it moved later`;
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
+    case "write_clip_gain_curve": return `Wrote a dynamic clip gain envelope`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
     case "set_clip_fade": return `Set clip fades (in ${a.fadeInSec ?? "–"}s, out ${a.fadeOutSec ?? "–"}s)`;
     case "set_clip_reverse": return a.reversed ? `Reversed a clip` : `Un-reversed a clip`;

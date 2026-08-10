@@ -165,12 +165,13 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 
 ### Audio clip inspector
 
-- **Structure**: clip name, mute state, paired clip-gain slider and numeric field, 0 dB reset, waveform preview, read-only timing/fade metadata, plus an inline selected-clip gain line and lower-left adjustment handle in the timeline.
+- **Structure**: clip name, mute state, paired static clip-gain slider and numeric field, 0 dB reset, waveform preview, read-only timing/fade metadata, plus an inline selected-clip static handle and a dynamic clip-local gain envelope in the timeline.
 - **States**: clean, locally edited, invalid name, invalid gain, command rejected, project replaced, muted.
 - **Accessibility**: every field has a visible label; validation is announced and associated with its field; Escape restores the snapshot value; the mute toggle exposes `aria-pressed`; the inline handle exposes slider semantics, value text, Arrow/Home/End control, and a visible focus ring.
-- **Mutation**: rename, mute, and gain commit only through `rename_clip`, `set_clip_mute`, and `set_clip_gain`. Gain remains local while a pointer or keyboard gesture is active, accepts `-48…+24 dB`, and commits only on completion.
+- **Mutation**: rename, mute, and static gain commit only through `rename_clip`, `set_clip_mute`, and `set_clip_gain`. Static gain remains local while a pointer or keyboard gesture is active, accepts `-48…+24 dB`, and commits only on completion. Dynamic breakpoints replace one clip-local envelope through `write_clip_gain_curve`; offsets accept `-48…+6 dB`, are stored source-relative, and remain a single undo transaction per gesture.
 - **Safety**: a `projectEpoch` change resets all drafts and prevents a stale editor gesture from addressing the replacement project.
-- **Visual feedback**: the gain line maps the supported dB range into the waveform body and the waveform scales by the linear dB amplitude factor, clipped by the original clip bounds. The handle and line are original Mosh primitives, not copied Avid art.
+- **Dynamic behavior**: with Smart Tool or Grabber active, clicking the gain line inserts an interpolated breakpoint. Pointer movement changes gain vertically and timing horizontally; keyboard users can add at the playhead, nudge in time/value, or delete a focused point. Escape, pointer cancellation, command rejection, and project replacement discard local preview state.
+- **Visual feedback**: the static gain line maps the supported dB range into the waveform body and the waveform scales by the linear dB amplitude factor, clipped by the original clip bounds. The dynamic SVG line and native breakpoint buttons render the audible envelope but do not yet redraw waveform amplitude per segment. These are original Mosh primitives, not copied Avid art.
 
 ### Insert browser and rack
 
