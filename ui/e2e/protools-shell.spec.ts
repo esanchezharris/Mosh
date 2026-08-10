@@ -435,6 +435,87 @@ test("Playlists audition whole takes and promote a selected phrase into the main
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });
 
+test("Waveform comp target cycles alternate takes inside one selection", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  await sessionAction(page, "new_project");
+  await page.getByTestId("pt-add-track").click();
+  await page.getByTestId("pt-add-track-audio").click();
+
+  const header = page.getByTestId("pt-track-header").first();
+  const trackId = await header.getAttribute("data-track-id");
+  if (!trackId) throw new Error("recorded comp track id is absent");
+  const lane = page.locator(`[data-testid="pt-lane"][data-track-id="${trackId}"]`);
+  await header.getByTestId("pt-track-select").click();
+  await page.getByTestId("pt-io-input").click();
+  await page.getByTestId("pt-io-input-option").filter({ hasText: "Input 1-2" }).click();
+  await header.getByTestId("pt-track-arm").click();
+
+  const toolbar = page.getByTestId("pt-toolbar");
+  const record = toolbar.getByRole("button", { name: "Record", exact: true });
+  const stop = toolbar.getByRole("button", { name: "Stop", exact: true });
+  for (let take = 0; take < 2; take += 1) {
+    await record.click();
+    await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(true);
+    await stop.click();
+    await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(false);
+  }
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.currentTakeIndex")).toBe(1);
+
+  const clip = lane.getByTestId("v2-clip").first();
+  const clipBox = await clip.boundingBox();
+  if (!clipBox) throw new Error("waveform clip bounds are absent");
+  const selectionY = clipBox.y + Math.min(8, clipBox.height / 4);
+  await page.mouse.move(clipBox.x + clipBox.width * 0.25, selectionY);
+  await page.mouse.down();
+  await page.mouse.move(clipBox.x + clipBox.width * 0.75, selectionY, { steps: 4 });
+  await expect(lane.getByTestId("pt-comp-range")).toHaveAttribute("data-dragging", "true");
+  await page.mouse.up();
+
+  const compRange = lane.getByTestId("pt-comp-range");
+  await expect(compRange).toBeVisible();
+  await expect(compRange.getByTestId("pt-comp-target")).toHaveText("Target: Main");
+  await expect(compRange.getByTestId("pt-comp-current")).toHaveText("Take 2 of 2");
+  await page.screenshot({
+    path: testInfo.outputPath("protools-waveform-comp-target-before-wide.png"),
+    animations: "disabled",
+  });
+
+  await page.keyboard.press("Meta+Shift+ArrowUp");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.length")).toBe(3);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.1.currentTakeIndex")).toBe(0);
+  await expect(compRange.getByTestId("pt-comp-current")).toHaveText("Take 1 of 2");
+  await page.keyboard.press("Meta+Shift+ArrowDown");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.1.currentTakeIndex")).toBe(1);
+  await expect(compRange.getByTestId("pt-comp-current")).toHaveText("Take 2 of 2");
+
+  const promotions = await page.evaluate(() =>
+    (window as ProToolsWindow).__moshCmdTrace?.filter((entry) =>
+      entry.command === "promote_take_region") ?? []);
+  expect(promotions).toHaveLength(2);
+  expect(promotions[0]?.args.takeIndex).toBe(0);
+  expect(promotions[1]?.args.takeIndex).toBe(1);
+  await page.screenshot({
+    path: testInfo.outputPath("protools-waveform-comp-target-after-wide.png"),
+    animations: "disabled",
+  });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
+  const compactToolbar = await compRange.getByRole("group").boundingBox();
+  if (!compactToolbar) throw new Error("compact comp controls are absent");
+  expect(compactToolbar.x).toBeGreaterThanOrEqual(0);
+  expect(compactToolbar.x + compactToolbar.width).toBeLessThanOrEqual(720);
+  await page.screenshot({
+    path: testInfo.outputPath("protools-waveform-comp-target-compact.png"),
+    animations: "disabled",
+  });
+
+  await page.keyboard.press("Escape");
+  await expect(compRange).toHaveCount(0);
+});
+
 test("Sends route a track through a named Aux return and its insert rack", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);

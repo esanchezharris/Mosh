@@ -36,7 +36,7 @@ Row format (the guard parses these columns exactly):
 | Count-in | set_count_in | reachable | role:topbar count-in select | — |
 | Quantize (piano roll / MIDI tab) | quantize_notes | reachable | testid:v2-open-pianoroll | — |
 | Takes (switch + keep) | set_current_take, keep_take | reachable | role:inspector Takes tab (dynamic testid v2-insp-tab-takes) | record-arm.spec.ts |
-| Pro Tools playlist region comp | promote_take_region | reachable | testid:pt-playlist-promote | protools-shell.spec.ts |
+| Pro Tools playlist region comp / Waveform take cycle | promote_take_region | reachable | testid:pt-playlist-promote, pt-comp-previous, pt-comp-next | protools-shell.spec.ts |
 | Record (transport, auto-arm) | set_transport, arm_track | reachable | testid:v2-record | record-arm.spec.ts |
 | Per-track arm / input monitor / input picker | arm_track, set_input_monitor, set_track_input | reachable | testid:v2-track-arm | record-arm.spec.ts |
 | Automation editing in v2 (write-arm + lanes) | set_track_automation_mode, write_automation_curve, add_automation_point | gap:G16 | testid:v2-automation-arm | automation-write.spec.ts |

@@ -130,12 +130,25 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
   // Escape stack, so Esc cancels the gesture instead of closing an overlay beneath.
   const escDispose = useRef<(() => void) | null>(null);
   const cancelDrag = () => {
+    const timeSelection = drag.current?.kind === "time";
     drag.current = null;
     setPreview(null);
+    if (timeSelection) {
+      useShell.getState().setTimeRangeDragging(false);
+      useShell.getState().setTimeRange(null);
+    }
     escDispose.current?.();
     escDispose.current = null;
   };
-  useEffect(() => () => { escDispose.current?.(); escDispose.current = null; }, []);
+  useEffect(() => () => {
+    if (drag.current?.kind === "time") {
+      useShell.getState().setTimeRangeDragging(false);
+      useShell.getState().setTimeRange(null);
+    }
+    drag.current = null;
+    escDispose.current?.();
+    escDispose.current = null;
+  }, []);
 
   const pos: DragPos = preview ?? { start: clip.start, length: clip.length, offset: clip.offset };
   const left = pos.start * pxPerSec;
@@ -219,7 +232,11 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
     const d = drag.current; if (!d) return;
     const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
     const threshold = liveFeel().dragThreshold;
-    if (!d.engaged) { if (!passedDragThreshold(dx, dy, threshold)) return; d.engaged = true; }
+    if (!d.engaged) {
+      if (!passedDragThreshold(dx, dy, threshold)) return;
+      d.engaged = true;
+      if (d.kind === "time") useShell.getState().setTimeRangeDragging(true);
+    }
     // TIME SELECTION across the clip body (Ableton / Pro Tools). It paints the shared
     // range band instead of a clip preview, so it returns before every rule below —
     // those are all about previewing a moved/trimmed clip, which this gesture never does.
@@ -267,6 +284,11 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
     if (d && d.engaged) {
       lastUp.current = null;
       if (d.kind === "time") {
+        useShell.getState().setTimeRangeDragging(false);
+        if (useStore.getState().projectEpoch !== d.projectEpoch) {
+          useShell.getState().setTimeRange(null);
+          return;
+        }
         // Nothing to commit: a range is UI-local state, and delete/loop act on it from
         // the band's own toolbar. Drop a zero-width range so a stray drag leaves nothing.
         const r = useShell.getState().timeRange;

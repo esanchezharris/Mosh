@@ -9,6 +9,7 @@ import { midiPointerIsBlank } from "./midiBlankHit";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { ProToolsAudioClip } from "./ProToolsAudioClip";
 import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
+import { ProToolsCompRange } from "./ProToolsCompRange";
 import { ProToolsPlaylists } from "./ProToolsPlaylists";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
@@ -34,6 +35,9 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const pxPerSec = useStore((s) => s.pxPerSec);
   const select = useStore((s) => s.select);
   const clearSelection = useStore((s) => s.clearSelection);
+  const selectedClipId = useStore((s) => s.selection.size === 1
+    ? s.selection.values().next().value ?? null
+    : null);
   const position = useStore((s) => s.transport.position);
   const smartToolEnabled = useProTools((s) => s.smartToolEnabled);
   const activeTool = useProTools((s) => s.activeTool);
@@ -347,6 +351,10 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
                 );
               })}
               {trackView === "playlists" && <ProToolsPlaylists track={track} />}
+              {trackView === "waveform" && track.clips.map((clip) =>
+                clip.id === selectedClipId && !clip.hidden && clip.type === "wave"
+                  ? <ProToolsCompRange key={`comp:${clip.id}`} clip={clip} />
+                  : null)}
               {(primaryAutomation || secondaryAutomation) && (
                 <ProToolsAutomationLane track={track} width={contentWidth}
                   primary={primaryAutomation} targetName="Volume" />

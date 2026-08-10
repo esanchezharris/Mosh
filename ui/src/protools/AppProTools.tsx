@@ -10,6 +10,7 @@ import { SettingsPanel } from "../settings/SettingsPanel";
 import { useStore } from "../store";
 import { AudioDeviceNotice } from "../ui/AudioDeviceNotice";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
+import { useShell } from "../v2/shellState";
 import { ProToolsArrangement } from "./ProToolsArrangement";
 import { ProToolsDetailDock } from "./ProToolsDetailDock";
 import { ProToolsMoshiDrawer } from "./ProToolsMoshiDrawer";
@@ -39,7 +40,11 @@ export function AppProTools() {
   useProToolsKeys();
   useQwertyMidi();
 
-  useEffect(() => resetForProject(projectEpoch), [projectEpoch, resetForProject]);
+  useEffect(() => {
+    resetForProject(projectEpoch);
+    useShell.getState().setTimeRange(null);
+    useShell.getState().setTimeRangeDragging(false);
+  }, [projectEpoch, resetForProject]);
   useEffect(() => {
     setRipple(editMode === "shuffle");
     setSnap(editMode === "grid");
