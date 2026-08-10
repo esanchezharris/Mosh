@@ -60,6 +60,18 @@ describe("Pro Tools horizontal zoom controls", () => {
     expect(useProTools.getState().midiNoteZoom).toBe(0.75);
   });
 
+  it("exposes Single Zoom as project-scoped tool behavior without changing project data", () => {
+    const single = host.querySelector<HTMLButtonElement>("[data-testid=pt-single-zoom]");
+    if (!single) throw new Error("Single Zoom control is missing");
+
+    act(() => single.click());
+
+    expect(single.getAttribute("aria-pressed")).toBe("true");
+    expect(useProTools.getState().singleZoomEnabled).toBe(true);
+    act(() => useProTools.getState().resetForProject(92));
+    expect(useProTools.getState().singleZoomEnabled).toBe(false);
+  });
+
   it("zooms with the cluster buttons and recalls presets", () => {
     const zoomIn = host.querySelector<HTMLButtonElement>("[data-testid=pt-zoom-in]");
     const presetFive = host.querySelector<HTMLButtonElement>("[data-testid=pt-zoom-preset-5]");

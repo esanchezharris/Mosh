@@ -31,6 +31,8 @@ describe("Pro Tools shell state", () => {
       midiNoteZoom: state.midiNoteZoom,
       memoryLocationsOpen: state.memoryLocationsOpen,
       memoryLocationEditor: state.memoryLocationEditor,
+      singleZoomEnabled: state.singleZoomEnabled,
+      zoomReturnState: state.zoomReturnState,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -55,6 +57,8 @@ describe("Pro Tools shell state", () => {
       midiNoteZoom: 1,
       memoryLocationsOpen: false,
       memoryLocationEditor: null,
+      singleZoomEnabled: false,
+      zoomReturnState: null,
     });
   });
 
@@ -94,6 +98,22 @@ describe("Pro Tools shell state", () => {
     state.resetForProject(projectEpoch + 1);
     expect(useProTools.getState().audioWaveformZoom).toBe(1);
     expect(useProTools.getState().midiNoteZoom).toBe(1);
+  });
+
+  it("returns Single Zoom to the previously selected Smart Tool state", () => {
+    const state = useProTools.getState();
+    state.setActiveTool("zoomer");
+    state.toggleSmartTool();
+    state.toggleSingleZoom();
+
+    expect(useProTools.getState().singleZoomEnabled).toBe(true);
+    expect(useProTools.getState().activeTool).toBe("zoomer");
+    expect(useProTools.getState().smartToolEnabled).toBe(false);
+
+    useProTools.getState().completeSingleZoom();
+    expect(useProTools.getState().activeTool).toBe("selector");
+    expect(useProTools.getState().smartToolEnabled).toBe(true);
+    expect(useProTools.getState().zoomReturnState).toBeNull();
   });
 
   it("clamps track-header resizing at both supported boundaries", () => {

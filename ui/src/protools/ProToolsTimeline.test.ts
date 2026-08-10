@@ -61,6 +61,7 @@ describe("ProToolsTimeline pointer capture", () => {
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
   const originalExec = useStore.getState().exec;
+  let projectEpoch = 40;
 
   const clip = () => {
     const element = host.querySelector<HTMLElement>('[data-testid="v2-clip"]');
@@ -96,15 +97,16 @@ describe("ProToolsTimeline pointer capture", () => {
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     openSpot = vi.fn();
+    projectEpoch += 1;
     useStore.setState({
       snapshot: SNAPSHOT,
       transport: SNAPSHOT.transport,
       selection: new Set<string>(),
       pxPerSec: 100,
-      projectEpoch: 41,
+      projectEpoch,
       exec,
     });
-    useProTools.getState().resetForProject(41);
+    useProTools.getState().resetForProject(projectEpoch);
     act(() => root.render(React.createElement(Harness)));
   });
 
@@ -273,6 +275,50 @@ describe("ProToolsTimeline pointer capture", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it("returns to the previous Smart Tool after one successful Single Zoom gesture", () => {
+    const { content } = timeline();
+    act(() => {
+      useProTools.getState().setActiveTool("zoomer");
+      useProTools.getState().toggleSmartTool();
+      useProTools.getState().toggleSingleZoom();
+    });
+
+    dispatchPointer(content, "pointerdown", { pointerId: 33, button: 0, clientX: 100, clientY: 100 });
+    dispatchPointer(content, "pointermove", { pointerId: 33, buttons: 1, clientX: 300, clientY: 100 });
+    dispatchPointer(content, "pointerup", { pointerId: 33, button: 0, clientX: 300, clientY: 100 });
+
+    expect(useStore.getState().pxPerSec).toBe(180);
+    expect(useProTools.getState().activeTool).toBe("selector");
+    expect(useProTools.getState().smartToolEnabled).toBe(true);
+    expect(useProTools.getState().singleZoomEnabled).toBe(true);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("completes Single Zoom from the keyboard but not from pointer cancellation", () => {
+    const { content } = timeline();
+    act(() => {
+      useProTools.getState().setActiveTool("zoomer");
+      useProTools.getState().toggleSmartTool();
+      useProTools.getState().toggleSingleZoom();
+    });
+    dispatchPointer(content, "pointerdown", { pointerId: 34, button: 0, clientX: 80, clientY: 100 });
+    dispatchPointer(content, "pointermove", { pointerId: 34, buttons: 1, clientX: 220, clientY: 100 });
+    dispatchPointer(content, "pointercancel", { pointerId: 34, clientX: 220, clientY: 100 });
+    expect(useProTools.getState().activeTool).toBe("zoomer");
+    expect(useProTools.getState().smartToolEnabled).toBe(false);
+
+    const element = clip();
+    element.focus();
+    act(() => element.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    })));
+    expect(useProTools.getState().activeTool).toBe("selector");
+    expect(useProTools.getState().smartToolEnabled).toBe(true);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it("abandons an F5 Zoomer drag on pointer cancellation or project replacement", () => {
     const { content } = timeline();
     act(() => {
@@ -288,7 +334,7 @@ describe("ProToolsTimeline pointer capture", () => {
 
     dispatchPointer(content, "pointerdown", { pointerId: 32, button: 0, clientX: 80, clientY: 100 });
     dispatchPointer(content, "pointermove", { pointerId: 32, buttons: 1, clientX: 260, clientY: 100 });
-    act(() => useStore.setState({ projectEpoch: 42 }));
+    act(() => useStore.setState({ projectEpoch: projectEpoch + 1 }));
     dispatchPointer(content, "pointerup", { pointerId: 32, clientX: 260, clientY: 100 });
     expect(useStore.getState().pxPerSec).toBe(100);
     expect(exec).not.toHaveBeenCalled();

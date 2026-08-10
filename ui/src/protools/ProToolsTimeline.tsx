@@ -41,6 +41,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const trackViews = useProTools((s) => s.trackViews);
   const automationLanesVisible = useProTools((s) => s.automationLanesVisible);
   const midiNoteZoom = useProTools((s) => s.midiNoteZoom);
+  const completeSingleZoom = useProTools((s) => s.completeSingleZoom);
   const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
   const clipMap = useMemo(() => new Map(tracks.flatMap((track) =>
     track.clips.map((clip) => [clip.id, { clip, track }] as const))), [tracks]);
@@ -185,6 +186,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
       if (useStore.getState().projectEpoch !== zoom.epoch || !scrollRef.current) return;
       if (!applyHorizontalZoomRange(scrollRef.current, zoom.startX, zoom.x))
         applyHorizontalZoomStep(zoom.zoomOut ? -1 : 1, e.clientX);
+      completeSingleZoom();
       return;
     }
     const spot = spotCandidate.current;
@@ -263,6 +265,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
         (match.clip.start + match.clip.length) * pxPerSec,
       );
       else applyHorizontalZoomStep(1);
+      completeSingleZoom();
       return;
     }
     if (editMode !== "spot" || (e.key !== "Enter" && e.key !== " ")) return;

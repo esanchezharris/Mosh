@@ -101,6 +101,12 @@
   padding: 0 3px;
   font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.pt-single-zoom {
+  align-self: stretch;
+  min-width: 28px !important;
+  padding: 0 3px !important;
+  font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace !important;
+}
 .pt-zoom-media {
   display: grid;
   grid-template-columns: repeat(2, 27px);

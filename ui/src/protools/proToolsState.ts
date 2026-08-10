@@ -15,6 +15,11 @@ export type ProToolsMemoryLocationEditor =
   | { readonly mode: "create"; readonly seconds: number }
   | { readonly mode: "edit"; readonly annotationId: string };
 
+export type ProToolsZoomReturnState = {
+  readonly activeTool: ProToolsTool;
+  readonly smartToolEnabled: boolean;
+};
+
 export type ProToolsRulersVisible = Readonly<Record<ProToolsRuler, boolean>>;
 
 type ProToolsViewState = {
@@ -37,6 +42,8 @@ type ProToolsViewState = {
   readonly midiNoteZoom: number;
   readonly memoryLocationsOpen: boolean;
   readonly memoryLocationEditor: ProToolsMemoryLocationEditor | null;
+  readonly singleZoomEnabled: boolean;
+  readonly zoomReturnState: ProToolsZoomReturnState | null;
 };
 
 type ProToolsActions = {
@@ -60,6 +67,8 @@ type ProToolsActions = {
   readonly requestNewMemoryLocation: (seconds: number) => void;
   readonly requestEditMemoryLocation: (annotationId: string) => void;
   readonly closeMemoryLocationEditor: () => void;
+  readonly toggleSingleZoom: () => void;
+  readonly completeSingleZoom: () => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -91,13 +100,30 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   midiNoteZoom: 1,
   memoryLocationsOpen: false,
   memoryLocationEditor: null,
+  singleZoomEnabled: false,
+  zoomReturnState: null,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
   ...projectDefaults(0),
   setEditMode: (editMode) => set({ editMode }),
-  setActiveTool: (activeTool) => set({ activeTool }),
-  toggleSmartTool: () => set((state) => ({ smartToolEnabled: !state.smartToolEnabled })),
+  setActiveTool: (activeTool) => set((state) => {
+    if (activeTool === "zoomer") {
+      if (!state.smartToolEnabled && state.activeTool === "zoomer") return state;
+      return {
+        activeTool,
+        zoomReturnState: {
+          activeTool: state.activeTool,
+          smartToolEnabled: state.smartToolEnabled,
+        },
+      };
+    }
+    return { activeTool, zoomReturnState: null };
+  }),
+  toggleSmartTool: () => set((state) => ({
+    smartToolEnabled: !state.smartToolEnabled,
+    ...(!state.smartToolEnabled ? { zoomReturnState: null } : {}),
+  })),
   setTabToTransient: (tabToTransient) => set({ tabToTransient }),
   setTrackHeaderWidth: (width) => set({ trackHeaderWidth: Math.min(280, Math.max(128, width)) }),
   toggleRuler: (ruler) => set((state) => ({
@@ -141,6 +167,15 @@ export const useProTools = create<ProToolsState>((set) => ({
     memoryLocationEditor: { mode: "edit", annotationId },
   }),
   closeMemoryLocationEditor: () => set({ memoryLocationEditor: null }),
+  toggleSingleZoom: () => set((state) => ({ singleZoomEnabled: !state.singleZoomEnabled })),
+  completeSingleZoom: () => set((state) => {
+    if (!state.singleZoomEnabled || !state.zoomReturnState) return state;
+    return {
+      activeTool: state.zoomReturnState.activeTool,
+      smartToolEnabled: state.zoomReturnState.smartToolEnabled,
+      zoomReturnState: null,
+    };
+  }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

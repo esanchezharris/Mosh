@@ -133,6 +133,20 @@ describe("useProToolsKeys", () => {
     expect(useProTools.getState().smartToolEnabled).toBe(false);
   });
 
+  it("toggles Normal and Single Zoom with a repeated F5", () => {
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "F5", bubbles: true, cancelable: true,
+    })));
+    expect(useProTools.getState().activeTool).toBe("zoomer");
+    expect(useProTools.getState().singleZoomEnabled).toBe(false);
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "F5", bubbles: true, cancelable: true,
+    })));
+    expect(useProTools.getState().activeTool).toBe("zoomer");
+    expect(useProTools.getState().singleZoomEnabled).toBe(true);
+  });
+
   it("does not claim mode keys while an editable control has focus", () => {
     const input = document.createElement("input");
     document.body.appendChild(input);

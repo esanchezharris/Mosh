@@ -10,6 +10,8 @@ export function ProToolsZoomControls() {
   const midiNoteZoom = useProTools((state) => state.midiNoteZoom);
   const setAudioWaveformZoom = useProTools((state) => state.setAudioWaveformZoom);
   const setMidiNoteZoom = useProTools((state) => state.setMidiNoteZoom);
+  const singleZoomEnabled = useProTools((state) => state.singleZoomEnabled);
+  const toggleSingleZoom = useProTools((state) => state.toggleSingleZoom);
 
   return (
     <div className="pt-toolbar-group pt-zoom-group" role="group" aria-label="Zoom controls">
@@ -36,6 +38,10 @@ export function ProToolsZoomControls() {
           ))}
         </div>
       </div>
+      <button type="button" className="pt-single-zoom" data-testid="pt-single-zoom"
+        aria-label="Single Zoom; return to the previous Edit Tool after one Zoomer action"
+        aria-pressed={singleZoomEnabled} title="Single Zoom · press F5 again while Zoomer is active"
+        onClick={toggleSingleZoom}>1×</button>
       <div className="pt-zoom-media" role="group" aria-label="Vertical media zoom">
         <button type="button" data-testid="pt-waveform-zoom-out"
           aria-label={`Audio waveform vertical zoom out, ${Math.round(audioWaveformZoom * 100)} percent`}

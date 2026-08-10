@@ -94,6 +94,10 @@ export function useProToolsKeys(): void {
       if (tool && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
         event.preventDefault();
         const proTools = useProTools.getState();
+        if (tool === "zoomer" && !proTools.smartToolEnabled && proTools.activeTool === "zoomer") {
+          proTools.toggleSingleZoom();
+          return;
+        }
         proTools.setActiveTool(tool);
         if (proTools.smartToolEnabled) proTools.toggleSmartTool();
         return;

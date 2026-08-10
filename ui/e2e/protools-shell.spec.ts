@@ -179,7 +179,9 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
 
   await timeline.focus();
   await page.keyboard.press("F5");
-  await expect(page.getByRole("button", { name: "Zoomer" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Zoomer", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("pt-single-zoom").click();
+  await expect(page.getByTestId("pt-single-zoom")).toHaveAttribute("aria-pressed", "true");
   const bounds = await timeline.boundingBox();
   if (!bounds) throw new Error("timeline bounds are missing");
   const y = bounds.y + Math.min(150, bounds.height / 2);
@@ -189,6 +191,7 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
   await expect(page.locator(".pt-zoom-marquee")).toBeVisible();
   await page.mouse.up();
   await expect(page.locator(".pt-zoom-marquee")).toHaveCount(0);
+  await expect(page.getByTestId("pt-smart-tool")).toHaveAttribute("aria-pressed", "true");
   const afterRange = await storeVal<number>(page, "pxPerSec");
   expect(afterRange).toBeGreaterThan(80);
 
