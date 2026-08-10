@@ -60,7 +60,10 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
   await expect(first.getByTestId("pt-mix-output")).toHaveAccessibleName("Output destination for Drums");
   await expect(first.getByTestId("pt-mix-mute")).toHaveAccessibleName("Mute Drums");
   await expect(page.getByTestId("pt-mix-master-meter")).toHaveAccessibleName("Master live stereo level");
-  await expect(page.getByRole("region", { name: "Master output level" })).toContainText("Read-only level");
+  const master = page.getByTestId("pt-mix-master-strip");
+  await expect(master).toHaveAccessibleName("Master channel strip");
+  await expect(master.getByTestId("pt-mix-master-volume")).toHaveAccessibleName("Volume for Master");
+  await expect(master.getByTestId("pt-mix-master-pan")).toHaveAccessibleName("Pan for Master");
 
   const ordered = await Promise.all([
     first.getByTestId("pt-mix-inserts").boundingBox(),
@@ -87,6 +90,15 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
   await first.getByTestId("pt-mix-insert-open-0").click();
   await first.getByTestId("pt-mix-insert-bypass-0").click();
 
+  await master.getByTestId("pt-mix-master-volume").fill("-2.5");
+  await master.getByTestId("pt-mix-master-pan").fill("0.15");
+  await master.getByTestId("pt-mix-master-add-insert").click();
+  await page.getByTestId("plugin-browser-search").fill("Compressor");
+  await page.getByTitle("Add Compressor to the master bus").click();
+  await expect(master.getByTestId("pt-mix-master-inserts")).toContainText("Compressor");
+  await master.getByTestId("pt-mix-master-insert-open-0").click();
+  await master.getByTestId("pt-mix-master-insert-bypass-0").click();
+
   await expect.poll(() => page.evaluate((id) => {
     const track = (window as ProToolsWindow).__moshStore?.getState().snapshot?.tracks
       .find((candidate) => candidate.id === id);
@@ -110,6 +122,15 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
     send: -8,
     insertEnabled: false,
   });
+  await expect.poll(() => page.evaluate(() => {
+    const masterState = (window as ProToolsWindow).__moshStore?.getState().snapshot?.master;
+    return {
+      volume: masterState?.volumeDb,
+      pan: masterState?.pan,
+      plugin: masterState?.plugins?.[0]?.name,
+      enabled: masterState?.plugins?.[0]?.enabled,
+    };
+  })).toEqual({ volume: -2.5, pan: 0.15, plugin: "Compressor", enabled: false });
 
   await page.screenshot({ path: testInfo.outputPath("protools-mix-window-wide.png"), animations: "disabled" });
 
@@ -143,6 +164,11 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
     "set_send_level",
     "open_plugin_editor",
     "bypass_plugin",
+    "set_master_volume",
+    "set_master_pan",
+    "load_master_builtin",
+    "open_master_plugin_editor",
+    "bypass_master_plugin",
   ]) expect(trace.map((entry) => entry.command)).toContain(command);
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });

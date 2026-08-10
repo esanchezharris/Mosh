@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
-import { MasterMeter } from "../ui/Meter";
 import { ProToolsMixChannelStrip } from "./ProToolsMixChannelStrip";
+import { ProToolsMixMasterStrip } from "./ProToolsMixMasterStrip";
 import { useProTools } from "./proToolsState";
 
 export function ProToolsMixWindow({ snapshot }: { readonly snapshot: Snapshot }) {
@@ -21,15 +21,7 @@ export function ProToolsMixWindow({ snapshot }: { readonly snapshot: Snapshot })
       <div className="pt-mix-bank">
         {tracks.map((track) => <ProToolsMixChannelStrip key={track.id} snapshot={snapshot} track={track} />)}
         {tracks.length === 0 && <p className="pt-mix-empty" role="status">No shown tracks</p>}
-        <section className="pt-mix-master-strip" aria-label="Master output level">
-          <header>Master</header>
-          <div className="pt-mix-master-meter" data-testid="pt-mix-master-meter"
-            role="img" aria-label="Master live stereo level">
-            <MasterMeter />
-          </div>
-          <span>Output</span>
-          <small>Read-only level</small>
-        </section>
+        <ProToolsMixMasterStrip snapshot={snapshot} />
       </div>
     </section>
   );

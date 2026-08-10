@@ -11,9 +11,10 @@ function quarantineName(entry: PluginQuarantine): string {
   return entry.rawId.split("/").at(-1) || entry.id;
 }
 
-export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
+export function ProToolsInsertDialog({ onClose, returnFocusRef, target = "track" }: {
   readonly onClose: () => void;
   readonly returnFocusRef: RefObject<HTMLButtonElement>;
+  readonly target?: "track" | "master";
 }) {
   const pluginCounts = useStore((state) => state.pluginCounts);
   const scanProgress = useStore((state) => state.scanProgress);
@@ -82,7 +83,7 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
         onClick={(event) => event.stopPropagation()} onKeyDown={trapFocus}>
         <header className="pt-insert-head">
           <div>
-            <h2 id="pt-insert-title">Add Insert</h2>
+            <h2 id="pt-insert-title">{target === "master" ? "Add Master Insert" : "Add Insert"}</h2>
             <span>{pluginCounts ? `${pluginCounts.vst3} VST3 available` : "Plugin catalog"}</span>
           </div>
           <button type="button" data-testid="pt-insert-rescan" disabled={Boolean(scanProgress)}
@@ -113,7 +114,7 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
           </div>
         )}
         {scanAttempted && lastError && <div className="pt-insert-error" role="alert">{lastError}</div>}
-        <PluginBrowserContent onLoaded={onClose} />
+        <PluginBrowserContent onLoaded={onClose} loadTarget={target} />
       </section>
     </div>
   );

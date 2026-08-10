@@ -127,6 +127,17 @@ export function loadPluginEntry(
   return true;
 }
 
+/** Dispatch an entry onto the session master bus and record it in recents. */
+export function loadMasterPluginEntry(
+  entry: PluginEntry,
+  exec: (command: string, args?: Record<string, unknown>) => unknown,
+): boolean {
+  if (entry.loadKind === "builtin") void exec("load_master_builtin", { type: entry.loadKey });
+  else void exec("load_master_plugin", { pluginId: entry.loadKey });
+  addPluginRecent(entry.uid);
+  return true;
+}
+
 /** Window math: which row indices to mount for a given scroll position. */
 export function visibleRange(
   scrollTop: number, viewportH: number, rowH: number, count: number, overscan = 6,

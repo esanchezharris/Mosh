@@ -16,7 +16,7 @@ import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useElementHeight } from "../hooks/useElementHeight";
 import {
   builtinEntry, installedEntry, buildPluginRows, visibleRange,
-  loadFavorites, toggleFavorite, loadPluginRecents, loadPluginEntry,
+  loadFavorites, toggleFavorite, loadPluginRecents, loadPluginEntry, loadMasterPluginEntry,
   type PluginEntry, type PluginKind,
 } from "./pluginBrowserUtil";
 
@@ -25,7 +25,10 @@ const ROW_H = 46; // uniform height for headers + plugin rows (drives the window
 // The reusable inner surface: search + kind tabs + the windowed, sectioned list. Loads
 // the catalog lazily on mount. `onLoaded` fires after a plugin lands (the modal closes;
 // the drawer stays open).
-export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
+export function PluginBrowserContent({ onLoaded, loadTarget = "track" }: {
+  onLoaded?: () => void;
+  loadTarget?: "track" | "master";
+}) {
   const plugins = useStore((s) => s.availablePlugins);
   const builtins = useStore((s) => s.availableBuiltins);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -53,7 +56,10 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
   const favSet = new Set(favorites);
 
   const load = (e: PluginEntry) => {
-    if (!loadPluginEntry(e, selectedTrackId, exec)) return;
+    const loaded = loadTarget === "master"
+      ? loadMasterPluginEntry(e, exec)
+      : loadPluginEntry(e, selectedTrackId, exec);
+    if (!loaded) return;
     setRecents(loadPluginRecents());
     onLoaded?.();
   };
@@ -86,7 +92,8 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
               const fav = favSet.has(e.uid);
               return (
                 <div key={row.key} className="plugin-row vrow" style={style}>
-                  <button className="prow-load" onClick={() => load(e)} title={`Add ${e.name} to the selected track`}>
+                  <button className="prow-load" onClick={() => load(e)}
+                    title={`Add ${e.name} to ${loadTarget === "master" ? "the master bus" : "the selected track"}`}>
                     <span className="pr-name">{e.name}</span>
                     <span className="pr-meta">{e.meta}</span>
                   </button>

@@ -51,6 +51,7 @@
 }
 
 .pt-mix-inserts,
+.pt-mix-master-inserts,
 .pt-mix-sends,
 .pt-mix-routing,
 .pt-mix-automation,
@@ -159,19 +160,48 @@
 .pt-mix-track-name span { overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .pt-mix-track-name small { color: inherit; opacity: 0.72; text-transform: uppercase; }
 
-.pt-mix-master-strip { display: grid; width: 86px; min-width: 86px; grid-template-rows: auto 1fr auto auto; justify-items: center; color: var(--pt-text-muted); }
-.pt-mix-master-strip > header { width: 100%; box-sizing: border-box; color: var(--pt-text); text-align: center; }
-.pt-mix-master-meter { align-self: center; height: min(360px, 62vh); }
-.pt-mix-master-meter .meter { width: min(350px, 60vh); }
-.pt-mix-master-strip > span { padding: 6px; color: var(--pt-text); font-weight: 700; }
-.pt-mix-master-strip > small { padding-bottom: 8px; }
+.pt-mix-master-strip { width: 152px; min-width: 152px; }
+.pt-mix-master-strip .pt-mix-strip-color { background: var(--pt-text-muted); }
+.pt-mix-master-output {
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border-bottom: 1px solid var(--pt-border);
+  color: var(--pt-text-muted);
+  background: var(--pt-inset);
+  font-size: 8px;
+}
+.pt-mix-master-output strong {
+  min-height: 20px;
+  padding: 4px;
+  box-sizing: border-box;
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  border: 1px solid var(--pt-border);
+  font-size: 9px;
+}
+.pt-mix-master-name {
+  display: grid;
+  min-height: 40px;
+  margin: 4px;
+  padding: 4px;
+  border: 1px solid var(--pt-border);
+  border-top: 5px solid var(--pt-text-muted);
+  color: var(--pt-text);
+  background: var(--pt-raised);
+}
+.pt-mix-master-name span { font-weight: 700; }
+.pt-mix-master-name small { opacity: 0.72; text-transform: uppercase; }
 .pt-mix-empty { width: 200px; padding: 16px; color: var(--pt-text-muted); }
 
 @media (max-width: 760px) {
-  .pt-mix-strip { width: 144px; min-width: 144px; }
+  .pt-mix-strip,
+  .pt-mix-master-strip { width: 144px; min-width: 144px; }
   .pt-mix-meter-fader { min-height: 145px; }
-  .pt-mix-meter { height: 132px; }
-  .pt-mix-meter .meter { width: 126px; }
+  .pt-mix-meter,
+  .pt-mix-master-meter { height: 132px; }
+  .pt-mix-meter .meter,
+  .pt-mix-master-meter .meter { width: 126px; }
   .pt-mix-fader { height: 132px; }
   .pt-mix-fader input { height: 110px; }
 }

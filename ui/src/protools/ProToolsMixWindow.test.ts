@@ -62,6 +62,20 @@ const SNAPSHOT: Snapshot = {
     },
   ],
   buses: [{ bus: 1, name: "Vocal Verb", trackId: "aux-1" }],
+  master: {
+    volumeDb: -1.5,
+    pan: 0.1,
+    plugins: [{
+      index: 0,
+      name: "Master Glue",
+      type: "compressor",
+      enabled: true,
+      external: false,
+      builtin: true,
+      isInstrument: false,
+      params: [],
+    }],
+  },
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
 };
 
@@ -105,6 +119,21 @@ describe("Pro Tools Mix Window", () => {
       selection: new Set(),
       exec,
       lastError: null,
+      availablePlugins: [{
+        id: "waves-cla-2a-stereo",
+        name: "CLA-2A Stereo",
+        format: "VST3",
+        manufacturer: "Waves",
+        isInstrument: false,
+      }],
+      availableBuiltins: [{
+        type: "compressor",
+        name: "Compressor",
+        category: "Dynamics",
+        isInstrument: false,
+        builtin: true,
+      }],
+      ensurePluginCatalog: vi.fn(),
       waveInputs: [
         { deviceID: "in-1-2", name: "Input 1-2", enabled: true, isStereoPair: true },
         { deviceID: "in-3-4", name: "Input 3-4", enabled: true, isStereoPair: true },
@@ -135,6 +164,9 @@ describe("Pro Tools Mix Window", () => {
       selection: originalState.selection,
       exec: originalState.exec,
       lastError: originalState.lastError,
+      availablePlugins: originalState.availablePlugins,
+      availableBuiltins: originalState.availableBuiltins,
+      ensurePluginCatalog: originalState.ensurePluginCatalog,
       waveInputs: originalState.waveInputs,
       midiInputs: originalState.midiInputs,
       trackOutputs: originalState.trackOutputs,
@@ -161,6 +193,51 @@ describe("Pro Tools Mix Window", () => {
     expect(vocalStrip().querySelector("[data-testid=pt-mix-automation]")).not.toBeNull();
     expect(vocalStrip().querySelector(".meter")).not.toBeNull();
     expect(host.querySelector("[data-testid=pt-mix-master-meter]")).not.toBeNull();
+    expect(host.querySelector("[data-testid=pt-mix-master-inserts]")?.textContent).toContain("Master Glue");
+    expect(host.querySelector<HTMLInputElement>("[data-testid=pt-mix-master-volume]")?.value).toBe("-1.5");
+    expect(host.querySelector<HTMLInputElement>("[data-testid=pt-mix-master-pan]")?.value).toBe("0.1");
+  });
+
+  it("routes master fader, pan, and existing inserts through master-only commands", async () => {
+    const volume = host.querySelector<HTMLInputElement>("[data-testid=pt-mix-master-volume]");
+    const pan = host.querySelector<HTMLInputElement>("[data-testid=pt-mix-master-pan]");
+    const open = host.querySelector<HTMLButtonElement>("[data-testid=pt-mix-master-insert-open-0]");
+    const bypass = host.querySelector<HTMLButtonElement>("[data-testid=pt-mix-master-insert-bypass-0]");
+    const remove = host.querySelector<HTMLButtonElement>("[data-testid=pt-mix-master-insert-remove-0]");
+    if (!volume || !pan || !open || !bypass || !remove) throw new Error("master controls are missing");
+
+    await act(async () => {
+      changeInput(volume, "-4");
+      changeInput(pan, "-0.2");
+      open.click();
+      bypass.click();
+      remove.click();
+    });
+
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith("set_master_volume", { db: -4 }));
+    expect(exec).toHaveBeenCalledWith("set_master_pan", { pan: -0.2 });
+    expect(exec).toHaveBeenCalledWith("open_master_plugin_editor", { index: 0 });
+    expect(exec).toHaveBeenCalledWith("bypass_master_plugin", { index: 0, bypassed: true });
+    expect(exec).toHaveBeenCalledWith("remove_master_plugin", { index: 0 });
+  });
+
+  it("loads a Master insert without targeting the selected channel strip", async () => {
+    const add = host.querySelector<HTMLButtonElement>("[data-testid=pt-mix-master-add-insert]");
+    if (!add) throw new Error("master insert control is missing");
+
+    await act(async () => add.click());
+    const dialog = host.querySelector<HTMLElement>("[data-testid=pt-insert-dialog]");
+    const compressor = Array.from(dialog?.querySelectorAll<HTMLButtonElement>(".prow-load") ?? [])
+      .find((control) => control.textContent?.includes("Compressor"));
+    if (!dialog || !compressor) throw new Error("master insert dialog is missing");
+    expect(dialog.textContent).toContain("Add Master Insert");
+    expect(document.activeElement).toBe(dialog.querySelector("[data-testid=plugin-browser-search]"));
+
+    await act(async () => compressor.click());
+    expect(exec).toHaveBeenCalledWith("load_master_builtin", { type: "compressor" });
+    expect(exec).not.toHaveBeenCalledWith("load_builtin", expect.anything());
+    expect(host.querySelector("[data-testid=pt-insert-dialog]")).toBeNull();
+    expect(document.activeElement).toBe(add);
   });
 
   it("routes fader, pan, automation, I/O, insert, send, and track controls through store.exec", async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   builtinEntry, installedEntry, matchEntry, buildPluginRows, visibleRange,
-  loadPluginEntry, loadPluginRecents,
+  loadPluginEntry, loadMasterPluginEntry, loadPluginRecents,
   type PluginRow,
 } from "./pluginBrowserUtil";
 import type { AvailablePlugin, BuiltinPlugin } from "../types";
@@ -119,5 +119,21 @@ describe("loadPluginEntry", () => {
     expect(loadPluginEntry(builtinEntry(bi("comp", "Compressor", "Dynamics")), null, exec)).toBe(false);
     expect(exec).not.toHaveBeenCalled();
     expect(loadPluginRecents()).toEqual([]);
+  });
+});
+
+describe("loadMasterPluginEntry", () => {
+  it("dispatches master-only commands for built-in and installed entries", () => {
+    localStorage.clear();
+    const calls: Array<[string, Record<string, unknown> | undefined]> = [];
+    const exec = (command: string, args?: Record<string, unknown>) => { calls.push([command, args]); };
+
+    expect(loadMasterPluginEntry(builtinEntry(bi("comp", "Compressor", "Dynamics")), exec)).toBe(true);
+    expect(loadMasterPluginEntry(installedEntry(vst("ott", "OTT", "Xfer")), exec)).toBe(true);
+    expect(calls).toEqual([
+      ["load_master_builtin", { type: "comp" }],
+      ["load_master_plugin", { pluginId: "ott" }],
+    ]);
+    expect(loadPluginRecents()).toEqual(["v:ott", "b:comp"]);
   });
 });
