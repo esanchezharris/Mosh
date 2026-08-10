@@ -958,6 +958,7 @@ const BUILTINS = [
 const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
   { id: "ott", name: "OTT", format: "VST3", manufacturer: "Xfer", isInstrument: false },
+  { id: "waves-cla-2a-stereo", name: "CLA-2A Stereo", format: "VST3", manufacturer: "Waves", isInstrument: false },
 ];
 // AUD-SCAN fidelity — the cold-start scan only catalogs VST3 bundles carrying
 // moduleinfo.json; the rest (all Valhalla, Waves shells, most FabFilter…) only show
@@ -2742,7 +2743,24 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       mockTxn.failureCode = undefined;
       return ok(command, mockTxnStatusData(mockTxn));
     }
-    case "save": case "reload": return ok(command);
+    case "save": {
+      const file = snapshot.session.editFile;
+      if (!file) return err(command, "no project file");
+      rememberProject(file);
+      syncRecents();
+      mockProjects.set(file, clone(snapshot));
+      return ok(command, { file });
+    }
+    case "reload": {
+      const file = snapshot.session.editFile;
+      const saved = mockProjects.get(file);
+      if (!saved) return err(command, "project has not been saved");
+      snapshot = clone(saved);
+      history.length = 0;
+      future.length = 0;
+      stopPlayback();
+      return ok(command, { file });
+    }
 
     case "get_clip_peaks": {
       const f = findClip(str(args.clipId));
@@ -2933,7 +2951,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
-    case "set_project_settings": case "save_as": return ok(command);
+    case "set_project_settings": return ok(command);
+    case "save_as": {
+      const file = str(args.file);
+      if (!file) return err(command, "save_as needs a file");
+      snapshot.session.editFile = file;
+      rememberProject(file);
+      syncRecents();
+      mockProjects.set(file, clone(snapshot));
+      invalidate();
+      return ok(command, { file });
+    }
 
     // Open an existing project — by path, or by index into the live Recent list. The
     // index form mirrors native `open_recent`, including its out-of-range error, because
@@ -2948,10 +2976,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         target = str(args.file);
         if (!target) return err(command, "open_project needs a file");
       }
-      mockProjects.set(snapshot.session.editFile, snapshot);   // keep what we're leaving
+      mockProjects.set(snapshot.session.editFile, clone(snapshot));   // keep what we're leaving
       rememberProject(snapshot.session.editFile);              // …and keep it reachable
       const restored = mockProjects.get(target);
-      snapshot = restored ?? emptySession();
+      snapshot = restored ? clone(restored) : emptySession();
       snapshot.session.editFile = target;
       rememberProject(target);
       syncRecents();
@@ -2964,7 +2992,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // blank session and clears undo history — you can't undo across a New, same as a DAW.
     case "new_project": {
       const leaving = snapshot.session.editFile;
-      mockProjects.set(leaving, snapshot);
+      mockProjects.set(leaving, clone(snapshot));
       snapshot = emptySession();
       snapshot.session.editFile = `/mock/untitled-${mockProjects.size}.mosh`;
       // The project you LEFT stays in Recent, so "Start empty" is reversible. This
@@ -4176,6 +4204,9 @@ export function __resetMockForTests(): void {
   clipSeq = 100;
   trackSeq = 10;
   snapshot = seedSnapshot();
+  mockProjects.clear();
+  recentPaths = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];
+  syncRecents();
   landedLayers.clear();
   mockCorpusLines = 0;
   mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };

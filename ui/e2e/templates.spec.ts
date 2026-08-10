@@ -115,7 +115,7 @@ test.describe("dock restructure (redesign shell)", () => {
 
 test("template choice persists across reload", async ({ page }) => {
   // Templates (the skin system) are a classic-shell feature, so pin uiShell="classic"
-  // (v2 is the default post-cutover). MERGE rather than overwrite so the template this
+  // (Pro Tools is the fresh-settings default). MERGE rather than overwrite so the template this
   // test sets via the UI survives the reload — that persistence is what we're asserting.
   await page.addInitScript(() => {
     const raw = window.localStorage.getItem("mosh.settings");

@@ -1,6 +1,6 @@
 // UI-REACH — can a MOUSE-ONLY user reach each command?
 //
-// The gap this closes: the v2 shell (the default) shipped unable to create a drum track
+// The gap this closes: the v2 shell shipped unable to create a drum track
 // or a MIDI clip, and unable to rename a track. Every backend involved was complete and
 // tested. 1,792 native selftest checks, 1,746 vitest tests and a "150/152 DAW-parity"
 // scoreboard were all green throughout, because all of them assert that COMMANDS work —

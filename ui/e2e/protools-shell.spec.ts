@@ -5,9 +5,15 @@ import type { Snapshot } from "../src/types";
 type ProToolsWindow = Window & {
   __moshStore?: {
     getState: () => {
-      snapshot: Pick<Snapshot, "tracks">;
+      snapshot: Snapshot | null;
+      exec: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
     };
   };
+  __moshCmdTrace?: Array<{
+    command: string;
+    args: Record<string, unknown>;
+    ok: boolean;
+  }>;
 };
 
 async function storeVal<T>(page: Page, path: string): Promise<T> {
@@ -29,6 +35,19 @@ async function clipStart(page: Page, clipId: string): Promise<number> {
     if (!clip) throw new Error(`clip ${id} is absent`);
     return clip.start;
   }, clipId);
+}
+
+async function sessionAction(page: Page, id: string): Promise<void> {
+  await page.getByTestId("pt-session-menu").click();
+  await page.locator(`[data-pt-session-action="${id}"]`).locator("..").click();
+}
+
+async function execInPage(page: Page, command: string, args: Record<string, unknown> = {}): Promise<void> {
+  await page.evaluate(async ({ name, payload }) => {
+    const store = (window as ProToolsWindow).__moshStore;
+    if (!store) throw new Error("__moshStore is unavailable");
+    await store.getState().exec(name, payload);
+  }, { name: command, payload: args });
 }
 
 test("?shell=protools boots the Edit Window zones with left track headers", async ({ page }) => {
@@ -224,4 +243,120 @@ test("compact Edit Window keeps collapsed Clip List and overflow controls reacha
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(settings).toBeFocused();
+});
+
+test("audio producer flow records, edits, mixes, inserts, saves, reloads, and undoes Moshi", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+
+  await sessionAction(page, "new_project");
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(0);
+
+  await page.getByTestId("pt-add-track").click();
+  await page.getByTestId("pt-add-track-audio").click();
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(1);
+  const header = page.getByTestId("pt-track-header").first();
+  const trackId = await header.getAttribute("data-track-id");
+  if (!trackId) throw new Error("created audio track id is absent");
+  await header.getByTestId("pt-track-select").click();
+  await expect(page.getByTestId("pt-track-inspector")).toBeVisible();
+
+  await page.getByTestId("pt-track-name").fill("Tonight Vocal");
+  await page.getByTestId("pt-track-name").press("Enter");
+  await expect.poll(() => storeVal<string>(page, "snapshot.tracks.0.name")).toBe("Tonight Vocal");
+
+  await page.getByTestId("pt-io-input").click();
+  await page.getByTestId("pt-io-input-option").filter({ hasText: "Input 1-2" }).click();
+  await expect(page.getByTestId("pt-io-input")).toContainText("Input 1-2");
+  await page.getByTestId("pt-io-output").click();
+  await page.getByTestId("pt-io-output-option").filter({ hasText: "External Headphones" }).click();
+  await expect(page.getByTestId("pt-io-output")).toContainText("External Headphones");
+  await page.getByTestId("pt-monitor-on").click();
+  await expect(page.getByTestId("pt-monitor-on")).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByTestId("pt-track-volume").fill("-6");
+  await page.getByTestId("pt-track-pan").fill("0.25");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.volumeDb")).toBe(-6);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.pan")).toBe(0.25);
+
+  await header.getByTestId("pt-track-arm").click();
+  await expect(header.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
+  const toolbar = page.getByTestId("pt-toolbar");
+  await toolbar.getByRole("button", { name: "Record", exact: true }).click();
+  await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(true);
+  await toolbar.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(false);
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.length")).toBe(1);
+
+  const clipEntry = page.getByTestId("pt-clip-list-item").first();
+  await clipEntry.click();
+  await expect(page.getByTestId("pt-audio-clip-inspector")).toBeVisible();
+  const clipId = await page.getByTestId("pt-lane").first().getByTestId("v2-clip").getAttribute("data-clip-id");
+  if (!clipId) throw new Error("recorded clip id is absent");
+
+  await page.keyboard.press("F3");
+  const timelineClip = page.getByTestId("pt-lane").first().getByTestId("v2-clip");
+  await timelineClip.focus();
+  await page.keyboard.press("Enter");
+  await page.getByTestId("pt-spot-start").fill("00:01.000");
+  await page.getByTestId("pt-spot-dialog").getByRole("button", { name: "Spot", exact: true }).click();
+  await expect.poll(() => clipStart(page, clipId)).toBeCloseTo(1, 5);
+
+  await page.getByTestId("pt-clip-name").fill("Tonight Take");
+  await page.getByTestId("pt-clip-name").press("Enter");
+  await page.getByTestId("pt-clip-gain-number").fill("3.5");
+  await page.getByTestId("pt-clip-gain-number").press("Enter");
+  await page.getByTestId("pt-clip-mute").click();
+  await expect(page.getByTestId("pt-clip-mute")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("pt-clip-mute").click();
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
+  await expect.poll(() => storeVal<string>(page, "snapshot.tracks.0.clips.0.name")).toBe("Tonight Take");
+  await expect.poll(() => storeVal<boolean>(page, "snapshot.tracks.0.clips.0.mute")).toBe(false);
+
+  await header.getByTestId("pt-track-select").click();
+  await page.getByTestId("pt-add-insert").click();
+  await page.getByTestId("plugin-browser-search").fill("CLA-2A Stereo");
+  await page.locator(".prow-load").filter({ hasText: "CLA-2A Stereo" }).click();
+  await expect(page.getByTestId("pt-device-rack")).toContainText("CLA-2A Stereo");
+  await page.getByTestId("pt-device-open-0").click();
+  await page.getByTestId("pt-device-bypass-0").click();
+  await expect(page.getByTestId("pt-device-bypass-0")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("pt-device-bypass-0").click();
+  await expect(page.getByTestId("pt-device-bypass-0")).toHaveAttribute("aria-pressed", "false");
+
+  await sessionAction(page, "save_as");
+  await expect.poll(() => storeVal<string>(page, "snapshot.session.editFile"))
+    .toBe("/mock/sessions/protools-tonight.mosh");
+  await sessionAction(page, "save");
+  await sessionAction(page, "export_audio");
+
+  await page.getByTestId("pt-track-volume").fill("-18");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.volumeDb")).toBe(-18);
+  await execInPage(page, "reload");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.volumeDb")).toBe(-6);
+  await expect(page.getByTestId("pt-device-rack")).toContainText("CLA-2A Stereo");
+
+  await sessionAction(page, "new_project");
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(0);
+  await sessionAction(page, "open_project");
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(1);
+  await expect.poll(() => storeVal<string>(page, "snapshot.tracks.0.name")).toBe("Tonight Vocal");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
+
+  await page.getByTestId("pt-ask-moshi").click();
+  await page.getByTestId("agent-input").fill("mute Tonight Vocal");
+  await page.getByTestId("agent-send").click();
+  await expect.poll(() => storeVal<boolean>(page, "snapshot.tracks.0.mute")).toBe(true);
+  await page.getByTestId("v2-toast-undo").click();
+  await expect.poll(() => storeVal<boolean>(page, "snapshot.tracks.0.mute")).toBe(false);
+
+  const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  const commands = trace.map((entry) => entry.command);
+  for (const command of [
+    "new_project", "create_track", "rename_track", "set_track_input", "set_track_output",
+    "set_input_monitor", "arm_track", "stop_recording", "move_clip", "rename_clip",
+    "set_clip_gain", "set_clip_mute", "load_plugin", "open_plugin_editor", "bypass_plugin",
+    "save_as", "save", "export_audio", "reload", "open_project", "undo",
+  ]) expect(commands).toContain(command);
+  expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });

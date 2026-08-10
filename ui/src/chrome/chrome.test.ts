@@ -96,6 +96,29 @@ describe("chrome seam", () => {
     expect(document.querySelector('[data-testid="item-b"]'), "menu did not reopen after a pick").not.toBeNull();
   });
 
+  it.each(["Enter", " "])("a focused menu item activates once with %s", async (key) => {
+    let picked = 0;
+    act(() => root.render(
+      h(MoshMenu, {
+        label: "Keyboard menu",
+        trigger: h("button", { "data-testid": "keyboard-trig" }, "open"),
+        children: h(MoshMenuItem, { testId: "keyboard-item", onPick: () => picked++, children: "Choose" }),
+      }),
+    ));
+    const trigger = host.querySelector('[data-testid="keyboard-trig"]') as HTMLButtonElement;
+    await act(async () => trigger.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const item = document.querySelector('[data-testid="keyboard-item"]') as HTMLButtonElement;
+    item.focus();
+
+    await act(async () => {
+      item.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      item.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+    });
+
+    expect(picked).toBe(1);
+    expect(document.querySelector('[data-testid="keyboard-item"]')).toBeNull();
+  });
+
   it("MoshTip carries no native title and merges onto its trigger", () => {
     // Show/hide on hover is Floating UI's behaviour and needs a real layout engine —
     // it is pinned in a browser by piano-roll.spec ("header controls show the styled

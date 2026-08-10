@@ -131,3 +131,8 @@
 .pt-menu-hint { color: var(--pt-text-muted, #8e8e8e); font-size: 10px; }
 .pt-session-action { display: flex; align-items: center; gap: 16px; width: 100%; }
 .pt-session-action kbd { margin-left: auto; color: var(--pt-text-muted, #949494); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Base UI portals menus to <body>, outside .protools-shell. Give only popups that
+   contain Pro Tools menu chrome an overlay layer above the sticky rulers/lanes. */
+.v2-menu-panel-floating:has(.pt-menu) { z-index: 130; }
+[data-base-ui-portal]:has(.pt-menu) > [data-open][role="presentation"] { z-index: 130; }

@@ -77,6 +77,11 @@ export function MoshMenuItem({ onPick, testId, ariaLabel, children }: MoshMenuIt
       data-testid={testId}
       aria-label={ariaLabel}
       onClick={onPick}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.currentTarget.click();
+      }}
     >
       {children}
     </Menu.Item>

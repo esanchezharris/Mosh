@@ -17,12 +17,12 @@ export const TEMPLATE_SKIN: Record<TemplateName, { skin: string; theme: string; 
 };
 
 /** Load the app in the CLASSIC shell (Mosh/dark template) and wait for the cold snapshot.
- *  The v2 shell is the shipping default (uiShell defaults to "v2" in settings/schema.ts),
- *  and within classic the agent-first redesign also defaults on (redesignShell true) — so
+ *  Pro Tools is the fresh-settings default; within classic the agent-first redesign also
+ *  defaults on (redesignShell true) — so
  *  these core/template/producer specs, which drive the topbar File/Export menus the
  *  redesign relocates into the "+" control, explicitly seed uiShell:"classic" +
  *  redesignShell:false to keep exercising the classic layout (the supported fallback).
- *  The v2 default is covered by the v2 specs (bootV2 below); the redesign variant by
+ *  The v2 shell is covered by the v2 specs (bootV2 below); the redesign variant by
  *  redesign-shell.spec. addInitScript runs before the page's scripts, so the settings
  *  store hydrates from this seed → deterministic every test. */
 export async function boot(page: Page): Promise<void> {
@@ -36,7 +36,7 @@ export async function boot(page: Page): Promise<void> {
 }
 
 /** Boot the agent-first REDESIGN variant of the classic shell (redesignShell:true — the
- *  classic-side default, though the shipping default shell overall is v2) so the right
+ *  classic-side default, while Pro Tools is the fresh-settings shell default) so the right
  *  Session/Inspector rail is present — needed to observe the PT/Logic right-rail
  *  restructure. (redesign-shell.spec has its own local copy; this is the shared one.) */
 export async function bootRedesign(page: Page): Promise<void> {
