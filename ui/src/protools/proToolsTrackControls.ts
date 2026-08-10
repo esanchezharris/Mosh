@@ -2,6 +2,7 @@ import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
+import { proToolsMixGroupTrackIds } from "./proToolsTrackGroups";
 
 export type ProToolsTrackControl = "arm" | "solo" | "mute" | "input";
 
@@ -64,8 +65,10 @@ export async function applyProToolsTrackControl(
   if (!sourceTrack) return;
   const commandForTrack = trackControlCommand(control, sourceTrack);
   const epoch = store.projectEpoch;
+  const coveredMixTracks = new Set<string>();
 
   for (const track of tracks) {
+    if ((control === "mute" || control === "solo") && coveredMixTracks.has(track.id)) continue;
     if (useStore.getState().projectEpoch !== epoch) return;
     const { command, args } = commandForTrack(track.id);
     const result = await store.exec(command, args);
@@ -83,6 +86,8 @@ export async function applyProToolsTrackControl(
       store.setLastError(failure);
       return;
     }
+    if (control === "mute" || control === "solo")
+      for (const trackId of proToolsMixGroupTrackIds(snapshot, track.id)) coveredMixTracks.add(trackId);
   }
 }
 

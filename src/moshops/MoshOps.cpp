@@ -490,7 +490,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
         const auto scope = LockManager::classify (name);
         if (scope != LockManager::Scope::Unguarded)
         {
-            for (const auto& key : lockKeysFor (scope, args))
+            for (const auto& key : lockKeysFor (scope, name, args))
             {
                 const auto decision = lockManager_.decide (scope, key);
                 if (! decision.allow)
@@ -549,6 +549,11 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "ungroup_clip_group") return cmdUngroupClipGroup (args);
     if (name == "regroup_clip_group") return cmdRegroupClipGroup (args);
     if (name == "rename_clip_group")  return cmdRenameClipGroup (args);
+    if (name == "create_track_group") return cmdCreateTrackGroup (args);
+    if (name == "set_track_group_enabled") return cmdSetTrackGroupEnabled (args);
+    if (name == "set_track_groups_suspended") return cmdSetTrackGroupsSuspended (args);
+    if (name == "rename_track_group") return cmdRenameTrackGroup (args);
+    if (name == "remove_track_group") return cmdRemoveTrackGroup (args);
     // LYR-001 — Finish-My-Song lyric sheet (per-track).
     if (name == "create_lyric_sheet")   return cmdCreateLyricSheet (args);
     if (name == "remove_lyric_sheet")   return cmdRemoveLyricSheet (args);
@@ -803,7 +808,9 @@ juce::var MoshOps::executeImpl (const juce::var& command)
 // Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope, const juce::var& args)
+std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope,
+                                                const juce::String& command,
+                                                const juce::var& args)
 {
     using Scope = LockManager::Scope;
     std::vector<juce::String> keys;
@@ -824,9 +831,21 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope, const 
 
     if (scope == Scope::Track)
     {
+        if (auto* trackIds = args.getProperty ("trackIds", var()).getArray())
+            for (const auto& trackId : *trackIds)
+                addTrackKey (findTrack (trackId.toString()));
+        if (const auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());
+            group.isValid())
+            for (auto* track : trackGroupMembers (group)) addTrackKey (track);
         if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
         {
-            addTrackKey (t);
+            static const std::set<juce::String> mixLinkedCommands {
+                "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo"
+            };
+            if (mixLinkedCommands.count (command))
+                for (auto* track : mixLinkedTracks (t->itemID.toString())) addTrackKey (track);
+            else
+                addTrackKey (t);
             return keys;
         }
         // Track-scoped composites may target via clipId only (add_drum_pattern) —
@@ -3158,6 +3177,10 @@ juce::var MoshOps::snapshot()
     if (const auto groups = edit.state.getChildWithName (ids::MOSH_CLIP_GROUPS); groups.isValid())
         if (const auto groupId = groups[ids::lastUngroupedClipGroupId].toString(); groupId.isNotEmpty())
             root->setProperty ("lastUngroupedClipGroupId", groupId);
+    root->setProperty ("trackGroups", trackGroupsToVar());
+    if (const auto groups = edit.state.getChildWithName (ids::MOSH_TRACK_GROUPS); groups.isValid())
+        root->setProperty ("trackGroupsSuspended",
+                           (bool) groups.getProperty (ids::trackGroupsSuspended, false));
 
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())
@@ -3953,6 +3976,8 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_section", "rename_section", "move_section", "remove_section",
         "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
+        "create_track_group", "set_track_group_enabled", "set_track_groups_suspended",
+        "rename_track_group", "remove_track_group",
         "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
         "set_tempo", "set_time_signature", "set_metronome", "set_key", "set_project_settings" };
     return replayable.contains (name);
@@ -3981,7 +4006,7 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
 {
     juce::HashMap<juce::String, juce::String> idMap;
     static const juce::StringArray idFields {
-        "trackId", "clipId", "newClipId", "layerId", "busId", "groupTrackId", "sectionId", "annotationId" };
+        "trackId", "clipId", "newClipId", "layerId", "busId", "groupId", "groupTrackId", "sectionId", "annotationId" };
 
     int recovered = 0; bool halted = false;
     replayingRecovery_ = true;       // guards re-journaling AND per-command event emits

@@ -1,6 +1,7 @@
 import { useStore } from "../store";
 import { useShell } from "../v2/shellState";
 import { useProTools } from "./proToolsState";
+import { proToolsEditGroupSelection } from "./proToolsTrackGroups";
 
 export type ProToolsTrackSelectionOptions = {
   readonly additive?: boolean;
@@ -17,11 +18,13 @@ export function scopeProToolsEditSelectionToTracks(
   focusTrackId: string,
 ): void {
   const proTools = useProTools.getState();
-  proTools.setEditSelectionTracks(trackIds, focusTrackId);
   const store = useStore.getState();
+  const expanded = store.snapshot ? proToolsEditGroupSelection(store.snapshot, trackIds) : trackIds;
+  const focus = expanded.includes(focusTrackId) ? focusTrackId : expanded.at(-1) ?? focusTrackId;
+  proTools.setEditSelectionTracks(expanded, focus);
   if (!proTools.trackEditLinked) return;
-  proTools.setTrackSelectionIds(trackIds);
-  if (store.selectedTrackId !== focusTrackId) store.setSelectedTrack(focusTrackId);
+  proTools.setTrackSelectionIds(expanded);
+  if (store.selectedTrackId !== focus) store.setSelectedTrack(focus);
 }
 
 export function selectProToolsTrack(
@@ -35,11 +38,16 @@ export function selectProToolsTrack(
     ? proTools.trackSelectionIds
     : store.selectedTrackId ? [store.selectedTrackId] : [];
   const current = new Set(currentTrackIds);
+  const snapshot = store.snapshot;
+  const clickedIds = snapshot ? proToolsEditGroupSelection(snapshot, [trackId]) : [trackId];
   let nextTrackIds: readonly string[];
 
   if (options.additive) {
-    if (current.has(trackId)) current.delete(trackId);
-    else current.add(trackId);
+    const remove = clickedIds.every((id) => current.has(id));
+    for (const id of clickedIds) {
+      if (remove) current.delete(id);
+      else current.add(id);
+    }
     nextTrackIds = visibleTrackIds.filter((id) => current.has(id));
   } else if (options.range) {
     const anchorTrackId = store.selectedTrackId && visibleTrackIds.includes(store.selectedTrackId)
@@ -54,8 +62,10 @@ export function selectProToolsTrack(
         Math.max(anchorIndex, trackIndex) + 1,
       );
   } else {
-    nextTrackIds = [trackId];
+    nextTrackIds = clickedIds;
   }
+
+  if (snapshot) nextTrackIds = proToolsEditGroupSelection(snapshot, nextTrackIds);
 
   const focusTrackId = nextTrackIds.includes(trackId)
     ? trackId

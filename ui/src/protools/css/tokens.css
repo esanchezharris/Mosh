@@ -1,4 +1,5 @@
-.protools-shell {
+.protools-shell,
+.pt-protools-portal {
   --pt-canvas: #1e1e1e;
   --pt-surface: #252525;
   --pt-raised: #2d2d2d;
@@ -85,7 +86,8 @@
   --focus-ring: var(--pt-focus-ring);
 }
 
-.protools-shell[data-pt-theme="classic"] {
+.protools-shell[data-pt-theme="classic"],
+.pt-protools-portal[data-pt-theme="classic"] {
   --pt-canvas: #c0c0c0;
   --pt-surface: #b5b5b5;
   --pt-raised: #d0d0d0;

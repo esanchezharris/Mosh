@@ -51,6 +51,7 @@ create_annotation	SessionGlobal
 create_bus	SessionGlobal
 create_clip_group	Clip
 create_group_track	SessionGlobal
+create_track_group	Track
 create_lyric_sheet	Track
 create_render_layer	Clip
 create_section	SessionGlobal
@@ -157,11 +158,13 @@ remove_send	Track
 remove_tempo_change	SessionGlobal
 remove_time_sig_change	SessionGlobal
 remove_track	Track
+remove_track_group	Track
 rename_bus	SessionGlobal
 rename_clip	Clip
 rename_clip_group	Clip
 rename_section	SessionGlobal
 rename_track	Track
+rename_track_group	Track
 render_ahead_arm	Clip
 render_ahead_tick	Unguarded
 render_layer	Clip
@@ -207,6 +210,8 @@ set_tempo	SessionGlobal
 set_tempo_curve	SessionGlobal
 set_time_signature	SessionGlobal
 set_track_active	Track
+set_track_group_enabled	Track
+set_track_groups_suspended	SessionGlobal
 set_track_automation_mode	Track
 set_track_color	Track
 set_track_icon	Track

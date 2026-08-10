@@ -819,7 +819,6 @@ juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
 juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();
-    te::VolumeAndPanPlugin* vp = nullptr;
     te::AudioTrack* audioTrack = findTrack (id);
     auto* group = audioTrack != nullptr ? nullptr : findGroupTrack (id);   // MIX-008: group fader (submix VolumeAndPan)
     if (audioTrack == nullptr && group == nullptr) return errResult ("set_track_volume", "no track");
@@ -834,12 +833,33 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
     // doing its job. Validation above still runs before any mutation, so a bad trackId
     // opens no transaction.
     beginTxn ("set_track_volume");
-    vp = audioTrack != nullptr ? ensureVolumePlugin (*audioTrack) : group->getVolumePlugin();
-    if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
-    // G14 — route the fader change through the UndoManager (setVolumeDb alone bypasses it).
-    undoManager().perform (new SetFaderValueAction (*vp, false, (float) (double) args.getProperty ("db", 0.0)));
+    const auto targets = audioTrack != nullptr ? mixLinkedTracks (id)
+                                               : std::vector<te::AudioTrack*> {};
+    if (group != nullptr)
+    {
+        auto* vp = group->getVolumePlugin();
+        if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
+        undoManager().perform (new SetFaderValueAction (
+            *vp, false, (float) (double) args.getProperty ("db", 0.0)));
+    }
+    else
+    {
+        auto* source = ensureVolumePlugin (*audioTrack);
+        if (source == nullptr) return errResult ("set_track_volume", "no volume plugin");
+        const float requested = (float) (double) args.getProperty ("db", 0.0);
+        const float delta = requested - source->getVolumeDb();
+        for (auto* target : targets)
+        {
+            auto* vp = ensureVolumePlugin (*target);
+            if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
+            const float next = target == audioTrack
+                ? requested
+                : juce::jlimit (-70.0f, 6.0f, vp->getVolumeDb() + delta);
+            undoManager().perform (new SetFaderValueAction (*vp, false, next));
+        }
+    }
     logLine ("set_track_volume", args, true, {}, true);
-    if (audioTrack != nullptr) emitTrackPatch (*audioTrack);   // scoped (group fader → full below)
+    if (audioTrack != nullptr && targets.size() == 1) emitTrackPatch (*audioTrack);
     else emitSnapshotInvalidated();
     return okResult ("set_track_volume");
 }
@@ -853,14 +873,24 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
     // materialisation belongs INSIDE this command's transaction, or one undo leaves the
     // plugin behind.
     beginTxn ("set_track_pan");
-    auto* vp = ensureVolumePlugin (*track);
-    if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
-
-    // G14 — route the pan change through the UndoManager (setPan alone bypasses it).
-    undoManager().perform (new SetFaderValueAction (*vp, true,
-        juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
+    const auto targets = mixLinkedTracks (track->itemID.toString());
+    auto* source = ensureVolumePlugin (*track);
+    if (source == nullptr) return errResult ("set_track_pan", "no volume plugin");
+    const float requested = juce::jlimit (
+        -1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0));
+    const float delta = requested - source->getPan();
+    for (auto* target : targets)
+    {
+        auto* vp = ensureVolumePlugin (*target);
+        if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
+        const float next = target == track
+            ? requested
+            : juce::jlimit (-1.0f, 1.0f, vp->getPan() + delta);
+        undoManager().perform (new SetFaderValueAction (*vp, true, next));
+    }
     logLine ("set_track_pan", args, true, {}, true);
-    emitTrackPatch (*track);   // scoped — pan is purely track-local
+    if (targets.size() == 1) emitTrackPatch (*track);
+    else emitSnapshotInvalidated();
     return okResult ("set_track_pan");
 }
 
@@ -876,9 +906,13 @@ juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
     // and mute is a plain CachedValue<bool> (not an AutomatableParameter), so undo's
     // CachedValue refresh is the complete story — no SetFaderValueAction-style replay
     // needed here.
-    track->state.setProperty (te::IDs::mute, (bool) args.getProperty ("mute", false), &undoManager());
+    const auto targets = mixLinkedTracks (track->itemID.toString());
+    for (auto* target : targets)
+        target->state.setProperty (te::IDs::mute,
+                                   (bool) args.getProperty ("mute", false), &undoManager());
     logLine ("set_track_mute", args, true, {}, true);
-    emitTrackPatch (*track);   // scoped — mute is purely track-local (unlike solo, which dims others)
+    if (targets.size() == 1) emitTrackPatch (*track);
+    else emitSnapshotInvalidated();
     return okResult ("set_track_mute");
 }
 
@@ -888,7 +922,9 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
     if (track == nullptr) return errResult ("set_track_solo", "no track");
     beginTxn ("set_track_solo");
     // Same G14-class fix as set_track_mute above (P6 undo matrix find).
-    track->state.setProperty (te::IDs::solo, (bool) args.getProperty ("solo", false), &undoManager());
+    for (auto* target : mixLinkedTracks (track->itemID.toString()))
+        target->state.setProperty (te::IDs::solo,
+                                   (bool) args.getProperty ("solo", false), &undoManager());
     logLine ("set_track_solo", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_solo");

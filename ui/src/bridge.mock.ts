@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -36,6 +36,7 @@ const SR = 48000;
 let clipSeq = 100;
 let trackSeq = 10;
 let clipGroupSeq = 0;
+let trackGroupSeq = 0;
 // Layers whose render has already been landed on the "Neural Renders" lane, so a second
 // accept/bounce does not duplicate the clip (native guards the same way, via its internal
 // landedClipId). Module-local rather than a snapshot field — see the accept_render branch.
@@ -43,6 +44,7 @@ const landedLayers = new Set<string>();
 const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
 const nextClipGroupId = () => `clip-group-${++clipGroupSeq}`;
+const nextTrackGroupId = () => `track-group-${++trackGroupSeq}`;
 // Live 12's Space vs ⇧Space marker memory (mirrors MoshOps::cmdSetTransport)
 let mockInsertMarker = 0;
 let mockViaContinue = false;
@@ -480,6 +482,8 @@ const MOCK_TXN_SAFE = new Set([
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
   "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
+  "create_track_group", "set_track_group_enabled", "set_track_groups_suspended",
+  "rename_track_group", "remove_track_group",
   "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
 ]);
 
@@ -836,6 +840,28 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 }
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
+}
+function trackGroupSupports(group: TrackGroup, axis: "edit" | "mix"): boolean {
+  return group.kind === axis || group.kind === "edit_mix";
+}
+function linkedMixTracks(trackId: string): Track[] {
+  const source = findTrack(trackId);
+  if (!source || snapshot.trackGroupsSuspended) return source ? [source] : [];
+  const linked = new Set([trackId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const group of snapshot.trackGroups ?? []) {
+      if (!group.enabled || !trackGroupSupports(group, "mix")
+        || !group.trackIds.some((id) => linked.has(id))) continue;
+      for (const id of group.trackIds) {
+        if (!findTrack(id) || linked.has(id)) continue;
+        linked.add(id);
+        changed = true;
+      }
+    }
+  }
+  return snapshot.tracks.filter((track) => linked.has(track.id));
 }
 // Is this clip's render layer scoped to PART of the clip? Mirrors the ±1e-3 comparison in
 // MoshOps::applyRenderInPlace, which is what decides in-place apply vs the lane landing.
@@ -1339,6 +1365,63 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
+    case "create_track_group": {
+      const trackIds = Array.isArray(args.trackIds)
+        ? [...new Set(args.trackIds.map(String))]
+        : [];
+      const kind = str(args.kind) as TrackGroupKind;
+      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
+      if (!(["edit", "mix", "edit_mix"] as const).includes(kind))
+        return err(command, "kind must be edit, mix, or edit_mix");
+      if (trackIds.some((trackId) => {
+        const track = findTrack(trackId);
+        return !track || track.isGroup || track.isReturn;
+      })) return err(command, "trackIds contains an unsupported track");
+      pushUndo();
+      const group: TrackGroup = {
+        id: nextTrackGroupId(),
+        name: str(args.name).trim() || `Group ${(snapshot.trackGroups?.length ?? 0) + 1}`,
+        trackIds,
+        kind,
+        enabled: true,
+      };
+      (snapshot.trackGroups ??= []).push(group);
+      invalidate();
+      return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
+    }
+    case "set_track_group_enabled": {
+      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
+      if (!group) return err(command, "track group not found");
+      pushUndo();
+      group.enabled = Boolean(args.enabled);
+      invalidate();
+      return ok(command, { groupId: group.id, enabled: group.enabled });
+    }
+    case "set_track_groups_suspended": {
+      pushUndo();
+      snapshot.trackGroupsSuspended = Boolean(args.suspended);
+      invalidate();
+      return ok(command, { suspended: snapshot.trackGroupsSuspended });
+    }
+    case "rename_track_group": {
+      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
+      const name = str(args.name).trim();
+      if (!group) return err(command, "track group not found");
+      if (!name) return err(command, "track group name cannot be empty");
+      pushUndo();
+      group.name = name;
+      invalidate();
+      return ok(command, { groupId: group.id });
+    }
+    case "remove_track_group": {
+      const groupId = str(args.groupId);
+      if (!(snapshot.trackGroups ?? []).some((group) => group.id === groupId))
+        return err(command, "track group not found");
+      pushUndo();
+      snapshot.trackGroups = (snapshot.trackGroups ?? []).filter((group) => group.id !== groupId);
+      invalidate();
+      return ok(command, { groupId });
+    }
     case "set_track_type": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
@@ -1448,10 +1531,36 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       snapshot.tracks.forEach((t, i) => (t.index = i));
       invalidate(); return ok(command);
     }
-    case "set_track_volume": { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.volumeDb = num(args.db); invalidate(); return ok(command); }
-    case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
-    case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
-    case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+    case "set_track_volume": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      const targets = linkedMixTracks(t.id);
+      const requested = num(args.db);
+      const delta = requested - (t.volumeDb ?? 0);
+      pushUndo();
+      for (const target of targets)
+        target.volumeDb = targets.length === 1 ? requested : Math.min(6, Math.max(-70, (target.volumeDb ?? 0) + delta));
+      invalidate(); return ok(command);
+    }
+    case "set_track_pan": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      const targets = linkedMixTracks(t.id);
+      const requested = num(args.pan);
+      const delta = requested - (t.pan ?? 0);
+      pushUndo();
+      for (const target of targets)
+        target.pan = targets.length === 1 ? requested : Math.min(1, Math.max(-1, (target.pan ?? 0) + delta));
+      invalidate(); return ok(command);
+    }
+    case "set_track_mute": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      pushUndo(); for (const target of linkedMixTracks(t.id)) target.mute = Boolean(args.mute);
+      invalidate(); return ok(command);
+    }
+    case "set_track_solo": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      pushUndo(); for (const target of linkedMixTracks(t.id)) target.solo = Boolean(args.solo);
+      invalidate(); return ok(command);
+    }
     case "set_track_active": { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); const active = args.active !== false; if ((t.active ?? true) === active) return ok(command); pushUndo(); t.active = active; invalidate(); return ok(command); }
 
     // ── sends / returns / aux buses (Wave 8) ─────────────────────────────────
@@ -4443,6 +4552,7 @@ export function __resetMockForTests(): void {
   clipSeq = 100;
   trackSeq = 10;
   clipGroupSeq = 0;
+  trackGroupSeq = 0;
   snapshot = seedSnapshot();
   mockProjects.clear();
   recentPaths = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];

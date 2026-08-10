@@ -1,5 +1,6 @@
 #include "MoshOps.h"
 #include "state/ClipGroup.h"
+#include "state/TrackGroup.h"
 #include "state/Ids.h"
 
 namespace mosh
@@ -153,6 +154,157 @@ juce::var MoshOps::clipGroupsToVar()
         for (const auto& clipId : ClipGroup::memberIds (group))
             if (findClip (clipId) != nullptr) memberIds.add (clipId);
         object->setProperty ("clipIds", memberIds);
+        out.add (var (object));
+    }
+    return out;
+}
+
+static juce::var trackGroupResult (const juce::ValueTree& group)
+{
+    auto* data = new DynamicObject();
+    data->setProperty ("groupId", group[ids::id].toString());
+    Array<var> members;
+    for (const auto& trackId : TrackGroup::memberIds (group)) members.add (trackId);
+    data->setProperty ("trackIds", members);
+    return var (data);
+}
+
+juce::ValueTree MoshOps::findTrackGroupById (const juce::String& groupId)
+{
+    const auto groups = eng.edit().state.getChildWithName (ids::MOSH_TRACK_GROUPS);
+    const auto group = groups.getChildWithProperty (ids::id, groupId);
+    return group.hasType (ids::MOSH_TRACK_GROUP) ? group : juce::ValueTree {};
+}
+
+std::vector<te::AudioTrack*> MoshOps::trackGroupMembers (const juce::ValueTree& group)
+{
+    std::vector<te::AudioTrack*> out;
+    for (const auto& trackId : TrackGroup::memberIds (group))
+        if (auto* track = findTrack (trackId)) out.push_back (track);
+    return out;
+}
+
+std::vector<te::AudioTrack*> MoshOps::mixLinkedTracks (const juce::String& trackId)
+{
+    std::vector<te::AudioTrack*> out;
+    const auto groups = eng.edit().state.getChildWithName (ids::MOSH_TRACK_GROUPS);
+    for (const auto& memberId : TrackGroup::linkedMemberIds (groups, trackId, TrackGroup::Axis::Mix))
+        if (auto* track = findTrack (memberId)) out.push_back (track);
+    return out;
+}
+
+juce::var MoshOps::cmdCreateTrackGroup (const juce::var& args)
+{
+    StringArray trackIds;
+    if (auto* values = args.getProperty ("trackIds", var()).getArray())
+        for (const auto& value : *values)
+        {
+            const auto trackId = value.toString();
+            if (trackId.isNotEmpty()) trackIds.addIfNotAlreadyThere (trackId);
+        }
+    if (trackIds.isEmpty())
+        return errResult ("create_track_group", "trackIds must contain at least one track");
+    for (const auto& trackId : trackIds)
+        if (findTrack (trackId) == nullptr)
+            return errResult ("create_track_group", "no supported track: " + trackId);
+
+    const auto kind = args.getProperty ("kind", "edit_mix").toString();
+    if (! TrackGroup::validKind (kind))
+        return errResult ("create_track_group", "kind must be edit, mix, or edit_mix");
+    auto state = eng.edit().state;
+    auto groups = state.getChildWithName (ids::MOSH_TRACK_GROUPS);
+    auto name = args.getProperty ("name", var()).toString().trim();
+    if (name.isEmpty()) name = "Group " + String (groups.getNumChildren() + 1);
+    const auto groupId = Uuid().toString();
+
+    beginTxn ("create_track_group");
+    if (! groups.isValid())
+    {
+        groups = ValueTree (ids::MOSH_TRACK_GROUPS);
+        state.appendChild (groups, &undoManager());
+    }
+    groups.appendChild (TrackGroup::create (groupId, name, kind, trackIds), &undoManager());
+    const auto group = groups.getChildWithProperty (ids::id, groupId);
+    logLine ("create_track_group", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("create_track_group", trackGroupResult (group));
+}
+
+juce::var MoshOps::cmdSetTrackGroupEnabled (const juce::var& args)
+{
+    auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());
+    if (! group.isValid()) return errResult ("set_track_group_enabled", "track group not found");
+    const bool enabled = (bool) args.getProperty ("enabled", true);
+    beginTxn ("set_track_group_enabled");
+    group.setProperty (ids::trackGroupEnabled, enabled, &undoManager());
+    logLine ("set_track_group_enabled", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto result = trackGroupResult (group);
+    result.getDynamicObject()->setProperty ("enabled", enabled);
+    return okResult ("set_track_group_enabled", result);
+}
+
+juce::var MoshOps::cmdSetTrackGroupsSuspended (const juce::var& args)
+{
+    auto state = eng.edit().state;
+    auto groups = state.getChildWithName (ids::MOSH_TRACK_GROUPS);
+    beginTxn ("set_track_groups_suspended");
+    if (! groups.isValid())
+    {
+        groups = ValueTree (ids::MOSH_TRACK_GROUPS);
+        state.appendChild (groups, &undoManager());
+    }
+    const bool suspended = (bool) args.getProperty ("suspended", true);
+    groups.setProperty (ids::trackGroupsSuspended, suspended, &undoManager());
+    logLine ("set_track_groups_suspended", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("suspended", suspended);
+    return okResult ("set_track_groups_suspended", var (data));
+}
+
+juce::var MoshOps::cmdRenameTrackGroup (const juce::var& args)
+{
+    auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());
+    const auto name = args.getProperty ("name", var()).toString().trim();
+    if (! group.isValid()) return errResult ("rename_track_group", "track group not found");
+    if (name.isEmpty()) return errResult ("rename_track_group", "track group name cannot be empty");
+    beginTxn ("rename_track_group");
+    group.setProperty (ids::trackGroupName, name, &undoManager());
+    logLine ("rename_track_group", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("rename_track_group", trackGroupResult (group));
+}
+
+juce::var MoshOps::cmdRemoveTrackGroup (const juce::var& args)
+{
+    auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());
+    if (! group.isValid()) return errResult ("remove_track_group", "track group not found");
+    const auto result = trackGroupResult (group);
+    beginTxn ("remove_track_group");
+    group.getParent().removeChild (group, &undoManager());
+    logLine ("remove_track_group", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_track_group", result);
+}
+
+juce::var MoshOps::trackGroupsToVar()
+{
+    Array<var> out;
+    const auto groups = eng.edit().state.getChildWithName (ids::MOSH_TRACK_GROUPS);
+    for (int index = 0; index < groups.getNumChildren(); ++index)
+    {
+        const auto group = groups.getChild (index);
+        if (! group.hasType (ids::MOSH_TRACK_GROUP)) continue;
+        auto* object = new DynamicObject();
+        object->setProperty ("id", group[ids::id].toString());
+        object->setProperty ("name", group[ids::trackGroupName].toString());
+        object->setProperty ("kind", group[ids::trackGroupKind].toString());
+        object->setProperty ("enabled", (bool) group.getProperty (ids::trackGroupEnabled, true));
+        Array<var> memberIds;
+        for (const auto& trackId : TrackGroup::memberIds (group))
+            if (findTrack (trackId) != nullptr) memberIds.add (trackId);
+        object->setProperty ("trackIds", memberIds);
         out.add (var (object));
     }
     return out;

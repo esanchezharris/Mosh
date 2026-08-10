@@ -54,6 +54,7 @@ export type ProToolsViewState = {
   readonly editSelectionTrackId: string | null;
   readonly editSelectionTrackIds: readonly string[];
   readonly trackSelectionIds: readonly string[];
+  readonly trackGroupDialogOpen: boolean;
   readonly universeOpen: boolean;
   readonly universeHeight: number;
 };
@@ -97,6 +98,7 @@ export const proToolsProjectDefaults = (projectEpoch: number): ProToolsViewState
   editSelectionTrackId: null,
   editSelectionTrackIds: [],
   trackSelectionIds: [],
+  trackGroupDialogOpen: false,
   universeOpen: false,
   universeHeight: PROTOOLS_UNIVERSE_DEFAULT_HEIGHT,
 });

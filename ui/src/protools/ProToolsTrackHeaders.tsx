@@ -9,6 +9,7 @@ import { scaledTrackHeights } from "./trackHeightZoom";
 import { applyProToolsTrackControl, type ProToolsTrackControl } from "./proToolsTrackControls";
 import { selectProToolsTrack } from "./proToolsTrackEditSelection";
 import { ProToolsTrackListMenu } from "./ProToolsTrackListMenu";
+import { ProToolsTrackGroupsPanel } from "./ProToolsTrackGroupsPanel";
 import {
   proToolsPlaylistRowCount,
   proToolsTrackRowHeight,
@@ -41,6 +42,7 @@ export function ProToolsTrackHeaders({ snapshot }: ProToolsTrackHeadersProps) {
           ))}
         <AddTrackMenu />
       </div>
+      <ProToolsTrackGroupsPanel snapshot={snapshot} />
     </section>
   );
 }

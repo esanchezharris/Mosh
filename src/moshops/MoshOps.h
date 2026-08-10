@@ -109,6 +109,11 @@ private:
     juce::var cmdUngroupClipGroup (const juce::var& args);
     juce::var cmdRegroupClipGroup (const juce::var& args);
     juce::var cmdRenameClipGroup  (const juce::var& args);
+    juce::var cmdCreateTrackGroup       (const juce::var& args);
+    juce::var cmdSetTrackGroupEnabled   (const juce::var& args);
+    juce::var cmdSetTrackGroupsSuspended (const juce::var& args);
+    juce::var cmdRenameTrackGroup       (const juce::var& args);
+    juce::var cmdRemoveTrackGroup       (const juce::var& args);
     // LYR-001 — Finish-My-Song lyric sheet (MOSH_LYRICSHEET on a track; undoable).
     juce::var cmdCreateLyricSheet  (const juce::var& args);
     juce::var cmdRemoveLyricSheet  (const juce::var& args);
@@ -205,9 +210,11 @@ private:
     juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
     juce::var cmdMpApplyStructural  (const juce::var& args);
     // Resolve every affected lock key (track logicalIds or the session key) for a
-    // guarded command. Clip scope includes singular clipId and every valid clipIds
-    // entry; unresolvable targets stay empty so command handlers own shape errors.
-    std::vector<juce::String> lockKeysFor (LockManager::Scope scope, const juce::var& args);
+    // guarded command. Track scope includes trackId, trackIds, Track Group members,
+    // and enabled Mix-linked peers; Clip scope includes singular clipId and every
+    // valid clipIds entry. Unresolvable targets stay empty so handlers own shape errors.
+    std::vector<juce::String> lockKeysFor (LockManager::Scope scope, const juce::String& command,
+                                           const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
@@ -538,6 +545,10 @@ private:
     juce::var clipGroupsToVar();
     juce::ValueTree findClipGroupForClip (const juce::String& clipId, bool activeOnly);
     std::vector<te::Clip*> clipGroupMembers (const juce::ValueTree& group);
+    juce::var trackGroupsToVar();
+    juce::ValueTree findTrackGroupById (const juce::String& groupId);
+    std::vector<te::AudioTrack*> trackGroupMembers (const juce::ValueTree& group);
+    std::vector<te::AudioTrack*> mixLinkedTracks (const juce::String& trackId);
 
     // LYR-001 — a track's MOSH_LYRICSHEET as a snapshot object (read-only; never
     // creates the tree). { id, grid, language, topic, mood, explicit, rhymeStrictness,

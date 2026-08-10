@@ -118,7 +118,7 @@ describe("per-DAW keymaps", () => {
     expect(resolveKey(getKeymap("fl"), ev({ key: "d", metaKey: true }))).toBeNull();
     expect(resolveKey(getKeymap("mosh"), ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
   });
-  it("pro tools: ⌘E separates, ⌘Space records, unsupported Mosh grouping stays unclaimed, Return → start", () => {
+  it("pro tools: ⌘E separates, ⌘Space records, shared routing grouping stays unclaimed, Return → start", () => {
     const pt = getKeymap("protools");
     expect(resolveKey(pt, ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
     expect(resolveKey(pt, ev({ key: " ", metaKey: true }))).toBe(A.RECORD);

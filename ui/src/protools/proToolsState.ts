@@ -62,6 +62,7 @@ type ProToolsActions = {
   readonly setEditSelectionTrackId: (trackId: string | null) => void;
   readonly setEditSelectionTracks: (trackIds: readonly string[], focusTrackId: string | null) => void;
   readonly setTrackSelectionIds: (trackIds: readonly string[]) => void;
+  readonly setTrackGroupDialogOpen: (open: boolean) => void;
   readonly setUniverseOpen: (open: boolean) => void;
   readonly setUniverseHeight: (height: number) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
@@ -177,6 +178,7 @@ export const useProTools = create<ProToolsState>((set) => ({
     editSelectionTrackIds: [...editSelectionTrackIds],
   }),
   setTrackSelectionIds: (trackSelectionIds) => set({ trackSelectionIds: [...trackSelectionIds] }),
+  setTrackGroupDialogOpen: (trackGroupDialogOpen) => set({ trackGroupDialogOpen }),
   setUniverseOpen: (universeOpen) => set({ universeOpen }),
   setUniverseHeight: (height) => set({ universeHeight: clampProToolsUniverseHeight(height) }),
   resetForProject: (nextEpoch) => set((state) => {

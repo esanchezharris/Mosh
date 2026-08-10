@@ -263,6 +263,19 @@ export type ClipGroup = {
   active: boolean;
 };
 
+export type TrackGroupKind = "edit" | "mix" | "edit_mix";
+
+/** Pro Tools-style non-routing track linkage. These groups never create folder
+ *  tracks or alter the signal path: Edit membership links selection, while Mix
+ *  membership links volume, pan, mute, and solo. */
+export type TrackGroup = {
+  id: string;
+  name: string;
+  trackIds: string[];
+  kind: TrackGroupKind;
+  enabled: boolean;
+};
+
 export type ControllerEventName =
   | "TRANSPORT_TOGGLE"
   | "TRANSPORT_SCRUB"
@@ -818,6 +831,10 @@ export type Snapshot = {
   clipGroups?: ClipGroup[];
   /** The dormant definition eligible for Pro Tools Regroup. */
   lastUngroupedClipGroupId?: string;
+  /** Additive, non-routing Pro Tools Edit/Mix group definitions. */
+  trackGroups?: TrackGroup[];
+  /** Temporarily bypasses every Track Group without deleting its membership. */
+  trackGroupsSuspended?: boolean;
   audio?: AudioSelection;
   training?: TrainingState;
 };

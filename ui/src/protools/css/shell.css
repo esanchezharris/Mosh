@@ -13,13 +13,27 @@
   user-select: none;
 }
 
+.pt-protools-portal {
+  color: var(--pt-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  user-select: none;
+}
+
 .protools-shell button,
 .protools-shell input,
-.protools-shell select { font: inherit; }
+.protools-shell select,
+.pt-protools-portal button,
+.pt-protools-portal input,
+.pt-protools-portal select { font: inherit; }
 .protools-shell input,
-.protools-shell select { user-select: text; }
-.protools-shell button { color: inherit; }
-.protools-shell :focus-visible {
+.protools-shell select,
+.pt-protools-portal input,
+.pt-protools-portal select { user-select: text; }
+.protools-shell button,
+.pt-protools-portal button { color: inherit; }
+.protools-shell :focus-visible,
+.pt-protools-portal :focus-visible {
   outline: 2px solid var(--pt-focus-ring);
   outline-offset: 1px;
 }

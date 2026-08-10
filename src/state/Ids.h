@@ -200,6 +200,17 @@ namespace mosh::ids
     MOSH_DECLARE_ID (clipGroupClipId)
     MOSH_DECLARE_ID (lastUngroupedClipGroupId)
 
+    // Pro Tools Track Groups — non-routing Edit/Mix linkage. These nodes never
+    // create Tracktion folder tracks or alter signal flow.
+    MOSH_DECLARE_ID (MOSH_TRACK_GROUPS)
+    MOSH_DECLARE_ID (MOSH_TRACK_GROUP)
+    MOSH_DECLARE_ID (MOSH_TRACK_GROUP_MEMBER)
+    MOSH_DECLARE_ID (trackGroupName)
+    MOSH_DECLARE_ID (trackGroupKind)
+    MOSH_DECLARE_ID (trackGroupEnabled)
+    MOSH_DECLARE_ID (trackGroupTrackId)
+    MOSH_DECLARE_ID (trackGroupsSuspended)
+
     // ANN-001 — timeline ANNOTATIONS (lightweight, authored comment pins). A
     // MOSH_ANNOTATIONS container child of the Edit's own ValueTree (mirrors
     // MOSH_SECTIONS) holding MOSH_ANNOTATION nodes — each a BEAT-anchored note with
