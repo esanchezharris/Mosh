@@ -49,6 +49,8 @@ TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][l
     REQUIRE (LockManager::classify ("rename_track")     == Scope::Track);
     REQUIRE (LockManager::classify ("set_track_volume") == Scope::Track);
     REQUIRE (LockManager::classify ("create_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("configure_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("duplicate_track_group") == Scope::Track);
     REQUIRE (LockManager::classify ("set_track_group_members") == Scope::Track);
     REQUIRE (LockManager::classify ("set_track_group_enabled") == Scope::Track);
     REQUIRE (LockManager::classify ("rename_track_group") == Scope::Track);

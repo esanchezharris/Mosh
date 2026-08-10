@@ -6,8 +6,14 @@ import { useStore } from "../store";
 import type { Snapshot, TrackGroupKind } from "../types";
 import { IconMore, IconPlus } from "../ui/icons";
 import { ProToolsTrackGroupModifyDialog } from "./ProToolsTrackGroupModifyDialog";
+import type { TrackGroupDialogMode } from "./ProToolsTrackGroupModifyDialog";
 import { useProTools } from "./proToolsState";
-import { PROTOOLS_TRACK_GROUP_KIND_LABELS, selectProToolsTrackGroup } from "./proToolsTrackGroups";
+import {
+  PROTOOLS_TRACK_GROUP_KIND_LABELS,
+  PROTOOLS_TRACK_GROUP_KINDS,
+  isProToolsTrackGroupKind,
+  selectProToolsTrackGroup,
+} from "./proToolsTrackGroups";
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
@@ -19,7 +25,10 @@ export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snap
   const selectedTrackIds = useProTools((state) => state.trackSelectionIds);
   const dialogOpen = useProTools((state) => state.trackGroupDialogOpen);
   const setDialogOpen = useProTools((state) => state.setTrackGroupDialogOpen);
-  const [modifyGroupId, setModifyGroupId] = useState<string | null>(null);
+  const [dialogRequest, setDialogRequest] = useState<{
+    readonly groupId: string;
+    readonly mode: TrackGroupDialogMode;
+  } | null>(null);
   const menuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const eligibleTrackIds = useMemo(() => {
     const requested = new Set(selectedTrackIds.length > 0
@@ -29,7 +38,7 @@ export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snap
       .filter((track) => !track.isGroup && !track.isReturn && requested.has(track.id))
       .map((track) => track.id);
   }, [selectedTrackId, selectedTrackIds, snapshot.tracks]);
-  const modifyGroup = (snapshot.trackGroups ?? []).find((group) => group.id === modifyGroupId);
+  const configGroup = (snapshot.trackGroups ?? []).find((group) => group.id === dialogRequest?.groupId);
 
   const selectGroup = (trackIds: readonly string[]) => {
     clearSelection();
@@ -82,8 +91,15 @@ export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snap
               )}>
                 <div className="pt-menu pt-track-group-menu">
                   <MoshMenuItem testId="pt-track-group-modify"
-                    ariaLabel={`Modify ${group.name} Track Group membership`}
-                    onPick={() => setModifyGroupId(group.id)}>Modify Membership…</MoshMenuItem>
+                    ariaLabel={`Modify ${group.name} Track Group`}
+                    onPick={() => setDialogRequest({ groupId: group.id, mode: "modify" })}>
+                    Modify Group…
+                  </MoshMenuItem>
+                  <MoshMenuItem testId="pt-track-group-duplicate"
+                    ariaLabel={`Duplicate ${group.name} Track Group`}
+                    onPick={() => setDialogRequest({ groupId: group.id, mode: "duplicate" })}>
+                    Duplicate Group…
+                  </MoshMenuItem>
                   <MoshMenuItem testId="pt-track-group-remove"
                     ariaLabel={`Remove ${group.name} Track Group`}
                     onPick={() => { void exec("remove_track_group", { groupId: group.id }); }}>
@@ -98,10 +114,11 @@ export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snap
         <ProToolsTrackGroupDialog snapshot={snapshot} trackIds={eligibleTrackIds}
           onClose={() => setDialogOpen(false)} />
       )}
-      {modifyGroup && (
-        <ProToolsTrackGroupModifyDialog snapshot={snapshot} group={modifyGroup}
-          selectedTrackIds={eligibleTrackIds} onClose={() => setModifyGroupId(null)}
-          restoreFocus={() => menuTriggerRefs.current.get(modifyGroup.id)?.focus()} />
+      {configGroup && dialogRequest && (
+        <ProToolsTrackGroupModifyDialog snapshot={snapshot} group={configGroup}
+          mode={dialogRequest.mode} selectedTrackIds={eligibleTrackIds}
+          onClose={() => setDialogRequest(null)}
+          restoreFocus={() => menuTriggerRefs.current.get(configGroup.id)?.focus()} />
       )}
     </section>
   );
@@ -212,9 +229,13 @@ function ProToolsTrackGroupDialog({ snapshot, trackIds, onClose }: {
           <label htmlFor="pt-track-group-kind">Type</label>
           <select id="pt-track-group-kind" data-testid="pt-track-group-kind"
             value={kind} disabled={submitting}
-            onChange={(event) => setKind(event.currentTarget.value as TrackGroupKind)}>
-            {(Object.entries(PROTOOLS_TRACK_GROUP_KIND_LABELS) as [TrackGroupKind, string][])
-              .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              if (isProToolsTrackGroupKind(value)) setKind(value);
+            }}>
+            {PROTOOLS_TRACK_GROUP_KINDS.map((value) => (
+              <option key={value} value={value}>{PROTOOLS_TRACK_GROUP_KIND_LABELS[value]}</option>
+            ))}
           </select>
           <span className="pt-track-group-members" title={selectedNames.join(", ")}>
             {selectedNames.join(", ")}

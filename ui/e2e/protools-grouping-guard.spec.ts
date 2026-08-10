@@ -52,7 +52,7 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   await page.getByTestId("pt-track-group-modify").click();
   const modifyDialog = page.getByTestId("pt-track-group-modify-dialog");
   await expect(modifyDialog).toBeVisible();
-  await expect(page.getByTestId("pt-track-group-add-selection")).toBeFocused();
+  await expect(page.getByTestId("pt-track-group-modify-name")).toBeFocused();
   await expect(page.getByTestId("pt-track-group-selected")).toHaveText(firstTrack.name);
   await expect(page.getByTestId("pt-track-group-draft")).toContainText(`${firstTrack.name}, ${secondTrack.name}`);
   await page.getByTestId("pt-track-group-replace-selection").click();
@@ -81,6 +81,26 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   await page.getByTestId("pt-track-group-suspend").click();
   await expect.poll(() => trackGroupsSuspended(page)).toBe(false);
 
+  await page.getByTestId("pt-track-group-menu").click();
+  await page.getByTestId("pt-track-group-modify").click();
+  await page.getByTestId("pt-track-group-modify-name").fill("Rhythm Configured");
+  await page.getByTestId("pt-track-group-modify-kind").selectOption("mix");
+  await page.getByTestId("pt-track-group-tab-attributes").click();
+  await page.getByTestId("pt-track-group-attribute-main_volume").uncheck();
+  await page.getByTestId("pt-track-group-attribute-record_enable").check();
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-group-attributes-wide.png"),
+    animations: "disabled",
+  });
+  await page.getByTestId("pt-track-group-apply").click();
+  await expect(modifyDialog).toBeHidden();
+  await expect(page.getByTestId("pt-track-group-row")).toContainText("Rhythm Configured");
+  await expect.poll(async () => (await trackGroupDefinitions(page))[0]).toMatchObject({
+    name: "Rhythm Configured",
+    kind: "mix",
+    mixAttributes: ["main_mute", "main_pan", "solo", "record_enable"],
+  });
+
   const beforeGroupSelect = await commandTraceLength(page);
   await page.getByTestId("pt-track-group-select").click();
   await expect(page.getByTestId("pt-track-select").first()).toHaveAttribute("aria-pressed", "true");
@@ -90,18 +110,30 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   const before = await trackMix(page);
   const volume = page.getByTestId("pt-track-volume");
   await volume.evaluate((element) => {
-    const input = element as HTMLInputElement;
+    if (!(element instanceof HTMLInputElement)) throw new Error("Track volume is not an input");
+    const input = element;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     setter?.call(input, "-6");
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await expect.poll(async () => {
-    const mix = await trackMix(page);
-    return mix[1]!.volumeDb! - mix[0]!.volumeDb!;
-  }).toBeCloseTo(before[1]!.volumeDb! - before[0]!.volumeDb!, 5);
+  await expect.poll(async () => (await trackMix(page))[0]?.volumeDb).toBe(before[0]?.volumeDb);
+  await expect.poll(async () => (await trackMix(page))[1]?.volumeDb).toBe(-6);
   await page.getByTestId("pt-track-mute").first().click();
   await expect.poll(async () => (await trackMix(page)).slice(0, 2).every((track) => track.mute)).toBe(true);
+
+  await page.getByTestId("pt-track-group-menu").click();
+  await page.getByTestId("pt-track-group-duplicate").click();
+  await expect(page.getByTestId("pt-track-group-modify-name")).toHaveValue("Rhythm Configured Copy");
+  await page.getByTestId("pt-track-group-apply").click();
+  await expect.poll(() => trackGroupCount(page)).toBe(2);
+  const definitions = await trackGroupDefinitions(page);
+  expect(definitions[1]).toMatchObject({
+    name: "Rhythm Configured Copy",
+    kind: "mix",
+    mixAttributes: ["main_mute", "main_pan", "solo", "record_enable"],
+  });
+  expect(definitions[1]?.id).not.toBe(definitions[0]?.id);
 
   await page.getByTestId("pt-track-group-suspend").click();
   await expect.poll(() => trackGroupsSuspended(page)).toBe(true);
@@ -114,6 +146,8 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   ));
   expect(commands).toEqual(expect.arrayContaining([
     "create_track_group",
+    "configure_track_group",
+    "duplicate_track_group",
     "set_track_group_members",
     "set_track_volume",
     "set_track_mute",
@@ -139,13 +173,13 @@ test("Avid Edit and Mix Track Groups link selection and controls without changin
   await page.setViewportSize({ width: 720, height: 720 });
   const panel = page.getByTestId("pt-track-groups");
   await expect(panel).toBeVisible();
-  await expect(page.getByTestId("pt-track-group-row")).toContainText("Rhythm");
+  await expect(page.getByTestId("pt-track-group-row").first()).toContainText("Rhythm Configured");
   await expect(page.getByTestId("pt-track-groups-new")).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("protools-track-groups-compact.png"),
     animations: "disabled",
   });
-  await page.getByTestId("pt-track-group-menu").click();
+  await page.getByTestId("pt-track-group-menu").first().click();
   await page.getByTestId("pt-track-group-modify").click();
   const compactModify = page.getByTestId("pt-track-group-modify-dialog");
   await expect(compactModify).toBeVisible();
@@ -196,6 +230,12 @@ async function trackGroupCount(page: Page): Promise<number> {
 async function trackGroupMemberIds(page: Page): Promise<readonly string[]> {
   return page.evaluate(() => (
     (window as ProToolsGroupingWindow).__moshStore?.getState().snapshot?.trackGroups?.[0]?.trackIds ?? []
+  ));
+}
+
+async function trackGroupDefinitions(page: Page): Promise<NonNullable<Snapshot["trackGroups"]>> {
+  return page.evaluate(() => (
+    (window as ProToolsGroupingWindow).__moshStore?.getState().snapshot?.trackGroups ?? []
   ));
 }
 

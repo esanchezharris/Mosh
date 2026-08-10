@@ -208,6 +208,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (trackGroupName)
     MOSH_DECLARE_ID (trackGroupKind)
     MOSH_DECLARE_ID (trackGroupEnabled)
+    MOSH_DECLARE_ID (trackGroupMixAttributes)
     MOSH_DECLARE_ID (trackGroupTrackId)
     MOSH_DECLARE_ID (trackGroupsSuspended)
 

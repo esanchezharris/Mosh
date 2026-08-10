@@ -265,6 +265,22 @@ export type ClipGroup = {
 
 export type TrackGroupKind = "edit" | "mix" | "edit_mix";
 
+export const TRACK_GROUP_MIX_ATTRIBUTES = [
+  "main_volume",
+  "main_mute",
+  "main_pan",
+  "solo",
+  "record_enable",
+  "input_monitoring",
+] as const;
+export type TrackGroupMixAttribute = typeof TRACK_GROUP_MIX_ATTRIBUTES[number];
+export const DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES: readonly TrackGroupMixAttribute[] = [
+  "main_volume",
+  "main_mute",
+  "main_pan",
+  "solo",
+] as const;
+
 /** Pro Tools-style non-routing track linkage. These groups never create folder
  *  tracks or alter the signal path: Edit membership links selection, while Mix
  *  membership links volume, pan, mute, and solo. */
@@ -274,6 +290,8 @@ export type TrackGroup = {
   trackIds: string[];
   kind: TrackGroupKind;
   enabled: boolean;
+  /** Missing on legacy projects; consumers must apply DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES. */
+  mixAttributes?: TrackGroupMixAttribute[];
 };
 
 export type ControllerEventName =

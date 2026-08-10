@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import type { Snapshot, Track } from "../types";
+import type { Snapshot, Track, TrackGroupMixAttribute } from "../types";
 import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
 import { proToolsMixGroupTrackIds } from "./proToolsTrackGroups";
@@ -11,6 +11,13 @@ const TRACK_CONTROL_KEYS: Readonly<Partial<Record<string, ProToolsTrackControl>>
   KeyS: "solo",
   KeyM: "mute",
   KeyI: "input",
+};
+
+const TRACK_CONTROL_ATTRIBUTES: Readonly<Record<ProToolsTrackControl, TrackGroupMixAttribute>> = {
+  arm: "record_enable",
+  solo: "solo",
+  mute: "main_mute",
+  input: "input_monitoring",
 };
 
 export function proToolsEditTrackIds(snapshot: Snapshot): readonly string[] {
@@ -59,7 +66,11 @@ export async function applyProToolsTrackControl(
   const store = useStore.getState();
   const snapshot = store.snapshot;
   if (!snapshot) return;
-  const requested = new Set(requestedTrackIds);
+  const requested = new Set<string>();
+  const mixAttribute = TRACK_CONTROL_ATTRIBUTES[control];
+  for (const trackId of requestedTrackIds)
+    for (const linkedTrackId of proToolsMixGroupTrackIds(snapshot, trackId, mixAttribute))
+      requested.add(linkedTrackId);
   const tracks = snapshot.tracks.filter((track) => requested.has(track.id));
   const sourceTrack = tracks.find((track) => track.id === sourceTrackId) ?? tracks[0];
   if (!sourceTrack) return;
@@ -87,7 +98,8 @@ export async function applyProToolsTrackControl(
       return;
     }
     if (control === "mute" || control === "solo")
-      for (const trackId of proToolsMixGroupTrackIds(snapshot, track.id)) coveredMixTracks.add(trackId);
+      for (const trackId of proToolsMixGroupTrackIds(snapshot, track.id, mixAttribute))
+        coveredMixTracks.add(trackId);
   }
 }
 

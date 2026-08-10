@@ -833,7 +833,7 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
     // doing its job. Validation above still runs before any mutation, so a bad trackId
     // opens no transaction.
     beginTxn ("set_track_volume");
-    const auto targets = audioTrack != nullptr ? mixLinkedTracks (id)
+    const auto targets = audioTrack != nullptr ? mixLinkedTracks (id, "main_volume")
                                                : std::vector<te::AudioTrack*> {};
     if (group != nullptr)
     {
@@ -873,7 +873,7 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
     // materialisation belongs INSIDE this command's transaction, or one undo leaves the
     // plugin behind.
     beginTxn ("set_track_pan");
-    const auto targets = mixLinkedTracks (track->itemID.toString());
+    const auto targets = mixLinkedTracks (track->itemID.toString(), "main_pan");
     auto* source = ensureVolumePlugin (*track);
     if (source == nullptr) return errResult ("set_track_pan", "no volume plugin");
     const float requested = juce::jlimit (
@@ -906,7 +906,7 @@ juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
     // and mute is a plain CachedValue<bool> (not an AutomatableParameter), so undo's
     // CachedValue refresh is the complete story — no SetFaderValueAction-style replay
     // needed here.
-    const auto targets = mixLinkedTracks (track->itemID.toString());
+    const auto targets = mixLinkedTracks (track->itemID.toString(), "main_mute");
     for (auto* target : targets)
         target->state.setProperty (te::IDs::mute,
                                    (bool) args.getProperty ("mute", false), &undoManager());
@@ -922,7 +922,7 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
     if (track == nullptr) return errResult ("set_track_solo", "no track");
     beginTxn ("set_track_solo");
     // Same G14-class fix as set_track_mute above (P6 undo matrix find).
-    for (auto* target : mixLinkedTracks (track->itemID.toString()))
+    for (auto* target : mixLinkedTracks (track->itemID.toString(), "solo"))
         target->state.setProperty (te::IDs::solo,
                                    (bool) args.getProperty ("solo", false), &undoManager());
     logLine ("set_track_solo", args, true, {}, true);

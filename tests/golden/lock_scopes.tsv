@@ -47,6 +47,7 @@ compile_render	Clip
 complete_lyrics	Track
 confirm_skeleton	Track
 consolidate_clips	Clip
+configure_track_group	Track
 create_annotation	SessionGlobal
 create_bus	SessionGlobal
 create_clip_group	Clip
@@ -62,6 +63,7 @@ detect_clip_bpm	Unguarded
 disable_track_meter	Unguarded
 discard_recovery	SessionGlobal
 duplicate_clip	Clip
+duplicate_track_group	Track
 edit_annotation	SessionGlobal
 enable_all_meters	Unguarded
 enable_track_meter	Unguarded

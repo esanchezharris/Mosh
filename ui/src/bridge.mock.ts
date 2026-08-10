@@ -14,7 +14,8 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
+import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -482,7 +483,8 @@ const MOCK_TXN_SAFE = new Set([
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
   "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
-  "create_track_group", "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
+  "create_track_group", "configure_track_group", "duplicate_track_group",
+  "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
   "rename_track_group", "remove_track_group",
   "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
 ]);
@@ -844,7 +846,32 @@ function findTrack(trackId: string): Track | null {
 function trackGroupSupports(group: TrackGroup, axis: "edit" | "mix"): boolean {
   return group.kind === axis || group.kind === "edit_mix";
 }
-function linkedMixTracks(trackId: string): Track[] {
+const TRACK_GROUP_MIX_ATTRIBUTE_SET: ReadonlySet<string> = new Set(TRACK_GROUP_MIX_ATTRIBUTES);
+function isTrackGroupMixAttribute(value: unknown): value is TrackGroupMixAttribute {
+  return typeof value === "string" && TRACK_GROUP_MIX_ATTRIBUTE_SET.has(value);
+}
+function parseTrackGroupMixAttributes(value: unknown): TrackGroupMixAttribute[] | null {
+  if (!Array.isArray(value)) return null;
+  const attributes: TrackGroupMixAttribute[] = [];
+  for (const item of value) {
+    if (!isTrackGroupMixAttribute(item)) return null;
+    if (!attributes.includes(item)) attributes.push(item);
+  }
+  return attributes;
+}
+function parseTrackGroupKind(value: unknown): TrackGroupKind | null {
+  return value === "edit" || value === "mix" || value === "edit_mix" ? value : null;
+}
+function trackGroupMixAttributes(group: TrackGroup): readonly TrackGroupMixAttribute[] {
+  return group.mixAttributes ?? DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES;
+}
+function trackGroupTrackIds(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.map(String))] : [];
+}
+function sameTrackGroupValues(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+function linkedMixTracks(trackId: string, attribute: TrackGroupMixAttribute): Track[] {
   const source = findTrack(trackId);
   if (!source || snapshot.trackGroupsSuspended) return source ? [source] : [];
   const linked = new Set([trackId]);
@@ -853,6 +880,7 @@ function linkedMixTracks(trackId: string): Track[] {
     changed = false;
     for (const group of snapshot.trackGroups ?? []) {
       if (!group.enabled || !trackGroupSupports(group, "mix")
+        || !trackGroupMixAttributes(group).includes(attribute)
         || !group.trackIds.some((id) => linked.has(id))) continue;
       for (const id of group.trackIds) {
         if (!findTrack(id) || linked.has(id)) continue;
@@ -1366,13 +1394,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command);
     }
     case "create_track_group": {
-      const trackIds = Array.isArray(args.trackIds)
-        ? [...new Set(args.trackIds.map(String))]
-        : [];
-      const kind = str(args.kind) as TrackGroupKind;
+      const trackIds = trackGroupTrackIds(args.trackIds);
+      const kind = parseTrackGroupKind(args.kind);
+      const mixAttributes = args.mixAttributes === undefined
+        ? [...DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES]
+        : parseTrackGroupMixAttributes(args.mixAttributes);
       if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
-      if (!(["edit", "mix", "edit_mix"] as const).includes(kind))
+      if (!kind)
         return err(command, "kind must be edit, mix, or edit_mix");
+      if (!mixAttributes) return err(command, "mixAttributes must contain only supported attributes");
       if (trackIds.some((trackId) => {
         const track = findTrack(trackId);
         return !track || track.isGroup || track.isReturn;
@@ -1384,10 +1414,68 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         trackIds,
         kind,
         enabled: true,
+        mixAttributes,
       };
       (snapshot.trackGroups ??= []).push(group);
       invalidate();
       return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
+    }
+    case "configure_track_group": {
+      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
+      const name = str(args.name).trim();
+      const kind = parseTrackGroupKind(args.kind);
+      const trackIds = trackGroupTrackIds(args.trackIds);
+      const mixAttributes = parseTrackGroupMixAttributes(args.mixAttributes);
+      if (!group) return err(command, "track group not found");
+      if (!name) return err(command, "track group name cannot be empty");
+      if (!kind)
+        return err(command, "kind must be edit, mix, or edit_mix");
+      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
+      if (trackIds.some((trackId) => {
+        const track = findTrack(trackId);
+        return !track || track.isGroup || track.isReturn;
+      })) return err(command, "trackIds contains an unsupported track");
+      if (!mixAttributes) return err(command, "mixAttributes must contain only supported attributes");
+      if (group.name === name && group.kind === kind
+        && sameTrackGroupValues(group.trackIds, trackIds)
+        && sameTrackGroupValues(trackGroupMixAttributes(group), mixAttributes))
+        return ok(command, { groupId: group.id, trackIds: [...group.trackIds], mixAttributes: [...mixAttributes] });
+      pushUndo();
+      group.name = name;
+      group.kind = kind;
+      group.trackIds = trackIds;
+      group.mixAttributes = mixAttributes;
+      invalidate();
+      return ok(command, { groupId: group.id, trackIds: [...group.trackIds], mixAttributes: [...mixAttributes] });
+    }
+    case "duplicate_track_group": {
+      const source = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
+      const name = str(args.name).trim();
+      const kind = parseTrackGroupKind(args.kind);
+      const trackIds = trackGroupTrackIds(args.trackIds);
+      const mixAttributes = parseTrackGroupMixAttributes(args.mixAttributes);
+      if (!source) return err(command, "track group not found");
+      if (!name) return err(command, "track group name cannot be empty");
+      if (!kind)
+        return err(command, "kind must be edit, mix, or edit_mix");
+      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
+      if (trackIds.some((trackId) => {
+        const track = findTrack(trackId);
+        return !track || track.isGroup || track.isReturn;
+      })) return err(command, "trackIds contains an unsupported track");
+      if (!mixAttributes) return err(command, "mixAttributes must contain only supported attributes");
+      pushUndo();
+      const duplicate: TrackGroup = {
+        id: nextTrackGroupId(),
+        name,
+        kind,
+        trackIds,
+        enabled: true,
+        mixAttributes,
+      };
+      (snapshot.trackGroups ??= []).push(duplicate);
+      invalidate();
+      return ok(command, { groupId: duplicate.id, trackIds: [...trackIds], mixAttributes: [...mixAttributes] });
     }
     case "set_track_group_enabled": {
       const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
@@ -1399,9 +1487,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_track_group_members": {
       const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
-      const trackIds = Array.isArray(args.trackIds)
-        ? [...new Set(args.trackIds.map(String))]
-        : [];
+      const trackIds = trackGroupTrackIds(args.trackIds);
       if (!group) return err(command, "track group not found");
       if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
       if (trackIds.some((trackId) => {
@@ -1552,7 +1638,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_track_volume": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const targets = linkedMixTracks(t.id);
+      const targets = linkedMixTracks(t.id, "main_volume");
       const requested = num(args.db);
       const delta = requested - (t.volumeDb ?? 0);
       pushUndo();
@@ -1562,7 +1648,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_track_pan": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const targets = linkedMixTracks(t.id);
+      const targets = linkedMixTracks(t.id, "main_pan");
       const requested = num(args.pan);
       const delta = requested - (t.pan ?? 0);
       pushUndo();
@@ -1572,12 +1658,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_track_mute": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      pushUndo(); for (const target of linkedMixTracks(t.id)) target.mute = Boolean(args.mute);
+      pushUndo(); for (const target of linkedMixTracks(t.id, "main_mute")) target.mute = Boolean(args.mute);
       invalidate(); return ok(command);
     }
     case "set_track_solo": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      pushUndo(); for (const target of linkedMixTracks(t.id)) target.solo = Boolean(args.solo);
+      pushUndo(); for (const target of linkedMixTracks(t.id, "solo")) target.solo = Boolean(args.solo);
       invalidate(); return ok(command);
     }
     case "set_track_active": { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); const active = args.active !== false; if ((t.active ?? true) === active) return ok(command); pushUndo(); t.active = active; invalidate(); return ok(command); }

@@ -110,6 +110,8 @@ private:
     juce::var cmdRegroupClipGroup (const juce::var& args);
     juce::var cmdRenameClipGroup  (const juce::var& args);
     juce::var cmdCreateTrackGroup       (const juce::var& args);
+    juce::var cmdConfigureTrackGroup    (const juce::var& args);
+    juce::var cmdDuplicateTrackGroup    (const juce::var& args);
     juce::var cmdSetTrackGroupMembers   (const juce::var& args);
     juce::var cmdSetTrackGroupEnabled   (const juce::var& args);
     juce::var cmdSetTrackGroupsSuspended (const juce::var& args);
@@ -549,7 +551,8 @@ private:
     juce::var trackGroupsToVar();
     juce::ValueTree findTrackGroupById (const juce::String& groupId);
     std::vector<te::AudioTrack*> trackGroupMembers (const juce::ValueTree& group);
-    std::vector<te::AudioTrack*> mixLinkedTracks (const juce::String& trackId);
+    std::vector<te::AudioTrack*> mixLinkedTracks (const juce::String& trackId,
+                                                   const juce::String& mixAttribute);
 
     // LYR-001 — a track's MOSH_LYRICSHEET as a snapshot object (read-only; never
     // creates the tree). { id, grid, language, topic, mood, explicit, rhymeStrictness,

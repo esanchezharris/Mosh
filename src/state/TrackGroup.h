@@ -16,6 +16,18 @@ struct TrackGroup
         return kind == "edit" || kind == "mix" || kind == "edit_mix";
     }
 
+    static bool validMixAttribute (const juce::String& attribute)
+    {
+        return defaultMixAttributes().contains (attribute)
+            || attribute == "record_enable"
+            || attribute == "input_monitoring";
+    }
+
+    static juce::StringArray defaultMixAttributes()
+    {
+        return { "main_volume", "main_mute", "main_pan", "solo" };
+    }
+
     static juce::ValueTree create (const juce::String& groupId,
                                    const juce::String& name,
                                    const juce::String& kind,
@@ -67,6 +79,29 @@ struct TrackGroup
         }
     }
 
+    static juce::StringArray mixAttributes (const juce::ValueTree& group)
+    {
+        if (! group.hasProperty (ids::trackGroupMixAttributes))
+            return defaultMixAttributes();
+
+        juce::StringArray attributes;
+        for (const auto& attribute : juce::StringArray::fromTokens (
+                 group[ids::trackGroupMixAttributes].toString(), ",", {}))
+            if (validMixAttribute (attribute)) attributes.addIfNotAlreadyThere (attribute);
+        return attributes;
+    }
+
+    static void replaceMixAttributes (juce::ValueTree group,
+                                      const juce::StringArray& requestedAttributes,
+                                      juce::UndoManager* undoManager)
+    {
+        juce::StringArray attributes;
+        for (const auto& attribute : requestedAttributes)
+            if (validMixAttribute (attribute)) attributes.addIfNotAlreadyThere (attribute);
+        group.setProperty (ids::trackGroupMixAttributes,
+                           attributes.joinIntoString (","), undoManager);
+    }
+
     static bool supports (const juce::ValueTree& group, Axis axis)
     {
         const auto kind = group[ids::trackGroupKind].toString();
@@ -75,7 +110,8 @@ struct TrackGroup
 
     static juce::StringArray linkedMemberIds (const juce::ValueTree& groups,
                                                const juce::String& seedTrackId,
-                                               Axis axis)
+                                               Axis axis,
+                                               const juce::String& mixAttribute = {})
     {
         juce::StringArray linked;
         if (seedTrackId.isNotEmpty()) linked.add (seedTrackId);
@@ -90,7 +126,9 @@ struct TrackGroup
                 const auto group = groups.getChild (index);
                 if (! group.hasType (ids::MOSH_TRACK_GROUP)
                     || ! (bool) group.getProperty (ids::trackGroupEnabled, true)
-                    || ! supports (group, axis)) continue;
+                    || ! supports (group, axis)
+                    || (axis == Axis::Mix && mixAttribute.isNotEmpty()
+                        && ! mixAttributes (group).contains (mixAttribute))) continue;
                 const auto members = memberIds (group);
                 bool intersects = false;
                 for (const auto& member : members)

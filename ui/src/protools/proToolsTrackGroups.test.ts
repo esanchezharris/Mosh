@@ -74,6 +74,24 @@ describe("Pro Tools Edit and Mix Track Groups", () => {
     expect(proToolsEditGroupSelection(project, [keys.id])).toEqual([keys.id]);
   });
 
+  it("filters Mix linkage by the selected supported attribute", () => {
+    const [drums, bass, keys] = project.tracks;
+    if (!drums || !bass || !keys) throw new Error("track-group fixtures are missing");
+    project.trackGroups = [{
+      id: "mix-attrs",
+      name: "Control Link",
+      trackIds: [drums.id, bass.id],
+      kind: "mix",
+      enabled: true,
+      mixAttributes: ["main_mute", "record_enable"],
+    }];
+
+    expect(proToolsMixGroupTrackIds(project, drums.id, "main_volume")).toEqual([drums.id]);
+    expect(proToolsMixGroupTrackIds(project, drums.id, "main_mute")).toEqual([drums.id, bass.id]);
+    expect(proToolsMixGroupTrackIds(project, drums.id, "record_enable")).toEqual([drums.id, bass.id]);
+    expect(proToolsMixGroupTrackIds(project, drums.id, "input_monitoring")).toEqual([drums.id]);
+  });
+
   it("maps Command or Control G to the Track Group dialog without a routing command", () => {
     const event = new KeyboardEvent("keydown", {
       key: "g",
