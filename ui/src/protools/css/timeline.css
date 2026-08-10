@@ -387,9 +387,16 @@
 }
 .pt-fade-handle.in { left: 0; clip-path: polygon(0 0, 100% 0, 0 100%); }
 .pt-fade-handle.out { right: 0; clip-path: polygon(0 0, 100% 0, 100% 100%); }
-.pt-fade-line { position: absolute; top: 0; bottom: 0; border-top: 1px solid var(--pt-wave-outline); opacity: 0.55; }
-.pt-fade-line.in { left: 0; transform: skewY(24deg); transform-origin: left top; }
-.pt-fade-line.out { right: 0; transform: skewY(-24deg); transform-origin: right top; }
+.pt-fade-line { position: absolute; top: 0; bottom: 0; overflow: hidden; opacity: 0.68; pointer-events: none; }
+.pt-fade-line.in { left: 0; }
+.pt-fade-line.out { right: 0; }
+.pt-fade-line svg { display: block; width: 100%; height: 100%; }
+.pt-fade-line path {
+  fill: none;
+  stroke: var(--pt-wave-outline);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
 .pt-crossfade-region {
   position: absolute;
   top: 0;

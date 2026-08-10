@@ -11,10 +11,11 @@ function formatSeconds(seconds: number): string {
   return `${Math.max(0, seconds).toFixed(3)} s`;
 }
 
-export function ProToolsAudioClipInspector({ clip, track, onClose }: {
+export function ProToolsAudioClipInspector({ clip, track, onClose, onOpenFades }: {
   readonly clip: Clip;
   readonly track: Track;
   readonly onClose: () => void;
+  readonly onOpenFades: () => void;
 }) {
   const exec = useStore((state) => state.exec);
   const projectEpoch = useStore((state) => state.projectEpoch);
@@ -143,6 +144,9 @@ export function ProToolsAudioClipInspector({ clip, track, onClose }: {
                   });
                 }
               }}>Auto Crossfade</button>
+            <button type="button" className="pt-clip-fades" data-testid="pt-open-fades"
+              title="Create fades for the current audio selection · Command+F"
+              onClick={onOpenFades}>Fades… <kbd>⌘F</kbd></button>
             <span id="pt-clip-crossfade-help" className="pt-clip-crossfade-help">
               {crossfadeHelp}
             </span>

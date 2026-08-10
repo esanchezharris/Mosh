@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isNative } from "../bridge";
 import { MoshTipProvider } from "../chrome/Tooltip";
 import { pushEscapeHandler } from "../hooks/escapeStack";
@@ -13,10 +13,12 @@ import { RecoveryNotice } from "../ui/RecoveryNotice";
 import { useShell } from "../v2/shellState";
 import { ProToolsArrangement } from "./ProToolsArrangement";
 import { ProToolsDetailDock } from "./ProToolsDetailDock";
+import { ProToolsFadesDialog } from "./ProToolsFadesDialog";
 import { ProToolsMoshiDrawer } from "./ProToolsMoshiDrawer";
 import { ProToolsMemoryLocations } from "./ProToolsMemoryLocations";
 import { ProToolsStatusBar } from "./ProToolsStatusBar";
 import { ProToolsToolbar } from "./ProToolsToolbar";
+import { proToolsFadeTargets } from "./proToolsFades";
 import { useProTools } from "./proToolsState";
 import { useProToolsKeys } from "./useProToolsKeys";
 import "./protools.css";
@@ -33,15 +35,18 @@ export function AppProTools() {
   const resetForProject = useProTools((s) => s.resetForProject);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moshiOpen, setMoshiOpen] = useState(false);
+  const [fadesOpen, setFadesOpen] = useState(false);
   const moshiButtonRef = useRef<HTMLButtonElement>(null);
   const dragging = useFileDrop();
+  const openFades = useCallback(() => setFadesOpen(true), []);
 
   useKeyboardShortcuts();
-  useProToolsKeys();
+  useProToolsKeys(openFades);
   useQwertyMidi();
 
   useEffect(() => {
     resetForProject(projectEpoch);
+    setFadesOpen(false);
     useShell.getState().setTimeRange(null);
     useShell.getState().setTimeRangeDragging(false);
   }, [projectEpoch, resetForProject]);
@@ -60,6 +65,15 @@ export function AppProTools() {
   );
 
   const displayError = lastError ? formatPeerError(lastError, peers) : null;
+  const fadeTargets = fadesOpen && snapshot
+    ? proToolsFadeTargets({
+      snapshot,
+      selectedClipIds: useStore.getState().selection,
+      editingClipId: useStore.getState().editingClipId,
+      editRange: useShell.getState().timeRange,
+      editTrackIds: useProTools.getState().editSelectionTrackIds,
+    })
+    : [];
   return (
     <MoshTipProvider delay={300}>
       <div className="protools-shell" data-testid="protools-shell"
@@ -77,11 +91,14 @@ export function AppProTools() {
             : <div className="pt-loading" role="status">Loading Edit Window…</div>}
           {dragging && <div className="pt-drop-overlay" role="status">Drop audio to import at the playhead</div>}
         </main>
-        <ProToolsDetailDock />
+        <ProToolsDetailDock onOpenFades={openFades} />
         <ProToolsStatusBar snapshot={snapshot} />
         <ProToolsMoshiDrawer open={moshiOpen} onClose={() => setMoshiOpen(false)}
           returnFocusRef={moshiButtonRef} />
         {snapshot && <ProToolsMemoryLocations snapshot={snapshot} />}
+        {fadesOpen && fadeTargets.length > 0 && (
+          <ProToolsFadesDialog targets={fadeTargets} onClose={() => setFadesOpen(false)} />
+        )}
         {settingsOpen && snapshot && (
           <SettingsOverlay onClose={() => setSettingsOpen(false)} />
         )}

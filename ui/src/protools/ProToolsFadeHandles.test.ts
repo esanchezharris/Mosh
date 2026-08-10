@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Clip, CommandResult, Track } from "../types";
 import { useStore } from "../store";
 import { ProToolsFadeHandles } from "./ProToolsFadeHandles";
+import { proToolsFadePath } from "./proToolsFades";
 
 const CLIP: Clip = {
   id: "audio-clip",
@@ -102,5 +103,39 @@ describe("ProToolsFadeHandles project epoch cancellation", () => {
     expect(region.style.left).toBe("300px");
     expect(region.style.width).toBe("100px");
     expect(region.querySelectorAll("path")).toHaveLength(2);
+  });
+
+  it("draws persisted edge shapes and an explicit two-curve overlap after Auto Crossfade is disabled", () => {
+    const neighbor = TRACK.clips.find((clip) => clip.id === "audio-neighbor");
+    if (!neighbor) throw new Error("audio neighbor fixture is missing");
+    const shapedClip = {
+      ...CLIP,
+      autoCrossfade: false,
+      fadeInSec: 0.5,
+      fadeOutSec: 1,
+      fadeInType: 2,
+      fadeOutType: 3,
+    };
+    const shapedTrack: Track = {
+      ...TRACK,
+      clips: [shapedClip, {
+        ...neighbor,
+        fadeInSec: 1,
+        fadeInType: 2,
+      }],
+    };
+    act(() => root.render(React.createElement(ProToolsFadeHandles, {
+      clip: shapedClip,
+      track: shapedTrack,
+    })));
+
+    const fadeInPath = host.querySelector(".pt-fade-line.in path");
+    const fadeOutPath = host.querySelector(".pt-fade-line.out path");
+    expect(fadeInPath?.getAttribute("d")).toBe(proToolsFadePath("convex", "in"));
+    expect(fadeOutPath?.getAttribute("d")).toBe(proToolsFadePath("concave", "out"));
+    const region = host.querySelector<HTMLElement>("[data-testid=pt-crossfade-region]");
+    expect(region?.dataset.crossfadeMode).toBe("explicit");
+    expect(region?.querySelector("path.in")?.getAttribute("d")).toBe(proToolsFadePath("convex", "in"));
+    expect(region?.querySelector("path.out")?.getAttribute("d")).toBe(proToolsFadePath("concave", "out"));
   });
 });

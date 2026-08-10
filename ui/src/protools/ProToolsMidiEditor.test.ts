@@ -100,7 +100,7 @@ describe("Pro Tools multi-track MIDI Editor", () => {
   });
 
   const render = (): void => {
-    act(() => root.render(React.createElement(ProToolsDetailDock)));
+    act(() => root.render(React.createElement(ProToolsDetailDock, { onOpenFades: vi.fn() })));
   };
 
   it("renders only MIDI working tracks with one visible edit target", () => {

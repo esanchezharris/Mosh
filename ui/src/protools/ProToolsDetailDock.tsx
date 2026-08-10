@@ -4,7 +4,7 @@ import { ProToolsDeviceRack } from "./ProToolsDeviceRack";
 import { ProToolsMidiEditor } from "./ProToolsMidiEditor";
 import { ProToolsTrackInspector } from "./ProToolsTrackInspector";
 
-export function ProToolsDetailDock() {
+export function ProToolsDetailDock({ onOpenFades }: { readonly onOpenFades: () => void }) {
   const snapshot = useStore((state) => state.snapshot);
   const editingClipId = useStore((state) => state.editingClipId);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
@@ -42,7 +42,8 @@ export function ProToolsDetailDock() {
       const { clip, track } = match;
       return (
         <section className="pt-detail-dock pt-detail-wave" data-testid="pt-detail-dock" aria-label="Audio clip editor">
-          <ProToolsAudioClipInspector clip={clip} track={track} onClose={closePianoRoll} />
+          <ProToolsAudioClipInspector clip={clip} track={track} onClose={closePianoRoll}
+            onOpenFades={onOpenFades} />
         </section>
       );
     }

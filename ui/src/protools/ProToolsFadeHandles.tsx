@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import type { Clip, Track } from "../types";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { proToolsOverlappingAudioClip } from "./proToolsCrossfade";
+import { proToolsFadeCurveFromType, proToolsFadePath } from "./proToolsFades";
 import { useProTools } from "./proToolsState";
 
 type Side = "in" | "out";
@@ -17,9 +18,28 @@ export function ProToolsFadeHandles({ clip, track }: { readonly clip: Clip; read
   } | null>(null);
   const fadeIn = preview?.side === "in" ? preview.seconds : (clip.fadeInSec ?? 0);
   const fadeOut = preview?.side === "out" ? preview.seconds : (clip.fadeOutSec ?? 0);
-  const crossfadeNeighbor = clip.autoCrossfade === true
-    ? proToolsOverlappingAudioClip(clip, track)
+  const overlappingClip = proToolsOverlappingAudioClip(clip, track);
+  const outgoingClip = overlappingClip && clip.start <= overlappingClip.start ? clip : overlappingClip;
+  const incomingClip = overlappingClip && outgoingClip?.id === clip.id ? overlappingClip : clip;
+  const representedOverlap = outgoingClip && incomingClip
+    ? Math.min(outgoingClip.start + outgoingClip.length, incomingClip.start + incomingClip.length)
+      - Math.max(outgoingClip.start, incomingClip.start)
+    : 0;
+  const explicitCrossfade = overlappingClip !== null
+    && outgoingClip?.id === clip.id
+    && representedOverlap > 1e-6
+    && Math.abs((outgoingClip.fadeOutSec ?? 0) - representedOverlap) <= 1e-6
+    && Math.abs((incomingClip.fadeInSec ?? 0) - representedOverlap) <= 1e-6;
+  const crossfadeNeighbor = clip.autoCrossfade === true || explicitCrossfade
+    ? overlappingClip
     : null;
+  const crossfadeMode = explicitCrossfade ? "explicit" : "auto";
+  const crossfadeInCurve = explicitCrossfade
+    ? proToolsFadeCurveFromType(incomingClip.fadeInType)
+    : "sCurve";
+  const crossfadeOutCurve = explicitCrossfade
+    ? proToolsFadeCurveFromType(outgoingClip.fadeOutType)
+    : "sCurve";
   const crossfadeStart = crossfadeNeighbor
     ? Math.max(clip.start, crossfadeNeighbor.start)
     : 0;
@@ -90,18 +110,27 @@ export function ProToolsFadeHandles({ clip, track }: { readonly clip: Clip; read
     <div className="pt-fades" style={{ left: clip.start * pxPerSec, width: Math.max(4, clip.length * pxPerSec) }}>
       {crossfadeNeighbor && (
         <div className="pt-crossfade-region" data-testid="pt-crossfade-region"
+          data-crossfade-mode={crossfadeMode}
           style={{
             left: (crossfadeStart - clip.start) * pxPerSec,
             width: (crossfadeEnd - crossfadeStart) * pxPerSec,
           }}>
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M 0 100 C 35 100 65 0 100 0" />
-            <path d="M 0 0 C 35 0 65 100 100 100" />
+            <path className="in" d={proToolsFadePath(crossfadeInCurve, "in")} />
+            <path className="out" d={proToolsFadePath(crossfadeOutCurve, "out")} />
           </svg>
         </div>
       )}
-      <div className="pt-fade-line in" style={{ width: fadeIn * pxPerSec }} aria-hidden="true" />
-      <div className="pt-fade-line out" style={{ width: fadeOut * pxPerSec }} aria-hidden="true" />
+      <div className="pt-fade-line in" style={{ width: fadeIn * pxPerSec }} aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d={proToolsFadePath(proToolsFadeCurveFromType(clip.fadeInType), "in")} />
+        </svg>
+      </div>
+      <div className="pt-fade-line out" style={{ width: fadeOut * pxPerSec }} aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d={proToolsFadePath(proToolsFadeCurveFromType(clip.fadeOutType), "out")} />
+        </svg>
+      </div>
       {(["in", "out"] as const).map((side) => (
         <button key={side} type="button" className={`pt-fade-handle ${side}`}
           aria-label={`${side === "in" ? "Fade in" : "Fade out"} ${clip.name}`}

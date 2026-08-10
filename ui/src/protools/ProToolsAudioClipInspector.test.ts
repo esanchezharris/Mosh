@@ -57,6 +57,7 @@ describe("Pro Tools audio clip inspector", () => {
   let host: HTMLDivElement;
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
+  let onOpenFades: ReturnType<typeof vi.fn>;
   const originalState = useStore.getState();
 
   beforeEach(() => {
@@ -65,6 +66,7 @@ describe("Pro Tools audio clip inspector", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
+    onOpenFades = vi.fn();
     useStore.setState({
       snapshot: SNAPSHOT,
       selectedTrackId: "audio-track",
@@ -72,7 +74,7 @@ describe("Pro Tools audio clip inspector", () => {
       projectEpoch: 70,
       exec,
     });
-    act(() => root.render(React.createElement(ProToolsDetailDock)));
+    act(() => root.render(React.createElement(ProToolsDetailDock, { onOpenFades })));
   });
 
   afterEach(() => {
@@ -128,6 +130,11 @@ describe("Pro Tools audio clip inspector", () => {
       clipId: CLIP_ID,
       enabled: true,
     });
+  });
+
+  it("opens the selection-aware Fades dialog from the audio inspector", async () => {
+    await act(async () => button("pt-open-fades").click());
+    expect(onOpenFades).toHaveBeenCalledTimes(1);
   });
 
   it("does not offer an inaudible crossfade when no audio clip overlaps", async () => {

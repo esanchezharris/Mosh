@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { isEditableTarget } from "../interaction/keymap";
 import { useStore, type State } from "../store";
+import { handleProToolsFadesShortcut } from "./proToolsFadeShortcut";
 import { useProTools, type ProToolsEditMode } from "./proToolsState";
 import { applyHorizontalZoom, applyHorizontalZoomStep } from "./proToolsZoom";
 import type { ProToolsTool } from "./smartTool";
@@ -44,7 +45,7 @@ function ownsTabToTransientNavigation(element: Element | null): boolean {
   return element?.closest(".pt-timeline-scroll, [data-clip-id]") !== null;
 }
 
-export function useProToolsKeys(): void {
+export function useProToolsKeys(onOpenFades?: () => void): void {
   const memorySequence = useRef<{ digits: string; startedAt: number } | null>(null);
   const lastRecalledLocation = useRef<number | null>(null);
   const memoryEpoch = useRef(useStore.getState().projectEpoch);
@@ -81,6 +82,8 @@ export function useProToolsKeys(): void {
         if (proTools.smartToolEnabled) proTools.toggleSmartTool();
         return;
       }
+
+      if (handleProToolsFadesShortcut(event, onOpenFades)) return;
 
       if (event.code === "Slash" && event.shiftKey
         && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -245,5 +248,5 @@ export function useProToolsKeys(): void {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [onOpenFades]);
 }

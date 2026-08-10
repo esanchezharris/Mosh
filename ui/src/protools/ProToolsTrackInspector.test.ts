@@ -99,7 +99,7 @@ describe("Pro Tools selected-track inspector", () => {
   });
 
   function renderDock(): void {
-    act(() => root.render(React.createElement(ProToolsDetailDock)));
+    act(() => root.render(React.createElement(ProToolsDetailDock, { onOpenFades: vi.fn() })));
   }
 
   it("renders real routing, monitoring, volume, and pan controls for the selected track", () => {
