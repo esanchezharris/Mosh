@@ -148,6 +148,14 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: labelled region, explicit close button, content stays keyboard reachable.
 - **Layout**: dock is a fixed shell row with internal overflow; selected-track channel controls sit beside inserts on wide screens and stack inside the dock's own scroll area on compact screens; status bar never overlays content.
 
+### Audio clip inspector
+
+- **Structure**: clip name, mute state, paired clip-gain slider and numeric field, 0 dB reset, waveform preview, and read-only timing/fade metadata.
+- **States**: clean, locally edited, invalid name, invalid gain, command rejected, project replaced, muted.
+- **Accessibility**: every field has a visible label; validation is announced and associated with its field; Escape restores the snapshot value; the mute toggle exposes `aria-pressed`.
+- **Mutation**: rename, mute, and gain commit only through `rename_clip`, `set_clip_mute`, and `set_clip_gain`. Gain remains local while a pointer or keyboard gesture is active, accepts `-48…+24 dB`, and commits only on completion.
+- **Safety**: a `projectEpoch` change resets all drafts and prevents a stale editor gesture from addressing the replacement project.
+
 ### Spot placement dialog
 
 - **Structure**: modal title and clip identity, native Time Scale select, one editable Start field, validation message, Cancel, and Spot confirmation.
@@ -197,7 +205,6 @@ Strategy: mixed tonal shift plus one-pixel dimensional edges.
 |---|---|---|---|
 | Exact pixel polish against current Pro Tools | Entire shell | Explicit follow-up; Pro Tools is unavailable locally and no proprietary imagery is copied | Later reference-fidelity pass with licensed access |
 | Spot Sync Point and timestamp recall | Spot dialog | Mosh snapshots do not expose clip sync points, original timestamps, or user timestamps | Add fields only with an additive backend snapshot/command contract |
-| Per-clip gain | Audio detail dock | Explicitly outside this delivery | Follow-up MoshOps command/UI slice |
 | Memory Locations | Toolbar/list surfaces | Explicitly outside this delivery | Follow-up navigation slice |
 | True transient detector | Tab navigation | Mosh exposes waveform peaks, not Pro Tools transient metadata; falls back to clip boundaries | Replace when an additive backend transient feed exists |
 | Native Pro Tools behavioral validation | Research/QA | Pro Tools is not installed; browser QA proves Mosh behavior only | Validate later on an authorized reference system |
