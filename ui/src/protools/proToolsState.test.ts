@@ -27,6 +27,8 @@ describe("Pro Tools shell state", () => {
       trackViews: state.trackViews,
       automationLanesVisible: state.automationLanesVisible,
       horizontalZoomPresets: state.horizontalZoomPresets,
+      audioWaveformZoom: state.audioWaveformZoom,
+      midiNoteZoom: state.midiNoteZoom,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -46,7 +48,26 @@ describe("Pro Tools shell state", () => {
       trackViews: {},
       automationLanesVisible: {},
       horizontalZoomPresets: DEFAULT_HORIZONTAL_ZOOM_PRESETS,
+      audioWaveformZoom: 1,
+      midiNoteZoom: 1,
     });
+  });
+
+  it("keeps media zoom independent and project-scoped", () => {
+    const state = useProTools.getState();
+    state.setAudioWaveformZoom(3);
+    state.setMidiNoteZoom(0.5);
+
+    expect(useProTools.getState().audioWaveformZoom).toBe(3);
+    expect(useProTools.getState().midiNoteZoom).toBe(0.5);
+
+    state.resetForProject(projectEpoch);
+    expect(useProTools.getState().audioWaveformZoom).toBe(3);
+    expect(useProTools.getState().midiNoteZoom).toBe(0.5);
+
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().audioWaveformZoom).toBe(1);
+    expect(useProTools.getState().midiNoteZoom).toBe(1);
   });
 
   it("clamps track-header resizing at both supported boundaries", () => {

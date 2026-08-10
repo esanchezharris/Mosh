@@ -72,11 +72,15 @@
 .pt-smart-button { min-width: 48px !important; font-weight: 700; }
 .pt-zoom-group {
   flex: 0 0 auto;
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  padding: 17px 4px 3px;
+}
+.pt-horizontal-zoom {
   display: grid;
   grid-template-rows: 25px 24px;
-  align-content: end;
   gap: 2px;
-  padding: 17px 4px 3px;
 }
 .pt-zoom-step-row,
 .pt-zoom-presets { display: flex; align-items: center; gap: 2px; }
@@ -95,6 +99,17 @@
   min-width: 24px;
   min-height: 24px;
   padding: 0 3px;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-zoom-media {
+  display: grid;
+  grid-template-columns: repeat(2, 27px);
+  gap: 2px;
+}
+.pt-zoom-media button {
+  min-width: 27px;
+  min-height: 24px;
+  padding: 0 2px;
   font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .pt-session-group { flex: 0 0 auto; padding-top: 18px; }

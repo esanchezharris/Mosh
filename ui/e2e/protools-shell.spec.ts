@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { bootProTools } from "./helpers";
 import type { Snapshot } from "../src/types";
 
@@ -50,6 +50,26 @@ async function execInPage(page: Page, command: string, args: Record<string, unkn
   }, { name: command, payload: args });
 }
 
+async function canvasInkHeight(canvas: Locator): Promise<number> {
+  return canvas.evaluate((element) => {
+    if (!(element instanceof HTMLCanvasElement)) throw new Error("clip canvas is unavailable");
+    const context = element.getContext("2d", { willReadFrequently: true });
+    if (!context || element.width <= 0 || element.height <= 0) return 0;
+    const pixels = context.getImageData(0, 0, element.width, element.height).data;
+    let first = element.height;
+    let last = -1;
+    for (let y = 0; y < element.height; y += 1) {
+      for (let x = 0; x < element.width; x += 1) {
+        if (pixels[(y * element.width + x) * 4 + 3] <= 8) continue;
+        first = Math.min(first, y);
+        last = Math.max(last, y);
+        break;
+      }
+    }
+    return last < first ? 0 : last - first + 1;
+  });
+}
+
 test("?shell=protools boots the Edit Window zones with left track headers", async ({ page }) => {
   await bootProTools(page);
   await expect(page.getByTestId("pt-toolbar")).toBeVisible();
@@ -87,7 +107,7 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   expect(clipList.width / viewport.width).toBeLessThan(0.18);
 });
 
-test("tutorial-backed horizontal zoom preserves the editing focus workflow", async ({ page }, testInfo) => {
+test("tutorial-backed Zoom controls preserve the editing focus workflow", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
   const timeline = page.getByTestId("pt-timeline");
@@ -123,6 +143,33 @@ test("tutorial-backed horizontal zoom preserves the editing focus workflow", asy
   await page.mouse.wheel(0, 100);
   await page.keyboard.up("Alt");
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBeLessThan(afterRange);
+
+  const waveformCanvas = page.locator('.pt-lane [data-testid="v2-clip"].wave canvas').first();
+  const midiCanvas = page.locator('.pt-lane [data-testid="v2-clip"].midi canvas, .pt-lane [data-testid="v2-clip"].drum canvas').first();
+  await expect(waveformCanvas).toBeVisible();
+  await expect(midiCanvas).toBeVisible();
+
+  const waveformOut = page.getByTestId("pt-waveform-zoom-out");
+  const waveformIn = page.getByTestId("pt-waveform-zoom-in");
+  await waveformOut.click();
+  await waveformOut.click();
+  await expect(waveformIn).toHaveAttribute("aria-label", /50 percent/);
+  const waveformLow = await canvasInkHeight(waveformCanvas);
+  expect(waveformLow).toBeGreaterThan(0);
+  for (let step = 0; step < 4; step += 1) await waveformIn.click();
+  await expect(waveformIn).toHaveAttribute("aria-label", /200 percent/);
+  await expect.poll(() => canvasInkHeight(waveformCanvas)).toBeGreaterThan(waveformLow);
+
+  const midiOut = page.getByTestId("pt-midi-zoom-out");
+  const midiIn = page.getByTestId("pt-midi-zoom-in");
+  await midiOut.click();
+  await midiOut.click();
+  await expect(midiIn).toHaveAttribute("aria-label", /50 percent/);
+  const midiLow = await canvasInkHeight(midiCanvas);
+  expect(midiLow).toBeGreaterThan(0);
+  for (let step = 0; step < 4; step += 1) await midiIn.click();
+  await expect(midiIn).toHaveAttribute("aria-label", /200 percent/);
+  await expect.poll(() => canvasInkHeight(midiCanvas)).toBeGreaterThan(midiLow);
   await page.screenshot({ path: testInfo.outputPath("protools-zoom-wide.png"), animations: "disabled" });
 
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -132,6 +179,7 @@ test("tutorial-backed horizontal zoom preserves the editing focus workflow", asy
   await expect(zoomGroup).toBeInViewport();
   await expect(page.getByTestId("pt-zoom-in")).toBeVisible();
   await expect(page.getByTestId("pt-zoom-preset-5")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Vertical media zoom" })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("protools-zoom-compact.png"), animations: "disabled" });
 
   const traceAfter = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace?.length ?? 0);

@@ -2,6 +2,7 @@ import { useStore } from "../store";
 
 export const HORIZONTAL_ZOOM_LEVELS = [20, 28, 40, 56, 80, 112, 160, 224, 320, 400] as const;
 export const DEFAULT_HORIZONTAL_ZOOM_PRESETS = [32, 56, 80, 160, 320] as const;
+export const VERTICAL_ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2, 3, 4] as const;
 
 type PendingZoomScroll = {
   readonly timeline: HTMLDivElement;
@@ -21,6 +22,15 @@ export function clampHorizontalZoom(pxPerSec: number): number {
 export function nextHorizontalZoom(current: number, direction: -1 | 1): number {
   if (direction > 0) return HORIZONTAL_ZOOM_LEVELS.find((level) => level > current) ?? 400;
   return [...HORIZONTAL_ZOOM_LEVELS].reverse().find((level) => level < current) ?? 20;
+}
+
+export function clampVerticalZoom(value: number): number {
+  return Math.min(4, Math.max(0.5, Number.isFinite(value) ? value : 1));
+}
+
+export function nextVerticalZoom(current: number, direction: -1 | 1): number {
+  if (direction > 0) return VERTICAL_ZOOM_LEVELS.find((level) => level > current) ?? 4;
+  return [...VERTICAL_ZOOM_LEVELS].reverse().find((level) => level < current) ?? 0.5;
 }
 
 function timelineElement(): HTMLDivElement | null {

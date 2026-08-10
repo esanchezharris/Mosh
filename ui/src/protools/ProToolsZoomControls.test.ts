@@ -3,7 +3,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../store";
 import { useProTools } from "./proToolsState";
-import { DEFAULT_HORIZONTAL_ZOOM_PRESETS, nextHorizontalZoom } from "./proToolsZoom";
+import {
+  DEFAULT_HORIZONTAL_ZOOM_PRESETS,
+  nextHorizontalZoom,
+  nextVerticalZoom,
+} from "./proToolsZoom";
 import { ProToolsZoomControls } from "./ProToolsZoomControls";
 
 describe("Pro Tools horizontal zoom controls", () => {
@@ -33,6 +37,27 @@ describe("Pro Tools horizontal zoom controls", () => {
     expect(nextHorizontalZoom(80, -1)).toBe(56);
     expect(nextHorizontalZoom(400, 1)).toBe(400);
     expect(nextHorizontalZoom(20, -1)).toBe(20);
+  });
+
+  it("steps through bounded vertical zoom levels", () => {
+    expect(nextVerticalZoom(1, 1)).toBe(1.5);
+    expect(nextVerticalZoom(1, -1)).toBe(0.75);
+    expect(nextVerticalZoom(4, 1)).toBe(4);
+    expect(nextVerticalZoom(0.5, -1)).toBe(0.5);
+  });
+
+  it("changes audio-waveform and MIDI-note zoom independently", () => {
+    const audioIn = host.querySelector<HTMLButtonElement>("[data-testid=pt-waveform-zoom-in]");
+    const midiOut = host.querySelector<HTMLButtonElement>("[data-testid=pt-midi-zoom-out]");
+    if (!audioIn || !midiOut) throw new Error("vertical zoom controls are missing");
+
+    act(() => audioIn.click());
+    expect(useProTools.getState().audioWaveformZoom).toBe(1.5);
+    expect(useProTools.getState().midiNoteZoom).toBe(1);
+
+    act(() => midiOut.click());
+    expect(useProTools.getState().audioWaveformZoom).toBe(1.5);
+    expect(useProTools.getState().midiNoteZoom).toBe(0.75);
   });
 
   it("zooms with the cluster buttons and recalls presets", () => {

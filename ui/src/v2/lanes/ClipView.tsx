@@ -68,11 +68,12 @@ const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).
 type DragKind = "move" | "trim-l" | "trim-r" | "stretch" | "time";
 
 export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHeaderPx,
-  gestureTable, waveAmplitudeAt }: {
+  gestureTable, waveAmplitudeAt, midiVerticalZoom }: {
   clip: Clip; trackType: string; snapshot: Snapshot;
   clipHeaderPx?: number; clipVisualHeaderPx?: number;
   gestureTable?: () => GestureTable;
   waveAmplitudeAt?: (ratio: number) => number;
+  midiVerticalZoom?: number;
 }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const selection = useStore((s) => s.selection);
@@ -349,8 +350,10 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
     >
       {clip.type === "wave" && <ClipWave peaks={peaks} width={width} amplitudeAt={waveAmplitudeAt} />}
       {clip.type === "midi" && (drumClip
-        ? <ClipDrumGrid notes={shownNotes} width={width} bs={bs} secToPx={secToPx} />
-        : <ClipMidi notes={shownNotes} width={width} bs={bs} secToPx={secToPx} />)}
+        ? <ClipDrumGrid notes={shownNotes} width={width} bs={bs} secToPx={secToPx}
+            verticalZoom={midiVerticalZoom} />
+        : <ClipMidi notes={shownNotes} width={width} bs={bs} secToPx={secToPx}
+            verticalZoom={midiVerticalZoom} />)}
       <span className="v2-clip-label">{clip.name}</span>
       {clip.renderLayer?.reimagineActive && (
         <span className="v2-clip-badge reimagine" data-testid="v2-clip-reimagine"

@@ -40,6 +40,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const setHoveredIntent = useProTools((s) => s.setHoveredIntent);
   const trackViews = useProTools((s) => s.trackViews);
   const automationLanesVisible = useProTools((s) => s.automationLanesVisible);
+  const midiNoteZoom = useProTools((s) => s.midiNoteZoom);
   const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
   const clipMap = useMemo(() => new Map(tracks.flatMap((track) =>
     track.clips.map((clip) => [clip.id, { clip, track }] as const))), [tracks]);
@@ -325,6 +326,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
                     <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
                       clipHeaderPx={0}
                       clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
+                      midiVerticalZoom={midiNoteZoom}
                       gestureTable={() => proToolsGestureTable("midi", smartToolEnabled, activeTool)} />
                   </span>
                 );

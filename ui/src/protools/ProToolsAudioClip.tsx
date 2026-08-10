@@ -20,13 +20,14 @@ const EMPTY_GAIN_POINTS: readonly ClipGainPoint[] = [];
 export function ProToolsAudioClip({ clip, snapshot, track }: ProToolsAudioClipProps) {
   const smartToolEnabled = useProTools((state) => state.smartToolEnabled);
   const activeTool = useProTools((state) => state.activeTool);
+  const audioWaveformZoom = useProTools((state) => state.audioWaveformZoom);
   const [previewGain, setPreviewGain] = useState<number | null>(null);
   const [previewPoints, setPreviewPoints] = useState<readonly ClipGainPoint[] | null>(null);
   const gainDb = previewGain ?? clip.gainDb ?? 0;
   const gainPoints = previewPoints ?? clip.clipGainPoints ?? EMPTY_GAIN_POINTS;
   const waveAmplitudeAt = useCallback((ratio: number) => clipGainAmplitude(
     gainDb + clipGainOffsetAt(gainPoints, ratio * clip.length),
-  ), [gainDb, gainPoints, clip.length]);
+  ) * audioWaveformZoom, [gainDb, gainPoints, clip.length, audioWaveformZoom]);
 
   useEffect(() => setPreviewGain(null), [clip.id, clip.gainDb]);
   useEffect(() => setPreviewPoints(null), [clip.id, clip.clipGainPoints]);

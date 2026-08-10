@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import type { AutomationClipboard } from "./automationEditing";
-import { clampHorizontalZoom, DEFAULT_HORIZONTAL_ZOOM_PRESETS } from "./proToolsZoom";
+import {
+  clampHorizontalZoom,
+  clampVerticalZoom,
+  DEFAULT_HORIZONTAL_ZOOM_PRESETS,
+} from "./proToolsZoom";
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 import type { ProToolsTrackView } from "./trackViews";
 
@@ -25,6 +29,8 @@ type ProToolsViewState = {
   readonly trackViews: Readonly<Record<string, ProToolsTrackView>>;
   readonly automationLanesVisible: Readonly<Record<string, boolean>>;
   readonly horizontalZoomPresets: readonly number[];
+  readonly audioWaveformZoom: number;
+  readonly midiNoteZoom: number;
 };
 
 type ProToolsActions = {
@@ -42,6 +48,8 @@ type ProToolsActions = {
   readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
   readonly toggleAutomationLane: (trackId: string) => void;
   readonly setHorizontalZoomPreset: (index: number, pxPerSec: number) => void;
+  readonly setAudioWaveformZoom: (value: number) => void;
+  readonly setMidiNoteZoom: (value: number) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -68,6 +76,8 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   trackViews: {},
   automationLanesVisible: {},
   horizontalZoomPresets: [...DEFAULT_HORIZONTAL_ZOOM_PRESETS],
+  audioWaveformZoom: 1,
+  midiNoteZoom: 1,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -100,6 +110,8 @@ export const useProTools = create<ProToolsState>((set) => ({
     horizontalZoomPresets[index] = clampHorizontalZoom(pxPerSec);
     return { horizontalZoomPresets };
   }),
+  setAudioWaveformZoom: (value) => set({ audioWaveformZoom: clampVerticalZoom(value) }),
+  setMidiNoteZoom: (value) => set({ midiNoteZoom: clampVerticalZoom(value) }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

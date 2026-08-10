@@ -125,7 +125,12 @@ describe("Pro Tools inline clip gain", () => {
       ensurePeaks: vi.fn(),
       exec,
     });
-    useProTools.setState({ smartToolEnabled: true, activeTool: "selector", nudgeValue: 0.25 });
+    useProTools.setState({
+      smartToolEnabled: true,
+      activeTool: "selector",
+      nudgeValue: 0.25,
+      audioWaveformZoom: 1,
+    });
     act(() => root.render(React.createElement(Harness)));
   });
 
@@ -169,6 +174,14 @@ describe("Pro Tools inline clip gain", () => {
     expect(amplitudeAt(0)).toBeCloseTo(10 ** (-12 / 20), 8);
     expect(amplitudeAt(0.5)).toBeCloseTo(10 ** (-6 / 20), 8);
     expect(amplitudeAt(1)).toBeCloseTo(1, 8);
+  });
+
+  it("composes waveform vertical zoom with clip gain without changing project data", () => {
+    act(() => useProTools.getState().setAudioWaveformZoom(2));
+    const amplitudeAt = waveAmplitudeAt();
+
+    expect(amplitudeAt(0.5)).toBeCloseTo(2 * (10 ** (-6 / 20)), 8);
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("keeps an upward pointer draft local until release and commits its exact gain", () => {
