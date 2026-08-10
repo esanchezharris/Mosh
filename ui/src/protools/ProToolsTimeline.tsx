@@ -11,6 +11,7 @@ import { ProToolsAudioClip } from "./ProToolsAudioClip";
 import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
 import { ProToolsCompRange } from "./ProToolsCompRange";
 import { ProToolsPlaylists } from "./ProToolsPlaylists";
+import { ProToolsPunchOverlay } from "./ProToolsPunchOverlay";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
 import { applyHorizontalZoomRange, applyHorizontalZoomStep } from "./proToolsZoom";
@@ -373,6 +374,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           left: Math.min(zoomArea.startX, zoomArea.x),
           width: Math.abs(zoomArea.x - zoomArea.startX),
         }} />}
+        <ProToolsPunchOverlay snapshot={snapshot} />
         <div className="pt-playhead" data-testid="pt-playhead" style={{ left: position * pxPerSec }} aria-hidden="true" />
       </div>
     </div>

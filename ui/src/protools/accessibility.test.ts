@@ -34,16 +34,18 @@ function contrastRatio(first: string, second: string): number {
 }
 
 describe("Pro Tools accessibility tokens", () => {
-  it("keeps selected and danger small text at AA contrast", () => {
+  it("keeps selected, danger, and pre-roll small text at AA contrast", () => {
     const [dark, classic] = tokens.split(".protools-shell[data-pt-theme=\"classic\"]");
     if (!dark || !classic) throw new Error("theme token scopes are missing");
 
     for (const scope of [dark, classic]) {
       expect(contrastRatio(tokenValue(scope, "--pt-selected"), tokenValue(scope, "--pt-on-selected"))).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(tokenValue(scope, "--pt-danger"), tokenValue(scope, "--pt-on-danger"))).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(tokenValue(scope, "--pt-preroll"), tokenValue(scope, "--pt-on-preroll"))).toBeGreaterThanOrEqual(4.5);
     }
     expect(toolbar).toContain("color: var(--pt-on-selected);");
     expect(panels).toContain("color: var(--pt-on-danger);");
+    expect(timeline).toContain("color: var(--pt-on-preroll);");
   });
 
   it("keeps the Classic focus ring above non-text contrast on every shell surface", () => {

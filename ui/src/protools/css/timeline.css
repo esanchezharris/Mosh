@@ -150,6 +150,41 @@
 }
 .pt-lower-zoom-axis:first-child output { width: 38px; }
 .pt-timeline-content { position: relative; min-height: 100%; }
+.pt-record-range-overlays { position: absolute; inset: 0; pointer-events: none; }
+.pt-preroll-overlay,
+.pt-punch-overlay {
+  position: absolute;
+  z-index: 2;
+  top: var(--pt-track-title-h);
+  bottom: 0;
+  box-sizing: border-box;
+}
+.pt-preroll-overlay {
+  border-right: 1px solid var(--pt-preroll);
+  background: color-mix(in srgb, var(--pt-preroll) 7%, transparent);
+}
+.pt-punch-overlay {
+  border-right: 1px solid var(--pt-danger);
+  border-left: 1px solid var(--pt-danger);
+  background: color-mix(in srgb, var(--pt-danger) 8%, transparent);
+}
+.pt-preroll-overlay > span,
+.pt-punch-overlay > span {
+  position: absolute;
+  top: 2px;
+  padding: 1px 3px;
+  border-radius: 1px;
+  font: 700 8px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+.pt-preroll-overlay > span {
+  right: 2px;
+  color: var(--pt-on-preroll);
+  background: var(--pt-preroll);
+}
+.pt-punch-overlay > span { color: var(--pt-on-danger); background: var(--pt-danger); }
+.pt-punch-in-flag { left: 2px; }
+.pt-punch-out-flag { right: 2px; }
 .pt-timeline-title-spacer {
   position: relative;
   z-index: 3;

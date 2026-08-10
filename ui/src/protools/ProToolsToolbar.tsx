@@ -8,6 +8,7 @@ import type { Snapshot } from "../types";
 import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconStop } from "../ui/icons";
 import { useTransportControls } from "../v2/useTransportControls";
 import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
+import { ProToolsPunchControls } from "./ProToolsPunchControls";
 import { ProToolsZoomControls } from "./ProToolsZoomControls";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
 import type { ProToolsTool } from "./smartTool";
@@ -127,6 +128,7 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
         <button type="button" aria-label="Stop" onClick={() => void transport.stop()}><IconStop size={13} /></button>
         <button type="button" className="pt-record-button" aria-label="Record"
           aria-pressed={transportState.recording} onClick={() => void transport.record()}><span /></button>
+        <ProToolsPunchControls snapshot={snapshot} />
       </div>
 
       <div className="pt-toolbar-group pt-grid-group">

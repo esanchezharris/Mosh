@@ -13,6 +13,8 @@
   --pt-wave-outline: #e3e3e3;
   --pt-danger: #d76a64;
   --pt-on-danger: #1e1e1e;
+  --pt-preroll: #e5c552;
+  --pt-on-preroll: #161616;
   --pt-focus-ring: #4a90d9;
   --pt-track-title-h: 24px;
   --pt-ruler-row-h: 18px;
@@ -98,6 +100,8 @@
   --pt-wave-outline: #ffffff;
   --pt-danger: #9a2e2a;
   --pt-on-danger: #ffffff;
+  --pt-preroll: #8a6800;
+  --pt-on-preroll: #ffffff;
   --pt-focus-ring: #005a9c;
   --clip-ink-midi: rgba(28, 37, 45, 0.78);
   --clip-ink-drum: rgba(28, 37, 45, 0.78);

@@ -143,6 +143,35 @@
   border-radius: 50%;
   background: var(--pt-danger);
 }
+.pt-punch-controls {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: 28px 12px;
+  gap: 1px 3px;
+  margin-left: 2px;
+}
+.pt-punch-button { min-width: 48px !important; font-weight: 700; }
+.pt-punch-button[aria-pressed="true"] {
+  color: var(--pt-on-danger);
+  background: var(--pt-danger);
+}
+.pt-preroll-control {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--pt-text-muted);
+  font-size: 9px;
+}
+.pt-preroll-control select { width: 58px; height: 28px; padding: 0 3px; }
+.pt-punch-range-readout {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--pt-text-muted);
+  font: 8px/11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pt-grid-group { align-items: center; }
 .pt-nudge-control { display: grid; gap: 2px; color: var(--pt-text-muted); font-size: 10px; }
 .pt-nudge-control select { height: 28px; padding: 0 20px 0 5px; }

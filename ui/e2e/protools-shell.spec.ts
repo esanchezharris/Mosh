@@ -14,6 +14,9 @@ type ProToolsWindow = Window & {
     args: Record<string, unknown>;
     ok: boolean;
   }>;
+  __moshShellStore?: {
+    getState: () => { timeRange: { start: number; end: number } | null };
+  };
 };
 
 async function storeVal<T>(page: Page, path: string): Promise<T> {
@@ -300,6 +303,64 @@ test("mode, tool, Smart Tool, and resizable headers are keyboard operable", asyn
   const before = Number(await resizer.getAttribute("aria-valuenow"));
   await resizer.press("ArrowRight");
   await expect(resizer).toHaveAttribute("aria-valuenow", String(before + 8));
+});
+
+test("tutorial-backed pre-roll and Punch preserve context before a bounded record range", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+
+  const waveClip = page.locator('[data-testid="v2-clip"].wave').first();
+  const clipBox = await waveClip.boundingBox();
+  if (!clipBox) throw new Error("audio clip bounds are unavailable for the Punch selection");
+  const selectionY = clipBox.y + Math.min(8, clipBox.height / 4);
+  await page.mouse.move(clipBox.x + clipBox.width * 0.2, selectionY);
+  await page.mouse.down();
+  await page.mouse.move(clipBox.x + clipBox.width * 0.75, selectionY, { steps: 4 });
+  await page.mouse.up();
+
+  const editSelection = await page.evaluate(() =>
+    (window as ProToolsWindow).__moshShellStore?.getState().timeRange ?? null);
+  if (!editSelection) throw new Error("Selector drag did not create an Edit selection");
+  expect(editSelection.end).toBeGreaterThan(editSelection.start);
+
+  const punch = page.getByTestId("pt-punch-toggle");
+  await punch.scrollIntoViewIfNeeded();
+  await punch.click();
+  await expect.poll(() => storeVal<boolean>(page, "snapshot.session.project.recordOptions.punchInOut"))
+    .toBe(true);
+  await expect.poll(() => storeVal<boolean>(page, "transport.looping")).toBe(false);
+  await expect.poll(() => storeVal<number>(page, "transport.loopStart"))
+    .toBeCloseTo(editSelection.start, 4);
+  await expect.poll(() => storeVal<number>(page, "transport.loopEnd"))
+    .toBeCloseTo(editSelection.end, 4);
+  await expect(page.getByTestId("pt-punch-overlay")).toBeVisible();
+
+  await page.getByTestId("pt-preroll-select").selectOption("1");
+  await expect.poll(() => storeVal<number>(page, "snapshot.session.countInBars")).toBe(1);
+  await expect(page.getByTestId("pt-preroll-overlay")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("protools-punch-preroll-wide.png"), animations: "disabled" });
+
+  const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  const punchCommands = trace.filter((entry) =>
+    ["set_transport", "set_record_options", "set_count_in"].includes(entry.command));
+  expect(punchCommands.slice(-3).map((entry) => [entry.command, entry.args])).toEqual([
+    ["set_transport", {
+      loop: false,
+      loopStart: editSelection.start,
+      loopEnd: editSelection.end,
+    }],
+    ["set_record_options", { punchInOut: true }],
+    ["set_count_in", { bars: 1 }],
+  ]);
+  expect(punchCommands.filter((entry) => !entry.ok)).toEqual([]);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await punch.scrollIntoViewIfNeeded();
+  await expect(punch).toBeInViewport();
+  await expect(punch).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("pt-preroll-select")).toHaveValue("1");
+  await page.screenshot({ path: testInfo.outputPath("protools-punch-preroll-compact.png"), animations: "disabled" });
 });
 
 test("Track Views follow contextual selectors, Minus toggles, and automation disclosure", async ({ page }, testInfo) => {
