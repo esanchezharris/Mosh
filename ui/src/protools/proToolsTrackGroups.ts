@@ -47,6 +47,21 @@ export function proToolsMixGroupTrackIds(snapshot: Snapshot, trackId: string): r
   return linkedTrackIds(snapshot, [trackId], "mix");
 }
 
+export function selectProToolsTrackGroup(snapshot: Snapshot, requestedTrackIds: readonly string[]): boolean {
+  const orderedTrackIds = snapshot.tracks
+    .filter((track) => !track.isGroup && !track.isReturn && requestedTrackIds.includes(track.id))
+    .map((track) => track.id);
+  const focusTrackId = orderedTrackIds.at(-1);
+  if (!focusTrackId) return false;
+  const proTools = useProTools.getState();
+  proTools.setTrackSelectionIds(orderedTrackIds);
+  if (proTools.trackEditLinked)
+    proTools.setEditSelectionTracks(orderedTrackIds, focusTrackId);
+  const store = useStore.getState();
+  if (store.selectedTrackId !== focusTrackId) store.setSelectedTrack(focusTrackId);
+  return true;
+}
+
 export function handleProToolsTrackGroupShortcut(event: KeyboardEvent): boolean {
   if (event.code !== "KeyG" || event.altKey || event.shiftKey
     || (!event.metaKey && !event.ctrlKey)) return false;

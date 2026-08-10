@@ -48,6 +48,25 @@ struct TrackGroup
         return out;
     }
 
+    static void replaceMemberIds (juce::ValueTree group,
+                                  const juce::StringArray& requestedTrackIds,
+                                  juce::UndoManager* undoManager)
+    {
+        for (int index = group.getNumChildren(); --index >= 0;)
+            if (group.getChild (index).hasType (ids::MOSH_TRACK_GROUP_MEMBER))
+                group.removeChild (index, undoManager);
+
+        juce::StringArray uniqueTrackIds;
+        for (const auto& trackId : requestedTrackIds)
+            if (trackId.isNotEmpty()) uniqueTrackIds.addIfNotAlreadyThere (trackId);
+        for (const auto& trackId : uniqueTrackIds)
+        {
+            juce::ValueTree member (ids::MOSH_TRACK_GROUP_MEMBER);
+            member.setProperty (ids::trackGroupTrackId, trackId, nullptr);
+            group.appendChild (member, undoManager);
+        }
+    }
+
     static bool supports (const juce::ValueTree& group, Axis axis)
     {
         const auto kind = group[ids::trackGroupKind].toString();

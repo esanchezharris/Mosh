@@ -64,14 +64,17 @@ describe("Pro Tools Track Groups panel and dialog", () => {
     });
   });
 
-  it("shows group state, toggles Suspend All, and removes through store.exec", async () => {
+  it("shows group state, toggles Suspend All, and removes through the row action menu", async () => {
     act(() => root.render(React.createElement(ProToolsTrackGroupsPanel, { snapshot: SNAPSHOT })));
     expect(host.querySelector("[data-testid=pt-track-group-row]")?.textContent).toContain("Rhythm");
     expect(host.querySelector("[data-testid=pt-track-group-row]")?.textContent).toContain("Edit + Mix");
 
     await act(async () => host.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-toggle]")?.click());
     await act(async () => host.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-suspend]")?.click());
-    await act(async () => host.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-remove]")?.click());
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-menu]")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-remove]")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(exec).toHaveBeenCalledWith("set_track_group_enabled", { groupId: "rhythm", enabled: false });
     expect(exec).toHaveBeenCalledWith("set_track_groups_suspended", { suspended: true });
     expect(exec).toHaveBeenCalledWith("remove_track_group", { groupId: "rhythm" });
@@ -122,5 +125,80 @@ describe("Pro Tools Track Groups panel and dialog", () => {
     act(() => useStore.setState({ projectEpoch: 13 }));
     expect(document.querySelector("[data-testid=pt-track-group-dialog]")).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("uses Track Selection to replace membership in an accessible Modify Group draft", async () => {
+    useProTools.setState({ trackSelectionIds: ["drums"] });
+    act(() => root.render(React.createElement(ProToolsTrackGroupsPanel, { snapshot: SNAPSHOT })));
+    const trigger = host.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-menu]");
+    if (!trigger) throw new Error("Track Group action menu is missing");
+    trigger.focus();
+    await act(async () => trigger.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const modify = document.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-modify]");
+    if (!modify) throw new Error("Modify Group action is missing");
+    await act(async () => modify.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    const dialog = document.querySelector<HTMLElement>("[data-testid=pt-track-group-modify-dialog]");
+    expect(dialog?.textContent).toContain("Modify Rhythm");
+    expect(document.querySelector("[data-testid=pt-track-group-selected]")?.textContent).toContain("Drums");
+    expect(document.querySelector("[data-testid=pt-track-group-draft]")?.textContent).toContain("Drums, Bass");
+
+    await act(async () => document.querySelector<HTMLButtonElement>(
+      "[data-testid=pt-track-group-replace-selection]",
+    )?.click());
+    expect(document.querySelector("[data-testid=pt-track-group-draft]")?.textContent).toContain("Drums");
+    expect(document.querySelector("[data-testid=pt-track-group-draft]")?.textContent).not.toContain("Bass");
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-apply]")?.click());
+
+    expect(exec).toHaveBeenCalledWith("set_track_group_members", {
+      groupId: "rhythm",
+      trackIds: ["drums"],
+    });
+    expect(document.querySelector("[data-testid=pt-track-group-modify-dialog]")).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector("[data-testid=pt-track-group-menu]"));
+  });
+
+  it("keeps a rejected membership change open and discards later drafts on project replacement", async () => {
+    exec.mockResolvedValueOnce({
+      ok: false,
+      command: "set_track_group_members",
+      error: "replacement tracks are locked",
+    });
+    useProTools.setState({ trackSelectionIds: ["drums"] });
+    act(() => root.render(React.createElement(ProToolsTrackGroupsPanel, { snapshot: SNAPSHOT })));
+    const openModify = async () => {
+      const trigger = host.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-menu]");
+      if (!trigger) throw new Error("Track Group action menu is missing");
+      trigger.focus();
+      await act(async () => trigger.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await act(async () => document.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-modify]")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      return trigger;
+    };
+
+    await openModify();
+    await act(async () => document.querySelector<HTMLButtonElement>(
+      "[data-testid=pt-track-group-replace-selection]",
+    )?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-testid=pt-track-group-apply]")?.click());
+    expect(document.querySelector("[data-testid=pt-track-group-modify-dialog]")).not.toBeNull();
+    expect(document.querySelector("[role=alert]")?.textContent).toBe("replacement tracks are locked");
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    })));
+    expect(document.querySelector("[data-testid=pt-track-group-modify-dialog]")).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector("[data-testid=pt-track-group-menu]"));
+
+    exec.mockClear();
+    await openModify();
+    await act(async () => document.querySelector<HTMLButtonElement>(
+      "[data-testid=pt-track-group-replace-selection]",
+    )?.click());
+    act(() => useStore.setState({ projectEpoch: 13 }));
+    expect(document.querySelector("[data-testid=pt-track-group-modify-dialog]")).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
   });
 });

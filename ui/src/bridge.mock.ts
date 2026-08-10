@@ -482,7 +482,7 @@ const MOCK_TXN_SAFE = new Set([
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
   "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
-  "create_track_group", "set_track_group_enabled", "set_track_groups_suspended",
+  "create_track_group", "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
   "rename_track_group", "remove_track_group",
   "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
 ]);
@@ -1396,6 +1396,25 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       group.enabled = Boolean(args.enabled);
       invalidate();
       return ok(command, { groupId: group.id, enabled: group.enabled });
+    }
+    case "set_track_group_members": {
+      const group = (snapshot.trackGroups ?? []).find((candidate) => candidate.id === str(args.groupId));
+      const trackIds = Array.isArray(args.trackIds)
+        ? [...new Set(args.trackIds.map(String))]
+        : [];
+      if (!group) return err(command, "track group not found");
+      if (trackIds.length === 0) return err(command, "trackIds must contain at least one track");
+      if (trackIds.some((trackId) => {
+        const track = findTrack(trackId);
+        return !track || track.isGroup || track.isReturn;
+      })) return err(command, "trackIds contains an unsupported track");
+      if (group.trackIds.length === trackIds.length
+        && group.trackIds.every((trackId, index) => trackId === trackIds[index]))
+        return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
+      pushUndo();
+      group.trackIds = trackIds;
+      invalidate();
+      return ok(command, { groupId: group.id, trackIds: [...group.trackIds] });
     }
     case "set_track_groups_suspended": {
       pushUndo();

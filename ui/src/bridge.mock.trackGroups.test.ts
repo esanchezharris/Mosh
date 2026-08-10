@@ -55,4 +55,32 @@ describe("bridge.mock Pro Tools Track Groups", () => {
     })).ok).toBe(true);
     expect((await mockSnapshot<Snapshot>()).trackGroups).toEqual([]);
   });
+
+  it("replaces membership atomically, rejects an empty group, and restores it with Undo", async () => {
+    const before = await mockSnapshot<Snapshot>();
+    const [drums, bass] = before.tracks;
+    if (!drums || !bass) throw new Error("track-group fixtures are missing");
+    const created = await mockExecute<CommandResult<{ groupId: string }>>({
+      command: "create_track_group",
+      args: { trackIds: [drums.id, bass.id], name: "Rhythm", kind: "edit_mix" },
+    });
+    const groupId = created.data?.groupId;
+    if (!groupId) throw new Error("Track Group id was not returned");
+
+    expect((await mockExecute<CommandResult>({
+      command: "set_track_group_members",
+      args: { groupId, trackIds: [drums.id] },
+    })).ok).toBe(true);
+    expect((await mockSnapshot<Snapshot>()).trackGroups?.[0]?.trackIds).toEqual([drums.id]);
+
+    const rejected = await mockExecute<CommandResult>({
+      command: "set_track_group_members",
+      args: { groupId, trackIds: [] },
+    });
+    expect(rejected).toMatchObject({ ok: false, error: expect.stringMatching(/at least one track/i) });
+    expect((await mockSnapshot<Snapshot>()).trackGroups?.[0]?.trackIds).toEqual([drums.id]);
+
+    expect((await mockExecute<CommandResult>({ command: "undo", args: {} })).ok).toBe(true);
+    expect((await mockSnapshot<Snapshot>()).trackGroups?.[0]?.trackIds).toEqual([drums.id, bass.id]);
+  });
 });

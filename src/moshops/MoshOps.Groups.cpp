@@ -230,6 +230,33 @@ juce::var MoshOps::cmdCreateTrackGroup (const juce::var& args)
     return okResult ("create_track_group", trackGroupResult (group));
 }
 
+juce::var MoshOps::cmdSetTrackGroupMembers (const juce::var& args)
+{
+    auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());
+    if (! group.isValid()) return errResult ("set_track_group_members", "track group not found");
+
+    StringArray trackIds;
+    if (auto* values = args.getProperty ("trackIds", var()).getArray())
+        for (const auto& value : *values)
+        {
+            const auto trackId = value.toString();
+            if (trackId.isNotEmpty()) trackIds.addIfNotAlreadyThere (trackId);
+        }
+    if (trackIds.isEmpty())
+        return errResult ("set_track_group_members", "trackIds must contain at least one track");
+    for (const auto& trackId : trackIds)
+        if (findTrack (trackId) == nullptr)
+            return errResult ("set_track_group_members", "no supported track: " + trackId);
+    if (TrackGroup::memberIds (group) == trackIds)
+        return okResult ("set_track_group_members", trackGroupResult (group));
+
+    beginTxn ("set_track_group_members");
+    TrackGroup::replaceMemberIds (group, trackIds, &undoManager());
+    logLine ("set_track_group_members", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_group_members", trackGroupResult (group));
+}
+
 juce::var MoshOps::cmdSetTrackGroupEnabled (const juce::var& args)
 {
     auto group = findTrackGroupById (args.getProperty ("groupId", var()).toString());

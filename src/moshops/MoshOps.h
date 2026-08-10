@@ -110,6 +110,7 @@ private:
     juce::var cmdRegroupClipGroup (const juce::var& args);
     juce::var cmdRenameClipGroup  (const juce::var& args);
     juce::var cmdCreateTrackGroup       (const juce::var& args);
+    juce::var cmdSetTrackGroupMembers   (const juce::var& args);
     juce::var cmdSetTrackGroupEnabled   (const juce::var& args);
     juce::var cmdSetTrackGroupsSuspended (const juce::var& args);
     juce::var cmdRenameTrackGroup       (const juce::var& args);

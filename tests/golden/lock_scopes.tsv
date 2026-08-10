@@ -211,6 +211,7 @@ set_tempo_curve	SessionGlobal
 set_time_signature	SessionGlobal
 set_track_active	Track
 set_track_group_enabled	Track
+set_track_group_members	Track
 set_track_groups_suspended	SessionGlobal
 set_track_automation_mode	Track
 set_track_color	Track

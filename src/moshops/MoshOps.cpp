@@ -550,6 +550,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "regroup_clip_group") return cmdRegroupClipGroup (args);
     if (name == "rename_clip_group")  return cmdRenameClipGroup (args);
     if (name == "create_track_group") return cmdCreateTrackGroup (args);
+    if (name == "set_track_group_members") return cmdSetTrackGroupMembers (args);
     if (name == "set_track_group_enabled") return cmdSetTrackGroupEnabled (args);
     if (name == "set_track_groups_suspended") return cmdSetTrackGroupsSuspended (args);
     if (name == "rename_track_group") return cmdRenameTrackGroup (args);
@@ -3976,7 +3977,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_section", "rename_section", "move_section", "remove_section",
         "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
-        "create_track_group", "set_track_group_enabled", "set_track_groups_suspended",
+        "create_track_group", "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
         "rename_track_group", "remove_track_group",
         "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
         "set_tempo", "set_time_signature", "set_metronome", "set_key", "set_project_settings" };

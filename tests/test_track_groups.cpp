@@ -53,3 +53,20 @@ TEST_CASE ("disabled track groups do not bridge overlapping membership", "[track
     REQUIRE (TrackGroup::linkedMemberIds (groups, "track-c", TrackGroup::Axis::Edit)
              == juce::StringArray { "track-c" });
 }
+
+TEST_CASE ("track group membership replacement is ordered, unique, and undoable", "[track-groups]")
+{
+    auto group = TrackGroup::create ("group-1", "Rhythm", "edit_mix",
+                                     { "track-a", "track-b" });
+    group.appendChild (juce::ValueTree ("UNRELATED"), nullptr);
+    juce::UndoManager undo;
+    undo.beginNewTransaction ("set_track_group_members");
+
+    TrackGroup::replaceMemberIds (group, { "track-c", "track-c", "track-a" }, &undo);
+    REQUIRE (TrackGroup::memberIds (group) == juce::StringArray { "track-c", "track-a" });
+    REQUIRE (group.getChildWithName ("UNRELATED").isValid());
+
+    REQUIRE (undo.undo());
+    REQUIRE (TrackGroup::memberIds (group) == juce::StringArray { "track-a", "track-b" });
+    REQUIRE (group.getChildWithName ("UNRELATED").isValid());
+}

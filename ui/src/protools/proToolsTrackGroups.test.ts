@@ -7,6 +7,7 @@ import {
   handleProToolsTrackGroupShortcut,
   proToolsEditGroupSelection,
   proToolsMixGroupTrackIds,
+  selectProToolsTrackGroup,
 } from "./proToolsTrackGroups";
 
 const originalStore = useStore.getState();
@@ -86,5 +87,31 @@ describe("Pro Tools Edit and Mix Track Groups", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(useProTools.getState().trackGroupDialogOpen).toBe(true);
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("selects exact group members and associates the retained Edit span only while linked", () => {
+    const [drums, bass, keys] = project.tracks;
+    if (!drums || !bass || !keys) throw new Error("track-group fixtures are missing");
+    useProTools.setState({
+      trackEditLinked: true,
+      editSelectionTrackId: keys.id,
+      editSelectionTrackIds: [keys.id],
+      trackSelectionIds: [keys.id],
+    });
+
+    selectProToolsTrackGroup(project, [drums.id, bass.id]);
+    expect(useProTools.getState().trackSelectionIds).toEqual([drums.id, bass.id]);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual([drums.id, bass.id]);
+    expect(useStore.getState().selectedTrackId).toBe(bass.id);
+    expect(exec).not.toHaveBeenCalled();
+
+    useProTools.setState({
+      trackEditLinked: false,
+      editSelectionTrackId: keys.id,
+      editSelectionTrackIds: [keys.id],
+    });
+    selectProToolsTrackGroup(project, [drums.id]);
+    expect(useProTools.getState().trackSelectionIds).toEqual([drums.id]);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual([keys.id]);
   });
 });

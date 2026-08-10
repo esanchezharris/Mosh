@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { pushEscapeHandler } from "../hooks/escapeStack";
 import { useStore } from "../store";
 import type { Snapshot, TrackGroupKind } from "../types";
-import { IconPlus } from "../ui/icons";
+import { IconMore, IconPlus } from "../ui/icons";
+import { ProToolsTrackGroupModifyDialog } from "./ProToolsTrackGroupModifyDialog";
 import { useProTools } from "./proToolsState";
-import { PROTOOLS_TRACK_GROUP_KIND_LABELS } from "./proToolsTrackGroups";
+import { PROTOOLS_TRACK_GROUP_KIND_LABELS, selectProToolsTrackGroup } from "./proToolsTrackGroups";
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snapshot }) {
   const exec = useStore((state) => state.exec);
+  const clearSelection = useStore((state) => state.clearSelection);
+  const closePianoRoll = useStore((state) => state.closePianoRoll);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const selectedTrackIds = useProTools((state) => state.trackSelectionIds);
   const dialogOpen = useProTools((state) => state.trackGroupDialogOpen);
   const setDialogOpen = useProTools((state) => state.setTrackGroupDialogOpen);
+  const [modifyGroupId, setModifyGroupId] = useState<string | null>(null);
+  const menuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const eligibleTrackIds = useMemo(() => {
     const requested = new Set(selectedTrackIds.length > 0
       ? selectedTrackIds
@@ -23,6 +29,13 @@ export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snap
       .filter((track) => !track.isGroup && !track.isReturn && requested.has(track.id))
       .map((track) => track.id);
   }, [selectedTrackId, selectedTrackIds, snapshot.tracks]);
+  const modifyGroup = (snapshot.trackGroups ?? []).find((group) => group.id === modifyGroupId);
+
+  const selectGroup = (trackIds: readonly string[]) => {
+    clearSelection();
+    closePianoRoll();
+    selectProToolsTrackGroup(snapshot, trackIds);
+  };
 
   return (
     <section className="pt-track-groups" data-testid="pt-track-groups" aria-label="Track Groups">
@@ -52,17 +65,43 @@ export function ProToolsTrackGroupsPanel({ snapshot }: { readonly snapshot: Snap
                   groupId: group.id,
                   enabled: !group.enabled,
                 })}>{group.enabled ? "●" : "○"}</button>
-              <span className="pt-track-group-name" title={group.name}>{group.name}</span>
+              <button type="button" className="pt-track-group-name" title={group.name}
+                data-testid="pt-track-group-select"
+                aria-label={`Select tracks in ${group.name} Track Group`}
+                onClick={() => selectGroup(group.trackIds)}>{group.name}</button>
               <span className="pt-track-group-kind">{PROTOOLS_TRACK_GROUP_KIND_LABELS[group.kind]}</span>
-              <button type="button" className="pt-track-group-remove"
-                data-testid="pt-track-group-remove" aria-label={`Remove ${group.name} Track Group`}
-                onClick={() => void exec("remove_track_group", { groupId: group.id })}>×</button>
+              <MoshMenu label={`${group.name} Track Group actions`} align="end" trigger={(
+                <button type="button" className="pt-track-group-menu-trigger"
+                  ref={(node) => {
+                    if (node) menuTriggerRefs.current.set(group.id, node);
+                    else menuTriggerRefs.current.delete(group.id);
+                  }}
+                  data-testid="pt-track-group-menu" aria-label={`${group.name} Track Group actions`}>
+                  <IconMore size={13} />
+                </button>
+              )}>
+                <div className="pt-menu pt-track-group-menu">
+                  <MoshMenuItem testId="pt-track-group-modify"
+                    ariaLabel={`Modify ${group.name} Track Group membership`}
+                    onPick={() => setModifyGroupId(group.id)}>Modify Membership…</MoshMenuItem>
+                  <MoshMenuItem testId="pt-track-group-remove"
+                    ariaLabel={`Remove ${group.name} Track Group`}
+                    onPick={() => { void exec("remove_track_group", { groupId: group.id }); }}>
+                    Remove Group
+                  </MoshMenuItem>
+                </div>
+              </MoshMenu>
             </div>
           ))}
       </div>
       {dialogOpen && (
         <ProToolsTrackGroupDialog snapshot={snapshot} trackIds={eligibleTrackIds}
           onClose={() => setDialogOpen(false)} />
+      )}
+      {modifyGroup && (
+        <ProToolsTrackGroupModifyDialog snapshot={snapshot} group={modifyGroup}
+          selectedTrackIds={eligibleTrackIds} onClose={() => setModifyGroupId(null)}
+          restoreFocus={() => menuTriggerRefs.current.get(modifyGroup.id)?.focus()} />
       )}
     </section>
   );
