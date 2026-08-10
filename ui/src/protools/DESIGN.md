@@ -166,9 +166,10 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 
 ### Edit Keyboard Focus track navigation
 
-- **Behavior**: P moves Edit ownership up one visible track and Semicolon moves it down while the Edit timeline or a clip owns focus. Control+P and Control+Semicolon provide Avid's system-level Mac shortcuts outside editable controls. A multi-track Edit set collapses to the one adjacent track resolved from its focused lane; the horizontal time span is unchanged.
-- **Linked state**: Link Track/Edit on moves the pressed Track Name and active inspector with Edit ownership. Link Track/Edit off moves only the Edit band and leaves independently selected Track Names unchanged.
-- **Boundary and safety**: navigation at the first or last visible track is a no-op and is not claimed from unrelated buttons by the focus-only shortcut. Track ids are resolved against current visible order, so deleted/group/return tracks cannot become targets. This is project-scoped UI state and issues no command.
+- **Behavior**: P moves Edit ownership up one visible track and Semicolon moves it down while the Edit timeline or a clip owns focus. Control+P and Control+Semicolon provide Avid's system-level Mac shortcuts outside editable controls. A multi-track Move collapses to the one adjacent track resolved from its focused lane. Control+Shift+P/Semicolon extends the exact Edit set by one visible track above/below its outer edge; Option+Control+P/Semicolon removes its top/bottom edge. Every operation preserves the horizontal time span.
+- **Focus**: Move focuses its destination. Extend focuses the newly included edge; Remove focuses the surviving edge nearest the removed track. This makes the next vertical command deterministic and gives Mosh's singular inspector a stable target.
+- **Linked state**: Link Track/Edit on makes the pressed Track Names and active inspector follow every Move, Extend, or Remove operation. Link Track/Edit off changes only the Edit bands and retains independently selected Track Names and inspector focus.
+- **Boundary and safety**: Move and Extend at the first/last visible edge are no-ops. Remove retains the final Edit owner as a documented Mosh adaptation because Avid's published command descriptions do not define a single-track result. Unapplied operations do not claim the key event. Track ids are ordered and filtered against the current visible list, so deleted/group/return tracks cannot become targets and a discontiguous set extends from or removes its true outer visible edge. This is project-scoped UI state and issues no command.
 
 ### Track control row
 

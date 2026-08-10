@@ -24,22 +24,6 @@ export function scopeProToolsEditSelectionToTracks(
   if (store.selectedTrackId !== focusTrackId) store.setSelectedTrack(focusTrackId);
 }
 
-export function moveProToolsEditSelection(
-  direction: -1 | 1,
-  visibleTrackIds: readonly string[],
-): boolean {
-  const proTools = useProTools.getState();
-  const store = useStore.getState();
-  const focusTrackId = proTools.editSelectionTrackId ?? store.selectedTrackId;
-  if (!focusTrackId) return false;
-  const focusIndex = visibleTrackIds.indexOf(focusTrackId);
-  if (focusIndex < 0) return false;
-  const targetTrackId = visibleTrackIds[focusIndex + direction];
-  if (!targetTrackId) return false;
-  scopeProToolsEditSelectionToTracks([targetTrackId], targetTrackId);
-  return true;
-}
-
 export function selectProToolsTrack(
   trackId: string,
   options: ProToolsTrackSelectionOptions = {},

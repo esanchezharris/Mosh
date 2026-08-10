@@ -9,9 +9,12 @@ import { nextTabPosition } from "./tabNavigation";
 import { nextCommonProToolsTrackView } from "./trackViews";
 import { toggleProToolsTimelineEditLink } from "./proToolsTimelineSelection";
 import {
-  moveProToolsEditSelection,
   toggleProToolsTrackEditLink,
 } from "./proToolsTrackEditSelection";
+import {
+  handleProToolsEditTrackNavigation,
+  ownsProToolsEditKeyboardFocus,
+} from "./proToolsEditTrackNavigation";
 import { handleProToolsTrackControlShortcut } from "./proToolsTrackControls";
 import {
   adjacentMemoryLocation,
@@ -40,27 +43,6 @@ type ReadonlyPeaks = Readonly<Record<string, readonly (readonly [number, number]
 function ownsTabToTransientNavigation(element: Element | null): boolean {
   if (element === document.body) return true;
   return element?.closest(".pt-timeline-scroll, [data-clip-id]") !== null;
-}
-
-function ownsEditKeyboardFocus(element: Element | null): boolean {
-  return element?.closest(".pt-timeline-scroll, [data-clip-id]") !== null;
-}
-
-function handleEditTrackNavigation(event: KeyboardEvent): boolean {
-  const direction = event.code === "KeyP" ? -1 : event.code === "Semicolon" ? 1 : 0;
-  if (direction === 0) return false;
-  const commandFocus = ownsEditKeyboardFocus(document.activeElement)
-    && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
-  const systemShortcut = event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
-  if (!commandFocus && !systemShortcut) return false;
-  const snapshot = useStore.getState().snapshot;
-  if (!snapshot) return false;
-  const visibleTrackIds = snapshot.tracks
-    .filter((track) => !track.isGroup && !track.isReturn)
-    .map((track) => track.id);
-  if (!moveProToolsEditSelection(direction, visibleTrackIds)) return false;
-  event.preventDefault();
-  return true;
 }
 
 export function transientCandidates(snapshot: Snapshot | null, peaks: ReadonlyPeaks): readonly number[] {
@@ -142,7 +124,7 @@ export function useProToolsKeys(): void {
 
       if (handleProToolsTrackControlShortcut(event)) return;
 
-      if (handleEditTrackNavigation(event)) return;
+      if (handleProToolsEditTrackNavigation(event)) return;
 
       if ((event.code === "Slash" || event.code === "NumpadDivide")
         && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -214,7 +196,7 @@ export function useProToolsKeys(): void {
         return;
       }
 
-      if (noModifiers && ownsEditKeyboardFocus(document.activeElement)) {
+      if (noModifiers && ownsProToolsEditKeyboardFocus(document.activeElement)) {
         const zoomKey = event.key.toLowerCase();
         if (zoomKey === "r" || zoomKey === "t") {
           event.preventDefault();
