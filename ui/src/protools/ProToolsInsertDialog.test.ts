@@ -145,7 +145,7 @@ describe("Pro Tools insert workflow", () => {
   it("offers only a VST3 rescan and surfaces progress and quarantine failures", async () => {
     let dialog = await openDialog();
     await act(async () => button("pt-insert-rescan").click());
-    expect(rescanPlugins).toHaveBeenCalledWith("vst3");
+    expect(rescanPlugins).toHaveBeenCalledWith("vst3", false, true);
     expect(dialog.textContent).not.toContain("Audio Units");
 
     act(() => useStore.setState({ scanProgress: { format: "vst3", done: false, count: 7, elapsedMs: 1200 } }));

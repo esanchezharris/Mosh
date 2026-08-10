@@ -3,6 +3,7 @@
 // 'plugin_scan_progress' event shape MoshOps.cpp's timerCallback() sampler and
 // cmdRescanPlugins() both emit through makeScanProgressPayload().
 #include <catch2/catch_test_macros.hpp>
+#include "moshops/PluginScanPlan.h"
 #include "moshops/ScanProgress.h"
 
 using namespace mosh;
@@ -46,4 +47,33 @@ TEST_CASE ("makeScanProgressPayload: all four keys are present (additive-contrac
     REQUIRE (obj->hasProperty ("done"));
     REQUIRE (obj->hasProperty ("count"));
     REQUIRE (obj->hasProperty ("elapsedMs"));
+}
+
+TEST_CASE ("deep VST3 scan stays AU-free and uses the async isolated worker", "[plugin_scan_plan]")
+{
+    const auto plan = planPluginScan (true, true, false, false, true);
+    REQUIRE_FALSE (plan.runSynchronously);
+    REQUIRE_FALSE (plan.preScanVST3);
+    REQUIRE (plan.asyncClearFirst);
+    REQUIRE (plan.asyncIncludeVST3);
+    REQUIRE_FALSE (plan.asyncIncludeAU);
+    REQUIRE (plan.asyncSlowVST3);
+}
+
+TEST_CASE ("ordinary VST3 scan keeps the existing fast synchronous path", "[plugin_scan_plan]")
+{
+    const auto plan = planPluginScan (false, true, false, false, false);
+    REQUIRE (plan.runSynchronously);
+    REQUIRE_FALSE (plan.asyncIncludeVST3);
+    REQUIRE_FALSE (plan.asyncIncludeAU);
+}
+
+TEST_CASE ("wait AU scan preserves its fast VST3 pre-pass", "[plugin_scan_plan]")
+{
+    const auto plan = planPluginScan (true, true, true, true, false);
+    REQUIRE_FALSE (plan.runSynchronously);
+    REQUIRE (plan.preScanVST3);
+    REQUIRE_FALSE (plan.asyncClearFirst);
+    REQUIRE_FALSE (plan.asyncIncludeVST3);
+    REQUIRE (plan.asyncIncludeAU);
 }

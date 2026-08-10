@@ -48,7 +48,7 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
   const rescanVst3 = async () => {
     setScanAttempted(true);
     setLastError(null);
-    await rescanPlugins("vst3");
+    await rescanPlugins("vst3", false, true);
   };
 
   return (

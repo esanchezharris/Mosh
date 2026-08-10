@@ -29,7 +29,7 @@ export type CatalogsSlice = {
 
   ensurePluginCatalog: () => void;          // lazy-load the plugin list + built-ins (shared by the modal + the v2 drawer)
   // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
-  rescanPlugins: (format?: "vst3" | "au" | "all", allowAU?: boolean) => Promise<void>;
+  rescanPlugins: (format?: "vst3" | "au" | "all", allowAU?: boolean, deepVst3?: boolean) => Promise<void>;
   refreshPluginList: () => Promise<void>;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
@@ -73,9 +73,13 @@ export const createCatalogsSlice: StateCreator<State, [], [], CatalogsSlice> = (
   // AUD-SCAN — `allowAU` is the per-call opt-in the backend requires before it will
   // sweep AudioUnits. Without it the native handler quietly does a VST3-only pass, so
   // every AU on the machine stayed invisible with no error to explain why.
-  rescanPlugins: async (format = "all", allowAU = false) => {
+  rescanPlugins: async (format = "all", allowAU = false, deepVst3 = false) => {
     set({ scanProgress: { format, done: false, count: 0, elapsedMs: 0 } });
-    const res = await get().exec("rescan_plugins", { format, allowAU });
+    const res = await get().exec("rescan_plugins", {
+      format,
+      allowAU,
+      ...(deepVst3 ? { deepVst3: true } : {}),
+    });
     // Inline/VST3 rescans return done immediately; AU rescans complete via the
     // 'plugin_scan_progress' event (see init()).
     const status = (res.data as { status?: string } | undefined)?.status;

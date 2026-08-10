@@ -15,6 +15,7 @@
 #include "MoshOpsInternal.h"
 #include "AutomationMode.h"
 #include "AutomationCurveWrite.h"
+#include "PluginScanPlan.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include <cmath>
@@ -1002,15 +1003,18 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         return errResult ("rescan_plugins",
                           "Audio Unit scanning is off — pass allowAU:true (or set MOSH_SCAN_AU=1)");
 
-    // wait:true forces a synchronous VST3 sweep (cheap + safe on the message thread).
-    // AU cataloging ALWAYS runs on a background thread, even when wait:true, because
+    // wait:true keeps the legacy cheap VST3 pre-pass for an AU sweep. deepVst3:true
+    // instead keeps module loading in the isolated worker, even when AU stays off.
+    // AU cataloging ALWAYS runs on a background thread because
     // JUCE's AudioPluginFormat::createInstanceFromDescription marshals component
     // instantiation back to the message thread — a hanging AU stalls the UI with no
     // per-component timeout.  Only CRASHes are recovered via the dead-mans-pedal;
     // a HANG requires a forced app restart.  Never call the AU sweep synchronously
     // on the message thread.
     const bool wait = (bool) args.getProperty ("wait", false);
-    if (! includeAU)
+    const bool deepVST3 = (bool) args.getProperty ("deepVst3", false);
+    const auto scanPlan = planPluginScan (clearFirst, includeVST3, includeAU, wait, deepVST3);
+    if (scanPlan.runSynchronously)
     {
         // VST3-only (or no formats): fast + safe, run synchronously.
         const int total = pluginHost.rescan (clearFirst, includeVST3, false);
@@ -1021,18 +1025,17 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         d->setProperty ("count", total);
         return okResult ("rescan_plugins", var (d));
     }
-    if (wait)
+    if (scanPlan.preScanVST3)
     {
         // wait:true with AU requested: do the VST3 part inline, THEN kick off the
         // AU sweep on a background thread and return "scanning" to the caller.
         // (Keeping the message-thread VST3 result gives the caller a useful count
         // while the AU sweep is in progress.)
-        if (includeVST3)
-            pluginHost.rescan (clearFirst, includeVST3, false);
+        pluginHost.rescan (clearFirst, true, false);
     }
 
-    // Async AU rescan — mirror cmdRenderLayer: do the slow work on a background
-    // std::thread, marshal the result back to the message thread.
+    // Async deep VST3 and/or AU rescan — mirror cmdRenderLayer: do the slow work on
+    // a background std::thread, marshal the result back to the message thread.
     //
     // FIT-003 — arm the live progress sampler BEFORE spawning the scan thread (message
     // thread only; see timerCallback()) so the UI gets periodic running-count events
@@ -1042,19 +1045,20 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
     scanStartMs_   = Time::getMillisecondCounterHiRes();
     lastScanCount_ = -1;
     emit ("plugin_scan_progress", makeScanProgressPayload (format, /*count=*/0, /*done=*/false, 0));
-    // NOTE: clearFirst and the VST3 sweep have already run inline (if wait:true) or
-    // will run together below (async path).  Pass clearFirst=false and includeVST3 in
-    // the async lambda only if we didn't already do them above.
-    const bool asyncClearFirst  = clearFirst && ! wait;
-    const bool asyncIncludeVST3 = includeVST3 && ! wait;
-    std::thread ([this, asyncClearFirst, asyncIncludeVST3, format]
+    // The pure plan keeps an optional legacy VST3 pre-pass and the async format flags
+    // mutually consistent. In particular, Pro Tools' deep VST3 request reaches this
+    // worker with asyncIncludeAU=false.
+    std::thread ([this, scanPlan, format]
     {
         // slowVST3=true: this is the deep, module-loading sweep on a BACKGROUND thread
         // (never the message thread) — engage Tracktion's out-of-process scanner + the
         // hang watchdog so a plugin that hangs the child (e.g. a WaveShell on the user's
         // conflicting Waves install) gets killed → blocklisted → skipped, and the catalog
         // is checkpointed mid-sweep so a kill keeps the progress so far.
-        const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true, /*slowVST3=*/true);
+        const int total = pluginHost.rescan (scanPlan.asyncClearFirst,
+                                             scanPlan.asyncIncludeVST3,
+                                             scanPlan.asyncIncludeAU,
+                                             scanPlan.asyncSlowVST3);
         juce::MessageManager::callAsync ([this, total, format]
         {
             const int elapsed = (int) (Time::getMillisecondCounterHiRes() - scanStartMs_);

@@ -52,10 +52,12 @@ describe("plugin rescan — the AudioUnit opt-in (AUD-SCAN)", () => {
 
     await useStore.getState().rescanPlugins("vst3", false);
     await useStore.getState().rescanPlugins("all", true);
+    await useStore.getState().rescanPlugins("vst3", false, true);
 
     expect(seen).toEqual([
       { format: "vst3", allowAU: false },
       { format: "all", allowAU: true },
+      { format: "vst3", allowAU: false, deepVst3: true },
     ]);
     useStore.setState({ exec: real });
   });
