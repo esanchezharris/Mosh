@@ -31,6 +31,14 @@ const SNAPSHOT: Snapshot = {
       fadeOutSec: 0.2,
       mute: false,
       hasRenderLayer: false,
+    }, {
+      id: "vocal-double",
+      name: "Verse Double",
+      type: "wave",
+      start: 5,
+      length: 3,
+      offset: 0,
+      hasRenderLayer: false,
     }],
   }],
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
@@ -97,6 +105,9 @@ describe("Pro Tools audio clip inspector", () => {
     expect(button("pt-clip-mute").getAttribute("aria-pressed")).toBe("false");
     expect(input("pt-clip-gain-slider").value).toBe("-3");
     expect(input("pt-clip-gain-number").value).toBe("-3");
+    expect(button("pt-clip-crossfade").disabled).toBe(false);
+    expect(button("pt-clip-crossfade").getAttribute("aria-pressed")).toBe("false");
+    expect(host.querySelector("#pt-clip-crossfade-help")?.textContent).toContain("Verse Double");
     expect(host.querySelector("[data-testid=pt-wave-inspector]")?.textContent).toContain("Fade In");
   });
 
@@ -108,6 +119,39 @@ describe("Pro Tools audio clip inspector", () => {
 
     expect(exec).toHaveBeenCalledWith("rename_clip", { clipId: CLIP_ID, name: "Verse Comp" });
     expect(exec).toHaveBeenCalledWith("set_clip_mute", { clipId: CLIP_ID, mute: true });
+  });
+
+  it("routes an available Auto Crossfade toggle through store.exec", async () => {
+    await act(async () => button("pt-clip-crossfade").click());
+
+    expect(exec).toHaveBeenCalledWith("set_clip_crossfade", {
+      clipId: CLIP_ID,
+      enabled: true,
+    });
+  });
+
+  it("does not offer an inaudible crossfade when no audio clip overlaps", async () => {
+    act(() => useStore.setState({ snapshot: snapshotWithoutOverlap(false) }));
+
+    const crossfade = button("pt-clip-crossfade");
+    expect(crossfade.disabled).toBe(true);
+    expect(host.querySelector("#pt-clip-crossfade-help")?.textContent).toContain("Overlap another audio clip");
+    await act(async () => crossfade.click());
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("lets an inactive stale crossfade setting be disabled after overlap is removed", async () => {
+    act(() => useStore.setState({ snapshot: snapshotWithoutOverlap(true) }));
+
+    const crossfade = button("pt-clip-crossfade");
+    expect(crossfade.disabled).toBe(false);
+    expect(crossfade.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => crossfade.click());
+
+    expect(exec).toHaveBeenCalledWith("set_clip_crossfade", {
+      clipId: CLIP_ID,
+      enabled: false,
+    });
   });
 
   it("keeps slider edits local until completion and then commits the exact gain", async () => {
@@ -166,3 +210,15 @@ describe("Pro Tools audio clip inspector", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 });
+
+function snapshotWithoutOverlap(autoCrossfade: boolean): Snapshot {
+  return {
+    ...SNAPSHOT,
+    tracks: SNAPSHOT.tracks.map((track) => ({
+      ...track,
+      clips: track.clips
+        .filter((clip) => clip.id === CLIP_ID)
+        .map((clip) => ({ ...clip, autoCrossfade })),
+    })),
+  };
+}

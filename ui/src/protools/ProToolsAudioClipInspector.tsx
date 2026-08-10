@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Clip, Track } from "../types";
 import { IconClose } from "../ui/icons";
+import { proToolsOverlappingAudioClip } from "./proToolsCrossfade";
 
 const MIN_GAIN_DB = -48;
 const MAX_GAIN_DB = 24;
@@ -24,6 +25,14 @@ export function ProToolsAudioClipInspector({ clip, track, onClose }: {
   const [gainDraft, setGainDraft] = useState(snapshotGain);
   const [gainText, setGainText] = useState(String(snapshotGain));
   const [gainError, setGainError] = useState<string | null>(null);
+  const overlappingClip = proToolsOverlappingAudioClip(clip, track);
+  const crossfadeEnabled = clip.autoCrossfade === true;
+  const crossfadeAvailable = overlappingClip !== null || crossfadeEnabled;
+  const crossfadeHelp = overlappingClip
+    ? `Crossfades the overlap with ${overlappingClip.name}.`
+    : crossfadeEnabled
+      ? "Enabled, but inactive until this clip overlaps another audio clip."
+      : `Overlap another audio clip on ${track.name} to enable.`;
 
   const resetGain = () => {
     setGainDraft(snapshotGain);
@@ -119,10 +128,25 @@ export function ProToolsAudioClipInspector({ clip, track, onClose }: {
             <button type="button" data-testid="pt-clip-gain-reset" onClick={() => commitGain(0)}>0 dB</button>
           </div>
           {gainError && <span id="pt-clip-gain-error" className="pt-field-error" role="alert">{gainError}</span>}
-          <button type="button" className="pt-clip-mute" data-testid="pt-clip-mute"
-            aria-pressed={Boolean(clip.mute)} onClick={() => {
-              if (currentProject()) void exec("set_clip_mute", { clipId: clip.id, mute: !clip.mute });
-            }}>{clip.mute ? "Unmute Clip" : "Mute Clip"}</button>
+          <div className="pt-clip-toggle-row">
+            <button type="button" className="pt-clip-mute" data-testid="pt-clip-mute"
+              aria-pressed={Boolean(clip.mute)} onClick={() => {
+                if (currentProject()) void exec("set_clip_mute", { clipId: clip.id, mute: !clip.mute });
+              }}>{clip.mute ? "Unmute Clip" : "Mute Clip"}</button>
+            <button type="button" className="pt-clip-crossfade" data-testid="pt-clip-crossfade"
+              aria-pressed={crossfadeEnabled} aria-describedby="pt-clip-crossfade-help"
+              disabled={!crossfadeAvailable} onClick={() => {
+                if (currentProject() && crossfadeAvailable) {
+                  void exec("set_clip_crossfade", {
+                    clipId: clip.id,
+                    enabled: !crossfadeEnabled,
+                  });
+                }
+              }}>Auto Crossfade</button>
+            <span id="pt-clip-crossfade-help" className="pt-clip-crossfade-help">
+              {crossfadeHelp}
+            </span>
+          </div>
           <dl className="pt-clip-fields">
             <div><dt>Track</dt><dd>{track.name}</dd></div>
             <div><dt>Start</dt><dd>{formatSeconds(clip.start)}</dd></div>

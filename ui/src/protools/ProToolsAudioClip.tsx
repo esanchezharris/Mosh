@@ -41,7 +41,7 @@ export function ProToolsAudioClip({ clip, snapshot, track }: ProToolsAudioClipPr
         clipHeaderPx={Math.max(8, (trackHeight - 30) / 2)} clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
         gestureTable={() => proToolsGestureTable("audio", smartToolEnabled, activeTool)}
         waveAmplitudeAt={waveAmplitudeAt} />
-      <ProToolsFadeHandles clip={clip} />
+      <ProToolsFadeHandles clip={clip} track={track} />
       <ProToolsClipGain clip={clip} onPreviewGainChange={setPreviewGain}
         onPreviewPointsChange={setPreviewPoints} />
     </span>

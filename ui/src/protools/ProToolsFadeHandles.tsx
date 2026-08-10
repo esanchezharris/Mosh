@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
 import { useStore } from "../store";
-import type { Clip } from "../types";
+import type { Clip, Track } from "../types";
 import { capturePointer, releasePointer } from "./pointerCapture";
+import { proToolsOverlappingAudioClip } from "./proToolsCrossfade";
 import { useProTools } from "./proToolsState";
 
 type Side = "in" | "out";
 
-export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
+export function ProToolsFadeHandles({ clip, track }: { readonly clip: Clip; readonly track: Track }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const exec = useStore((s) => s.exec);
   const setHoveredIntent = useProTools((s) => s.setHoveredIntent);
@@ -16,6 +17,15 @@ export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
   } | null>(null);
   const fadeIn = preview?.side === "in" ? preview.seconds : (clip.fadeInSec ?? 0);
   const fadeOut = preview?.side === "out" ? preview.seconds : (clip.fadeOutSec ?? 0);
+  const crossfadeNeighbor = clip.autoCrossfade === true
+    ? proToolsOverlappingAudioClip(clip, track)
+    : null;
+  const crossfadeStart = crossfadeNeighbor
+    ? Math.max(clip.start, crossfadeNeighbor.start)
+    : 0;
+  const crossfadeEnd = crossfadeNeighbor
+    ? Math.min(clip.start + clip.length, crossfadeNeighbor.start + crossfadeNeighbor.length)
+    : 0;
 
   const commit = (side: Side, seconds: number) => {
     const args = side === "in" ? { fadeInSec: seconds } : { fadeOutSec: seconds };
@@ -78,6 +88,18 @@ export function ProToolsFadeHandles({ clip }: { clip: Clip }) {
 
   return (
     <div className="pt-fades" style={{ left: clip.start * pxPerSec, width: Math.max(4, clip.length * pxPerSec) }}>
+      {crossfadeNeighbor && (
+        <div className="pt-crossfade-region" data-testid="pt-crossfade-region"
+          style={{
+            left: (crossfadeStart - clip.start) * pxPerSec,
+            width: (crossfadeEnd - crossfadeStart) * pxPerSec,
+          }}>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M 0 100 C 35 100 65 0 100 0" />
+            <path d="M 0 0 C 35 0 65 100 100 100" />
+          </svg>
+        </div>
+      )}
       <div className="pt-fade-line in" style={{ width: fadeIn * pxPerSec }} aria-hidden="true" />
       <div className="pt-fade-line out" style={{ width: fadeOut * pxPerSec }} aria-hidden="true" />
       {(["in", "out"] as const).map((side) => (

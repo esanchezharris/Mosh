@@ -1,7 +1,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Clip, CommandResult } from "../types";
+import type { Clip, CommandResult, Track } from "../types";
 import { useStore } from "../store";
 import { ProToolsFadeHandles } from "./ProToolsFadeHandles";
 
@@ -13,6 +13,22 @@ const CLIP: Clip = {
   length: 4,
   offset: 0,
   hasRenderLayer: false,
+};
+
+const TRACK: Track = {
+  id: "audio-track",
+  index: 0,
+  name: "Vocal",
+  type: "audio",
+  clips: [CLIP, {
+    id: "audio-neighbor",
+    name: "Vocal Double",
+    type: "wave",
+    start: 3,
+    length: 4,
+    offset: 0,
+    hasRenderLayer: false,
+  }],
 };
 
 describe("ProToolsFadeHandles project epoch cancellation", () => {
@@ -32,7 +48,7 @@ describe("ProToolsFadeHandles project epoch cancellation", () => {
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useStore.setState({ pxPerSec: 100, projectEpoch: 51, exec });
-    act(() => root.render(React.createElement(ProToolsFadeHandles, { clip: CLIP })));
+    act(() => root.render(React.createElement(ProToolsFadeHandles, { clip: CLIP, track: TRACK })));
   });
 
   afterEach(() => {
@@ -73,5 +89,18 @@ describe("ProToolsFadeHandles project epoch cancellation", () => {
     // Then: no fade command is committed and the preview is gone.
     expect(exec).not.toHaveBeenCalled();
     expect(fadeLine.style.width).toBe("0px");
+  });
+
+  it("draws the enabled overlap as an original crossfade curve", () => {
+    act(() => root.render(React.createElement(ProToolsFadeHandles, {
+      clip: { ...CLIP, autoCrossfade: true },
+      track: TRACK,
+    })));
+
+    const region = host.querySelector<HTMLElement>("[data-testid=pt-crossfade-region]");
+    if (!region) throw new Error("crossfade region did not render");
+    expect(region.style.left).toBe("300px");
+    expect(region.style.width).toBe("100px");
+    expect(region.querySelectorAll("path")).toHaveLength(2);
   });
 });
