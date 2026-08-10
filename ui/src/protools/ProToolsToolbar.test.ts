@@ -5,7 +5,9 @@ import { MoshTipProvider } from "../chrome/Tooltip";
 import { FILE_MENU } from "../menuActions";
 import { useStore } from "../store";
 import type { CommandResult, Snapshot } from "../types";
+import { useShell } from "../v2/shellState";
 import { ProToolsToolbar } from "./ProToolsToolbar";
+import { useProTools } from "./proToolsState";
 
 const bridge = vi.hoisted(() => ({
   pickFiles: vi.fn(async () => ({ ok: false, files: [] as string[] })),
@@ -45,6 +47,8 @@ describe("Pro Tools Session menu", () => {
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useStore.setState({ snapshot: SNAPSHOT, transport: SNAPSHOT.transport, exec, refresh: vi.fn(async () => {}) });
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
+    useProTools.getState().resetForProject(useProTools.getState().projectEpoch + 1);
     act(() => root.render(
       React.createElement(MoshTipProvider, { delay: 0 },
         React.createElement(ProToolsToolbar, {
@@ -62,6 +66,7 @@ describe("Pro Tools Session menu", () => {
     host.remove();
     document.body.querySelectorAll(".v2-menu-panel-floating, .mosh-tip").forEach((node) => node.remove());
     useStore.setState({ snapshot: null, exec: originalExec, refresh: originalRefresh });
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
     bridge.pickFiles.mockClear();
     bridge.pickSaveFile.mockClear();
   });
@@ -105,6 +110,23 @@ describe("Pro Tools Session menu", () => {
     if (!saveAs) throw new Error("Save As action is missing");
     await act(async () => saveAs.click());
     expect(bridge.pickSaveFile).toHaveBeenCalledTimes(1);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("unlinks Timeline and Edit selection from an accessible pressed control", () => {
+    // Given the default linked control and a current Edit selection.
+    act(() => useShell.setState({ timeRange: { start: 2, end: 6 } }));
+    const link = host.querySelector<HTMLButtonElement>("[data-testid=pt-selection-link]");
+    if (!link) throw new Error("Timeline and Edit selection link control is missing");
+    expect(link.getAttribute("aria-pressed")).toBe("true");
+
+    // When the visible toolbar control is pressed.
+    act(() => link.click());
+
+    // Then it exposes the unlinked state without issuing a project command.
+    expect(link.getAttribute("aria-pressed")).toBe("false");
+    expect(link.getAttribute("aria-label")).toMatch(/Link Timeline and Edit Selection/i);
+    expect(useProTools.getState().timelineSelection).toEqual({ start: 2, end: 6 });
     expect(exec).not.toHaveBeenCalled();
   });
 });

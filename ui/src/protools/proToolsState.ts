@@ -8,6 +8,7 @@ import {
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 import { clampTrackHeightScale } from "./trackHeightZoom";
 import type { ProToolsTrackView } from "./trackViews";
+import type { TimeRangeSel } from "../v2/shellState";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
 export type ProToolsRuler = "markers" | "barsBeats" | "timecode" | "minutesSeconds" | "samples";
@@ -46,6 +47,9 @@ type ProToolsViewState = {
   readonly singleZoomEnabled: boolean;
   readonly zoomReturnState: ProToolsZoomReturnState | null;
   readonly trackHeightScale: number;
+  readonly timelineEditLinked: boolean;
+  readonly timelineSelection: TimeRangeSel | null;
+  readonly timelineSelectionDragging: boolean;
 };
 
 type ProToolsActions = {
@@ -72,6 +76,9 @@ type ProToolsActions = {
   readonly toggleSingleZoom: () => void;
   readonly completeSingleZoom: () => void;
   readonly setTrackHeightScale: (scale: number) => void;
+  readonly setTimelineEditLinked: (linked: boolean, editSelection: TimeRangeSel | null) => void;
+  readonly setTimelineSelection: (selection: TimeRangeSel | null) => void;
+  readonly setTimelineSelectionDragging: (dragging: boolean) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -106,6 +113,9 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   singleZoomEnabled: false,
   zoomReturnState: null,
   trackHeightScale: 1,
+  timelineEditLinked: true,
+  timelineSelection: null,
+  timelineSelectionDragging: false,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -181,6 +191,13 @@ export const useProTools = create<ProToolsState>((set) => ({
     };
   }),
   setTrackHeightScale: (scale) => set({ trackHeightScale: clampTrackHeightScale(scale) }),
+  setTimelineEditLinked: (timelineEditLinked, editSelection) => set((state) => ({
+    timelineEditLinked,
+    timelineSelection: timelineEditLinked ? state.timelineSelection : editSelection,
+    timelineSelectionDragging: false,
+  })),
+  setTimelineSelection: (timelineSelection) => set({ timelineSelection }),
+  setTimelineSelectionDragging: (timelineSelectionDragging) => set({ timelineSelectionDragging }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

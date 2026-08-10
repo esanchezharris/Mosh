@@ -9,6 +9,7 @@ This contract is scoped to `.protools-shell`. Existing Mosh shells keep their ow
 - Interaction reference: read beui.dev `tabs` and `table` source; kept its accessible segmented-control semantics and direct pointer-resize mechanism, but omitted its spring library because an editing surface needs immediate, low-motion feedback.
 - Spot interaction reference: read Avid's “Spotting Clips” procedure and beui.dev `center-morph-modal` source. Kept controlled open state, initial focus, focus containment, Escape/backdrop dismissal, and trigger restoration; omitted the center-unfold animation and motion dependency to preserve the shell's immediate panel contract.
 - Tutorial parity reference: reviewed official Avid Edit Window, recording, I/O, Clip Gain, automation, and MIDI Editor videos at the timecodes recorded in `docs/protools-clone/RESEARCH.md`. Extracted structural ratios and before/during/after behavior only; source frames remain private and uncommitted.
+- Selection-link reference: reviewed Avid's Timeline/Edit selection documentation, OBEDIA's linked-selection demonstrations, and the beui.dev `switch` source. The Pro Tools control keeps native pressed semantics and immediate state feedback, but omits the spring thumb because a dense editing toolbar benefits from the shell's existing depressed-button grammar.
 - Automation conflict resolution: Avid's Smart Tool help page explicitly assigns Selector to the bottom 75% and Trim to the top 25% of automation/controller views. That authority preserves the existing classifier despite simplified “half” language in the short automation video.
 - Skipped generated imagery and broad style search: the user supplied a concrete Pro Tools reference target and prohibited proprietary art reuse; original CSS geometry and existing Mosh renderers are the fidelity contract.
 
@@ -116,9 +117,18 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 
 - **Structure**: name cell aligned with track headers plus repeated tick labels over the lane scale.
 - **Variants**: Bars+Beats, Timecode, Minutes:Seconds, Samples; independently toggleable.
-- **States**: visible/hidden, hover, focus, current playhead.
+- **States**: visible/hidden, hover, focus, current playhead, linked Timeline/Edit span, independent Timeline playback span.
 - **Accessibility**: each toggle exposes `aria-pressed`; row name remains text, not an image.
 - **Layout**: fixed name column + horizontally translated tick field; timeline owns horizontal scroll.
+
+### Link Timeline and Edit Selection control
+
+- **Structure**: one labelled native toolbar button beside the Edit Tools, using the same depressed selected state as Smart Tool rather than Avid artwork.
+- **States**: linked by default, unlinked with an independent Timeline range, focus-visible, compact toolbar overflow.
+- **Accessibility**: `aria-pressed` and the full “Link Timeline and Edit Selection” accessible name; Shift+/ toggles it outside editable fields.
+- **Behavior**: unlinking clones the current Edit span into the Timeline span. Later track/clip selections change only the Edit span, while ruler selections and Punch use only the Timeline span. Relinking makes the current Edit span authoritative again.
+- **Mutation**: both spans and the link flag are project-scoped view state; no MoshOps command is issued until an explicit action such as Punch consumes the Timeline range.
+- **Motion**: immediate tokenized color/depth feedback; no moving thumb or layout animation.
 
 ### Track control row
 
@@ -205,6 +215,7 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 | `--pt-motion-panel` | `140ms ease-out` | Optional panel opacity only |
 
 - Mode/tool selection uses the beui.dev segmented-tabs accessibility mechanism (`role`/`aria-pressed` equivalent) without its spring: edit commands must feel immediate.
+- Link Timeline and Edit Selection adapts the beui.dev switch's native state semantics to the existing depressed toolbar-button primitive; it changes immediately and requires no spatial animation.
 - Header resizing follows the beui.dev table mechanism: pointer capture, clamped direct width updates, and no tween during drag.
 - Smart Tool feedback changes cursor and status text before mutation; drag mutations commit only through `store.exec` on gesture completion.
 - Spot mode intercepts the Grabber's normal move gesture, opens the placement dialog after pointer release (or keyboard activation), and restores the clip trigger when dismissed.

@@ -1,5 +1,5 @@
-import { useShell } from "../v2/shellState";
 import type { ProToolsRuler } from "./proToolsState";
+import { useProToolsTimelineSelectionModel } from "./proToolsTimelineSelection";
 
 type Props = {
   readonly visibleRulers: readonly ProToolsRuler[];
@@ -12,8 +12,7 @@ export function ProToolsRulerSelectionOverlay({
   pxPerSecond,
   recordArmed,
 }: Props) {
-  const range = useShell((state) => state.timeRange);
-  const dragging = useShell((state) => state.timeRangeDragging);
+  const { range, dragging } = useProToolsTimelineSelectionModel();
   const barsBeatsIndex = visibleRulers.indexOf("barsBeats");
   const firstTimebaseIndex = visibleRulers.findIndex((ruler) => ruler !== "markers");
   const mainRulerIndex = barsBeatsIndex >= 0 ? barsBeatsIndex : firstTimebaseIndex;

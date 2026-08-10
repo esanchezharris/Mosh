@@ -5,6 +5,7 @@ import { useStore } from "../store";
 import type { CommandResult, Snapshot } from "../types";
 import { useShell } from "../v2/shellState";
 import { ProToolsPunchControls } from "./ProToolsPunchControls";
+import { useProTools } from "./proToolsState";
 
 const SNAPSHOT: Snapshot = {
   schemaVersion: 1,
@@ -62,6 +63,7 @@ describe("Pro Tools Punch controls", () => {
       exec,
     });
     useShell.setState({ timeRange: null, timeRangeDragging: false });
+    useProTools.getState().resetForProject(useProTools.getState().projectEpoch + 1);
   });
 
   afterEach(() => {
@@ -91,10 +93,33 @@ describe("Pro Tools Punch controls", () => {
 
     const punch = host.querySelector<HTMLButtonElement>("[data-testid=pt-punch-toggle]");
     if (!punch) throw new Error("Punch control is missing");
+
+    // When Punch is enabled.
     await act(async () => punch.click());
 
+    // Then its engine range follows Timeline playback, not the Edit target.
     expect(exec.mock.calls).toEqual([
       ["set_transport", { loop: false, loopStart: 2, loopEnd: 6 }],
+      ["set_record_options", { punchInOut: true }],
+    ]);
+  });
+
+  it("uses the independent Timeline span for Punch while selections are unlinked", async () => {
+    // Given different Edit and Timeline ranges.
+    useShell.setState({ timeRange: { start: 2, end: 6 } });
+    useProTools.getState().setTimelineEditLinked(false, useShell.getState().timeRange);
+    useProTools.getState().setTimelineSelection({ start: 8, end: 10 });
+    render();
+
+    const punch = host.querySelector<HTMLButtonElement>("[data-testid=pt-punch-toggle]");
+    if (!punch) throw new Error("Punch control is missing");
+
+    // When Punch is enabled.
+    await act(async () => punch.click());
+
+    // Then its engine range follows Timeline playback, not the Edit target.
+    expect(exec.mock.calls).toEqual([
+      ["set_transport", { loop: false, loopStart: 8, loopEnd: 10 }],
       ["set_record_options", { punchInOut: true }],
     ]);
   });
@@ -119,7 +144,7 @@ describe("Pro Tools Punch controls", () => {
     const missingRangePunch = host.querySelector<HTMLButtonElement>("[data-testid=pt-punch-toggle]")!;
     await act(async () => missingRangePunch.click());
     expect(exec).not.toHaveBeenCalled();
-    expect(useStore.getState().lastError).toMatch(/Edit selection or stored range/i);
+    expect(useStore.getState().lastError).toMatch(/Timeline selection or stored range/i);
 
     act(() => useShell.setState({ timeRange: { start: 4, end: 7 } }));
     exec.mockImplementationOnce(async () => ({

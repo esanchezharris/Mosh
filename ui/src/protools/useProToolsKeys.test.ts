@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandResult, Snapshot } from "../types";
 import { useStore } from "../store";
+import { useShell } from "../v2/shellState";
 import { useProTools } from "./proToolsState";
 import { transientCandidates, useProToolsKeys } from "./useProToolsKeys";
 
@@ -78,6 +79,7 @@ describe("useProToolsKeys", () => {
     root = createRoot(host);
     execCalls = [];
     useProTools.getState().resetForProject(useProTools.getState().projectEpoch + 1);
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
     useStore.setState({
       snapshot: SNAPSHOT,
       transport: SNAPSHOT.transport,
@@ -104,6 +106,7 @@ describe("useProToolsKeys", () => {
       selectedTrackId: null,
       exec: originalExec,
     });
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
     vi.restoreAllMocks();
   });
 
@@ -156,6 +159,25 @@ describe("useProToolsKeys", () => {
 
     expect(useProTools.getState().editMode).toBe("slip");
     input.remove();
+  });
+
+  it("toggles Link Timeline and Edit Selection with Shift+Slash", () => {
+    // Given a linked Edit range.
+    act(() => useShell.setState({ timeRange: { start: 2, end: 6 } }));
+
+    // When the documented shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "?",
+      code: "Slash",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    // Then the Timeline becomes independent without an engine command.
+    expect(useProTools.getState().timelineEditLinked).toBe(false);
+    expect(useProTools.getState().timelineSelection).toEqual({ start: 2, end: 6 });
+    expect(execCalls).toEqual([]);
   });
 
   it("tabs to the next clip boundary when transient data is unavailable", async () => {

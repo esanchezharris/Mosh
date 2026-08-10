@@ -48,7 +48,7 @@ describe("Pro Tools Marker ruler", () => {
       projectEpoch: 60,
       exec,
     });
-    useProTools.getState().resetForProject(60);
+    useProTools.getState().resetForProject();
     useShell.setState({ timeRange: null, timeRangeDragging: false });
     act(() => root.render(React.createElement(ProToolsRulers, {
       snapshot: SNAPSHOT,
@@ -137,6 +137,26 @@ describe("Pro Tools Marker ruler", () => {
     pointer(bars, "pointerup", 650);
     expect(useShell.getState().timeRangeDragging).toBe(false);
     expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6.5 });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("changes only the Timeline span when ruler selection is unlinked from Edit selection", () => {
+    // Given distinct Timeline and Edit ownership.
+    const bars = ruler();
+    act(() => {
+      useShell.setState({ timeRange: { start: 1, end: 2 }, timeRangeDragging: false });
+      useProTools.getState().setTimelineEditLinked(false, useShell.getState().timeRange);
+    });
+
+    // When the Selector drags in a timebase ruler.
+    pointer(bars, "pointerdown", 400);
+    pointer(bars, "pointermove", 650);
+    pointer(bars, "pointerup", 650);
+
+    // Then only playback/record scope moves.
+    expect(useShell.getState().timeRange).toEqual({ start: 1, end: 2 });
+    expect(useProTools.getState().timelineSelection).toEqual({ start: 4, end: 6.5 });
+    expect(host.querySelector("[data-testid=pt-ruler-selection]")).not.toBeNull();
     expect(exec).not.toHaveBeenCalled();
   });
 

@@ -9,6 +9,7 @@ import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconS
 import { useTransportControls } from "../v2/useTransportControls";
 import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
 import { ProToolsPunchControls } from "./ProToolsPunchControls";
+import { ProToolsSelectionLinkControl } from "./ProToolsSelectionLinkControl";
 import { ProToolsZoomControls } from "./ProToolsZoomControls";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
 import type { ProToolsTool } from "./smartTool";
@@ -115,6 +116,7 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
           <button type="button" className="pt-smart-button" data-testid="pt-smart-tool"
             aria-pressed={smartToolEnabled} onClick={toggleSmartTool}>Smart</button>
         </MoshTip>
+        <ProToolsSelectionLinkControl />
       </div>
 
       <div className="pt-toolbar-group pt-transport-group" role="group" aria-label="Transport">

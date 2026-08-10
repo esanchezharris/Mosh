@@ -2,7 +2,6 @@ import type { KeyboardEvent, MouseEvent, RefObject } from "react";
 import { useCallback, useMemo } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
-import { useShell } from "../v2/shellState";
 import type { ProToolsRuler, ProToolsRulersVisible } from "./proToolsState";
 import {
   barsBeatsRulerTicks,
@@ -22,6 +21,7 @@ import {
 } from "./proToolsEditSelection";
 import { useProTools } from "./proToolsState";
 import { useProToolsEditSelection } from "./useProToolsEditSelection";
+import { useProToolsTimelineSelectionModel } from "./proToolsTimelineSelection";
 
 type Props = {
   snapshot: Snapshot;
@@ -54,9 +54,8 @@ export function ProToolsRulers({
   const editMode = useProTools((state) => state.editMode);
   const activeTool = useProTools((state) => state.activeTool);
   const smartToolEnabled = useProTools((state) => state.smartToolEnabled);
-  const range = useShell((state) => state.timeRange);
-  const setRange = useShell((state) => state.setTimeRange);
-  const setRangeDragging = useShell((state) => state.setTimeRangeDragging);
+  const { range, setRange, setDragging: setRangeDragging, target } =
+    useProToolsTimelineSelectionModel();
   const totalSeconds = timelineSeconds(snapshot);
   const logicalTimelineWidth = Math.max(1, totalSeconds * pxPerSecond);
   const ticks = useMemo<Record<ProToolsRuler, ProToolsRulerTick[]>>(() => ({
@@ -95,6 +94,7 @@ export function ProToolsRulers({
     enabled: selectorEnabled,
     positionAt,
     onPlaceCursor: seek,
+    target,
   });
 
   const onClick = (event: MouseEvent<HTMLButtonElement>) => {

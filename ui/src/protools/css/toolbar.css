@@ -69,6 +69,7 @@
   font-size: 14px;
   line-height: 1;
 }
+.pt-tool-group { flex: 0 0 auto; }
 .pt-smart-button { min-width: 48px !important; font-weight: 700; }
 .pt-zoom-group {
   flex: 0 0 auto;

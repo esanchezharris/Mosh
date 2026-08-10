@@ -7,6 +7,7 @@ import { applyHorizontalZoom, applyHorizontalZoomStep } from "./proToolsZoom";
 import type { ProToolsTool } from "./smartTool";
 import { nextTabPosition } from "./tabNavigation";
 import { nextCommonProToolsTrackView } from "./trackViews";
+import { toggleProToolsTimelineEditLink } from "./proToolsTimelineSelection";
 import {
   adjacentMemoryLocation,
   memoryLocationAtNumber,
@@ -100,6 +101,13 @@ export function useProToolsKeys(): void {
         }
         proTools.setActiveTool(tool);
         if (proTools.smartToolEnabled) proTools.toggleSmartTool();
+        return;
+      }
+
+      if (event.code === "Slash" && event.shiftKey
+        && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        toggleProToolsTimelineEditLink();
         return;
       }
 

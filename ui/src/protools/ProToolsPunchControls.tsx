@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { CommandResult, Snapshot } from "../types";
-import { useShell } from "../v2/shellState";
 import {
   formatProToolsPunchRange,
   resolveProToolsPunchRange,
 } from "./punchRecording";
+import { useProToolsTimelineRange } from "./proToolsTimelineSelection";
 
 const resultError = (result: CommandResult, fallback: string): string | null =>
   result.ok ? null : result.error ?? fallback;
@@ -14,14 +14,14 @@ export function ProToolsPunchControls({ snapshot }: { readonly snapshot: Snapsho
   const exec = useStore((state) => state.exec);
   const transport = useStore((state) => state.transport);
   const projectEpoch = useStore((state) => state.projectEpoch);
-  const editSelection = useShell((state) => state.timeRange);
+  const timelineSelection = useProToolsTimelineRange();
   const [busy, setBusy] = useState(false);
   const mountedRef = useRef(true);
   const epochRef = useRef(projectEpoch);
   const recordOptions = snapshot.session.project?.recordOptions;
   const punchEnabled = recordOptions?.punchInOut ?? false;
   const preRollBars = snapshot.session.countInBars ?? snapshot.session.project?.countInBars ?? 0;
-  const punchRange = resolveProToolsPunchRange(editSelection, transport);
+  const punchRange = resolveProToolsPunchRange(timelineSelection, transport);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -45,7 +45,7 @@ export function ProToolsPunchControls({ snapshot }: { readonly snapshot: Snapsho
     setBusy(true);
     if (!punchEnabled) {
       if (!punchRange) {
-        fail("Punch needs an Edit selection or stored range before it can be enabled.");
+        fail("Punch needs a Timeline selection or stored range before it can be enabled.");
         finish(epoch);
         return;
       }
