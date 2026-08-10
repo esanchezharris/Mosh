@@ -17,6 +17,7 @@ export type AutomationTarget = {
   readonly pluginIndex: number;
   readonly paramIndex: number;
   readonly paramName: string;
+  readonly value: number;
   readonly points: readonly AutoPoint[];
 };
 
@@ -36,6 +37,7 @@ type PointMove = {
   readonly deltaX: number;
   readonly deltaY: number;
   readonly pxPerSec: number;
+  readonly graphHeightPx?: number;
 };
 
 const round = (value: number): number => Number(value.toFixed(6));
@@ -50,8 +52,25 @@ export function firstAutomationTarget(track: Track): AutomationTarget | null {
     pluginIndex: plugin.index,
     paramIndex: param.index,
     paramName: param.name,
+    value: param.value,
     points: param.points ?? [],
   };
+}
+
+export function automationTargetByName(track: Track, paramName: string): AutomationTarget | null {
+  const requested = paramName.trim().toLowerCase();
+  for (const plugin of [...(track.mixerPlugins ?? []), ...(track.plugins ?? [])]) {
+    const param = plugin.params.find((candidate) => candidate.name.trim().toLowerCase() === requested);
+    if (!param) continue;
+    return {
+      pluginIndex: plugin.index,
+      paramIndex: param.index,
+      paramName: param.name,
+      value: param.value,
+      points: param.points ?? [],
+    };
+  }
+  return null;
 }
 
 export function automationRange(anchor: number, current: number): AutomationRange {
@@ -183,10 +202,16 @@ export function automationSegmentPreview(
     .sort((left, right) => left.t - right.t);
 }
 
-export function moveAutomationPoint({ point, deltaX, deltaY, pxPerSec }: PointMove): AutoPoint {
+export function moveAutomationPoint({
+  point,
+  deltaX,
+  deltaY,
+  pxPerSec,
+  graphHeightPx = AUTOMATION_GRAPH_HEIGHT_PX,
+}: PointMove): AutoPoint {
   return {
     t: round(Math.max(0, point.t + deltaX / pxPerSec)),
-    v: round(clampValue(point.v - deltaY / AUTOMATION_GRAPH_HEIGHT_PX)),
+    v: round(clampValue(point.v - deltaY / graphHeightPx)),
   };
 }
 

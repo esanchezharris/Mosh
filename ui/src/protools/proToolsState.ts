@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AutomationClipboard } from "./automationEditing";
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
+import type { ProToolsTrackView } from "./trackViews";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
 export type ProToolsRuler = "barsBeats" | "timecode" | "minutesSeconds" | "samples";
@@ -20,6 +21,8 @@ type ProToolsViewState = {
   readonly classicTheme: boolean;
   readonly hoveredIntent: ProToolsIntent | null;
   readonly automationClipboard: AutomationClipboard | null;
+  readonly trackViews: Readonly<Record<string, ProToolsTrackView>>;
+  readonly automationLanesVisible: Readonly<Record<string, boolean>>;
 };
 
 type ProToolsActions = {
@@ -34,6 +37,8 @@ type ProToolsActions = {
   readonly toggleClassicTheme: () => void;
   readonly setHoveredIntent: (intent: ProToolsIntent | null) => void;
   readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
+  readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
+  readonly toggleAutomationLane: (trackId: string) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -57,6 +62,8 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   classicTheme: false,
   hoveredIntent: null,
   automationClipboard: null,
+  trackViews: {},
+  automationLanesVisible: {},
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -74,6 +81,15 @@ export const useProTools = create<ProToolsState>((set) => ({
   toggleClassicTheme: () => set((state) => ({ classicTheme: !state.classicTheme })),
   setHoveredIntent: (hoveredIntent) => set({ hoveredIntent }),
   setAutomationClipboard: (automationClipboard) => set({ automationClipboard }),
+  setTrackView: (trackId, view) => set((state) => ({
+    trackViews: { ...state.trackViews, [trackId]: view },
+  })),
+  toggleAutomationLane: (trackId) => set((state) => ({
+    automationLanesVisible: {
+      ...state.automationLanesVisible,
+      [trackId]: !state.automationLanesVisible[trackId],
+    },
+  })),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

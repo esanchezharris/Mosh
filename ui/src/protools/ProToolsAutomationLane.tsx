@@ -4,20 +4,27 @@ import { useStore } from "../store";
 import type { Track } from "../types";
 import { ProToolsAutomationCurve } from "./ProToolsAutomationCurve";
 import { ProToolsAutomationMenu } from "./ProToolsAutomationMenu";
-import { firstAutomationTarget } from "./automationEditing";
+import { automationTargetByName, firstAutomationTarget } from "./automationEditing";
 import { useProToolsAutomationLane } from "./useProToolsAutomationLane";
 
 type Props = {
   readonly track: Track;
   readonly width: number;
+  readonly primary?: boolean;
+  readonly targetName?: string;
 };
 
 type LaneStyle = CSSProperties & { "--pt-track-color": string };
 
-export function ProToolsAutomationLane({ track, width }: Props) {
+export function ProToolsAutomationLane({ track, width, primary = false, targetName }: Props) {
   const pxPerSec = useStore((state) => state.pxPerSec);
   const position = useStore((state) => state.transport.position);
-  const target = useMemo(() => firstAutomationTarget(track), [track.plugins, track.mixerPlugins]);
+  const target = useMemo(
+    () => targetName ? automationTargetByName(track, targetName) : firstAutomationTarget(track),
+    [targetName, track.plugins, track.mixerPlugins],
+  );
+  const graphTopPx = primary ? 6 : 3;
+  const graphHeightPx = primary ? 80 : 20;
   const snapshotPoints = target?.points ?? [];
   const interaction = useProToolsAutomationLane({
     trackId: track.id,
@@ -25,6 +32,8 @@ export function ProToolsAutomationLane({ track, width }: Props) {
     snapshotPoints,
     pxPerSec,
     position,
+    graphTopPx,
+    graphHeightPx,
   });
   const laneRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ readonly x: number; readonly y: number } | null>(null);
@@ -41,6 +50,7 @@ export function ProToolsAutomationLane({ track, width }: Props) {
   return (
     <>
       <div className="pt-automation-lane-frame" style={laneStyle}
+        data-testid="pt-automation-lane-frame" data-primary={primary}
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -73,7 +83,8 @@ export function ProToolsAutomationLane({ track, width }: Props) {
       </button>
       <ProToolsAutomationCurve trackId={track.id} target={target}
         points={interaction.renderedPoints} selection={interaction.selection}
-        pxPerSec={pxPerSec} width={width} onEditKeyDown={interaction.onEditKeyDown} />
+        pxPerSec={pxPerSec} width={width} onEditKeyDown={interaction.onEditKeyDown}
+        graphTopPx={graphTopPx} graphHeightPx={graphHeightPx} />
       </div>
       {menu && (
         <ProToolsAutomationMenu x={menu.x} y={menu.y} label={target?.paramName ?? "Automation"}

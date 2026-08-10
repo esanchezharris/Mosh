@@ -95,6 +95,19 @@
   box-shadow: none;
   cursor: default;
 }
+.protools-shell .pt-lane[data-secondary-automation="false"] .v2-clip {
+  bottom: 2px;
+}
+.protools-shell .pt-lane[data-track-view="notes"] .v2-clip.midi,
+.protools-shell .pt-lane[data-track-view="notes"] .v2-clip.drum {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--pt-track-color) 18%, transparent);
+}
+.protools-shell .pt-lane[data-track-view="notes"] .v2-clip > .v2-clip-label {
+  height: 14px;
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--pt-track-color) 34%, var(--pt-inset));
+}
 .protools-shell .pt-lane .v2-clip.wave,
 .protools-shell .pt-lane .v2-clip.midi,
 .protools-shell .pt-lane .v2-clip.drum {
@@ -139,6 +152,7 @@
   bottom: calc(var(--pt-automation-h) + 2px);
   pointer-events: none;
 }
+.pt-lane[data-secondary-automation="false"] .pt-fades { bottom: 2px; }
 .pt-fade-handle {
   position: absolute;
   top: 0;
@@ -164,6 +178,7 @@
   bottom: calc(var(--pt-automation-h) + 2px);
   pointer-events: none;
 }
+.pt-lane[data-secondary-automation="false"] .pt-clip-gain { bottom: 2px; }
 .pt-clip-gain-line {
   position: absolute;
   right: 0;
@@ -287,6 +302,11 @@
   overflow: hidden;
   border-top: 1px solid var(--pt-border);
   background: color-mix(in srgb, var(--pt-inset) 88%, var(--pt-track-color));
+}
+.pt-automation-lane-frame[data-primary="true"] {
+  top: 0;
+  height: auto;
+  border-top: 0;
 }
 .pt-automation-lane {
   position: absolute;

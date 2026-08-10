@@ -29,10 +29,19 @@ type Options = {
   readonly target: AutomationTarget | null;
   readonly points: readonly AutoPoint[];
   readonly pxPerSec: number;
+  readonly graphTopPx?: number;
+  readonly graphHeightPx?: number;
 };
 
 export function useProToolsAutomationPencil(options: Options) {
-  const { trackId, target, points, pxPerSec } = options;
+  const {
+    trackId,
+    target,
+    points,
+    pxPerSec,
+    graphTopPx = AUTOMATION_GRAPH_TOP_PX,
+    graphHeightPx = AUTOMATION_GRAPH_HEIGHT_PX,
+  } = options;
   const exec = useStore((state) => state.exec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const setHoveredIntent = useProTools((state) => state.setHoveredIntent);
@@ -60,7 +69,7 @@ export function useProToolsAutomationPencil(options: Options) {
     return {
       t: Math.max(0, (event.clientX - rect.left) / pxPerSec),
       v: Math.min(1, Math.max(0,
-        1 - (event.clientY - rect.top - AUTOMATION_GRAPH_TOP_PX) / AUTOMATION_GRAPH_HEIGHT_PX)),
+        1 - (event.clientY - rect.top - graphTopPx) / graphHeightPx)),
     };
   };
 

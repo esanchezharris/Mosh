@@ -49,10 +49,20 @@ type Options = {
   readonly snapshotPoints: readonly AutoPoint[];
   readonly pxPerSec: number;
   readonly position: number;
+  readonly graphTopPx?: number;
+  readonly graphHeightPx?: number;
 };
 
 export function useProToolsAutomationLane(options: Options) {
-  const { trackId, target, snapshotPoints, pxPerSec, position } = options;
+  const {
+    trackId,
+    target,
+    snapshotPoints,
+    pxPerSec,
+    position,
+    graphTopPx = AUTOMATION_GRAPH_TOP_PX,
+    graphHeightPx = AUTOMATION_GRAPH_HEIGHT_PX,
+  } = options;
   const exec = useStore((state) => state.exec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const smartToolEnabled = useProTools((state) => state.smartToolEnabled);
@@ -65,7 +75,14 @@ export function useProToolsAutomationLane(options: Options) {
   const gesture = useRef<SelectGesture | TrimGesture | null>(null);
   const previewToken = useRef(0);
   const basePoints = previewPoints ?? snapshotPoints;
-  const pencil = useProToolsAutomationPencil({ trackId, target, points: basePoints, pxPerSec });
+  const pencil = useProToolsAutomationPencil({
+    trackId,
+    target,
+    points: basePoints,
+    pxPerSec,
+    graphTopPx,
+    graphHeightPx,
+  });
   const renderedPoints = pencil.previewPoints ?? basePoints;
   const clipboard = useProToolsAutomationClipboard({
     trackId,
@@ -177,7 +194,7 @@ export function useProToolsAutomationLane(options: Options) {
       event.stopPropagation();
       const rect = event.currentTarget.getBoundingClientRect();
       const value = Math.min(1, Math.max(0,
-        1 - (event.clientY - rect.top - AUTOMATION_GRAPH_TOP_PX) / AUTOMATION_GRAPH_HEIGHT_PX));
+        1 - (event.clientY - rect.top - graphTopPx) / graphHeightPx));
       addBreakpoint(timeAt(event), value);
       return;
     }
@@ -227,7 +244,7 @@ export function useProToolsAutomationLane(options: Options) {
       return;
     }
     if (!selection) return;
-    const deltaValue = (current.startY - event.clientY) / AUTOMATION_GRAPH_HEIGHT_PX;
+    const deltaValue = (current.startY - event.clientY) / graphHeightPx;
     current.valuePoints = trimAutomationPoints(current.originalPoints, selection, deltaValue);
     setPreviewPoints(current.valuePoints);
     setTrimReadout(deltaValue);

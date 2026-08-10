@@ -24,7 +24,7 @@ Grabber. Mosh follows the documented 25/75 contract.
 
 ## Primary official corpus
 
-The titles and channel attribution for V01-V08 were rechecked through YouTube's
+The titles and channel attribution for V01-V09 were rechecked through YouTube's
 oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 
 | ID | Avid video | Timecoded evidence |
@@ -37,7 +37,7 @@ oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
 | V06 | [How to Use Clip Gain](https://www.youtube.com/watch?v=-jQceBZ8tPI) | 0:04 clip versus track volume; 0:18 lower-left gain control; 0:42 dynamic gain; 0:58 gain line; 1:04 Grabber breakpoints; 1:13 vertical gain/horizontal timing. |
 | V07 | [Editing Automation](https://www.youtube.com/watch?v=HjoNFBxyXYg) | 0:00 Smart Tool; 0:15 selection; 0:18-0:25 cut/copy/paste; 0:24 trim; 0:40 nudge; 0:45 node move; 0:56 delete; 1:03 Control line Pencil; 1:09 Control+Command freehand. |
 | V08 | [MIDI Editor](https://www.youtube.com/watch?v=FDqKlSMKCGw) | 0:00 double-click MIDI clip; 0:27 independent modes/tools; 0:34 keyboard; 0:43 controller lane; 0:51 Track List; 1:13 Smart Tool. |
-| V09 | [Track Views](https://www.youtube.com/watch?v=VyEEufPAZ5s) | Track display and automation-view selection. |
+| V09 | [Track Views](https://www.youtube.com/watch?v=VyEEufPAZ5s) | 0:00 Track View selector; 0:04 audio Waveform; 0:11 automation; 0:21 Playlists; 0:26 instrument Clips/Notes; 0:40 Minus toggles audio Waveform/Volume; 0:53 Minus toggles instrument Clips/Notes; 0:56 automation-lanes disclosure. |
 | V10 | [Playlist Comping](https://www.youtube.com/watch?v=8X3KQ3Cq8Co) | Playlist-based take comping; additive follow-up scope. |
 | V11 | [Fast Start: Mixing Fundamentals](https://www.youtube.com/watch?v=MDcgJju4WOY) | Fader, pan, inserts, sends, buses, and mix hierarchy. |
 
@@ -107,6 +107,7 @@ native, physical-device, or audio-output acceptance.
 | Automation Smart Tool | V07 plus Avid help | `MATCH` | Authoritative top-25/lower-75 classifier and Command/Control breakpoint tests. |
 | Automation range/node editing | V07 | `MATCH` | Lower-band persistent range, upper-band trim preview, numeric Nudge, direct node move, and Option/Alt or Delete removal have focused component tests plus one serial Chromium before/during/after command trace. |
 | Automation clipboard/Pencil | V07 | `MATCH` | ⌘C/⌘X/⌘V and the accessible right-click menu own the selected automation range, including native macOS Edit-menu forwarding; Control-drag writes a line and Control+Command-drag writes one ordered freehand segment, each previewed locally and committed once. |
+| Track Views | V09 plus Avid Track View help | `MATCH/PARTIAL` | Each header has a contextual Waveform/Volume or Clips/Notes selector; the selected track follows the main-keyboard Minus toggle; Waveform/Clips use the full row by default, Volume is a full-height mixer-fader automation view, and the disclosure button adds a secondary Volume lane. Multiple simultaneous automation lanes, Playlists, Warp, and direct inline note editing remain explicit follow-ups. |
 | MIDI editor | V08 | `MATCH/PARTIAL` | Double-click opens the bottom piano roll/controller direction; multi-track editor selection needs deeper proof. |
 | Inserts | V05, V11 | `ADAPTED` | Searchable catalog preserves load/open/bypass/remove/persistence behavior instead of copying nested menus. |
 | Playlist comping | V10 | `DEFERRED` | Requires additive take/playlists project-model work. |

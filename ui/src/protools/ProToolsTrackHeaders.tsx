@@ -1,10 +1,12 @@
 import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
-import { IconPlus } from "../ui/icons";
+import { IconLayers, IconPlus } from "../ui/icons";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
 import { TRACK_ROW_HEIGHT } from "./layout";
 import { appliedFailure } from "./commandFeedback";
+import { useProTools } from "./proToolsState";
+import { proToolsTrackViewOptions, resolveProToolsTrackView } from "./trackViews";
 
 type ProToolsTrackHeadersProps = {
   readonly snapshot: Snapshot;
@@ -33,7 +35,13 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
   const setSelectedTrack = useStore((state) => state.setSelectedTrack);
   const closePianoRoll = useStore((state) => state.closePianoRoll);
   const setLastError = useStore((state) => state.setLastError);
+  const requestedTrackView = useProTools((state) => state.trackViews[track.id]);
+  const automationLaneVisible = useProTools((state) => Boolean(state.automationLanesVisible[track.id]));
+  const setTrackView = useProTools((state) => state.setTrackView);
+  const toggleAutomationLane = useProTools((state) => state.toggleAutomationLane);
   const selected = selectedTrackId === track.id;
+  const trackViewOptions = proToolsTrackViewOptions(track);
+  const trackView = resolveProToolsTrackView(track, requestedTrackView);
 
   const selectTrack = () => {
     clearSelection();
@@ -100,6 +108,27 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
       <span className="pt-track-route" title={track.output?.name ?? "Default output"}>
         {track.output?.name ?? "Default output"}
       </span>
+      <div className="pt-track-view-controls">
+        <label>
+          <select data-testid="pt-track-view" aria-label={`${track.name} Track View`}
+            value={trackView}
+            onChange={(event) => {
+              const option = trackViewOptions.find((candidate) => candidate.value === event.target.value);
+              if (option) setTrackView(track.id, option.value);
+            }}>
+            {trackViewOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="pt-automation-lanes-toggle"
+          data-testid="pt-automation-lanes"
+          aria-label={`${automationLaneVisible ? "Hide" : "Show"} ${track.name} automation lane`}
+          aria-pressed={automationLaneVisible}
+          onClick={() => toggleAutomationLane(track.id)}>
+          <IconLayers size={12} />
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # Pro Tools Edit Window research
 
-Research date: 2026-08-09
+Research date: 2026-08-10
 
 Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro Tools is not installed on this machine. This artifact records source links and figure references only. No Avid artwork, icons, screenshots, or other proprietary assets are copied into the repository.
 
@@ -17,6 +17,8 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 | [Spotting Clips](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/Arr3.clips.33.13.html) | With Spot mode enabled, clicking an existing clip with the Grabber opens the Spot dialog. The dialog chooses a Time Scale, accepts a precise locate value, and moves the clip when confirmed. | Linked Spot dialog figure. Mosh uses the documented Start locate field; Sync Point, Original Time Stamp, and User Time Stamp require clip metadata Mosh does not expose. |
 | [Edit Tools](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/ed2.ModesTools.24.12.html) | Zoomer, Trimmer, Selector, Grabber, Scrubber, Pencil, and the multifunction Smart Tool form the editing tool set. | Linked Edit tools and Smart Tool figures. |
 | [The Smart Tool in Automation and Controller Views](https://apps.avid.com/protoolsfirsthelp/version12.3/enu/Pro%20Tools%20First%20Help/ed2.ModesTools.24.42.html) | Selector owns the bottom 75% of an automation or controller view, Trim owns the top 25%, and Command/Control temporarily exposes the Grabber for breakpoint creation. | This authoritative split takes precedence over simplified “upper/lower half” narration in short tutorial videos and confirms Mosh's 25/75 classifier. |
+| [Track View Selectors](https://apps.avid.com/protoolsfirsthelp/version12.3/enu/Pro%20Tools%20First%20Help/sess3.tracks.14.56.html) | Track View determines which audio, MIDI, and automation content is displayed and edited. Audio defaults to Waveform; MIDI and Instrument tracks offer clip/note and controller views. | Use the selector behavior and contextual view families, not Avid menu art. Mosh initially exposes the two common views demonstrated by V09. |
+| [Changing Track Views](https://apps.avid.com/proToolsFirstHelp/version12.0/enu/Pro%20Tools%20First%20Help/ed1.basics.23.26.html) | Primary Track View controls editing semantics, while automation lanes allow additional parameters to be visible at the same time. | Confirms that primary view and disclosed automation lanes are separate UI state. |
 | [Timebase Rulers](https://apps.avid.com/proToolsFirstHelp/version12.3/enu/Pro%20Tools%20First%20Help/Arr1.conductors.31.03.html) | Bars|Beats is tempo-relative. Minutes:Seconds is absolute. Rulers define timeline and edit selections. | Linked Bars|Beats and Minutes:Seconds ruler figures. The Avid glossary and reference guide also define Samples and Timecode timebases. |
 | [Edit Window and Mix Window keyboard shortcuts](https://apps.avid.com/ProToolsFirstHelp/version2019.5/enu/keyshortcuts.6.10.html) | Space starts/stops. F1-F4 choose Shuffle, Slip, Spot, Grid. F5-F8 and F10 choose Zoomer, Trimmer, Selector, Grabber, Pencil. Tab locates the next transient when enabled and the next clip boundary when disabled. | Shortcut table, sections "Playback," "Edit Modes and Edit Tools," and "Edit Selection, Definition, and Navigation." |
 | [Pro Tools Quick Tips: Edit Window](https://www.youtube.com/watch?v=3L_UeAZuSik) | Official Avid video tour showing the live hierarchy and density of the Edit Window. | Published 2022-04-26 by Avid Pro Tools. Review the toolbar/rulers opening view and the later list and lane demonstrations. No frames are copied. |
@@ -26,6 +28,7 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 | [How to Use Clip Gain in Pro Tools](https://www.youtube.com/watch?v=-jQceBZ8tPI) | Current official evidence for static and dynamic clip gain: selected-clip control, visible gain line, waveform amplitude response, and breakpoint editing. | Review 0:04 clip gain versus track volume, 0:18 static control, 0:42 dynamic gain, 0:58 gain-line visibility, 1:04 Grabber breakpoint creation, and 1:13 vertical gain/horizontal timing movement. Mosh implements the behavior with original primitives; its shared waveform canvas now redraws amplitude per linear envelope segment. |
 | [Pro Tools Quick Tips: Editing Automation](https://www.youtube.com/watch?v=HjoNFBxyXYg) | Smart Tool selection/trim workflow, automation clipboard, node nudge and movement, modifier deletion, and Pencil clutching. | Review 0:15 selection, 0:18-0:25 cut/copy/paste, 0:24 trim, 0:40 nudge, 0:45 node move, 0:56 delete, 1:03 Control line Pencil, and 1:09 Control+Command freehand. Use the 25/75 help-page contract for exact hit geometry. |
 | [Pro Tools Quick Tips: MIDI Editor](https://www.youtube.com/watch?v=FDqKlSMKCGw) | Double-click MIDI clip opening, independent tools/modes, vertical keyboard, controller/velocity lane, and multi-track editing. | Review 0:00 open behavior, 0:34 keyboard, 0:43 controller lane, and 0:51 Track List. This directly supports Mosh's bottom editor direction. |
+| [Pro Tools Quick Tips: Track Views](https://www.youtube.com/watch?v=VyEEufPAZ5s) | Contextual Track View choices, primary Waveform/Clips/Notes/automation presentation, the main-keyboard Minus toggle, and automation-lane disclosure. | Review 0:00 selector, 0:04 Waveform, 0:11 automation, 0:26 instrument Clips/Notes, 0:40 audio Minus toggle, 0:53 instrument Minus toggle, and 0:56 automation lanes. |
 
 ## Reputable visual cross-check
 
@@ -44,6 +47,7 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 - Smart Tool is contextual. Its pointer affordance and action must follow media type and pointer region rather than act as a cosmetic toggle.
 - In Spot mode, activating a clip through its Grabber intent opens a modal placement surface instead of beginning a free drag. The placement value uses the selected Time Scale and commits the clip Start through the normal move command.
 - Tab changes navigation target according to Tab to Transients. When transient data is unavailable in Mosh, a clip-boundary fallback is honest and matches the documented disabled behavior.
+- Track View is project-scoped shell state: audio tracks default to Waveform, MIDI/instrument tracks default to Clips, the main-keyboard Minus key toggles each track's two common views, and a separate disclosure exposes automation beneath the primary edit view.
 
 ## Mosh adaptations and explicit non-claims
 
@@ -52,6 +56,7 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 - Compact behavior will collapse or overlay supporting lists before shrinking the timeline below usability. This is a responsive adaptation for Mosh's WebView, not a claim about Pro Tools mobile behavior.
 - The first Spot dialog slice supports precise Start placement in the four shell time scales. Timecode follows the shell's existing fixed 30 fps ruler until project timecode-rate metadata exists; Sync Point and timestamp recall remain explicit adaptations until Mosh exposes those fields additively.
 - Static per-clip gain uses `set_clip_gain`; dynamic clip-local gain uses the additive `write_clip_gain_curve` command. Both are behaviorally grounded by Avid's current Clip Gain walkthrough and use original Mosh DOM/CSS/SVG/canvas work. Dynamic breakpoint processing and per-segment waveform response are implemented without replacing track volume or static clip gain; non-linear curve-shape visualization and Memory Locations remain outside this delivery.
+- The first Track Views slice exposes Waveform/Volume and Clips/Notes, plus one secondary Volume lane. It deliberately defers multiple simultaneous automation lanes, Playlists, Elastic Audio Warp views, and direct per-note editing in the track row; MIDI note editing remains in Mosh's documented bottom editor.
 
 ## Design consequences
 

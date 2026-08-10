@@ -5,6 +5,7 @@ import type { Snapshot } from "../types";
 import { useProTools, type ProToolsEditMode } from "./proToolsState";
 import type { ProToolsTool } from "./smartTool";
 import { nextTabPosition } from "./tabNavigation";
+import { nextCommonProToolsTrackView } from "./trackViews";
 
 const EDIT_MODE_KEYS: Readonly<Partial<Record<string, ProToolsEditMode>>> = {
   F1: "shuffle",
@@ -57,7 +58,9 @@ function peaksAmplitude(bucket: readonly [number, number] | undefined): number {
 export function useProToolsKeys(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return;
+      if (event.defaultPrevented
+        || isEditableTarget(event.target)
+        || isEditableTarget(document.activeElement)) return;
 
       const mode = EDIT_MODE_KEYS[event.key];
       if (mode && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -72,6 +75,17 @@ export function useProToolsKeys(): void {
         const proTools = useProTools.getState();
         proTools.setActiveTool(tool);
         if (proTools.smartToolEnabled) proTools.toggleSmartTool();
+        return;
+      }
+
+      if ((event.key === "-" || event.code === "NumpadSubtract")
+        && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        const store = useStore.getState();
+        const track = store.snapshot?.tracks.find((candidate) => candidate.id === store.selectedTrackId);
+        if (!track) return;
+        event.preventDefault();
+        const proTools = useProTools.getState();
+        proTools.setTrackView(track.id, nextCommonProToolsTrackView(track, proTools.trackViews[track.id]));
         return;
       }
 

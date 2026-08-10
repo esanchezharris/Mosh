@@ -125,6 +125,59 @@ test("mode, tool, Smart Tool, and resizable headers are keyboard operable", asyn
   await expect(resizer).toHaveAttribute("aria-valuenow", String(before + 8));
 });
 
+test("Track Views follow contextual selectors, Minus toggles, and automation disclosure", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+
+  const keysHeader = page.getByTestId("pt-track-header").filter({ hasText: "Keys" });
+  const keysTrackId = await keysHeader.getAttribute("data-track-id");
+  if (!keysTrackId) throw new Error("Keys track id is absent");
+  const keysLane = page.locator(`[data-testid="pt-lane"][data-track-id="${keysTrackId}"]`);
+  const keysView = keysHeader.getByTestId("pt-track-view");
+
+  await expect(keysView).toHaveValue("waveform");
+  await expect(keysLane).toHaveAttribute("data-track-view", "waveform");
+  await expect(keysLane).toHaveAttribute("data-secondary-automation", "false");
+  await expect(keysLane.getByTestId("v2-clip")).toBeVisible();
+
+  // The native fader target is intentionally lazy. A normal inspector adjustment
+  // materializes it before the producer opens Volume automation.
+  await keysHeader.getByTestId("pt-track-select").click();
+  await page.getByTestId("pt-track-volume").fill("-7");
+  await keysView.selectOption("volume");
+  await expect(keysLane).toHaveAttribute("data-track-view", "volume");
+  await expect(keysLane.getByTestId("v2-clip")).toHaveCount(0);
+  await expect(keysLane.getByTestId("pt-automation-lane-frame")).toHaveAttribute("data-primary", "true");
+  await expect(keysLane.getByRole("button", { name: /Keys automation, Volume\./ })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("protools-track-views-wide.png"), animations: "disabled" });
+
+  await keysHeader.getByTestId("pt-track-select").click();
+  await page.keyboard.press("-");
+  await expect(keysView).toHaveValue("waveform");
+  await expect(keysLane.getByTestId("v2-clip")).toBeVisible();
+
+  await keysHeader.getByTestId("pt-automation-lanes").click();
+  await expect(keysLane).toHaveAttribute("data-secondary-automation", "true");
+  await expect(keysLane.getByTestId("pt-automation-lane-frame")).toHaveAttribute("data-primary", "false");
+
+  const drumsHeader = page.getByTestId("pt-track-header").filter({ hasText: "Drums" });
+  const drumsTrackId = await drumsHeader.getAttribute("data-track-id");
+  if (!drumsTrackId) throw new Error("Drums track id is absent");
+  const drumsLane = page.locator(`[data-testid="pt-lane"][data-track-id="${drumsTrackId}"]`);
+  const drumsView = drumsHeader.getByTestId("pt-track-view");
+  await expect(drumsView).toHaveValue("clips");
+  await drumsHeader.getByTestId("pt-track-select").click();
+  await page.keyboard.press("-");
+  await expect(drumsView).toHaveValue("notes");
+  await expect(drumsLane).toHaveAttribute("data-track-view", "notes");
+  await expect(drumsLane.getByTestId("v2-clip")).toBeVisible();
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
+  await page.screenshot({ path: testInfo.outputPath("protools-track-views-compact.png"), animations: "disabled" });
+});
+
 test("Spot mode opens a keyboard modal and moves the clip through the command seam", async ({ page }, testInfo) => {
   // Given: the Pro Tools shell is in Spot mode with a rendered clip focused.
   await page.setViewportSize({ width: 1440, height: 900 });

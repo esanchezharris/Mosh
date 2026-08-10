@@ -23,6 +23,8 @@ describe("Pro Tools shell state", () => {
       nudgeValue: state.nudgeValue,
       classicTheme: state.classicTheme,
       automationClipboard: state.automationClipboard,
+      trackViews: state.trackViews,
+      automationLanesVisible: state.automationLanesVisible,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -39,6 +41,8 @@ describe("Pro Tools shell state", () => {
       nudgeValue: 0.25,
       classicTheme: false,
       automationClipboard: null,
+      trackViews: {},
+      automationLanesVisible: {},
     });
   });
 
@@ -98,5 +102,29 @@ describe("Pro Tools shell state", () => {
 
     useProTools.getState().resetForProject(projectEpoch + 1);
     expect(useProTools.getState().automationClipboard).toBeNull();
+  });
+
+  it("keeps Track Views project-scoped and independent per track", () => {
+    const state = useProTools.getState();
+
+    state.setTrackView("audio-1", "volume");
+    state.setTrackView("midi-1", "notes");
+    state.toggleAutomationLane("audio-1");
+
+    expect(useProTools.getState().trackViews).toEqual({
+      "audio-1": "volume",
+      "midi-1": "notes",
+    });
+    expect(useProTools.getState().automationLanesVisible).toEqual({ "audio-1": true });
+
+    state.resetForProject(projectEpoch);
+    expect(useProTools.getState().trackViews).toEqual({
+      "audio-1": "volume",
+      "midi-1": "notes",
+    });
+
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().trackViews).toEqual({});
+    expect(useProTools.getState().automationLanesVisible).toEqual({});
   });
 });

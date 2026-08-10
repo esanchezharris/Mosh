@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { Track } from "../types";
 import {
+  automationTargetByName,
   automationClipboardFromSelection,
   automationLinePoints,
   automationPointsForPaste,
@@ -7,6 +9,7 @@ import {
   automationReplacementBounds,
   automationSegmentPreview,
   nudgeAutomationPoints,
+  moveAutomationPoint,
   selectedAutomationPointIndices,
 } from "./automationEditing";
 
@@ -69,5 +72,51 @@ describe("Pro Tools automation editing geometry", () => {
     expect(automationSegmentPreview(points, line)).toEqual([
       { t: 1, v: 0.2 }, { t: 3, v: 0.7 }, { t: 5, v: 0.4 },
     ]);
+  });
+
+  it("resolves a named mixer target before similarly named insert parameters", () => {
+    const track: Track = {
+      id: "track-1",
+      index: 0,
+      name: "Audio",
+      type: "audio",
+      clips: [],
+      plugins: [{
+        index: 2,
+        name: "Insert Gain",
+        type: "gain",
+        enabled: true,
+        external: false,
+        isInstrument: false,
+        params: [{ index: 0, name: "Volume", value: 0.5, points: [] }],
+      }],
+      mixerPlugins: [{
+        index: 8,
+        name: "Track Fader",
+        type: "moshTrackFader",
+        enabled: true,
+        external: false,
+        isInstrument: false,
+        params: [{ index: 1, name: "Volume", value: 0.8, points: [{ t: 1, v: 0.7 }] }],
+      }],
+    };
+
+    expect(automationTargetByName(track, "volume")).toEqual({
+      pluginIndex: 8,
+      paramIndex: 1,
+      paramName: "Volume",
+      value: 0.8,
+      points: [{ t: 1, v: 0.7 }],
+    });
+  });
+
+  it("scales point movement against a full-height primary automation graph", () => {
+    expect(moveAutomationPoint({
+      point: { t: 1, v: 0.5 },
+      deltaX: 50,
+      deltaY: -8,
+      pxPerSec: 100,
+      graphHeightPx: 80,
+    })).toEqual({ t: 1.5, v: 0.6 });
   });
 });

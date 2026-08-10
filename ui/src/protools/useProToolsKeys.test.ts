@@ -29,6 +29,22 @@ const SNAPSHOT: Snapshot = {
       sourceFile: "/tmp/verse.wav",
       hasRenderLayer: false,
     }],
+  }, {
+    id: "track-2",
+    index: 1,
+    name: "Instrument",
+    type: "midi",
+    isInstrument: true,
+    clips: [{
+      id: "clip-2",
+      name: "Keys",
+      type: "midi",
+      start: 8,
+      length: 4,
+      offset: 0,
+      hasRenderLayer: false,
+      notes: [],
+    }],
   }],
   transport: {
     playing: false,
@@ -64,6 +80,7 @@ describe("useProToolsKeys", () => {
       selection: new Set<string>(),
       peaks: {},
       projectEpoch: 7,
+      selectedTrackId: "track-1",
       exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
         return { ok: true, command };
@@ -79,6 +96,7 @@ describe("useProToolsKeys", () => {
       snapshot: null,
       selection: new Set<string>(),
       peaks: {},
+      selectedTrackId: null,
       exec: originalExec,
     });
     vi.restoreAllMocks();
@@ -189,6 +207,37 @@ describe("useProToolsKeys", () => {
       command: "move_clip",
       args: { clipId: "clip-1", start: 2.25 },
     }));
+  });
+
+  it("toggles the selected track's two common Track Views with Minus", () => {
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "-", code: "Minus", bubbles: true, cancelable: true,
+    })));
+    expect(useProTools.getState().trackViews["track-1"]).toBe("volume");
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "-", code: "Minus", bubbles: true, cancelable: true,
+    })));
+    expect(useProTools.getState().trackViews["track-1"]).toBe("waveform");
+
+    act(() => useStore.setState({ selectedTrackId: "track-2" }));
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "-", code: "Minus", bubbles: true, cancelable: true,
+    })));
+    expect(useProTools.getState().trackViews["track-2"]).toBe("notes");
+    expect(execCalls).toEqual([]);
+  });
+
+  it("leaves a consumed Minus event with the focused automation editor", () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "-", code: "Minus", bubbles: true, cancelable: true,
+    });
+    event.preventDefault();
+
+    act(() => window.dispatchEvent(event));
+
+    expect(useProTools.getState().trackViews).toEqual({});
+    expect(execCalls).toEqual([]);
   });
 });
 

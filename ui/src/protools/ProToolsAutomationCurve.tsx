@@ -27,6 +27,8 @@ type Props = {
   readonly pxPerSec: number;
   readonly width: number;
   readonly onEditKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => boolean;
+  readonly graphTopPx?: number;
+  readonly graphHeightPx?: number;
 };
 
 type PointGesture = {
@@ -42,12 +44,22 @@ type PointGesture = {
   value: AutoPoint;
 };
 
-function pointTop(value: number): number {
-  return AUTOMATION_GRAPH_TOP_PX + (1 - value) * AUTOMATION_GRAPH_HEIGHT_PX;
+function pointTop(value: number, graphTopPx: number, graphHeightPx: number): number {
+  return graphTopPx + (1 - value) * graphHeightPx;
 }
 
 export function ProToolsAutomationCurve(props: Props) {
-  const { trackId, target, points, selection, pxPerSec, width, onEditKeyDown } = props;
+  const {
+    trackId,
+    target,
+    points,
+    selection,
+    pxPerSec,
+    width,
+    onEditKeyDown,
+    graphTopPx = AUTOMATION_GRAPH_TOP_PX,
+    graphHeightPx = AUTOMATION_GRAPH_HEIGHT_PX,
+  } = props;
   const exec = useStore((state) => state.exec);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const [previewPoints, setPreviewPoints] = useState<readonly AutoPoint[] | null>(null);
@@ -124,6 +136,7 @@ export function ProToolsAutomationCurve(props: Props) {
       deltaX: event.clientX - current.startX,
       deltaY: event.clientY - current.startY,
       pxPerSec,
+      graphHeightPx,
     });
     setPreviewPoints(replaceAutomationPoint(
       current.originalPoints,
@@ -184,11 +197,25 @@ export function ProToolsAutomationCurve(props: Props) {
     removePoint(point.pointIndex);
   };
 
-  const path = orderedPoints.map((point, index) => {
-    const x = Math.max(0, point.t * pxPerSec);
-    const y = pointTop(point.v);
-    return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(" ");
+  const path = (() => {
+    if (!target) return "";
+    const first = orderedPoints[0];
+    const last = orderedPoints.at(-1);
+    if (!first || !last) {
+      const y = pointTop(target.value, graphTopPx, graphHeightPx).toFixed(1);
+      return `M 0.0 ${y} L ${width.toFixed(1)} ${y}`;
+    }
+    const commands = [
+      `M 0.0 ${pointTop(first.v, graphTopPx, graphHeightPx).toFixed(1)}`,
+      ...orderedPoints.map((point) => {
+        const x = Math.max(0, point.t * pxPerSec);
+        const y = pointTop(point.v, graphTopPx, graphHeightPx);
+        return `L ${x.toFixed(1)} ${y.toFixed(1)}`;
+      }),
+      `L ${width.toFixed(1)} ${pointTop(last.v, graphTopPx, graphHeightPx).toFixed(1)}`,
+    ];
+    return commands.join(" ");
+  })();
 
   return (
     <>
@@ -198,7 +225,7 @@ export function ProToolsAutomationCurve(props: Props) {
       {target && orderedPoints.map((point) => {
         const pointStyle: CSSProperties = {
           left: point.t * pxPerSec,
-          top: pointTop(point.v),
+          top: pointTop(point.v, graphTopPx, graphHeightPx),
         };
         const selected = automationPointIsSelected(point, selection);
         return (

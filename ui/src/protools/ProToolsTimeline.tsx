@@ -12,6 +12,7 @@ import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
+import { resolveProToolsTrackView } from "./trackViews";
 
 type Props = {
   snapshot: Snapshot;
@@ -34,6 +35,8 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const activeTool = useProTools((s) => s.activeTool);
   const editMode = useProTools((s) => s.editMode);
   const setHoveredIntent = useProTools((s) => s.setHoveredIntent);
+  const trackViews = useProTools((s) => s.trackViews);
+  const automationLanesVisible = useProTools((s) => s.automationLanesVisible);
   const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
   const clipMap = useMemo(() => new Map(tracks.flatMap((track) =>
     track.clips.map((clip) => [clip.id, { clip, track }] as const))), [tracks]);
@@ -220,29 +223,38 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
         onKeyDownCapture={onKeyDownCapture}
         onPointerLeave={() => { lastIntentClip.current?.removeAttribute("data-pt-intent"); setHoveredIntent(null); }}>
         <div className="pt-timeline-title-spacer">Timeline</div>
-        {tracks.map((track) => (
-          <div key={track.id} className="pt-lane" data-testid="pt-lane" data-track-id={track.id}
-            style={{
-              height: TRACK_ROW_HEIGHT,
-              "--pt-track-color": track.color ?? "var(--pt-selected)",
-              "--pt-beat-px": `${beatsInSeconds * pxPerSec}px`,
-            } as React.CSSProperties}>
-            {track.clips.filter((clip) => !clip.hidden).map((clip) => {
-              if (clip.type === "wave") {
-                return <ProToolsAudioClip key={clip.id} clip={clip} snapshot={snapshot} track={track} />;
-              }
-              return (
-                <span key={clip.id}>
-                  <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
-                    clipHeaderPx={0}
-                    clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
-                    gestureTable={() => proToolsGestureTable("midi", smartToolEnabled, activeTool)} />
-                </span>
-              );
-            })}
-            <ProToolsAutomationLane track={track} width={contentWidth} />
-          </div>
-        ))}
+        {tracks.map((track) => {
+          const trackView = resolveProToolsTrackView(track, trackViews[track.id]);
+          const primaryAutomation = trackView === "volume";
+          const secondaryAutomation = !primaryAutomation && Boolean(automationLanesVisible[track.id]);
+          return (
+            <div key={track.id} className="pt-lane" data-testid="pt-lane" data-track-id={track.id}
+              data-track-view={trackView} data-secondary-automation={secondaryAutomation}
+              style={{
+                height: TRACK_ROW_HEIGHT,
+                "--pt-track-color": track.color ?? "var(--pt-selected)",
+                "--pt-beat-px": `${beatsInSeconds * pxPerSec}px`,
+              } as React.CSSProperties}>
+              {!primaryAutomation && track.clips.filter((clip) => !clip.hidden).map((clip) => {
+                if (clip.type === "wave") {
+                  return <ProToolsAudioClip key={clip.id} clip={clip} snapshot={snapshot} track={track} />;
+                }
+                return (
+                  <span key={clip.id}>
+                    <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
+                      clipHeaderPx={0}
+                      clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
+                      gestureTable={() => proToolsGestureTable("midi", smartToolEnabled, activeTool)} />
+                  </span>
+                );
+              })}
+              {(primaryAutomation || secondaryAutomation) && (
+                <ProToolsAutomationLane track={track} width={contentWidth}
+                  primary={primaryAutomation} targetName="Volume" />
+              )}
+            </div>
+          );
+        })}
         {tracks.length === 0 && <p className="pt-timeline-empty" role="status">Add a track to begin editing.</p>}
         {marquee && <div className="pt-marquee" style={{
           left: Math.min(marquee.startX, marquee.x),
