@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { ProToolsClipList } from "./ProToolsClipList";
+import { ProToolsLowerZoom } from "./ProToolsLowerZoom";
 import { ProToolsRulers } from "./ProToolsRulers";
 import { ProToolsSpotDialog } from "./ProToolsSpotDialog";
 import { ProToolsTimeline } from "./ProToolsTimeline";
@@ -94,6 +95,7 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
               setTrackHeaderWidth(trackHeaderWidth + delta);
             }} />
         </div>
+        <ProToolsLowerZoom />
       </div>
       <ProToolsClipList snapshot={snapshot} open={clipListOpen} onOpenChange={setClipListOpen} />
       {spotClip && (

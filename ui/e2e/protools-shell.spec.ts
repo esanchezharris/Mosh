@@ -176,6 +176,10 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(320);
   await page.getByTestId("pt-zoom-preset-3").click();
   await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(80);
+  await page.getByTestId("pt-lower-zoom-in").click();
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(112);
+  await page.getByTestId("pt-lower-zoom-out").click();
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(80);
 
   await timeline.focus();
   await page.keyboard.press("F5");
@@ -230,7 +234,7 @@ test("tutorial-backed Zoom controls preserve the editing focus workflow", async 
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 720, height: 720 });
-  const zoomGroup = page.getByRole("group", { name: "Horizontal Zoom" });
+  const zoomGroup = page.getByRole("group", { name: "Horizontal Zoom", exact: true });
   await zoomGroup.scrollIntoViewIfNeeded();
   await expect(zoomGroup).toBeInViewport();
   await expect(page.getByTestId("pt-zoom-in")).toBeVisible();

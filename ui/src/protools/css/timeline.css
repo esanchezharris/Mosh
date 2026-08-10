@@ -109,6 +109,40 @@
   overscroll-behavior: contain;
   background: var(--pt-canvas);
 }
+.pt-lower-zoom {
+  position: absolute;
+  z-index: 12;
+  right: 8px;
+  bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid var(--pt-border);
+  border-radius: 2px;
+  background: var(--pt-surface);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.45);
+}
+.pt-lower-zoom button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--pt-border);
+  border-top-color: var(--pt-highlight);
+  border-radius: 1px;
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  font: 700 13px/1 sans-serif;
+}
+.pt-lower-zoom output {
+  display: grid;
+  width: 32px;
+  height: 20px;
+  place-items: center;
+  color: var(--pt-text-muted);
+  background: var(--pt-inset);
+  font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .pt-timeline-content { position: relative; min-height: 100%; }
 .pt-timeline-title-spacer {
   position: relative;
