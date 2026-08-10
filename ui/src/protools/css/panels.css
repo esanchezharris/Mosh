@@ -40,6 +40,7 @@
 .pt-track-visibility-state { display: grid; width: 14px; place-items: center; }
 .pt-track-visibility-state[data-shown="false"]::before { content: "·"; }
 .pt-track-visibility-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-track-active-state { margin-left: auto; color: var(--pt-text-muted); font-style: italic; }
 .pt-track-list-empty,
 .pt-clip-list-empty { margin: 12px; color: var(--pt-text-muted); }
 .pt-track-header {
@@ -54,6 +55,14 @@
   box-shadow: inset 0 1px color-mix(in srgb, var(--pt-highlight) 72%, transparent), inset 0 -1px var(--pt-border);
 }
 .pt-track-header[data-selected="true"] { background: color-mix(in srgb, var(--pt-selected) 22%, var(--pt-surface)); }
+.pt-track-header[data-track-active="false"] .pt-track-color { opacity: 0.35; }
+.pt-track-header[data-track-active="false"] .pt-track-name {
+  color: var(--pt-text-muted);
+  font-style: italic;
+}
+.pt-track-header[data-track-active="false"] .pt-track-controls,
+.pt-track-header[data-track-active="false"] .pt-track-route,
+.pt-track-header[data-track-active="false"] .pt-track-view-controls { opacity: 0.58; }
 .pt-track-header[data-track-height-compact="true"] {
   grid-template-rows: 32px 22px 15px 0 minmax(0, 1fr);
 }

@@ -1496,7 +1496,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 99.0);
       check (! ok (cmd (ops, "split_clip", var (a))), "split far outside clip errors"); }
 
-    // mixer: volume / pan / mute / solo
+    // mixer: volume / pan / mute / solo / active
     { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("db", -6.0);
       check (ok (cmd (ops, "set_track_volume", var (a))), "set_track_volume ok"); }
     check (std::abs ((double) firstTrack (ops).getProperty ("volumeDb", 0.0) + 6.0) < 0.5, "track volume ~= -6 dB");
@@ -1509,6 +1509,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("solo", true);
       cmd (ops, "set_track_solo", var (a)); }
     check ((bool) firstTrack (ops).getProperty ("solo", false), "track soloed");
+    check ((bool) firstTrack (ops).getProperty ("active", false), "track active by default");
+    check (ok (cmd (ops, "set_track_active", objN ({{ "trackId", tid }, { "active", false }}))),
+           "set_track_active false ok");
+    check (! (bool) firstTrack (ops).getProperty ("active", true), "inactive track exposed in snapshot");
+    check (ok (cmd (ops, "undo")), "undo track inactive ok");
+    check ((bool) firstTrack (ops).getProperty ("active", false), "undo restores active track");
+    check (ok (cmd (ops, "redo")), "redo track inactive ok");
+    check (! (bool) firstTrack (ops).getProperty ("active", true), "redo restores inactive track");
+    check (ok (cmd (ops, "set_track_active", objN ({{ "trackId", tid }, { "active", true }}))),
+           "set_track_active true ok");
+    check (! ok (cmd (ops, "set_track_active",
+                      objN ({{ "trackId", "no-such-track" }, { "active", false }}))),
+           "set_track_active rejects an unknown track");
 
     // get_clip_peaks -> non-empty peak array (waveform from backend)
     { auto* a = new DynamicObject(); a->setProperty ("clipId", firstTrack (ops)["clips"][0].getProperty ("id", var()));
@@ -13998,6 +14011,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "set_track_pan",        objN ({ { "trackId", mt }, { "pan", 0.4 } }) },
             { "set_track_mute",       objN ({ { "trackId", mt }, { "mute", true } }) },
             { "set_track_solo",       objN ({ { "trackId", mt }, { "solo", true } }) },
+            { "set_track_active",     objN ({ { "trackId", mt }, { "active", false } }) },
             { "move_clip",            objN ({ { "clipId", mwc }, { "start", 5.0 } }) },
             { "rename_clip",          objN ({ { "clipId", mwc }, { "name", "MxClip" } }) },
             { "set_clip_gain",        objN ({ { "clipId", mwc }, { "gainDb", -5.0 } }) },

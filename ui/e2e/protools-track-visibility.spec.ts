@@ -140,3 +140,48 @@ test("Show Only Selected Tracks restores its exact previous Edit view", async ({
   })).toHaveAttribute("aria-disabled", "true");
   expect(await commandNames(page)).toEqual(commandsBefore);
 });
+
+test("Track List makes a selected track inactive without hiding it", async ({ page }, testInfo) => {
+  // Given the wide Edit Window has Drums selected and all Edit rows shown.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  const selectedHeader = page.getByTestId("pt-track-header").filter({ hasText: "Drums" });
+  await expect(selectedHeader.getByTestId("pt-track-select")).toHaveAttribute("aria-pressed", "true");
+  const trackId = await selectedHeader.getAttribute("data-track-id");
+  if (!trackId) throw new Error("Selected Drums track id is unavailable");
+
+  // When Make Selected Tracks Inactive is chosen from the Track List menu.
+  await page.getByTestId("pt-track-visibility-menu").click();
+  await page.getByRole("menuitem", { name: "Make Selected Tracks Inactive", exact: true }).click();
+
+  // Then the row and clips remain visible, but both aligned surfaces expose inactive state.
+  await expect(selectedHeader).toHaveAttribute("data-track-active", "false");
+  await expect(selectedHeader.getByTestId("pt-track-select"))
+    .toHaveAttribute("aria-label", "Select track Drums, inactive");
+  await expect(page.locator(`[data-testid="pt-lane"][data-track-id="${trackId}"]`))
+    .toHaveAttribute("data-track-active", "false");
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
+  await expect(page.getByTestId("pt-clip-list-item").filter({ hasText: "Drums" })).toBeVisible();
+  await expect.poll(async () => (await commandNames(page)).at(-1)).toBe("set_track_active");
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-inactive-wide.png"),
+    animations: "disabled",
+  });
+
+  // And the same inactive state stays legible in the reduced-motion compact shell.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(selectedHeader).toHaveAttribute("data-track-active", "false");
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-inactive-compact.png"),
+    animations: "disabled",
+  });
+
+  // When the selected track is made active again.
+  await page.getByTestId("pt-track-visibility-menu").click();
+  await page.getByRole("menuitem", { name: "Make Selected Tracks Active", exact: true }).click();
+
+  // Then processing state returns without changing Track List visibility.
+  await expect(selectedHeader).toHaveAttribute("data-track-active", "true");
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
+});

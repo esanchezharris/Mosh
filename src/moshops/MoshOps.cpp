@@ -627,6 +627,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
     if (name == "set_track_mute")    return cmdSetTrackMute (args);
     if (name == "set_track_solo")    return cmdSetTrackSolo (args);
+    if (name == "set_track_active")  return cmdSetTrackActive (args);
     if (name == "arm_track")         return cmdArmTrack (args);
     if (name == "stop_recording")    return cmdStopRecording (args);
     if (name == "set_input_monitor") return cmdSetInputMonitor (args);
@@ -3345,6 +3346,10 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));
+    // Pro Tools-style active/inactive is distinct from both mute and Track List
+    // visibility. Tracktion persists this as IDs::process and removes an inactive
+    // track (including its plug-ins) from the playback graph while retaining state.
+    o->setProperty ("active", t.isProcessing (false));
     // G10 — automation record-arm mode ("read"|"touch"|"latch"|"write"); defaults to
     // "read" for a track that never called set_track_automation_mode.
     {
@@ -3932,7 +3937,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "promote_take_region",
         "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "relink_clip", "set_clip_warp",
         "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
-        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_section", "rename_section", "move_section", "remove_section",
         "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
         "set_tempo", "set_time_signature", "set_metronome", "set_key", "set_project_settings" };

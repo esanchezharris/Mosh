@@ -460,7 +460,7 @@ const mockManifestDigest = (name: string, manifest: readonly unknown[]): string 
 // txnSafeRegistry.test.ts parses the C++ registry and requires this list to equal it, so
 // the mock cannot quietly admit something the engine refuses (or vice versa).
 const MOCK_TXN_SAFE = new Set([
-  "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+  "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
   "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
   "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
   "promote_take_region",
@@ -1449,6 +1449,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
     case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+    case "set_track_active": { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); const active = args.active !== false; if ((t.active ?? true) === active) return ok(command); pushUndo(); t.active = active; invalidate(); return ok(command); }
 
     // ── sends / returns / aux buses (Wave 8) ─────────────────────────────────
     // A "bus" is an integer; the return is an instrument-free audio track carrying

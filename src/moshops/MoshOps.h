@@ -274,6 +274,7 @@ private:
     juce::var cmdSetTrackPan    (const juce::var& args);
     juce::var cmdSetTrackMute   (const juce::var& args);
     juce::var cmdSetTrackSolo   (const juce::var& args);
+    juce::var cmdSetTrackActive (const juce::var& args);
     // Wave: recording — arm tracks + input monitoring
     juce::var cmdArmTrack       (const juce::var& args);
     juce::var cmdSetInputMonitor (const juce::var& args);

@@ -376,6 +376,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           );
           return (
             <div key={track.id} className="pt-lane" data-testid="pt-lane" data-track-id={track.id}
+              data-track-active={track.active !== false}
               data-track-view={trackView} data-secondary-automation={secondaryAutomation}
               data-track-height-compact={trackHeightScale < 1}
               style={{

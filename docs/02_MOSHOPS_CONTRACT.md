@@ -34,6 +34,7 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 |---|---|---|---|---|
 | `create_track` | `{name?}` | ✓ | `{trackId}` | `snapshot_invalidated` |
 | `rename_track` | `{trackId, name}` | ✓ | — | `snapshot_invalidated` |
+| `set_track_active` | `{trackId, active}` | ✓ | — | `snapshot_invalidated` (scoped track patch) |
 | `remove_track` | `{trackId}` | ✓ | — | `snapshot_invalidated` |
 | `import_clip` | `{file, trackId?, startSeconds?, name?}` | ✓ | `{clipId, trackId}` | `snapshot_invalidated` |
 | `add_test_tone_clip` | `{seconds?, freq?, trackId?, name?}` | ✓ | `{clipId, trackId}` | `snapshot_invalidated` |
@@ -55,6 +56,8 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `clear_automation` | `{trackId, pluginIndex, paramIndex}` | ✓ | — | `snapshot_invalidated` |
 | `set_track_automation_mode` | `{trackId, mode: read\|touch\|latch\|write}` | ✓ | — | `snapshot_invalidated` (scoped track patch) |
 | `write_automation_curve` | `{trackId, pluginIndex, paramIndex, points: [{t,v:0-1,curve?}] \| JSON string, apply?: replace\|merge, replaceStart?: seconds, replaceEnd?: seconds}` | ✓ | `{pointCount, numPoints}` | `snapshot_invalidated` |
+
+`set_track_active` is the Pro Tools-style processing-state command, distinct from both mute and UI-local Track List visibility. `active:false` persists Tracktion's undo-managed `process` property, excludes the track from playback graph construction, and disables processing for its owned plug-ins while leaving the track, clips, routing, and Track List row in the session. The snapshot exposes additive `track.active` (`true` when the field is absent for older consumers). The command is Track-scoped for multiplayer, replayable, JSONL-recorded, save/reload-safe, and a same-state request is a successful no-op that does not create an empty undo step.
 
 *Audio warp — "easy" Ableton-style (post-Stage-6): `set_clip_warp` toggles auto-tempo on a wave clip (Tracktion `TimeStretcher`/SoundTouch); with `detect:true` (and no explicit `sourceBpm`) it estimates the loop's own BPM offline and locks it to the grid. `stretch_clip` time-stretches a wave clip to a target warped `length` (seconds) OR a `bars` count by deriving `sourceBpm` (`warpedLen = sourceLen × sourceBpm / projectBpm`) and enabling auto-tempo — it powers the ⌘-drag-edge stretch gesture and the Inspector "Fit N bars / ½× / 2×" helpers. `detect_clip_bpm` is a read-only offline estimate (onset-envelope autocorrelation, pure C++ so it runs in `--selftest`) → `{bpm, confidence}`. Per-transient warp MARKERS remain a deferred subsystem.*
 

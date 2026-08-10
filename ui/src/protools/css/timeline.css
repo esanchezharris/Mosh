@@ -289,6 +289,15 @@
       var(--pt-grid) calc(var(--pt-beat-px, 40px) - 1px),
       var(--pt-grid) var(--pt-beat-px, 40px));
 }
+.pt-lane[data-track-active="false"] {
+  background-color: color-mix(in srgb, var(--pt-canvas) 72%, var(--pt-inset));
+}
+.pt-lane[data-track-active="false"] .v2-clip,
+.pt-lane[data-track-active="false"] .pt-playlists,
+.pt-lane[data-track-active="false"] .pt-automation-lane {
+  opacity: 0.52;
+  filter: saturate(0.35);
+}
 .protools-shell .pt-lane .v2-clip {
   top: 2px;
   bottom: calc(var(--pt-automation-h) + 2px);

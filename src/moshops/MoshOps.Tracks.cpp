@@ -894,6 +894,24 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
     return okResult ("set_track_solo");
 }
 
+juce::var MoshOps::cmdSetTrackActive (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_track_active", "no track");
+    const bool active = (bool) args.getProperty ("active", true);
+    if (track->isProcessing (false) == active)
+        return okResult ("set_track_active");
+
+    beginTxn ("set_track_active");
+    // Track::processing is a CachedValue bound to the Edit UndoManager. Unlike mute,
+    // this public setter therefore records a real undo action and also propagates the
+    // processing state to every plug-in owned by this track.
+    track->setProcessing (active);
+    logLine ("set_track_active", args, true, {}, true);
+    emitTrackPatch (*track);
+    return okResult ("set_track_active");
+}
+
 juce::var MoshOps::cmdArmTrack (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());

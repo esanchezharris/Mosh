@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import type { Track } from "../types";
 import { IconCheck, IconLayers } from "../ui/icons";
 import { useProTools } from "./proToolsState";
+import { setProToolsTracksActive } from "./proToolsTrackActive";
 
 export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Track[] }) {
   const trackVisibility = useProTools((state) => state.trackVisibility);
@@ -23,6 +24,11 @@ export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Tr
   const shownTrackIds = trackIds.filter((trackId) => trackVisibility[trackId] !== false);
   const shownSelectedIds = shownTrackIds.filter((trackId) => selected.has(trackId));
   const eligibleSelectedIds = trackIds.filter((trackId) => selected.has(trackId));
+  const selectedTracks = tracks.filter((track) => selected.has(track.id));
+  const selectedHasInactiveTrack = selectedTracks.some((track) => track.active === false);
+  const activeActionLabel = selectedHasInactiveTrack
+    ? "Make Selected Tracks Active"
+    : "Make Selected Tracks Inactive";
 
   return (
     <MoshMenu label="Track visibility" align="start" trigger={
@@ -61,6 +67,14 @@ export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Tr
             onPick={restorePreviouslyShownTracks}>
             <span className="pt-track-visibility-name">Restore Previously Shown Tracks</span>
           </MoshMenuItem>
+          <MoshMenuItem testId="pt-track-active-selected" ariaLabel={activeActionLabel}
+            disabled={selectedTracks.length === 0}
+            onPick={() => void setProToolsTracksActive(
+              eligibleSelectedIds,
+              selectedHasInactiveTrack,
+            )}>
+            <span className="pt-track-visibility-name">{activeActionLabel}</span>
+          </MoshMenuItem>
         </div>
         {tracks.map((track) => {
           const shown = trackVisibility[track.id] !== false;
@@ -72,6 +86,9 @@ export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Tr
                 {shown ? <IconCheck size={12} /> : null}
               </span>
               <span className="pt-track-visibility-name">{track.name}</span>
+              {track.active === false
+                ? <span className="pt-track-active-state">Inactive</span>
+                : null}
             </MoshMenuItem>
           );
         })}

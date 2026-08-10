@@ -76,7 +76,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     static const std::set<juce::String> track {
         "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "import_clip", "import_clip_data",
         "add_test_tone_clip", "set_track_volume", "set_track_pan", "set_track_mute",
-        "set_track_solo", "arm_track", "set_input_monitor", "set_current_take",
+        "set_track_solo", "set_track_active", "arm_track", "set_input_monitor", "set_current_take",
         "keep_take", "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
         "set_plugin_param", "bypass_plugin",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",

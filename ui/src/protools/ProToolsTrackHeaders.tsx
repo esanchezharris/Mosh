@@ -67,6 +67,7 @@ function ProToolsTrackHeader({ track, tracks }: {
   const playlistRows = proToolsPlaylistRowCount(track);
   const heights = scaledTrackHeights(trackHeightScale);
   const rowHeight = proToolsTrackRowHeight(track, trackView, automationLaneVisible, trackHeightScale);
+  const active = track.active !== false;
 
   const selectTrack = (event: React.MouseEvent<HTMLButtonElement>) => {
     clearSelection();
@@ -93,6 +94,7 @@ function ProToolsTrackHeader({ track, tracks }: {
       data-testid="pt-track-header"
       data-track-id={track.id}
       data-selected={selected}
+      data-track-active={active}
       data-track-view={trackView}
       data-track-height-compact={trackHeightScale < 1}
       style={{
@@ -111,13 +113,13 @@ function ProToolsTrackHeader({ track, tracks }: {
         type="button"
         className="pt-track-select"
         data-testid="pt-track-select"
-        aria-label={`Select track ${track.name}`}
+        aria-label={`Select track ${track.name}${active ? "" : ", inactive"}`}
         aria-pressed={selected}
         onClick={selectTrack}
       >
         <span className="pt-track-index" aria-hidden="true">{track.index + 1}</span>
         <span className="pt-track-name" title={track.name}>{track.name}</span>
-        <span className="pt-track-type">{track.type}</span>
+        <span className="pt-track-type">{active ? track.type : `${track.type} · Inactive`}</span>
       </button>
       <div className="pt-track-controls" role="group" aria-label={`${track.name} track controls`}>
         <button

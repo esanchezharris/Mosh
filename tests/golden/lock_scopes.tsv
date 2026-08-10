@@ -203,6 +203,7 @@ set_send_level	Track
 set_tempo	SessionGlobal
 set_tempo_curve	SessionGlobal
 set_time_signature	SessionGlobal
+set_track_active	Track
 set_track_automation_mode	Track
 set_track_color	Track
 set_track_icon	Track

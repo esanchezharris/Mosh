@@ -399,6 +399,9 @@ export type Track = {
    *  src/plugins/mixer/TrackMutePlugin.h for how the two differ and why both exist. */
   mute?: boolean;
   solo?: boolean;
+  /** Playback/resource state. `false` retains the track but removes it and its plug-ins
+   *  from processing; absent snapshots are active for backward compatibility. */
+  active?: boolean;
   // G10 — automation record-arm mode. Absent (legacy/never-set track) means "read".
   // Track-wide, not per-parameter: while "write", every automatable param change on
   // this track captures a point. Only "write" is behavioral in v0 — "touch"/"latch"

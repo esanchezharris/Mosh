@@ -42,7 +42,7 @@ enum class Class
     costs a skill nothing while a wrong admission costs a partial mutation.
     Scope = the commands the transactable skills in SKILL_CATALOG use, plus the
     synchronous arrangement / mixer / plugin / section / MIDI / automation core a B2
-    skill plainly needs. All 47 satisfy criteria 1–4.
+    skill plainly needs. Every admitted entry satisfies criteria 1–4.
 
     Reviewed EXCLUSIONS (each mechanically "safe" but held out of v1 on purpose):
       • remove_bus / create_group_track / ungroup_track / delete_time_range /
@@ -69,7 +69,7 @@ inline const std::set<juce::String>& registry()
 {
     static const std::set<juce::String> safe {
         // ── mixer / track ──
-        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
         // ── clips ──
         "move_clip", "trim_clip", "split_clip", "promote_take_region", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
