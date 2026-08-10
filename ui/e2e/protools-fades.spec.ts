@@ -80,6 +80,22 @@ test("tutorial-backed Batch Fades persist curve-shaped overlap edits", async ({ 
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
+
+  const quickTraceStart = await page.evaluate(() => (
+    (window as ProToolsFadesWindow).__moshCmdTrace?.length ?? 0
+  ));
+  await page.keyboard.press("Meta+Control+f");
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => persistedFadeState(page, sourceId, neighborId)).toEqual({
+    source: { autoCrossfade: false, fadeInSec: 0.01, fadeOutSec: 1, fadeInType: 1, fadeOutType: 1 },
+    neighbor: { autoCrossfade: false, fadeInSec: 1, fadeOutSec: 0.01, fadeInType: 1, fadeOutType: 1 },
+  });
+  const quickCommands = await page.evaluate((start) => (
+    ((window as ProToolsFadesWindow).__moshCmdTrace ?? [])
+      .slice(start)
+      .map((entry) => entry.command)
+  ), quickTraceStart);
+  expect(quickCommands).toEqual(["batch_begin", "set_clip_fade", "set_clip_fade", "batch_end"]);
 });
 
 async function createSelectedOverlap(page: Page): Promise<{

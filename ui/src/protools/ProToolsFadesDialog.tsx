@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pushEscapeHandler } from "../hooks/escapeStack";
 import { useStore } from "../store";
+import { applyProToolsFadePlan } from "./proToolsFadeApply";
 import {
   buildProToolsFadePlan,
   PROTOOLS_FADE_CURVES,
@@ -21,7 +22,6 @@ export function ProToolsFadesDialog({ targets, onClose }: {
   readonly targets: readonly ProToolsFadeTarget[];
   readonly onClose: () => void;
 }) {
-  const runAtomic = useStore((state) => state.runAtomic);
   const projectEpoch = useStore((state) => state.projectEpoch);
   const dialogRef = useRef<HTMLElement>(null);
   const lengthRef = useRef<HTMLInputElement>(null);
@@ -98,42 +98,14 @@ export function ProToolsFadesDialog({ targets, onClose }: {
     }
     setError(null);
     setSubmitting(true);
-    let failure: string | null = null;
-    let stale = false;
-    try {
-      await runAtomic("create fades", async (exec) => {
-        const commands: Array<{ command: string; args: Record<string, unknown> }> = [
-          ...plan.disableAutoCrossfadeIds.map((clipId) => ({
-            command: "set_clip_crossfade",
-            args: { clipId, enabled: false },
-          })),
-          ...plan.edits.map((edit) => ({
-            command: "set_clip_fade",
-            args: { ...edit },
-          })),
-        ];
-        for (const command of commands) {
-          if (useStore.getState().projectEpoch !== openEpochRef.current) {
-            stale = true;
-            return;
-          }
-          const result = await exec(command.command, command.args);
-          if (!result.ok) {
-            failure = result.error ?? "The fade edit was rejected.";
-            return;
-          }
-        }
-      });
-    } catch (reason) {
-      failure = reason instanceof Error ? reason.message : "The fade edit could not be completed.";
-    }
-    if (stale || useStore.getState().projectEpoch !== openEpochRef.current) {
+    const result = await applyProToolsFadePlan("create fades", plan, openEpochRef.current);
+    if (result.stale) {
       onClose();
       return;
     }
-    if (failure) {
+    if (result.error) {
       setSubmitting(false);
-      setError(failure);
+      setError(result.error);
       return;
     }
     onClose();
