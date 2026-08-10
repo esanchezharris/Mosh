@@ -86,16 +86,38 @@
 .pt-ruler-selection-start,
 .pt-ruler-selection-end {
   position: absolute;
-  top: 0;
+  z-index: 1;
+  top: -2px;
+  width: 16px;
+  height: 18px;
+  border-radius: 2px;
+  outline: none;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+.pt-ruler-selection-start::after,
+.pt-ruler-selection-end::after {
+  position: absolute;
+  top: 2px;
+  left: 4px;
   width: 0;
   height: 0;
+  content: "";
   border-top: 6px solid var(--pt-selected);
   border-right: 4px solid transparent;
   border-left: 4px solid transparent;
 }
-.pt-ruler-selection-start { left: -4px; }
-.pt-ruler-selection-end { right: -4px; transform: rotate(180deg); }
-.pt-ruler-selection.is-record-armed > span { border-top-color: var(--pt-danger); }
+.pt-ruler-selection-start { left: -8px; }
+.pt-ruler-selection-end { right: -8px; }
+.pt-ruler-selection-end::after { transform: rotate(180deg); }
+.pt-ruler-selection-start:active,
+.pt-ruler-selection-end:active { cursor: grabbing; }
+.pt-ruler-selection-start:focus-visible,
+.pt-ruler-selection-end:focus-visible { box-shadow: 0 0 0 2px var(--pt-focus-ring); }
+.pt-ruler-selection-start.is-disabled,
+.pt-ruler-selection-end.is-disabled { cursor: default; pointer-events: none; }
+.pt-ruler-selection.is-record-armed > span::after { border-top-color: var(--pt-danger); }
 .pt-marker-ruler { overflow: visible; }
 .pt-marker-flag {
   position: absolute;
