@@ -975,6 +975,8 @@ const DEEP_SCAN_EXTRA = [
 ];
 let mockPluginCatalog = [...VST3S];
 let mockDeepScanned = false;
+type MockPluginBlockEntry = { id: string; rawId: string; reason: string };
+let mockPluginBlocklist: MockPluginBlockEntry[] = [];
 const COLORS = [
   { name: "grit", astd_max: 0.55, peak_layer: 2, more_sign: 1, verdict: "STRONG", no_stack_with: [] as string[] },
   { name: "brightness", astd_max: 0.5, peak_layer: 3, more_sign: 1, verdict: "STRONG", no_stack_with: ["air"] },
@@ -2806,6 +2808,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: mockPluginCatalog, counts: { vst3: VST3S.length, au: mockPluginCatalog.length - VST3S.length, total: mockPluginCatalog.length } });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
+    case "get_plugin_blocklist":
+      return ok(command, { blocklist: mockPluginBlocklist.map((entry) => ({ ...entry })) });
+    case "unblock_plugin": {
+      const pluginId = str(args.pluginId);
+      if (!pluginId) return err(command, "missing pluginId");
+      const index = mockPluginBlocklist.findIndex((entry) => entry.rawId === pluginId || entry.id === pluginId);
+      if (index < 0) return err(command, "plugin is not quarantined");
+      mockPluginBlocklist.splice(index, 1);
+      invalidate();
+      return ok(command);
+    }
     // FIT-003 — an explicit case (was a bare DEFAULT_OK passthrough returning no
     // `status`, which store.rescanPlugins() then read as `undefined !== "scanning"`
     // and treated as already-done — harmless for the real always-instant dev catalog,
@@ -4209,6 +4222,7 @@ export function __resetMockForTests(): void {
   syncRecents();
   landedLayers.clear();
   mockCorpusLines = 0;
+  mockPluginBlocklist = [];
   mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };
   mockAgentMemoryProject = [];
   mockAgentMemoryTs = 0;

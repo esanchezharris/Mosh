@@ -226,6 +226,7 @@ transform_notes	Clip
 transform_velocities	Clip
 trim_clip	Clip
 undo	Unguarded
+unblock_plugin	Unguarded
 unfreeze_layer	Clip
 unfreeze_track	Track
 ungroup_track	SessionGlobal
