@@ -144,4 +144,16 @@ describe("Pro Tools Session menu", () => {
     expect(timelineLink?.getAttribute("aria-pressed")).toBe("true");
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it("shows the optional Universe overview from an accessible pressed control", () => {
+    const toggle = host.querySelector<HTMLButtonElement>("[data-testid=pt-universe-toggle]");
+    if (!toggle) throw new Error("Universe view toggle is missing");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+    act(() => toggle.click());
+
+    expect(useProTools.getState().universeOpen).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(exec).not.toHaveBeenCalled();
+  });
 });

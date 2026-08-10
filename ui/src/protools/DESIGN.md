@@ -226,6 +226,15 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: the Track List is a labelled complementary region. Show and Edit are separate named native buttons with `aria-pressed`; the active target cannot be hidden. The target change is immediately reflected in the Piano Roll title and focus remains in the dock.
 - **Adaptation**: Pro Tools can pencil-enable more than one track. Mosh deliberately exposes one edit target because its canonical command owner is singular; multi-target Pencil writes and multi-track controller lanes remain explicit follow-ups rather than ambiguous command routing.
 
+### Universe session overview
+
+- **Structure**: an optional two-column overview sits immediately above the ruler stack, aligned to the same resizable Track List width. It is closed by default, 72px when opened, and keyboard/pointer resizable from 44px through 160px so session-critical timeline height is never taken without producer intent.
+- **Content**: every track shown in Mosh's Edit Window retains its order and an equal overview band; non-hidden clip extents render as thin lines in the owning track color. Blank shown tracks remain visible as empty bands. Mosh group/return rows are omitted because those rows are not currently shown in this Edit Window.
+- **Viewport**: a high-contrast framed area is derived from the real timeline's horizontal and vertical scroll metrics. It updates on scroll and resize and never becomes project data.
+- **Behavior**: clicking the overview centers the Edit Window at that horizontal/vertical location. Arrow keys pan by 75% of the visible viewport, Home/End go to the horizontal bounds, and Enter/Space center the current playhead as an accessibility adaptation. The separator supports pointer resize with cancellation rollback, Arrow keys, Home/End, and double-click reset.
+- **State and commands**: visibility and height are UI-local, preserve an idempotent current epoch, and reset on project replacement. Navigation changes DOM scroll only and issues no `store.exec` command because no session data changes.
+- **Adaptation**: Avid documents internal vertical Universe scrolling when its own height cannot show every track. Mosh currently compresses all shown Edit rows into the chosen height; dedicated overview scroll arrows and a hidden-track model remain explicit gaps.
+
 ### Audio clip inspector
 
 - **Structure**: clip name, mute state, paired static clip-gain slider and numeric field, 0 dB reset, waveform preview, read-only timing/fade metadata, plus an inline selected-clip static handle and a dynamic clip-local gain envelope in the timeline.

@@ -68,6 +68,8 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
   const toggleClassicTheme = useProTools((s) => s.toggleClassicTheme);
   const memoryLocationsOpen = useProTools((s) => s.memoryLocationsOpen);
   const setMemoryLocationsOpen = useProTools((s) => s.setMemoryLocationsOpen);
+  const universeOpen = useProTools((s) => s.universeOpen);
+  const setUniverseOpen = useProTools((s) => s.setUniverseOpen);
   const mainTimeScale = useProTools((s) => s.mainTimeScale);
   const setShell = useSettings((s) => s.set);
   const fallbackTrackId = selectedTrackId
@@ -165,6 +167,11 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
 
       <div className="pt-toolbar-spacer" />
       <div className="pt-toolbar-group pt-view-group">
+        <MoshTip side="bottom" label={universeOpen ? "Hide Universe overview" : "Show Universe overview"}>
+          <button type="button" className="pt-view-button" data-testid="pt-universe-toggle"
+            aria-controls="pt-universe" aria-pressed={universeOpen}
+            onClick={() => setUniverseOpen(!universeOpen)}>Universe</button>
+        </MoshTip>
         <button type="button" className="pt-view-button" data-testid="pt-memory-toggle"
           aria-expanded={memoryLocationsOpen} aria-controls="pt-memory-locations"
           aria-pressed={memoryLocationsOpen}

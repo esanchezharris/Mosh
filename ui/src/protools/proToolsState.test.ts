@@ -42,6 +42,8 @@ describe("Pro Tools shell state", () => {
       editSelectionTrackId: state.editSelectionTrackId,
       editSelectionTrackIds: state.editSelectionTrackIds,
       trackSelectionIds: state.trackSelectionIds,
+      universeOpen: state.universeOpen,
+      universeHeight: state.universeHeight,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -77,6 +79,8 @@ describe("Pro Tools shell state", () => {
       editSelectionTrackId: null,
       editSelectionTrackIds: [],
       trackSelectionIds: [],
+      universeOpen: false,
+      universeHeight: 72,
     });
   });
 
@@ -187,6 +191,24 @@ describe("Pro Tools shell state", () => {
     expect(useProTools.getState().trackHeightScale).toBe(1.25);
     state.resetForProject(projectEpoch + 1);
     expect(useProTools.getState().trackHeightScale).toBe(1);
+  });
+
+  it("keeps the optional Universe view bounded and project-scoped", () => {
+    const state = useProTools.getState();
+    state.setUniverseOpen(true);
+    state.setUniverseHeight(8);
+
+    expect(useProTools.getState().universeOpen).toBe(true);
+    expect(useProTools.getState().universeHeight).toBe(44);
+
+    state.setUniverseHeight(999);
+    expect(useProTools.getState().universeHeight).toBe(160);
+    state.resetForProject(projectEpoch);
+    expect(useProTools.getState().universeOpen).toBe(true);
+
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().universeOpen).toBe(false);
+    expect(useProTools.getState().universeHeight).toBe(72);
   });
 
   it("clamps track-header resizing at both supported boundaries", () => {

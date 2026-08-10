@@ -7,6 +7,7 @@ import { ProToolsRulers } from "./ProToolsRulers";
 import { ProToolsSpotDialog } from "./ProToolsSpotDialog";
 import { ProToolsTimeline } from "./ProToolsTimeline";
 import { ProToolsTrackHeaders } from "./ProToolsTrackHeaders";
+import { ProToolsUniverse } from "./ProToolsUniverseView";
 import { timelineSeconds } from "./layout";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { useProTools } from "./proToolsState";
@@ -55,6 +56,7 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
     <section className="pt-edit-window" data-testid="pt-edit-window"
       style={{ "--pt-track-head-w": `${trackHeaderWidth}px` } as React.CSSProperties}>
       <div className="pt-arrangement-main">
+        <ProToolsUniverse snapshot={snapshot} timelineRef={timelineRef} />
         <ProToolsRulers snapshot={snapshot} rulersVisible={rulersVisible}
           contentWidth={contentWidth} fieldRef={rulerFieldRef}
           getScrollLeft={() => timelineRef.current?.scrollLeft ?? 0} />

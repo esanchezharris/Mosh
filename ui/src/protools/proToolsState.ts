@@ -10,6 +10,10 @@ import { clampTrackHeightScale } from "./trackHeightZoom";
 import type { ProToolsTrackView } from "./trackViews";
 import type { TimeRangeSel } from "../v2/shellState";
 import type { SpotTimeScale } from "./spotTime";
+import {
+  clampProToolsUniverseHeight,
+  PROTOOLS_UNIVERSE_DEFAULT_HEIGHT,
+} from "./proToolsUniverse";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
 export type ProToolsRuler = "markers" | "barsBeats" | "timecode" | "minutesSeconds" | "samples";
@@ -56,6 +60,8 @@ type ProToolsViewState = {
   readonly editSelectionTrackId: string | null;
   readonly editSelectionTrackIds: readonly string[];
   readonly trackSelectionIds: readonly string[];
+  readonly universeOpen: boolean;
+  readonly universeHeight: number;
 };
 
 type ProToolsActions = {
@@ -90,6 +96,8 @@ type ProToolsActions = {
   readonly setEditSelectionTrackId: (trackId: string | null) => void;
   readonly setEditSelectionTracks: (trackIds: readonly string[], focusTrackId: string | null) => void;
   readonly setTrackSelectionIds: (trackIds: readonly string[]) => void;
+  readonly setUniverseOpen: (open: boolean) => void;
+  readonly setUniverseHeight: (height: number) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -132,6 +140,8 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   editSelectionTrackId: null,
   editSelectionTrackIds: [],
   trackSelectionIds: [],
+  universeOpen: false,
+  universeHeight: PROTOOLS_UNIVERSE_DEFAULT_HEIGHT,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -225,6 +235,8 @@ export const useProTools = create<ProToolsState>((set) => ({
     editSelectionTrackIds: [...editSelectionTrackIds],
   }),
   setTrackSelectionIds: (trackSelectionIds) => set({ trackSelectionIds: [...trackSelectionIds] }),
+  setUniverseOpen: (universeOpen) => set({ universeOpen }),
+  setUniverseHeight: (height) => set({ universeHeight: clampProToolsUniverseHeight(height) }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);
