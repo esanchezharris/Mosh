@@ -14,12 +14,14 @@ import { clampProToolsUniverseHeight } from "./proToolsUniverse";
 import {
   proToolsProjectDefaults,
   type ProToolsEditMode,
+  type ProToolsMainWindow,
   type ProToolsRuler,
   type ProToolsViewState,
 } from "./proToolsViewState";
 
 export type {
   ProToolsEditMode,
+  ProToolsMainWindow,
   ProToolsMemoryLocationEditor,
   ProToolsRuler,
   ProToolsRulersVisible,
@@ -27,6 +29,8 @@ export type {
 } from "./proToolsViewState";
 
 type ProToolsActions = {
+  readonly setMainWindow: (mainWindow: ProToolsMainWindow) => void;
+  readonly toggleMainWindow: () => void;
   readonly setEditMode: (mode: ProToolsEditMode) => void;
   readonly setActiveTool: (tool: ProToolsTool) => void;
   readonly toggleSmartTool: () => void;
@@ -72,6 +76,8 @@ export type ProToolsState = ProToolsViewState & ProToolsActions;
 
 export const useProTools = create<ProToolsState>((set) => ({
   ...proToolsProjectDefaults(0),
+  setMainWindow: (mainWindow) => set({ mainWindow }),
+  toggleMainWindow: () => set((state) => ({ mainWindow: state.mainWindow === "edit" ? "mix" : "edit" })),
   setEditMode: (editMode) => set({ editMode }),
   setActiveTool: (activeTool) => set((state) => {
     if (activeTool === "zoomer") {

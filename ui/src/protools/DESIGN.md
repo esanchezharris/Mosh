@@ -9,6 +9,7 @@ This contract is scoped to `.protools-shell`. Existing Mosh shells keep their ow
 - Interaction reference: read beui.dev `tabs` and `table` source; kept its accessible segmented-control semantics and direct pointer-resize mechanism, but omitted its spring library because an editing surface needs immediate, low-motion feedback.
 - Spot interaction reference: read Avid's “Spotting Clips” procedure and beui.dev `center-morph-modal` source. Kept controlled open state, initial focus, focus containment, Escape/backdrop dismissal, and trigger restoration; omitted the center-unfold animation and motion dependency to preserve the shell's immediate panel contract.
 - Tutorial parity reference: reviewed official Avid Edit Window, recording, I/O, Clip Gain, automation, and MIDI Editor videos at the timecodes recorded in `docs/protools-clone/RESEARCH.md`. Extracted structural ratios and before/during/after behavior only; source frames remain private and uncommitted.
+- Mix Window reference: reviewed Avid's official Mix Window Overview at 0:05/0:20/0:35/0:50 and Mixing Fundamentals at 3:09/3:36/6:26/7:23-9:26. The videos establish channel-strip hierarchy, density, and the Edit/Mix transition; Avid's Main Windows, Mix Window, Channels, and shortcut documentation remains the behavioral authority. No frame or Avid asset enters the product.
 - Track Group configuration reference: reviewed Avid's current Grouping Tracks chapter plus the official Quick Modify short and Audio Sorcerer's full-window tutorial. The guide is behavioral authority; tutorial frames only corroborate the Groups-bank launch point, Name/Type region, Tracks/Attributes tab hierarchy, dual membership columns, and dense attribute matrix. No frame or Avid artwork enters the product.
 - Selection-link reference: reviewed Avid's Timeline/Edit selection documentation, OBEDIA's linked-selection demonstrations, and the beui.dev `switch` source. The Pro Tools control keeps native pressed semantics and immediate state feedback, but omits the spring thumb because a dense editing toolbar benefits from the shell's existing depressed-button grammar.
 - Selection-marker reference: Avid's Timeline Selections help identifies the down arrow as Start, the up arrow as End, Time Grabber as the drag tool, and Grid as the movement constraint. The beui.dev `range-slider` source supplies pointer-capture and slider-keyboard semantics; Mosh keeps direct, unsmoothed movement so the marker remains sample/grid legible and reduced-motion safe.
@@ -288,6 +289,16 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **States**: closed by default, composing, listening, working/Stop, completed/task Undo, applied/change Undo, and error.
 - **Accessibility**: opening focuses the composer; Escape or Close dismisses; focus returns to the toolbar trigger; the drawer is complementary rather than modal.
 - **Layout**: the closed drawer has no DOM or layout footprint. The open drawer overlays instead of resizing the timeline.
+
+### Mix Window
+
+- **Structure**: the shell toolbar remains the fixed session/navigation owner. The main work area swaps from the Edit timeline to one horizontally scrolling bank of vertical channel strips. Each project track gets a strip; routing groups and Aux returns are included instead of being hidden as Edit-only support objects.
+- **Hierarchy**: Inserts, Sends, Input/Output, automation mode, pan, record/input/solo/mute, live stereo meter plus vertical fader, numeric value, and track name follow the order corroborated by V20. Unsupported Instrument/HEAT, EQ graph, delay-compensation, and VCA rows are omitted rather than drawn as inert decoration.
+- **Navigation**: two visible Edit/Mix controls expose pressed state. Command+= on macOS and Control+= on Windows toggles the same project-local state. Shifted Command/Control++ remains clip nudge, preserving the established editing shortcut.
+- **Selection**: interacting with a strip makes it the canonical selected track, clears clip selection, and closes a clip editor. Returning to Edit therefore opens the same track's inspector without mutating the snapshot.
+- **Mutation**: routing, fader, pan, automation, inserts, sends, record, monitoring, solo, and mute use their existing `store.exec` commands and result envelopes. Level meters read the 30 Hz telemetry rail and never write project state.
+- **Accessibility**: every strip is a named region; native buttons, selects, and ranges remain keyboard reachable. The compact layout keeps full-size strips inside the same intentional horizontal scroll owner instead of collapsing or hiding controls.
+- **Honest boundary**: this is an in-shell main-view swap, not a native floating/multi-monitor window. Independent Mix visibility, narrow/wide strips, Option/Option+Shift fan-out, full Sends A-J semantics, master/VCA faders, and native audible verification remain explicit debt.
 
 ### Spot placement dialog
 

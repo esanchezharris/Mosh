@@ -604,6 +604,36 @@ describe("useProToolsKeys", () => {
     }));
   });
 
+  it("toggles Edit and Mix with unshifted Command or Control Equals without nudging", async () => {
+    useStore.setState({ selection: new Set(["clip-1"]) });
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "=",
+      code: "Equal",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    expect(useProTools.getState().mainWindow).toBe("mix");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(execCalls).toEqual([]);
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "+",
+      code: "Equal",
+      metaKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "move_clip",
+      args: { clipId: "clip-1", start: 2.25 },
+    }));
+  });
+
   it("toggles the selected track's two common Track Views with Minus", () => {
     act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "-", code: "Minus", bubbles: true, cancelable: true,

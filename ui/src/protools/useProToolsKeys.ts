@@ -85,6 +85,13 @@ export function useProToolsKeys(onOpenFades?: () => void): void {
         return;
       }
 
+      if (event.code === "Equal" && (event.metaKey || event.ctrlKey)
+        && !event.altKey && !event.shiftKey) {
+        event.preventDefault();
+        useProTools.getState().toggleMainWindow();
+        return;
+      }
+
       if (handleProToolsFadesShortcut(event, onOpenFades)) return;
 
       if (handleProToolsClipGroupShortcut(event)) return;
@@ -228,7 +235,7 @@ export function useProToolsKeys(onOpenFades?: () => void): void {
       let direction: -1 | 0 | 1 = 0;
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {
         if (event.key === "-" || event.key === "_") direction = -1;
-        if (event.key === "+" || event.key === "=") direction = 1;
+        if (event.key === "+") direction = 1;
       }
       if (direction === 0) return;
       const store = useStore.getState();

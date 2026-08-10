@@ -16,6 +16,7 @@ import { ProToolsDetailDock } from "./ProToolsDetailDock";
 import { ProToolsFadesDialog } from "./ProToolsFadesDialog";
 import { ProToolsMoshiDrawer } from "./ProToolsMoshiDrawer";
 import { ProToolsMemoryLocations } from "./ProToolsMemoryLocations";
+import { ProToolsMixWindow } from "./ProToolsMixWindow";
 import { ProToolsStatusBar } from "./ProToolsStatusBar";
 import { ProToolsToolbar } from "./ProToolsToolbar";
 import { proToolsFadeTargets } from "./proToolsFades";
@@ -32,6 +33,7 @@ export function AppProTools() {
   const setSnap = useStore((s) => s.setSnap);
   const editMode = useProTools((s) => s.editMode);
   const classicTheme = useProTools((s) => s.classicTheme);
+  const mainWindow = useProTools((s) => s.mainWindow);
   const resetForProject = useProTools((s) => s.resetForProject);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moshiOpen, setMoshiOpen] = useState(false);
@@ -78,7 +80,7 @@ export function AppProTools() {
     <MoshTipProvider delay={300}>
       <div className="protools-shell" data-testid="protools-shell"
         data-pt-theme={classicTheme ? "classic" : "dark"}
-        data-edit-mode={editMode}>
+        data-edit-mode={editMode} data-main-window={mainWindow}>
         {snapshot && <ProToolsToolbar snapshot={snapshot} onOpenSettings={() => setSettingsOpen(true)}
           moshiOpen={moshiOpen} onToggleMoshi={() => setMoshiOpen((open) => !open)}
           moshiButtonRef={moshiButtonRef} />}
@@ -87,11 +89,15 @@ export function AppProTools() {
         <AudioDeviceNotice />
         <main className="pt-shell-main">
           {snapshot
-            ? <ProToolsArrangement snapshot={snapshot} />
-            : <div className="pt-loading" role="status">Loading Edit Window…</div>}
-          {dragging && <div className="pt-drop-overlay" role="status">Drop audio to import at the playhead</div>}
+            ? mainWindow === "edit"
+              ? <ProToolsArrangement snapshot={snapshot} />
+              : <ProToolsMixWindow snapshot={snapshot} />
+            : <div className="pt-loading" role="status">Loading Pro Tools session…</div>}
+          {dragging && mainWindow === "edit" && (
+            <div className="pt-drop-overlay" role="status">Drop audio to import at the playhead</div>
+          )}
         </main>
-        <ProToolsDetailDock onOpenFades={openFades} />
+        {mainWindow === "edit" && <ProToolsDetailDock onOpenFades={openFades} />}
         <ProToolsStatusBar snapshot={snapshot} />
         <ProToolsMoshiDrawer open={moshiOpen} onClose={() => setMoshiOpen(false)}
           returnFocusRef={moshiButtonRef} />

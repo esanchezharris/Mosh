@@ -44,6 +44,7 @@ describe("Pro Tools shell state", () => {
       trackSelectionIds: state.trackSelectionIds,
       universeOpen: state.universeOpen,
       universeHeight: state.universeHeight,
+      mainWindow: state.mainWindow,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -81,6 +82,7 @@ describe("Pro Tools shell state", () => {
       trackSelectionIds: [],
       universeOpen: false,
       universeHeight: 72,
+      mainWindow: "edit",
     });
   });
 
@@ -253,6 +255,22 @@ describe("Pro Tools shell state", () => {
     expect(useProTools.getState().editMode).toBe("slip");
     expect(useProTools.getState().trackHeaderWidth).toBe(160);
     expect(useProTools.getState().mainTimeScale).toBe("barsBeats");
+  });
+
+  it("keeps the Edit or Mix main window project-scoped", () => {
+    const state = useProTools.getState();
+
+    state.setMainWindow("mix");
+    expect(useProTools.getState().mainWindow).toBe("mix");
+
+    state.resetForProject(projectEpoch);
+    expect(useProTools.getState().mainWindow).toBe("mix");
+
+    state.toggleMainWindow();
+    expect(useProTools.getState().mainWindow).toBe("edit");
+
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().mainWindow).toBe("edit");
   });
 
   it("keeps the automation clipboard within one project epoch", () => {

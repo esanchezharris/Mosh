@@ -1,0 +1,177 @@
+.pt-mix-window {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--pt-canvas);
+}
+
+.pt-mix-bank {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  align-items: stretch;
+}
+
+.pt-mix-strip,
+.pt-mix-master-strip {
+  position: relative;
+  box-sizing: border-box;
+  width: 152px;
+  min-width: 152px;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+  box-shadow: inset 1px 0 var(--pt-highlight), inset -1px 0 var(--pt-border);
+}
+
+.pt-mix-strip[data-selected="true"] {
+  box-shadow: inset 0 0 0 2px var(--pt-selected), inset 1px 0 var(--pt-highlight);
+}
+
+.pt-mix-strip-color { height: 5px; background: var(--pt-track-color); }
+
+.pt-mix-strip header,
+.pt-mix-master-strip > header {
+  min-height: 20px;
+  padding: 0 6px;
+  color: var(--pt-text-muted);
+  background: var(--pt-raised);
+  border-bottom: 1px solid var(--pt-border);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pt-mix-inserts,
+.pt-mix-sends,
+.pt-mix-routing,
+.pt-mix-automation,
+.pt-mix-pan,
+.pt-mix-track-controls,
+.pt-mix-meter-fader {
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-mix-insert-slot {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) 20px 20px;
+  min-height: 22px;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--pt-border) 72%, transparent);
+  background: var(--pt-inset);
+  font-size: 9px;
+}
+
+.pt-mix-insert-slot[data-filled="false"] { grid-template-columns: 15px minmax(0, 1fr); color: var(--pt-text-muted); }
+.pt-mix-slot-letter { padding-left: 4px; color: var(--pt-text-muted); }
+.pt-mix-insert-slot button { height: 21px; min-width: 0; padding: 0 3px; border: 0; background: transparent; }
+.pt-mix-insert-name { overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.pt-mix-insert-slot button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.pt-mix-add-insert,
+.pt-mix-add-send { width: 100%; min-height: 22px; border: 0; color: var(--pt-text); background: var(--pt-raised); }
+
+.pt-mix-send-rows { max-height: 90px; overflow-y: auto; background: var(--pt-inset); }
+.pt-mix-send-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px 24px 18px;
+  min-height: 24px;
+  align-items: center;
+  gap: 2px;
+  padding-left: 4px;
+  border-bottom: 1px solid var(--pt-border);
+  font-size: 8px;
+}
+.pt-mix-send-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-mix-send-row input { width: 34px; }
+.pt-mix-send-row output { text-align: right; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pt-mix-send-row button { width: 18px; height: 20px; padding: 0; border: 0; background: transparent; }
+.pt-mix-empty-slot { display: block; padding: 6px; color: var(--pt-text-muted); font-size: 9px; }
+
+.pt-mix-routing { display: grid; gap: 3px; padding: 4px; background: var(--pt-inset); }
+.pt-mix-routing label,
+.pt-mix-automation,
+.pt-mix-pan { display: grid; gap: 2px; color: var(--pt-text-muted); font-size: 8px; }
+.pt-mix-routing select,
+.pt-mix-automation select { width: 100%; min-width: 0; height: 20px; color: var(--pt-text); background: var(--pt-raised); border: 1px solid var(--pt-border); font-size: 9px; }
+.pt-mix-fixed-route { box-sizing: border-box; min-height: 20px; padding: 4px; overflow: hidden; color: var(--pt-text); background: var(--pt-raised); border: 1px solid var(--pt-border); text-overflow: ellipsis; white-space: nowrap; }
+.pt-mix-automation,
+.pt-mix-pan { padding: 4px; background: var(--pt-surface); }
+.pt-mix-pan { grid-template-columns: 22px minmax(0, 1fr) 30px; align-items: center; }
+.pt-mix-pan input { min-width: 0; }
+.pt-mix-pan output { text-align: right; color: var(--pt-text); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.pt-mix-track-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 4px; }
+.pt-mix-track-controls button { height: 23px; padding: 0; border: 1px solid var(--pt-border); border-top-color: var(--pt-highlight); background: var(--pt-raised); font-weight: 700; }
+.pt-mix-track-controls button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.pt-mix-track-controls button[data-testid="pt-mix-arm"][aria-pressed="true"] { color: var(--pt-on-danger); background: var(--pt-danger); }
+.pt-mix-track-controls button:disabled { opacity: 0.38; }
+
+.pt-mix-meter-fader {
+  display: flex;
+  min-height: 170px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--pt-inset);
+}
+.pt-mix-meter,
+.pt-mix-master-meter { position: relative; width: 14px; height: 158px; overflow: hidden; }
+.pt-mix-meter .meter,
+.pt-mix-master-meter .meter {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 152px;
+  gap: 3px;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+.pt-mix-window .meter .mbar {
+  height: 5px;
+  background: linear-gradient(90deg, var(--pt-selected) 0%, var(--pt-selected) 60%, var(--pt-preroll) 84%, var(--pt-danger) 100%);
+}
+.pt-mix-window .meter .mmask { background: var(--pt-inset); }
+.pt-mix-fader { display: grid; gap: 3px; height: 158px; color: var(--pt-text-muted); font-size: 8px; text-align: center; }
+.pt-mix-fader input { width: 28px; height: 136px; margin: 0; writing-mode: vertical-lr; direction: rtl; accent-color: var(--pt-selected); }
+.pt-mix-volume-readout { display: block; padding: 4px; color: var(--pt-text); background: var(--pt-raised); text-align: center; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.pt-mix-track-name {
+  display: grid;
+  width: calc(100% - 8px);
+  min-height: 40px;
+  margin: 4px;
+  padding: 4px;
+  border: 1px solid var(--pt-border);
+  border-top: 5px solid var(--pt-track-color);
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  text-align: left;
+}
+.pt-mix-track-name[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.pt-mix-track-name span { overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.pt-mix-track-name small { color: inherit; opacity: 0.72; text-transform: uppercase; }
+
+.pt-mix-master-strip { display: grid; width: 86px; min-width: 86px; grid-template-rows: auto 1fr auto auto; justify-items: center; color: var(--pt-text-muted); }
+.pt-mix-master-strip > header { width: 100%; box-sizing: border-box; color: var(--pt-text); text-align: center; }
+.pt-mix-master-meter { align-self: center; height: min(360px, 62vh); }
+.pt-mix-master-meter .meter { width: min(350px, 60vh); }
+.pt-mix-master-strip > span { padding: 6px; color: var(--pt-text); font-weight: 700; }
+.pt-mix-master-strip > small { padding-bottom: 8px; }
+.pt-mix-empty { width: 200px; padding: 16px; color: var(--pt-text-muted); }
+
+@media (max-width: 760px) {
+  .pt-mix-strip { width: 144px; min-width: 144px; }
+  .pt-mix-meter-fader { min-height: 145px; }
+  .pt-mix-meter { height: 132px; }
+  .pt-mix-meter .meter { width: 126px; }
+  .pt-mix-fader { height: 132px; }
+  .pt-mix-fader input { height: 110px; }
+}

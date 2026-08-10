@@ -8,6 +8,7 @@ import type { SpotTimeScale } from "./spotTime";
 import { PROTOOLS_UNIVERSE_DEFAULT_HEIGHT } from "./proToolsUniverse";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
+export type ProToolsMainWindow = "edit" | "mix";
 export type ProToolsRuler = "markers" | "barsBeats" | "timecode" | "minutesSeconds" | "samples";
 
 export type ProToolsMemoryLocationEditor =
@@ -23,6 +24,7 @@ export type ProToolsRulersVisible = Readonly<Record<ProToolsRuler, boolean>>;
 
 export type ProToolsViewState = {
   readonly projectEpoch: number;
+  readonly mainWindow: ProToolsMainWindow;
   readonly editMode: ProToolsEditMode;
   readonly activeTool: ProToolsTool;
   readonly smartToolEnabled: boolean;
@@ -61,6 +63,7 @@ export type ProToolsViewState = {
 
 export const proToolsProjectDefaults = (projectEpoch: number): ProToolsViewState => ({
   projectEpoch,
+  mainWindow: "edit",
   editMode: "slip",
   activeTool: "selector",
   smartToolEnabled: true,

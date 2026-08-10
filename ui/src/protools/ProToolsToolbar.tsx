@@ -70,6 +70,8 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
   const setMemoryLocationsOpen = useProTools((s) => s.setMemoryLocationsOpen);
   const universeOpen = useProTools((s) => s.universeOpen);
   const setUniverseOpen = useProTools((s) => s.setUniverseOpen);
+  const mainWindow = useProTools((s) => s.mainWindow);
+  const setMainWindow = useProTools((s) => s.setMainWindow);
   const mainTimeScale = useProTools((s) => s.mainTimeScale);
   const setShell = useSettings((s) => s.set);
   const fallbackTrackId = selectedTrackId
@@ -91,6 +93,19 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
       <div className="pt-toolbar-group pt-session-group" aria-label="Session">
         <span className="pt-toolbar-label">File</span>
         <ProToolsSessionMenu />
+      </div>
+      <div className="pt-toolbar-group pt-window-group" role="group" aria-label="Main Window">
+        <span className="pt-toolbar-label">Window</span>
+        <div className="pt-window-switch">
+          <MoshTip side="bottom" label="Edit Window · Command or Control plus Equals">
+            <button type="button" data-testid="pt-window-edit" aria-pressed={mainWindow === "edit"}
+              onClick={() => setMainWindow("edit")}>Edit</button>
+          </MoshTip>
+          <MoshTip side="bottom" label="Mix Window · Command or Control plus Equals">
+            <button type="button" data-testid="pt-window-mix" aria-pressed={mainWindow === "mix"}
+              onClick={() => setMainWindow("mix")}>Mix</button>
+          </MoshTip>
+        </div>
       </div>
       <div className="pt-toolbar-group pt-mode-group" role="group" aria-label="Edit Modes">
         <span className="pt-toolbar-label">Edit Modes</span>

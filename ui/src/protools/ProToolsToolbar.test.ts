@@ -156,4 +156,20 @@ describe("Pro Tools Session menu", () => {
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it("exposes complementary Edit and Mix main-window controls", () => {
+    const edit = host.querySelector<HTMLButtonElement>("[data-testid=pt-window-edit]");
+    const mix = host.querySelector<HTMLButtonElement>("[data-testid=pt-window-mix]");
+    if (!edit || !mix) throw new Error("Edit and Mix controls are missing");
+
+    expect(edit.getAttribute("aria-pressed")).toBe("true");
+    expect(mix.getAttribute("aria-pressed")).toBe("false");
+
+    act(() => mix.click());
+
+    expect(useProTools.getState().mainWindow).toBe("mix");
+    expect(edit.getAttribute("aria-pressed")).toBe("false");
+    expect(mix.getAttribute("aria-pressed")).toBe("true");
+    expect(exec).not.toHaveBeenCalled();
+  });
 });

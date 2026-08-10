@@ -237,6 +237,9 @@
 .pt-nudge-control select { height: 28px; padding: 0 20px 0 5px; }
 .pt-transient-button { max-width: 72px; line-height: 1.05; }
 .pt-toolbar-spacer { flex: 1 1 auto; min-width: 2px; }
+.pt-window-switch { display: flex; gap: 2px; }
+.pt-window-switch button { min-width: 34px; }
+.pt-window-switch button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
 .pt-view-group { padding-top: 4px; align-items: center; }
 .pt-classic-button { min-width: 48px !important; }
 .pt-moshi-group { flex: 0 0 auto; }
