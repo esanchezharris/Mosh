@@ -25,6 +25,10 @@ const emptyAgentPromptSpace = (target: EventTarget | null, action: string): bool
   !!target.closest(".agent-composer") &&
   target.value.trim() === "";
 
+const nativeButtonActivation = (target: EventTarget | null, event: KeyboardEvent): boolean =>
+  target instanceof HTMLButtonElement
+  && (event.key === "Enter" || event.key === " " || /^(space|spacebar)$/i.test(event.key));
+
 // The arrangement-vs-editor keymap gates below used to read "a clip editor is open"
 // (editingClipId set) — true when the piano roll was MODAL and always focused. The
 // live shell docks the editor non-modally and the dock now FOLLOWS the clip
@@ -76,6 +80,11 @@ export function useKeyboardShortcuts() {
       // their arrows until focus actually returns to the arrangement.
       const keyboardOwner = isEditableTarget(e.target) ? e.target : document.activeElement;
       if (isEditableTarget(keyboardOwner) && !emptyAgentPromptSpace(keyboardOwner, action)) return;
+      // Enter and Space activate a focused native button. Let the browser synthesize
+      // its click instead of also running a mapped DAW command (Pro Tools maps Enter
+      // to Return-to-Zero). Custom clip buttons stop propagation in their own key
+      // handler, so arrangement-level keyboard behavior is unchanged.
+      if (nativeButtonActivation(keyboardOwner, e)) return;
       if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
 
       const s = useStore.getState();

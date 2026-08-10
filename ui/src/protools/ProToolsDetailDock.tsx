@@ -1,7 +1,7 @@
 import { useStore } from "../store";
-import { PianoRoll } from "../ui/PianoRoll";
 import { ProToolsAudioClipInspector } from "./ProToolsAudioClipInspector";
 import { ProToolsDeviceRack } from "./ProToolsDeviceRack";
+import { ProToolsMidiEditor } from "./ProToolsMidiEditor";
 import { ProToolsTrackInspector } from "./ProToolsTrackInspector";
 
 export function ProToolsDetailDock() {
@@ -9,9 +9,10 @@ export function ProToolsDetailDock() {
   const editingClipId = useStore((state) => state.editingClipId);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const closePianoRoll = useStore((state) => state.closePianoRoll);
-  const selectedTrack = snapshot?.tracks.find((track) => track.id === selectedTrackId) ?? null;
+  if (!snapshot) return null;
+  const selectedTrack = snapshot.tracks.find((track) => track.id === selectedTrackId) ?? null;
   const match = editingClipId
-    ? snapshot?.tracks
+    ? snapshot.tracks
       .flatMap((track) => track.clips.map((clip) => ({ clip, track })))
       .find(({ clip }) => clip.id === editingClipId) ?? null
     : null;
@@ -27,7 +28,7 @@ export function ProToolsDetailDock() {
     case "midi":
       return (
         <section className="pt-detail-dock pt-detail-midi" data-testid="pt-detail-dock" aria-label="MIDI clip editor">
-          <PianoRoll docked />
+          <ProToolsMidiEditor snapshot={snapshot} targetClipId={match.clip.id} />
         </section>
       );
     case "clip":

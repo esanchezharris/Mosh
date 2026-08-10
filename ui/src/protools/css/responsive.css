@@ -28,6 +28,9 @@
     box-shadow: -8px 0 18px rgba(0, 0, 0, 0.4);
   }
   .pt-detail-dock { --pt-dock-h: 190px; }
+  .pt-midi-editor { grid-template-columns: 124px minmax(0, 1fr); }
+  .pt-midi-track-row { gap: 0; padding-inline: 0; }
+  .pt-midi-track-copy { padding-inline-start: var(--pt-space-1); }
   .pt-track-inspector-body { grid-template-columns: 1fr; overflow: auto; }
   .pt-track-channel { border-right: 0; border-bottom: 1px solid var(--pt-border); }
   .pt-device-rack.is-embedded { min-height: 112px; }
@@ -51,5 +54,6 @@
 @media (forced-colors: active) {
   .protools-shell :focus-visible { outline-color: Highlight; }
   .pt-track-controls button[aria-pressed="true"],
-  .pt-toolbar button[aria-pressed="true"] { border: 2px solid Highlight; }
+  .pt-toolbar button[aria-pressed="true"],
+  .pt-midi-track-list button[aria-pressed="true"] { border: 2px solid Highlight; }
 }

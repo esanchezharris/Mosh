@@ -1621,6 +1621,7 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .dp-foot { font-size: 10px; color: var(--pr-text-dim); }
 
 .pr-note.pr-loop-ghost { opacity: 0.35; pointer-events: none; border-style: dashed; }
+.pr-note.pr-context-note { opacity: 0.42; pointer-events: none; border-style: dashed; cursor: default; }
 
 .pr-loopbar { display: inline-flex; align-items: center; min-width: 0; }
 .pr-loopbar .live-loopbar-row { padding: 0; }

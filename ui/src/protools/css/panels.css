@@ -191,6 +191,83 @@
   background: var(--pt-surface);
 }
 .pt-detail-midi .piano-roll { height: 100%; border: 0; }
+.pt-midi-editor {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.pt-midi-track-list {
+  display: grid;
+  grid-template-rows: var(--pt-track-title-h) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--pt-border);
+  background: var(--pt-raised);
+}
+.pt-midi-track-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--pt-space-1);
+  border-bottom: 1px solid var(--pt-border);
+  color: var(--pt-text-muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pt-midi-track-all,
+.pt-midi-track-visible,
+.pt-midi-track-target {
+  display: grid;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text-muted);
+  background: var(--pt-inset);
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-midi-track-all { min-width: 28px; min-height: 20px; }
+.pt-midi-track-all[aria-pressed="true"],
+.pt-midi-track-visible[aria-pressed="true"],
+.pt-midi-track-target[aria-pressed="true"] {
+  color: var(--pt-on-selected);
+  border-color: var(--pt-selected);
+  background: var(--pt-selected);
+}
+.pt-midi-track-visible:disabled { opacity: 1; }
+.pt-midi-track-list-items { margin: 0; padding: 0; overflow: auto; list-style: none; }
+.pt-midi-track-row {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) 24px 24px;
+  gap: var(--pt-space-1);
+  align-items: center;
+  min-height: 36px;
+  padding: var(--pt-space-1);
+  border-bottom: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+}
+.pt-midi-track-row[data-target="true"] { background: var(--pt-highlight); }
+.pt-midi-track-color { align-self: stretch; min-height: 24px; background: var(--pt-text-muted); }
+.pt-midi-track-copy { display: grid; min-width: 0; }
+.pt-midi-track-copy strong,
+.pt-midi-track-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-midi-track-copy strong { color: var(--pt-text); font-size: 11px; }
+.pt-midi-track-copy small { color: var(--pt-text-muted); font-size: 9px; }
+.pt-midi-editor-main { min-width: 0; min-height: 0; overflow: hidden; }
+.pt-midi-editor-main .pr.docked {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  animation: none;
+}
+.pt-midi-editor-main .pr-head { overflow-x: auto; }
 .pt-detail-head { justify-content: space-between; }
 .pt-detail-close { display: grid; width: 22px; height: 20px; padding: 0; place-items: center; border: 0; background: transparent; }
 .pt-device-rack { height: 100%; }

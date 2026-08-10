@@ -216,6 +216,16 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: labelled region, explicit close button, content stays keyboard reachable.
 - **Layout**: dock is a fixed shell row with internal overflow; selected-track channel controls sit beside inserts on wide screens and stack inside the dock's own scroll area on compact screens; status bar never overlays content.
 
+### MIDI Editor Track List and superimposed notes
+
+- **Structure**: the docked editor becomes a fixed 168px Track List plus a `minmax(0, 1fr)` shared Piano Roll. Below the compact breakpoint the list narrows to 124px instead of becoming a second vertical scroll region. Only MIDI/instrument tracks with MIDI clips appear.
+- **States**: one explicit edit target, one or more visible context tracks, target forced visible, Show All, no eligible tracks, and project replacement. Native pressed buttons expose both visibility and target state; row color comes from project track color with semantic-token fallback.
+- **Behavior**: visible non-target tracks contribute disarmed notes to Superimposed Notes View. Choosing Edit resolves the track's overlapping or nearest MIDI clip, makes it the global `editingClipId`, and selects its track; every existing Piano Roll command therefore continues to address exactly one clip. Visibility is editor-local and resets on `projectEpoch` replacement.
+- **Projection**: context notes are mapped through the session tempo map into the target clip's visible beat window. Notes crossing either edge are clipped visually. Context pitches participate in Content/Scale folding so a shown note can never disappear into a folded-away row.
+- **Visual feedback**: target notes keep the shared solid Pro Tools note treatment. Context notes reuse the same note primitive with their track color, 42% opacity, and a dashed edge; they are `aria-hidden` and `pointer-events: none`, so they cannot steal selection or mutation gestures.
+- **Accessibility**: the Track List is a labelled complementary region. Show and Edit are separate named native buttons with `aria-pressed`; the active target cannot be hidden. The target change is immediately reflected in the Piano Roll title and focus remains in the dock.
+- **Adaptation**: Pro Tools can pencil-enable more than one track. Mosh deliberately exposes one edit target because its canonical command owner is singular; multi-target Pencil writes and multi-track controller lanes remain explicit follow-ups rather than ambiguous command routing.
+
 ### Audio clip inspector
 
 - **Structure**: clip name, mute state, paired static clip-gain slider and numeric field, 0 dB reset, waveform preview, read-only timing/fade metadata, plus an inline selected-clip static handle and a dynamic clip-local gain envelope in the timeline.
