@@ -12,7 +12,7 @@ describe("plugin_scan_progress reducer (FIT-003)", () => {
   beforeAll(() => { useStore.getState().init(); }); // wires the reducer to the mock's event bus
   beforeEach(() => {
     __resetMockForTests();
-    useStore.setState({ scanProgress: null });
+    useStore.setState({ scanProgress: null, lastError: null });
   });
 
   it("a running-count sample sets scanProgress with count + elapsedMs", () => {
@@ -42,5 +42,21 @@ describe("plugin_scan_progress reducer (FIT-003)", () => {
   it("an older {format,done}-only payload (no count/elapsedMs) still works — additive/backward-compatible", () => {
     __mockEmitForTests("plugin_scan_progress", { format: "vst3", done: false });
     expect(useStore.getState().scanProgress).toEqual({ format: "vst3", done: false, count: undefined, elapsedMs: undefined });
+  });
+
+  it("surfaces newly quarantined plug-ins when an async scan completes", async () => {
+    __mockEmitForTests("plugin_scan_progress", {
+      format: "vst3",
+      done: true,
+      count: 41,
+      elapsedMs: 25_500,
+      quarantined: ["WaveShell1-VST3 16.7.vst3"],
+    });
+
+    expect(useStore.getState().scanProgress).toBeNull();
+    expect(useStore.getState().lastError).toBe(
+      "VST3 scan quarantined WaveShell1-VST3 16.7.vst3 because it stopped responding.",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });

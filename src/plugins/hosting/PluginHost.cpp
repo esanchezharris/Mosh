@@ -341,7 +341,13 @@ void PluginHost::initialise()
                     const int now = scanFilesProcessed.load (std::memory_order_relaxed);
                     const auto t = juce::Time::getMillisecondCounter();
                     if (now != last) { last = now; lastAdvance = t; continue; }
-                    if (t - lastAdvance > (juce::uint32) kStallMs) { killScanWorkers(); lastAdvance = t; }
+                    if (t - lastAdvance > (juce::uint32) kStallMs)
+                    {
+                        scanWatchdog.requestAbort();
+                        engine.getPluginManager().abortCurrentPluginScan();
+                        killScanWorkers();
+                        lastAdvance = t;
+                    }
                 }
             });
             scanAUComponents();
@@ -446,6 +452,8 @@ void PluginHost::scanAUComponents()
         OwnedArray<PluginDescription> found;
         list.scanAndAddFile (id, true /*dontRescanIfAlreadyInList*/, found, au);
 
+        finishWatchedPluginScan (id);
+
         pedal.deleteFile();   // clean return -> disarm
         scanFilesProcessed.fetch_add (1, std::memory_order_relaxed);   // watchdog heartbeat
         checkpointCatalog();  // persist AU progress periodically so a killed sweep isn't lost
@@ -539,7 +547,13 @@ int PluginHost::rescan (bool clearFirst, bool includeVST3, bool includeAU, bool 
                 if (now != last) { last = now; lastAdvance = t; continue; }
                 if (t - lastAdvance > (uint32) kStallMs)
                 {
-                    killScanWorkers();      // hung child -> te sees a crash -> skip + blocklist
+                    // Tracktion's wait loop has no timeout and does not necessarily
+                    // observe a killed child. Set its explicit cancellation flag first,
+                    // then terminate only this app's scan worker. scanFile() consumes
+                    // the hand-off and resets the scanner before the next bundle.
+                    scanWatchdog.requestAbort();
+                    engine.getPluginManager().abortCurrentPluginScan();
+                    killScanWorkers();
                     lastAdvance = t;        // give the retry/next plugin a fresh window
                 }
             }
@@ -585,6 +599,7 @@ void PluginHost::scanFile (const File& file)
         // results to the list itself and blacklists a file whose scan returns false.
         deadMansPedal().replaceWithText (path);
         list.scanAndAddFile (path, true /*dontRescanIfAlreadyInList*/, found, vst3);
+        finishWatchedPluginScan (path);
         deadMansPedal().deleteFile();
     }
     else
@@ -600,6 +615,22 @@ void PluginHost::scanFile (const File& file)
 
     scanFilesProcessed.fetch_add (1, std::memory_order_relaxed);   // per-plugin heartbeat (watchdog)
     checkpointCatalog();   // persist VST3 progress periodically so a killed sweep isn't lost
+}
+
+void PluginHost::finishWatchedPluginScan (const String& pluginId)
+{
+    if (! scanWatchdog.consumeAbortRequest())
+        return;
+
+    auto& list = engine.getPluginManager().knownPluginList;
+
+    // cancelScan() is sticky until CustomScanner::scanFinished(). Reset it now,
+    // between plug-ins, otherwise every remaining bundle would be rejected and
+    // blacklisted without being scanned. scanAndAddFile() already blacklisted the
+    // timed-out id when the cancelled custom scanner returned false; this call adds
+    // the durable reason and checkpoints both files before the sweep continues.
+    list.scanFinished();
+    blockPluginWithReason (pluginId, "crash_or_hang");
 }
 
 Array<PluginDescription> PluginHost::available() const

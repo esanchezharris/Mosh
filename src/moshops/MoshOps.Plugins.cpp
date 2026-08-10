@@ -1055,15 +1055,19 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         // hang watchdog so a plugin that hangs the child (e.g. a WaveShell on the user's
         // conflicting Waves install) gets killed → blocklisted → skipped, and the catalog
         // is checkpointed mid-sweep so a kill keeps the progress so far.
+        const auto blocklistBefore = pluginHost.blocklist();
         const int total = pluginHost.rescan (scanPlan.asyncClearFirst,
                                              scanPlan.asyncIncludeVST3,
                                              scanPlan.asyncIncludeAU,
                                              scanPlan.asyncSlowVST3);
-        juce::MessageManager::callAsync ([this, total, format]
+        const auto quarantined = newlyQuarantinedPluginNames (blocklistBefore,
+                                                               pluginHost.blocklist());
+        juce::MessageManager::callAsync ([this, total, format, quarantined]
         {
             const int elapsed = (int) (Time::getMillisecondCounterHiRes() - scanStartMs_);
             scanSampling_ = false;   // stop the timerCallback() sampler before the terminal emit
-            emit ("plugin_scan_progress", makeScanProgressPayload (format, total, /*done=*/true, elapsed));
+            emit ("plugin_scan_progress", makeScanProgressPayload (
+                format, total, /*done=*/true, elapsed, quarantined));
             emitSnapshotInvalidated();
         });
     }).detach();

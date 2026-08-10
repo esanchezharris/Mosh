@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "moshops/PluginScanPlan.h"
 #include "moshops/ScanProgress.h"
+#include "plugins/hosting/PluginScanWatchdog.h"
 
 using namespace mosh;
 
@@ -28,18 +29,23 @@ TEST_CASE ("makeScanProgressPayload: mid-sweep running-count sample", "[plugin_s
 
 TEST_CASE ("makeScanProgressPayload: terminal done event", "[plugin_scan_progress]")
 {
-    auto payload = makeScanProgressPayload ("all", 42, true, 1500);
+    auto payload = makeScanProgressPayload ("all", 42, true, 1500,
+                                            { "WaveShell1-VST3 16.7.vst3" });
     REQUIRE (payload["format"].toString() == "all");
     REQUIRE ((bool) payload["done"] == true);
     REQUIRE ((int) payload["count"] == 42);
     REQUIRE ((int) payload["elapsedMs"] == 1500);
+    auto* quarantined = payload["quarantined"].getArray();
+    REQUIRE (quarantined != nullptr);
+    REQUIRE (quarantined->size() == 1);
+    REQUIRE ((*quarantined)[0].toString() == "WaveShell1-VST3 16.7.vst3");
 }
 
-TEST_CASE ("makeScanProgressPayload: all four keys are present (additive-contract guard)", "[plugin_scan_progress]")
+TEST_CASE ("makeScanProgressPayload: all five keys are present (additive-contract guard)", "[plugin_scan_progress]")
 {
     // The store (ui/src/store.ts) reads format/done/count/elapsedMs and forward-
     // compatibly ignores unknown fields; this pins the shape so the frontend can
-    // rely on all four keys always being present, never omitted.
+    // rely on all five keys always being present, never omitted.
     auto payload = makeScanProgressPayload ("vst3", 3, false, 250);
     auto* obj = payload.getDynamicObject();
     REQUIRE (obj != nullptr);
@@ -47,6 +53,31 @@ TEST_CASE ("makeScanProgressPayload: all four keys are present (additive-contrac
     REQUIRE (obj->hasProperty ("done"));
     REQUIRE (obj->hasProperty ("count"));
     REQUIRE (obj->hasProperty ("elapsedMs"));
+    REQUIRE (obj->hasProperty ("quarantined"));
+    REQUIRE (payload["quarantined"].getArray()->isEmpty());
+}
+
+TEST_CASE ("plugin scan watchdog request is consumed exactly once", "[plugin_scan_watchdog]")
+{
+    PluginScanWatchdogState state;
+    REQUIRE_FALSE (state.isAbortRequested());
+    state.requestAbort();
+    REQUIRE (state.isAbortRequested());
+    REQUIRE (state.consumeAbortRequest());
+    REQUIRE_FALSE (state.isAbortRequested());
+    REQUIRE_FALSE (state.consumeAbortRequest());
+}
+
+TEST_CASE ("terminal scan event names only newly quarantined bundles", "[plugin_scan_progress]")
+{
+    const juce::StringArray before { "/Library/Audio/Plug-Ins/VST3/Old.vst3" };
+    const juce::StringArray after {
+        "/Library/Audio/Plug-Ins/VST3/Old.vst3",
+        "/Library/Audio/Plug-Ins/VST3/WaveShell1-VST3 16.7.vst3",
+    };
+
+    const auto names = newlyQuarantinedPluginNames (before, after);
+    REQUIRE (names == juce::StringArray { "WaveShell1-VST3 16.7.vst3" });
 }
 
 TEST_CASE ("deep VST3 scan stays AU-free and uses the async isolated worker", "[plugin_scan_plan]")

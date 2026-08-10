@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tracktion_engine/tracktion_engine.h>
+#include "PluginScanWatchdog.h"
 #include <atomic>
 #include <functional>
 
@@ -107,6 +108,7 @@ private:
     void saveCatalog();                                  // createXml → plugin-catalog.xml
     void checkpointCatalog();                            // periodic saveCatalog() during a rescan sweep
     void recoverFromDeadMansPedal();                     // blocklist a prior crasher, then clear
+    void finishWatchedPluginScan (const juce::String&);  // reset + persist a watchdog quarantine
     juce::File catalogFile()   const;
     juce::File deadMansPedal() const;
     void closeEditorByKey (const juce::String& key);
@@ -128,8 +130,10 @@ private:
     bool vst3SlowScan = false;   // set during a rescan(slowVST3=true): scanFile loads modules
     // Bumped per plugin (scanFile + the AU sweep): a progress heartbeat the deep-scan
     // watchdog polls. A hung out-of-process child stops this advancing, so the watchdog
-    // kills the child (te treats it as a crash -> blocklist -> continue).
+    // cancels Tracktion's wait, kills the child, and hands quarantine/reset back to the
+    // scan thread before it continues.
     std::atomic<int> scanFilesProcessed { 0 };
+    PluginScanWatchdogState scanWatchdog;
     // Single-flight latch: only one rescan() runs at a time (a second concurrent scan
     // would race the OOP flag, the watchdog, and the dead-mans-pedal).
     std::atomic<bool> scanInProgress { false };

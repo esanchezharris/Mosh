@@ -69,9 +69,19 @@ export function onPluginScanProgress(ev: MoshEvent, set: Set, get: Get): void {
   // + `elapsedMs` (decimated ~2/s) for the whole sweep, not just start/done; both
   // fields are optional so this stays compatible with any older {format,done}-only
   // sender (e.g. a stale mock).
-  const p = ev.payload as { format: string; done: boolean; count?: number; elapsedMs?: number };
+  const p = ev.payload as {
+    format: string;
+    done: boolean;
+    count?: number;
+    elapsedMs?: number;
+    quarantined?: string[];
+  };
   if (p.done) {
-    set({ scanProgress: null });
+    const quarantined = p.quarantined ?? [];
+    const quarantineError = quarantined.length > 0
+      ? `${p.format.toUpperCase()} scan quarantined ${quarantined.join(", ")} because ${quarantined.length === 1 ? "it" : "they"} stopped responding.`
+      : undefined;
+    set({ scanProgress: null, ...(quarantineError ? { lastError: quarantineError } : {}) });
     void get().refreshPluginList();
   } else {
     set({ scanProgress: { format: p.format, done: false, count: p.count, elapsedMs: p.elapsedMs } });
