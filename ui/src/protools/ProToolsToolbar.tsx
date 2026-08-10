@@ -6,6 +6,7 @@ import { secondsToBBSMap, tempoMapFrom } from "../time";
 import type { Snapshot } from "../types";
 import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconStop } from "../ui/icons";
 import { useTransportControls } from "../v2/useTransportControls";
+import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
 import type { ProToolsTool } from "./smartTool";
 
@@ -71,6 +72,10 @@ export function ProToolsToolbar({ snapshot, onOpenSettings }: {
 
   return (
     <header className="pt-toolbar" data-testid="pt-toolbar">
+      <div className="pt-toolbar-group pt-session-group" aria-label="Session">
+        <span className="pt-toolbar-label">File</span>
+        <ProToolsSessionMenu />
+      </div>
       <div className="pt-toolbar-group pt-mode-group" role="group" aria-label="Edit Modes">
         <span className="pt-toolbar-label">Edit Modes</span>
         {MODES.map((mode) => (

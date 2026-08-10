@@ -78,6 +78,7 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - Clip List is a right supporting panel; Track List is integrated into the left control bank. Neither is a content browser.
 - Wide: toolbar + left headers + lane field + optional Clip List + bottom editor.
 - Compact below 760px: Clip List closes and nonessential toolbar labels compress, but Nudge, Tab-to-Transients, Rulers, Settings, and Interface Options remain in the toolbar's horizontal scroll range; the bottom editor remains usable.
+- Session operations stay in one labelled toolbar menu. Selected-track routing and mix controls live in the detail dock rather than crowding the fixed-height track headers.
 
 ### Wireframe
 
@@ -102,6 +103,13 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Motion**: color/opacity only, `--pt-motion-micro`; no traveling indicator.
 - **Layout**: wrapping cluster; toolbar itself does not scroll vertically.
 
+### Session action menu
+
+- **Structure**: one labelled toolbar trigger backed by the shared File action definitions and Mosh menu chrome.
+- **States**: closed, open, keyboard-highlighted action, native picker canceled, command rejected.
+- **Accessibility**: native button trigger, menu semantics, visible shortcut hints, Escape dismissal, and focus return supplied by the shared menu primitive.
+- **Mutation**: New, Open, Save, Save As, and Export continue through `runAction`; file pickers only select paths and never mutate a project directly.
+
 ### Ruler row
 
 - **Structure**: name cell aligned with track headers plus repeated tick labels over the lane scale.
@@ -112,7 +120,7 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 
 ### Track control row
 
-- **Structure**: color strip, select/name button, record/solo/mute controls, output metadata, level meter.
+- **Structure**: color strip, select/name button, record/solo/mute controls, and snapshot-backed output metadata.
 - **States**: default, hover, selected, armed, muted, soloed, focus-visible.
 - **Accessibility**: controls use native buttons and explicit labels; track name selection is separate from record/mute actions.
 - **Layout**: vertical stack row locked to the corresponding lane; resize separator is keyboard-operable.
@@ -135,10 +143,10 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 
 ### Detail dock and status bar
 
-- **Structure**: dock header + shared PianoRoll for MIDI or clip inspector for audio; bottom status text exposes mode, tool, nudge, and contextual pointer intent.
-- **States**: closed, MIDI, audio, empty selection.
+- **Structure**: dock header + shared PianoRoll for MIDI, clip inspector for audio, or a selected-track inspector with input/output routing, monitor mode, volume/pan, and inserts; bottom status text exposes mode, tool, nudge, and contextual pointer intent.
+- **States**: closed, MIDI, audio, selected track, loading catalogs, empty routing catalog, command rejected, empty selection.
 - **Accessibility**: labelled region, explicit close button, content stays keyboard reachable.
-- **Layout**: dock is a fixed shell row with internal overflow; status bar never overlays content.
+- **Layout**: dock is a fixed shell row with internal overflow; selected-track channel controls sit beside inserts on wide screens and stack inside the dock's own scroll area on compact screens; status bar never overlays content.
 
 ### Spot placement dialog
 

@@ -8,7 +8,7 @@
 
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MoshMenu, MoshMenuItem } from "./Menu";
 import { MoshTip, MoshTipProvider } from "./Tooltip";
 
@@ -32,6 +32,7 @@ describe("chrome seam", () => {
   });
 
   it("MoshMenu opens from its trigger and a pick fires once, then closes", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     let picked = 0;
     act(() => root.render(
       h(MoshMenu, {
@@ -62,6 +63,8 @@ describe("chrome seam", () => {
     // pre-pick node reference is stale; re-query for post-close state.
     const trig2 = host.querySelector('[data-testid="trig"]') as HTMLButtonElement;
     expect(trig2.getAttribute("aria-expanded")).toBe("false");
+    expect(errors).not.toHaveBeenCalledWith(expect.stringContaining("nativeButton"));
+    errors.mockRestore();
   });
 
   it("a pick remounts the Root, and the SAME menu reopens from the new trigger", async () => {

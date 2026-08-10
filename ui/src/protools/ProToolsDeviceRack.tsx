@@ -2,17 +2,20 @@ import { MoshTip } from "../chrome/Tooltip";
 import { useStore } from "../store";
 import type { Track } from "../types";
 
-export function ProToolsDeviceRack({ track }: { readonly track: Track }) {
+export function ProToolsDeviceRack({ track, embedded = false }: {
+  readonly track: Track;
+  readonly embedded?: boolean;
+}) {
   const exec = useStore((state) => state.exec);
   const plugins = track.plugins ?? [];
 
   return (
-    <div className="pt-device-rack" data-testid="pt-device-rack" role="group"
+    <div className={`pt-device-rack${embedded ? " is-embedded" : ""}`} data-testid="pt-device-rack" role="group"
       aria-label={`Inserts on ${track.name}`}>
-      <header className="pt-detail-head">
+      {!embedded && <header className="pt-detail-head">
         <span className="pt-detail-title">Track — {track.name}</span>
         <span className="pt-device-rack-label">Inserts A–E</span>
-      </header>
+      </header>}
       <div className="pt-device-rack-body">
         {track.frozen && <span className="pt-device-frozen" role="status">Track frozen</span>}
         {plugins.length === 0

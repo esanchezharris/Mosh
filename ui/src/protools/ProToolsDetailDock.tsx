@@ -2,6 +2,7 @@ import { useStore } from "../store";
 import { IconClose } from "../ui/icons";
 import { PianoRoll } from "../ui/PianoRoll";
 import { ProToolsDeviceRack } from "./ProToolsDeviceRack";
+import { ProToolsTrackInspector } from "./ProToolsTrackInspector";
 
 function formatSeconds(seconds: number): string {
   return `${Math.max(0, seconds).toFixed(3)} s`;
@@ -21,8 +22,8 @@ export function ProToolsDetailDock() {
 
   if (!match) return selectedTrack ? (
     <section className="pt-detail-dock pt-detail-devices" data-testid="pt-detail-dock"
-      aria-label={`${selectedTrack.name} inserts`}>
-      <ProToolsDeviceRack track={selectedTrack} />
+      aria-label={`${selectedTrack.name} track inspector`}>
+      <ProToolsTrackInspector track={selectedTrack} />
     </section>
   ) : null;
 

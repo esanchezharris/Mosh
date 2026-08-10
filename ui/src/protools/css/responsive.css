@@ -28,6 +28,9 @@
     box-shadow: -8px 0 18px rgba(0, 0, 0, 0.4);
   }
   .pt-detail-dock { --pt-dock-h: 190px; }
+  .pt-track-inspector-body { grid-template-columns: 1fr; overflow: auto; }
+  .pt-track-channel { border-right: 0; border-bottom: 1px solid var(--pt-border); }
+  .pt-device-rack.is-embedded { min-height: 112px; }
   .pt-wave-inspector { grid-template-columns: 1fr; }
   .pt-wave-preview { display: none; }
   .pt-status-field { display: none; }

@@ -4,6 +4,7 @@ import type { Snapshot, Track } from "../types";
 import { IconPlus } from "../ui/icons";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
 import { TRACK_ROW_HEIGHT } from "./layout";
+import { appliedFailure } from "./commandFeedback";
 
 type ProToolsTrackHeadersProps = {
   readonly snapshot: Snapshot;
@@ -31,12 +32,18 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
   const clearSelection = useStore((state) => state.clearSelection);
   const setSelectedTrack = useStore((state) => state.setSelectedTrack);
   const closePianoRoll = useStore((state) => state.closePianoRoll);
+  const setLastError = useStore((state) => state.setLastError);
   const selected = selectedTrackId === track.id;
 
   const selectTrack = () => {
     clearSelection();
     setSelectedTrack(track.id);
     closePianoRoll();
+  };
+  const toggleArm = async () => {
+    const result = await exec("arm_track", { trackId: track.id, armed: !track.armed });
+    const failure = appliedFailure(result, "Record arm could not be applied.");
+    if (failure) setLastError(failure);
   };
 
   return (
@@ -71,7 +78,7 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
           data-testid="pt-track-arm"
           aria-label={`Record-arm ${track.name}`}
           aria-pressed={Boolean(track.armed)}
-          onClick={() => void exec("arm_track", { trackId: track.id, armed: !track.armed })}
+          onClick={() => void toggleArm()}
         >R</button>
         <button
           type="button"
@@ -90,7 +97,9 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
           onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}
         >M</button>
       </div>
-      <span className="pt-track-route">Out 1–2</span>
+      <span className="pt-track-route" title={track.output?.name ?? "Default output"}>
+        {track.output?.name ?? "Default output"}
+      </span>
     </div>
   );
 }

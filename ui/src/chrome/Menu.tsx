@@ -73,6 +73,7 @@ export function MoshMenuItem({ onPick, testId, ariaLabel, children }: MoshMenuIt
   return (
     <Menu.Item
       render={<button type="button" />}
+      nativeButton
       data-testid={testId}
       aria-label={ariaLabel}
       onClick={onPick}

@@ -70,6 +70,8 @@
   line-height: 1;
 }
 .pt-smart-button { min-width: 48px !important; font-weight: 700; }
+.pt-session-group { flex: 0 0 auto; padding-top: 18px; }
+.pt-session-button { min-width: 58px !important; font-weight: 700; }
 .pt-transport-group { padding-top: 4px; align-items: center; }
 .pt-main-counter {
   display: inline-grid;
@@ -125,3 +127,5 @@
 .pt-menu button:focus-visible { color: var(--pt-on-selected); background: var(--pt-selected, #4a90d9); }
 .pt-menu-label { min-width: 62px; }
 .pt-menu-hint { color: var(--pt-text-muted, #8e8e8e); font-size: 10px; }
+.pt-session-action { display: flex; align-items: center; gap: 16px; width: 100%; }
+.pt-session-action kbd { margin-left: auto; color: var(--pt-text-muted, #949494); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
