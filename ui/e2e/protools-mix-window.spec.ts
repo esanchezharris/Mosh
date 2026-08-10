@@ -45,6 +45,11 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
   await execInPage(page, "create_bus", { name: "Vocal Verb" });
   await execInPage(page, "load_builtin", { trackId, type: "compressor" });
 
+  const editHeaders = page.getByTestId("pt-track-header");
+  const additiveModifier = process.platform === "darwin" ? "Meta" : "Control";
+  await editHeaders.nth(0).getByTestId("pt-track-select").click();
+  await editHeaders.nth(1).getByTestId("pt-track-select").click({ modifiers: [additiveModifier] });
+
   await page.getByTestId("pt-window-mix").click();
   const shell = page.getByTestId("protools-shell");
   const mix = page.getByTestId("pt-mix-window");
@@ -54,6 +59,8 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
   await expect(mix).toBeVisible();
   await expect(page.getByTestId("pt-timeline")).toHaveCount(0);
   await expect(strips).toHaveCount(9);
+  await expect(strips.nth(0)).toHaveAttribute("data-selected", "true");
+  await expect(strips.nth(1)).toHaveAttribute("data-selected", "true");
   await expect(page.getByTestId("pt-mix-master-meter")).toBeVisible();
   await expect(first.getByTestId("pt-mix-volume")).toHaveAccessibleName("Volume for Drums");
   await expect(first.getByTestId("pt-mix-input")).toHaveAccessibleName("Input source for Drums");
@@ -90,6 +97,19 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
   await first.getByTestId("pt-mix-insert-open-0").click();
   await first.getByTestId("pt-mix-insert-bypass-0").click();
 
+  await page.keyboard.down("Alt");
+  await page.keyboard.down("Shift");
+  await first.getByTestId("pt-mix-volume").fill("-5");
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Alt");
+
+  await page.keyboard.down("Alt");
+  await first.getByTestId("pt-mix-automation").selectOption("touch");
+  await first.getByTestId("pt-mix-add-insert").click();
+  await page.keyboard.up("Alt");
+  await page.getByTestId("plugin-browser-search").fill("Delay");
+  await page.getByTitle("Add Delay to 9 channel strips").click();
+
   await master.getByTestId("pt-mix-master-volume").fill("-2.5");
   await master.getByTestId("pt-mix-master-pan").fill("0.15");
   await master.getByTestId("pt-mix-master-add-insert").click();
@@ -115,13 +135,23 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
   }, trackId)).toEqual({
     input: "in-3-4",
     output: "out-3-4",
-    automation: "write",
+    automation: "touch",
     pan: -0.35,
-    volume: -9,
+    volume: -5,
     mute: true,
     send: -8,
     insertEnabled: false,
   });
+  await expect.poll(() => page.evaluate(() => {
+    const tracks = (window as ProToolsWindow).__moshStore?.getState().snapshot?.tracks ?? [];
+    const compatible = tracks.filter((track) => !track.isGroup);
+    return {
+      selectedVolumes: tracks.slice(0, 2).map((track) => track.volumeDb),
+      allAutomation: compatible.every((track) => track.automationMode === "touch"),
+      delayTargets: compatible.filter((track) => track.plugins?.some((plugin) => plugin.name === "Delay")).length,
+      compatible: compatible.length,
+    };
+  })).toEqual({ selectedVolumes: [-5, -5], allAutomation: true, delayTargets: 9, compatible: 9 });
   await expect.poll(() => page.evaluate(() => {
     const masterState = (window as ProToolsWindow).__moshStore?.getState().snapshot?.master;
     return {
@@ -170,5 +200,10 @@ test("tutorial-backed Mix Window exposes real channel strips and the Edit/Mix wo
     "open_master_plugin_editor",
     "bypass_master_plugin",
   ]) expect(trace.map((entry) => entry.command)).toContain(command);
+  expect(trace.filter((entry) => entry.command === "set_track_volume" && entry.args.db === -5)).toHaveLength(2);
+  expect(trace.filter((entry) => entry.command === "set_track_automation_mode" && entry.args.mode === "touch"))
+    .toHaveLength(9);
+  expect(trace.filter((entry) => entry.command === "load_builtin" && entry.args.type === "delay"))
+    .toHaveLength(9);
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });

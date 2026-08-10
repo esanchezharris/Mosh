@@ -127,6 +127,30 @@ export function loadPluginEntry(
   return true;
 }
 
+export async function loadPluginEntryToTracks(
+  entry: PluginEntry,
+  trackIds: readonly string[],
+  exec: (command: string, args?: Record<string, unknown>) => Promise<{ readonly ok: boolean }>,
+  isCurrent: () => boolean = () => true,
+): Promise<boolean> {
+  const targets = [...new Set(trackIds)];
+  if (targets.length === 0) return false;
+  for (const trackId of targets) {
+    if (!isCurrent()) return false;
+    let result: { readonly ok: boolean };
+    try {
+      result = entry.loadKind === "builtin"
+        ? await exec("load_builtin", { trackId, type: entry.loadKey })
+        : await exec("load_plugin", { trackId, pluginId: entry.loadKey });
+    } catch {
+      return false;
+    }
+    if (!result.ok || !isCurrent()) return false;
+  }
+  addPluginRecent(entry.uid);
+  return true;
+}
+
 /** Dispatch an entry onto the session master bus and record it in recents. */
 export function loadMasterPluginEntry(
   entry: PluginEntry,

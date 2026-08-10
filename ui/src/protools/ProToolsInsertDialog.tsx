@@ -11,10 +11,11 @@ function quarantineName(entry: PluginQuarantine): string {
   return entry.rawId.split("/").at(-1) || entry.id;
 }
 
-export function ProToolsInsertDialog({ onClose, returnFocusRef, target = "track" }: {
+export function ProToolsInsertDialog({ onClose, returnFocusRef, target = "track", trackIds }: {
   readonly onClose: () => void;
   readonly returnFocusRef: RefObject<HTMLButtonElement>;
   readonly target?: "track" | "master";
+  readonly trackIds?: readonly string[];
 }) {
   const pluginCounts = useStore((state) => state.pluginCounts);
   const scanProgress = useStore((state) => state.scanProgress);
@@ -24,12 +25,17 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef, target = "track"
   const exec = useStore((state) => state.exec);
   const pluginBlocklist = useStore((state) => state.pluginBlocklist);
   const refreshPluginBlocklist = useStore((state) => state.refreshPluginBlocklist);
+  const projectEpoch = useStore((state) => state.projectEpoch);
   const dialogRef = useRef<HTMLElement>(null);
+  const openedEpochRef = useRef(projectEpoch);
   const [scanAttempted, setScanAttempted] = useState(false);
   const quarantined = pluginBlocklist.filter((entry) =>
     entry.reason === "crash_or_hang" && entry.rawId.toLowerCase().endsWith(".vst3"));
 
   useEffect(() => pushEscapeHandler(onClose), [onClose]);
+  useEffect(() => {
+    if (projectEpoch !== openedEpochRef.current) onClose();
+  }, [onClose, projectEpoch]);
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLInputElement>("[data-testid=plugin-browser-search]")?.focus();
     return () => returnFocusRef.current?.focus();
@@ -83,7 +89,10 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef, target = "track"
         onClick={(event) => event.stopPropagation()} onKeyDown={trapFocus}>
         <header className="pt-insert-head">
           <div>
-            <h2 id="pt-insert-title">{target === "master" ? "Add Master Insert" : "Add Insert"}</h2>
+            <h2 id="pt-insert-title">
+              {target === "master" ? "Add Master Insert"
+                : trackIds && trackIds.length > 1 ? `Add Insert to ${trackIds.length} Channel Strips` : "Add Insert"}
+            </h2>
             <span>{pluginCounts ? `${pluginCounts.vst3} VST3 available` : "Plugin catalog"}</span>
           </div>
           <button type="button" data-testid="pt-insert-rescan" disabled={Boolean(scanProgress)}
@@ -114,7 +123,7 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef, target = "track"
           </div>
         )}
         {scanAttempted && lastError && <div className="pt-insert-error" role="alert">{lastError}</div>}
-        <PluginBrowserContent onLoaded={onClose} loadTarget={target} />
+        <PluginBrowserContent onLoaded={onClose} loadTarget={target} trackIds={trackIds} />
       </section>
     </div>
   );

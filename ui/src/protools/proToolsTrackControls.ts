@@ -67,10 +67,13 @@ export async function applyProToolsTrackControl(
   const snapshot = store.snapshot;
   if (!snapshot) return;
   const requested = new Set<string>();
+  const existing = new Set(snapshot.tracks.map((track) => track.id));
   const mixAttribute = TRACK_CONTROL_ATTRIBUTES[control];
-  for (const trackId of requestedTrackIds)
+  for (const trackId of requestedTrackIds) {
+    if (existing.has(trackId)) requested.add(trackId);
     for (const linkedTrackId of proToolsMixGroupTrackIds(snapshot, trackId, mixAttribute))
       requested.add(linkedTrackId);
+  }
   const tracks = snapshot.tracks.filter((track) => requested.has(track.id));
   const sourceTrack = tracks.find((track) => track.id === sourceTrackId) ?? tracks[0];
   if (!sourceTrack) return;

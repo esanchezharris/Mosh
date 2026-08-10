@@ -5,13 +5,15 @@ import { ProToolsInsertDialog } from "./ProToolsInsertDialog";
 
 const INSERT_SLOT_LABELS = ["A", "B", "C", "D", "E"] as const;
 
-export function ProToolsMixInserts({ track, onSelectTrack }: {
+export function ProToolsMixInserts({ track, onSelectTrack, targetTrackIds }: {
   readonly track: Track;
   readonly onSelectTrack: () => void;
+  readonly targetTrackIds: readonly string[];
 }) {
   const exec = useStore((state) => state.exec);
   const addRef = useRef<HTMLButtonElement>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogTrackIds, setDialogTrackIds] = useState<readonly string[]>([]);
   const plugins = track.plugins ?? [];
 
   return (
@@ -47,11 +49,15 @@ export function ProToolsMixInserts({ track, onSelectTrack }: {
         );
       })}
       <button ref={addRef} type="button" className="pt-mix-add-insert" data-testid="pt-mix-add-insert"
-        disabled={track.frozen} onClick={() => {
+        disabled={track.frozen || track.isGroup} onClick={() => {
           onSelectTrack();
+          setDialogTrackIds(targetTrackIds);
           setDialogOpen(true);
         }}>+ Insert</button>
-      {dialogOpen && <ProToolsInsertDialog onClose={() => setDialogOpen(false)} returnFocusRef={addRef} />}
+      {dialogOpen && (
+        <ProToolsInsertDialog onClose={() => setDialogOpen(false)} returnFocusRef={addRef}
+          trackIds={dialogTrackIds} />
+      )}
     </section>
   );
 }

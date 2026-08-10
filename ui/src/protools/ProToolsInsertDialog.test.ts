@@ -93,6 +93,7 @@ describe("Pro Tools insert workflow", () => {
       ensurePluginCatalog: originalState.ensurePluginCatalog,
       rescanPlugins: originalState.rescanPlugins,
       refreshPluginBlocklist: originalState.refreshPluginBlocklist,
+      projectEpoch: originalState.projectEpoch,
     });
   });
 
@@ -131,6 +132,16 @@ describe("Pro Tools insert workflow", () => {
 
     await openDialog();
     await act(async () => button("pt-insert-close").click());
+    expect(document.querySelector("[data-testid=pt-insert-dialog]")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes and restores focus when the project changes", async () => {
+    const trigger = button("pt-add-insert");
+    await openDialog();
+
+    act(() => useStore.setState({ projectEpoch: useStore.getState().projectEpoch + 1 }));
+
     expect(document.querySelector("[data-testid=pt-insert-dialog]")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });

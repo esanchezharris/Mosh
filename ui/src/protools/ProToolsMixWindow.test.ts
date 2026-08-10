@@ -40,8 +40,21 @@ const SNAPSHOT: Snapshot = {
       sends: [{ bus: 1, db: -12, mute: false }],
     },
     {
-      id: "folder",
+      id: "double",
       index: 1,
+      name: "Double",
+      type: "audio",
+      clips: [],
+      armed: false,
+      monitor: "automatic",
+      volumeDb: -4,
+      pan: -0.1,
+      automationMode: "read",
+      sends: [{ bus: 1, db: -10, mute: false }],
+    },
+    {
+      id: "folder",
+      index: 2,
       name: "Vocals Folder",
       type: "group",
       isGroup: true,
@@ -51,7 +64,7 @@ const SNAPSHOT: Snapshot = {
     },
     {
       id: "aux-1",
-      index: 2,
+      index: 3,
       name: "Vocal Verb",
       type: "audio",
       isReturn: true,
@@ -184,7 +197,7 @@ describe("Pro Tools Mix Window", () => {
 
   it("renders every track and Aux as a labelled strip with the documented control hierarchy", () => {
     expect(host.querySelector("[data-testid=pt-mix-window]")).not.toBeNull();
-    expect(host.querySelectorAll("[data-testid=pt-mix-strip]")).toHaveLength(3);
+    expect(host.querySelectorAll("[data-testid=pt-mix-strip]")).toHaveLength(4);
     expect(vocalStrip().getAttribute("aria-label")).toBe("Lead Vocal channel strip");
     expect(vocalStrip().querySelector("[data-testid=pt-mix-inserts]")?.textContent).toContain("CLA-2A Stereo");
     expect(vocalStrip().querySelector("[data-testid=pt-mix-sends]")?.textContent).toContain("Vocal Verb");
@@ -196,6 +209,12 @@ describe("Pro Tools Mix Window", () => {
     expect(host.querySelector("[data-testid=pt-mix-master-inserts]")?.textContent).toContain("Master Glue");
     expect(host.querySelector<HTMLInputElement>("[data-testid=pt-mix-master-volume]")?.value).toBe("-1.5");
     expect(host.querySelector<HTMLInputElement>("[data-testid=pt-mix-master-pan]")?.value).toBe("0.1");
+    const groupStrip = host.querySelector<HTMLElement>("[data-testid=pt-mix-strip][data-track-id=folder]");
+    expect(groupStrip?.querySelector<HTMLInputElement>("[data-testid=pt-mix-volume]")?.disabled).toBe(false);
+    expect(groupStrip?.querySelector<HTMLInputElement>("[data-testid=pt-mix-pan]")?.disabled).toBe(true);
+    expect(groupStrip?.querySelector<HTMLSelectElement>("[data-testid=pt-mix-output]")?.disabled).toBe(true);
+    expect(groupStrip?.querySelector<HTMLButtonElement>("[data-testid=pt-mix-mute]")?.disabled).toBe(true);
+    expect(groupStrip?.querySelector<HTMLButtonElement>("[data-testid=pt-mix-add-insert]")?.disabled).toBe(true);
   });
 
   it("routes master fader, pan, and existing inserts through master-only commands", async () => {
@@ -278,12 +297,155 @@ describe("Pro Tools Mix Window", () => {
     expect(useStore.getState().selectedTrackId).toBe("vocal");
   });
 
+  it("Option applies compatible Mix actions to all shown strips in session order", async () => {
+    const strip = vocalStrip();
+    const automation = strip.querySelector<HTMLSelectElement>("[data-testid=pt-mix-automation]");
+    const output = strip.querySelector<HTMLSelectElement>("[data-testid=pt-mix-output]");
+    const mute = strip.querySelector<HTMLButtonElement>("[data-testid=pt-mix-mute]");
+    const addInsert = strip.querySelector<HTMLButtonElement>("[data-testid=pt-mix-add-insert]");
+    if (!automation || !output || !mute || !addInsert) throw new Error("fan-out controls are missing");
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Alt", code: "AltLeft", altKey: true, bubbles: true,
+    })));
+    await act(async () => {
+      changeSelect(automation, "write");
+      changeSelect(output, "dev:out-3-4");
+      mute.click();
+      addInsert.click();
+    });
+    const dialog = host.querySelector<HTMLElement>("[data-testid=pt-insert-dialog]");
+    const compressor = Array.from(dialog?.querySelectorAll<HTMLButtonElement>(".prow-load") ?? [])
+      .find((control) => control.textContent?.includes("Compressor"));
+    if (!compressor) throw new Error("fan-out Insert row is missing");
+    await act(async () => compressor.click());
+    act(() => window.dispatchEvent(new KeyboardEvent("keyup", {
+      key: "Alt", code: "AltLeft", altKey: false, bubbles: true,
+    })));
+
+    await vi.waitFor(() => expect(exec.mock.calls.filter(([command]) => command === "set_track_automation_mode"))
+      .toEqual([
+        ["set_track_automation_mode", { trackId: "vocal", mode: "write" }],
+        ["set_track_automation_mode", { trackId: "double", mode: "write" }],
+        ["set_track_automation_mode", { trackId: "aux-1", mode: "write" }],
+      ]));
+    expect(exec.mock.calls.filter(([command]) => command === "set_track_output")).toEqual([
+      ["set_track_output", { trackId: "vocal", deviceID: "out-3-4" }],
+      ["set_track_output", { trackId: "double", deviceID: "out-3-4" }],
+      ["set_track_output", { trackId: "aux-1", deviceID: "out-3-4" }],
+    ]);
+    expect(exec.mock.calls.filter(([command]) => command === "set_track_mute")).toEqual([
+      ["set_track_mute", { trackId: "vocal", mute: true }],
+      ["set_track_mute", { trackId: "double", mute: true }],
+      ["set_track_mute", { trackId: "aux-1", mute: true }],
+    ]);
+    expect(exec.mock.calls.filter(([command]) => command === "load_builtin")).toEqual([
+      ["load_builtin", { trackId: "vocal", type: "compressor" }],
+      ["load_builtin", { trackId: "double", type: "compressor" }],
+      ["load_builtin", { trackId: "aux-1", type: "compressor" }],
+    ]);
+  });
+
+  it("Option changes a matching send on every compatible strip that owns it", async () => {
+    const send = vocalStrip().querySelector<HTMLInputElement>("[data-testid=pt-mix-send-level-1]");
+    if (!send) throw new Error("Vocal Verb send is missing");
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Alt", code: "AltLeft", altKey: true, bubbles: true,
+    })));
+    await act(async () => changeInput(send, "-4"));
+    act(() => window.dispatchEvent(new KeyboardEvent("keyup", {
+      key: "Alt", code: "AltLeft", altKey: false, bubbles: true,
+    })));
+
+    await vi.waitFor(() => expect(exec.mock.calls.filter(([command]) => command === "set_send_level"))
+      .toEqual([
+        ["set_send_level", { trackId: "vocal", bus: 1, db: -4 }],
+        ["set_send_level", { trackId: "double", bus: 1, db: -4 }],
+      ]));
+  });
+
+  it("stops all-strip input routing when hardware reports applied false", async () => {
+    const input = vocalStrip().querySelector<HTMLSelectElement>("[data-testid=pt-mix-input]");
+    if (!input) throw new Error("Mix input is missing");
+    exec.mockResolvedValueOnce({
+      ok: true,
+      command: "set_track_input",
+      data: { applied: false, reason: "Input 3-4 is unavailable" },
+    });
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Alt", code: "AltLeft", altKey: true, bubbles: true,
+    })));
+    await act(async () => changeSelect(input, "in-3-4"));
+    act(() => window.dispatchEvent(new KeyboardEvent("keyup", {
+      key: "Alt", code: "AltLeft", altKey: false, bubbles: true,
+    })));
+
+    await vi.waitFor(() => expect(useStore.getState().lastError).toBe("Input 3-4 is unavailable"));
+    expect(exec.mock.calls.filter(([command]) => command === "set_track_input")).toEqual([
+      ["set_track_input", { trackId: "vocal", deviceID: "in-3-4" }],
+    ]);
+  });
+
+  it("Option-Shift applies a fader action only to selected Track Names", async () => {
+    act(() => useProTools.setState({
+      trackSelectionIds: ["aux-1"],
+      editSelectionTrackIds: ["aux-1"],
+      editSelectionTrackId: "aux-1",
+    }));
+    const volume = vocalStrip().querySelector<HTMLInputElement>("[data-testid=pt-mix-volume]");
+    if (!volume) throw new Error("Mix fader is missing");
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Alt", code: "AltLeft", altKey: true, shiftKey: true, bubbles: true,
+    })));
+    await act(async () => changeInput(volume, "-7"));
+    act(() => window.dispatchEvent(new KeyboardEvent("keyup", {
+      key: "Alt", code: "AltLeft", altKey: false, shiftKey: true, bubbles: true,
+    })));
+
+    await vi.waitFor(() => expect(exec.mock.calls.filter(([command]) => command === "set_track_volume"))
+      .toEqual([["set_track_volume", { trackId: "aux-1", db: -7 }]]));
+  });
+
+  it("keeps an Aux strip's direct Mute action operational", async () => {
+    const aux = host.querySelector<HTMLElement>("[data-testid=pt-mix-strip][data-track-id=aux-1]");
+    const mute = aux?.querySelector<HTMLButtonElement>("[data-testid=pt-mix-mute]");
+    if (!mute) throw new Error("Aux mute is missing");
+
+    await act(async () => mute.click());
+
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith("set_track_mute", {
+      trackId: "aux-1",
+      mute: true,
+    }));
+  });
+
   it("keeps hidden strips out of Mix without removing their project tracks", () => {
     act(() => useProTools.getState().setTrackShown("folder", false));
 
     expect(host.querySelector("[data-testid=pt-mix-strip][data-track-id=folder]")).toBeNull();
     expect(useStore.getState().snapshot?.tracks.some((track) => track.id === "folder")).toBe(true);
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("selects contiguous or noncontiguous Track Names directly in Mix", () => {
+    const vocalName = vocalStrip().querySelector<HTMLButtonElement>(".pt-mix-track-name");
+    const double = host.querySelector<HTMLElement>("[data-testid=pt-mix-strip][data-track-id=double]");
+    const doubleName = double?.querySelector<HTMLButtonElement>(".pt-mix-track-name");
+    if (!vocalName || !doubleName) throw new Error("Mix Track Names are missing");
+
+    act(() => vocalName.click());
+    act(() => doubleName.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      metaKey: true,
+    })));
+
+    expect(useProTools.getState().trackSelectionIds).toEqual(["vocal", "double"]);
+    expect(vocalStrip().dataset.selected).toBe("true");
+    expect(double?.dataset.selected).toBe("true");
   });
 
   it("opens the shared Insert dialog for the strip selected by keyboard or pointer", async () => {
