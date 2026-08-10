@@ -1,7 +1,8 @@
 import type { KeyboardEvent, MouseEvent, RefObject } from "react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
+import { useShell } from "../v2/shellState";
 import type { ProToolsRuler, ProToolsRulersVisible } from "./proToolsState";
 import {
   barsBeatsRulerTicks,
@@ -9,14 +10,18 @@ import {
   formatSamples,
   formatTimecode,
   linearRulerTicks,
-  secondsAtClientX,
-  secondsAtScrollLeft,
-  timelinePxPerSecond,
   timelineSeconds,
   type ProToolsRulerTick,
 } from "./layout";
 import { numberedMemoryLocations } from "./memoryLocations";
+import { ProToolsRulerSelectionOverlay } from "./ProToolsRulerSelectionOverlay";
+import { PRO_TOOLS_RULER_SPECS } from "./proToolsRulerSpecs";
+import {
+  extendedProToolsSelection,
+  proToolsSelectionSecondAt,
+} from "./proToolsEditSelection";
 import { useProTools } from "./proToolsState";
+import { useProToolsEditSelection } from "./useProToolsEditSelection";
 
 type Props = {
   snapshot: Snapshot;
@@ -25,20 +30,6 @@ type Props = {
   fieldRef: RefObject<HTMLDivElement>;
   getScrollLeft: () => number;
 };
-
-type RulerSpec = {
-  id: ProToolsRuler;
-  label: string;
-  hint: string;
-};
-
-const RULERS: readonly RulerSpec[] = [
-  { id: "markers", label: "Markers", hint: "saved Memory Locations" },
-  { id: "barsBeats", label: "Bars+Beats", hint: "musical bars and beats" },
-  { id: "timecode", label: "Timecode", hint: "30 frames per second" },
-  { id: "minutesSeconds", label: "Minutes:Seconds", hint: "elapsed minutes and seconds" },
-  { id: "samples", label: "Samples", hint: "audio samples" },
-];
 
 const nearestKeyboardTick = (
   ticks: readonly ProToolsRulerTick[],
@@ -57,49 +48,91 @@ export function ProToolsRulers({
   getScrollLeft,
 }: Props) {
   const exec = useStore((state) => state.exec);
+  const pxPerSecond = useStore((state) => state.pxPerSec);
   const requestNewMemoryLocation = useProTools((state) => state.requestNewMemoryLocation);
   const requestEditMemoryLocation = useProTools((state) => state.requestEditMemoryLocation);
+  const editMode = useProTools((state) => state.editMode);
+  const activeTool = useProTools((state) => state.activeTool);
+  const smartToolEnabled = useProTools((state) => state.smartToolEnabled);
+  const range = useShell((state) => state.timeRange);
+  const setRange = useShell((state) => state.setTimeRange);
+  const setRangeDragging = useShell((state) => state.setTimeRangeDragging);
   const totalSeconds = timelineSeconds(snapshot);
-  const pxPerSecond = timelinePxPerSecond(contentWidth, totalSeconds);
+  const logicalTimelineWidth = Math.max(1, totalSeconds * pxPerSecond);
   const ticks = useMemo<Record<ProToolsRuler, ProToolsRulerTick[]>>(() => ({
     markers: [],
-    barsBeats: barsBeatsRulerTicks(snapshot, contentWidth),
-    timecode: linearRulerTicks(totalSeconds, contentWidth, formatTimecode, 102),
-    minutesSeconds: linearRulerTicks(totalSeconds, contentWidth, formatMinutesSeconds, 96),
+    barsBeats: barsBeatsRulerTicks(snapshot, logicalTimelineWidth),
+    timecode: linearRulerTicks(totalSeconds, logicalTimelineWidth, formatTimecode, 102),
+    minutesSeconds: linearRulerTicks(totalSeconds, logicalTimelineWidth, formatMinutesSeconds, 96),
     samples: linearRulerTicks(
       totalSeconds,
-      contentWidth,
+      logicalTimelineWidth,
       (seconds) => formatSamples(seconds, snapshot.session.sampleRate),
       92,
     ),
-  }), [contentWidth, snapshot, totalSeconds]);
+  }), [logicalTimelineWidth, snapshot, totalSeconds]);
   const memoryLocations = useMemo(() => numberedMemoryLocations(snapshot), [snapshot]);
-  const visible = RULERS.filter((ruler) => rulersVisible[ruler.id]);
-  const seek = (position: number) => {
+  const visible = PRO_TOOLS_RULER_SPECS.filter((ruler) => rulersVisible[ruler.id]);
+  const selectorEnabled = smartToolEnabled || activeTool === "selector";
+  const seek = useCallback((position: number) => {
     void exec("set_transport", { position: Math.max(0, Math.min(totalSeconds, position)) });
-  };
+  }, [exec, totalSeconds]);
+  const positionAt = useCallback((element: HTMLElement, clientX: number, bypassSnap: boolean) => {
+    const state = useStore.getState();
+    return proToolsSelectionSecondAt({
+      clientX,
+      rectLeft: element.getBoundingClientRect().left,
+      pxPerSecond,
+      totalSeconds,
+      editMode,
+      bypassSnap,
+      session: snapshot.session,
+      snapDivision: state.effectiveSnapDivision(),
+      snapTriplet: state.snapTriplet,
+    });
+  }, [editMode, pxPerSecond, snapshot.session, totalSeconds]);
+  const editSelection = useProToolsEditSelection({
+    enabled: selectorEnabled,
+    positionAt,
+    onPlaceCursor: seek,
+  });
 
   const onClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (editSelection.consumePointerClick(event)) return;
     const position = event.detail === 0
-      ? secondsAtScrollLeft(getScrollLeft(), contentWidth, totalSeconds)
-      : secondsAtClientX(
-          event.clientX,
-          event.currentTarget.getBoundingClientRect().left,
-          contentWidth,
-          totalSeconds,
-        );
+      ? Math.max(0, Math.min(totalSeconds, getScrollLeft() / pxPerSecond))
+      : positionAt(event.currentTarget, event.clientX, event.altKey);
+    setRangeDragging(false);
+    setRange(null);
     seek(position);
   };
 
   const onKeyDown = (ruler: ProToolsRuler, event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Escape" && range) {
+      event.preventDefault();
+      event.stopPropagation();
+      setRangeDragging(false);
+      setRange(null);
+      return;
+    }
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     event.stopPropagation();
     const position = useStore.getState().transport.position;
-    if (event.key === "Home") return seek(0);
-    if (event.key === "End") return seek(totalSeconds);
-    const direction = event.key === "ArrowRight" ? 1 : -1;
-    const next = nearestKeyboardTick(ticks[ruler], position, direction);
+    const direction: -1 | 1 = event.key === "ArrowLeft" || event.key === "Home" ? -1 : 1;
+    const edge = range ? (direction > 0 ? range.end : range.start) : position;
+    const next = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? totalSeconds
+        : nearestKeyboardTick(ticks[ruler], edge, direction);
+    if (event.shiftKey && selectorEnabled && next !== undefined) {
+      setRangeDragging(false);
+      setRange(extendedProToolsSelection(range, position, next, direction));
+      return;
+    }
+    setRangeDragging(false);
+    setRange(null);
     if (next !== undefined) seek(next);
   };
 
@@ -162,9 +195,34 @@ export function ProToolsRulers({
               className="pt-ruler-row"
               data-ruler={ruler.id}
               key={ruler.id}
-              aria-label={`${ruler.label} ruler, ${ruler.hint}. Click to place the playhead; use Left, Right, Home, or End to seek.`}
+              aria-label={`${ruler.label} ruler, ${ruler.hint}. Click to place the playhead; drag with the Selector to make an Edit selection; use Shift plus Left or Right to extend it.`}
               onClick={onClick}
               onKeyDown={(event) => onKeyDown(ruler.id, event)}
+              onPointerDown={(event) => {
+                if (!editSelection.begin(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onPointerMove={(event) => {
+                if (!editSelection.move(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onPointerUp={(event) => {
+                if (!editSelection.finish(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onPointerCancel={(event) => {
+                if (!editSelection.cancel(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onLostPointerCapture={(event) => {
+                if (!editSelection.cancel(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
             >
               {ticks[ruler.id].map((tick) => (
                 <span
@@ -178,6 +236,10 @@ export function ProToolsRulers({
               ))}
             </button>
           ))}
+          <ProToolsRulerSelectionOverlay
+            visibleRulers={visible.map((ruler) => ruler.id)}
+            pxPerSecond={pxPerSecond}
+            recordArmed={snapshot.tracks.some((track) => track.armed)} />
         </div>
       </div>
     </section>

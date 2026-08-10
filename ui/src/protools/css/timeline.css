@@ -36,7 +36,7 @@
   font: 700 11px/1 sans-serif;
 }
 .pt-ruler-viewport { position: relative; min-width: 0; overflow: hidden; }
-.pt-ruler-field { display: grid; will-change: transform; }
+.pt-ruler-field { position: relative; display: grid; will-change: transform; }
 .pt-ruler-row {
   position: relative;
   display: block;
@@ -68,6 +68,34 @@
   font: 500 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums;
 }
+.pt-ruler-selection {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  height: var(--pt-ruler-row-h);
+  min-width: 2px;
+  border-inline: 1px solid var(--pt-selected);
+  border-bottom: 2px solid var(--pt-selected);
+  background: transparent;
+  pointer-events: none;
+}
+.pt-ruler-selection.is-record-armed {
+  border-inline-color: var(--pt-danger);
+  border-bottom-color: var(--pt-danger);
+}
+.pt-ruler-selection-start,
+.pt-ruler-selection-end {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 6px solid var(--pt-selected);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+.pt-ruler-selection-start { left: -4px; }
+.pt-ruler-selection-end { right: -4px; transform: rotate(180deg); }
+.pt-ruler-selection.is-record-armed > span { border-top-color: var(--pt-danger); }
 .pt-marker-ruler { overflow: visible; }
 .pt-marker-flag {
   position: absolute;
@@ -150,7 +178,34 @@
 }
 .pt-lower-zoom-axis:first-child output { width: 38px; }
 .pt-timeline-content { position: relative; min-height: 100%; }
-.pt-record-range-overlays { position: absolute; inset: 0; pointer-events: none; }
+.pt-edit-selection {
+  position: absolute;
+  z-index: 8;
+  top: var(--pt-track-title-h);
+  bottom: 0;
+  box-sizing: border-box;
+  min-width: 2px;
+  border-inline: 1px solid var(--pt-selected);
+  background: color-mix(in srgb, var(--pt-selected) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pt-selected) 16%, transparent);
+  pointer-events: none;
+}
+.pt-edit-selection[data-dragging="true"] {
+  background: color-mix(in srgb, var(--pt-selected) 21%, transparent);
+}
+.pt-edit-selection > span {
+  position: absolute;
+  top: 2px;
+  padding: 1px 3px;
+  border-radius: 1px;
+  color: var(--pt-on-selected);
+  background: var(--pt-selected);
+  font: 700 8px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+.pt-edit-selection-start { left: 2px; }
+.pt-edit-selection-end { right: 2px; }
+.pt-record-range-overlays { position: absolute; z-index: 9; inset: 0; pointer-events: none; }
 .pt-preroll-overlay,
 .pt-punch-overlay {
   position: absolute;

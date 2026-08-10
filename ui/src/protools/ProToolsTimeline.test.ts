@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandResult, Snapshot } from "../types";
 import { useStore } from "../store";
+import { useShell } from "../v2/shellState";
 import { useProTools } from "./proToolsState";
 import { ProToolsTimeline } from "./ProToolsTimeline";
 
@@ -107,6 +108,7 @@ describe("ProToolsTimeline pointer capture", () => {
       exec,
     });
     useProTools.getState().resetForProject(projectEpoch);
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
     act(() => root.render(React.createElement(Harness)));
   });
 
@@ -114,6 +116,7 @@ describe("ProToolsTimeline pointer capture", () => {
     act(() => root.unmount());
     host.remove();
     useStore.setState({ snapshot: null, selection: new Set<string>(), exec: originalExec });
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
     vi.restoreAllMocks();
   });
 
@@ -243,6 +246,74 @@ describe("ProToolsTimeline pointer capture", () => {
     // Then: the transient selection gesture is removed without selecting a clip.
     expect(host.querySelector(".pt-marquee")).toBeNull();
     expect(useStore.getState().selection).toEqual(new Set<string>());
+  });
+
+  it("creates a persistent Edit selection by dragging empty lane space", () => {
+    const { content } = timeline();
+    const lane = host.querySelector<HTMLElement>(".pt-lane");
+    if (!lane) throw new Error("timeline lane did not render");
+
+    dispatchPointer(lane, "pointerdown", { pointerId: 20, button: 0, clientX: 420, clientY: 80 });
+    dispatchPointer(lane, "pointermove", { pointerId: 20, buttons: 1, clientX: 560, clientY: 80 });
+    expect(useShell.getState().timeRangeDragging).toBe(true);
+    expect(useShell.getState().timeRange).toEqual({ start: 4.2, end: 5.6 });
+    expect(content.querySelector("[data-testid=pt-edit-selection]")).not.toBeNull();
+
+    dispatchPointer(lane, "pointerup", { pointerId: 20, clientX: 560, clientY: 80 });
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    expect(useShell.getState().timeRange).toEqual({ start: 4.2, end: 5.6 });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("places the edit cursor on an empty-lane click and clears the prior range", () => {
+    timeline();
+    const lane = host.querySelector<HTMLElement>(".pt-lane");
+    if (!lane) throw new Error("timeline lane did not render");
+    act(() => useShell.setState({ timeRange: { start: 2, end: 5 }, timeRangeDragging: false }));
+
+    dispatchPointer(lane, "pointerdown", { pointerId: 21, button: 0, clientX: 300, clientY: 80 });
+    dispatchPointer(lane, "pointerup", { pointerId: 21, clientX: 300, clientY: 80 });
+
+    expect(useShell.getState().timeRange).toBeNull();
+    expect(exec).toHaveBeenCalledWith("set_transport", { position: 3 });
+  });
+
+  it("rolls empty-lane selection back on cancellation and invalidates it on project replacement", () => {
+    timeline();
+    const lane = host.querySelector<HTMLElement>(".pt-lane");
+    if (!lane) throw new Error("timeline lane did not render");
+    act(() => useShell.setState({ timeRange: { start: 1, end: 2 }, timeRangeDragging: false }));
+
+    dispatchPointer(lane, "pointerdown", { pointerId: 22, button: 0, clientX: 420, clientY: 80 });
+    dispatchPointer(lane, "pointermove", { pointerId: 22, buttons: 1, clientX: 560, clientY: 80 });
+    dispatchPointer(lane, "pointercancel", { pointerId: 22, clientX: 560, clientY: 80 });
+    expect(useShell.getState().timeRange).toEqual({ start: 1, end: 2 });
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+
+    dispatchPointer(lane, "pointerdown", { pointerId: 23, button: 0, clientX: 420, clientY: 80 });
+    dispatchPointer(lane, "pointermove", { pointerId: 23, buttons: 1, clientX: 560, clientY: 80 });
+    act(() => useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 })));
+    expect(useShell.getState().timeRange).toBeNull();
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    dispatchPointer(lane, "pointerup", { pointerId: 23, clientX: 600, clientY: 80 });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("does not claim empty-lane drags when a non-Selector tool owns the pointer", () => {
+    timeline();
+    const lane = host.querySelector<HTMLElement>(".pt-lane");
+    if (!lane) throw new Error("timeline lane did not render");
+    act(() => {
+      useProTools.getState().toggleSmartTool();
+      useProTools.getState().setActiveTool("grabber");
+    });
+
+    dispatchPointer(lane, "pointerdown", { pointerId: 24, button: 0, clientX: 420, clientY: 80 });
+    dispatchPointer(lane, "pointermove", { pointerId: 24, buttons: 1, clientX: 560, clientY: 80 });
+    dispatchPointer(lane, "pointerup", { pointerId: 24, clientX: 560, clientY: 80 });
+
+    expect(useShell.getState().timeRange).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("uses Option-wheel for anchored horizontal zoom", () => {

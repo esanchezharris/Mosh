@@ -1,19 +1,22 @@
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import { useStore } from "../store";
 import { beatSeconds, meterFrom } from "../time";
 import type { Clip, Snapshot, Track } from "../types";
 import { applyNoteEdits } from "../ui/noteCommands";
 import { ClipView } from "../v2/lanes/ClipView";
-import { CLIP_VISUAL_HEADER_PX } from "./layout";
+import { CLIP_VISUAL_HEADER_PX, timelineSeconds } from "./layout";
 import { midiPointerIsBlank } from "./midiBlankHit";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { ProToolsAudioClip } from "./ProToolsAudioClip";
 import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
 import { ProToolsCompRange } from "./ProToolsCompRange";
+import { ProToolsEditSelectionOverlay } from "./ProToolsEditSelectionOverlay";
 import { ProToolsPlaylists } from "./ProToolsPlaylists";
 import { ProToolsPunchOverlay } from "./ProToolsPunchOverlay";
+import { proToolsSelectionSecondAt } from "./proToolsEditSelection";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
+import { useProToolsEditSelection } from "./useProToolsEditSelection";
 import { applyHorizontalZoomRange, applyHorizontalZoomStep } from "./proToolsZoom";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
 import { scaledTrackHeights } from "./trackHeightZoom";
@@ -31,6 +34,20 @@ type ClipMatch = { clip: Clip; track: Track };
 type Marquee = { pointerId: number; trackId: string; startX: number; x: number; top: number };
 type SpotCandidate = { pointerId: number; clip: Clip; epoch: number };
 type ZoomArea = { pointerId: number; startX: number; x: number; epoch: number; zoomOut: boolean };
+
+const isEditableBlankLaneTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement) || !target.closest(".pt-lane")) return false;
+  return !target.closest([
+    "[data-clip-id]",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "[role=button]",
+    ".pt-playlists",
+    ".pt-automation-lane-frame",
+  ].join(","));
+};
 
 export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, onSpotClip }: Props) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -64,6 +81,30 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const spotCandidate = useRef<SpotCandidate | null>(null);
   const lastIntentClip = useRef<HTMLElement | null>(null);
   const zoomerEnabled = !smartToolEnabled && activeTool === "zoomer";
+  const selectorEnabled = smartToolEnabled || activeTool === "selector";
+  const totalSeconds = timelineSeconds(snapshot);
+  const selectionPositionAt = useCallback((element: HTMLElement, clientX: number, bypassSnap: boolean) => {
+    const state = useStore.getState();
+    return proToolsSelectionSecondAt({
+      clientX,
+      rectLeft: element.getBoundingClientRect().left,
+      pxPerSecond: state.pxPerSec,
+      totalSeconds,
+      editMode,
+      bypassSnap,
+      session: snapshot.session,
+      snapDivision: state.effectiveSnapDivision(),
+      snapTriplet: state.snapTriplet,
+    });
+  }, [editMode, snapshot.session, totalSeconds]);
+  const placeEditCursor = useCallback((nextPosition: number): void => {
+    void useStore.getState().exec("set_transport", { position: nextPosition });
+  }, []);
+  const editSelection = useProToolsEditSelection({
+    enabled: selectorEnabled,
+    positionAt: selectionPositionAt,
+    onPlaceCursor: placeEditCursor,
+  });
 
   const hit = (e: React.PointerEvent): (ClipMatch & { element: HTMLElement; intent: ProToolsIntent; blank: boolean }) | null => {
     if (!(e.target instanceof HTMLElement)) return null;
@@ -120,7 +161,13 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
       return;
     }
     const current = hit(e);
-    if (!current || e.button !== 0) return;
+    if (!current) {
+      if (!isEditableBlankLaneTarget(e.target) || !editSelection.begin(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.button !== 0) return;
     if (editMode === "spot" && current.intent === "grabber") {
       e.preventDefault(); e.stopPropagation();
       select([current.clip.id]);
@@ -171,6 +218,11 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
       setZoomArea(next);
       return;
     }
+    if (editSelection.move(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (velocityDrag.current || marqueeRef.current) {
       e.preventDefault(); e.stopPropagation();
       if (marqueeRef.current) {
@@ -185,6 +237,11 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   };
 
   const finishGesture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (editSelection.finish(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const zoom = zoomAreaRef.current;
     if (zoom?.pointerId === e.pointerId) {
       e.preventDefault(); e.stopPropagation();
@@ -238,6 +295,11 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   };
 
   const cancelGesture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (editSelection.cancel(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const velocity = velocityDrag.current;
     const area = marqueeRef.current;
     const spot = spotCandidate.current;
@@ -374,6 +436,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           left: Math.min(zoomArea.startX, zoomArea.x),
           width: Math.abs(zoomArea.x - zoomArea.startX),
         }} />}
+        <ProToolsEditSelectionOverlay />
         <ProToolsPunchOverlay snapshot={snapshot} />
         <div className="pt-playhead" data-testid="pt-playhead" style={{ left: position * pxPerSec }} aria-hidden="true" />
       </div>

@@ -70,6 +70,14 @@ describe("Pro Tools accessibility tokens", () => {
     expect(timeline).toContain("font: 500 10px/1.2 ui-monospace");
   });
 
+  it("keeps Edit-selection markers from tinting the ruler label contrast", () => {
+    const selectionRule = /\.pt-ruler-selection\s*\{([^}]*)\}/.exec(timeline)?.[1];
+    if (!selectionRule) throw new Error("ruler selection rule is missing");
+    expect(selectionRule).toContain("background: transparent;");
+    expect(selectionRule).toContain("border-inline: 1px solid var(--pt-selected);");
+    expect(selectionRule).toContain("border-bottom: 2px solid var(--pt-selected);");
+  });
+
   it("keeps compact toolbar groups reachable by horizontal scrolling", () => {
     expect(toolbar).toContain("overflow-x: auto;");
     expect(toolbar).toContain(".pt-zoom-presets button {");

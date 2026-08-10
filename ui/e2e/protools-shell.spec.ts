@@ -309,19 +309,24 @@ test("tutorial-backed pre-roll and Punch preserve context before a bounded recor
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
 
-  const waveClip = page.locator('[data-testid="v2-clip"].wave').first();
-  const clipBox = await waveClip.boundingBox();
-  if (!clipBox) throw new Error("audio clip bounds are unavailable for the Punch selection");
-  const selectionY = clipBox.y + Math.min(8, clipBox.height / 4);
-  await page.mouse.move(clipBox.x + clipBox.width * 0.2, selectionY);
+  const barsBeatsRuler = page.locator('[data-ruler="barsBeats"]');
+  const rulerBox = await barsBeatsRuler.boundingBox();
+  if (!rulerBox) throw new Error("Bars+Beats ruler bounds are unavailable for the Punch selection");
+  const selectionY = rulerBox.y + rulerBox.height / 2;
+  await page.mouse.move(rulerBox.x + 160, selectionY);
   await page.mouse.down();
-  await page.mouse.move(clipBox.x + clipBox.width * 0.75, selectionY, { steps: 4 });
+  await page.mouse.move(rulerBox.x + 480, selectionY, { steps: 4 });
+  await expect(page.getByTestId("pt-ruler-selection")).toHaveAttribute("data-dragging", "true");
+  await expect(page.getByTestId("pt-edit-selection")).toHaveAttribute("data-dragging", "true");
   await page.mouse.up();
 
   const editSelection = await page.evaluate(() =>
     (window as ProToolsWindow).__moshShellStore?.getState().timeRange ?? null);
-  if (!editSelection) throw new Error("Selector drag did not create an Edit selection");
+  if (!editSelection) throw new Error("Timebase-ruler Selector drag did not create an Edit selection");
   expect(editSelection.end).toBeGreaterThan(editSelection.start);
+  await expect(page.getByTestId("pt-ruler-selection")).toHaveAttribute("data-dragging", "false");
+  await expect(page.getByTestId("pt-edit-selection")).toHaveAttribute("data-dragging", "false");
+  await page.screenshot({ path: testInfo.outputPath("protools-edit-selection-wide.png"), animations: "disabled" });
 
   const punch = page.getByTestId("pt-punch-toggle");
   await punch.scrollIntoViewIfNeeded();
@@ -361,6 +366,12 @@ test("tutorial-backed pre-roll and Punch preserve context before a bounded recor
   await expect(punch).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("pt-preroll-select")).toHaveValue("1");
   await page.screenshot({ path: testInfo.outputPath("protools-punch-preroll-compact.png"), animations: "disabled" });
+
+  await punch.click();
+  await expect(punch).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("pt-punch-overlay")).toHaveCount(0);
+  await expect(page.getByTestId("pt-edit-selection")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("protools-edit-selection-compact.png"), animations: "disabled" });
 });
 
 test("Track Views follow contextual selectors, Minus toggles, and automation disclosure", async ({ page }, testInfo) => {
