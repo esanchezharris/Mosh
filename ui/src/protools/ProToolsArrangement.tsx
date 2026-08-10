@@ -10,6 +10,7 @@ import { ProToolsTrackHeaders } from "./ProToolsTrackHeaders";
 import { timelineSeconds } from "./layout";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { useProTools } from "./proToolsState";
+import { scopeProToolsEditSelectionToTrack } from "./proToolsTrackEditSelection";
 
 export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -56,7 +57,11 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
         <ProToolsRulers snapshot={snapshot} rulersVisible={rulersVisible}
           contentWidth={contentWidth} fieldRef={rulerFieldRef}
           getScrollLeft={() => timelineRef.current?.scrollLeft ?? 0} />
-        <div className="pt-edit-body">
+        <div className="pt-edit-body" onPointerDownCapture={(event) => {
+          if (event.button !== 0 || !(event.target instanceof Element)) return;
+          const trackId = event.target.closest<HTMLElement>(".pt-lane")?.dataset.trackId;
+          if (trackId) scopeProToolsEditSelectionToTrack(trackId);
+        }}>
           <div ref={headerPaneRef} className="pt-track-header-pane">
             <ProToolsTrackHeaders snapshot={snapshot} />
           </div>

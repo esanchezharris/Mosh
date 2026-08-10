@@ -436,7 +436,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           left: Math.min(zoomArea.startX, zoomArea.x),
           width: Math.abs(zoomArea.x - zoomArea.startX),
         }} />}
-        <ProToolsEditSelectionOverlay />
+        <ProToolsEditSelectionOverlay snapshot={snapshot} />
         <ProToolsPunchOverlay snapshot={snapshot} />
         <div className="pt-playhead" data-testid="pt-playhead" style={{ left: position * pxPerSec }} aria-hidden="true" />
       </div>

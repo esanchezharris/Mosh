@@ -8,6 +8,7 @@ import type { ProToolsTool } from "./smartTool";
 import { nextTabPosition } from "./tabNavigation";
 import { nextCommonProToolsTrackView } from "./trackViews";
 import { toggleProToolsTimelineEditLink } from "./proToolsTimelineSelection";
+import { toggleProToolsTrackEditLink } from "./proToolsTrackEditSelection";
 import {
   adjacentMemoryLocation,
   memoryLocationAtNumber,
@@ -108,6 +109,13 @@ export function useProToolsKeys(): void {
         && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         toggleProToolsTimelineEditLink();
+        return;
+      }
+
+      if (event.code === "KeyT" && event.shiftKey
+        && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        toggleProToolsTrackEditLink();
         return;
       }
 

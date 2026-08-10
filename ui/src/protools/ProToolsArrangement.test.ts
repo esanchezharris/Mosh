@@ -12,13 +12,21 @@ vi.mock("./ProToolsTimeline", () => ({
   ProToolsTimeline: ({ snapshot, onSpotClip }: {
     readonly snapshot: Snapshot;
     readonly onSpotClip?: (clip: Clip) => void;
-  }) => React.createElement("button", {
-    type: "button",
-    onClick: () => {
-      const clip = snapshot.tracks[0]?.clips[0];
-      if (clip && onSpotClip) onSpotClip(clip);
-    },
-  }, "Request spot"),
+  }) => React.createElement("div", null,
+    React.createElement("button", {
+      type: "button",
+      onClick: () => {
+        const clip = snapshot.tracks[0]?.clips[0];
+        if (clip && onSpotClip) onSpotClip(clip);
+      },
+    }, "Request spot"),
+    React.createElement("button", {
+      type: "button",
+      className: "pt-lane",
+      "data-track-id": snapshot.tracks[0]?.id,
+      "data-testid": "mock-edit-lane",
+    }, "Edit Vocal"),
+  ),
 }));
 vi.mock("./ProToolsTrackHeaders", () => ({ ProToolsTrackHeaders: () => React.createElement("div") }));
 
@@ -75,7 +83,7 @@ describe("ProToolsArrangement", () => {
     })));
     useProTools.setState({ clipListOpen: true });
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
-    useStore.setState({ snapshot: SNAPSHOT, projectEpoch: 51, exec });
+    useStore.setState({ snapshot: SNAPSHOT, projectEpoch: 51, selectedTrackId: null, exec });
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -84,7 +92,7 @@ describe("ProToolsArrangement", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
-    useStore.setState({ snapshot: null, exec: originalExec });
+    useStore.setState({ snapshot: null, selectedTrackId: null, exec: originalExec });
     vi.unstubAllGlobals();
   });
 
@@ -104,6 +112,25 @@ describe("ProToolsArrangement", () => {
     act(() => changeListener?.());
 
     expect(useProTools.getState().clipListOpen).toBe(false);
+  });
+
+  it("selects the lane associated with a linked Edit interaction", () => {
+    // Given no active track in the default linked Track/Edit state.
+    compact = false;
+    act(() => root.render(React.createElement(ProToolsArrangement, { snapshot: SNAPSHOT })));
+    const lane = host.querySelector<HTMLButtonElement>("[data-testid=mock-edit-lane]");
+    if (!lane) throw new Error("mock Edit lane is missing");
+
+    // When the producer begins an Edit interaction in the Vocal lane.
+    act(() => lane.dispatchEvent(new PointerEvent("pointerdown", {
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    // Then the associated track becomes active without a project command.
+    expect(useStore.getState().selectedTrackId).toBe("audio-track");
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("contains focus in the Spot dialog and restores the originating clip on Escape", () => {

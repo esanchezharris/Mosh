@@ -52,6 +52,8 @@ type ProToolsViewState = {
   readonly timelineEditLinked: boolean;
   readonly timelineSelection: TimeRangeSel | null;
   readonly timelineSelectionDragging: boolean;
+  readonly trackEditLinked: boolean;
+  readonly editSelectionTrackId: string | null;
 };
 
 type ProToolsActions = {
@@ -82,6 +84,8 @@ type ProToolsActions = {
   readonly setTimelineEditLinked: (linked: boolean, editSelection: TimeRangeSel | null) => void;
   readonly setTimelineSelection: (selection: TimeRangeSel | null) => void;
   readonly setTimelineSelectionDragging: (dragging: boolean) => void;
+  readonly setTrackEditLinked: (linked: boolean) => void;
+  readonly setEditSelectionTrackId: (trackId: string | null) => void;
   readonly resetForProject: (projectEpoch?: number) => void;
 };
 
@@ -120,6 +124,8 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   timelineEditLinked: true,
   timelineSelection: null,
   timelineSelectionDragging: false,
+  trackEditLinked: true,
+  editSelectionTrackId: null,
 });
 
 export const useProTools = create<ProToolsState>((set) => ({
@@ -203,6 +209,8 @@ export const useProTools = create<ProToolsState>((set) => ({
   })),
   setTimelineSelection: (timelineSelection) => set({ timelineSelection }),
   setTimelineSelectionDragging: (timelineSelectionDragging) => set({ timelineSelectionDragging }),
+  setTrackEditLinked: (trackEditLinked) => set({ trackEditLinked }),
+  setEditSelectionTrackId: (editSelectionTrackId) => set({ editSelectionTrackId }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
     return projectDefaults(nextEpoch ?? state.projectEpoch);

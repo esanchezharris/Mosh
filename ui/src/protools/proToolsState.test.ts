@@ -38,6 +38,8 @@ describe("Pro Tools shell state", () => {
       timelineEditLinked: state.timelineEditLinked,
       timelineSelection: state.timelineSelection,
       timelineSelectionDragging: state.timelineSelectionDragging,
+      trackEditLinked: state.trackEditLinked,
+      editSelectionTrackId: state.editSelectionTrackId,
     }).toEqual({
       editMode: "slip",
       activeTool: "selector",
@@ -69,6 +71,8 @@ describe("Pro Tools shell state", () => {
       timelineEditLinked: true,
       timelineSelection: null,
       timelineSelectionDragging: false,
+      trackEditLinked: true,
+      editSelectionTrackId: null,
     });
   });
 

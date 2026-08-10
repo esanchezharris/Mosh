@@ -129,4 +129,19 @@ describe("Pro Tools Session menu", () => {
     expect(useProTools.getState().timelineSelection).toEqual({ start: 2, end: 6 });
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it("exposes Track and Edit selection as an independent pressed control", () => {
+    // Given the default Pro Tools toolbar.
+    const timelineLink = host.querySelector<HTMLButtonElement>("[data-testid=pt-selection-link]");
+
+    // When its selection-link controls are inspected.
+    const trackLink = host.querySelector<HTMLButtonElement>("[data-testid=pt-track-edit-link]");
+
+    // Then Track/Edit has its own enabled state and does not replace Timeline/Edit.
+    expect(trackLink).not.toBeNull();
+    expect(trackLink?.getAttribute("aria-label")).toBe("Link Track and Edit Selection");
+    expect(trackLink?.getAttribute("aria-pressed")).toBe("true");
+    expect(timelineLink?.getAttribute("aria-pressed")).toBe("true");
+    expect(exec).not.toHaveBeenCalled();
+  });
 });

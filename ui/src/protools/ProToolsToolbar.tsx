@@ -10,6 +10,7 @@ import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
 import { ProToolsPunchControls } from "./ProToolsPunchControls";
 import { ProToolsSelectionLinkControl } from "./ProToolsSelectionLinkControl";
 import { ProToolsSelectionIndicators } from "./ProToolsSelectionIndicators";
+import { ProToolsTrackEditLinkControl } from "./ProToolsTrackEditLinkControl";
 import { ProToolsZoomControls } from "./ProToolsZoomControls";
 import { formatSpotTime } from "./spotTime";
 import { useProTools, type ProToolsEditMode, type ProToolsRuler } from "./proToolsState";
@@ -119,6 +120,7 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
             aria-pressed={smartToolEnabled} onClick={toggleSmartTool}>Smart</button>
         </MoshTip>
         <ProToolsSelectionLinkControl />
+        <ProToolsTrackEditLinkControl />
       </div>
 
       <ProToolsSelectionIndicators snapshot={snapshot} />

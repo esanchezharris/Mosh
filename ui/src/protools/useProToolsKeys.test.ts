@@ -180,6 +180,25 @@ describe("useProToolsKeys", () => {
     expect(execCalls).toEqual([]);
   });
 
+  it("toggles Link Track and Edit Selection with Shift+T", () => {
+    // Given the default linked active track.
+    expect(useStore.getState().selectedTrackId).toBe("track-1");
+
+    // When the documented shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "T",
+      code: "KeyT",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    // Then Track/Edit becomes independent without issuing a project command.
+    expect(useProTools.getState().trackEditLinked).toBe(false);
+    expect(useProTools.getState().editSelectionTrackId).toBe("track-1");
+    expect(execCalls).toEqual([]);
+  });
+
   it("focuses the Edit Selection Start indicator with unmodified Slash", () => {
     const start = document.createElement("input");
     start.id = "pt-selection-start";

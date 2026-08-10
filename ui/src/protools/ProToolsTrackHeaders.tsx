@@ -6,6 +6,7 @@ import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
 import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
 import { scaledTrackHeights } from "./trackHeightZoom";
+import { selectProToolsTrack } from "./proToolsTrackEditSelection";
 import {
   proToolsPlaylistRowCount,
   proToolsTrackRowHeight,
@@ -37,7 +38,6 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
   const exec = useStore((state) => state.exec);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const clearSelection = useStore((state) => state.clearSelection);
-  const setSelectedTrack = useStore((state) => state.setSelectedTrack);
   const closePianoRoll = useStore((state) => state.closePianoRoll);
   const setLastError = useStore((state) => state.setLastError);
   const requestedTrackView = useProTools((state) => state.trackViews[track.id]);
@@ -54,7 +54,7 @@ function ProToolsTrackHeader({ track }: { readonly track: Track }) {
 
   const selectTrack = () => {
     clearSelection();
-    setSelectedTrack(track.id);
+    selectProToolsTrack(track.id);
     closePianoRoll();
   };
   const toggleArm = async () => {
