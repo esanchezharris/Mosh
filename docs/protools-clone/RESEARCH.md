@@ -44,7 +44,7 @@ Scope: layout and interaction evidence for Mosh's additive `protools` shell. Pro
 - The requested Classic theme uses a `#C0C0C0` base as a Mosh interpretation of older gray Pro Tools surfaces. It does not copy Avid textures, icons, logos, or artwork.
 - Compact behavior will collapse or overlay supporting lists before shrinking the timeline below usability. This is a responsive adaptation for Mosh's WebView, not a claim about Pro Tools mobile behavior.
 - The first Spot dialog slice supports precise Start placement in the four shell time scales. Timecode follows the shell's existing fixed 30 fps ruler until project timecode-rate metadata exists; Sync Point and timestamp recall remain explicit adaptations until Mosh exposes those fields additively.
-- Per-clip gain and Memory Locations remain outside this delivery.
+- Per-clip gain is now a Mosh adaptation backed by the existing `set_clip_gain` command; Memory Locations remain outside this delivery.
 
 ## Design consequences
 

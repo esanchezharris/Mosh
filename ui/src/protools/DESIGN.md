@@ -219,7 +219,7 @@ Strategy: mixed tonal shift plus one-pixel dimensional edges.
 | Item | Location | Why accepted | Owner / Exit |
 |---|---|---|---|
 | Exact pixel polish against current Pro Tools | Entire shell | Explicit follow-up; Pro Tools is unavailable locally and no proprietary imagery is copied | Later reference-fidelity pass with licensed access |
-| Spot Sync Point and timestamp recall | Spot dialog | Mosh snapshots do not expose clip sync points, original timestamps, or user timestamps | Add fields only with an additive backend snapshot/command contract |
+| Spot Sync Point and timestamp recall | Spot dialog | The additive contract is defined, but native/mock persistence is intentionally outside tonight's critical path | Implement [Spot Sync Point contract](../../../docs/protools-clone/SPOT_SYNC_POINT_CONTRACT.md) as one tested native/mock/UI lane |
 | Memory Locations | Toolbar/list surfaces | Explicitly outside this delivery | Follow-up navigation slice |
 | True transient detector | Tab navigation | Mosh exposes waveform peaks, not Pro Tools transient metadata; falls back to clip boundaries | Replace when an additive backend transient feed exists |
 | Native Pro Tools behavioral validation | Research/QA | Pro Tools is not installed; browser QA proves Mosh behavior only | Validate later on an authorized reference system |
