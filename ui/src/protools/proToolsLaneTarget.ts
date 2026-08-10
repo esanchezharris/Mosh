@@ -5,6 +5,7 @@ const EDIT_SELECTION_BLOCKERS = [
   "select",
   "textarea",
   "[role=button]",
+  ".pt-clip-gain",
   ".pt-playlists",
   ".pt-automation-lane-frame",
 ].join(",");

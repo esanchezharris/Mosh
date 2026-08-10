@@ -858,6 +858,12 @@ test("audio producer flow records, edits, mixes, inserts, saves, reloads, and un
 
   await page.getByTestId("pt-clip-name").fill("Tonight Take");
   await page.getByTestId("pt-clip-name").press("Enter");
+  const waveform = timelineClip.locator("canvas").first();
+  await expect(waveform).toBeVisible();
+  const waveformBeforeGain = await waveform.evaluate((element) => {
+    if (!(element instanceof HTMLCanvasElement)) throw new Error("audio waveform canvas is absent");
+    return element.toDataURL();
+  });
   await page.getByTestId("pt-clip-gain-number").fill("3.5");
   await page.getByTestId("pt-clip-gain-number").press("Enter");
   await page.getByTestId("pt-clip-mute").click();
@@ -870,14 +876,34 @@ test("audio producer flow records, edits, mixes, inserts, saves, reloads, and un
   const inlineGain = page.getByTestId("pt-clip-gain-handle");
   await expect(inlineGain).toHaveAttribute("aria-valuenow", "3.5");
   await expect(inlineGain).toHaveAttribute("aria-valuetext", "3.5 dB");
-  const waveformScale = await page.getByTestId("pt-audio-clip-stack").evaluate((element) =>
-    Number((element as HTMLElement).style.getPropertyValue("--pt-clip-gain-scale")),
-  );
-  expect(waveformScale).toBeCloseTo(10 ** (3.5 / 20), 8);
+  await expect.poll(() => waveform.evaluate((element) => {
+    if (!(element instanceof HTMLCanvasElement)) throw new Error("audio waveform canvas is absent");
+    return element.toDataURL();
+  })).not.toBe(waveformBeforeGain);
   await inlineGain.focus();
   await page.keyboard.press("ArrowDown");
   await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3);
   await page.keyboard.press("ArrowUp");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
+  const gainHandleBox = await inlineGain.boundingBox();
+  if (!gainHandleBox) throw new Error("inline clip gain handle has no browser geometry");
+  await page.mouse.move(
+    gainHandleBox.x + gainHandleBox.width / 2,
+    gainHandleBox.y + gainHandleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    gainHandleBox.x + gainHandleBox.width / 2,
+    gainHandleBox.y + gainHandleBox.height / 2 - 4,
+    { steps: 2 },
+  );
+  await expect(inlineGain).toHaveAttribute("aria-valuenow", "4.5");
+  expect(await storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
+  await page.mouse.up();
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(4.5);
+  await inlineGain.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
   await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
   await page.screenshot({ path: testInfo.outputPath("protools-tutorial-parity-wide.png") });
   await page.emulateMedia({ reducedMotion: "reduce" });
