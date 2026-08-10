@@ -21,9 +21,9 @@ public:
     /** Initialise formats + load/scan plugins into the KnownPluginList. The
         catalog is PERSISTED (plugin-catalog.xml beside the session dir) and
         restored on startup; the curated VST3 scan runs only on a cold catalog.
-        Scanning is in-process and curated to avoid the cost/crash risk of a
-        full blind scan; bundles without VST3 moduleinfo use the slow scan only
-        when MOSH_SCAN_SLOW_VST3=1 is set.
+        Metadata scans are in-process; bundles without VST3 moduleinfo use the
+        slow scan only when MOSH_SCAN_SLOW_VST3=1 is set, with each bundle loaded
+        in its own bounded Mosh child and no in-process fallback.
         AU cataloging is an opt-in (MOSH_SCAN_AU=1) experimental feature.
         D2: the cold-start AU sweep now runs OUT-OF-PROCESS with the same stall
         watchdog rescan() uses, so a HANGING AudioUnit is killed (~25 s) instead of
@@ -48,8 +48,8 @@ public:
         @param includeVST3  re-enumerate the VST3 plug-in folders.
         @param includeAU    also enumerate+catalog .component AudioUnits.
         @param slowVST3    load modules for VST3 bundles without moduleinfo.json
-                           (catches plug-ins the fast path can't see); the dead-
-                           mans-pedal makes a crasher recoverable. Must NOT run on
+                           (catches plug-ins the fast path can't see); each bundle
+                           is isolated in a bounded direct child. Must NOT run on
                            the message thread — MoshOps drives it on a background
                            thread, like the AU path. */
     int rescan (bool clearFirst, bool includeVST3, bool includeAU, bool slowVST3 = false);
@@ -109,7 +109,7 @@ private:
     void saveCatalog();                                  // createXml → plugin-catalog.xml
     void checkpointCatalog();                            // periodic saveCatalog() during a rescan sweep
     void recoverFromDeadMansPedal();                     // blocklist a prior crasher, then clear
-    void finishWatchedPluginScan (const juce::String&);  // reset + persist a watchdog quarantine
+    void finishWatchedPluginScan (const juce::String&);  // reset + persist an AU watchdog quarantine
     juce::File catalogFile()   const;
     juce::File deadMansPedal() const;
     void closeEditorByKey (const juce::String& key);
@@ -129,10 +129,8 @@ private:
     juce::HashMap<juce::String, juce::DocumentWindow*> windowByPlugin;
     bool initialised = false;
     bool vst3SlowScan = false;   // set during a rescan(slowVST3=true): scanFile loads modules
-    // Bumped per plugin (scanFile + the AU sweep): a progress heartbeat the deep-scan
-    // watchdog polls. A hung out-of-process child stops this advancing, so the watchdog
-    // cancels Tracktion's wait, kills the child, and hands quarantine/reset back to the
-    // scan thread before it continues.
+    // Bumped per plugin (scanFile + the AU sweep): progress for UI/checkpoints and the
+    // AU-only Tracktion watchdog. Deep VST3 children own their timeout individually.
     std::atomic<int> scanFilesProcessed { 0 };
     PluginScanWatchdogState scanWatchdog;
     // Single-flight latch: only one rescan() runs at a time (a second concurrent scan

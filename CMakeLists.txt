@@ -241,6 +241,7 @@ if (MOSH_BUILD_APP)
         src/multiplayer/MultiplayerSession.cpp
         # Stage 3 — VST3 hosting (04 PART 1)
         src/plugins/hosting/PluginHost.cpp
+        src/plugins/hosting/Vst3ScanWorker.cpp
         # Moshi reactivity — master-output spectral tap (pure measure)
         src/plugins/spectral/MasterSpectralTapPlugin.cpp
         # CAP-AUT-006 — the per-track mute gate (hidden mixer element, one automatable param)
@@ -264,6 +265,20 @@ if (MOSH_BUILD_APP)
         # iPhone companion remote control + phone-take ingest
         src/remote/RemoteCompanionProtocol.cpp
         src/remote/RemoteCompanionServer.cpp)
+
+    set(MOSH_VST3_HOSTING_SDK
+        "${tracktion_engine_SOURCE_DIR}/modules/juce/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting")
+    target_sources(Mosh PRIVATE
+        "${MOSH_VST3_HOSTING_SDK}/module.cpp")
+    if (APPLE)
+        target_sources(Mosh PRIVATE "${MOSH_VST3_HOSTING_SDK}/module_mac.mm")
+        set_source_files_properties("${MOSH_VST3_HOSTING_SDK}/module_mac.mm"
+            PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    elseif (WIN32)
+        target_sources(Mosh PRIVATE "${MOSH_VST3_HOSTING_SDK}/module_win32.cpp")
+    elseif (UNIX)
+        target_sources(Mosh PRIVATE "${MOSH_VST3_HOSTING_SDK}/module_linux.cpp")
+    endif()
 
     target_include_directories(Mosh PRIVATE src)
 

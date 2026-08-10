@@ -6,6 +6,7 @@
 #include "moshops/PluginScanPlan.h"
 #include "moshops/ScanProgress.h"
 #include "plugins/hosting/PluginScanWatchdog.h"
+#include "plugins/hosting/Vst3ScanWorker.h"
 
 using namespace mosh;
 
@@ -107,4 +108,29 @@ TEST_CASE ("wait AU scan preserves its fast VST3 pre-pass", "[plugin_scan_plan]"
     REQUIRE_FALSE (plan.asyncClearFirst);
     REQUIRE_FALSE (plan.asyncIncludeVST3);
     REQUIRE (plan.asyncIncludeAU);
+}
+
+TEST_CASE ("VST3 scan worker request preserves bundle paths with spaces", "[plugin_scan_worker]")
+{
+    const juce::StringArray args {
+        "--mosh-vst3-scan-worker",
+        "/Library/Audio/Plug-Ins/VST3/WaveShell1-VST3 16.7.vst3",
+        "/tmp/mosh scan result.xml",
+    };
+
+    const auto request = parseVst3ScanWorkerRequest (args);
+    REQUIRE (request.valid);
+    REQUIRE (request.pluginBundle.getFullPathName() == args[1]);
+    REQUIRE (request.outputXml.getFullPathName() == args[2]);
+}
+
+TEST_CASE ("VST3 scan worker rejects malformed internal commands", "[plugin_scan_worker]")
+{
+    REQUIRE_FALSE (parseVst3ScanWorkerRequest ({}).valid);
+    REQUIRE_FALSE (parseVst3ScanWorkerRequest ({ "--mosh-vst3-scan-worker" }).valid);
+    REQUIRE_FALSE (parseVst3ScanWorkerRequest ({ "--other", "a.vst3", "out.xml" }).valid);
+    REQUIRE_FALSE (parseVst3ScanWorkerRequest (
+        { "--mosh-vst3-scan-worker", {}, "out.xml" }).valid);
+    REQUIRE_FALSE (parseVst3ScanWorkerRequest (
+        { "--mosh-vst3-scan-worker", "a.vst3", {} }).valid);
 }
