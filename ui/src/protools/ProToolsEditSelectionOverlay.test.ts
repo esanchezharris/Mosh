@@ -27,6 +27,12 @@ const SNAPSHOT: Snapshot = {
     name: "Vocal",
     type: "audio",
     clips: [],
+  }, {
+    id: "keys",
+    index: 2,
+    name: "Keys",
+    type: "midi",
+    clips: [],
   }],
   transport: {
     playing: false,
@@ -91,6 +97,30 @@ describe("Pro Tools Edit selection track scope", () => {
     expect(overlay.dataset.trackIds).toBe("drums vocal");
     expect(overlay.style.top).toBe("calc(var(--pt-track-title-h) + 0px)");
     expect(overlay.style.height).toBe("184px");
+    expect(overlay.querySelectorAll("[data-testid=pt-edit-selection-band]")).toHaveLength(1);
+  });
+
+  it("renders separate bands for a noncontiguous linked Track Name selection", () => {
+    // Given Drums and Keys own one horizontal Edit span while Vocal is not selected.
+    useProTools.setState({
+      editSelectionTrackId: "keys",
+      editSelectionTrackIds: ["drums", "keys"],
+      trackSelectionIds: ["drums", "keys"],
+    });
+
+    // When the shared Edit range is rendered.
+    act(() => root.render(React.createElement(ProToolsEditSelectionOverlay, { snapshot: SNAPSHOT })));
+    const overlay = host.querySelector<HTMLElement>("[data-testid=pt-edit-selection]");
+    const bands = overlay?.querySelectorAll<HTMLElement>("[data-testid=pt-edit-selection-band]");
+    if (!overlay || !bands) throw new Error("noncontiguous Edit selection bands are missing");
+
+    // Then no highlight paints the unselected Vocal row between the two bands.
+    expect(overlay.dataset.trackIds).toBe("drums keys");
+    expect(bands).toHaveLength(2);
+    expect(bands[0]?.style.top).toBe("0px");
+    expect(bands[0]?.style.height).toBe("92px");
+    expect(bands[1]?.style.top).toBe("184px");
+    expect(bands[1]?.style.height).toBe("92px");
   });
 
   it("retains its Edit track while header selection is independently unlinked", () => {

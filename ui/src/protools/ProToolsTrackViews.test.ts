@@ -2,7 +2,7 @@ import React, { act, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
-import type { Snapshot } from "../types";
+import type { CommandResult, Snapshot } from "../types";
 import { ProToolsTimeline } from "./ProToolsTimeline";
 import { ProToolsTrackHeaders } from "./ProToolsTrackHeaders";
 import { useProTools } from "./proToolsState";
@@ -111,12 +111,15 @@ describe("Pro Tools Track Views", () => {
   let host: HTMLDivElement;
   let root: Root;
   const originalEnsurePeaks = useStore.getState().ensurePeaks;
+  const originalExec = useStore.getState().exec;
+  let execCalls: { readonly command: string; readonly args?: Record<string, unknown> }[];
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
+    execCalls = [];
     useStore.setState({
       snapshot: SNAPSHOT,
       transport: SNAPSHOT.transport,
@@ -125,6 +128,10 @@ describe("Pro Tools Track Views", () => {
       pxPerSec: 100,
       projectEpoch: 90,
       ensurePeaks: vi.fn(),
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        execCalls.push({ command, args });
+        return { ok: true, command, data: command === "arm_track" ? { applied: true } : undefined };
+      }),
     });
     useProTools.getState().resetForProject();
   });
@@ -137,6 +144,7 @@ describe("Pro Tools Track Views", () => {
       selectedTrackId: null,
       selection: new Set<string>(),
       ensurePeaks: originalEnsurePeaks,
+      exec: originalExec,
     });
     vi.restoreAllMocks();
   });
@@ -183,6 +191,60 @@ describe("Pro Tools Track Views", () => {
     expect(leadHeader?.dataset.selected).toBe("true");
     expect(doubleHeader?.dataset.selected).toBe("true");
     expect(doubleView.value).toBe("volume");
+  });
+
+  it("uses Command-click for noncontiguous Track Names and Shift-click for a range", () => {
+    act(() => root.render(React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT })));
+    const lead = host.querySelector<HTMLElement>('[data-track-id="audio-track"]');
+    const keys = host.querySelector<HTMLElement>('[data-track-id="midi-track"]');
+    const double = host.querySelector<HTMLElement>('[data-track-id="double-track"]');
+    const leadSelect = lead?.querySelector<HTMLButtonElement>("[data-testid=pt-track-select]");
+    const doubleSelect = double?.querySelector<HTMLButtonElement>("[data-testid=pt-track-select]");
+    if (!leadSelect || !doubleSelect) throw new Error("Track Name buttons are missing");
+
+    // Command-click adds the nonadjacent Double without selecting Keys.
+    act(() => doubleSelect.dispatchEvent(new MouseEvent("click", {
+      bubbles: true, cancelable: true, metaKey: true,
+    })));
+    expect(lead?.dataset.selected).toBe("true");
+    expect(keys?.dataset.selected).toBe("false");
+    expect(double?.dataset.selected).toBe("true");
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["audio-track", "double-track"]);
+
+    // A plain click establishes Lead as the anchor, then Shift-click selects through Double.
+    act(() => leadSelect.click());
+    act(() => doubleSelect.dispatchEvent(new MouseEvent("click", {
+      bubbles: true, cancelable: true, shiftKey: true,
+    })));
+    expect(useProTools.getState().trackSelectionIds)
+      .toEqual(["audio-track", "midi-track", "double-track"]);
+    expect(keys?.dataset.selected).toBe("true");
+    expect(execCalls).toEqual([]);
+  });
+
+  it("Option-Shift-click applies a header control to every selected Track Name", async () => {
+    // Given two nonadjacent Track Names are selected.
+    useProTools.setState({
+      editSelectionTrackId: "double-track",
+      editSelectionTrackIds: ["audio-track", "double-track"],
+      trackSelectionIds: ["audio-track", "double-track"],
+    });
+    act(() => root.render(React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT })));
+    const lead = host.querySelector<HTMLElement>('[data-track-id="audio-track"]');
+    const mute = lead?.querySelector<HTMLButtonElement>("[data-testid=pt-track-mute]");
+    if (!mute) throw new Error("Lead Vocal mute control is missing");
+
+    // When the source Mute button is Option-Shift-clicked.
+    act(() => mute.dispatchEvent(new MouseEvent("click", {
+      bubbles: true, cancelable: true, altKey: true, shiftKey: true,
+    })));
+
+    // Then the selected Track Names receive the same next state in visible order.
+    await vi.waitFor(() => expect(execCalls.filter((call) => call.command === "set_track_mute"))
+      .toEqual([
+        { command: "set_track_mute", args: { trackId: "audio-track", mute: true } },
+        { command: "set_track_mute", args: { trackId: "double-track", mute: true } },
+      ]));
   });
 
   it("discloses a secondary automation lane without mutating the project", () => {

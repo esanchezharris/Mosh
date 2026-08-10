@@ -3,9 +3,9 @@ import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { IconLayers, IconPlus } from "../ui/icons";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
-import { appliedFailure } from "./commandFeedback";
 import { useProTools } from "./proToolsState";
 import { scaledTrackHeights } from "./trackHeightZoom";
+import { applyProToolsTrackControl, type ProToolsTrackControl } from "./proToolsTrackControls";
 import { selectProToolsTrack } from "./proToolsTrackEditSelection";
 import {
   proToolsPlaylistRowCount,
@@ -40,11 +40,9 @@ function ProToolsTrackHeader({ track, tracks }: {
   readonly track: Track;
   readonly tracks: readonly Track[];
 }) {
-  const exec = useStore((state) => state.exec);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const clearSelection = useStore((state) => state.clearSelection);
   const closePianoRoll = useStore((state) => state.closePianoRoll);
-  const setLastError = useStore((state) => state.setLastError);
   const requestedTrackView = useProTools((state) => state.trackViews[track.id]);
   const automationLaneVisible = useProTools((state) => Boolean(state.automationLanesVisible[track.id]));
   const trackHeightScale = useProTools((state) => state.trackHeightScale);
@@ -61,15 +59,23 @@ function ProToolsTrackHeader({ track, tracks }: {
   const heights = scaledTrackHeights(trackHeightScale);
   const rowHeight = proToolsTrackRowHeight(track, trackView, automationLaneVisible, trackHeightScale);
 
-  const selectTrack = () => {
+  const selectTrack = (event: React.MouseEvent<HTMLButtonElement>) => {
     clearSelection();
-    selectProToolsTrack(track.id);
+    selectProToolsTrack(track.id, {
+      additive: (event.metaKey || event.ctrlKey) && !event.shiftKey,
+      range: event.shiftKey && !event.metaKey && !event.ctrlKey,
+      visibleTrackIds: tracks.map((candidate) => candidate.id),
+    });
     closePianoRoll();
   };
-  const toggleArm = async () => {
-    const result = await exec("arm_track", { trackId: track.id, armed: !track.armed });
-    const failure = appliedFailure(result, "Record arm could not be applied.");
-    if (failure) setLastError(failure);
+  const applyControl = (
+    control: ProToolsTrackControl,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    const targetIds = event.altKey && event.shiftKey && selected
+      ? selectedTrackIds
+      : [track.id];
+    void applyProToolsTrackControl(control, track.id, targetIds);
   };
 
   return (
@@ -111,7 +117,8 @@ function ProToolsTrackHeader({ track, tracks }: {
           data-testid="pt-track-arm"
           aria-label={`Record-arm ${track.name}`}
           aria-pressed={Boolean(track.armed)}
-          onClick={() => void toggleArm()}
+          aria-keyshortcuts="Shift+R"
+          onClick={(event) => applyControl("arm", event)}
         >R</button>
         <button
           type="button"
@@ -119,7 +126,8 @@ function ProToolsTrackHeader({ track, tracks }: {
           data-testid="pt-track-solo"
           aria-label={`Solo ${track.name}`}
           aria-pressed={Boolean(track.solo)}
-          onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}
+          aria-keyshortcuts="Shift+S"
+          onClick={(event) => applyControl("solo", event)}
         >S</button>
         <button
           type="button"
@@ -127,7 +135,8 @@ function ProToolsTrackHeader({ track, tracks }: {
           data-testid="pt-track-mute"
           aria-label={`Mute ${track.name}`}
           aria-pressed={Boolean(track.mute)}
-          onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}
+          aria-keyshortcuts="Shift+M"
+          onClick={(event) => applyControl("mute", event)}
         >M</button>
       </div>
       <span className="pt-track-route" title={track.output?.name ?? "Default output"}>

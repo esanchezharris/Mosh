@@ -94,4 +94,75 @@ describe("Pro Tools multi-track Edit association", () => {
     expect(useStore.getState().selectedTrackId).toBe("keys");
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it("Command-click toggles noncontiguous Track Names and mirrors the linked Edit set", () => {
+    // Given Drums is the active Track Name in linked mode.
+    useProTools.setState({
+      editSelectionTrackId: "drums",
+      editSelectionTrackIds: ["drums"],
+      trackSelectionIds: ["drums"],
+    });
+    useStore.setState({ selectedTrackId: "drums" });
+
+    // When Keys is Command-clicked, then Drums is Command-clicked again.
+    selectProToolsTrack("keys", {
+      additive: true,
+      visibleTrackIds: ["drums", "vocal", "keys"],
+    });
+    selectProToolsTrack("drums", {
+      additive: true,
+      visibleTrackIds: ["drums", "vocal", "keys"],
+    });
+
+    // Then only Keys remains in both ordered sets and owns the inspector.
+    expect(useProTools.getState().trackSelectionIds).toEqual(["keys"]);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["keys"]);
+    expect(useProTools.getState().editSelectionTrackId).toBe("keys");
+    expect(useStore.getState().selectedTrackId).toBe("keys");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("Shift-click selects the contiguous visible Track Name range from the active anchor", () => {
+    // Given Drums is the active Track Name.
+    useProTools.setState({
+      editSelectionTrackId: "drums",
+      editSelectionTrackIds: ["drums"],
+      trackSelectionIds: ["drums"],
+    });
+    useStore.setState({ selectedTrackId: "drums" });
+
+    // When Keys is Shift-clicked.
+    selectProToolsTrack("keys", {
+      range: true,
+      visibleTrackIds: ["drums", "vocal", "keys"],
+    });
+
+    // Then every Track Name between anchor and focus owns the linked Edit range.
+    expect(useProTools.getState().trackSelectionIds).toEqual(["drums", "vocal", "keys"]);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["drums", "vocal", "keys"]);
+    expect(useStore.getState().selectedTrackId).toBe("keys");
+  });
+
+  it("keeps Edit ownership fixed when modifier Track selection changes while unlinked", () => {
+    // Given Vocal owns the Edit range while only Drums is selected as a Track Name.
+    useProTools.setState({
+      trackEditLinked: false,
+      editSelectionTrackId: "vocal",
+      editSelectionTrackIds: ["vocal"],
+      trackSelectionIds: ["drums"],
+    });
+    useStore.setState({ selectedTrackId: "drums" });
+
+    // When Keys is added to Track selection.
+    selectProToolsTrack("keys", {
+      additive: true,
+      visibleTrackIds: ["drums", "vocal", "keys"],
+    });
+
+    // Then Track Names diverge without moving the retained Edit selection.
+    expect(useProTools.getState().trackSelectionIds).toEqual(["drums", "keys"]);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["vocal"]);
+    expect(useProTools.getState().editSelectionTrackId).toBe("vocal");
+    expect(useStore.getState().selectedTrackId).toBe("keys");
+  });
 });

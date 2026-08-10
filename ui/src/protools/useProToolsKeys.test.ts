@@ -199,6 +199,109 @@ describe("useProToolsKeys", () => {
     expect(execCalls).toEqual([]);
   });
 
+  it.each([
+    ["R", "KeyR", "arm_track", "armed"],
+    ["S", "KeyS", "set_track_solo", "solo"],
+    ["M", "KeyM", "set_track_mute", "mute"],
+  ] as const)("Shift+%s applies the track-header action to every Edit-associated track",
+    async (key, code, command, field) => {
+      // Given both tracks contain the Edit selection.
+      useProTools.setState({
+        editSelectionTrackId: "track-2",
+        editSelectionTrackIds: ["track-1", "track-2"],
+        trackSelectionIds: ["track-1", "track-2"],
+      });
+
+      // When the documented group shortcut is pressed.
+      act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+        key,
+        code,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      })));
+
+      // Then each target is changed serially through its existing MoshOps command.
+      await vi.waitFor(() => expect(execCalls.filter((call) => call.command === command)).toEqual([
+        { command, args: { trackId: "track-1", [field]: true } },
+        { command, args: { trackId: "track-2", [field]: true } },
+      ]));
+    });
+
+  it("Shift+M follows the retained Edit selection while Track/Edit is unlinked", async () => {
+    // Given Track Names and Edit ownership have diverged.
+    useProTools.setState({
+      trackEditLinked: false,
+      editSelectionTrackId: "track-2",
+      editSelectionTrackIds: ["track-2"],
+      trackSelectionIds: ["track-1"],
+    });
+
+    // When the Edit-targeted mute shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "M", code: "KeyM", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+
+    // Then only the track containing the Edit selection is mutated.
+    await vi.waitFor(() => expect(execCalls.filter((call) => call.command === "set_track_mute"))
+      .toEqual([{ command: "set_track_mute", args: { trackId: "track-2", mute: true } }]));
+  });
+
+  it("surfaces an applied:false record-arm result and stops the group action", async () => {
+    // Given two tracks own the Edit range and the second has no usable input.
+    useProTools.setState({
+      editSelectionTrackId: "track-2",
+      editSelectionTrackIds: ["track-1", "track-2"],
+      trackSelectionIds: ["track-1", "track-2"],
+    });
+    useStore.setState({
+      lastError: null,
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        execCalls.push({ command, args });
+        if (command === "arm_track" && args?.trackId === "track-2") {
+          return { ok: true, command, data: { applied: false, reason: "No physical input" } };
+        }
+        return { ok: true, command, data: { applied: true } };
+      }),
+    });
+
+    // When Shift+R record-enables the Edit-associated tracks.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "R", code: "KeyR", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+
+    // Then the honest hardware failure is visible instead of a false armed state.
+    await vi.waitFor(() => expect(useStore.getState().lastError).toBe("No physical input"));
+  });
+
+  it("stops a group track action when projectEpoch changes after the first command", async () => {
+    // Given both tracks own the Edit range and the first command replaces the project.
+    useProTools.setState({
+      editSelectionTrackId: "track-2",
+      editSelectionTrackIds: ["track-1", "track-2"],
+      trackSelectionIds: ["track-1", "track-2"],
+    });
+    useStore.setState({
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        execCalls.push({ command, args });
+        useStore.setState({ projectEpoch: 8 });
+        return { ok: true, command };
+      }),
+    });
+
+    // When a Shift+M group action starts.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "M", code: "KeyM", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+
+    // Then the stale continuation cannot touch the replacement project.
+    await vi.waitFor(() => expect(execCalls).toHaveLength(1));
+    expect(execCalls[0]).toEqual({
+      command: "set_track_mute",
+      args: { trackId: "track-1", mute: true },
+    });
+  });
+
   it("focuses the Edit Selection Start indicator with unmodified Slash", () => {
     const start = document.createElement("input");
     start.id = "pt-selection-start";

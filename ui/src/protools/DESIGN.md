@@ -156,19 +156,20 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 ### Link Track and Edit Selection control
 
 - **Structure**: one labelled pressed toolbar button adjacent to Link Timeline/Edit. Track/Edit and Timeline/Edit are independent options and never share state.
-- **States**: linked by default, one or multiple contiguous associated tracks, unlinked with retained Edit- and Track-selection sets, focus-visible, project replacement, and compact toolbar overflow.
+- **States**: linked by default, one or multiple contiguous or discontiguous associated tracks, unlinked with retained Edit- and Track-selection sets, focus-visible, project replacement, and compact toolbar overflow.
 - **Accessibility**: `aria-pressed`, the full “Link Track and Edit Selection” accessible name, and Shift+T outside editable controls.
-- **Behavior**: a linked Selector or Smart Tool drag across primary lanes selects every visible track between the anchor and focus lanes while preserving the same horizontal Edit range. Selecting another track header moves the range to that one track. Track View changes fan out to every compatible selected track. Unlinking preserves both sets, so later header selection can diverge; relinking makes the Edit-track set authoritative again.
-- **Visual feedback**: the Edit band spans only its contiguous associated lane rows, and every linked Track-selection header exposes pressed state. When unlinked, the independently selected header set remains separate visible feedback.
+- **Behavior**: a linked Selector or Smart Tool drag across primary lanes selects every visible track between the anchor and focus lanes while preserving the same horizontal Edit range. A plain Track Name click replaces the selected set, Shift-click selects the visible contiguous range from the active header, and Command-click on macOS or Control-click elsewhere toggles a discontiguous Track Name. Linked header selection assigns the same Edit span to that exact set; unlinked header selection changes only Track selection. Track View changes fan out to every compatible selected track. Relinking makes the Edit-track set authoritative again.
+- **Visual feedback**: every selected Track Name exposes immediate native `aria-pressed` state, following the nearest BeUI checkbox pattern's semantic/immediate-state principle without importing its visual treatment. The Edit overlay renders one band per contiguous associated run so a discontiguous selection never paints intervening lanes. When unlinked, the independently selected header set remains separate visible feedback.
 - **Safety**: pointer cancellation restores the prior Edit- and Track-selection sets; project replacement clears them. Missing or deleted track ids are filtered against the current visible-track order before geometry or group operations run.
 - **Mutation**: link and both selection sets are UI-local. The focused lane still uses the existing global `setSelectedTrack` path for the active inspector and multiplayer signaling; no snapshot mutation or project command occurs. Track View is shell-local display state.
-- **Adaptation**: Mosh's canonical active-track field remains singular, so the last focused associated lane owns the inspector while the shell renders and operates on the complete contiguous selected set. Noncontiguous Command-click track selection and group-wide record/solo/mute shortcuts remain explicit parity debt.
+- **Adaptation**: Mosh's canonical active-track field remains singular, so the last focused associated lane owns the inspector while the shell renders and operates on the complete selected set. If a modifier removes the active Track Name, the last remaining selected Track Name becomes active; removing the final Track Name clears the linked Edit range.
 
 ### Track control row
 
 - **Structure**: color strip, select/name button, record/solo/mute controls, and snapshot-backed output metadata.
-- **States**: default, hover, selected, armed, muted, soloed, focus-visible.
-- **Accessibility**: controls use native buttons and explicit labels; track name selection is separate from record/mute actions.
+- **States**: default, hover, selected, armed, muted, soloed, focus-visible, group action in flight, failure.
+- **Accessibility**: controls use native buttons and explicit labels; Track Name selection is separate from record/mute actions. Shift+R/S/M act outside editable controls on the exact tracks containing the Edit cursor or selection. Option/Alt+Shift-click on R/S/M applies the source control's next state to selected Track Names.
+- **Mutation**: group actions call the existing `arm_track`, `set_track_solo`, or `set_track_mute` MoshOps command once per target in visible order. Calls are serial, stop on the first failure, and abort on `projectEpoch` replacement. Both `ok:false` and `ok:true, applied:false` surface through the existing Pro Tools error banner. This preserves canonical validation, JSONL, multiplayer locks, and `arm_track` hardware semantics; it is explicitly not an atomic native group command.
 - **Layout**: vertical stack row locked to the corresponding lane; resize separator is keyboard-operable.
 
 ### Timeline lane and Smart Tool surface

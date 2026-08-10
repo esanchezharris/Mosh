@@ -32,8 +32,9 @@ export function ProToolsEditSelectionOverlay({ snapshot }: { readonly snapshot: 
     const trackIds = tracks.filter((track) => requested.has(track.id)).map((track) => track.id);
     if (trackIds.length === 0) return null;
     const selected = new Set(trackIds);
-    let firstTop: number | null = null;
-    let lastBottom = 0;
+    const absoluteBands: { top: number; height: number }[] = [];
+    let bandTop: number | null = null;
+    let bandHeight = 0;
     let top = 0;
     for (const track of tracks) {
       const height = proToolsTrackRowHeight(
@@ -43,20 +44,31 @@ export function ProToolsEditSelectionOverlay({ snapshot }: { readonly snapshot: 
         trackHeightScale,
       );
       if (selected.has(track.id)) {
-        firstTop ??= top;
-        lastBottom = top + height;
+        bandTop ??= top;
+        bandHeight += height;
+      } else if (bandTop !== null) {
+        absoluteBands.push({ top: bandTop, height: bandHeight });
+        bandTop = null;
+        bandHeight = 0;
       }
       top += height;
     }
-    if (firstTop === null) return null;
+    if (bandTop !== null) absoluteBands.push({ top: bandTop, height: bandHeight });
+    const firstBand = absoluteBands[0];
+    const lastBand = absoluteBands.at(-1);
+    if (!firstBand || !lastBand) return null;
     const focusTrackId = editSelectionTrackId && selected.has(editSelectionTrackId)
       ? editSelectionTrackId
       : trackIds.at(-1) ?? null;
     return {
       trackId: focusTrackId,
       trackIds,
-      top: firstTop,
-      height: lastBottom - firstTop,
+      top: firstBand.top,
+      height: lastBand.top + lastBand.height - firstBand.top,
+      bands: absoluteBands.map((band) => ({
+        top: band.top - firstBand.top,
+        height: band.height,
+      })),
     };
   }, [
     automationLanesVisible,
@@ -88,8 +100,19 @@ export function ProToolsEditSelectionOverlay({ snapshot }: { readonly snapshot: 
           height: geometry.height,
         } : {}),
       }}>
-      <span className="pt-edit-selection-start" aria-hidden="true">EDIT IN</span>
-      <span className="pt-edit-selection-end" aria-hidden="true">OUT</span>
+      {(geometry?.bands ?? [null]).map((band, index) => (
+        <div key={band ? `${band.top}-${band.height}` : "all"}
+          className="pt-edit-selection-band"
+          data-testid="pt-edit-selection-band"
+          style={band ? { top: band.top, height: band.height } : { top: 0, bottom: 0 }}>
+          {index === 0 && (
+            <>
+              <span className="pt-edit-selection-start" aria-hidden="true">EDIT IN</span>
+              <span className="pt-edit-selection-end" aria-hidden="true">OUT</span>
+            </>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

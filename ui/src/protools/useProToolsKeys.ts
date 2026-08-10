@@ -9,6 +9,7 @@ import { nextTabPosition } from "./tabNavigation";
 import { nextCommonProToolsTrackView } from "./trackViews";
 import { toggleProToolsTimelineEditLink } from "./proToolsTimelineSelection";
 import { toggleProToolsTrackEditLink } from "./proToolsTrackEditSelection";
+import { handleProToolsTrackControlShortcut } from "./proToolsTrackControls";
 import {
   adjacentMemoryLocation,
   memoryLocationAtNumber,
@@ -118,6 +119,8 @@ export function useProToolsKeys(): void {
         toggleProToolsTrackEditLink();
         return;
       }
+
+      if (handleProToolsTrackControlShortcut(event)) return;
 
       if ((event.code === "Slash" || event.code === "NumpadDivide")
         && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {

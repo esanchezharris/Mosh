@@ -148,3 +148,82 @@ test("vertical Edit selection links contiguous tracks and their compatible Track
   await expect(secondHeader).toHaveAttribute("data-selected", "true");
   await expect(thirdHeader).toHaveAttribute("data-selected", "false");
 });
+
+test("Track Name modifiers and Shift R S M follow the tutorial-backed Edit selection", async ({ page }, testInfo) => {
+  // Given a linked Edit range on the first of three visible tracks.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  const lanes = page.getByTestId("pt-lane");
+  const headers = page.getByTestId("pt-track-header");
+  await expect(lanes).toHaveCount(3);
+  const firstLane = lanes.nth(0);
+  const firstHeader = headers.nth(0);
+  const middleHeader = headers.nth(1);
+  const lastHeader = headers.nth(2);
+  const firstTrackId = await firstHeader.getAttribute("data-track-id");
+  const lastTrackId = await lastHeader.getAttribute("data-track-id");
+  const firstBounds = await firstLane.boundingBox();
+  if (!firstTrackId || !lastTrackId || !firstBounds)
+    throw new Error("track-group fixture geometry is unavailable");
+  const startX = Math.min(firstBounds.x + firstBounds.width - 180, firstBounds.x + 850);
+  await page.mouse.move(startX, firstBounds.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(startX + 120, firstBounds.y + 8, { steps: 4 });
+  await page.mouse.up();
+
+  // When the last Track Name is Command-clicked.
+  await lastHeader.getByTestId("pt-track-select").click({ modifiers: ["Meta"] });
+
+  // Then the exact noncontiguous set is linked to two separate Edit bands.
+  await expect(firstHeader).toHaveAttribute("data-selected", "true");
+  await expect(middleHeader).toHaveAttribute("data-selected", "false");
+  await expect(lastHeader).toHaveAttribute("data-selected", "true");
+  const edit = page.getByTestId("pt-edit-selection");
+  await expect(edit).toHaveAttribute("data-track-ids", `${firstTrackId} ${lastTrackId}`);
+  await expect(edit.getByTestId("pt-edit-selection-band")).toHaveCount(2);
+
+  // When the tutorial-backed keyboard family is used.
+  await page.keyboard.press("Shift+M");
+  await expect(firstHeader.getByTestId("pt-track-mute")).toHaveAttribute("aria-pressed", "true");
+  await expect(middleHeader.getByTestId("pt-track-mute")).toHaveAttribute("aria-pressed", "false");
+  await expect(lastHeader.getByTestId("pt-track-mute")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Shift+S");
+  await expect(firstHeader.getByTestId("pt-track-solo")).toHaveAttribute("aria-pressed", "true");
+  await expect(lastHeader.getByTestId("pt-track-solo")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Shift+R");
+  await expect(firstHeader.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
+  await expect(lastHeader.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
+
+  // And the command trail names each existing per-track MoshOps mutation in visible order.
+  const controls = await page.evaluate(() => {
+    const trace = (window as unknown as {
+      __moshCmdTrace?: Array<{ command: string; args: Record<string, unknown> }>;
+    }).__moshCmdTrace ?? [];
+    return trace.filter((entry) => ["set_track_mute", "set_track_solo", "arm_track"]
+      .includes(entry.command))
+      .map(({ command, args }) => ({ command, args }));
+  });
+  expect(controls).toEqual([
+    { command: "set_track_mute", args: { trackId: firstTrackId, mute: true } },
+    { command: "set_track_mute", args: { trackId: lastTrackId, mute: true } },
+    { command: "set_track_solo", args: { trackId: firstTrackId, solo: true } },
+    { command: "set_track_solo", args: { trackId: lastTrackId, solo: true } },
+    { command: "arm_track", args: { trackId: firstTrackId, armed: true } },
+    { command: "arm_track", args: { trackId: lastTrackId, armed: true } },
+  ]);
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-group-controls-wide.png"),
+    animations: "disabled",
+  });
+
+  // The same linked state remains legible in compact reduced-motion layout.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await edit.scrollIntoViewIfNeeded();
+  await expect(edit).toBeVisible();
+  await expect(edit.getByTestId("pt-edit-selection-band")).toHaveCount(2);
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-group-controls-compact.png"),
+    animations: "disabled",
+  });
+});
