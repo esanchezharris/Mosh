@@ -8,6 +8,8 @@ This contract is scoped to `.protools-shell`. Existing Mosh shells keep their ow
 - Existing-system extraction: mapped `ui/src/live/`, shared `ClipView`, `PianoRoll`, `SettingsPanel`, `MoshMenu`, `MoshTip`, icons, interaction tables, and global store ownership; selected additive reuse instead of a parallel data path.
 - Interaction reference: read beui.dev `tabs` and `table` source; kept its accessible segmented-control semantics and direct pointer-resize mechanism, but omitted its spring library because an editing surface needs immediate, low-motion feedback.
 - Spot interaction reference: read Avid's “Spotting Clips” procedure and beui.dev `center-morph-modal` source. Kept controlled open state, initial focus, focus containment, Escape/backdrop dismissal, and trigger restoration; omitted the center-unfold animation and motion dependency to preserve the shell's immediate panel contract.
+- Tutorial parity reference: reviewed official Avid Edit Window, recording, I/O, Clip Gain, automation, and MIDI Editor videos at the timecodes recorded in `docs/protools-clone/RESEARCH.md`. Extracted structural ratios and before/during/after behavior only; source frames remain private and uncommitted.
+- Automation conflict resolution: Avid's Smart Tool help page explicitly assigns Selector to the bottom 75% and Trim to the top 25% of automation/controller views. That authority preserves the existing classifier despite simplified “half” language in the short automation video.
 - Skipped generated imagery and broad style search: the user supplied a concrete Pro Tools reference target and prohibited proprietary art reuse; original CSS geometry and existing Mosh renderers are the fidelity contract.
 
 ## 1. Atmosphere & Identity
@@ -150,11 +152,12 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 
 ### Audio clip inspector
 
-- **Structure**: clip name, mute state, paired clip-gain slider and numeric field, 0 dB reset, waveform preview, and read-only timing/fade metadata.
+- **Structure**: clip name, mute state, paired clip-gain slider and numeric field, 0 dB reset, waveform preview, read-only timing/fade metadata, plus an inline selected-clip gain line and lower-left adjustment handle in the timeline.
 - **States**: clean, locally edited, invalid name, invalid gain, command rejected, project replaced, muted.
-- **Accessibility**: every field has a visible label; validation is announced and associated with its field; Escape restores the snapshot value; the mute toggle exposes `aria-pressed`.
+- **Accessibility**: every field has a visible label; validation is announced and associated with its field; Escape restores the snapshot value; the mute toggle exposes `aria-pressed`; the inline handle exposes slider semantics, value text, Arrow/Home/End control, and a visible focus ring.
 - **Mutation**: rename, mute, and gain commit only through `rename_clip`, `set_clip_mute`, and `set_clip_gain`. Gain remains local while a pointer or keyboard gesture is active, accepts `-48…+24 dB`, and commits only on completion.
 - **Safety**: a `projectEpoch` change resets all drafts and prevents a stale editor gesture from addressing the replacement project.
+- **Visual feedback**: the gain line maps the supported dB range into the waveform body and the waveform scales by the linear dB amplitude factor, clipped by the original clip bounds. The handle and line are original Mosh primitives, not copied Avid art.
 
 ### Insert browser and rack
 

@@ -66,6 +66,25 @@ test("?shell=protools boots the Edit Window zones with left track headers", asyn
   if (!header || !lane) throw new Error("Edit Window bounds are missing");
   expect(header.x).toBeLessThan(lane.x);
   expect(Math.abs(header.y - lane.y)).toBeLessThanOrEqual(2);
+
+  // Broad envelopes derived from uncropped V01 Edit Window frames keep the
+  // hierarchy recognizable without treating compressed tutorial pixels as art.
+  const viewport = page.viewportSize();
+  const toolbar = await page.getByTestId("pt-toolbar").boundingBox();
+  const rulers = await page.getByRole("region", { name: "Timeline rulers" }).boundingBox();
+  const trackList = await page.getByTestId("pt-track-list").boundingBox();
+  const clipList = await page.getByTestId("pt-clip-list").boundingBox();
+  if (!viewport || !toolbar || !rulers || !trackList || !clipList) {
+    throw new Error("Edit Window parity-zone bounds are missing");
+  }
+  expect(toolbar.height / viewport.height).toBeGreaterThan(0.05);
+  expect(toolbar.height / viewport.height).toBeLessThan(0.13);
+  expect(rulers.height / viewport.height).toBeGreaterThan(0.05);
+  expect(rulers.height / viewport.height).toBeLessThan(0.12);
+  expect(trackList.width / viewport.width).toBeGreaterThan(0.07);
+  expect(trackList.width / viewport.width).toBeLessThan(0.16);
+  expect(clipList.width / viewport.width).toBeGreaterThan(0.09);
+  expect(clipList.width / viewport.width).toBeLessThan(0.18);
 });
 
 test("mode, tool, Smart Tool, and resizable headers are keyboard operable", async ({ page }) => {
@@ -245,7 +264,7 @@ test("compact Edit Window keeps collapsed Clip List and overflow controls reacha
   await expect(settings).toBeFocused();
 });
 
-test("audio producer flow records, edits, mixes, inserts, saves, reloads, and undoes Moshi", async ({ page }) => {
+test("audio producer flow records, edits, mixes, inserts, saves, reloads, and undoes Moshi", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
 
@@ -260,6 +279,16 @@ test("audio producer flow records, edits, mixes, inserts, saves, reloads, and un
   if (!trackId) throw new Error("created audio track id is absent");
   await header.getByTestId("pt-track-select").click();
   await expect(page.getByTestId("pt-track-inspector")).toBeVisible();
+  const toolbar = page.getByTestId("pt-toolbar");
+  const recordButton = toolbar.getByRole("button", { name: "Record", exact: true });
+
+  // Avid's recording tutorial starts with the track explicitly unassigned,
+  // disarmed, and in Auto monitoring before the producer chooses physical I/O.
+  await expect(page.getByTestId("pt-io-input")).toContainText("No Input");
+  await expect(page.getByTestId("pt-io-output")).toContainText("Default output");
+  await expect(page.getByTestId("pt-monitor-automatic")).toHaveAttribute("aria-pressed", "true");
+  await expect(header.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "false");
+  await expect(recordButton).toHaveAttribute("aria-pressed", "false");
 
   await page.getByTestId("pt-track-name").fill("Tonight Vocal");
   await page.getByTestId("pt-track-name").press("Enter");
@@ -281,11 +310,13 @@ test("audio producer flow records, edits, mixes, inserts, saves, reloads, and un
 
   await header.getByTestId("pt-track-arm").click();
   await expect(header.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
-  const toolbar = page.getByTestId("pt-toolbar");
-  await toolbar.getByRole("button", { name: "Record", exact: true }).click();
+  await recordButton.click();
   await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(true);
+  await expect(recordButton).toHaveAttribute("aria-pressed", "true");
+  await expect(header.getByTestId("pt-track-arm")).toHaveAttribute("aria-pressed", "true");
   await toolbar.getByRole("button", { name: "Stop", exact: true }).click();
   await expect.poll(() => storeVal<boolean>(page, "transport.recording")).toBe(false);
+  await expect(recordButton).toHaveAttribute("aria-pressed", "false");
   await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.length")).toBe(1);
 
   const clipEntry = page.getByTestId("pt-clip-list-item").first();
@@ -312,6 +343,25 @@ test("audio producer flow records, edits, mixes, inserts, saves, reloads, and un
   await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
   await expect.poll(() => storeVal<string>(page, "snapshot.tracks.0.clips.0.name")).toBe("Tonight Take");
   await expect.poll(() => storeVal<boolean>(page, "snapshot.tracks.0.clips.0.mute")).toBe(false);
+
+  const inlineGain = page.getByTestId("pt-clip-gain-handle");
+  await expect(inlineGain).toHaveAttribute("aria-valuenow", "3.5");
+  await expect(inlineGain).toHaveAttribute("aria-valuetext", "3.5 dB");
+  const waveformScale = await page.getByTestId("pt-audio-clip-stack").evaluate((element) =>
+    Number((element as HTMLElement).style.getPropertyValue("--pt-clip-gain-scale")),
+  );
+  expect(waveformScale).toBeCloseTo(10 ** (3.5 / 20), 8);
+  await inlineGain.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3);
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => storeVal<number>(page, "snapshot.tracks.0.clips.0.gainDb")).toBe(3.5);
+  await page.screenshot({ path: testInfo.outputPath("protools-tutorial-parity-wide.png") });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
+  await page.screenshot({ path: testInfo.outputPath("protools-tutorial-parity-compact.png") });
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await header.getByTestId("pt-track-select").click();
   await page.getByTestId("pt-add-insert").click();

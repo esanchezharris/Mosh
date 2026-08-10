@@ -7,8 +7,8 @@ import { ClipView } from "../v2/lanes/ClipView";
 import { TRACK_ROW_HEIGHT, CLIP_VISUAL_HEADER_PX } from "./layout";
 import { midiPointerIsBlank } from "./midiBlankHit";
 import { capturePointer, releasePointer } from "./pointerCapture";
+import { ProToolsAudioClip } from "./ProToolsAudioClip";
 import { ProToolsAutomationLane } from "./ProToolsAutomationLane";
-import { ProToolsFadeHandles } from "./ProToolsFadeHandles";
 import { proToolsGestureTable } from "./proToolsGestureTable";
 import { useProTools } from "./proToolsState";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
@@ -228,14 +228,15 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
               "--pt-beat-px": `${beatsInSeconds * pxPerSec}px`,
             } as React.CSSProperties}>
             {track.clips.filter((clip) => !clip.hidden).map((clip) => {
-              const media = clip.type === "wave" ? "audio" : "midi";
+              if (clip.type === "wave") {
+                return <ProToolsAudioClip key={clip.id} clip={clip} snapshot={snapshot} track={track} />;
+              }
               return (
                 <span key={clip.id}>
                   <ClipView clip={clip} trackType={track.type} snapshot={snapshot}
-                    clipHeaderPx={media === "audio" ? (TRACK_ROW_HEIGHT - 30) / 2 : 0}
+                    clipHeaderPx={0}
                     clipVisualHeaderPx={CLIP_VISUAL_HEADER_PX}
-                    gestureTable={() => proToolsGestureTable(media, smartToolEnabled, activeTool)} />
-                  {clip.type === "wave" && <ProToolsFadeHandles clip={clip} />}
+                    gestureTable={() => proToolsGestureTable("midi", smartToolEnabled, activeTool)} />
                 </span>
               );
             })}

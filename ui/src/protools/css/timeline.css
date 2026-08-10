@@ -120,6 +120,12 @@
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.62);
 }
 .protools-shell .pt-lane .v2-clip canvas { filter: drop-shadow(0 0 0.5px var(--pt-wave-outline)); }
+.protools-shell .pt-audio-clip-stack > .v2-clip.wave canvas {
+  transform: scaleY(var(--pt-clip-gain-scale, 1));
+  transform-origin: center;
+  transition: transform var(--pt-motion-micro);
+  will-change: transform;
+}
 .protools-shell .pt-lane .v2-trim { z-index: 5; }
 .protools-shell .v2-clip[data-pt-intent="selector"] { cursor: text; }
 .protools-shell .v2-clip[data-pt-intent="grabber"] { cursor: grab; }
@@ -156,6 +162,67 @@
 .pt-fade-line { position: absolute; top: 0; bottom: 0; border-top: 1px solid var(--pt-wave-outline); opacity: 0.55; }
 .pt-fade-line.in { left: 0; transform: skewY(24deg); transform-origin: left top; }
 .pt-fade-line.out { right: 0; transform: skewY(-24deg); transform-origin: right top; }
+
+.pt-clip-gain {
+  position: absolute;
+  z-index: 7;
+  top: calc(2px + var(--pt-clip-header-h));
+  bottom: calc(var(--pt-automation-h) + 2px);
+  pointer-events: none;
+}
+.pt-clip-gain-line {
+  position: absolute;
+  right: 0;
+  left: 0;
+  top: var(--pt-clip-gain-y);
+  border-top: 1px solid color-mix(in srgb, var(--pt-wave-outline) 78%, var(--pt-track-color));
+  opacity: 0.48;
+}
+.pt-clip-gain.is-selected .pt-clip-gain-line { opacity: 0.9; }
+.pt-clip-gain-handle {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  width: var(--pt-space-3);
+  height: var(--pt-space-3);
+  border: 1px solid var(--pt-wave-outline);
+  background: color-mix(in srgb, var(--pt-track-color) 76%, var(--pt-inset));
+  box-shadow: inset 0 1px var(--pt-highlight);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.pt-clip-gain-handle::before,
+.pt-clip-gain-handle::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  width: 6px;
+  height: 1px;
+  background: var(--pt-wave-outline);
+}
+.pt-clip-gain-handle::before { top: 3px; }
+.pt-clip-gain-handle::after { bottom: 3px; }
+.pt-clip-gain-handle:focus-visible {
+  outline: 2px solid var(--pt-focus-ring);
+  outline-offset: 2px;
+}
+.pt-clip-gain-value {
+  position: absolute;
+  bottom: 1px;
+  left: calc(var(--pt-space-4) + 2px);
+  padding: 1px var(--pt-space-1);
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  font: 600 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--pt-motion-micro);
+}
+.pt-clip-gain-handle:hover + .pt-clip-gain-value,
+.pt-clip-gain-handle:focus-visible + .pt-clip-gain-value { opacity: 1; }
 
 .pt-automation-lane {
   position: absolute;
