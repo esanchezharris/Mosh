@@ -30,11 +30,29 @@
 }
 .pt-track-list-menu-trigger:disabled { color: var(--pt-text-muted); opacity: 0.55; }
 .pt-track-list-menu-trigger:focus-visible { outline: 2px solid var(--pt-focus-ring); }
-.pt-track-visibility-menu { min-width: 196px; }
+.pt-track-visibility-menu { width: min(316px, calc(100vw - 32px)); }
 .pt-track-visibility-actions {
   padding-bottom: 4px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--pt-border);
+}
+.pt-track-filter-actions {
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--pt-border);
+}
+.pt-track-filter-group + .pt-track-filter-group {
+  padding-top: 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--pt-border);
+}
+.pt-track-filter-title {
+  padding: 4px 7px 2px;
+  color: var(--pt-text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .pt-track-visibility-menu button[data-disabled] { opacity: 0.45; }
 .pt-track-visibility-state { display: grid; width: 14px; place-items: center; }

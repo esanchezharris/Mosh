@@ -185,3 +185,77 @@ test("Track List makes a selected track inactive without hiding it", async ({ pa
   await expect(selectedHeader).toHaveAttribute("data-track-active", "true");
   await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
 });
+
+test("Show Only clips in the Timeline selection filters every aligned Edit surface", async ({ page }, testInfo) => {
+  // Given only the Drums and Bass clips intersect a deterministic Timeline selection.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  await page.getByTestId("pt-universe-toggle").click();
+  await page.evaluate(() => {
+    const shell = Reflect.get(window, "__moshShellStore");
+    const state = Reflect.get(shell, "getState")();
+    Reflect.get(state, "setTimeRange")({ start: 0, end: 1 });
+  });
+  const commandsBefore = await commandNames(page);
+
+  // When the timeline-content Show Only filter is chosen.
+  await page.getByTestId("pt-track-visibility-menu").click();
+  await page.getByRole("menuitem", {
+    name: "Show Only Tracks With Clips Within Timeline Selection",
+    exact: true,
+  }).click();
+
+  // Then the aligned banks keep only the matching tracks while all clips remain in-session.
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(2);
+  await expect(page.getByTestId("pt-track-header").nth(0)).toContainText("Drums");
+  await expect(page.getByTestId("pt-track-header").nth(1)).toContainText("Bass");
+  await expect(page.getByTestId("pt-lane")).toHaveCount(2);
+  await expect(page.getByTestId("pt-universe-track")).toHaveCount(2);
+  await expect(page.getByTestId("pt-clip-list-item")).toHaveCount(3);
+  expect(await commandNames(page)).toEqual(commandsBefore);
+
+  // And the source filter remains reachable in the viewport-clamped menu.
+  await page.getByTestId("pt-track-visibility-menu").click();
+  const timelineFilter = page.getByRole("menuitem", {
+    name: "Show Only Tracks With Clips Within Timeline Selection",
+    exact: true,
+  });
+  await timelineFilter.scrollIntoViewIfNeeded();
+  await expect(timelineFilter).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-filter-timeline-wide.png"),
+    animations: "disabled",
+  });
+});
+
+test("compact Track List hides instrument tracks by keyboard", async ({ page }, testInfo) => {
+  // Given the reduced-motion compact shell contains two instrument tracks and one audio track.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await bootProTools(page);
+  const trigger = page.getByTestId("pt-track-visibility-menu");
+  await page.getByTestId("pt-track-select").filter({ hasText: "Keys" }).click();
+  const commandsBefore = await commandNames(page);
+
+  // When Hide Instrument Tracks is activated using only the keyboard.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const action = page.getByRole("menuitem", { name: "Hide Instrument Tracks", exact: true });
+  await action.focus();
+  await page.keyboard.press("Enter");
+
+  // Then Keys is the one remaining row and the tall filter menu stayed keyboard reachable.
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(1);
+  await expect(page.getByTestId("pt-track-header")).toContainText("Keys");
+  expect(await commandNames(page)).toEqual(commandsBefore);
+
+  // And the filter remains keyboard reachable inside the compact, scrollable popup.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await action.focus();
+  await expect(action).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-filter-compact.png"),
+    animations: "disabled",
+  });
+});

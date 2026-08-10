@@ -2,6 +2,7 @@ import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { useStore } from "../store";
 import type { Track } from "../types";
 import { IconCheck, IconLayers } from "../ui/icons";
+import { ProToolsTrackFilterActions } from "./ProToolsTrackFilterActions";
 import { useProTools } from "./proToolsState";
 import { setProToolsTracksActive } from "./proToolsTrackActive";
 
@@ -76,6 +77,13 @@ export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Tr
             <span className="pt-track-visibility-name">{activeActionLabel}</span>
           </MoshMenuItem>
         </div>
+        <ProToolsTrackFilterActions
+          tracks={tracks}
+          trackIds={trackIds}
+          shownTrackIds={shownTrackIds}
+          showOnlyTrackIds={showOnlyTrackIds}
+          setShownTrackIds={setShownTrackIds}
+        />
         {tracks.map((track) => {
           const shown = trackVisibility[track.id] !== false;
           return (
