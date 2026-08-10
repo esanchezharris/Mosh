@@ -214,6 +214,12 @@ describe("AG-KB1 expanded categories (warp/drums/lyrics/generative/mixer/vst3/re
     expect(top("I recorded three takes of this line, how do I compare them")).toBe("recording-take-lanes");
   });
 
+  it("recording: phrase from another take -> region promotion", () => {
+    expect(top("use one word from another vocal take in my comp")).toBe(
+      "recording-promote-take-region",
+    );
+  });
+
   it("every new card's maps_to names a real AGENT_COMMANDS entry or an accurate UI-only control", () => {
     // Guards against inventing a command: every card that names a bare command
     // token in maps_to (snake_case, no spaces) must resolve to AGENT_COMMANDS.
@@ -413,6 +419,12 @@ describe("AG-KB-AUTO: parameter automation + clip-ops (set_track_automation_mode
     expect(
       top("I already know the exact automation curve shape I want, can I author it as a list of points at once"),
     ).toBe("automation-write-curve-bulk");
+  });
+
+  it("clip gain: riding phrases inside one clip -> clip-local dynamic envelope", () => {
+    expect(
+      top("ride the loud and quiet words inside this one audio clip without changing the whole track fader"),
+    ).toBe("clip-gain-dynamic-envelope");
   });
 
   it("automation: one exact point or wiping a messy curve -> add_automation_point / clear_automation", () => {

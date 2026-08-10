@@ -193,6 +193,14 @@ export type MidiNote = {
   mute?: boolean;
 };
 
+export type ClipGainPoint = {
+  /** Seconds from the clip's current visible start; may be negative after a head trim. */
+  t: number;
+  /** Dynamic dB offset applied after the clip's static gain. */
+  gainDb: number;
+  curve?: number;
+};
+
 export type Clip = {
   id: string;
   name: string;
@@ -205,6 +213,8 @@ export type Clip = {
   // same track beneath the muted source. Filtered out of the lanes (it's not a clip to manage).
   hidden?: boolean;
   gainDb?: number;
+  /** Clip-local dynamic gain envelope. Absent means no dynamic envelope. */
+  clipGainPoints?: ClipGainPoint[];
   // G4b — clip-edge fades (wave clips only). Seconds; type is 1=linear 2=convex
   // 3=concave 4=sCurve (optional — the v1 UI only drives durations).
   fadeInSec?: number;
@@ -241,6 +251,47 @@ export type Clip = {
   numTakes?: number;
   currentTakeIndex?: number;
   takes?: ClipTake[];
+};
+
+/** Pro Tools-style arrangement group. Unlike a routing folder, this owns no signal
+ *  path: active members select and move as one clip object. Inactive definitions are
+ *  retained so the documented Regroup command can restore the last Ungroup. */
+export type ClipGroup = {
+  id: string;
+  name: string;
+  clipIds: string[];
+  active: boolean;
+};
+
+export type TrackGroupKind = "edit" | "mix" | "edit_mix";
+
+export const TRACK_GROUP_MIX_ATTRIBUTES = [
+  "main_volume",
+  "main_mute",
+  "main_pan",
+  "solo",
+  "record_enable",
+  "input_monitoring",
+] as const;
+export type TrackGroupMixAttribute = typeof TRACK_GROUP_MIX_ATTRIBUTES[number];
+export const DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES: readonly TrackGroupMixAttribute[] = [
+  "main_volume",
+  "main_mute",
+  "main_pan",
+  "solo",
+] as const;
+
+/** Pro Tools-style non-routing track linkage. These groups never create folder
+ *  tracks or alter the signal path: Edit membership links selection, while Mix
+ *  membership links volume, pan, mute, and solo. */
+export type TrackGroup = {
+  id: string;
+  name: string;
+  trackIds: string[];
+  kind: TrackGroupKind;
+  enabled: boolean;
+  /** Missing on legacy projects; consumers must apply DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES. */
+  mixAttributes?: TrackGroupMixAttribute[];
 };
 
 export type ControllerEventName =
@@ -389,6 +440,9 @@ export type Track = {
    *  src/plugins/mixer/TrackMutePlugin.h for how the two differ and why both exist. */
   mute?: boolean;
   solo?: boolean;
+  /** Playback/resource state. `false` retains the track but removes it and its plug-ins
+   *  from processing; absent snapshots are active for backward compatibility. */
+  active?: boolean;
   // G10 — automation record-arm mode. Absent (legacy/never-set track) means "read".
   // Track-wide, not per-parameter: while "write", every automatable param change on
   // this track captures a point. Only "write" is behavioral in v0 — "touch"/"latch"
@@ -791,6 +845,14 @@ export type Snapshot = {
   buses?: Bus[];
   sections?: Section[];
   annotations?: Annotation[];
+  /** Additive Pro Tools-style arrangement groups; absent means no clip groups. */
+  clipGroups?: ClipGroup[];
+  /** The dormant definition eligible for Pro Tools Regroup. */
+  lastUngroupedClipGroupId?: string;
+  /** Additive, non-routing Pro Tools Edit/Mix group definitions. */
+  trackGroups?: TrackGroup[];
+  /** Temporarily bypasses every Track Group without deleting its membership. */
+  trackGroupsSuspended?: boolean;
   audio?: AudioSelection;
   training?: TrainingState;
 };

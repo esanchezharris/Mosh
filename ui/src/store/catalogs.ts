@@ -22,6 +22,7 @@ export type CatalogsSlice = {
   // by the sync VST3 rescan path and the mock) stays valid — a live async sweep adds a
   // periodic running count + elapsed time, sampled from the backend's real plugin catalog.
   scanProgress: { format: string; done: boolean; count?: number; elapsedMs?: number } | null; // transient rescan state
+  pluginBlocklist: { id: string; rawId: string; reason: string }[];
   audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
   waveInputs: WaveInput[] | null;          // RTG-001 input choices (on-demand, lazy)
   midiInputs: MidiInput[] | null;          // CTL-001 MIDI-input choices (on-demand, lazy)
@@ -29,8 +30,9 @@ export type CatalogsSlice = {
 
   ensurePluginCatalog: () => void;          // lazy-load the plugin list + built-ins (shared by the modal + the v2 drawer)
   // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
-  rescanPlugins: (format?: "vst3" | "au" | "all", allowAU?: boolean) => Promise<void>;
+  rescanPlugins: (format?: "vst3" | "au" | "all", allowAU?: boolean, deepVst3?: boolean) => Promise<void>;
   refreshPluginList: () => Promise<void>;
+  refreshPluginBlocklist: () => Promise<void>;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
@@ -41,6 +43,7 @@ export const createCatalogsSlice: StateCreator<State, [], [], CatalogsSlice> = (
   availableBuiltins: [],
   pluginCounts: null,
   scanProgress: null,
+  pluginBlocklist: [],
   audioDevices: null,
   waveInputs: null,
   midiInputs: null,
@@ -68,14 +71,26 @@ export const createCatalogsSlice: StateCreator<State, [], [], CatalogsSlice> = (
       set({ availablePlugins: res.data.plugins, pluginCounts: res.data.counts ?? null });
   },
 
+  refreshPluginBlocklist: async () => {
+    const res = await executeCommand<CommandResult<{
+      blocklist: { id: string; rawId: string; reason: string }[];
+    }>>({ command: "get_plugin_blocklist", args: {} });
+    if (res.ok && res.data)
+      set({ pluginBlocklist: res.data.blocklist ?? [] });
+  },
+
   // INS-005 — re-enumerate the catalog. AU is the slow/risky path (the backend
   // runs it off the message thread); we refresh the list when the scan reports done.
   // AUD-SCAN — `allowAU` is the per-call opt-in the backend requires before it will
   // sweep AudioUnits. Without it the native handler quietly does a VST3-only pass, so
   // every AU on the machine stayed invisible with no error to explain why.
-  rescanPlugins: async (format = "all", allowAU = false) => {
+  rescanPlugins: async (format = "all", allowAU = false, deepVst3 = false) => {
     set({ scanProgress: { format, done: false, count: 0, elapsedMs: 0 } });
-    const res = await get().exec("rescan_plugins", { format, allowAU });
+    const res = await get().exec("rescan_plugins", {
+      format,
+      allowAU,
+      ...(deepVst3 ? { deepVst3: true } : {}),
+    });
     // Inline/VST3 rescans return done immediately; AU rescans complete via the
     // 'plugin_scan_progress' event (see init()).
     const status = (res.data as { status?: string } | undefined)?.status;

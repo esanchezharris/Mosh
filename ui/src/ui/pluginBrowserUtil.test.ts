@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   builtinEntry, installedEntry, matchEntry, buildPluginRows, visibleRange,
-  loadPluginEntry, loadPluginRecents,
+  loadPluginEntry, loadPluginEntryToTracks, loadMasterPluginEntry, loadPluginRecents,
   type PluginRow,
 } from "./pluginBrowserUtil";
 import type { AvailablePlugin, BuiltinPlugin } from "../types";
@@ -118,6 +118,71 @@ describe("loadPluginEntry", () => {
     const exec = vi.fn();
     expect(loadPluginEntry(builtinEntry(bi("comp", "Compressor", "Dynamics")), null, exec)).toBe(false);
     expect(exec).not.toHaveBeenCalled();
+    expect(loadPluginRecents()).toEqual([]);
+  });
+});
+
+describe("loadMasterPluginEntry", () => {
+  it("dispatches master-only commands for built-in and installed entries", () => {
+    localStorage.clear();
+    const calls: Array<[string, Record<string, unknown> | undefined]> = [];
+    const exec = (command: string, args?: Record<string, unknown>) => { calls.push([command, args]); };
+
+    expect(loadMasterPluginEntry(builtinEntry(bi("comp", "Compressor", "Dynamics")), exec)).toBe(true);
+    expect(loadMasterPluginEntry(installedEntry(vst("ott", "OTT", "Xfer")), exec)).toBe(true);
+    expect(calls).toEqual([
+      ["load_master_builtin", { type: "comp" }],
+      ["load_master_plugin", { pluginId: "ott" }],
+    ]);
+    expect(loadPluginRecents()).toEqual(["v:ott", "b:comp"]);
+  });
+});
+
+describe("loadPluginEntryToTracks", () => {
+  it("loads one entry serially onto distinct track targets and records one recent", async () => {
+    localStorage.clear();
+    const order: string[] = [];
+    const exec = vi.fn(async (_command: string, args?: Record<string, unknown>) => {
+      order.push(String(args?.trackId));
+      return { ok: true };
+    });
+
+    const loaded = await loadPluginEntryToTracks(
+      builtinEntry(bi("comp", "Compressor", "Dynamics")),
+      ["vocal", "double", "vocal"],
+      exec,
+    );
+
+    expect(loaded).toBe(true);
+    expect(order).toEqual(["vocal", "double"]);
+    expect(exec.mock.calls).toEqual([
+      ["load_builtin", { trackId: "vocal", type: "comp" }],
+      ["load_builtin", { trackId: "double", type: "comp" }],
+    ]);
+    expect(loadPluginRecents()).toEqual(["b:comp"]);
+  });
+
+  it("stops on rejection or project invalidation", async () => {
+    localStorage.clear();
+    const rejected = vi.fn()
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValue({ ok: true });
+    expect(await loadPluginEntryToTracks(
+      installedEntry(vst("ott", "OTT", "Xfer")),
+      ["vocal", "double"],
+      rejected,
+    )).toBe(false);
+    expect(rejected).toHaveBeenCalledTimes(1);
+
+    let current = true;
+    const invalidated = vi.fn(async () => { current = false; return { ok: true }; });
+    expect(await loadPluginEntryToTracks(
+      installedEntry(vst("ott", "OTT", "Xfer")),
+      ["vocal", "double"],
+      invalidated,
+      () => current,
+    )).toBe(false);
+    expect(invalidated).toHaveBeenCalledTimes(1);
     expect(loadPluginRecents()).toEqual([]);
   });
 });

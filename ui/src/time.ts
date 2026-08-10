@@ -156,13 +156,13 @@ export const meterAt = (map: TempoMap, sec: number): Meter => {
 };
 
 /** Continuous bar position (fractional) at a time. */
-const barPosAt = (map: TempoMap, sec: number): number => {
+export const barPosAt = (map: TempoMap, sec: number): number => {
   const s = segAt(map, sec);
   return s.startBarF + Math.max(0, sec - s.startSec) / s.barSec;
 };
 
 /** Invert a continuous bar position back to seconds. */
-const barPosToSec = (map: TempoMap, barF: number): number => {
+export const barPosToSec = (map: TempoMap, barF: number): number => {
   let seg = map[0];
   for (const s of map) { if (s.startBarF <= barF + 1e-9) seg = s; else break; }
   return seg.startSec + (barF - seg.startBarF) * seg.barSec;

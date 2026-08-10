@@ -1496,7 +1496,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 99.0);
       check (! ok (cmd (ops, "split_clip", var (a))), "split far outside clip errors"); }
 
-    // mixer: volume / pan / mute / solo
+    // mixer: volume / pan / mute / solo / active
     { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("db", -6.0);
       check (ok (cmd (ops, "set_track_volume", var (a))), "set_track_volume ok"); }
     check (std::abs ((double) firstTrack (ops).getProperty ("volumeDb", 0.0) + 6.0) < 0.5, "track volume ~= -6 dB");
@@ -1509,6 +1509,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("solo", true);
       cmd (ops, "set_track_solo", var (a)); }
     check ((bool) firstTrack (ops).getProperty ("solo", false), "track soloed");
+    check ((bool) firstTrack (ops).getProperty ("active", false), "track active by default");
+    check (ok (cmd (ops, "set_track_active", objN ({{ "trackId", tid }, { "active", false }}))),
+           "set_track_active false ok");
+    check (! (bool) firstTrack (ops).getProperty ("active", true), "inactive track exposed in snapshot");
+    check (ok (cmd (ops, "undo")), "undo track inactive ok");
+    check ((bool) firstTrack (ops).getProperty ("active", false), "undo restores active track");
+    check (ok (cmd (ops, "redo")), "redo track inactive ok");
+    check (! (bool) firstTrack (ops).getProperty ("active", true), "redo restores inactive track");
+    check (ok (cmd (ops, "set_track_active", objN ({{ "trackId", tid }, { "active", true }}))),
+           "set_track_active true ok");
+    check (! ok (cmd (ops, "set_track_active",
+                      objN ({{ "trackId", "no-such-track" }, { "active", false }}))),
+           "set_track_active rejects an unknown track");
 
     // get_clip_peaks -> non-empty peak array (waveform from backend)
     { auto* a = new DynamicObject(); a->setProperty ("clipId", firstTrack (ops)["clips"][0].getProperty ("id", var()));
@@ -1869,6 +1882,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         if (p.getProperty ("id", var()).toString() == blockTarget) stillPresent = true;
                 check (! stillPresent, "blocked VST3 removed from list_plugins immediately");
             }
+
+            // A producer retry removes only the named quarantine; it must not use
+            // clear_plugin_blocklist, which could re-enable unrelated crashers.
+            String blockedRawId;
+            { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+              if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("id", var()).toString() == blockTarget ||
+                        e.getProperty ("rawId", var()).toString() == blockTarget)
+                        blockedRawId = e.getProperty ("rawId", var()).toString(); }
+            check (blockedRawId.isNotEmpty(), "blocked plugin exposes its raw quarantine id");
+            check (ok (cmd (ops, "unblock_plugin", args1 ("pluginId", blockedRawId))),
+                   "unblock_plugin retries one quarantine");
+            { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+              bool stillBlocked = false;
+              if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("rawId", var()).toString() == blockedRawId) stillBlocked = true;
+              check (! stillBlocked, "unblock_plugin removes only the named quarantine"); }
         }
 
         // clear_plugin_blocklist empties it again.
@@ -2075,6 +2107,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "undo restores prior clip gain (+24)");
         cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}));   // sane default for downstream
 
+        // Avid V06 parity — dynamic Clip Gain is a clip-local envelope, separate from
+        // the static fader above and from the track's volume automation. The whole
+        // curve is one undo transaction; signed times preserve source-relative points
+        // hidden by a head trim.
+        {
+            juce::Array<var> gainPoints;
+            auto addGainPoint = [&] (double t, double gainDb, double curve = 0.0)
+            {
+                auto* point = new DynamicObject();
+                point->setProperty ("t", t);
+                point->setProperty ("gainDb", gainDb);
+                if (curve != 0.0) point->setProperty ("curve", curve);
+                gainPoints.add (var (point));
+            };
+            addGainPoint (-0.25, -9.0, -0.2);
+            addGainPoint (0.0, 0.0);
+            addGainPoint (0.75, 4.5, 0.4);
+            auto* gainArgs = new DynamicObject();
+            gainArgs->setProperty ("clipId", cid);
+            gainArgs->setProperty ("points", var (gainPoints));
+            check (ok (cmd (ops, "write_clip_gain_curve", var (gainArgs))),
+                   "write_clip_gain_curve accepts a signed clip-local envelope");
+            auto curve = clipById (cid).getProperty ("clipGainPoints", var());
+            check (curve.isArray() && curve.size() == 3, "clip gain curve reflects in snapshot");
+            check (std::abs ((double) curve[0].getProperty ("t", 99.0) - (-0.25)) < 0.01
+                   && std::abs ((double) curve[2].getProperty ("gainDb", 99.0) - 4.5) < 0.05,
+                   "clip gain snapshot preserves signed time and dB offsets");
+
+            check (ok (cmd (ops, "undo")), "undo write_clip_gain_curve ok");
+            check (! clipById (cid).hasProperty ("clipGainPoints"),
+                   "undo removes the clip-local gain envelope");
+            check (ok (cmd (ops, "redo")), "redo write_clip_gain_curve ok");
+            check (clipById (cid).getProperty ("clipGainPoints", var()).size() == 3,
+                   "redo restores the clip-local gain envelope");
+
+            juce::Array<var> invalidPoints;
+            auto* invalid = new DynamicObject();
+            invalid->setProperty ("t", 0.0);
+            invalid->setProperty ("gainDb", 6.5);
+            invalidPoints.add (var (invalid));
+            auto* invalidArgs = new DynamicObject();
+            invalidArgs->setProperty ("clipId", cid);
+            invalidArgs->setProperty ("points", var (invalidPoints));
+            check (! ok (cmd (ops, "write_clip_gain_curve", var (invalidArgs))),
+                   "write_clip_gain_curve rejects out-of-range dB before mutation");
+            check (clipById (cid).getProperty ("clipGainPoints", var()).size() == 3,
+                   "rejected clip gain envelope leaves the prior curve intact");
+        }
+
         // G4b — clip fades (fade-in / fade-out, + optional curve type). Audio-clip-only,
         // undoable, JSONL-logged undoable:true, snapshot-invalidating. Fades render NATIVELY
         // through Tracktion's AudioClipBase — no src/state schema change (free persistence
@@ -2126,6 +2207,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "save"); cmd (ops, "reload");
         check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "clip fadeInSec persists across save/reload");
         check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "clip fadeOutSec persists across save/reload");
+        check (clipById (cid).getProperty ("clipGainPoints", var()).size() == 3,
+               "clip gain envelope persists across save/reload");
 
         // JSONL: set_clip_fade logged undoable:true (mirror the warp assert).
         {
@@ -2350,6 +2433,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (et).getProperty ("clips", var()).size() == before + 1, "duplicate adds a clip to the track");
         const auto newId = dup["data"].getProperty ("newClipId", var()).toString();
         check ((double) clipById (newId).getProperty ("start", 0.0) > 0.5, "duplicate lands after the original");
+        check (clipById (newId).getProperty ("clipGainPoints", var()).size() == 3,
+               "duplicate carries its clip-local gain envelope");
         // duplicate is undoable (was uncovered): undo drops the copy, redo restores it.
         check (ok (cmd (ops, "undo")), "undo duplicate_clip ok");
         check (trackById (et).getProperty ("clips", var()).size() == before, "undo removes the duplicated clip");
@@ -2669,6 +2754,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (wr), "G10: write_automation_curve replace ok");
         check ((int) wr["data"].getProperty ("pointCount", -1) == 3, "G10: replace reports 3 points written");
         check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 3, "G10: curve now has exactly the 3 replaced points");
+
+        // A UI nudge can move the first point inward. The explicit old+new replacement
+        // union must clear the OLD boundary too, or a ghost point survives at t=0.
+        var nudgedBoundaryPoints; { Array<var> a; a.add (objN ({{ "t", 0.25 }, { "v", 0.1 }}));
+                                      a.add (objN ({{ "t", 1.25 }, { "v", 0.5 }}));
+                                      a.add (objN ({{ "t", 2.0 }, { "v", 0.9 }})); nudgedBoundaryPoints = a; }
+        auto wrBounds = cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                                                                    { "points", nudgedBoundaryPoints }, { "apply", "replace" },
+                                                                    { "replaceStart", 0.0 }, { "replaceEnd", 2.0 }}));
+        check (ok (wrBounds), "G10: explicit replacement bounds accepted");
+        check ((int) wrBounds["data"].getProperty ("numPoints", -1) == 3,
+               "G10: explicit replacement bounds remove the moved old boundary");
 
         // reject: non-ascending t -> the WHOLE call is rejected, curve UNCHANGED (validate-before-mutate)
         var badPoints; { Array<var> a; a.add (objN ({{ "t", 1.0 }, { "v", 0.2 }}));
@@ -7168,6 +7265,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! ok (lt), "list_takes on a missing clip errors (dispatched, not unknown)");
             check (lt["error"].toString().contains ("wave clip"), "list_takes error is the handler's (no wave clip)");
             check (! ok (cmd (ops, "set_current_take", objN ({{ "clipId", "no-such-clip" }, { "takeIndex", 0 }}))), "set_current_take on a missing clip errors");
+            check (! ok (cmd (ops, "promote_take_region", objN ({{ "clipId", "no-such-clip" }, { "takeIndex", 0 }, { "start", 0.0 }, { "end", 1.0 }}))),
+                   "promote_take_region on a missing clip errors");
             check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", "no-such-clip" }}))), "keep_take on a missing clip errors");
             auto mark = cmd (ops, "mark_take", objN ({
                 { "source", "phone_controller" },
@@ -7284,6 +7383,68 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                      "the main snapshot current take follows undo");
               check (currentTakeFlags (clip) == 1 && (bool) clip["takes"][0].getProperty ("isCurrent", false),
                      "the main snapshot restores exactly one current-take marker on undo"); }
+
+            // ── playlist comping: promote only the selected phrase ──
+            // Avid's playlist workflow assembles word/syllable ranges into the main
+            // playlist. The MoshOps representation is three ordinary audio clips whose
+            // copied take trees preserve every source; only the middle segment changes
+            // current take, and the whole edit is one undo transaction.
+            const double compClipStart = wa->getPosition().getStart().inSeconds();
+            const double compClipEnd = wa->getPosition().getEnd().inSeconds();
+            const double compStart = compClipStart + 0.2;
+            const double compEnd = compClipStart + 0.7;
+            check (! ok (cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
+                       { "start", juce::String (compStart) }, { "end", compEnd } }))),
+                   "promote_take_region rejects string-valued timeline bounds");
+            check (! ok (cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
+                       { "start", compStart }, { "end", compClipEnd + 0.2 } }))),
+                   "promote_take_region rejects a range outside the visible clip");
+            auto promoted = cmd (ops, "promote_take_region", objN ({ { "clipId", toneA }, { "takeIndex", 1 },
+                                  { "start", compStart }, { "end", compEnd } }));
+            check (ok (promoted), "promote_take_region on a direct-file take ok");
+            const auto promotedId = promoted["data"].getProperty ("clipId", var()).toString();
+            const auto tailId = promoted["data"].getProperty ("newClipId", var()).toString();
+            check (promotedId.isNotEmpty() && tailId.isNotEmpty() && promotedId != toneA && tailId != promotedId,
+                   "region promotion returns the new middle and tail clip ids");
+            auto compSegments = [&eng, &tfTrack]
+            {
+                std::vector<te::WaveAudioClip*> out;
+                for (auto* tr : te::getAudioTracks (eng.edit()))
+                    if (tr != nullptr && tr->itemID.toString() == tfTrack)
+                        for (auto* c : tr->getClips())
+                            if (auto* wave = dynamic_cast<te::WaveAudioClip*> (c); wave != nullptr && wave->hasAnyTakes())
+                                out.push_back (wave);
+                std::sort (out.begin(), out.end(), [] (auto* a, auto* b) {
+                    return a->getPosition().getStart() < b->getPosition().getStart();
+                });
+                return out;
+            };
+            { const auto segments = compSegments();
+              check (segments.size() == 3, "region promotion splits the take clip into three comp segments");
+              if (segments.size() == 3)
+              {
+                  check (segments[0]->getCurrentSourceFile() == fileA
+                      && segments[1]->getCurrentSourceFile() == fileB
+                      && segments[2]->getCurrentSourceFile() == fileA,
+                      "only the promoted middle segment plays the chosen take");
+                  check (segments[0]->getNumTakes (false) == 2
+                      && segments[1]->getNumTakes (false) == 2
+                      && segments[2]->getNumTakes (false) == 2,
+                      "every comp segment preserves the complete take tree");
+              } }
+            check (ok (cmd (ops, "undo", objN ({}))), "one undo restores the unsplit take clip");
+            { const auto segments = compSegments();
+              check (segments.size() == 1 && segments[0]->getCurrentSourceFile() == fileA,
+                     "undo restores one original-source take clip"); }
+            check (ok (cmd (ops, "redo", objN ({}))), "redo restores the promoted comp region");
+            check (compSegments().size() == 3, "redo restores all three comp segments");
+            check (ok (cmd (ops, "undo", objN ({}))), "final comp undo restores the fixture for render proof");
+            { auto compLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+              bool promotionUndoable = false;
+              for (auto& ln : juce::StringArray::fromLines (compLog))
+                  if (ln.contains ("\"command\": \"promote_take_region\"") && ln.contains ("\"undoable\": true"))
+                      promotionUndoable = true;
+              check (promotionUndoable, "promote_take_region is JSONL-recorded undoable:true"); }
 
             // The switched source actually RENDERS: remove the other clip so the
             // track holds only the take clip, switch back to take 1, bounce, and
@@ -13851,6 +14012,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "set_track_pan",        objN ({ { "trackId", mt }, { "pan", 0.4 } }) },
             { "set_track_mute",       objN ({ { "trackId", mt }, { "mute", true } }) },
             { "set_track_solo",       objN ({ { "trackId", mt }, { "solo", true } }) },
+            { "set_track_active",     objN ({ { "trackId", mt }, { "active", false } }) },
             { "move_clip",            objN ({ { "clipId", mwc }, { "start", 5.0 } }) },
             { "rename_clip",          objN ({ { "clipId", mwc }, { "name", "MxClip" } }) },
             { "set_clip_gain",        objN ({ { "clipId", mwc }, { "gainDb", -5.0 } }) },

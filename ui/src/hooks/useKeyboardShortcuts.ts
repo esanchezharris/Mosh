@@ -25,6 +25,10 @@ const emptyAgentPromptSpace = (target: EventTarget | null, action: string): bool
   !!target.closest(".agent-composer") &&
   target.value.trim() === "";
 
+const nativeButtonActivation = (target: EventTarget | null, event: KeyboardEvent): boolean =>
+  target instanceof HTMLButtonElement
+  && (event.key === "Enter" || event.key === " " || /^(space|spacebar)$/i.test(event.key));
+
 // The arrangement-vs-editor keymap gates below used to read "a clip editor is open"
 // (editingClipId set) — true when the piano roll was MODAL and always focused. The
 // live shell docks the editor non-modally and the dock now FOLLOWS the clip
@@ -35,6 +39,26 @@ const emptyAgentPromptSpace = (target: EventTarget | null, action: string): bool
 // keeps focus inside, so this check is true there exactly as before — v2/classic
 // semantics unchanged by construction.
 const dispatch = (id: ActionId) => runAction(id, ctx());
+
+const NATIVE_EDIT_KEYS: Partial<Record<ActionId, string>> = {
+  cut: "x",
+  copy: "c",
+  paste: "v",
+};
+
+function forwardNativeEditAction(action: ActionId): boolean {
+  const key = NATIVE_EDIT_KEYS[action];
+  const owner = document.activeElement;
+  if (!key || !(owner instanceof HTMLElement)
+    || owner.dataset.moshEditOwner !== "protools-automation") return false;
+  owner.dispatchEvent(new KeyboardEvent("keydown", {
+    key,
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  }));
+  return true;
+}
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
@@ -56,6 +80,11 @@ export function useKeyboardShortcuts() {
       // their arrows until focus actually returns to the arrangement.
       const keyboardOwner = isEditableTarget(e.target) ? e.target : document.activeElement;
       if (isEditableTarget(keyboardOwner) && !emptyAgentPromptSpace(keyboardOwner, action)) return;
+      // Enter and Space activate a focused native button. Let the browser synthesize
+      // its click instead of also running a mapped DAW command (Pro Tools maps Enter
+      // to Return-to-Zero). Custom clip buttons stop propagation in their own key
+      // handler, so arrangement-level keyboard behavior is unchanged.
+      if (nativeButtonActivation(e.target, e) || nativeButtonActivation(keyboardOwner, e)) return;
       if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
 
       const s = useStore.getState();
@@ -223,6 +252,7 @@ export function useKeyboardShortcuts() {
     return onEvent("mosh_menu", (raw) => {
       const p = (raw ?? {}) as { action?: ActionId; file?: string };
       if (!p.action) return;
+      if (forwardNativeEditAction(p.action)) return;
       void runAction(p.action, ctx(), p.file ? { file: p.file } : {});
     });
   }, []);

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { validateCommand, AGENT_COMMAND_MAP } from "./commands";
 
 describe("catalog — performer-mode commands exposed", () => {
-  for (const c of ["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "list_takes", "set_current_take", "keep_take"])
+  for (const c of ["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "list_takes", "set_current_take", "promote_take_region", "keep_take"])
     it(`has ${c}`, () => expect(AGENT_COMMAND_MAP.has(c)).toBe(true));
 
   it("set_transport accepts an action string (+ optional loop/position)", () => {
@@ -23,6 +23,10 @@ describe("catalog — performer-mode commands exposed", () => {
     expect(validateCommand("list_takes", { clipId: "c1" })).toBeNull();
     expect(validateCommand("set_current_take", { clipId: "c1", takeIndex: 1 })).toBeNull();
     expect(validateCommand("set_current_take", { clipId: "c1" })).not.toBeNull();
+    expect(validateCommand("promote_take_region", {
+      clipId: "c1", takeIndex: 1, start: 2.5, end: 3.25,
+    })).toBeNull();
+    expect(validateCommand("promote_take_region", { clipId: "c1", takeIndex: 1, start: 2.5 })).not.toBeNull();
     expect(validateCommand("keep_take", { clipId: "c1" })).toBeNull();
   });
 });
@@ -69,5 +73,45 @@ describe("catalog — Phase-A closure commands (coverage-audit additions)", () =
   it("list_builtins / list_plugins are argless read-only tools", () => {
     expect(validateCommand("list_builtins", {})).toBeNull();
     expect(validateCommand("list_plugins", {})).toBeNull();
+  });
+});
+
+describe("catalog — Pro Tools grouping commands", () => {
+  for (const command of [
+    "set_track_active",
+    "create_track_group",
+    "configure_track_group",
+    "duplicate_track_group",
+    "set_track_group_members",
+    "set_track_group_enabled",
+    "set_track_groups_suspended",
+    "remove_track_group",
+    "create_clip_group",
+    "ungroup_clip_group",
+    "regroup_clip_group",
+    "rename_clip_group",
+  ]) {
+    it(`has ${command}`, () => expect(AGENT_COMMAND_MAP.has(command)).toBe(true));
+  }
+
+  it("validates scalar group identifiers while native validates member arrays", () => {
+    expect(validateCommand("set_track_active", { trackId: "t1", active: false })).toBeNull();
+    expect(validateCommand("set_track_active", { trackId: "t1", active: "false" })).not.toBeNull();
+    expect(validateCommand("create_track_group", {
+      name: "Rhythm",
+      kind: "edit_mix",
+      trackIds: ["t1", "t2"],
+    })).toBeNull();
+    expect(validateCommand("configure_track_group", {
+      groupId: "g1",
+      name: "Rhythm",
+      kind: "mix",
+      trackIds: ["t1", "t2"],
+      mixAttributes: ["main_volume"],
+    })).toBeNull();
+    expect(validateCommand("set_track_group_enabled", { groupId: "g1", enabled: false })).toBeNull();
+    expect(validateCommand("set_track_groups_suspended", { suspended: true })).toBeNull();
+    expect(validateCommand("rename_clip_group", { clipId: "c1", name: "Hook Stack" })).toBeNull();
+    expect(validateCommand("rename_clip_group", { clipId: "c1" })).not.toBeNull();
   });
 });

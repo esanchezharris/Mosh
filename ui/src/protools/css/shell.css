@@ -1,0 +1,167 @@
+.protools-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--pt-text);
+  background: var(--pt-canvas);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  user-select: none;
+}
+
+.pt-protools-portal {
+  color: var(--pt-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  user-select: none;
+}
+
+.protools-shell button,
+.protools-shell input,
+.protools-shell select,
+.pt-protools-portal button,
+.pt-protools-portal input,
+.pt-protools-portal select { font: inherit; }
+.protools-shell input,
+.protools-shell select,
+.pt-protools-portal input,
+.pt-protools-portal select { user-select: text; }
+.protools-shell button,
+.pt-protools-portal button { color: inherit; }
+.protools-shell :focus-visible,
+.pt-protools-portal :focus-visible {
+  outline: 2px solid var(--pt-focus-ring);
+  outline-offset: 1px;
+}
+
+.pt-shell-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 150px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pt-edit-window {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--pt-canvas);
+}
+
+.pt-arrangement-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pt-edit-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--pt-track-head-w) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.pt-track-header-pane {
+  position: relative;
+  z-index: 4;
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+}
+
+.pt-track-head-resizer {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--pt-track-head-w) - 3px);
+  width: 6px;
+  cursor: col-resize;
+}
+.pt-track-head-resizer:hover,
+.pt-track-head-resizer:focus-visible { background: color-mix(in srgb, var(--pt-selected) 60%, transparent); }
+
+.pt-loading,
+.pt-boot {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  gap: var(--pt-space-2);
+  color: var(--pt-text-muted);
+  text-align: center;
+}
+.pt-boot h2 { margin: 0; color: var(--pt-text); letter-spacing: 0.12em; }
+.pt-boot p { margin: 0; }
+
+.pt-error-bar {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  color: var(--pt-on-danger);
+  background: var(--pt-danger);
+  border-bottom: 1px solid var(--pt-border);
+}
+
+.pt-drop-overlay {
+  position: absolute;
+  z-index: 30;
+  inset: 12px;
+  display: grid;
+  place-content: center;
+  border: 2px dashed var(--pt-selected);
+  color: var(--pt-text);
+  background: color-mix(in srgb, var(--pt-canvas) 86%, transparent);
+  pointer-events: none;
+}
+
+.pt-settings-backdrop {
+  position: absolute;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--pt-space-6);
+  background: rgba(0, 0, 0, 0.62);
+}
+.pt-settings-dialog {
+  width: min(920px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  border: 1px solid var(--pt-highlight);
+  background: var(--pt-raised);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.46);
+}
+.pt-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 var(--pt-space-3);
+  border-bottom: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+}
+.pt-settings-head h2 { margin: 0; font-size: 12px; }
+.pt-settings-close { min-height: 28px; border: 1px solid var(--pt-border); background: var(--pt-raised); }
+.pt-settings-content { padding: var(--pt-space-2); }
+
+.protools-shell * { scrollbar-color: var(--pt-highlight) var(--pt-inset); scrollbar-width: thin; }
+body:has(.protools-shell) .v2-clipmenu {
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  border-color: var(--pt-highlight);
+  border-radius: 2px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+}

@@ -188,3 +188,20 @@ describe("bridge.mock Mosh FX built-ins", () => {
     });
   });
 });
+
+describe("bridge.mock plugin quarantine", () => {
+  it("returns an explicit blocklist and rejects retrying an entry that is not quarantined", async () => {
+    __resetMockForTests();
+
+    const listed = await mockExecute<CommandResult<{
+      blocklist: Array<{ id: string; rawId: string; reason: string }>;
+    }>>({ command: "get_plugin_blocklist", args: {} });
+    expect(listed).toMatchObject({ ok: true, data: { blocklist: [] } });
+
+    const retried = await mockExecute<CommandResult>({
+      command: "unblock_plugin",
+      args: { pluginId: "/Library/Audio/Plug-Ins/VST3/not-quarantined.vst3" },
+    });
+    expect(retried).toMatchObject({ ok: false, error: "plugin is not quarantined" });
+  });
+});

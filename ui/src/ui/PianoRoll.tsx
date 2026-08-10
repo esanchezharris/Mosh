@@ -32,6 +32,7 @@ import { stepReduce, STEP_INITIAL, type StepState } from "./stepRecord";
 import { visiblePitches, pitchAxis, PITCH_MIN, PITCH_MAX, type FoldMode } from "./pianoRollView";
 import { copyNotes, pasteAt, duplicateAfter, setClipboard, getClipboard } from "./pianoRollClipboard";
 import { effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
+import { PianoRollContextNotes, type PianoRollContextNote } from "./PianoRollContextNotes";
 // Live shell's draw mode (the control-bar pencil, live/liveState.ts). Read here
 // rather than passed as a prop so the docked editor and the control bar can't drift;
 // the slice defaults false and only the live shell ever toggles it, so the modal
@@ -97,11 +98,14 @@ function ToolField({ testId, ariaLabel, value, onCommit, min = 1, max = 127, int
   );
 }
 
-export function PianoRoll({ docked = false, expandControl }: {
+export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: {
   docked?: boolean;
   /** Live's Expanded Clip View (⌥⌘E) — the live shell's docked mount passes this;
    *  the modal mounts (classic/v2) never do, so their header is byte-identical. */
   expandControl?: { expanded: boolean; onToggle: () => void };
+  /** Read-only notes from other clips. They never enter the active clip's
+   *  selection or command index. */
+  contextNotes?: readonly PianoRollContextNote[];
 }) {
   const editingClipId = useStore((s) => s.editingClipId);
   const close = useStore((s) => s.closePianoRoll);
@@ -482,7 +486,16 @@ export function PianoRoll({ docked = false, expandControl }: {
   // through ONE axis object. Once rows can be folded away, (HIGH - pitch) * ROW_H is simply
   // wrong, and any consumer still doing its own arithmetic would silently disagree.
   const axis = pitchAxis(
-    visiblePitches({ low: LOW, high: HIGH, mode: fold, keyMask, notes: clip.notes ?? [] }),
+    visiblePitches({
+      low: LOW,
+      high: HIGH,
+      mode: fold,
+      keyMask,
+      notes: [
+        ...(clip.notes ?? []),
+        ...contextNotes.map((note, index) => ({ ...note, i: -(index + 1) })),
+      ],
+    }),
     ROW_H,
   );
   const pitches = axis.visible;
@@ -980,6 +993,12 @@ export function PianoRoll({ docked = false, expandControl }: {
                     style={{ left: b.x, top: b.y, width: b.w, height: b.h }} />
                 );
               })}
+              <PianoRollContextNotes
+                notes={contextNotes}
+                beatPx={beatPx}
+                rowHeight={ROW_H}
+                yOf={yOf}
+              />
               {notes.map((n) => {
                 const b = noteBox(n);
                 return (

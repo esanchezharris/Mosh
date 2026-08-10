@@ -42,7 +42,7 @@ enum class Class
     costs a skill nothing while a wrong admission costs a partial mutation.
     Scope = the commands the transactable skills in SKILL_CATALOG use, plus the
     synchronous arrangement / mixer / plugin / section / MIDI / automation core a B2
-    skill plainly needs. All 47 satisfy criteria 1–4.
+    skill plainly needs. Every admitted entry satisfies criteria 1–4.
 
     Reviewed EXCLUSIONS (each mechanically "safe" but held out of v1 on purpose):
       • remove_bus / create_group_track / ungroup_track / delete_time_range /
@@ -69,11 +69,15 @@ inline const std::set<juce::String>& registry()
 {
     static const std::set<juce::String> safe {
         // ── mixer / track ──
-        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+        "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo", "set_track_active",
         "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
         // ── clips ──
-        "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
-        "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
+        "move_clip", "trim_clip", "split_clip", "promote_take_region", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
+        "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
+        "create_track_group", "configure_track_group", "duplicate_track_group",
+        "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
+        "rename_track_group", "remove_track_group",
+        "duplicate_clip", "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade",
         "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
         "stretch_clip", "set_clip_warp",
         // ── MIDI ──

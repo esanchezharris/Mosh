@@ -118,12 +118,16 @@ describe("per-DAW keymaps", () => {
     expect(resolveKey(getKeymap("fl"), ev({ key: "d", metaKey: true }))).toBeNull();
     expect(resolveKey(getKeymap("mosh"), ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
   });
-  it("pro tools: ⌘E separates, ⌘Space records, F7/F8 pick Selector/Grabber, Return → start", () => {
+  it("pro tools: shell-owned grouping, tools, nudge, and Edit/Mix keys stay unclaimed", () => {
     const pt = getKeymap("protools");
     expect(resolveKey(pt, ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
     expect(resolveKey(pt, ev({ key: " ", metaKey: true }))).toBe(A.RECORD);
-    expect(resolveKey(pt, ev({ key: "F7" }))).toBe(A.TOOL_RANGE);
-    expect(resolveKey(pt, ev({ key: "F8" }))).toBe(A.TOOL_MOVE);
+    expect(resolveKey(pt, ev({ key: "g", metaKey: true }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "F7" }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "F8" }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "=", code: "Equal", metaKey: true }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "+", code: "Equal", metaKey: true, shiftKey: true }))).toBeNull();
+    expect(resolveKey(pt, ev({ key: "-", code: "Minus", metaKey: true }))).toBeNull();
     expect(resolveKey(pt, ev({ key: "Enter" }))).toBe(A.TO_START);
     // differs from mosh: F7 unbound, Home → start, plain R still records on mosh
     expect(resolveKey(getKeymap("mosh"), ev({ key: "F7" }))).toBeNull();
@@ -268,12 +272,12 @@ describe("resolveKey — ableton keymap-audit wave", () => {
     expect(resolveKey(km, ev({ key: "1" }))).toBeNull();
     expect(resolveKey(km, ev({ key: "2" }))).toBeNull();
     expect(resolveKey(km, ev({ key: "3" }))).toBeNull();
-    // …and kept in the presets that use them (Pro Tools deliberately rebinds
-    // Move/Range to F8/F7, so only its Split digit survives there).
+    // …and kept in the presets that use the shared modal-tool vocabulary.
     for (const name of ["mosh", "fl", "logic"]) {
       expect(resolveKey(getKeymap(name), ev({ key: "1" })), name).not.toBeNull();
     }
-    expect(resolveKey(getKeymap("protools"), ev({ key: "2" }))).not.toBeNull();
+    for (const key of ["1", "2", "3"])
+      expect(resolveKey(getKeymap("protools"), ev({ key })), key).toBeNull();
   });
 
   it("the new bindings stay ableton-only", () => {

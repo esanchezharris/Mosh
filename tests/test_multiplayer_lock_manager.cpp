@@ -48,6 +48,14 @@ TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][l
 {
     REQUIRE (LockManager::classify ("rename_track")     == Scope::Track);
     REQUIRE (LockManager::classify ("set_track_volume") == Scope::Track);
+    REQUIRE (LockManager::classify ("create_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("configure_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("duplicate_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("set_track_group_members") == Scope::Track);
+    REQUIRE (LockManager::classify ("set_track_group_enabled") == Scope::Track);
+    REQUIRE (LockManager::classify ("rename_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("remove_track_group") == Scope::Track);
+    REQUIRE (LockManager::classify ("set_track_active") == Scope::Track);
     REQUIRE (LockManager::classify ("load_plugin")      == Scope::Track);
     REQUIRE (LockManager::classify ("set_plugin_param") == Scope::Track);
     REQUIRE (LockManager::classify ("reorder_plugin")   == Scope::Track);
@@ -62,8 +70,10 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("move_clip")      == Scope::Clip);
     REQUIRE (LockManager::classify ("trim_clip")      == Scope::Clip);
     REQUIRE (LockManager::classify ("split_clip")     == Scope::Clip);
+    REQUIRE (LockManager::classify ("promote_take_region") == Scope::Clip);
     REQUIRE (LockManager::classify ("add_note")       == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_gain")  == Scope::Clip);
+    REQUIRE (LockManager::classify ("write_clip_gain_curve") == Scope::Clip);
     // G4A — the clip Inspector's gain/mute/rename commands were agent-only until now
     // (no UI surface); set_clip_gain was already covered above, these two were not.
     REQUIRE (LockManager::classify ("rename_clip")    == Scope::Clip);
@@ -74,6 +84,9 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("set_clip_reverse")   == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_crossfade") == Scope::Clip);
     REQUIRE (LockManager::classify ("normalize_clip")     == Scope::Clip);
+    REQUIRE (LockManager::classify ("create_clip_group")  == Scope::Clip);
+    REQUIRE (LockManager::classify ("ungroup_clip_group") == Scope::Clip);
+    REQUIRE (LockManager::classify ("rename_clip_group")  == Scope::Clip);
 }
 
 TEST_CASE ("classify: render-layer mutations are clip-scoped", "[multiplayer][lock]")
@@ -251,6 +264,8 @@ namespace
             // Structural: create/rename/remove a track, bus, or group -- these
             // change the session's track list itself, not one existing track.
             "create_track", "create_bus", "create_group_track", "ungroup_track",
+            "regroup_clip_group",
+            "set_track_groups_suspended",
             "rename_bus", "remove_bus",
             // Song-structure sections/annotations span the whole timeline.
             "create_section", "rename_section", "move_section", "remove_section",

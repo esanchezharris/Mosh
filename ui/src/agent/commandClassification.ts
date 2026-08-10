@@ -33,6 +33,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   set_track_input: "physical input routing is set from the track's input picker with the device list in view",
   rescan_plugins: "the plugin scan is a slow, blocking maintenance op driven from the settings UI",
   block_plugin: "the crash-blacklist is a safety console the producer manages",
+  unblock_plugin: "retrying one quarantined plugin is a safety decision the producer makes from the insert dialog",
   clear_plugin_blocklist: "the crash-blacklist is a safety console the producer manages",
   get_plugin_blocklist: "read-only feed for the blacklist settings panel",
   list_audio_devices: "device discovery feeding the settings UI — the agent's session context is the snapshot",
@@ -142,6 +143,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   // ── track grouping — no agent story yet ───────────────────────────────────────
   create_group_track: "track grouping v0 has no agent story yet — candidate for a later batch",
   ungroup_track: "track grouping v0 has no agent story yet — candidate for a later batch",
+  rename_track_group: "configure_track_group is the canonical agent operation because it updates name, type, members, and linked attributes atomically; this older rename-only seam remains for replay compatibility",
 
   // ── hardware-controller telemetry ─────────────────────────────────────────────
   mark_take: "fire-and-forget controller telemetry (logs + re-emits an event) — no session mutation to verify",

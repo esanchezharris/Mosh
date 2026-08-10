@@ -51,22 +51,35 @@ function inkOf(el: Element | null, token: string, fallback: string): string {
  *  in the outgoing theme's ink until something else invalidated it. */
 const useThemeKey = () => useSettings((s) => String(s.get("theme") ?? ""));
 
-export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
+export const ClipWave = memo(function ClipWave({ peaks, width, amplitudeAt }: {
+  peaks?: Peaks;
+  width: number;
+  /** Optional shell-local amplitude multiplier at a normalized horizontal position. */
+  amplitudeAt?: (ratio: number) => number;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const themeKey = useThemeKey();
   useEffect(() => {
     if (!peaks) return;
     const prep = prepCanvas(ref.current); if (!prep) return;
     const { ctx, w, h } = prep;
-    ctx.fillStyle = inkOf(ref.current, "--clip-ink-wave", "rgba(204,255,35,0.5)");
+    const fill = inkOf(ref.current, "--clip-ink-wave", "rgba(204,255,35,0.5)");
+    const outline = inkOf(ref.current, "--clip-ink-wave-outline", "transparent");
     const mid = h / 2, n = peaks.length;
     for (let x = 0; x < w; x++) {
       const p = peaks[Math.min(n - 1, Math.floor((x / w) * n))];
       if (!p) continue;
-      const top = mid + p[0] * mid * 0.92, bot = mid + p[1] * mid * 0.92;
+      const amplitude = Math.max(0, amplitudeAt?.((x + 0.5) / w) ?? 1);
+      const top = mid + p[0] * mid * 0.92 * amplitude;
+      const bot = mid + p[1] * mid * 0.92 * amplitude;
+      if (outline !== "transparent") {
+        ctx.fillStyle = outline;
+        ctx.fillRect(x - 1, top - 1, 3, Math.max(2, bot - top + 2));
+      }
+      ctx.fillStyle = fill;
       ctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
-  }, [peaks, width, themeKey]);
+  }, [peaks, width, amplitudeAt, themeKey]);
   return <canvas ref={ref} />;
 });
 
@@ -82,8 +95,8 @@ export function isDrumClip(notes?: MidiNote[]): boolean {
 // Inline MIDI preview — pitch-mapped note blocks. Notes carry clip-local beats;
 // beatSeconds(meter) → seconds, then the shared secToPx scale lands them on the
 // same grid the ruler/playhead use. Double-click the clip still opens the PianoRoll.
-export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
-  { notes?: LoopedNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
+export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx, verticalZoom = 1 }:
+  { notes?: LoopedNote[]; width: number; bs: number; secToPx: (s: number) => number; verticalZoom?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const themeKey = useThemeKey();
   useEffect(() => {
@@ -96,8 +109,11 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
     for (const n of ns) { if (n.pitch < lo) lo = n.pitch; if (n.pitch > hi) hi = n.pitch; }
     if (hi - lo < 4) { const c = Math.round((lo + hi) / 2 || 60); lo = c - 6; hi = c + 6; }
     else { lo -= 1; hi += 1; }
-    const span = Math.max(1, hi - lo);
-    const rowH = Math.max(2, Math.min(7, (h - 2) / span));
+    const center = (lo + hi) / 2;
+    const scale = Math.min(4, Math.max(0.5, Number.isFinite(verticalZoom) ? verticalZoom : 1));
+    const span = Math.max(1, (hi - lo) / scale);
+    lo = center - span / 2;
+    const rowH = Math.max(2, Math.min(18, (h - 2) / span));
 
     ctx.fillStyle = inkOf(ref.current, "--clip-ink-midi", "rgba(180,108,255,1)");
     for (const n of ns) {
@@ -110,14 +126,14 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
       ctx.fillRect(x, y, wpx, rowH);
     }
     ctx.globalAlpha = 1;
-  }, [notes, width, bs, secToPx, themeKey]);
+  }, [notes, width, bs, secToPx, verticalZoom, themeKey]);
   return <canvas ref={ref} />;
 });
 
 // Inline drum preview — fixed GM lanes (kick/snare/hat/…), FL-style steps. x stays
 // grid-aligned via secToPx(beats); y is the GM lane, not the pitch.
-export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
-  { notes?: LoopedNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
+export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx, verticalZoom = 1 }:
+  { notes?: LoopedNote[]; width: number; bs: number; secToPx: (s: number) => number; verticalZoom?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const themeKey = useThemeKey();
   useEffect(() => {
@@ -126,21 +142,23 @@ export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secTo
     const ns = notes ?? []; if (ns.length === 0) return;
 
     const lanes = DRUM_LANES.length;
-    const laneH = h / lanes;
+    const scale = Math.min(4, Math.max(0.5, Number.isFinite(verticalZoom) ? verticalZoom : 1));
+    const laneH = (h / lanes) * scale;
+    const laneTop = (h - laneH * lanes) / 2;
     const step = inkOf(ref.current, "--clip-ink-drum", "rgba(180,108,255,1)");
     ctx.fillStyle = inkOf(ref.current, "--clip-ink-drum-lane", "rgba(180,108,255,0.14)"); // separators
-    for (let l = 1; l < lanes; l++) ctx.fillRect(0, Math.round(l * laneH), w, 1);
+    for (let l = 1; l < lanes; l++) ctx.fillRect(0, Math.round(laneTop + l * laneH), w, 1);
 
     for (const n of ns) {
       const x = secToPx(n.start * bs);
       const cell = Math.max(3, Math.min(secToPx(n.length * bs), laneH - 2));
-      const y = Math.max(0, laneIndexForPitch(n.pitch)) * laneH + 1;
+      const y = laneTop + Math.max(0, laneIndexForPitch(n.pitch)) * laneH + 1;
       const a = 0.5 + 0.5 * (Math.min(127, Math.max(1, n.velocity)) / 127);
       ctx.globalAlpha = n.ghost ? a * 0.35 : a;   // ghost repeats paint dimmer
       ctx.fillStyle = step;
       ctx.fillRect(x, y, cell, Math.max(2, laneH - 3));
     }
     ctx.globalAlpha = 1;
-  }, [notes, width, bs, secToPx, themeKey]);
+  }, [notes, width, bs, secToPx, verticalZoom, themeKey]);
   return <canvas ref={ref} />;
 });

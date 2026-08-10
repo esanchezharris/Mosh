@@ -1,0 +1,278 @@
+.pt-toolbar {
+  flex: 0 0 auto;
+  min-height: 62px;
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 3px 4px;
+  overflow-x: auto;
+  background: var(--pt-raised);
+  border-bottom: 1px solid var(--pt-border);
+  box-shadow: inset 0 1px var(--pt-highlight), inset 0 -1px var(--pt-border);
+}
+.pt-toolbar-group {
+  flex: 0 0 auto;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  padding: 18px 4px 4px;
+  border: 1px solid var(--pt-border);
+  border-top-color: var(--pt-highlight);
+  background: var(--pt-surface);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04), inset 0 -1px rgba(0, 0, 0, 0.45);
+}
+.pt-toolbar-label {
+  position: absolute;
+  top: 3px;
+  left: 6px;
+  color: var(--pt-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.pt-toolbar button,
+.pt-toolbar select {
+  min-height: 28px;
+  border: 1px solid var(--pt-border);
+  border-top-color: var(--pt-highlight);
+  border-radius: 2px;
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.05), inset 0 -1px rgba(0, 0, 0, 0.35);
+}
+.pt-toolbar button { min-width: 28px; padding: 3px 6px; cursor: default; }
+.pt-toolbar button:hover { background: color-mix(in srgb, var(--pt-raised) 76%, var(--pt-highlight)); }
+.pt-toolbar button:active,
+.pt-toolbar button[aria-pressed="true"] {
+  border-top-color: var(--pt-border);
+  color: var(--pt-on-selected);
+  background: var(--pt-selected);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.42);
+}
+.pt-mode-button {
+  display: grid;
+  min-width: 62px;
+  place-items: center;
+  line-height: 1.05;
+}
+.pt-mode-button kbd,
+.pt-tool-button kbd {
+  color: inherit;
+  font: 500 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.72;
+}
+.pt-tool-button {
+  display: grid;
+  min-width: 34px;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+}
+.pt-tool-group { flex: 0 0 auto; }
+.pt-smart-button { min-width: 48px !important; font-weight: 700; }
+.pt-zoom-group {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  padding: 17px 4px 3px;
+}
+.pt-horizontal-zoom {
+  display: grid;
+  grid-template-rows: 25px 24px;
+  gap: 2px;
+}
+.pt-zoom-step-row,
+.pt-zoom-presets { display: flex; align-items: center; gap: 2px; }
+.pt-zoom-step-row button { min-width: 26px; min-height: 25px; padding: 1px 5px; font-size: 14px; }
+.pt-zoom-step-row output {
+  display: grid;
+  width: 34px;
+  height: 23px;
+  place-items: center;
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-zoom-presets button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 3px;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-single-zoom {
+  align-self: stretch;
+  min-width: 28px !important;
+  padding: 0 3px !important;
+  font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace !important;
+}
+.pt-zoom-media {
+  display: grid;
+  grid-template-columns: repeat(2, 27px);
+  gap: 2px;
+}
+.pt-zoom-media button {
+  min-width: 27px;
+  min-height: 24px;
+  padding: 0 2px;
+  font: 8px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-session-group { flex: 0 0 auto; padding-top: 18px; }
+.pt-session-button { min-width: 58px !important; font-weight: 700; }
+.pt-transport-group { padding-top: 4px; align-items: center; }
+.pt-main-counter {
+  display: inline-grid;
+  min-width: 102px;
+  height: 34px;
+  place-items: center;
+  padding: 0 7px;
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.52);
+  font: 600 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.035em;
+}
+.pt-selection-indicators {
+  flex: 0 0 146px;
+  min-width: 146px;
+  align-items: stretch;
+  padding-top: 19px;
+}
+.pt-selection-heading {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  left: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  color: var(--pt-text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+}
+.pt-selection-heading select {
+  width: 76px;
+  min-height: 14px;
+  height: 14px;
+  padding: 0 12px 0 3px;
+  font: 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-selection-grid { display: grid; align-content: center; gap: 1px; width: 100%; }
+.pt-selection-field {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px;
+  color: var(--pt-text-muted);
+  font: 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pt-selection-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--pt-border);
+  border-radius: 1px;
+  outline: none;
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pt-selection-field input:focus-visible { box-shadow: 0 0 0 2px var(--pt-focus-ring); }
+.pt-selection-field input[aria-invalid="true"] { border-color: var(--pt-danger); }
+.pt-selection-error {
+  max-width: 138px;
+  padding-top: 2px;
+  color: var(--pt-danger);
+  font: 8px/1.2 system-ui, sans-serif;
+}
+.pt-record-button span {
+  display: block;
+  width: 9px;
+  height: 9px;
+  margin: auto;
+  border-radius: 50%;
+  background: var(--pt-danger);
+}
+.pt-punch-controls {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: 28px 12px;
+  gap: 1px 3px;
+  margin-left: 2px;
+}
+.pt-punch-button { min-width: 48px !important; font-weight: 700; }
+.pt-punch-button[aria-pressed="true"] {
+  color: var(--pt-on-danger);
+  background: var(--pt-danger);
+}
+.pt-preroll-control {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--pt-text-muted);
+  font-size: 9px;
+}
+.pt-preroll-control select { width: 58px; height: 28px; padding: 0 3px; }
+.pt-punch-range-readout {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--pt-text-muted);
+  font: 8px/11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pt-grid-group { align-items: center; }
+.pt-nudge-control { display: grid; gap: 2px; color: var(--pt-text-muted); font-size: 10px; }
+.pt-nudge-control select { height: 28px; padding: 0 20px 0 5px; }
+.pt-transient-button { max-width: 72px; line-height: 1.05; }
+.pt-toolbar-spacer { flex: 1 1 auto; min-width: 2px; }
+.pt-window-switch { display: flex; gap: 2px; }
+.pt-window-switch button { min-width: 34px; }
+.pt-window-switch button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.pt-view-group { padding-top: 4px; align-items: center; }
+.pt-classic-button { min-width: 48px !important; }
+.pt-moshi-group { flex: 0 0 auto; }
+.pt-moshi-button { display: flex; align-items: center; gap: 5px; min-width: 92px !important; font-weight: 700; }
+
+.pt-menu {
+  display: grid;
+  min-width: 176px;
+  padding: 4px;
+  color: var(--pt-text, #c0c0c0);
+  background: var(--pt-raised, #2d2d2d);
+  border: 1px solid var(--pt-highlight, #454545);
+  border-radius: 2px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.52);
+}
+.pt-menu button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 7px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+.pt-menu button:hover,
+.pt-menu button:focus-visible { color: var(--pt-on-selected); background: var(--pt-selected, #4a90d9); }
+.pt-menu-label { min-width: 62px; }
+.pt-menu-hint { color: var(--pt-text-muted, #8e8e8e); font-size: 10px; }
+.pt-session-action { display: flex; align-items: center; gap: 16px; width: 100%; }
+.pt-session-action kbd { margin-left: auto; color: var(--pt-text-muted, #949494); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Base UI portals menus to <body>, outside .protools-shell. Give only popups that
+   contain Pro Tools menu chrome an overlay layer above the sticky rulers/lanes. */
+.v2-menu-panel-floating:has(.pt-menu) { z-index: 130; }
+[data-base-ui-portal]:has(.pt-menu) > [data-open][role="presentation"] { z-index: 130; }

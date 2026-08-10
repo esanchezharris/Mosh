@@ -55,6 +55,15 @@ describe("set + localStorage persistence round-trip", () => {
       keyOverrides: {},
     });
   });
+
+  it("keeps an explicit existing Live preference when the fresh default is Pro Tools", () => {
+    savePersisted(localStorage, { template: null, values: { uiShell: "live" }, keyOverrides: {} });
+    useSettings.setState({ template: null, values: {} });
+
+    useSettings.getState().hydrate();
+
+    expect(useSettings.getState().get("uiShell")).toBe("live");
+  });
 });
 
 describe("template application + per-setting override", () => {
@@ -100,6 +109,27 @@ describe("reset", () => {
 });
 
 describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
+  it("stores an unset Pro Tools shell rebind in the Pro Tools keymap bucket", () => {
+    useSettings.getState().set("uiShell", "protools");
+
+    useSettings.getState().set("key.undo", "Mod+P");
+
+    const { keyOverrides } = loadPersisted(localStorage);
+    expect(keyOverrides.protools?.["key.undo"]).toBe("Mod+P");
+    expect(keyOverrides.mosh?.["key.undo"]).toBeUndefined();
+  });
+
+  it("stores a Pro Tools shell rebind in an explicitly selected keymap bucket", () => {
+    useSettings.getState().set("uiShell", "protools");
+    useSettings.getState().set("keymap", "ableton");
+
+    useSettings.getState().set("key.undo", "Mod+J");
+
+    const { keyOverrides } = loadPersisted(localStorage);
+    expect(keyOverrides.ableton?.["key.undo"]).toBe("Mod+J");
+    expect(keyOverrides.protools?.["key.undo"]).toBeUndefined();
+  });
+
   it("scopes a key.* rebind to the active keymap — it doesn't bleed into another", () => {
     // On the Ableton keymap, rebind Undo.
     useSettings.getState().set("keymap", "ableton");
@@ -183,7 +213,7 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
 
 describe("DOM effects", () => {
   it("applies skin/theme to the root data-attributes and scale to zoom", () => {
-    // The skin axis only applies in the classic shell — the v2 shell (now the default)
+    // The skin axis only applies in the classic shell — the v2 shell
     // pins data-skin=mosh (effects.ts). Opt into classic to exercise the skin effect.
     useSettings.getState().set("uiShell", "classic");
     useSettings.getState().applyTemplate("fl");

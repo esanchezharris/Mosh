@@ -16,7 +16,8 @@ import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useElementHeight } from "../hooks/useElementHeight";
 import {
   builtinEntry, installedEntry, buildPluginRows, visibleRange,
-  loadFavorites, toggleFavorite, loadPluginRecents, loadPluginEntry,
+  loadFavorites, toggleFavorite, loadPluginRecents, loadPluginEntry, loadPluginEntryToTracks,
+  loadMasterPluginEntry,
   type PluginEntry, type PluginKind,
 } from "./pluginBrowserUtil";
 
@@ -25,12 +26,17 @@ const ROW_H = 46; // uniform height for headers + plugin rows (drives the window
 // The reusable inner surface: search + kind tabs + the windowed, sectioned list. Loads
 // the catalog lazily on mount. `onLoaded` fires after a plugin lands (the modal closes;
 // the drawer stays open).
-export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
+export function PluginBrowserContent({ onLoaded, loadTarget = "track", trackIds }: {
+  onLoaded?: () => void;
+  loadTarget?: "track" | "master";
+  trackIds?: readonly string[];
+}) {
   const plugins = useStore((s) => s.availablePlugins);
   const builtins = useStore((s) => s.availableBuiltins);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const exec = useStore((s) => s.exec);
   const ensureCatalog = useStore((s) => s.ensurePluginCatalog);
+  const projectEpoch = useStore((s) => s.projectEpoch);
 
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<PluginKind>("all");
@@ -51,9 +57,21 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
 
   const { start, end } = visibleRange(scrollTop, viewportH, ROW_H, rows.length);
   const favSet = new Set(favorites);
+  const loadDestination = loadTarget === "master" ? "the master bus"
+    : trackIds && trackIds.length > 1 ? `${trackIds.length} channel strips` : "the selected track";
 
-  const load = (e: PluginEntry) => {
-    if (!loadPluginEntry(e, selectedTrackId, exec)) return;
+  const load = async (e: PluginEntry) => {
+    const loaded = loadTarget === "master"
+      ? loadMasterPluginEntry(e, exec)
+      : trackIds
+        ? await loadPluginEntryToTracks(
+          e,
+          trackIds,
+          exec,
+          () => useStore.getState().projectEpoch === projectEpoch,
+        )
+        : loadPluginEntry(e, selectedTrackId, exec);
+    if (!loaded) return;
     setRecents(loadPluginRecents());
     onLoaded?.();
   };
@@ -62,7 +80,8 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
   return (
     <>
       <div className="modal-filters">
-        <input autoFocus placeholder="Filter by name or vendor…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input autoFocus data-testid="plugin-browser-search" aria-label="Search plugins"
+          placeholder="Filter by name or vendor…" value={q} onChange={(e) => setQ(e.target.value)} />
         {(["all", "inst", "fx"] as const).map((k) => (
           <button key={k} className={`btn${kind === k ? " on" : ""}`} onClick={() => setKind(k)}>{k === "all" ? "All" : k === "inst" ? "Instruments" : "Effects"}</button>
         ))}
@@ -85,7 +104,8 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
               const fav = favSet.has(e.uid);
               return (
                 <div key={row.key} className="plugin-row vrow" style={style}>
-                  <button className="prow-load" onClick={() => load(e)} title={`Add ${e.name} to the selected track`}>
+                  <button className="prow-load" onClick={() => void load(e)}
+                    title={`Add ${e.name} to ${loadDestination}`}>
                     <span className="pr-name">{e.name}</span>
                     <span className="pr-meta">{e.meta}</span>
                   </button>

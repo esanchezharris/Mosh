@@ -205,7 +205,12 @@ export async function pickFiles(opts?: {
   filters?: string;
   title?: string;
 }): Promise<{ ok: boolean; files: string[] }> {
-  if (!isNative()) return { ok: false, files: [] };
+  if (!realNative()) {
+    if (MOCK_ENABLED && opts?.title === "Open project") {
+      return { ok: true, files: ["/mock/sessions/protools-tonight.mosh"] };
+    }
+    return { ok: false, files: [] };
+  }
   return (await native("pick_files")(opts ?? {})) as { ok: boolean; files: string[] };
 }
 
@@ -214,7 +219,16 @@ export async function pickSaveFile(opts?: {
   title?: string;
   defaultName?: string;
 }): Promise<{ ok: boolean; file: string }> {
-  if (!isNative()) return { ok: false, file: "" };
+  if (!realNative()) {
+    if (!MOCK_ENABLED) return { ok: false, file: "" };
+    if (opts?.title === "Save project as") {
+      return { ok: true, file: "/mock/sessions/protools-tonight.mosh" };
+    }
+    if (opts?.title === "Export audio") {
+      return { ok: true, file: "/mock/exports/mix.wav" };
+    }
+    return { ok: false, file: "" };
+  }
   return (await native("pick_save_file")(opts ?? {})) as { ok: boolean; file: string };
 }
 

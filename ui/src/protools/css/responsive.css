@@ -1,0 +1,59 @@
+@media (max-width: 1120px) {
+  .pt-toolbar-group { flex: 0 0 auto; }
+  .pt-mode-button { min-width: 44px; }
+  .pt-mode-button > span { font-size: 10px; }
+  .pt-tool-button { min-width: 28px; }
+  .pt-main-counter { min-width: 82px; font-size: 15px; }
+  .pt-grid-group { display: flex; }
+  .pt-status-field:nth-of-type(3),
+  .pt-status-field:nth-of-type(4) { display: none; }
+}
+
+@media (max-width: 760px) {
+  .pt-toolbar { min-height: 54px; overflow-x: auto; }
+  .pt-toolbar-group { flex: 0 0 auto; padding-top: 15px; }
+  .pt-mode-button { min-width: 32px; }
+  .pt-mode-button > span { display: none; }
+  .pt-tool-button kbd,
+  .pt-mode-button kbd { font-size: 8px; }
+  .pt-transport-group { margin-left: auto; }
+  .pt-view-group { display: flex; }
+  .pt-clip-list.is-open {
+    position: absolute;
+    z-index: 40;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(220px, 58vw);
+    box-shadow: -8px 0 18px rgba(0, 0, 0, 0.4);
+  }
+  .pt-detail-dock { --pt-dock-h: 190px; }
+  .pt-midi-editor { grid-template-columns: 124px minmax(0, 1fr); }
+  .pt-midi-track-row { gap: 0; padding-inline: 0; }
+  .pt-midi-track-copy { padding-inline-start: var(--pt-space-1); }
+  .pt-track-inspector-body { grid-template-columns: 1fr; overflow: auto; }
+  .pt-track-channel { border-right: 0; border-bottom: 1px solid var(--pt-border); }
+  .pt-device-rack.is-embedded { min-height: 112px; }
+  .pt-wave-inspector { grid-template-columns: 1fr; }
+  .pt-wave-preview { display: none; }
+  .pt-status-field { display: none; }
+  .pt-status-track { max-width: 90px; }
+  .pt-moshi-drawer { inset: auto 0 0; width: 100vw; max-height: min(70vh, 520px); border-right: 0; border-bottom: 0; border-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .protools-shell *,
+  .protools-shell *::before,
+  .protools-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .protools-shell :focus-visible { outline-color: Highlight; }
+  .pt-track-controls button[aria-pressed="true"],
+  .pt-toolbar button[aria-pressed="true"],
+  .pt-midi-track-list button[aria-pressed="true"] { border: 2px solid Highlight; }
+}

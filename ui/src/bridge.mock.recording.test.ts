@@ -111,4 +111,64 @@ describe("bridge mock recording finalization parity", () => {
     expect(after.transport.recording).toBe(false);
     expect(after.transport.playing).toBe(false);
   });
+
+  it("promotes one playlist region into three undoable comp segments", async () => {
+    const created = await exec("create_track", { name: "Comp Vocal" });
+    const trackId = typeof created.data === "object" && created.data !== null
+      ? Reflect.get(created.data, "trackId")
+      : undefined;
+    if (typeof trackId !== "string") throw new Error("create_track did not return a trackId");
+    await exec("arm_track", { trackId, armed: true });
+    for (let take = 0; take < 2; take += 1) {
+      await exec("set_transport", { action: "record" });
+      await exec("set_transport", { action: "stop" });
+    }
+    let track = (await mockSnapshot<Snapshot>()).tracks.find((candidate) => candidate.id === trackId)!;
+    const clipId = track.clips[0]!.id;
+    await exec("set_current_take", { clipId, takeIndex: 0 });
+
+    const promoted = await exec("promote_take_region", {
+      clipId,
+      takeIndex: 1,
+      start: 0.5,
+      end: 1.5,
+    });
+    expect(promoted).toMatchObject({
+      ok: true,
+      data: { takeIndex: 1, start: 0.5, end: 1.5, applied: true },
+    });
+    track = (await mockSnapshot<Snapshot>()).tracks.find((candidate) => candidate.id === trackId)!;
+    const segments = [...track.clips].sort((a, b) => a.start - b.start);
+    expect(segments.map((clip) => [clip.start, clip.length, clip.offset, clip.currentTakeIndex])).toEqual([
+      [0, 0.5, 0, 0],
+      [0.5, 1, 0.5, 1],
+      [1.5, 0.5, 1.5, 0],
+    ]);
+    expect(segments.every((clip) => clip.numTakes === 2 && clip.takes?.length === 2)).toBe(true);
+    const promotedClipId = typeof promoted.data === "object" && promoted.data !== null
+      ? Reflect.get(promoted.data, "clipId")
+      : undefined;
+    const tailClipId = typeof promoted.data === "object" && promoted.data !== null
+      ? Reflect.get(promoted.data, "newClipId")
+      : undefined;
+    expect(promotedClipId).toBe(segments[1]!.id);
+    expect(tailClipId).toBe(segments[2]!.id);
+
+    expect((await exec("undo")).data).toEqual({ undone: true });
+    track = (await mockSnapshot<Snapshot>()).tracks.find((candidate) => candidate.id === trackId)!;
+    expect(track.clips).toHaveLength(1);
+    expect(track.clips[0]!.currentTakeIndex).toBe(0);
+    expect((await exec("redo")).data).toEqual({ redone: true });
+    track = (await mockSnapshot<Snapshot>()).tracks.find((candidate) => candidate.id === trackId)!;
+    expect(track.clips).toHaveLength(3);
+
+    const log = await exec("get_command_log", { limit: 20 });
+    const entries = typeof log.data === "object" && log.data !== null
+      ? Reflect.get(log.data, "entries")
+      : undefined;
+    expect(Array.isArray(entries) && entries.some((entry) =>
+      typeof entry === "object" && entry !== null
+      && Reflect.get(entry, "command") === "promote_take_region"
+      && Reflect.get(entry, "undoable") === true)).toBe(true);
+  });
 });

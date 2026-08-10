@@ -425,6 +425,7 @@ TEST_CASE ("txnsafe: the registry admits the transactable skills' commands", "[a
     for (auto* c : { "set_track_volume", "set_track_mute",           // set_track_level
                      "add_drum_pattern",                            // build_drum_pattern
                      "load_plugin", "set_plugin_param", "bypass_plugin",   // host_plugin
+                     "promote_take_region",                       // assemble a playlist comp phrase
                      "set_track_automation_mode", "write_automation_curve", // automate_parameter
                      "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint" })
         REQUIRE (mosh::txnsafe::isSafe (c));

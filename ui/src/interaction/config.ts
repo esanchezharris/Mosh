@@ -47,12 +47,11 @@ export function buildKeymap(get: Getter): Keymap {
 // without forcing React re-renders of the arrangement tree.
 
 // Resolve-time ONLY (nothing is materialized): with no EXPLICIT keymap/gestureTable
-// override persisted — and an explicit "mosh" IS an explicit choice — the LIVE shell
-// resolves these two settings to "ableton" (its native interaction bundle). Every
-// other shell, and every explicit user choice, resolves exactly as before. This is
-// the fix for "the live shell boots with the mosh bundle and its Live keys are dead"
-// (uiShell defaults to "live" while keymap/gestureTable default to "mosh"; the
-// ableton bundle only ever materialized if the user picked the template by hand).
+// override persisted — and an explicit "mosh" IS an explicit choice — each DAW shell
+// resolves these two settings to its native interaction bundle. Every explicit user
+// choice resolves exactly as before. A fresh Pro Tools shell therefore receives its
+// native bundle even though keymap/gestureTable retain "mosh" as their schema values;
+// an explicitly persisted Live shell receives the Ableton bundle by the same rule.
 // activeKeymap() in settings/store.ts mirrors this resolution for key.* rebind
 // buckets — the two must agree or rebinds land in the wrong keymap's bucket.
 export function effectiveInteractionSetting(id: string): SettingValue {
@@ -62,8 +61,17 @@ export function effectiveInteractionSetting(id: string): SettingValue {
   if (explicit !== undefined) return explicit;              // the user's choice always wins
   // The EFFECTIVE shell (honors the dev/e2e ?shell= override), not just the
   // persisted value — a ?shell=v2 boot with uiShell unset must NOT get the bundle.
-  if (resolveShell(st.get("uiShell")) === "live") return "ableton";
-  return st.get(id);                                        // every other shell: schema default
+  const shell = resolveShell(st.get("uiShell"));
+  switch (shell) {
+    case "live": return "ableton";
+    case "protools": return "protools";
+    case "classic":
+    case "v2": return st.get(id);
+    default: {
+      const unreachable: never = shell;
+      return unreachable;
+    }
+  }
 }
 
 const liveGet: Getter = (id) => effectiveInteractionSetting(id);

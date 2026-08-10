@@ -57,7 +57,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "enable_track_meter", "disable_track_meter",
         "enable_all_meters", "set_audio_device", "retry_audio_device", "set_buffer_size", "set_audio_threads",
         "set_project_settings", "set_key", "rescan_plugins", "get_plugin_blocklist",
-        "clear_plugin_blocklist", "block_plugin", "open_plugin_editor",
+        "clear_plugin_blocklist", "block_plugin", "unblock_plugin", "open_plugin_editor",
         // Master-bus plugins — popping a native editor window is viewer-local (no state
         // to sync), same posture as open_plugin_editor above.
         "open_master_plugin_editor",
@@ -75,8 +75,10 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // track's logicalId.
     static const std::set<juce::String> track {
         "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "import_clip", "import_clip_data",
+        "create_track_group", "configure_track_group", "duplicate_track_group",
+        "set_track_group_members", "set_track_group_enabled", "rename_track_group", "remove_track_group",
         "add_test_tone_clip", "set_track_volume", "set_track_pan", "set_track_mute",
-        "set_track_solo", "arm_track", "set_input_monitor", "set_current_take",
+        "set_track_solo", "set_track_active", "arm_track", "set_input_monitor", "set_current_take",
         "keep_take", "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
         "set_plugin_param", "bypass_plugin",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
@@ -106,8 +108,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // Clip-scoped: mutate clip content. MoshOps resolves the singular clipId and
     // every valid clipIds entry to all affected tracks' logicalIds before guarding.
     static const std::set<juce::String> clip {
-        "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
+        "move_clip", "trim_clip", "split_clip", "promote_take_region", "remove_clip", "rename_clip",
+        "create_clip_group", "ungroup_clip_group", "rename_clip_group",
+        "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
         // clip-ops wave — reverse / auto-crossfade / normalize all carry a clipId like
         // gain/mute/fade; same clip-scoped key resolution.
         "set_clip_reverse", "set_clip_crossfade", "normalize_clip",

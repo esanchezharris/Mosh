@@ -51,10 +51,9 @@ describe("buildKeymap", () => {
   });
 });
 
-// The live shell's default interaction bundle (resolve-time only): uiShell "live"
-// plus NO explicit keymap/gestureTable override must resolve to ableton — that was
-// the wild bug: the clone booted with the mosh bundle and every Live key was dead.
-describe("effectiveInteractionSetting — the live shell's default bundle", () => {
+// DAW shell interaction bundles are resolved only when the corresponding selector
+// has no persisted override. An explicit user choice always wins.
+describe("effectiveInteractionSetting — DAW shell defaults", () => {
   const backup = { ...useSettings.getState() };
   beforeEach(() => {
     useSettings.setState({ template: null, values: {}, keyOverrides: {} });
@@ -63,11 +62,11 @@ describe("effectiveInteractionSetting — the live shell's default bundle", () =
     useSettings.setState(backup, true);
   });
 
-  it("live shell + no overrides at all → ableton (absence of uiShell means live: the schema default)", () => {
-    expect(effectiveInteractionSetting("keymap")).toBe("ableton");
-    expect(effectiveInteractionSetting("gestureTable")).toBe("ableton");
+  it("fresh Pro Tools shell + no overrides → the Pro Tools bundle", () => {
+    expect(effectiveInteractionSetting("keymap")).toBe("protools");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("protools");
     // …and the resolution reaches the ACTIVE bundle, not just the getter
-    expect(resolveKey(liveKeymap(), { key: "e", metaKey: true })).toBe(A.SPLIT);
+    expect(resolveKey(liveKeymap(), { key: " ", metaKey: true })).toBe(A.RECORD);
     expect(liveGestureTable().some((r) => r.region === "clip.header")).toBe(true);
   });
 
@@ -95,6 +94,22 @@ describe("effectiveInteractionSetting — the live shell's default bundle", () =
 
   it("non-interaction ids pass straight through", () => {
     expect(effectiveInteractionSetting("feel.dragThreshold")).toBe(FEEL_DEFAULTS.dragThreshold);
-    expect(effectiveInteractionSetting("uiShell")).toBe("live"); // the schema default itself
+    expect(effectiveInteractionSetting("uiShell")).toBe("protools"); // the schema default itself
+  });
+
+  it("Pro Tools shell + unset interaction selectors → Pro Tools bundle", () => {
+    useSettings.setState({ values: { uiShell: "protools" } });
+
+    expect(effectiveInteractionSetting("keymap")).toBe("protools");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("protools");
+  });
+
+  it("Pro Tools shell + explicit interaction selectors → the user's bundle wins", () => {
+    useSettings.setState({
+      values: { uiShell: "protools", keymap: "ableton", gestureTable: "fl" },
+    });
+
+    expect(effectiveInteractionSetting("keymap")).toBe("ableton");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("fl");
   });
 });

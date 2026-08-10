@@ -9,6 +9,7 @@
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
+#include "plugins/hosting/Vst3ScanWorker.h"
 #include "state/ProjectName.h"
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
@@ -101,6 +102,12 @@ public:
 
         const auto commandLineParameters =
             juce::JUCEApplicationBase::getCommandLineParameterArray();
+        if (isVst3ScanWorkerCommand (commandLineParameters))
+        {
+            setApplicationReturnValue (runVst3ScanWorker (commandLineParameters));
+            quit();
+            return;
+        }
         if (! commandLineParameters.isEmpty()
             && commandLineParameters[0] == "--audio-probe")
         {

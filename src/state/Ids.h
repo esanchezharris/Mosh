@@ -125,6 +125,12 @@ namespace mosh::ids
     // stay correct. Same reasoning as a colour storing "#rrggbb" rather than "swatch 3".
     // The vocabulary of legal names lives in state/TrackIcons.h.
     MOSH_DECLARE_ID (trackIcon)
+
+    // Pro Tools dynamic Clip Gain — identifies the hidden clip-local VolumeAndPanPlugin
+    // whose absolute automation curve applies the per-breakpoint gain offsets. It lives
+    // inside the audio clip's own plugin list, so Tracktion moves, duplicates, saves and
+    // reloads it with the clip rather than leaking the envelope onto the track fader.
+    MOSH_DECLARE_ID (moshClipGainEnvelope)
     // FL drum-lane mute/solo: comma-separated GM pitches whose sampler pad is muted /
     // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
     MOSH_DECLARE_ID (drumMute)
@@ -182,6 +188,29 @@ namespace mosh::ids
     MOSH_DECLARE_ID (sectionStartBeat)
     MOSH_DECLARE_ID (sectionEndBeat)
     MOSH_DECLARE_ID (sectionColor)
+
+    // Pro Tools Clip Groups — arrangement membership only, never a Tracktion folder
+    // or routing submix. Inactive nodes stay persisted so Regroup can restore the
+    // last Ungroup without reconstructing a selection from UI state.
+    MOSH_DECLARE_ID (MOSH_CLIP_GROUPS)
+    MOSH_DECLARE_ID (MOSH_CLIP_GROUP)
+    MOSH_DECLARE_ID (MOSH_CLIP_GROUP_MEMBER)
+    MOSH_DECLARE_ID (clipGroupName)
+    MOSH_DECLARE_ID (clipGroupActive)
+    MOSH_DECLARE_ID (clipGroupClipId)
+    MOSH_DECLARE_ID (lastUngroupedClipGroupId)
+
+    // Pro Tools Track Groups — non-routing Edit/Mix linkage. These nodes never
+    // create Tracktion folder tracks or alter signal flow.
+    MOSH_DECLARE_ID (MOSH_TRACK_GROUPS)
+    MOSH_DECLARE_ID (MOSH_TRACK_GROUP)
+    MOSH_DECLARE_ID (MOSH_TRACK_GROUP_MEMBER)
+    MOSH_DECLARE_ID (trackGroupName)
+    MOSH_DECLARE_ID (trackGroupKind)
+    MOSH_DECLARE_ID (trackGroupEnabled)
+    MOSH_DECLARE_ID (trackGroupMixAttributes)
+    MOSH_DECLARE_ID (trackGroupTrackId)
+    MOSH_DECLARE_ID (trackGroupsSuspended)
 
     // ANN-001 — timeline ANNOTATIONS (lightweight, authored comment pins). A
     // MOSH_ANNOTATIONS container child of the Edit's own ValueTree (mirrors

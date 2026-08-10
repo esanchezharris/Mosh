@@ -22,7 +22,7 @@ Row format (the guard parses these columns exactly):
 | Clip fades (in/out + curve) | set_clip_fade | reachable | testid:v2-clip-fadein | clip-edit-fades.spec.ts |
 | Clip reverse | set_clip_reverse | reachable | testid:v2-clip-reverse | clip-edit-fades.spec.ts |
 | Clip normalize | normalize_clip | reachable | testid:v2-clip-normalize | clip-edit-fades.spec.ts |
-| Clip gain / mute / rename | set_clip_gain, set_clip_mute, rename_clip | reachable | testid:v2-clip-gain | clip-edit-fades.spec.ts |
+| Clip gain / mute / rename | set_clip_gain, write_clip_gain_curve, set_clip_mute, rename_clip | reachable | testid:pt-clip-gain-point | protools-clip-gain.spec.ts |
 | Clip loop region | set_clip_loop | reachable | testid:v2-clip-loop | clip-edit-fades.spec.ts |
 | Clip crossfade | set_clip_crossfade | reachable | testid:v2-clip-crossfade | clip-edit-fades.spec.ts |
 | Export (range / tail / format) | export_audio | reachable | testid:export-run | export-dialog.spec.ts |
@@ -36,6 +36,7 @@ Row format (the guard parses these columns exactly):
 | Count-in | set_count_in | reachable | role:topbar count-in select | — |
 | Quantize (piano roll / MIDI tab) | quantize_notes | reachable | testid:v2-open-pianoroll | — |
 | Takes (switch + keep) | set_current_take, keep_take | reachable | role:inspector Takes tab (dynamic testid v2-insp-tab-takes) | record-arm.spec.ts |
+| Pro Tools playlist region comp / Waveform take cycle | promote_take_region | reachable | testid:pt-playlist-promote | protools-shell.spec.ts |
 | Record (transport, auto-arm) | set_transport, arm_track | reachable | testid:v2-record | record-arm.spec.ts |
 | Per-track arm / input monitor / input picker | arm_track, set_input_monitor, set_track_input | reachable | testid:v2-track-arm | record-arm.spec.ts |
 | Automation editing in v2 (write-arm + lanes) | set_track_automation_mode, write_automation_curve, add_automation_point | gap:G16 | testid:v2-automation-arm | automation-write.spec.ts |

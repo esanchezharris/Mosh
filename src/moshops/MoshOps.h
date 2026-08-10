@@ -105,6 +105,18 @@ private:
     juce::var cmdRenameSection  (const juce::var& args);
     juce::var cmdMoveSection    (const juce::var& args);
     juce::var cmdRemoveSection  (const juce::var& args);
+    juce::var cmdCreateClipGroup  (const juce::var& args);
+    juce::var cmdUngroupClipGroup (const juce::var& args);
+    juce::var cmdRegroupClipGroup (const juce::var& args);
+    juce::var cmdRenameClipGroup  (const juce::var& args);
+    juce::var cmdCreateTrackGroup       (const juce::var& args);
+    juce::var cmdConfigureTrackGroup    (const juce::var& args);
+    juce::var cmdDuplicateTrackGroup    (const juce::var& args);
+    juce::var cmdSetTrackGroupMembers   (const juce::var& args);
+    juce::var cmdSetTrackGroupEnabled   (const juce::var& args);
+    juce::var cmdSetTrackGroupsSuspended (const juce::var& args);
+    juce::var cmdRenameTrackGroup       (const juce::var& args);
+    juce::var cmdRemoveTrackGroup       (const juce::var& args);
     // LYR-001 — Finish-My-Song lyric sheet (MOSH_LYRICSHEET on a track; undoable).
     juce::var cmdCreateLyricSheet  (const juce::var& args);
     juce::var cmdRemoveLyricSheet  (const juce::var& args);
@@ -201,9 +213,11 @@ private:
     juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
     juce::var cmdMpApplyStructural  (const juce::var& args);
     // Resolve every affected lock key (track logicalIds or the session key) for a
-    // guarded command. Clip scope includes singular clipId and every valid clipIds
-    // entry; unresolvable targets stay empty so command handlers own shape errors.
-    std::vector<juce::String> lockKeysFor (LockManager::Scope scope, const juce::var& args);
+    // guarded command. Track scope includes trackId, trackIds, Track Group members,
+    // and enabled Mix-linked peers; Clip scope includes singular clipId and every
+    // valid clipIds entry. Unresolvable targets stay empty so handlers own shape errors.
+    std::vector<juce::String> lockKeysFor (LockManager::Scope scope, const juce::String& command,
+                                           const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
@@ -233,6 +247,7 @@ private:
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
+    juce::var cmdWriteClipGainCurve (const juce::var& args);
     // G4b — clip fades (fade-in/fade-out + curve type). Audio-clip-only, mirrors
     // cmdSetClipGain; fades render NATIVELY through AudioClipBase (no src/state change).
     juce::var cmdSetClipFade    (const juce::var& args);
@@ -273,6 +288,7 @@ private:
     juce::var cmdSetTrackPan    (const juce::var& args);
     juce::var cmdSetTrackMute   (const juce::var& args);
     juce::var cmdSetTrackSolo   (const juce::var& args);
+    juce::var cmdSetTrackActive (const juce::var& args);
     // Wave: recording — arm tracks + input monitoring
     juce::var cmdArmTrack       (const juce::var& args);
     juce::var cmdSetInputMonitor (const juce::var& args);
@@ -282,6 +298,9 @@ private:
     // Take lanes (audio): expose Tracktion's native take tree — list/select/keep.
     juce::var cmdListTakes      (const juce::var& args);
     juce::var cmdSetCurrentTake (const juce::var& args);
+    // Pro Tools playlist comping: split at absolute timeline bounds and switch
+    // only the middle segment to the requested take. One undo transaction.
+    juce::var cmdPromoteTakeRegion (const juce::var& args);
     juce::var cmdKeepTake       (const juce::var& args);
     juce::var cmdMarkTake       (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
@@ -335,6 +354,7 @@ private:
     // catalog-only, so none take a Tracktion transaction.
     juce::var cmdRescanPlugins      (const juce::var& args);   // async catalog re-enumeration (persists)
     juce::var cmdGetPluginBlocklist (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdUnblockPlugin      (const juce::var& args);   // retry one quarantine (undoable:false)
     juce::var cmdClearPluginBlocklist (const juce::var& args); // catalog-only (undoable:false)
     juce::var cmdBlockPlugin        (const juce::var& args);   // catalog-only (undoable:false)
     // Wave 7 — parameter automation
@@ -525,6 +545,14 @@ private:
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
     juce::var sectionsToVar();
     juce::var annotationsToVar();
+    juce::var clipGroupsToVar();
+    juce::ValueTree findClipGroupForClip (const juce::String& clipId, bool activeOnly);
+    std::vector<te::Clip*> clipGroupMembers (const juce::ValueTree& group);
+    juce::var trackGroupsToVar();
+    juce::ValueTree findTrackGroupById (const juce::String& groupId);
+    std::vector<te::AudioTrack*> trackGroupMembers (const juce::ValueTree& group);
+    std::vector<te::AudioTrack*> mixLinkedTracks (const juce::String& trackId,
+                                                   const juce::String& mixAttribute);
 
     // LYR-001 — a track's MOSH_LYRICSHEET as a snapshot object (read-only; never
     // creates the tree). { id, grid, language, topic, mood, explicit, rhymeStrictness,
