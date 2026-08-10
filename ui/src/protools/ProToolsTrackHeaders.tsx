@@ -4,9 +4,11 @@ import type { Snapshot, Track } from "../types";
 import { IconLayers, IconPlus } from "../ui/icons";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
 import { useProTools } from "./proToolsState";
+import { proToolsEditTracks, proToolsShownTracks } from "./proToolsTrackVisibility";
 import { scaledTrackHeights } from "./trackHeightZoom";
 import { applyProToolsTrackControl, type ProToolsTrackControl } from "./proToolsTrackControls";
 import { selectProToolsTrack } from "./proToolsTrackEditSelection";
+import { ProToolsTrackListMenu } from "./ProToolsTrackListMenu";
 import {
   proToolsPlaylistRowCount,
   proToolsTrackRowHeight,
@@ -19,14 +21,21 @@ type ProToolsTrackHeadersProps = {
 };
 
 export function ProToolsTrackHeaders({ snapshot }: ProToolsTrackHeadersProps) {
-  const tracks = snapshot.tracks.filter((track) => !track.isGroup && !track.isReturn);
+  const trackVisibility = useProTools((state) => state.trackVisibility);
+  const allTracks = proToolsEditTracks(snapshot.tracks);
+  const tracks = proToolsShownTracks(allTracks, trackVisibility);
 
   return (
     <section className="pt-track-list" data-testid="pt-track-list" aria-label="Track List">
-      <header className="pt-track-list-title">Track List</header>
+      <header className="pt-track-list-title">
+        <span>Track List</span>
+        <ProToolsTrackListMenu tracks={allTracks} />
+      </header>
       <div className="pt-track-list-rows">
         {tracks.length === 0
-          ? <p className="pt-track-list-empty" role="status">No tracks</p>
+          ? <p className="pt-track-list-empty" role="status">
+              {allTracks.length === 0 ? "No tracks" : "No tracks shown"}
+            </p>
           : tracks.map((track) => (
             <ProToolsTrackHeader key={track.id} track={track} tracks={tracks} />
           ))}

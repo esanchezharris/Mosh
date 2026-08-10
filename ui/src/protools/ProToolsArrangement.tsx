@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { ProToolsClipList } from "./ProToolsClipList";
@@ -11,6 +11,7 @@ import { ProToolsUniverse } from "./ProToolsUniverseView";
 import { timelineSeconds } from "./layout";
 import { capturePointer, releasePointer } from "./pointerCapture";
 import { useProTools } from "./proToolsState";
+import { proToolsShownTracks } from "./proToolsTrackVisibility";
 import { useProToolsMultiTrackSelection } from "./useProToolsMultiTrackSelection";
 
 export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
@@ -21,7 +22,12 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
   const rulersVisible = useProTools((s) => s.rulersVisible);
   const clipListOpen = useProTools((s) => s.clipListOpen);
   const setClipListOpen = useProTools((s) => s.setClipListOpen);
+  const trackVisibility = useProTools((s) => s.trackVisibility);
   const contentWidth = Math.max(960, timelineSeconds(snapshot) * pxPerSec);
+  const shownSnapshot = useMemo<Snapshot>(() => ({
+    ...snapshot,
+    tracks: [...proToolsShownTracks(snapshot.tracks, trackVisibility)],
+  }), [snapshot, trackVisibility]);
   const timelineRef = useRef<HTMLDivElement>(null);
   const rulerFieldRef = useRef<HTMLDivElement>(null);
   const headerPaneRef = useRef<HTMLDivElement>(null);
@@ -56,7 +62,7 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
     <section className="pt-edit-window" data-testid="pt-edit-window"
       style={{ "--pt-track-head-w": `${trackHeaderWidth}px` } as React.CSSProperties}>
       <div className="pt-arrangement-main">
-        <ProToolsUniverse snapshot={snapshot} timelineRef={timelineRef} />
+        <ProToolsUniverse snapshot={shownSnapshot} timelineRef={timelineRef} />
         <ProToolsRulers snapshot={snapshot} rulersVisible={rulersVisible}
           contentWidth={contentWidth} fieldRef={rulerFieldRef}
           getScrollLeft={() => timelineRef.current?.scrollLeft ?? 0} />
@@ -64,7 +70,7 @@ export function ProToolsArrangement({ snapshot }: { snapshot: Snapshot }) {
           <div ref={headerPaneRef} className="pt-track-header-pane">
             <ProToolsTrackHeaders snapshot={snapshot} />
           </div>
-          <ProToolsTimeline snapshot={snapshot} contentWidth={contentWidth}
+          <ProToolsTimeline snapshot={shownSnapshot} contentWidth={contentWidth}
             scrollRef={timelineRef} onScroll={syncScroll} onSpotClip={(clip) => setSpotClipId(clip.id)} />
           <div className="pt-track-head-resizer" data-testid="pt-track-head-resizer"
             role="separator" aria-orientation="vertical" aria-label="Resize track headers"

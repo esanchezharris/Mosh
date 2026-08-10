@@ -81,7 +81,7 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - The shell owns the viewport and never body-scrolls. Toolbar, rulers, dock, and status are fixed rows.
 - Track controls are a resizable left column: 160px default, 128px minimum, 280px maximum.
 - The timeline is the sole horizontal scroll owner. Track rows and headers share one vertical scroll position.
-- Clip List is a right supporting panel; Track List is integrated into the left control bank. Neither is a content browser.
+- Clip List is a right supporting panel; Track List is integrated into the left control bank. Neither is a content browser. Its persistent visibility menu retains every session track while shown rows alone determine the aligned header/lane bank.
 - Wide: toolbar + left headers + lane field + optional Clip List + bottom editor.
 - Compact below 760px: Clip List closes and nonessential toolbar labels compress, but Nudge, Tab-to-Transients, Rulers, Settings, and Interface Options remain in the toolbar's horizontal scroll range; the bottom editor remains usable.
 - Session operations stay in one labelled toolbar menu. Selected-track routing and mix controls live in the detail dock rather than crowding the fixed-height track headers.
@@ -226,6 +226,14 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: the Track List is a labelled complementary region. Show and Edit are separate named native buttons with `aria-pressed`; the active target cannot be hidden. The target change is immediately reflected in the Piano Roll title and focus remains in the dock.
 - **Adaptation**: Pro Tools can pencil-enable more than one track. Mosh deliberately exposes one edit target because its canonical command owner is singular; multi-target Pencil writes and multi-track controller lanes remain explicit follow-ups rather than ambiguous command routing.
 
+### Edit Window Track List visibility
+
+- **Structure**: a persistent 24px labelled button in the left Track List title opens a check-state menu containing every non-group/non-return session track, including rows currently absent from the Edit Window.
+- **Behavior**: Hide removes the matching track header, primary lane, and Universe row while preserving session order and every clip in the Clip List. Show restores the same row. P/Semicolon and Tab navigation operate on shown rows only. If every row is hidden, `No tracks shown` replaces the bank while the recovery menu stays enabled.
+- **State and commands**: visibility is project-scoped shell state, clears on `projectEpoch` replacement, never mutates a snapshot, and emits no `store.exec` command. The hidden track remains audible because the engine and project graph are unchanged.
+- **Accessibility**: every item is a native menu button named `Hide <track> track` or `Show <track> track`; check state and visible text are redundant, and keyboard activation must not leak Enter into the global Return-to-Zero shortcut.
+- **Adaptation**: the menu uses Mosh's original check primitive instead of Avid's dot artwork. Make Active/Inactive, bulk filters, visibility-enabled Memory Locations, and Edit/Mix window linkage remain explicit gaps.
+
 ### Universe session overview
 
 - **Structure**: an optional two-column overview sits immediately above the ruler stack, aligned to the same resizable Track List width. It is closed by default, 72px when opened, and keyboard/pointer resizable from 44px through 160px so session-critical timeline height is never taken without producer intent.
@@ -233,7 +241,7 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Viewport**: a high-contrast framed area is derived from the real timeline's horizontal and vertical scroll metrics. It updates on scroll and resize and never becomes project data.
 - **Behavior**: clicking the overview centers the Edit Window at that horizontal/vertical location. Arrow keys pan by 75% of the visible viewport, Home/End go to the horizontal bounds, and Enter/Space center the current playhead as an accessibility adaptation. When tracks overflow, original 24px Scroll Up/Down buttons on the right move the overview's ordered track window by one row without moving the Edit viewport; their disabled boundaries and visible `Tracks n–m of total` label expose state. The separator supports pointer resize with cancellation rollback, Arrow keys, Home/End, and double-click reset; increasing height automatically admits more rows.
 - **State and commands**: visibility and height are UI-local, preserve an idempotent current epoch, and reset on project replacement. Navigation changes DOM scroll only and issues no `store.exec` command because no session data changes.
-- **Adaptation**: Avid's right-edge vertical scrolling is retained with native labelled buttons and a 6px minimum row instead of copied arrow artwork. The scroll position is component-local, survives a temporary close, clamps when height or track count changes, and resets on `projectEpoch`. Mosh still lacks an independent hidden-track model, so “shown tracks” currently means every non-group/non-return Edit row.
+- **Adaptation**: Avid's right-edge vertical scrolling is retained with native labelled buttons and a 6px minimum row instead of copied arrow artwork. The scroll position is component-local, survives a temporary close, clamps when height or track count changes, and resets on `projectEpoch`. Edit-window Track List visibility filters the overview through the same ordered shown-track model.
 
 ### Audio clip inspector
 

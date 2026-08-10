@@ -166,6 +166,25 @@ describe("useKeyboardShortcuts", () => {
     button.remove();
   });
 
+  it("does not hijack Enter when native button activation unmounts the button", () => {
+    useSettings.setState({ values: { gestureTable: "protools", keymap: "protools" } });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    const button = document.createElement("button");
+    document.body.appendChild(button);
+    button.addEventListener("keydown", () => button.remove());
+    button.focus();
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+
+    act(() => {
+      button.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(execCalls).toEqual([]);
+  });
+
   it("handles Space in the WebView even when the native menu is present (the menu carries no Space equivalent)", async () => {
     // The transport menu item carries NO Space key-equivalent (a modifier-less
     // equivalent hijacks the key from the DOM — MenuController.cpp), so PLAY_PAUSE

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isEditableTarget } from "../interaction/keymap";
 import { useStore, type State } from "../store";
-import type { Snapshot } from "../types";
 import { useProTools, type ProToolsEditMode } from "./proToolsState";
 import { applyHorizontalZoom, applyHorizontalZoomStep } from "./proToolsZoom";
 import type { ProToolsTool } from "./smartTool";
@@ -21,6 +20,8 @@ import {
   memoryLocationAtNumber,
   numberedMemoryLocations,
 } from "./memoryLocations";
+import { transientCandidates } from "./proToolsTransientCandidates";
+import { proToolsShownTracks } from "./proToolsTrackVisibility";
 
 const EDIT_MODE_KEYS: Readonly<Partial<Record<string, ProToolsEditMode>>> = {
   F1: "shuffle",
@@ -38,36 +39,9 @@ const EDIT_TOOL_KEYS: Readonly<Partial<Record<string, ProToolsTool>>> = {
   F10: "pencil",
 };
 
-type ReadonlyPeaks = Readonly<Record<string, readonly (readonly [number, number])[]>>;
-
 function ownsTabToTransientNavigation(element: Element | null): boolean {
   if (element === document.body) return true;
   return element?.closest(".pt-timeline-scroll, [data-clip-id]") !== null;
-}
-
-export function transientCandidates(snapshot: Snapshot | null, peaks: ReadonlyPeaks): readonly number[] {
-  if (!snapshot) return [];
-  const candidates: number[] = [];
-  for (const track of snapshot.tracks) {
-    for (const clip of track.clips) {
-      if (clip.type !== "wave") continue;
-      const buckets = peaks[clip.id];
-      if (!buckets || buckets.length === 0) continue;
-      for (let index = 0; index < buckets.length; index += 1) {
-        const bucket = buckets[index];
-        if (!bucket) continue;
-        const previous = index === 0 ? 0 : peaksAmplitude(buckets[index - 1]);
-        if (peaksAmplitude(bucket) >= 0.65 && previous < 0.45) {
-          candidates.push(clip.start + (index / buckets.length) * clip.length);
-        }
-      }
-    }
-  }
-  return candidates;
-}
-
-function peaksAmplitude(bucket: readonly [number, number] | undefined): number {
-  return bucket ? Math.max(Math.abs(bucket[0]), Math.abs(bucket[1])) : 0;
 }
 
 export function useProToolsKeys(): void {
@@ -225,12 +199,15 @@ export function useProToolsKeys(): void {
       if (event.key === "Tab" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if (!ownsTabToTransientNavigation(document.activeElement)) return;
         const store = useStore.getState();
-        const clipBoundaries = store.snapshot?.tracks.flatMap((track) =>
-          track.clips.flatMap((clip) => [clip.start, clip.start + clip.length])) ?? [];
+        const trackVisibility = useProTools.getState().trackVisibility;
+        const clipBoundaries = store.snapshot
+          ? proToolsShownTracks(store.snapshot.tracks, trackVisibility).flatMap((track) =>
+            track.clips.flatMap((clip) => [clip.start, clip.start + clip.length]))
+          : [];
         const next = nextTabPosition({
           position: store.transport.position,
           tabToTransient: useProTools.getState().tabToTransient,
-          transientCandidates: transientCandidates(store.snapshot, store.peaks),
+          transientCandidates: transientCandidates(store.snapshot, store.peaks, trackVisibility),
           clipBoundaries,
         });
         if (next === null) return;

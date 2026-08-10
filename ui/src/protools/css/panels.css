@@ -15,6 +15,25 @@
   letter-spacing: 0.05em;
 }
 .pt-track-list-rows { position: relative; will-change: transform; }
+.pt-track-list-title { justify-content: space-between; }
+.pt-track-list-menu-trigger {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--pt-border);
+  border-top-color: var(--pt-highlight);
+  border-radius: 2px;
+  color: var(--pt-text);
+  background: var(--pt-inset);
+}
+.pt-track-list-menu-trigger:disabled { color: var(--pt-text-muted); opacity: 0.55; }
+.pt-track-list-menu-trigger:focus-visible { outline: 2px solid var(--pt-focus-ring); }
+.pt-track-visibility-menu { min-width: 196px; }
+.pt-track-visibility-state { display: grid; width: 14px; place-items: center; }
+.pt-track-visibility-state[data-shown="false"]::before { content: "·"; }
+.pt-track-visibility-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pt-track-list-empty,
 .pt-clip-list-empty { margin: 12px; color: var(--pt-text-muted); }
 .pt-track-header {

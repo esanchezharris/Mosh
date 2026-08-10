@@ -44,6 +44,7 @@ type ProToolsViewState = {
   readonly hoveredIntent: ProToolsIntent | null;
   readonly automationClipboard: AutomationClipboard | null;
   readonly trackViews: Readonly<Record<string, ProToolsTrackView>>;
+  readonly trackVisibility: Readonly<Record<string, boolean>>;
   readonly automationLanesVisible: Readonly<Record<string, boolean>>;
   readonly horizontalZoomPresets: readonly number[];
   readonly audioWaveformZoom: number;
@@ -78,6 +79,7 @@ type ProToolsActions = {
   readonly setHoveredIntent: (intent: ProToolsIntent | null) => void;
   readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
   readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
+  readonly setTrackShown: (trackId: string, shown: boolean) => void;
   readonly toggleAutomationLane: (trackId: string) => void;
   readonly setHorizontalZoomPreset: (index: number, pxPerSec: number) => void;
   readonly setAudioWaveformZoom: (value: number) => void;
@@ -124,6 +126,7 @@ const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
   hoveredIntent: null,
   automationClipboard: null,
   trackViews: {},
+  trackVisibility: {},
   automationLanesVisible: {},
   horizontalZoomPresets: [...DEFAULT_HORIZONTAL_ZOOM_PRESETS],
   audioWaveformZoom: 1,
@@ -177,6 +180,9 @@ export const useProTools = create<ProToolsState>((set) => ({
   setAutomationClipboard: (automationClipboard) => set({ automationClipboard }),
   setTrackView: (trackId, view) => set((state) => ({
     trackViews: { ...state.trackViews, [trackId]: view },
+  })),
+  setTrackShown: (trackId, shown) => set((state) => ({
+    trackVisibility: { ...state.trackVisibility, [trackId]: shown },
   })),
   toggleAutomationLane: (trackId) => set((state) => ({
     automationLanesVisible: {

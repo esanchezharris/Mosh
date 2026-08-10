@@ -5,7 +5,8 @@ import type { CommandResult, Snapshot } from "../types";
 import { useStore } from "../store";
 import { useShell } from "../v2/shellState";
 import { useProTools } from "./proToolsState";
-import { transientCandidates, useProToolsKeys } from "./useProToolsKeys";
+import { transientCandidates } from "./proToolsTransientCandidates";
+import { useProToolsKeys } from "./useProToolsKeys";
 
 const SNAPSHOT: Snapshot = {
   schemaVersion: 1,
@@ -390,6 +391,25 @@ describe("useProToolsKeys", () => {
     }));
   });
 
+  it("skips clip boundaries on tracks hidden from the Edit Window", async () => {
+    // Given the first clip's track is hidden and the playhead is before both clips.
+    useProTools.getState().setTrackShown("track-1", false);
+    useStore.setState({ transport: { ...SNAPSHOT.transport, position: 1 } });
+
+    // When Tab advances through the shown Edit Window.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    })));
+
+    // Then the next shown boundary belongs to the second track.
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "set_transport",
+      args: { position: 8 },
+    }));
+  });
+
   it.each([
     ["toolbar", "pt-toolbar"],
     ["Track List", "pt-track-list"],
@@ -707,5 +727,13 @@ describe("Pro Tools transient candidates", () => {
     } satisfies Record<string, [number, number][]>;
 
     expect(transientCandidates(SNAPSHOT, peaks)).toEqual([4]);
+  });
+
+  it("excludes waveform onsets from tracks hidden in the Edit Window", () => {
+    const peaks = {
+      "clip-1": [[-0.1, 0.1], [-0.2, 0.2], [-0.9, 0.8], [-0.3, 0.3]],
+    } satisfies Record<string, [number, number][]>;
+
+    expect(transientCandidates(SNAPSHOT, peaks, { "track-1": false })).toEqual([]);
   });
 });

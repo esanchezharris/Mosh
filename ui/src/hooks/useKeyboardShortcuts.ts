@@ -84,7 +84,7 @@ export function useKeyboardShortcuts() {
       // its click instead of also running a mapped DAW command (Pro Tools maps Enter
       // to Return-to-Zero). Custom clip buttons stop propagation in their own key
       // handler, so arrangement-level keyboard behavior is unchanged.
-      if (nativeButtonActivation(keyboardOwner, e)) return;
+      if (nativeButtonActivation(e.target, e) || nativeButtonActivation(keyboardOwner, e)) return;
       if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
 
       const s = useStore.getState();

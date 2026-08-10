@@ -1,6 +1,7 @@
 import { useStore } from "../store";
 import { useProTools } from "./proToolsState";
 import { scopeProToolsEditSelectionToTracks } from "./proToolsTrackEditSelection";
+import { proToolsShownTracks } from "./proToolsTrackVisibility";
 
 type ProToolsEditTrackNavigation =
   | { readonly kind: "move"; readonly direction: -1 | 1 }
@@ -86,8 +87,8 @@ export function handleProToolsEditTrackNavigation(event: KeyboardEvent): boolean
   if (!navigation) return false;
   const snapshot = useStore.getState().snapshot;
   if (!snapshot) return false;
-  const visibleTrackIds = snapshot.tracks
-    .filter((track) => !track.isGroup && !track.isReturn)
+  const trackVisibility = useProTools.getState().trackVisibility;
+  const visibleTrackIds = proToolsShownTracks(snapshot.tracks, trackVisibility)
     .map((track) => track.id);
   if (!applyNavigation(navigation, visibleTrackIds)) return false;
   event.preventDefault();

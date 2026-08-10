@@ -171,6 +171,32 @@ describe("Pro Tools vertical Edit-selection keyboard navigation", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it("moves Edit ownership past tracks hidden in the Track List", () => {
+    // Given Vocal is hidden and Bass owns the linked Edit selection.
+    useProTools.setState({
+      editSelectionTrackId: "bass",
+      editSelectionTrackIds: ["bass"],
+      trackSelectionIds: ["bass"],
+    });
+    useProTools.getState().setTrackShown("vocal", false);
+    useStore.setState({ selectedTrackId: "bass" });
+
+    // When Move Edit Down is used.
+    const event = new KeyboardEvent("keydown", {
+      code: "Semicolon",
+      ctrlKey: true,
+      cancelable: true,
+    });
+    const handled = handleProToolsEditTrackNavigation(event);
+
+    // Then Keys is the next shown destination and no project command is issued.
+    expect(handled).toBe(true);
+    expect(useProTools.getState().editSelectionTrackIds).toEqual(["keys"]);
+    expect(useProTools.getState().trackSelectionIds).toEqual(["keys"]);
+    expect(useStore.getState().selectedTrackId).toBe("keys");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it.each([
     { label: "an Extend past the top", code: "KeyP", shiftKey: true, altKey: false },
     { label: "a Remove from one owner", code: "Semicolon", shiftKey: false, altKey: true },
