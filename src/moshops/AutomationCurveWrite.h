@@ -11,6 +11,7 @@
 
 #include <juce_core/juce_core.h>
 #include <juce_data_structures/juce_data_structures.h>
+#include <cmath>
 #include <vector>
 
 namespace mosh
@@ -23,6 +24,14 @@ struct AutomationCurveWriteResult
     bool ok = false;
     juce::String error;
     std::vector<AutomationCurvePointIn> points;   // validated, ascending in t (input order)
+};
+
+struct AutomationCurveReplaceRangeResult
+{
+    bool ok = false;
+    juce::String error;
+    double start = 0.0;
+    double end = 0.0;
 };
 
 // ADVERSARIAL-REVIEW FIX — o->getProperty("t")/("v") were cast straight to (double) with no
@@ -94,6 +103,52 @@ inline AutomationCurveWriteResult parseAutomationCurvePoints (const juce::var& p
         lastT = t;
         first = false;
     }
+
+    r.ok = true;
+    return r;
+}
+
+/** Optional replaceStart/replaceEnd let an editor replace the union of the OLD and NEW
+    curve bounds after moving an edge point. Without them, replacement keeps the original
+    [first-new-point,last-new-point] behavior. Both bounds are required together and must
+    cover every new point so the command remains honest about the region it replaces. */
+inline AutomationCurveReplaceRangeResult parseAutomationCurveReplaceRange (
+    const juce::var& args,
+    const std::vector<AutomationCurvePointIn>& points)
+{
+    AutomationCurveReplaceRangeResult r;
+    auto fail = [&r] (const juce::String& error) {
+        r.ok = false;
+        r.error = error;
+        return r;
+    };
+    if (points.empty()) return fail ("points must be validated before replacement bounds");
+
+    auto* object = args.getDynamicObject();
+    if (object == nullptr) return fail ("automation curve args must be an object");
+    const bool hasStart = object->hasProperty ("replaceStart");
+    const bool hasEnd = object->hasProperty ("replaceEnd");
+    if (hasStart != hasEnd)
+        return fail ("replaceStart and replaceEnd must be provided together");
+
+    r.start = points.front().t;
+    r.end = points.back().t;
+    if (hasStart)
+    {
+        const auto startVar = object->getProperty ("replaceStart");
+        const auto endVar = object->getProperty ("replaceEnd");
+        if (! isNumericVar (startVar) || ! isNumericVar (endVar))
+            return fail ("replaceStart and replaceEnd must be numeric");
+        r.start = (double) startVar;
+        r.end = (double) endVar;
+    }
+
+    if (! std::isfinite (r.start) || ! std::isfinite (r.end))
+        return fail ("replacement bounds must be finite");
+    if (r.start < 0.0 || r.end < r.start)
+        return fail ("replacement bounds must satisfy 0 <= replaceStart <= replaceEnd");
+    if (r.start > points.front().t || r.end < points.back().t)
+        return fail ("replacement bounds must cover every new point");
 
     r.ok = true;
     return r;

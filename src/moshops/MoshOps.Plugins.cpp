@@ -1299,16 +1299,23 @@ juce::var MoshOps::cmdWriteAutomationCurve (const juce::var& args)
     const auto parsed = parseAutomationCurvePoints (args.getProperty ("points", var()));
     if (! parsed.ok) return errResult ("write_automation_curve", parsed.error);
 
+    AutomationCurveReplaceRangeResult replaceRange;
+    if (apply == "replace")
+    {
+        replaceRange = parseAutomationCurveReplaceRange (args, parsed.points);
+        if (! replaceRange.ok) return errResult ("write_automation_curve", replaceRange.error);
+    }
+
     beginTxn ("write_automation_curve");
     auto& curve = param->getCurve();
     if (apply == "replace")
     {
-        // [minT, maxT] the new points span, padded past the last point by a sub-millisecond
-        // epsilon: removePointsInRegion is HALF-OPEN [start,end), so without the pad a
-        // pre-existing point sitting exactly at the new curve's last timestamp would survive
-        // the clear and end up duplicated alongside the freshly-added point at that time.
-        const auto rangeStart = tracktion::TimePosition::fromSeconds (parsed.points.front().t);
-        const auto rangeEnd   = tracktion::TimePosition::fromSeconds (parsed.points.back().t + 0.0005);
+        // The validated replacement window defaults to the new points' span, or includes
+        // explicit old bounds when an editor moves an edge point. Pad its end because
+        // removePointsInRegion is HALF-OPEN [start,end); without the sub-millisecond epsilon,
+        // a point exactly at the final timestamp would survive and be duplicated.
+        const auto rangeStart = tracktion::TimePosition::fromSeconds (replaceRange.start);
+        const auto rangeEnd   = tracktion::TimePosition::fromSeconds (replaceRange.end + 0.0005);
         curve.removePointsInRegion (tracktion::TimeRange (rangeStart, rangeEnd), &undoManager());
     }
     for (const auto& p : parsed.points)

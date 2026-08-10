@@ -3269,11 +3269,34 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         lastT = t;
       }
 
+      let replaceStart = parsed[0].t;
+      let replaceEnd = parsed[parsed.length - 1].t;
+      if (applyMode === "replace") {
+        const hasReplaceStart = Object.prototype.hasOwnProperty.call(args, "replaceStart");
+        const hasReplaceEnd = Object.prototype.hasOwnProperty.call(args, "replaceEnd");
+        if (hasReplaceStart !== hasReplaceEnd) {
+          return err(command, "replaceStart and replaceEnd must be provided together");
+        }
+        if (hasReplaceStart) {
+          if (typeof args.replaceStart !== "number" || typeof args.replaceEnd !== "number"
+            || !Number.isFinite(args.replaceStart) || !Number.isFinite(args.replaceEnd)) {
+            return err(command, "replaceStart and replaceEnd must be finite numbers");
+          }
+          replaceStart = args.replaceStart;
+          replaceEnd = args.replaceEnd;
+          if (replaceStart < 0 || replaceEnd < replaceStart) {
+            return err(command, "replacement bounds must satisfy 0 <= replaceStart <= replaceEnd");
+          }
+          if (replaceStart > parsed[0].t || replaceEnd < parsed[parsed.length - 1].t) {
+            return err(command, "replacement bounds must cover every new point");
+          }
+        }
+      }
+
       pushUndo();
       p.points = p.points ?? [];
       if (applyMode === "replace") {
-        const rangeStart = parsed[0].t, rangeEnd = parsed[parsed.length - 1].t;
-        p.points = p.points.filter((pt) => pt.t < rangeStart || pt.t > rangeEnd);
+        p.points = p.points.filter((pt) => pt.t < replaceStart || pt.t > replaceEnd);
       }
       p.points.push(...parsed);
       p.points.sort((a, b) => a.t - b.t);

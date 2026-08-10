@@ -20,6 +20,14 @@ static juce::var pointsArray (std::initializer_list<juce::var> pts)
     return juce::var (a);
 }
 
+static juce::var rangeArgs (juce::var start = {}, juce::var end = {})
+{
+    auto* o = new juce::DynamicObject();
+    if (! start.isVoid()) o->setProperty ("replaceStart", start);
+    if (! end.isVoid()) o->setProperty ("replaceEnd", end);
+    return juce::var (o);
+}
+
 TEST_CASE ("parseAutomationCurvePoints accepts a valid ascending array", "[automationcurvewrite]")
 {
     auto r = parseAutomationCurvePoints (pointsArray ({ pointObj (0.0, 0.1), pointObj (1.0, 0.5), pointObj (2.0, 0.9) }));
@@ -173,4 +181,39 @@ TEST_CASE ("parseAutomationCurvePoints still accepts an integer-valued t/v (isIn
     auto r = parseAutomationCurvePoints (juce::var (juce::String ("[{\"t\":0,\"v\":0},{\"t\":1,\"v\":1}]")));
     REQUIRE (r.ok);
     REQUIRE (r.points.size() == 2);
+}
+
+TEST_CASE ("automation replacement range can include the old boundary moved by nudge", "[automationcurvewrite]")
+{
+    const auto curve = parseAutomationCurvePoints (
+        pointsArray ({ pointObj (1.25, 0.2), pointObj (3.25, 0.7), pointObj (5.0, 0.4) }));
+    REQUIRE (curve.ok);
+
+    const auto range = parseAutomationCurveReplaceRange (rangeArgs (1.0, 5.0), curve.points);
+    REQUIRE (range.ok);
+    REQUIRE (range.start == 1.0);
+    REQUIRE (range.end == 5.0);
+}
+
+TEST_CASE ("automation replacement range defaults to the new curve bounds", "[automationcurvewrite]")
+{
+    const auto curve = parseAutomationCurvePoints (
+        pointsArray ({ pointObj (1.25, 0.2), pointObj (5.0, 0.4) }));
+    REQUIRE (curve.ok);
+
+    const auto range = parseAutomationCurveReplaceRange (rangeArgs(), curve.points);
+    REQUIRE (range.ok);
+    REQUIRE (range.start == 1.25);
+    REQUIRE (range.end == 5.0);
+}
+
+TEST_CASE ("automation replacement range rejects partial or non-covering bounds", "[automationcurvewrite]")
+{
+    const auto curve = parseAutomationCurvePoints (
+        pointsArray ({ pointObj (1.25, 0.2), pointObj (5.0, 0.4) }));
+    REQUIRE (curve.ok);
+
+    REQUIRE_FALSE (parseAutomationCurveReplaceRange (rangeArgs (1.0), curve.points).ok);
+    REQUIRE_FALSE (parseAutomationCurveReplaceRange (rangeArgs (2.0, 5.0), curve.points).ok);
+    REQUIRE_FALSE (parseAutomationCurveReplaceRange (rangeArgs (1.0, 4.0), curve.points).ok);
 }

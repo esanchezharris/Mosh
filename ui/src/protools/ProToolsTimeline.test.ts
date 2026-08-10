@@ -155,7 +155,7 @@ describe("ProToolsTimeline pointer capture", () => {
     dispatchPointer(element, "pointerdown", { pointerId: 13, button: 0, clientX: 200, clientY: 30 });
 
     // When: the project is replaced before that pointer is released.
-    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    act(() => useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 })));
     dispatchPointer(element, "pointerup", { pointerId: 13, button: 0, clientX: 200, clientY: 30 });
 
     // Then: the stale clip never opens a placement dialog or mutates the new project.
@@ -187,7 +187,7 @@ describe("ProToolsTimeline pointer capture", () => {
     dispatchPointer(element, "pointermove", { pointerId: 8, buttons: 1, clientX: 200, clientY: 10, metaKey: true });
 
     // When: the active project is replaced before the matching pointer release.
-    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    act(() => useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 })));
     dispatchPointer(element, "pointerup", { pointerId: 8, clientX: 200, clientY: 10, metaKey: true });
 
     // Then: the captured stale gesture reaches no MoshOps mutation.

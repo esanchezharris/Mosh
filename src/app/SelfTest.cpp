@@ -2689,6 +2689,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((int) wr["data"].getProperty ("pointCount", -1) == 3, "G10: replace reports 3 points written");
         check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 3, "G10: curve now has exactly the 3 replaced points");
 
+        // A UI nudge can move the first point inward. The explicit old+new replacement
+        // union must clear the OLD boundary too, or a ghost point survives at t=0.
+        var nudgedBoundaryPoints; { Array<var> a; a.add (objN ({{ "t", 0.25 }, { "v", 0.1 }}));
+                                      a.add (objN ({{ "t", 1.25 }, { "v", 0.5 }}));
+                                      a.add (objN ({{ "t", 2.0 }, { "v", 0.9 }})); nudgedBoundaryPoints = a; }
+        auto wrBounds = cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                                                                    { "points", nudgedBoundaryPoints }, { "apply", "replace" },
+                                                                    { "replaceStart", 0.0 }, { "replaceEnd", 2.0 }}));
+        check (ok (wrBounds), "G10: explicit replacement bounds accepted");
+        check ((int) wrBounds["data"].getProperty ("numPoints", -1) == 3,
+               "G10: explicit replacement bounds remove the moved old boundary");
+
         // reject: non-ascending t -> the WHOLE call is rejected, curve UNCHANGED (validate-before-mutate)
         var badPoints; { Array<var> a; a.add (objN ({{ "t", 1.0 }, { "v", 0.2 }}));
                           a.add (objN ({{ "t", 0.5 }, { "v", 0.4 }})); badPoints = a; }

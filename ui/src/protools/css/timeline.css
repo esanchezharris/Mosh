@@ -224,36 +224,93 @@
 .pt-clip-gain-handle:hover + .pt-clip-gain-value,
 .pt-clip-gain-handle:focus-visible + .pt-clip-gain-value { opacity: 1; }
 
-.pt-automation-lane {
+.pt-automation-lane-frame {
   position: absolute;
   z-index: 2;
   right: 0;
   bottom: 0;
   left: 0;
   height: var(--pt-automation-h);
+  overflow: hidden;
+  border-top: 1px solid var(--pt-border);
+  background: color-mix(in srgb, var(--pt-inset) 88%, var(--pt-track-color));
+}
+.pt-automation-lane {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
   display: block;
   width: 100%;
   padding: 0;
   overflow: hidden;
   border: 0;
-  border-top: 1px solid var(--pt-border);
   border-radius: 0;
   color: inherit;
-  background: color-mix(in srgb, var(--pt-inset) 88%, var(--pt-track-color));
+  background: transparent;
   font: inherit;
   text-align: left;
   cursor: text;
 }
 .pt-automation-lane:disabled { cursor: not-allowed; }
-.pt-automation-lane svg { display: block; overflow: visible; }
+.pt-automation-curve {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
 .pt-automation-path { fill: none; stroke: var(--pt-track-color); stroke-width: 1.5; }
-.pt-automation-point { fill: var(--pt-canvas); stroke: var(--pt-track-color); stroke-width: 1.5; }
+.pt-automation-point {
+  position: absolute;
+  z-index: 3;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 1.5px solid var(--pt-track-color);
+  border-radius: 50%;
+  background: var(--pt-canvas);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+}
+.pt-automation-point:active { cursor: grabbing; }
+.pt-automation-point[data-selected="true"] {
+  border-color: var(--pt-on-selected);
+  background: var(--pt-selected);
+}
+.pt-automation-point:focus-visible {
+  outline: 2px solid var(--pt-focus-ring);
+  outline-offset: 2px;
+}
+.pt-automation-selection {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  border-inline: 1px solid var(--pt-selected);
+  background: color-mix(in srgb, var(--pt-selected) 18%, transparent);
+  pointer-events: none;
+}
 .pt-automation-label {
   position: absolute;
+  z-index: 4;
   top: 2px;
   left: 5px;
   color: var(--pt-text-muted);
   font-size: 9px;
+  pointer-events: none;
+}
+.pt-automation-trim-readout {
+  position: absolute;
+  z-index: 4;
+  top: 2px;
+  right: var(--pt-space-1);
+  padding: 0 var(--pt-space-1);
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+  background: var(--pt-inset);
+  font: 600 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 .pt-marquee {

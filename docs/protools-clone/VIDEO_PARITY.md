@@ -24,6 +24,9 @@ Grabber. Mosh follows the documented 25/75 contract.
 
 ## Primary official corpus
 
+The titles and channel attribution for V01-V08 were rechecked through YouTube's
+oEmbed metadata on 2026-08-10; each reports the author as **Avid Pro Tools**.
+
 | ID | Avid video | Timecoded evidence |
 |---|---|---|
 | V01 | [Edit Window](https://www.youtube.com/watch?v=3L_UeAZuSik) | 0:05 modes/tools; 0:19 configurable toolbar; 0:34 Universe and rulers; 0:55 Track List left, Clips List right, lanes center. |
@@ -102,7 +105,8 @@ native, physical-device, or audio-output acceptance.
 | Static clip gain | V06, C03 | `MATCH` | Selected-clip line/handle, local drag preview, keyboard control, dB-amplitude waveform response, epoch cancellation, inspector agreement, and `set_clip_gain` commit. |
 | Dynamic clip gain | V06, C03 | `GAP` | Requires an additive breakpoint model and command contract; static gain must not fake it. |
 | Automation Smart Tool | V07 plus Avid help | `MATCH` | Authoritative top-25/lower-75 classifier and Command/Control breakpoint tests. |
-| Automation feedback | V07 | `PARTIAL` | Breakpoint creation is present; range overlay plus node move/delete/nudge traces remain. |
+| Automation range/node editing | V07 | `MATCH` | Lower-band persistent range, upper-band trim preview, numeric Nudge, direct node move, and Option/Alt or Delete removal have focused component tests plus one serial Chromium before/during/after command trace. |
+| Automation clipboard/Pencil | V07 | `GAP` | Cut/copy/paste of selected automation and Control Pencil/freehand authoring remain explicit follow-ups; selection/trim must not be counted as those behaviors. |
 | MIDI editor | V08 | `MATCH/PARTIAL` | Double-click opens the bottom piano roll/controller direction; multi-track editor selection needs deeper proof. |
 | Inserts | V05, V11 | `ADAPTED` | Searchable catalog preserves load/open/bypass/remove/persistence behavior instead of copying nested menus. |
 | Playlist comping | V10 | `DEFERRED` | Requires additive take/playlists project-model work. |

@@ -135,6 +135,16 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: clips retain shared keyboard semantics; cursor intent is repeated in the status text and tooltips.
 - **Layout**: scrollable canvas; lane/header heights remain identical.
 
+### Automation lane editing
+
+- **Structure**: one keyboard-focusable lane surface, a persistent time-range overlay, an SVG curve, and native breakpoint buttons positioned over the curve nodes.
+- **Smart Tool**: the lower 75% selects a time range; the top 25% trims every enclosed breakpoint as a batch; Command/Control-click adds a breakpoint. These regions follow Avid's authoritative Smart Tool help rather than approximate tutorial narration.
+- **Breakpoint behavior**: direct drag moves one point in time and value; Option/Alt-click or Delete removes it; focus and selected-range membership remain visible independently of color.
+- **Feedback**: selection and trim previews remain local during the gesture. The persistent overlay exposes the selected span, and the trim readout exposes its delta before a command is committed.
+- **Mutation**: individual edits use `set_automation_point` or `remove_automation_point`; selected-range trim/nudge uses one `write_automation_curve` replacement so one gesture remains one undo transaction.
+- **Safety**: pointer cancellation, Escape, command rejection, or `projectEpoch` replacement discards previews and cannot address the replacement project. A disabled lane with no target has no breakpoint focus targets.
+- **Accessibility**: the lane describes Enter/Space creation and selection shortcuts; every point is a named native button; selected nodes expose `aria-pressed`; keyboard users can delete a focused point and nudge a selected range.
+
 ### Supporting list panel
 
 - **Structure**: labelled list of tracks or clips with native buttons and a collapse control.
