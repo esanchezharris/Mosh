@@ -89,7 +89,7 @@ test("compact Track List keeps show and hide keyboard reachable", async ({ page 
   expect(await commandNames(page)).toEqual(commandsBefore);
 });
 
-test("Show Only Selected Tracks filters every Edit surface without a project command", async ({ page }) => {
+test("Show Only Selected Tracks restores its exact previous Edit view", async ({ page }, testInfo) => {
   // Given the wide Edit Window has one selected Track Name and every track is shown.
   await page.setViewportSize({ width: 1440, height: 900 });
   await bootProTools(page);
@@ -112,5 +112,31 @@ test("Show Only Selected Tracks filters every Edit surface without a project com
   await expect(page.getByTestId("pt-lane")).toHaveCount(1);
   await expect(page.getByTestId("pt-universe-track")).toHaveCount(1);
   await expect(page.getByTestId("pt-clip-list-item")).toHaveCount(3);
+
+  // When Restore Previously Shown Tracks is activated using only the keyboard.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const restore = page.getByRole("menuitem", {
+    name: "Restore Previously Shown Tracks",
+    exact: true,
+  });
+  await expect(restore).toHaveAttribute("aria-disabled", "false");
+  await page.screenshot({
+    path: testInfo.outputPath("protools-track-restore-wide.png"),
+    animations: "disabled",
+  });
+  await restore.focus();
+  await page.keyboard.press("Enter");
+
+  // Then the complete previous view returns, the restore point is consumed, and no command ran.
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
+  await expect(page.getByTestId("pt-lane")).toHaveCount(3);
+  await expect(page.getByTestId("pt-universe-track")).toHaveCount(3);
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", {
+    name: "Restore Previously Shown Tracks",
+    exact: true,
+  })).toHaveAttribute("aria-disabled", "true");
   expect(await commandNames(page)).toEqual(commandsBefore);
 });

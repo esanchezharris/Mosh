@@ -229,10 +229,10 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 ### Edit Window Track List visibility
 
 - **Structure**: a persistent 24px labelled button in the left Track List title opens a check-state menu containing every non-group/non-return session track, including rows currently absent from the Edit Window.
-- **Behavior**: Hide removes the matching track header, primary lane, and Universe row while preserving session order and every clip in the Clip List. Show restores the same row. Show All, Show Only Selected, Hide All, and Hide Selected replace the visibility set atomically; selection-dependent actions are disabled when no Track Name qualifies. P/Semicolon and Tab navigation operate on shown rows only. If every row is hidden, `No tracks shown` replaces the bank while the recovery menu stays enabled.
+- **Behavior**: Hide removes the matching track header, primary lane, and Universe row while preserving session order and every clip in the Clip List. Show restores the same row. Show All, Show Only Selected, Hide All, and Hide Selected replace the visibility set atomically; selection-dependent actions are disabled when no Track Name qualifies. Show Only Selected captures one exact prior map, while Restore Previously Shown Tracks consumes that one-level recovery point and is disabled before capture or after use. P/Semicolon and Tab navigation operate on shown rows only. If every row is hidden, `No tracks shown` replaces the bank while the recovery menu stays enabled.
 - **State and commands**: visibility is project-scoped shell state, clears on `projectEpoch` replacement, never mutates a snapshot, and emits no `store.exec` command. The hidden track remains audible because the engine and project graph are unchanged.
 - **Accessibility**: every item is a native menu button named `Hide <track> track` or `Show <track> track`; check state and visible text are redundant, and keyboard activation must not leak Enter into the global Return-to-Zero shortcut.
-- **Adaptation**: the menu uses Mosh's original check primitive instead of Avid's dot artwork. Make Active/Inactive, Restore Previously Shown Tracks, type/state/content filters, visibility-enabled Memory Locations, and Edit/Mix window linkage remain explicit gaps.
+- **Adaptation**: the menu uses Mosh's original check primitive instead of Avid's dot artwork. Make Active/Inactive, type/state/content filters, visibility-enabled Memory Locations, and Edit/Mix window linkage remain explicit gaps.
 
 ### Universe session overview
 

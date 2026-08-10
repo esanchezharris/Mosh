@@ -3,67 +3,28 @@ import type { AutomationClipboard } from "./automationEditing";
 import {
   clampHorizontalZoom,
   clampVerticalZoom,
-  DEFAULT_HORIZONTAL_ZOOM_PRESETS,
 } from "./proToolsZoom";
 import type { ProToolsIntent, ProToolsTool } from "./smartTool";
 import { clampTrackHeightScale } from "./trackHeightZoom";
 import type { ProToolsTrackView } from "./trackViews";
+import { proToolsVisibilityForShownTracks } from "./proToolsTrackVisibility";
 import type { TimeRangeSel } from "../v2/shellState";
 import type { SpotTimeScale } from "./spotTime";
+import { clampProToolsUniverseHeight } from "./proToolsUniverse";
 import {
-  clampProToolsUniverseHeight,
-  PROTOOLS_UNIVERSE_DEFAULT_HEIGHT,
-} from "./proToolsUniverse";
+  proToolsProjectDefaults,
+  type ProToolsEditMode,
+  type ProToolsRuler,
+  type ProToolsViewState,
+} from "./proToolsViewState";
 
-export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
-export type ProToolsRuler = "markers" | "barsBeats" | "timecode" | "minutesSeconds" | "samples";
-
-export type ProToolsMemoryLocationEditor =
-  | { readonly mode: "create"; readonly seconds: number }
-  | { readonly mode: "edit"; readonly annotationId: string };
-
-export type ProToolsZoomReturnState = {
-  readonly activeTool: ProToolsTool;
-  readonly smartToolEnabled: boolean;
-};
-
-export type ProToolsRulersVisible = Readonly<Record<ProToolsRuler, boolean>>;
-
-type ProToolsViewState = {
-  readonly projectEpoch: number;
-  readonly editMode: ProToolsEditMode;
-  readonly activeTool: ProToolsTool;
-  readonly smartToolEnabled: boolean;
-  readonly tabToTransient: boolean;
-  readonly trackHeaderWidth: number;
-  readonly rulersVisible: ProToolsRulersVisible;
-  readonly clipListOpen: boolean;
-  readonly nudgeValue: number;
-  readonly mainTimeScale: SpotTimeScale;
-  readonly classicTheme: boolean;
-  readonly hoveredIntent: ProToolsIntent | null;
-  readonly automationClipboard: AutomationClipboard | null;
-  readonly trackViews: Readonly<Record<string, ProToolsTrackView>>;
-  readonly trackVisibility: Readonly<Record<string, boolean>>;
-  readonly automationLanesVisible: Readonly<Record<string, boolean>>;
-  readonly horizontalZoomPresets: readonly number[];
-  readonly audioWaveformZoom: number;
-  readonly midiNoteZoom: number;
-  readonly memoryLocationsOpen: boolean;
-  readonly memoryLocationEditor: ProToolsMemoryLocationEditor | null;
-  readonly singleZoomEnabled: boolean;
-  readonly zoomReturnState: ProToolsZoomReturnState | null;
-  readonly trackHeightScale: number;
-  readonly timelineEditLinked: boolean;
-  readonly timelineSelection: TimeRangeSel | null;
-  readonly timelineSelectionDragging: boolean;
-  readonly trackEditLinked: boolean;
-  readonly editSelectionTrackId: string | null;
-  readonly editSelectionTrackIds: readonly string[];
-  readonly trackSelectionIds: readonly string[];
-  readonly universeOpen: boolean;
-  readonly universeHeight: number;
-};
+export type {
+  ProToolsEditMode,
+  ProToolsMemoryLocationEditor,
+  ProToolsRuler,
+  ProToolsRulersVisible,
+  ProToolsZoomReturnState,
+} from "./proToolsViewState";
 
 type ProToolsActions = {
   readonly setEditMode: (mode: ProToolsEditMode) => void;
@@ -81,6 +42,8 @@ type ProToolsActions = {
   readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
   readonly setTrackShown: (trackId: string, shown: boolean) => void;
   readonly setShownTrackIds: (trackIds: readonly string[], shownTrackIds: readonly string[]) => void;
+  readonly showOnlyTrackIds: (trackIds: readonly string[], shownTrackIds: readonly string[]) => void;
+  readonly restorePreviouslyShownTracks: () => void;
   readonly toggleAutomationLane: (trackId: string) => void;
   readonly setHorizontalZoomPreset: (index: number, pxPerSec: number) => void;
   readonly setAudioWaveformZoom: (value: number) => void;
@@ -106,50 +69,8 @@ type ProToolsActions = {
 
 export type ProToolsState = ProToolsViewState & ProToolsActions;
 
-const projectDefaults = (projectEpoch: number): ProToolsViewState => ({
-  projectEpoch,
-  editMode: "slip",
-  activeTool: "selector",
-  smartToolEnabled: true,
-  tabToTransient: true,
-  trackHeaderWidth: 160,
-  rulersVisible: {
-    markers: true,
-    barsBeats: true,
-    timecode: true,
-    minutesSeconds: true,
-    samples: true,
-  },
-  clipListOpen: true,
-  nudgeValue: 0.25,
-  mainTimeScale: "barsBeats",
-  classicTheme: false,
-  hoveredIntent: null,
-  automationClipboard: null,
-  trackViews: {},
-  trackVisibility: {},
-  automationLanesVisible: {},
-  horizontalZoomPresets: [...DEFAULT_HORIZONTAL_ZOOM_PRESETS],
-  audioWaveformZoom: 1,
-  midiNoteZoom: 1,
-  memoryLocationsOpen: false,
-  memoryLocationEditor: null,
-  singleZoomEnabled: false,
-  zoomReturnState: null,
-  trackHeightScale: 1,
-  timelineEditLinked: true,
-  timelineSelection: null,
-  timelineSelectionDragging: false,
-  trackEditLinked: true,
-  editSelectionTrackId: null,
-  editSelectionTrackIds: [],
-  trackSelectionIds: [],
-  universeOpen: false,
-  universeHeight: PROTOOLS_UNIVERSE_DEFAULT_HEIGHT,
-});
-
 export const useProTools = create<ProToolsState>((set) => ({
-  ...projectDefaults(0),
+  ...proToolsProjectDefaults(0),
   setEditMode: (editMode) => set({ editMode }),
   setActiveTool: (activeTool) => set((state) => {
     if (activeTool === "zoomer") {
@@ -185,11 +106,19 @@ export const useProTools = create<ProToolsState>((set) => ({
   setTrackShown: (trackId, shown) => set((state) => ({
     trackVisibility: { ...state.trackVisibility, [trackId]: shown },
   })),
-  setShownTrackIds: (trackIds, shownTrackIds) => set(() => {
-    const shown = new Set(shownTrackIds);
-    const trackVisibility: Record<string, boolean> = {};
-    trackIds.forEach((trackId) => { if (!shown.has(trackId)) trackVisibility[trackId] = false; });
-    return { trackVisibility };
+  setShownTrackIds: (trackIds, shownTrackIds) => set({
+    trackVisibility: proToolsVisibilityForShownTracks(trackIds, shownTrackIds),
+  }),
+  showOnlyTrackIds: (trackIds, shownTrackIds) => set((state) => ({
+    previousTrackVisibility: state.trackVisibility,
+    trackVisibility: proToolsVisibilityForShownTracks(trackIds, shownTrackIds),
+  })),
+  restorePreviouslyShownTracks: () => set((state) => {
+    if (state.previousTrackVisibility === null) return state;
+    return {
+      trackVisibility: state.previousTrackVisibility,
+      previousTrackVisibility: null,
+    };
   }),
   toggleAutomationLane: (trackId) => set((state) => ({
     automationLanesVisible: {
@@ -252,6 +181,6 @@ export const useProTools = create<ProToolsState>((set) => ({
   setUniverseHeight: (height) => set({ universeHeight: clampProToolsUniverseHeight(height) }),
   resetForProject: (nextEpoch) => set((state) => {
     if (nextEpoch !== undefined && nextEpoch === state.projectEpoch) return state;
-    return projectDefaults(nextEpoch ?? state.projectEpoch);
+    return proToolsProjectDefaults(nextEpoch ?? state.projectEpoch);
   }),
 }));

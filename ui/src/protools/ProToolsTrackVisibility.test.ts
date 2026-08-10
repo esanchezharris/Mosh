@@ -38,8 +38,7 @@ describe("Pro Tools Track List visibility", () => {
   const originalExec = useStore.getState().exec;
 
   beforeEach(() => {
-    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
-      .IS_REACT_ACT_ENVIRONMENT = true;
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -131,6 +130,61 @@ describe("Pro Tools Track List visibility", () => {
     expect(ids).toEqual(["bass"]);
     expect(useProTools.getState().trackVisibility).toEqual({ vocal: false, keys: false });
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("restores the exact visibility state from before Show Only Selected Tracks", async () => {
+    // Given Bass was already hidden before Keys becomes the only selected Track Name.
+    useStore.setState({ selectedTrackId: "keys" });
+    useProTools.setState({
+      trackSelectionIds: ["keys"],
+      trackVisibility: { bass: false },
+    });
+    act(() => root.render(React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT })));
+
+    // When Show Only Selected Tracks is followed by Restore Previously Shown Tracks.
+    const trigger = host.querySelector<HTMLButtonElement>("[data-testid=pt-track-visibility-menu]");
+    if (!trigger) throw new Error("Track List visibility trigger is missing");
+    await act(async () => trigger.click());
+    const showSelected = document.querySelector<HTMLButtonElement>(
+      '[data-testid="pt-track-visibility-show-selected"]',
+    );
+    if (!showSelected) throw new Error("Show Only Selected Tracks is missing");
+    await act(async () => showSelected.click());
+    expect([...host.querySelectorAll<HTMLElement>("[data-testid=pt-track-header]")]
+      .map((header) => header.dataset.trackId)).toEqual(["keys"]);
+    const restoreTrigger = host.querySelector<HTMLButtonElement>(
+      "[data-testid=pt-track-visibility-menu]",
+    );
+    if (!restoreTrigger) throw new Error("Remounted Track List visibility trigger is missing");
+    await act(async () => restoreTrigger.click());
+    const restore = document.querySelector<HTMLButtonElement>(
+      '[data-testid="pt-track-visibility-restore"]',
+    );
+    if (!restore) throw new Error("Restore Previously Shown Tracks is missing");
+    await act(async () => restore.click());
+
+    // Then Vocal and Keys return while the track hidden before Show Only stays hidden.
+    expect([...host.querySelectorAll<HTMLElement>("[data-testid=pt-track-header]")]
+      .map((header) => header.dataset.trackId)).toEqual(["vocal", "keys"]);
+    expect(useProTools.getState().trackVisibility).toEqual({ bass: false });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("disables restore until a Show Only command has captured a previous view", async () => {
+    // Given the project has not run a Show Only command.
+    act(() => root.render(React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT })));
+
+    // When the producer opens the Track List menu.
+    const trigger = host.querySelector<HTMLButtonElement>("[data-testid=pt-track-visibility-menu]");
+    if (!trigger) throw new Error("Track List visibility trigger is missing");
+    await act(async () => trigger.click());
+    const restore = document.querySelector<HTMLButtonElement>(
+      '[data-testid="pt-track-visibility-restore"]',
+    );
+    if (!restore) throw new Error("Restore Previously Shown Tracks is missing");
+
+    // Then the recovery action is exposed but unavailable.
+    expect(restore.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("hides every selected Track Name as one view-state change", async () => {

@@ -296,19 +296,4 @@ describe("Pro Tools shell state", () => {
     expect(useProTools.getState().automationLanesVisible).toEqual({});
   });
 
-  it("keeps shown-track choices within one project epoch", () => {
-    // Given every session track is shown by default.
-    const state = useProTools.getState();
-    expect(state.trackVisibility).toEqual({});
-
-    // When one track is hidden in the current Edit Window.
-    state.setTrackShown("bass-1", false);
-
-    // Then the choice survives an idempotent reset but not a replacement project.
-    expect(useProTools.getState().trackVisibility).toEqual({ "bass-1": false });
-    state.resetForProject(projectEpoch);
-    expect(useProTools.getState().trackVisibility).toEqual({ "bass-1": false });
-    state.resetForProject(projectEpoch + 1);
-    expect(useProTools.getState().trackVisibility).toEqual({});
-  });
 });

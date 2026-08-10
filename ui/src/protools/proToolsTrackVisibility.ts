@@ -12,3 +12,13 @@ export function proToolsShownTracks(
 ): readonly Track[] {
   return proToolsEditTracks(tracks).filter((track) => visibility[track.id] !== false);
 }
+
+export function proToolsVisibilityForShownTracks(
+  trackIds: readonly string[],
+  shownTrackIds: readonly string[],
+): ProToolsTrackVisibility {
+  const shown = new Set(shownTrackIds);
+  return Object.fromEntries(
+    trackIds.filter((trackId) => !shown.has(trackId)).map((trackId) => [trackId, false] as const),
+  );
+}

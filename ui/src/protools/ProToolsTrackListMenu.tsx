@@ -7,8 +7,13 @@ import { useProTools } from "./proToolsState";
 export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Track[] }) {
   const trackVisibility = useProTools((state) => state.trackVisibility);
   const trackSelectionIds = useProTools((state) => state.trackSelectionIds);
+  const previousTrackVisibility = useProTools((state) => state.previousTrackVisibility);
   const setTrackShown = useProTools((state) => state.setTrackShown);
   const setShownTrackIds = useProTools((state) => state.setShownTrackIds);
+  const showOnlyTrackIds = useProTools((state) => state.showOnlyTrackIds);
+  const restorePreviouslyShownTracks = useProTools(
+    (state) => state.restorePreviouslyShownTracks,
+  );
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const selectedIds = trackSelectionIds.length > 0
     ? trackSelectionIds
@@ -35,7 +40,7 @@ export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Tr
           </MoshMenuItem>
           <MoshMenuItem testId="pt-track-visibility-show-selected"
             ariaLabel="Show Only Selected Tracks" disabled={eligibleSelectedIds.length === 0}
-            onPick={() => setShownTrackIds(trackIds, eligibleSelectedIds)}>
+            onPick={() => showOnlyTrackIds(trackIds, eligibleSelectedIds)}>
             <span className="pt-track-visibility-name">Show Only Selected Tracks</span>
           </MoshMenuItem>
           <MoshMenuItem testId="pt-track-visibility-hide-all" ariaLabel="Hide All Tracks"
@@ -50,6 +55,11 @@ export function ProToolsTrackListMenu({ tracks }: { readonly tracks: readonly Tr
               shownTrackIds.filter((trackId) => !selected.has(trackId)),
             )}>
             <span className="pt-track-visibility-name">Hide Selected Tracks</span>
+          </MoshMenuItem>
+          <MoshMenuItem testId="pt-track-visibility-restore"
+            ariaLabel="Restore Previously Shown Tracks" disabled={previousTrackVisibility === null}
+            onPick={restorePreviouslyShownTracks}>
+            <span className="pt-track-visibility-name">Restore Previously Shown Tracks</span>
           </MoshMenuItem>
         </div>
         {tracks.map((track) => {
