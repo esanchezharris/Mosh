@@ -5,6 +5,12 @@ import { PluginBrowserContent } from "../ui/PluginBrowser";
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
+type PluginQuarantine = { id: string; rawId: string; reason: string };
+
+function quarantineName(entry: PluginQuarantine): string {
+  return entry.rawId.split("/").at(-1) || entry.id;
+}
+
 export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
   readonly onClose: () => void;
   readonly returnFocusRef: RefObject<HTMLButtonElement>;
@@ -14,14 +20,23 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
   const lastError = useStore((state) => state.lastError);
   const setLastError = useStore((state) => state.setLastError);
   const rescanPlugins = useStore((state) => state.rescanPlugins);
+  const exec = useStore((state) => state.exec);
+  const pluginBlocklist = useStore((state) => state.pluginBlocklist);
+  const refreshPluginBlocklist = useStore((state) => state.refreshPluginBlocklist);
   const dialogRef = useRef<HTMLElement>(null);
   const [scanAttempted, setScanAttempted] = useState(false);
+  const quarantined = pluginBlocklist.filter((entry) =>
+    entry.reason === "crash_or_hang" && entry.rawId.toLowerCase().endsWith(".vst3"));
 
   useEffect(() => pushEscapeHandler(onClose), [onClose]);
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLInputElement>("[data-testid=plugin-browser-search]")?.focus();
     return () => returnFocusRef.current?.focus();
   }, [returnFocusRef]);
+  useEffect(() => {
+    if (scanProgress) return;
+    void refreshPluginBlocklist();
+  }, [refreshPluginBlocklist, scanProgress]);
 
   const trapFocus = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Tab") return;
@@ -51,6 +66,15 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
     await rescanPlugins("vst3", false, true);
   };
 
+  const retryQuarantined = async (entry: PluginQuarantine) => {
+    setScanAttempted(true);
+    setLastError(null);
+    const result = await exec("unblock_plugin", { pluginId: entry.rawId });
+    if (!result.ok) return;
+    await refreshPluginBlocklist();
+    await rescanPlugins("vst3", false, true);
+  };
+
   return (
     <div className="pt-insert-backdrop" data-testid="pt-insert-backdrop" role="presentation" onClick={onClose}>
       <section ref={dialogRef} className="pt-insert-dialog" data-testid="pt-insert-dialog"
@@ -72,6 +96,20 @@ export function ProToolsInsertDialog({ onClose, returnFocusRef }: {
             {typeof scanProgress.count === "number" ? ` — ${scanProgress.count} found` : ""}
             {typeof scanProgress.elapsedMs === "number" ? ` · ${(scanProgress.elapsedMs / 1000).toFixed(1)}s` : ""}
             {" — hung plugins are quarantined"}
+          </div>
+        )}
+        {!scanProgress && quarantined.length > 0 && (
+          <div className="pt-insert-quarantine" role="status">
+            {quarantined.map((entry, index) => (
+              <div key={entry.rawId}>
+                <span>Quarantined: {quarantineName(entry)}</span>
+                <button type="button"
+                  data-testid={index === 0 ? "pt-insert-retry-quarantine" : undefined}
+                  onClick={() => void retryQuarantined(entry)}>
+                  Retry this VST3
+                </button>
+              </div>
+            ))}
           </div>
         )}
         {scanAttempted && lastError && <div className="pt-insert-error" role="alert">{lastError}</div>}

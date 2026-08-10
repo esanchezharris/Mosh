@@ -335,6 +335,7 @@ private:
     // catalog-only, so none take a Tracktion transaction.
     juce::var cmdRescanPlugins      (const juce::var& args);   // async catalog re-enumeration (persists)
     juce::var cmdGetPluginBlocklist (const juce::var& args);   // read-only (no log/transaction)
+    juce::var cmdUnblockPlugin      (const juce::var& args);   // retry one quarantine (undoable:false)
     juce::var cmdClearPluginBlocklist (const juce::var& args); // catalog-only (undoable:false)
     juce::var cmdBlockPlugin        (const juce::var& args);   // catalog-only (undoable:false)
     // Wave 7 — parameter automation

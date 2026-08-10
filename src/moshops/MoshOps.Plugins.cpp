@@ -1129,6 +1129,19 @@ juce::var MoshOps::cmdClearPluginBlocklist (const juce::var& args)
     return okResult ("clear_plugin_blocklist");
 }
 
+juce::var MoshOps::cmdUnblockPlugin (const juce::var& args)
+{
+    const auto id = args.getProperty ("pluginId", var()).toString();
+    if (id.isEmpty())
+        return errResult ("unblock_plugin", "missing pluginId");
+    if (! pluginHost.unblockPlugin (id))
+        return errResult ("unblock_plugin", "plugin is not quarantined");
+
+    logLine ("unblock_plugin", args, true, {}, false);   // catalog op, not undoable
+    emitSnapshotInvalidated();
+    return okResult ("unblock_plugin");
+}
+
 juce::var MoshOps::cmdBlockPlugin (const juce::var& args)
 {
     const auto id = args.getProperty ("pluginId", var()).toString();

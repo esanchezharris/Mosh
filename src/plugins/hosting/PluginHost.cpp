@@ -657,6 +657,21 @@ void PluginHost::blockPlugin (const String& pluginId)
     blockPluginWithReason (pluginId, "manual");
 }
 
+bool PluginHost::unblockPlugin (const String& pluginId)
+{
+    auto& list = engine.getPluginManager().knownPluginList;
+    if (! list.getBlacklistedFiles().contains (pluginId))
+        return false;
+
+    list.removeFromBlacklist (pluginId);
+    const int reasonIndex = blockReasons.getAllKeys().indexOf (pluginId);
+    if (reasonIndex >= 0)
+        blockReasons.remove (reasonIndex);
+    saveBlockReasons();
+    saveCatalog();
+    return true;
+}
+
 // FIT-003 — the one place that actually blacklists + tags a reason. Both the manual
 // block_plugin command (above) and the crash/hang dead-mans-pedal recovery
 // (recoverFromDeadMansPedal()) route through here so blockReasonFor() is always

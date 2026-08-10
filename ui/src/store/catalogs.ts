@@ -22,6 +22,7 @@ export type CatalogsSlice = {
   // by the sync VST3 rescan path and the mock) stays valid — a live async sweep adds a
   // periodic running count + elapsed time, sampled from the backend's real plugin catalog.
   scanProgress: { format: string; done: boolean; count?: number; elapsedMs?: number } | null; // transient rescan state
+  pluginBlocklist: { id: string; rawId: string; reason: string }[];
   audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
   waveInputs: WaveInput[] | null;          // RTG-001 input choices (on-demand, lazy)
   midiInputs: MidiInput[] | null;          // CTL-001 MIDI-input choices (on-demand, lazy)
@@ -31,6 +32,7 @@ export type CatalogsSlice = {
   // INS-005 — plugin scan / blocklist management (all via exec; UI-local view state otherwise).
   rescanPlugins: (format?: "vst3" | "au" | "all", allowAU?: boolean, deepVst3?: boolean) => Promise<void>;
   refreshPluginList: () => Promise<void>;
+  refreshPluginBlocklist: () => Promise<void>;
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
@@ -41,6 +43,7 @@ export const createCatalogsSlice: StateCreator<State, [], [], CatalogsSlice> = (
   availableBuiltins: [],
   pluginCounts: null,
   scanProgress: null,
+  pluginBlocklist: [],
   audioDevices: null,
   waveInputs: null,
   midiInputs: null,
@@ -66,6 +69,14 @@ export const createCatalogsSlice: StateCreator<State, [], [], CatalogsSlice> = (
     >({ command: "list_plugins", args: {} });
     if (res.ok && res.data)
       set({ availablePlugins: res.data.plugins, pluginCounts: res.data.counts ?? null });
+  },
+
+  refreshPluginBlocklist: async () => {
+    const res = await executeCommand<CommandResult<{
+      blocklist: { id: string; rawId: string; reason: string }[];
+    }>>({ command: "get_plugin_blocklist", args: {} });
+    if (res.ok && res.data)
+      set({ pluginBlocklist: res.data.blocklist ?? [] });
   },
 
   // INS-005 — re-enumerate the catalog. AU is the slow/risky path (the backend

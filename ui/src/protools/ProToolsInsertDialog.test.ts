@@ -29,6 +29,7 @@ describe("Pro Tools insert workflow", () => {
   let exec: ReturnType<typeof vi.fn>;
   let ensurePluginCatalog: ReturnType<typeof vi.fn>;
   let rescanPlugins: ReturnType<typeof vi.fn>;
+  let refreshPluginBlocklist: ReturnType<typeof vi.fn>;
   const originalState = useStore.getState();
 
   beforeEach(() => {
@@ -40,6 +41,7 @@ describe("Pro Tools insert workflow", () => {
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     ensurePluginCatalog = vi.fn();
     rescanPlugins = vi.fn(async () => {});
+    refreshPluginBlocklist = vi.fn(async () => {});
     useStore.setState({
       selectedTrackId: TRACK.id,
       availablePlugins: [{
@@ -58,10 +60,16 @@ describe("Pro Tools insert workflow", () => {
       }],
       pluginCounts: { vst3: 1, au: 0, total: 1 },
       scanProgress: null,
+      pluginBlocklist: [{
+        id: "/Library/Audio/Plug-Ins/VST3/WaveShell1-VST3 16.7.vst3",
+        rawId: "/Library/Audio/Plug-Ins/VST3/WaveShell1-VST3 16.7.vst3",
+        reason: "crash_or_hang",
+      }],
       lastError: null,
       exec,
       ensurePluginCatalog,
       rescanPlugins,
+      refreshPluginBlocklist,
     });
     act(() => root.render(
       React.createElement(MoshTipProvider, { delay: 0 },
@@ -79,10 +87,12 @@ describe("Pro Tools insert workflow", () => {
       availableBuiltins: originalState.availableBuiltins,
       pluginCounts: originalState.pluginCounts,
       scanProgress: originalState.scanProgress,
+      pluginBlocklist: originalState.pluginBlocklist,
       lastError: originalState.lastError,
       exec: originalState.exec,
       ensurePluginCatalog: originalState.ensurePluginCatalog,
       rescanPlugins: originalState.rescanPlugins,
+      refreshPluginBlocklist: originalState.refreshPluginBlocklist,
     });
   });
 
@@ -154,6 +164,19 @@ describe("Pro Tools insert workflow", () => {
 
     act(() => useStore.setState({ scanProgress: null, lastError: "VST3 scan quarantined BadPlugin" }));
     expect(dialog.querySelector("[role=alert]")?.textContent).toContain("quarantined BadPlugin");
+  });
+
+  it("retries only the selected quarantined VST3 before starting a guarded deep scan", async () => {
+    const dialog = await openDialog();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(dialog.textContent).toContain("WaveShell1-VST3 16.7.vst3");
+
+    await act(async () => button("pt-insert-retry-quarantine").click());
+
+    expect(exec).toHaveBeenCalledWith("unblock_plugin", {
+      pluginId: "/Library/Audio/Plug-Ins/VST3/WaveShell1-VST3 16.7.vst3",
+    });
+    expect(rescanPlugins).toHaveBeenCalledWith("vst3", false, true);
   });
 
   it("opens, bypasses, and removes an existing insert through store.exec", async () => {

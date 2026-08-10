@@ -674,6 +674,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "rescan_plugins")        return cmdRescanPlugins (args);
     if (name == "get_plugin_blocklist")  return cmdGetPluginBlocklist (args);
+    if (name == "unblock_plugin")        return cmdUnblockPlugin (args);
     if (name == "clear_plugin_blocklist")return cmdClearPluginBlocklist (args);
     if (name == "block_plugin")          return cmdBlockPlugin (args);
     if (name == "add_automation_point")    return cmdAddAutomationPoint (args);

@@ -62,6 +62,7 @@ public:
         available()/list_plugins. */
     juce::StringArray blocklist() const;
     void blockPlugin   (const juce::String& pluginId);   // manual quarantine
+    bool unblockPlugin (const juce::String& pluginId);   // retry one quarantine
     void clearBlocklist();                                // un-quarantine all
 
     /** FIT-003 — why `pluginId` (a raw fileOrIdentifier, as returned by blocklist())

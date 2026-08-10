@@ -1869,6 +1869,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         if (p.getProperty ("id", var()).toString() == blockTarget) stillPresent = true;
                 check (! stillPresent, "blocked VST3 removed from list_plugins immediately");
             }
+
+            // A producer retry removes only the named quarantine; it must not use
+            // clear_plugin_blocklist, which could re-enable unrelated crashers.
+            String blockedRawId;
+            { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+              if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("id", var()).toString() == blockTarget ||
+                        e.getProperty ("rawId", var()).toString() == blockTarget)
+                        blockedRawId = e.getProperty ("rawId", var()).toString(); }
+            check (blockedRawId.isNotEmpty(), "blocked plugin exposes its raw quarantine id");
+            check (ok (cmd (ops, "unblock_plugin", args1 ("pluginId", blockedRawId))),
+                   "unblock_plugin retries one quarantine");
+            { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+              bool stillBlocked = false;
+              if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("rawId", var()).toString() == blockedRawId) stillBlocked = true;
+              check (! stillBlocked, "unblock_plugin removes only the named quarantine"); }
         }
 
         // clear_plugin_blocklist empties it again.

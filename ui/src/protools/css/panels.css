@@ -187,9 +187,12 @@
 .pt-insert-head span { color: var(--pt-text-muted); font-size: 9px; }
 .pt-insert-head button { min-height: 28px; border: 1px solid var(--pt-border); color: var(--pt-text); background: var(--pt-raised); }
 .pt-insert-scan,
-.pt-insert-error { padding: 7px 10px; border-bottom: 1px solid var(--pt-border); background: var(--pt-inset); }
+.pt-insert-error,
+.pt-insert-quarantine { padding: 7px 10px; border-bottom: 1px solid var(--pt-border); background: var(--pt-inset); }
 .pt-insert-scan { color: var(--pt-text-muted); }
 .pt-insert-error { color: var(--pt-danger); }
+.pt-insert-quarantine > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pt-insert-quarantine button { min-height: 28px; border: 1px solid var(--pt-border); color: var(--pt-text); background: var(--pt-raised); }
 .pt-insert-dialog .modal-filters { border-color: var(--pt-border); }
 .pt-insert-dialog .modal-filters input,
 .pt-insert-dialog .prow-load,

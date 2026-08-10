@@ -83,6 +83,7 @@ export function onPluginScanProgress(ev: MoshEvent, set: Set, get: Get): void {
       : undefined;
     set({ scanProgress: null, ...(quarantineError ? { lastError: quarantineError } : {}) });
     void get().refreshPluginList();
+    void get().refreshPluginBlocklist();
   } else {
     set({ scanProgress: { format: p.format, done: false, count: p.count, elapsedMs: p.elapsedMs } });
   }
