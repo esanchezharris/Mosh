@@ -61,6 +61,7 @@ export function MoshMenu({ trigger, label, align = "start", children }: MoshMenu
 export type MoshMenuItemProps = {
   onPick: () => void;
   testId?: string;
+  disabled?: boolean;
   /** Required when the visible content is split across spans/icons (screen readers
    *  would otherwise announce the row unnamed). */
   ariaLabel?: string;
@@ -69,16 +70,17 @@ export type MoshMenuItemProps = {
 
 /** One action row. Renders a real <button> so the existing .v2-menu styles apply;
  *  the library adds role="menuitem", keyboard highlight, and typeahead. */
-export function MoshMenuItem({ onPick, testId, ariaLabel, children }: MoshMenuItemProps) {
+export function MoshMenuItem({ onPick, testId, disabled = false, ariaLabel, children }: MoshMenuItemProps) {
   return (
     <Menu.Item
       render={<button type="button" />}
       nativeButton
+      disabled={disabled}
       data-testid={testId}
       aria-label={ariaLabel}
       onClick={onPick}
       onKeyDown={(event) => {
-        if (event.key !== "Enter") return;
+        if (disabled || event.key !== "Enter") return;
         event.preventDefault();
         event.currentTarget.click();
       }}

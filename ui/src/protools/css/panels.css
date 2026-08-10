@@ -31,6 +31,12 @@
 .pt-track-list-menu-trigger:disabled { color: var(--pt-text-muted); opacity: 0.55; }
 .pt-track-list-menu-trigger:focus-visible { outline: 2px solid var(--pt-focus-ring); }
 .pt-track-visibility-menu { min-width: 196px; }
+.pt-track-visibility-actions {
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--pt-border);
+}
+.pt-track-visibility-menu button[data-disabled] { opacity: 0.45; }
 .pt-track-visibility-state { display: grid; width: 14px; place-items: center; }
 .pt-track-visibility-state[data-shown="false"]::before { content: "·"; }
 .pt-track-visibility-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

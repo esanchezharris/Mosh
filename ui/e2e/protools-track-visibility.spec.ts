@@ -88,3 +88,29 @@ test("compact Track List keeps show and hide keyboard reachable", async ({ page 
   await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
   expect(await commandNames(page)).toEqual(commandsBefore);
 });
+
+test("Show Only Selected Tracks filters every Edit surface without a project command", async ({ page }) => {
+  // Given the wide Edit Window has one selected Track Name and every track is shown.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+  await page.getByTestId("pt-universe-toggle").click();
+  await expect(page.getByTestId("pt-track-select").filter({ hasText: "Drums" }))
+    .toHaveAttribute("aria-pressed", "true");
+  const commandsBefore = await commandNames(page);
+
+  // When Show Only Selected Tracks is activated using the keyboard.
+  const trigger = page.getByTestId("pt-track-visibility-menu");
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const action = page.getByRole("menuitem", { name: "Show Only Selected Tracks", exact: true });
+  await action.focus();
+  await page.keyboard.press("Enter");
+
+  // Then every aligned Edit surface shows only Drums while all session clips remain listed.
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(1);
+  await expect(page.getByTestId("pt-track-header")).toContainText("Drums");
+  await expect(page.getByTestId("pt-lane")).toHaveCount(1);
+  await expect(page.getByTestId("pt-universe-track")).toHaveCount(1);
+  await expect(page.getByTestId("pt-clip-list-item")).toHaveCount(3);
+  expect(await commandNames(page)).toEqual(commandsBefore);
+});

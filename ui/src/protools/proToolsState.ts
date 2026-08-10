@@ -80,6 +80,7 @@ type ProToolsActions = {
   readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
   readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
   readonly setTrackShown: (trackId: string, shown: boolean) => void;
+  readonly setShownTrackIds: (trackIds: readonly string[], shownTrackIds: readonly string[]) => void;
   readonly toggleAutomationLane: (trackId: string) => void;
   readonly setHorizontalZoomPreset: (index: number, pxPerSec: number) => void;
   readonly setAudioWaveformZoom: (value: number) => void;
@@ -184,6 +185,12 @@ export const useProTools = create<ProToolsState>((set) => ({
   setTrackShown: (trackId, shown) => set((state) => ({
     trackVisibility: { ...state.trackVisibility, [trackId]: shown },
   })),
+  setShownTrackIds: (trackIds, shownTrackIds) => set(() => {
+    const shown = new Set(shownTrackIds);
+    const trackVisibility: Record<string, boolean> = {};
+    trackIds.forEach((trackId) => { if (!shown.has(trackId)) trackVisibility[trackId] = false; });
+    return { trackVisibility };
+  }),
   toggleAutomationLane: (trackId) => set((state) => ({
     automationLanesVisible: {
       ...state.automationLanesVisible,
