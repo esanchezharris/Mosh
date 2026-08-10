@@ -171,6 +171,12 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Linked state**: Link Track/Edit on makes the pressed Track Names and active inspector follow every Move, Extend, or Remove operation. Link Track/Edit off changes only the Edit bands and retains independently selected Track Names and inspector focus.
 - **Boundary and safety**: Move and Extend at the first/last visible edge are no-ops. Remove retains the final Edit owner as a documented Mosh adaptation because Avid's published command descriptions do not define a single-track result. Unapplied operations do not claim the key event. Track ids are ordered and filtered against the current visible list, so deleted/group/return tracks cannot become targets and a discontiguous set extends from or removes its true outer visible edge. This is project-scoped UI state and issues no command.
 
+### Track and Clip Group shortcut boundary
+
+- **Authority**: Avid assigns Command+G to Edit/Mix Track Groups and Command+Option+G to Clip Groups. These are different from routing folders.
+- **Current state**: both workflows remain explicit model gaps. The Pro Tools preset leaves Command+G unclaimed because Mosh's shared `group` action creates a routing folder/submix, which this Edit bank does not render.
+- **Safety**: no key press may dispatch `create_group_track` or make tracks disappear as a side effect of an unsupported Pro Tools grouping workflow. Focused keymap and Chromium regression tests pin that boundary until additive Track Group and Clip Group contracts exist.
+
 ### Track control row
 
 - **Structure**: color strip, select/name button, record/solo/mute controls, and snapshot-backed output metadata.

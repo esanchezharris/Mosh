@@ -212,8 +212,16 @@ const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
 // Pro Tools — Separate Clip = ⌘E; Record = ⌘Space; Return = back to start.
 // F1–F10 belong to the Pro Tools shell-local mode/tool layer so the shared
 // dispatcher cannot also mutate an invisible global modal-tool selection.
+// Pro Tools ⌘G creates an Edit/Mix track group, while Mosh's shared GROUP action
+// creates a routing folder/submix. The Pro Tools shell does not render those
+// group rows, so inheriting this binding silently changed routing and then hid
+// the result. Omit it until the additive Edit Group model exists; Pro Tools Clip
+// Groups are a separate ⌥⌘G workflow.
+const PROTOOLS_CORE: Keymap = { ...MOSH_NO_MODAL_TOOLS };
+delete PROTOOLS_CORE[A.GROUP];
+
 const PROTOOLS: Keymap = {
-  ...MOSH_NO_MODAL_TOOLS,
+  ...PROTOOLS_CORE,
   [A.SPLIT]: "Mod+E",
   [A.RECORD]: "Mod+Space",
   [A.TO_START]: "Enter",
