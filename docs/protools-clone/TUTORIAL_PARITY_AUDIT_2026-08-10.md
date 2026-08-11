@@ -1,10 +1,10 @@
 # Pro Tools tutorial parity audit — 2026-08-10
 
-Base: `ce1a33d2` (`origin/main` after PR #637)
+Base: `256f19bf` (`origin/main` after PR #638)
 
-Updated 2026-08-11 on `codex/protools-tutorial-parity`: the three selected
-follow-ups below now have source, focused, and browser evidence. Native audible
-routing and physical QuickPunch remain deliberately unclaimed.
+Updated 2026-08-11 on `codex/protools-send-automation-meters`: the selected
+mixing follow-up now has native source/self-test, focused UI, and serial Chromium
+evidence. Native audible routing and physical QuickPunch remain deliberately unclaimed.
 
 This is a behavior audit of the V01–V20 catalog in
 [`VIDEO_PARITY.md`](./VIDEO_PARITY.md), not a pixel-clone claim. Avid documentation
@@ -23,7 +23,7 @@ or deeper native contracts rather than missing top-level surfaces.
 |---:|---|---|---|---|
 | 1 | The no-dialog fade shortcut still uses a fixed 10 ms Linear preset instead of the last selected Fades settings. Avid's current Shortcuts Guide says Command+Control+F uses the last selected fade shape; C04/C04B establish the repeated edit workflow. | High for vocal cleanup and comp edits because it removes repeated modal setup. | `set_clip_fade`, `buildProToolsFadePlan`, schema-backed UI preferences. | **Implement now.** Persist the last successfully applied length and In/Out shapes; use them for the existing shortcut. Length persistence is a labelled Mosh adaptation because current Mosh fades do not extend hidden source handles from an arbitrary selection. |
 | 2 | QuickPunch plus arbitrary pre/post-roll and a movable play-start flag (V15/V16). | Very high for overdubs. | Only `set_count_in` 0/1/2 bars and bounded Punch exist. | **Contract complete; native work deferred.** [`QUICKPUNCH_PREPOST_CONTRACT.md`](./QUICKPUNCH_PREPOST_CONTRACT.md) freezes additive state/commands, continuous-source semantics, accessibility, recovery, locks, and the guarded physical-device matrix. Shell-only simulation remains prohibited. |
-| 3 | Send mute, pre-fader switching, pan, and automation (V11/V20). | High for effect A/B and cue mixes. | Send level/add/remove, Aux returns, and the native send plug-in seam. | **Mute, pan, and real pre/post implemented.** Focused native/mock/component tests plus serial Chromium cover state and command envelopes. Send automation/meters and native audible routing remain explicit gaps. |
+| 3 | Send mute, pre-fader switching, pan, automation, and metering (V11/V20). | High for effect A/B and cue mixes. | AuxSend's real parameter/graph seam plus the existing 30 Hz level rail. | **Implemented; native audible proof pending.** Level, Pan, and Mute are generic automation targets addressed from the physical AuxSend plug-in. Edit and Mix show its final delivered stereo branch. Native self-test, focused UI tests, and serial Chromium cover persistence, addresses, lifecycle, accessibility, and visible response; a physical output trace remains required before audible parity is claimed. |
 | 4 | Arbitrary playlist targets and atomic grouped-track comping (V10/V14). | High for vocals and multitrack drums. | `promote_take_region` targets Main on one track. | Defer until one atomic multi-track command can preserve alignment, locks, recovery ids, and undo. |
 | 5 | Memory Locations recalling edit selection, zoom, and track visibility (V13). | Medium-high navigation gain. | Persisted annotations plus shell-local selection/zoom/visibility state. | **Implemented.** Additive nested metadata is validated, undoable, save/reload-safe, replayable, and multiplayer-broadcast; recall is result- and epoch-gated and filters deleted tracks. Focused native/mock/component and serial Chromium evidence cover the contract. |
 | 6 | Multiple automation lanes and independent MIDI-editor modes/tools (V07–V09). | Medium; important in advanced editing, not session-blocking. | One Volume lane and the shared docked Piano Roll exist. | Split into automation-target and MIDI-editor lanes after the audio-first gaps. |
@@ -48,6 +48,26 @@ or deeper native contracts rather than missing top-level surfaces.
 - The three commands are validated, undoable, replayable, JSONL-recorded, and
   track-locked. Browser evidence verifies Edit inspector and Mix strip agreement;
   a physical output trace is still required before audible parity is claimed.
+
+## Implemented packet: send automation and final-branch meters
+
+- Each assigned send exposes the real AuxSend plug-in index plus Level, Pan, and
+  Mute parameter indices. The existing generic automation commands own every
+  breakpoint, curve replacement, undo entry, replay record, and JSONL line.
+- The Pro Tools Track View header offers ordered `Volume`, `<Bus> · Level`,
+  `<Bus> · Pan`, and `<Bus> · Mute` targets. Removing a remembered send falls
+  back to Volume; `projectEpoch` replacement clears target choices.
+- A Tracktion `LevelMeasurer` wraps the final post-mute, post-pan, post-level send
+  branch. The optional `levels.payload.sends` entries are keyed by track and bus;
+  legacy track/master consumers retain their exact event shape.
+- Edit and Mix meters read the ephemeral send map imperatively in one animation
+  loop per mounted meter. They expose a non-focusable `meter` role and stereo
+  dBFS text without a live region, so 30 Hz telemetry does not create React or
+  screen-reader announcement churn.
+- Serial Chromium proves moving stereo readings, all three exact generic command
+  addresses, mute-to-floor behavior, removal fallback, and 720×720 reachability.
+  This is Mosh/browser behavior evidence, not a claim that a physical Aux return
+  was heard or calibrated against Pro Tools.
 
 ## Implemented packet: Memory Location view recall
 
