@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
 import type { CommandResult, Snapshot, Track } from "../types";
+import { sendLevelKey } from "../types";
 import { ProToolsSends } from "./ProToolsSends";
 
 vi.mock("../bridge", async () => {
@@ -88,7 +89,10 @@ describe("Pro Tools sends and Aux returns", () => {
       exec,
       lastError: null,
       refresh: vi.fn(async () => {}),
+      sendLevels: { [sendLevelKey("vocal", 0)]: { l: -14, r: -16 } },
     });
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
   });
 
   afterEach(() => {
@@ -104,6 +108,7 @@ describe("Pro Tools sends and Aux returns", () => {
       refresh: originalState.refresh,
     });
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const render = () => act(() => root.render(React.createElement(ProToolsSends, { track: SOURCE })));
@@ -116,6 +121,8 @@ describe("Pro Tools sends and Aux returns", () => {
     expect(host.querySelector<HTMLInputElement>("[data-testid=pt-send-level-0]")?.value).toBe("-12");
     expect(host.querySelector("[data-testid=pt-send-level-readout-0]")?.textContent).toBe("-12.0 dB");
     expect(host.querySelector<HTMLInputElement>("[data-testid=pt-send-pan-0]")?.value).toBe("-0.25");
+    const sendMeter = host.querySelector<HTMLElement>('[data-testid="pt-send-0"] [role="meter"]');
+    expect(sendMeter?.getAttribute("aria-label")).toBe("Plate send output");
 
     const level = host.querySelector<HTMLInputElement>("[data-testid=pt-send-level-0]");
     const pan = host.querySelector<HTMLInputElement>("[data-testid=pt-send-pan-0]");

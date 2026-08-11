@@ -685,8 +685,11 @@
 .pt-send-level {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(80px, 1fr) 58px 25px;
+  grid-template-columns: 54px minmax(80px, 1fr) 58px 25px;
 }
+.pt-send-level .meter.send { width: 54px; gap: 2px; }
+.pt-send-level .meter.send .mbar { height: 3px; }
+.pt-send-level .meter.send .mmask { background: var(--pt-inset); }
 .pt-send-level input { width: 100%; accent-color: var(--pt-selected); }
 .pt-send-level output {
   color: var(--pt-text);

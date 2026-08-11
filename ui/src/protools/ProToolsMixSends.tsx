@@ -1,4 +1,5 @@
 import type { Snapshot, Track } from "../types";
+import { SendMeter } from "../ui/Meter";
 import { executeProToolsMixFanout } from "./proToolsMixFanout";
 
 export function ProToolsMixSends({ snapshot, track, targetTrackIds }: {
@@ -46,6 +47,7 @@ export function ProToolsMixSends({ snapshot, track, targetTrackIds }: {
                   void run("remove_send", (trackId) => ({ trackId, bus: send.bus }));
                 }}>×</button>
               </div>
+              <SendMeter trackId={track.id} bus={send.bus} label={`${name} send output`} />
               <label className="pt-mix-send-control">
                 <span>Lvl</span>
                 <input type="range" min={-60} max={6} step={0.5} value={send.db}
