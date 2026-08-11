@@ -399,7 +399,15 @@ export type BuiltinPlugin = {
   builtin: true;
 };
 
-export type Send = { bus: number; db: number; mute: boolean };
+export type Send = {
+  bus: number;
+  db: number;
+  mute: boolean;
+  /** Stereo balance for the send branch only: -1 left, 0 center, 1 right. */
+  pan?: number;
+  /** True when the send plugin is physically ordered before the track fader. */
+  preFader?: boolean;
+};
 // One loaded sound on a track's sampler. `index` is the sampler's own pad index and is
 // how every pad command addresses it; `pitch` is the note that triggers it. A pad whose
 // minNote..maxNote spans a wide range was assigned in melodic mode — it is a pitched
@@ -708,6 +716,18 @@ export type Annotation = {
   beat: number;
   color?: string;
   author?: string;
+  /** Optional Pro Tools-style view state recalled after the marker seek succeeds. */
+  memoryLocation?: MemoryLocationProperties;
+};
+
+export type MemoryLocationProperties = {
+  editSelection?: {
+    start: number;
+    end: number;
+    trackIds?: string[];
+  };
+  horizontalZoom?: number;
+  shownTrackIds?: string[];
 };
 
 // PRJ-FMT — the snapshot WIRE-CONTRACT version this UI build expects. If the backend

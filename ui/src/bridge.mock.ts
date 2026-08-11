@@ -15,7 +15,7 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
-import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -479,7 +479,8 @@ const MOCK_TXN_SAFE = new Set([
   "set_track_automation_mode", "write_automation_curve",
   "add_automation_point", "remove_automation_point", "set_automation_point",
   "clear_automation",
-  "create_bus", "add_send", "set_send_level", "remove_send",
+  "create_bus", "add_send", "set_send_level", "set_send_mute", "set_send_pan",
+  "set_send_pre_fader", "remove_send",
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
   "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
@@ -827,6 +828,55 @@ function stopPlayback() {
 
 const num = (v: unknown, d = 0): number => (typeof v === "number" && isFinite(v) ? v : d);
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
+function mockMemoryLocation(value: unknown): {
+  readonly value?: Annotation["memoryLocation"];
+  readonly error?: string;
+} {
+  if (value === null || value === undefined) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "memoryLocation must be an object or null" };
+  }
+  const source = value as Record<string, unknown>;
+  const normalized: NonNullable<Annotation["memoryLocation"]> = {};
+  const trackIds = (candidate: unknown): string[] | null => {
+    if (!Array.isArray(candidate) || candidate.some((id) => typeof id !== "string" || !id.trim())) {
+      return null;
+    }
+    return [...new Set(candidate as string[])];
+  };
+  if (source.editSelection !== undefined) {
+    if (typeof source.editSelection !== "object" || source.editSelection === null
+        || Array.isArray(source.editSelection)) {
+      return { error: "Memory Location editSelection must be an object" };
+    }
+    const selection = source.editSelection as Record<string, unknown>;
+    if (typeof selection.start !== "number" || !Number.isFinite(selection.start)
+        || typeof selection.end !== "number" || !Number.isFinite(selection.end)
+        || selection.start < 0 || selection.end < selection.start) {
+      return { error: "Memory Location selection must be finite and ordered" };
+    }
+    const ids = selection.trackIds === undefined ? undefined : trackIds(selection.trackIds);
+    if (ids === null) return { error: "Memory Location track ids must be non-empty strings" };
+    normalized.editSelection = {
+      start: selection.start,
+      end: selection.end,
+      ...(ids ? { trackIds: ids } : {}),
+    };
+  }
+  if (source.horizontalZoom !== undefined) {
+    if (typeof source.horizontalZoom !== "number" || !Number.isFinite(source.horizontalZoom)
+        || source.horizontalZoom < 20 || source.horizontalZoom > 400) {
+      return { error: "Memory Location horizontalZoom must be between 20 and 400" };
+    }
+    normalized.horizontalZoom = source.horizontalZoom;
+  }
+  if (source.shownTrackIds !== undefined) {
+    const ids = trackIds(source.shownTrackIds);
+    if (ids === null) return { error: "Memory Location track ids must be non-empty strings" };
+    normalized.shownTrackIds = ids;
+  }
+  return { value: normalized };
+}
 const completeLyricText = (text: string): boolean => {
   const t = text.trim();
   return Boolean(t && !t.includes("___") && /[A-Za-z0-9]/.test(t));
@@ -1670,8 +1720,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── sends / returns / aux buses (Wave 8) ─────────────────────────────────
     // A "bus" is an integer; the return is an instrument-free audio track carrying
-    // an aux-return (isReturn/returnBus). Sends are post-fader entries on a track's
-    // sends[], routed purely by matching bus number. Mirrors MoshOps cmdCreateBus/…
+    // an aux-return (isReturn/returnBus). Send controls live on the source track and
+    // route purely by matching bus number. Mirrors MoshOps cmdCreateBus/…
     case "create_bus": {
       pushUndo();
       const used = new Set((snapshot.buses ?? []).map((b) => b.bus));
@@ -1694,7 +1744,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
       if ((t.sends ?? []).some((s) => s.bus === bus)) return err(command, "send already exists");
       pushUndo();
-      (t.sends ??= []).push({ bus, db: Math.max(-60, Math.min(6, num(args.db, 0))), mute: false });
+      (t.sends ??= []).push({
+        bus,
+        db: Math.max(-60, Math.min(6, num(args.db, 0))),
+        mute: Boolean(args.mute),
+        pan: Math.max(-1, Math.min(1, num(args.pan, 0))),
+        preFader: Boolean(args.preFader),
+      });
       invalidate();
       return ok(command, { bus });
     }
@@ -1705,6 +1761,36 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!s) return err(command, "no send to that bus");
       pushUndo();
       s.db = Math.max(-100, Math.min(6, num(args.db, 0)));
+      invalidate();
+      return ok(command);
+    }
+    case "set_send_mute": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.mute = Boolean(args.mute);
+      invalidate();
+      return ok(command);
+    }
+    case "set_send_pan": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.pan = Math.max(-1, Math.min(1, num(args.pan, 0)));
+      invalidate();
+      return ok(command);
+    }
+    case "set_send_pre_fader": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.preFader = Boolean(args.preFader);
       invalidate();
       return ok(command);
     }
@@ -2093,17 +2179,37 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     case "create_annotation": {
+      const normalizedMemory = mockMemoryLocation(args.memoryLocation);
+      if (normalizedMemory.error) return err(command, normalizedMemory.error);
       pushUndo();
-      const ann = { id: str(args.annotationId) || nextAnnotationId(), text: str(args.text, ""), beat: num(args.beat, 0), color: str(args.color) || undefined, author: args.author != null ? str(args.author) : undefined };
+      const ann: Annotation = {
+        id: str(args.annotationId) || nextAnnotationId(),
+        text: str(args.text, ""),
+        beat: num(args.beat, 0),
+        color: str(args.color) || undefined,
+        author: args.author != null ? str(args.author) : undefined,
+        ...(normalizedMemory.value
+          ? { memoryLocation: structuredClone(normalizedMemory.value) }
+          : {}),
+      };
       (snapshot.annotations ??= []).push(ann);
       invalidate(); return ok(command, { annotationId: ann.id });
     }
     case "edit_annotation": {
       const ann = (snapshot.annotations ?? []).find((x) => x.id === str(args.annotationId));
       if (!ann) return err(command, "annotation not found");
+      const normalizedMemory = mockMemoryLocation(args.memoryLocation);
+      if (Object.prototype.hasOwnProperty.call(args, "memoryLocation") && normalizedMemory.error) {
+        return err(command, normalizedMemory.error);
+      }
       pushUndo();
       if (args.text != null) ann.text = str(args.text, ann.text);
       if (args.color != null) ann.color = str(args.color) || undefined;
+      if (Object.prototype.hasOwnProperty.call(args, "memoryLocation")) {
+        ann.memoryLocation = normalizedMemory.value
+          ? structuredClone(normalizedMemory.value)
+          : undefined;
+      }
       invalidate(); return ok(command);
     }
     case "move_annotation": {

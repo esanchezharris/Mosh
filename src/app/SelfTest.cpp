@@ -7047,21 +7047,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}))), "add_send ok");
         { auto s = sendsOf (gt);
           check (s.size() == 1 && (int) s[0].getProperty ("bus", -1) == bus0
-                 && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6, "send appears with the right bus + dB"); }
+                 && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6
+                 && ! (bool) s[0].getProperty ("mute", true)
+                 && std::abs ((double) s[0].getProperty ("pan", 1.0)) < 0.001
+                 && ! (bool) s[0].getProperty ("preFader", true),
+                 "send appears post-fader, centered, unmuted, with the right bus + dB"); }
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", 99 }}))), "send to a nonexistent bus rejected");
 
         check (ok (cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -3.0 }}))), "set_send_level ok");
         check (std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-3.0)) < 0.6, "send level reflects the new dB");
-        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -100.0 }}));
-        check ((bool) sendsOf (gt)[0].getProperty ("mute", false), "send mutes at -100 dB");
-        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}));
+        check (ok (cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", true }}))), "set_send_mute ok");
+        check ((bool) sendsOf (gt)[0].getProperty ("mute", false)
+               && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-3.0)) < 0.6,
+               "send mute preserves its level");
+        check (ok (cmd (ops, "set_send_pan", objN ({{ "trackId", gt }, { "bus", bus0 }, { "pan", 0.75 }}))), "set_send_pan ok");
+        check (std::abs ((double) sendsOf (gt)[0].getProperty ("pan", 0.0) - 0.75) < 0.001,
+               "send snapshot reflects its stereo pan");
+        check (ok (cmd (ops, "set_send_pre_fader", objN ({{ "trackId", gt }, { "bus", bus0 }, { "preFader", true }}))), "set_send_pre_fader ok");
+        check ((bool) sendsOf (gt)[0].getProperty ("preFader", false),
+               "send snapshot derives pre-fader state from plugin order");
+        check (ok (cmd (ops, "set_send_pre_fader", objN ({{ "trackId", gt }, { "bus", bus0 }, { "preFader", false }}))),
+               "send can switch back to post-fader");
+        check (! (bool) sendsOf (gt)[0].getProperty ("preFader", true),
+               "send snapshot derives post-fader state after switch");
+        check (ok (cmd (ops, "undo")) && (bool) sendsOf (gt)[0].getProperty ("preFader", false),
+               "undo restores pre-fader send placement");
 
         cmd (ops, "save"); cmd (ops, "reload");
         { bool found = false; auto bv = buses();              // bind to a local (no dangling temporary)
           if (auto* arr = bv.getArray()) for (auto& b : *arr) if (b.getProperty ("name", var()).toString() == "Reverb") found = true;
           check (found, "bus name persists across save/reload"); }
-        check (sendsOf (gt).size() == 1, "send persists across save/reload");
+        check (sendsOf (gt).size() == 1
+               && (bool) sendsOf (gt)[0].getProperty ("mute", false)
+               && (bool) sendsOf (gt)[0].getProperty ("preFader", false)
+               && std::abs ((double) sendsOf (gt)[0].getProperty ("pan", 0.0) - 0.75) < 0.001,
+               "send mute, pan, and pre-fader state persist across save/reload");
+        cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", false }}));
+        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}));
 
         // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
         check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");
@@ -13384,8 +13407,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         };
         const int before = annsArr().size();
 
+        auto* storedSelection = new DynamicObject();
+        storedSelection->setProperty ("start", 2.0);
+        storedSelection->setProperty ("end", 5.0);
+        Array<var> storedTrackIds;
+        storedTrackIds.add ("track-a");
+        storedTrackIds.add ("track-b");
+        storedSelection->setProperty ("trackIds", storedTrackIds);
+        auto* storedView = new DynamicObject();
+        storedView->setProperty ("editSelection", var (storedSelection));
+        storedView->setProperty ("horizontalZoom", 160.0);
+        Array<var> shownTrackIds;
+        shownTrackIds.add ("track-b");
+        storedView->setProperty ("shownTrackIds", shownTrackIds);
+
         auto created = cmd (ops, "create_annotation",
-                            objN ({ { "text", "fix this transition" }, { "beat", 24.0 }, { "color", "#ffd166" }, { "author", "alice" } }));
+                            objN ({ { "text", "fix this transition" }, { "beat", 24.0 }, { "color", "#ffd166" }, { "author", "alice" },
+                                    { "memoryLocation", var (storedView) } }));
         check (ok (created), "create_annotation ok");
         const auto annId = created.getProperty ("data", var()).getProperty ("annotationId", var()).toString();
         check (annId.isNotEmpty(), "create_annotation returns an annotationId");
@@ -13393,6 +13431,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (findAnn (annId).getProperty ("text", var()).toString() == "fix this transition", "annotation text round-trips");
         check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation carries its author");
         check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 24.0) < 1e-6, "annotation beat is 24");
+        { const auto memoryLocation = findAnn (annId).getProperty ("memoryLocation", var());
+          check (memoryLocation.isObject()
+                 && std::abs ((double) memoryLocation.getProperty ("horizontalZoom", 0.0) - 160.0) < 1e-6
+                 && memoryLocation.getProperty ("editSelection", var()).getProperty ("trackIds", var()).size() == 2,
+                 "annotation Memory Location properties round-trip"); }
 
         check (ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "smooth the drop" } }))), "edit_annotation ok");
         check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "edit reflected in snapshot");
@@ -13410,6 +13453,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "reload")), "reload (annotations) ok");
         check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "annotation persists across save/reload");
         check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation author persists across save/reload");
+        check (findAnn (annId).getProperty ("memoryLocation", var()).isObject(),
+               "annotation Memory Location properties persist across save/reload");
+
+        check (ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "memoryLocation", var() } }))),
+               "edit_annotation can clear Memory Location properties");
+        check (! findAnn (annId).hasProperty ("memoryLocation"), "cleared Memory Location is absent from snapshot");
+        check (ok (cmd (ops, "undo")), "undo restores Memory Location properties");
+        check (findAnn (annId).getProperty ("memoryLocation", var()).isObject(),
+               "Memory Location properties return after undo");
+
+        auto* invalidStoredView = new DynamicObject();
+        invalidStoredView->setProperty ("horizontalZoom", 0.0);
+        check (! ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId },
+                                                          { "memoryLocation", var (invalidStoredView) } }))),
+               "invalid Memory Location properties are rejected before mutation");
 
         // Caller-supplied id is honoured (this is how the MP broadcast keeps ids stable).
         check (ok (cmd (ops, "create_annotation", objN ({ { "annotationId", "ann-fixed" }, { "text", "shared note" }, { "beat", 4.0 } }))), "create_annotation with an explicit id ok");

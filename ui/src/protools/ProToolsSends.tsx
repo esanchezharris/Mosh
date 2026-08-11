@@ -93,7 +93,7 @@ export function ProToolsSends({ track }: { readonly track: Track }) {
     <section className="pt-sends" data-testid="pt-sends" aria-label={`Sends on ${track.name}`}>
       <div className="pt-sends-head">
         <span>Sends</span>
-        <span className="pt-sends-post">Post-fader</span>
+        <span className="pt-sends-post">Level · Pan · Pre/Post</span>
         <button type="button" data-testid="pt-add-bus" onClick={() => {
           setCreating(true);
           setCreateName("");
@@ -146,7 +146,18 @@ export function ProToolsSends({ track }: { readonly track: Track }) {
                     {bus.name}
                   </button>
                 )}
-                <span data-testid={`pt-send-post-${bus.bus}`}>Post</span>
+                {send && (
+                  <button type="button" className="pt-send-position"
+                    data-testid={`pt-send-pre-${bus.bus}`} aria-pressed={Boolean(send.preFader)}
+                    aria-label={`${bus.name} send ${send.preFader ? "pre" : "post"}-fader; switch to ${send.preFader ? "post" : "pre"}-fader`}
+                    onClick={() => void run("set_send_pre_fader", {
+                      trackId: track.id,
+                      bus: bus.bus,
+                      preFader: !send.preFader,
+                    }, `The ${bus.name} send position could not be changed.`)}>
+                    {send.preFader ? "Pre" : "Post"}
+                  </button>
+                )}
               </div>
               <div className="pt-send-bus-actions">
                 {isRenaming ? (
@@ -162,28 +173,55 @@ export function ProToolsSends({ track }: { readonly track: Track }) {
                   aria-label={`Delete ${bus.name} bus`} onClick={() => setConfirmBus(bus)}>Delete</button>
               </div>
               {send ? (
-                <div className="pt-send-level">
-                  <ReconciledRange key={`${projectEpoch}:${track.id}:${bus.bus}`} min={-60} max={6} step={0.5}
-                    value={send.db} data-testid={`pt-send-level-${bus.bus}`}
-                    aria-label={`${bus.name} send level`}
-                    onCommit={(db) => run("set_send_level", { trackId: track.id, bus: bus.bus, db },
-                      `The ${bus.name} send level could not be changed.`)}
-                    reconcile={async () => {
-                      if (!isCurrentProject(projectEpoch)) return useStore.getState().snapshot?.tracks
-                        .find((candidate) => candidate.id === track.id)?.sends
-                        ?.find((candidate) => candidate.bus === bus.bus)?.db ?? send.db;
-                      await refresh();
-                      return useStore.getState().snapshot?.tracks.find((candidate) => candidate.id === track.id)
-                        ?.sends?.find((candidate) => candidate.bus === bus.bus)?.db ?? send.db;
-                    }} />
-                  <output data-testid={`pt-send-level-readout-${bus.bus}`}>{send.db.toFixed(1)} dB</output>
-                  <button type="button" data-testid={`pt-remove-send-${bus.bus}`}
-                    aria-label={`Remove ${bus.name} send`}
-                    onClick={() => void run("remove_send", { trackId: track.id, bus: bus.bus },
-                      `The ${bus.name} send could not be removed.`)}>
-                    <IconClose size={11} />
-                  </button>
-                </div>
+                <>
+                  <div className="pt-send-controls">
+                    <button type="button" data-testid={`pt-send-mute-${bus.bus}`}
+                      aria-pressed={send.mute} aria-label={`${send.mute ? "Unmute" : "Mute"} ${bus.name} send`}
+                      onClick={() => void run("set_send_mute", {
+                        trackId: track.id,
+                        bus: bus.bus,
+                        mute: !send.mute,
+                      }, `The ${bus.name} send mute could not be changed.`)}>
+                      Mute
+                    </button>
+                    <label className="pt-send-pan-control">
+                      <span>Pan</span>
+                      <ReconciledRange key={`${projectEpoch}:${track.id}:${bus.bus}:pan`}
+                        min={-1} max={1} step={0.05} value={send.pan ?? 0}
+                        data-testid={`pt-send-pan-${bus.bus}`} aria-label={`${bus.name} send pan`}
+                        onCommit={(pan) => run("set_send_pan", { trackId: track.id, bus: bus.bus, pan },
+                          `The ${bus.name} send pan could not be changed.`)}
+                        reconcile={async () => {
+                          if (isCurrentProject(projectEpoch)) await refresh();
+                          return useStore.getState().snapshot?.tracks.find((candidate) => candidate.id === track.id)
+                            ?.sends?.find((candidate) => candidate.bus === bus.bus)?.pan ?? send.pan ?? 0;
+                        }} />
+                      <output>{(send.pan ?? 0).toFixed(2)}</output>
+                    </label>
+                  </div>
+                  <div className="pt-send-level">
+                    <ReconciledRange key={`${projectEpoch}:${track.id}:${bus.bus}:level`} min={-60} max={6} step={0.5}
+                      value={send.db} data-testid={`pt-send-level-${bus.bus}`}
+                      aria-label={`${bus.name} send level`}
+                      onCommit={(db) => run("set_send_level", { trackId: track.id, bus: bus.bus, db },
+                        `The ${bus.name} send level could not be changed.`)}
+                      reconcile={async () => {
+                        if (!isCurrentProject(projectEpoch)) return useStore.getState().snapshot?.tracks
+                          .find((candidate) => candidate.id === track.id)?.sends
+                          ?.find((candidate) => candidate.bus === bus.bus)?.db ?? send.db;
+                        await refresh();
+                        return useStore.getState().snapshot?.tracks.find((candidate) => candidate.id === track.id)
+                          ?.sends?.find((candidate) => candidate.bus === bus.bus)?.db ?? send.db;
+                      }} />
+                    <output data-testid={`pt-send-level-readout-${bus.bus}`}>{send.db.toFixed(1)} dB</output>
+                    <button type="button" data-testid={`pt-remove-send-${bus.bus}`}
+                      aria-label={`Remove ${bus.name} send`}
+                      onClick={() => void run("remove_send", { trackId: track.id, bus: bus.bus },
+                        `The ${bus.name} send could not be removed.`)}>
+                      <IconClose size={11} />
+                    </button>
+                  </div>
+                </>
               ) : (
                 <button type="button" className="pt-add-send" data-testid={`pt-add-send-${bus.bus}`}
                   onClick={() => void run("add_send", { trackId: track.id, bus: bus.bus, db: 0 },

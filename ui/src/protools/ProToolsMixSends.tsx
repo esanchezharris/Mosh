@@ -19,38 +19,53 @@ export function ProToolsMixSends({ snapshot, track, targetTrackIds }: {
           const bus = buses.find((candidate) => candidate.bus === send.bus)
             ?? snapshot.buses?.find((candidate) => candidate.bus === send.bus);
           const name = bus?.name ?? `Bus ${send.bus}`;
+          const targets = () => targetTrackIds.filter((trackId) => snapshot.tracks
+            .find((candidate) => candidate.id === trackId)?.sends?.some((candidate) => candidate.bus === send.bus));
+          const run = (command: string, argsForTrack: (trackId: string) => Record<string, unknown>) =>
+            executeProToolsMixFanout({
+              snapshot,
+              targetTrackIds: targets(),
+              commandForTrack: (trackId) => ({ command, args: argsForTrack(trackId) }),
+            });
           return (
             <div className="pt-mix-send-row" key={send.bus}>
-              <span>{String.fromCharCode(65 + index)} · {name}</span>
-              <input type="range" min={-60} max={6} step={0.5} value={send.db}
-                data-testid={`pt-mix-send-level-${send.bus}`} aria-label={`${name} send level`}
-                onChange={(event) => {
-                  const db = Number(event.currentTarget.value);
-                  const targets = targetTrackIds.filter((trackId) => snapshot.tracks
-                    .find((candidate) => candidate.id === trackId)?.sends?.some((candidate) => candidate.bus === send.bus));
-                  void executeProToolsMixFanout({
-                    snapshot,
-                    targetTrackIds: targets,
-                    commandForTrack: (trackId) => ({
-                      command: "set_send_level",
-                      args: { trackId, bus: send.bus, db },
-                    }),
-                  });
-                }} />
-              <output>{send.db.toFixed(1)}</output>
-              <button type="button" aria-label={`Remove ${name} send`}
+              <div className="pt-mix-send-head">
+                <span>{String.fromCharCode(65 + index)} · {name}</span>
+                <button type="button" data-testid={`pt-mix-send-mute-${send.bus}`}
+                  aria-label={`${send.mute ? "Unmute" : "Mute"} ${name} send`} aria-pressed={send.mute}
+                  onClick={() => void run("set_send_mute", (trackId) => ({
+                    trackId, bus: send.bus, mute: !send.mute,
+                  }))}>M</button>
+                <button type="button" data-testid={`pt-mix-send-pre-${send.bus}`}
+                  aria-label={`${name} send ${send.preFader ? "pre" : "post"}-fader`} aria-pressed={Boolean(send.preFader)}
+                  onClick={() => void run("set_send_pre_fader", (trackId) => ({
+                    trackId, bus: send.bus, preFader: !send.preFader,
+                  }))}>{send.preFader ? "Pre" : "Post"}</button>
+                <button type="button" aria-label={`Remove ${name} send`}
                 onClick={() => {
-                  const targets = targetTrackIds.filter((trackId) => snapshot.tracks
-                    .find((candidate) => candidate.id === trackId)?.sends?.some((candidate) => candidate.bus === send.bus));
-                  void executeProToolsMixFanout({
-                    snapshot,
-                    targetTrackIds: targets,
-                    commandForTrack: (trackId) => ({
-                      command: "remove_send",
-                      args: { trackId, bus: send.bus },
-                    }),
-                  });
+                  void run("remove_send", (trackId) => ({ trackId, bus: send.bus }));
                 }}>×</button>
+              </div>
+              <label className="pt-mix-send-control">
+                <span>Lvl</span>
+                <input type="range" min={-60} max={6} step={0.5} value={send.db}
+                  data-testid={`pt-mix-send-level-${send.bus}`} aria-label={`${name} send level`}
+                  onChange={(event) => {
+                    const db = Number(event.currentTarget.value);
+                    void run("set_send_level", (trackId) => ({ trackId, bus: send.bus, db }));
+                  }} />
+                <output>{send.db.toFixed(1)}</output>
+              </label>
+              <label className="pt-mix-send-control">
+                <span>Pan</span>
+                <input type="range" min={-1} max={1} step={0.05} value={send.pan ?? 0}
+                  data-testid={`pt-mix-send-pan-${send.bus}`} aria-label={`${name} send pan`}
+                  onChange={(event) => {
+                    const pan = Number(event.currentTarget.value);
+                    void run("set_send_pan", (trackId) => ({ trackId, bus: send.bus, pan }));
+                  }} />
+                <output>{(send.pan ?? 0).toFixed(2)}</output>
+              </label>
             </div>
           );
         })}

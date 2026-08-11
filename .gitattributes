@@ -12,3 +12,8 @@
 *.ttf binary
 *.wav binary
 *.npz binary
+
+# Unified-diff syntax uses a single space for blank context lines. Treat patch
+# payloads as literal source so range-level `git diff --check` does not report
+# the patch format itself as trailing whitespace.
+*.patch -whitespace

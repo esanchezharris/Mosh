@@ -15,9 +15,40 @@
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
 
+#include <cmath>
+
 namespace mosh
 {
 using namespace juce;
+
+namespace
+{
+bool isPreFaderSend (te::AudioTrack& track, te::AuxSendPlugin& send)
+{
+    auto* volume = track.getVolumePlugin();
+    if (volume == nullptr) return false;
+    const int sendIndex = track.pluginList.indexOf (&send);
+    const int volumeIndex = track.pluginList.indexOf (volume);
+    return sendIndex >= 0 && volumeIndex >= 0 && sendIndex < volumeIndex;
+}
+
+bool positionSendRelativeToFader (te::AudioTrack& track, te::AuxSendPlugin& send,
+                                  bool preFader, juce::UndoManager& undo)
+{
+    auto* volume = track.getVolumePlugin();
+    if (volume == nullptr) return false;
+    const int sendIndex = track.pluginList.state.indexOf (send.state);
+    const int volumeIndex = track.pluginList.state.indexOf (volume->state);
+    if (sendIndex < 0 || volumeIndex < 0) return false;
+
+    const int targetIndex = preFader
+        ? (sendIndex < volumeIndex ? volumeIndex - 1 : volumeIndex)
+        : (sendIndex < volumeIndex ? volumeIndex : volumeIndex + 1);
+    if (targetIndex != sendIndex)
+        track.pluginList.state.moveChild (sendIndex, targetIndex, &undo);
+    return true;
+}
+}
 
 // ── Metering helpers (Wave 9) ────────────────────────────────────────────────
 te::LevelMeterPlugin* MoshOps::findTrackMeter (te::AudioTrack& t)
@@ -414,15 +445,26 @@ juce::var MoshOps::cmdAddSend (const juce::var& args)
     if (findReturnTrackForBus (bus) == nullptr) return errResult ("add_send", "no such bus");
     if (track->getAuxSendPlugin (bus) != nullptr) return errResult ("add_send", "send already exists");
 
-    beginTxn ("add_send");
     auto plugin = eng.edit().getPluginCache().createNewPlugin (te::AuxSendPlugin::xmlTypeName, {});
     if (plugin == nullptr) return errResult ("add_send", "could not create aux send");
-    if (auto* s = dynamic_cast<te::AuxSendPlugin*> (plugin.get()))
-    {
-        s->busNumber = bus;
-        track->pluginList.insertPlugin (plugin, track->pluginList.getPlugins().size(), nullptr);  // append → post-fader
-        s->setGainDb (juce::jlimit (-60.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
-    }
+    auto* s = dynamic_cast<te::AuxSendPlugin*> (plugin.get());
+    if (s == nullptr) return errResult ("add_send", "created plugin was not an aux send");
+
+    const auto requestedPan = (double) args.getProperty ("pan", 0.0);
+    if (! std::isfinite (requestedPan)) return errResult ("add_send", "pan must be finite");
+    const bool preFader = (bool) args.getProperty ("preFader", false);
+
+    beginTxn ("add_send");
+    auto* volume = ensureVolumePlugin (*track);
+    if (volume == nullptr) return errResult ("add_send", "could not create track fader");
+    const int volumeIndex = track->pluginList.indexOf (volume);
+    if (volumeIndex < 0) return errResult ("add_send", "track fader is not in the plugin chain");
+
+    s->busNumber = bus;
+    track->pluginList.insertPlugin (plugin, preFader ? volumeIndex : volumeIndex + 1, nullptr);
+    s->setGainDb (juce::jlimit (-60.0f, 6.0f, (float) (double) args.getProperty ("db", 0.0)));
+    s->setPan ((float) requestedPan);
+    s->setMute ((bool) args.getProperty ("mute", false));
     logLine ("add_send", args, true, {}, true);
     emitSnapshotInvalidated();
     auto* data = new DynamicObject(); data->setProperty ("bus", bus);
@@ -440,6 +482,52 @@ juce::var MoshOps::cmdSetSendLevel (const juce::var& args)
     logLine ("set_send_level", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_send_level");
+}
+
+juce::var MoshOps::cmdSetSendMute (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_send_mute", "no track");
+    auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
+    if (s == nullptr) return errResult ("set_send_mute", "no send to that bus");
+    beginTxn ("set_send_mute");
+    s->setMute ((bool) args.getProperty ("mute", false));
+    logLine ("set_send_mute", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_send_mute");
+}
+
+juce::var MoshOps::cmdSetSendPan (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_send_pan", "no track");
+    auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
+    if (s == nullptr) return errResult ("set_send_pan", "no send to that bus");
+    const auto pan = (double) args.getProperty ("pan", 0.0);
+    if (! std::isfinite (pan)) return errResult ("set_send_pan", "pan must be finite");
+    beginTxn ("set_send_pan");
+    s->setPan ((float) pan);
+    logLine ("set_send_pan", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_send_pan");
+}
+
+juce::var MoshOps::cmdSetSendPreFader (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_send_pre_fader", "no track");
+    auto* s = track->getAuxSendPlugin ((int) args.getProperty ("bus", -1));
+    if (s == nullptr) return errResult ("set_send_pre_fader", "no send to that bus");
+    const bool preFader = (bool) args.getProperty ("preFader", false);
+
+    beginTxn ("set_send_pre_fader");
+    if (ensureVolumePlugin (*track) == nullptr
+        || (isPreFaderSend (*track, *s) != preFader
+            && ! positionSendRelativeToFader (*track, *s, preFader, undoManager())))
+        return errResult ("set_send_pre_fader", "could not position send around the track fader");
+    logLine ("set_send_pre_fader", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_send_pre_fader");
 }
 
 juce::var MoshOps::cmdRemoveSend (const juce::var& args)

@@ -87,7 +87,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // DRM-002 — composite: can create a clip AND mutate track instrument/type.
         "add_drum_pattern",
         "add_midi_clip", "paste_clip", "set_track_input", "set_track_output", "add_send",
-        "set_send_level", "remove_send", "add_automation_point", "remove_automation_point",
+        "set_send_level", "set_send_mute", "set_send_pan", "set_send_pre_fader", "remove_send",
+        "add_automation_point", "remove_automation_point",
         "set_automation_point", "clear_automation",
         // G10 — automation recording: arming write mode and bulk-authoring a curve both
         // target one track's parameter surface, same lock group as the Wave-7 quartet above.

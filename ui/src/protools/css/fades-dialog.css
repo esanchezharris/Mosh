@@ -137,6 +137,8 @@
 }
 
 .pt-fades-summary span { color: var(--pt-text-muted); text-align: right; }
+.pt-fades-summary > div { display: grid; gap: 2px; }
+.pt-fades-summary > div > span { text-align: left; }
 .pt-fades-error {
   grid-column: 1 / -1;
   margin: 0;

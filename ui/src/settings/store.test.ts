@@ -64,6 +64,19 @@ describe("set + localStorage persistence round-trip", () => {
 
     expect(useSettings.getState().get("uiShell")).toBe("live");
   });
+
+  it("reloads the last successful Pro Tools fade settings", () => {
+    useSettings.getState().set("protoolsDefaultFadeLengthMs", 37);
+    useSettings.getState().set("protoolsDefaultFadeCurveIn", "sCurve");
+    useSettings.getState().set("protoolsDefaultFadeCurveOut", "convex");
+
+    useSettings.setState({ template: null, values: {}, keyOverrides: {} });
+    useSettings.getState().hydrate();
+
+    expect(useSettings.getState().get("protoolsDefaultFadeLengthMs")).toBe(37);
+    expect(useSettings.getState().get("protoolsDefaultFadeCurveIn")).toBe("sCurve");
+    expect(useSettings.getState().get("protoolsDefaultFadeCurveOut")).toBe("convex");
+  });
 });
 
 describe("template application + per-setting override", () => {

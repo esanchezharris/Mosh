@@ -208,6 +208,9 @@ set_rave_param	Track
 set_record_options	SessionGlobal
 set_render_param	Clip
 set_send_level	Track
+set_send_mute	Track
+set_send_pan	Track
+set_send_pre_fader	Track
 set_tempo	SessionGlobal
 set_tempo_curve	SessionGlobal
 set_time_signature	SessionGlobal

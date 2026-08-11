@@ -49,6 +49,13 @@ describe("defaultSettings", () => {
   it("uses Pro Tools for fresh settings", () => {
     expect(defaultSettings().uiShell).toBe("protools");
   });
+
+  it("defines the Pro Tools no-dialog fade defaults", () => {
+    const defaults = defaultSettings();
+    expect(defaults.protoolsDefaultFadeLengthMs).toBe(10);
+    expect(defaults.protoolsDefaultFadeCurveIn).toBe("linear");
+    expect(defaults.protoolsDefaultFadeCurveOut).toBe("linear");
+  });
 });
 
 describe("settingsByCategory", () => {
@@ -57,7 +64,7 @@ describe("settingsByCategory", () => {
     // AUD-SCAN — "Plugins" is last by design: it is maintenance (opt-in AU scanning),
     // not a preference, so it sits at the bottom of the settings panel.
     expect(groups.map((g) => g.category)).toEqual([
-      "Appearance", "Moshi", "Layout", "Privacy", "Interaction", "Feel", "Keys", "Plugins",
+      "Appearance", "Moshi", "Layout", "Pro Tools", "Privacy", "Interaction", "Feel", "Keys", "Plugins",
     ]);
   });
 
@@ -118,5 +125,12 @@ describe("coerceSetting", () => {
 
   it("returns the default for an unknown id", () => {
     expect(coerceSetting("does-not-exist", 42)).toBe(42);
+  });
+
+  it("bounds and validates remembered Pro Tools fade settings", () => {
+    expect(coerceSetting("protoolsDefaultFadeLengthMs", -1)).toBe(0);
+    expect(coerceSetting("protoolsDefaultFadeLengthMs", 60_001)).toBe(60_000);
+    expect(coerceSetting("protoolsDefaultFadeCurveIn", "sCurve")).toBe("sCurve");
+    expect(coerceSetting("protoolsDefaultFadeCurveOut", "not-a-curve")).toBe("linear");
   });
 });

@@ -324,6 +324,9 @@ private:
     juce::var cmdCreateBus      (const juce::var& args);
     juce::var cmdAddSend        (const juce::var& args);
     juce::var cmdSetSendLevel   (const juce::var& args);
+    juce::var cmdSetSendMute    (const juce::var& args);
+    juce::var cmdSetSendPan     (const juce::var& args);
+    juce::var cmdSetSendPreFader (const juce::var& args);
     juce::var cmdRemoveSend     (const juce::var& args);
     juce::var cmdRemoveBus      (const juce::var& args);
     juce::var cmdRenameBus      (const juce::var& args);

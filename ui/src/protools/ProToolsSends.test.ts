@@ -16,7 +16,7 @@ const SOURCE: Track = {
   name: "Lead Vocal",
   type: "audio",
   clips: [],
-  sends: [{ bus: 0, db: -12, mute: false }],
+  sends: [{ bus: 0, db: -12, mute: false, pan: -0.25, preFader: false }],
 };
 
 const SNAPSHOT: Snapshot = {
@@ -112,19 +112,29 @@ describe("Pro Tools sends and Aux returns", () => {
     render();
 
     expect(host.querySelector("[data-testid=pt-sends]")).not.toBeNull();
-    expect(host.querySelector("[data-testid=pt-send-post-0]")?.textContent).toBe("Post");
+    expect(host.querySelector("[data-testid=pt-send-pre-0]")?.textContent).toContain("Post");
     expect(host.querySelector<HTMLInputElement>("[data-testid=pt-send-level-0]")?.value).toBe("-12");
     expect(host.querySelector("[data-testid=pt-send-level-readout-0]")?.textContent).toBe("-12.0 dB");
+    expect(host.querySelector<HTMLInputElement>("[data-testid=pt-send-pan-0]")?.value).toBe("-0.25");
 
     const level = host.querySelector<HTMLInputElement>("[data-testid=pt-send-level-0]");
+    const pan = host.querySelector<HTMLInputElement>("[data-testid=pt-send-pan-0]");
+    const mute = host.querySelector<HTMLButtonElement>("[data-testid=pt-send-mute-0]");
+    const pre = host.querySelector<HTMLButtonElement>("[data-testid=pt-send-pre-0]");
     const remove = host.querySelector<HTMLButtonElement>("[data-testid=pt-remove-send-0]");
     const assign = host.querySelector<HTMLButtonElement>("[data-testid=pt-add-send-1]");
-    if (!level || !remove || !assign) throw new Error("send controls are missing");
+    if (!level || !pan || !mute || !pre || !remove || !assign) throw new Error("send controls are missing");
     await act(async () => setValue(level, "-6"));
+    await act(async () => setValue(pan, "0.5"));
+    await act(async () => mute.click());
+    await act(async () => pre.click());
     await act(async () => remove.click());
     await act(async () => assign.click());
 
     expect(exec).toHaveBeenCalledWith("set_send_level", { trackId: "vocal", bus: 0, db: -6 });
+    expect(exec).toHaveBeenCalledWith("set_send_pan", { trackId: "vocal", bus: 0, pan: 0.5 });
+    expect(exec).toHaveBeenCalledWith("set_send_mute", { trackId: "vocal", bus: 0, mute: true });
+    expect(exec).toHaveBeenCalledWith("set_send_pre_fader", { trackId: "vocal", bus: 0, preFader: true });
     expect(exec).toHaveBeenCalledWith("remove_send", { trackId: "vocal", bus: 0 });
     expect(exec).toHaveBeenCalledWith("add_send", { trackId: "vocal", bus: 1, db: 0 });
   });
@@ -194,7 +204,7 @@ describe("Pro Tools sends and Aux returns", () => {
     await act(async () => assign.click());
 
     expect(useStore.getState().lastError).toBe("bus is locked");
-    expect(SOURCE.sends).toEqual([{ bus: 0, db: -12, mute: false }]);
+    expect(SOURCE.sends).toEqual([{ bus: 0, db: -12, mute: false, pan: -0.25, preFader: false }]);
   });
 
   it("ignores a command response that arrives after project replacement", async () => {

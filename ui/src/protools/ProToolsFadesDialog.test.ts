@@ -2,6 +2,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore, type State } from "../store";
+import { useSettings } from "../settings/store";
 import type { Clip, CommandResult } from "../types";
 import { ProToolsFadesDialog } from "./ProToolsFadesDialog";
 import type { ProToolsFadeTarget } from "./proToolsFades";
@@ -52,6 +53,8 @@ describe("Pro Tools Fades dialog", () => {
     onClose = vi.fn();
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     runAtomic = vi.fn(async (_label: string, body: (run: State["exec"]) => Promise<void>) => body(exec));
+    localStorage.clear();
+    useSettings.getState().reset();
     useStore.setState({ projectEpoch: 71, exec, runAtomic });
     act(() => root.render(React.createElement(ProToolsFadesDialog, { targets: TARGETS, onClose })));
   });
@@ -61,6 +64,7 @@ describe("Pro Tools Fades dialog", () => {
     host.remove();
     trigger.remove();
     useStore.setState({ projectEpoch: original.projectEpoch, exec: original.exec, runAtomic: original.runAtomic });
+    useSettings.getState().reset();
     vi.restoreAllMocks();
   });
 
@@ -124,6 +128,24 @@ describe("Pro Tools Fades dialog", () => {
       }],
     ]);
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(useSettings.getState().get("protoolsDefaultFadeLengthMs")).toBe(25);
+    expect(useSettings.getState().get("protoolsDefaultFadeCurveIn")).toBe("convex");
+    expect(useSettings.getState().get("protoolsDefaultFadeCurveOut")).toBe("concave");
+  });
+
+  it("starts from the persisted no-dialog fade settings", () => {
+    act(() => root.render(null));
+    useSettings.getState().set("protoolsDefaultFadeLengthMs", 48);
+    useSettings.getState().set("protoolsDefaultFadeCurveIn", "concave");
+    useSettings.getState().set("protoolsDefaultFadeCurveOut", "sCurve");
+
+    act(() => root.render(React.createElement(ProToolsFadesDialog, { targets: TARGETS, onClose })));
+
+    expect(control<HTMLInputElement>("pt-fades-length").value).toBe("48");
+    expect(control<HTMLSelectElement>("pt-fades-curve-in").value).toBe("concave");
+    expect(control<HTMLSelectElement>("pt-fades-curve-out").value).toBe("sCurve");
+    expect(host.querySelector("[data-testid=pt-fades-default-summary]")?.textContent)
+      .toContain("48 ms");
   });
 
   it("keeps a rejected command visible and invalidates drafts when the project changes", async () => {
@@ -135,6 +157,9 @@ describe("Pro Tools Fades dialog", () => {
     await act(async () => control<HTMLButtonElement>("pt-fades-apply").click());
     expect(control<HTMLElement>("pt-fades-error").textContent).toContain("locked by Ada");
     expect(onClose).not.toHaveBeenCalled();
+    expect(useSettings.getState().get("protoolsDefaultFadeLengthMs")).toBe(10);
+    expect(useSettings.getState().get("protoolsDefaultFadeCurveIn")).toBe("linear");
+    expect(useSettings.getState().get("protoolsDefaultFadeCurveOut")).toBe("linear");
 
     act(() => useStore.setState({ projectEpoch: 72 }));
     expect(onClose).toHaveBeenCalledTimes(1);

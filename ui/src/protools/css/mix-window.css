@@ -79,21 +79,21 @@
 .pt-mix-add-insert,
 .pt-mix-add-send { width: 100%; min-height: 22px; border: 0; color: var(--pt-text); background: var(--pt-raised); }
 
-.pt-mix-send-rows { max-height: 90px; overflow-y: auto; background: var(--pt-inset); }
+.pt-mix-send-rows { max-height: 150px; overflow-y: auto; background: var(--pt-inset); }
 .pt-mix-send-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px 24px 18px;
-  min-height: 24px;
-  align-items: center;
   gap: 2px;
-  padding-left: 4px;
+  padding: 2px 3px 3px;
   border-bottom: 1px solid var(--pt-border);
   font-size: 8px;
 }
-.pt-mix-send-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pt-mix-send-row input { width: 34px; }
-.pt-mix-send-row output { text-align: right; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.pt-mix-send-row button { width: 18px; height: 20px; padding: 0; border: 0; background: transparent; }
+.pt-mix-send-head { display: grid; grid-template-columns: minmax(0, 1fr) 18px 28px 18px; align-items: center; gap: 2px; }
+.pt-mix-send-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-mix-send-head button { min-width: 0; height: 18px; padding: 0 2px; border: 0; background: transparent; font-size: 8px; }
+.pt-mix-send-head button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.pt-mix-send-control { display: grid; grid-template-columns: 20px minmax(0, 1fr) 28px; align-items: center; gap: 2px; color: var(--pt-text-muted); }
+.pt-mix-send-control input { min-width: 0; width: 100%; }
+.pt-mix-send-control output { text-align: right; color: var(--pt-text); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pt-mix-empty-slot { display: block; padding: 6px; color: var(--pt-text-muted); font-size: 9px; }
 
 .pt-mix-routing { display: grid; gap: 3px; padding: 4px; background: var(--pt-inset); }

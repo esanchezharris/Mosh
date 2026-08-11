@@ -1,0 +1,261 @@
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp
+--- a/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp
++++ b/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp
+@@ -35,12 +35,16 @@ AuxSendNode::AuxSendNode (std::unique_ptr<Node> inputNode, int busIDToUse,
+                            return 0.0f;
+                     }
+ 
++                    if (sourceSendPlugin.isMute())
++                        return 0.0f;
++
+                     auto gain = volumeFaderPositionToGain (sourceSendPlugin.gain->getCurrentValue());
+                     if (sourceSendPlugin.invertPhase)
+                         gain *= -1.0f;
+ 
+                     return gain;
+-               }),
++               },
++               [&sourceSendPlugin] { return sourceSendPlugin.getPan(); }),
+       playHeadState (phs),
+       pluginPtr (sourceSendPlugin),
+       sendPlugin (sourceSendPlugin)
+diff --git a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp
+--- a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp
++++ b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp
+@@ -17,6 +17,19 @@ AuxSendPlugin::AuxSendPlugin (PluginCreationInfo info) : Plugin (info)
+     busNumber.referTo (state, IDs::busNum, um);
+     gainLevel.referTo (state, IDs::auxSendSliderPos, um, decibelsToVolumeFaderPosition (0.0f));
+     invertPhase.referTo (state, IDs::phase, um, false);
++
++    if (! state.hasProperty (IDs::mute)
++        && volumeFaderPositionToDB (gainLevel.get()) <= -90.0f)
++    {
++        state.setProperty (IDs::mute, true, nullptr);
++
++        const auto lastDb = (float) state.getProperty (IDs::lastVolumeBeforeMuteDb, 0.0f);
++        if (lastDb > -90.0f)
++            gainLevel = decibelsToVolumeFaderPosition (lastDb);
++    }
++
++    muted.referTo (state, IDs::mute, um, false);
++    pan.referTo (state, IDs::pan, um, 0.0f);
+     lastVolumeBeforeMute.referTo (state, IDs::lastVolumeBeforeMuteDb, um, 0.0f);
+ 
+     gain = addParam ("send level", TRANS("Send level"), { 0.0f, 1.0f },
+@@ -127,25 +140,30 @@ void AuxSendPlugin::setGainDb (float newDb)
+ 
+ void AuxSendPlugin::setMute (bool b)
+ {
++    if (b == isMute())
++        return;
++
+     if (b)
+-    {
+         lastVolumeBeforeMute = getGainDb();
+-        setGainDb (lastVolumeBeforeMute - 0.01f); // needed so that automation is recorded correctly
+-        setGainDb (-100.0f);
+-    }
+-    else
+-    {
+-        if (lastVolumeBeforeMute < -100.0f)
+-            lastVolumeBeforeMute = 0.0f;
+-
+-        setGainDb (getGainDb() + 0.01f); // needed so that automation is recorded correctly
+-        setGainDb (lastVolumeBeforeMute);
+-    }
++
++    muted = b;
++    changed();
+ }
+ 
+ bool AuxSendPlugin::isMute()
+ {
+-    return getGainDb() <= -90.0f;
++    return muted.get();
++}
++
++void AuxSendPlugin::setPan (float newPan)
++{
++    const auto clamped = juce::jlimit (-1.0f, 1.0f, newPan);
++
++    if (pan.get() != clamped)
++    {
++        pan = clamped;
++        changed();
++    }
+ }
+ 
+ juce::String AuxSendPlugin::getDefaultBusName (int index)
+@@ -172,7 +190,7 @@ juce::StringArray AuxSendPlugin::getBusNames (Edit& ed, int maxNumBusses)
+ 
+ void AuxSendPlugin::restorePluginStateFromValueTree (const juce::ValueTree& v)
+ {
+-    copyPropertiesToCachedValues (v, gainLevel, busNumber, invertPhase);
++    copyPropertiesToCachedValues (v, gainLevel, busNumber, invertPhase, muted, pan);
+ 
+     for (auto p : getAutomatableParameters())
+         p->updateFromAttachedValue();
+diff --git a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h
+--- a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h
++++ b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h
+@@ -24,6 +24,9 @@ public:
+     void setMute (bool m);
+     bool isMute();
+ 
++    void setPan (float newPan);
++    float getPan() const                     { return juce::jlimit (-1.0f, 1.0f, pan.get()); }
++
+     int getBusNumber() const                { return busNumber; }
+     juce::String getBusName();
+ 
+@@ -57,6 +60,8 @@ public:
+     juce::CachedValue<int> busNumber;
+     juce::CachedValue<float> gainLevel;
+     juce::CachedValue<bool> invertPhase;
++    juce::CachedValue<bool> muted;
++    juce::CachedValue<float> pan;
+ 
+     AutomatableParameter::Ptr gain;
+ 
+diff --git a/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h b/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h
+--- a/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h
++++ b/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h
+@@ -461,9 +461,11 @@ class SendNode  : public Node
+ public:
+     SendNode (std::unique_ptr<Node> inputNode, int busIDToUse,
+               std::function<float()> getGainFunc = nullptr,
++              std::function<float()> getPanFunc = nullptr,
+               std::optional<size_t> extraHashToUse_ = {})
+         : input (std::move (inputNode)), busID (busIDToUse),
+           gainFunction (std::move (getGainFunc)),
++          panFunction (std::move (getPanFunc)),
+           extraHashToUse (extraHashToUse_)
+     {
+         setOptimisations ({ ClearBuffers::no,
+@@ -480,6 +482,11 @@ public:
+         return gainFunction;
+     }
+ 
++    std::function<float()> getPanFunction()
++    {
++        return panFunction;
++    }
++
+     NodeProperties getNodeProperties() override
+     {
+         auto props = input->getNodeProperties();
+@@ -527,10 +534,95 @@ private:
+     std::unique_ptr<Node> input;
+     const int busID;
+     std::function<float()> gainFunction;
++    std::function<float()> panFunction;
+     std::optional<size_t> extraHashToUse;
+ };
+ 
+ 
++//==============================================================================
++//==============================================================================
++/** Applies stereo balance to a send branch without changing the source track path. */
++class StereoBalanceNode final : public Node
++{
++public:
++    StereoBalanceNode (Node* inputNode, std::function<float()> panFunc, size_t nodeHashToUse = 0)
++        : input (inputNode), panFunction (std::move (panFunc)), nodeHash (nodeHashToUse)
++    {
++        assert (input != nullptr);
++        assert (panFunction);
++        const auto pan = juce::jlimit (-1.0f, 1.0f, panFunction());
++        lastLeftGain = pan > 0.0f ? 1.0f - pan : 1.0f;
++        lastRightGain = pan < 0.0f ? 1.0f + pan : 1.0f;
++    }
++
++    NodeProperties getNodeProperties() override
++    {
++        auto props = input->getNodeProperties();
++
++        if (nodeHash != 0)
++            hash_combine (props.nodeID, nodeHash);
++
++        constexpr size_t stereoBalanceNodeMagicHash = size_t (0x73746572656f5061);
++
++        if (props.nodeID != 0)
++            hash_combine (props.nodeID, stereoBalanceNodeMagicHash);
++
++        return props;
++    }
++
++    std::vector<Node*> getDirectInputNodes() override
++    {
++        return { input };
++    }
++
++    bool isReadyToProcess() override
++    {
++        return input->hasProcessed();
++    }
++
++    void process (ProcessContext& pc) override
++    {
++        auto source = input->getProcessedOutput();
++        copy (pc.buffers.audio, source.audio);
++        pc.buffers.midi.copyFrom (source.midi);
++
++        if (pc.buffers.audio.getNumChannels() < 2)
++            return;
++
++        const auto pan = juce::jlimit (-1.0f, 1.0f, panFunction());
++        const auto leftGain = pan > 0.0f ? 1.0f - pan : 1.0f;
++        const auto rightGain = pan < 0.0f ? 1.0f + pan : 1.0f;
++
++        applyChannelGain (pc.buffers.audio.getChannel (0), lastLeftGain, leftGain);
++        applyChannelGain (pc.buffers.audio.getChannel (1), lastRightGain, rightGain);
++        lastLeftGain = leftGain;
++        lastRightGain = rightGain;
++    }
++
++private:
++    template<typename BufferType>
++    static void applyChannelGain (BufferType&& buffer, float previous, float target)
++    {
++        if (previous == target)
++        {
++            if (target != 1.0f)
++                applyGain (buffer, target);
++            return;
++        }
++
++        juce::SmoothedValue<float> smoother (previous);
++        smoother.setTargetValue (target);
++        smoother.reset ((int) buffer.getNumFrames());
++        applyGainPerFrame (buffer, [&] { return smoother.getNextValue(); });
++    }
++
++    Node* input = nullptr;
++    std::function<float()> panFunction;
++    float lastLeftGain = 1.0f, lastRightGain = 1.0f;
++    size_t nodeHash = 0;
++};
++
++
+ //==============================================================================
+ //==============================================================================
+ class ReturnNode final  : public Node
+@@ -718,11 +810,17 @@ private:
+             for (int i = (int) sends.size(); --i >= 0;)
+             {
+                 auto gainFunction = sends[(size_t) i]->getGainFunction();
++                auto panFunction = sends[(size_t) i]->getPanFunction();
+ 
+                 if (! gainFunction)
+                     continue;
+ 
+-                ownedNodes.push_back (makeNode<GainNode> (std::move (sends[(size_t) i]), std::move (gainFunction), returnNodeID));
++                if (panFunction)
++                    ownedNodes.push_back (makeNode<GainNode> (
++                        makeNode<StereoBalanceNode> (sends[(size_t) i], std::move (panFunction), returnNodeID),
++                        std::move (gainFunction), returnNodeID));
++                else
++                    ownedNodes.push_back (makeNode<GainNode> (std::move (sends[(size_t) i]), std::move (gainFunction), returnNodeID));
+ 				sends.erase (std::find (sends.begin(), sends.end(), sends[(size_t) i]));
+ 			}
+ 

@@ -11,9 +11,104 @@
 #include "state/Section.h"
 #include "state/Annotation.h"
 
+#include <cmath>
+#include <memory>
+
 namespace mosh
 {
 using namespace juce;
+
+namespace
+{
+bool copyMemoryTrackIds (const var& source, Array<var>& target, String& error)
+{
+    auto* values = source.getArray();
+    if (values == nullptr)
+    {
+        error = "Memory Location track ids must be an array";
+        return false;
+    }
+
+    StringArray seen;
+    for (const auto& value : *values)
+    {
+        if (! value.isString() || value.toString().trim().isEmpty())
+        {
+            error = "Memory Location track ids must be non-empty strings";
+            return false;
+        }
+        const auto id = value.toString();
+        if (! seen.contains (id))
+        {
+            seen.add (id);
+            target.add (id);
+        }
+    }
+    return true;
+}
+
+bool normaliseMemoryLocation (const var& source, var& result, String& error)
+{
+    if (source.isVoid() || source.isUndefined())
+    {
+        result = var();
+        return true;
+    }
+    if (! source.isObject())
+    {
+        error = "memoryLocation must be an object or null";
+        return false;
+    }
+
+    auto out = std::make_unique<DynamicObject>();
+    if (source.hasProperty ("editSelection"))
+    {
+        const auto selection = source.getProperty ("editSelection", var());
+        if (! selection.isObject())
+        {
+            error = "Memory Location editSelection must be an object";
+            return false;
+        }
+        const auto start = (double) selection.getProperty ("start", -1.0);
+        const auto end = (double) selection.getProperty ("end", -1.0);
+        if (! std::isfinite (start) || ! std::isfinite (end) || start < 0.0 || end < start)
+        {
+            error = "Memory Location selection must be finite and ordered";
+            return false;
+        }
+        auto normalisedSelection = std::make_unique<DynamicObject>();
+        normalisedSelection->setProperty ("start", start);
+        normalisedSelection->setProperty ("end", end);
+        if (selection.hasProperty ("trackIds"))
+        {
+            Array<var> trackIds;
+            if (! copyMemoryTrackIds (selection.getProperty ("trackIds", var()), trackIds, error))
+                return false;
+            normalisedSelection->setProperty ("trackIds", trackIds);
+        }
+        out->setProperty ("editSelection", var (normalisedSelection.release()));
+    }
+    if (source.hasProperty ("horizontalZoom"))
+    {
+        const auto zoom = (double) source.getProperty ("horizontalZoom", 0.0);
+        if (! std::isfinite (zoom) || zoom < 20.0 || zoom > 400.0)
+        {
+            error = "Memory Location horizontalZoom must be between 20 and 400";
+            return false;
+        }
+        out->setProperty ("horizontalZoom", zoom);
+    }
+    if (source.hasProperty ("shownTrackIds"))
+    {
+        Array<var> shownTrackIds;
+        if (! copyMemoryTrackIds (source.getProperty ("shownTrackIds", var()), shownTrackIds, error))
+            return false;
+        out->setProperty ("shownTrackIds", shownTrackIds);
+    }
+    result = var (out.release());
+    return true;
+}
+}
 
 // ── SEC-001 — named song sections (MOSH_SECTIONS tree on the Edit) ────────────
 // Beat-range regions with a name + colour; create/rename/move/remove are undoable
@@ -344,6 +439,12 @@ juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
     auto annId = args.getProperty ("annotationId", var()).toString();
     if (annId.isEmpty()) annId = juce::Uuid().toString();
 
+    var memoryLocation;
+    String memoryError;
+    if (args.hasProperty ("memoryLocation")
+        && ! normaliseMemoryLocation (args.getProperty ("memoryLocation", var()), memoryLocation, memoryError))
+        return errResult ("create_annotation", memoryError);
+
     beginTxn ("create_annotation");
     auto state = eng.edit().state;
     auto anns = state.getChildWithName (ids::MOSH_ANNOTATIONS);
@@ -355,7 +456,13 @@ juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
     // Idempotent on the resolved id: a re-applied create (the only ADDITIVE op broadcast
     // over MP) must not append a duplicate node.
     if (! anns.getChildWithProperty (ids::id, annId).isValid())
-        anns.appendChild (mosh::Annotation::create (annId, text, beat, color, author), &undoManager());
+    {
+        auto annotation = mosh::Annotation::create (annId, text, beat, color, author);
+        if (! memoryLocation.isVoid())
+            annotation.setProperty (ids::annotationMemoryLocation,
+                                    JSON::toString (memoryLocation, false), nullptr);
+        anns.appendChild (annotation, &undoManager());
+    }
 
     auto* data = new DynamicObject(); data->setProperty ("annotationId", annId);
     logLine ("create_annotation", args, true, {}, true);
@@ -369,6 +476,7 @@ juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
     broadcastArgs->setProperty ("beat", beat);
     if (color.isNotEmpty())  broadcastArgs->setProperty ("color", color);
     if (author.isNotEmpty()) broadcastArgs->setProperty ("author", author);
+    if (! memoryLocation.isVoid()) broadcastArgs->setProperty ("memoryLocation", memoryLocation);
     return broadcastStructuralIfActive ("create_annotation", var (broadcastArgs),
                                         okResult ("create_annotation", var (data)));
 }
@@ -380,9 +488,21 @@ juce::var MoshOps::cmdEditAnnotation (const juce::var& args)
     auto node = anns.getChildWithProperty (ids::id, annId);
     if (! node.isValid()) return errResult ("edit_annotation", "no annotation: " + annId);
 
+    var memoryLocation;
+    String memoryError;
+    if (args.hasProperty ("memoryLocation")
+        && ! normaliseMemoryLocation (args.getProperty ("memoryLocation", var()), memoryLocation, memoryError))
+        return errResult ("edit_annotation", memoryError);
+
     beginTxn ("edit_annotation");
     if (args.hasProperty ("text"))  node.setProperty (ids::annotationText, args.getProperty ("text", var()), &undoManager());
     if (args.hasProperty ("color")) node.setProperty (ids::annotationColor, args.getProperty ("color", var()), &undoManager());
+    if (args.hasProperty ("memoryLocation"))
+    {
+        if (memoryLocation.isVoid()) node.removeProperty (ids::annotationMemoryLocation, &undoManager());
+        else node.setProperty (ids::annotationMemoryLocation,
+                               JSON::toString (memoryLocation, false), &undoManager());
+    }
     logLine ("edit_annotation", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("edit_annotation");
@@ -430,6 +550,11 @@ juce::var MoshOps::annotationsToVar()
             o->setProperty ("beat", (double) a[ids::annotationBeat]);
             if (a.hasProperty (ids::annotationColor))  o->setProperty ("color", a[ids::annotationColor].toString());
             if (a.hasProperty (ids::annotationAuthor)) o->setProperty ("author", a[ids::annotationAuthor].toString());
+            if (a.hasProperty (ids::annotationMemoryLocation))
+            {
+                const auto memoryLocation = JSON::parse (a[ids::annotationMemoryLocation].toString());
+                if (memoryLocation.isObject()) o->setProperty ("memoryLocation", memoryLocation);
+            }
             out.add (var (o));
         }
     return out;

@@ -191,8 +191,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── sends / returns / aux buses ───────────────────────────────────────────
   { command: "create_bus", desc: "Create an aux/return bus (a reverb/delay return track) — routes any track's send into it", args: [S("name", false, "bus name, e.g. 'Reverb'")] },
-  { command: "add_send", desc: "Add a post-fader send from a track to a bus (bus number from the snapshot's buses[])", args: [S("trackId"), N("bus", true, "the bus number"), N("db", false, "send level in dB, -60…6")] },
+  { command: "add_send", desc: "Add a send from a track to a bus (bus number from snapshot.buses[])", args: [S("trackId"), N("bus", true, "the bus number"), N("db", false, "send level in dB, -60…6"), B("mute", false), N("pan", false, "send balance -1…1"), B("preFader", false)] },
   { command: "set_send_level", desc: "Set a track's send level to a bus in dB", args: [S("trackId"), N("bus"), N("db")] },
+  { command: "set_send_mute", desc: "Mute or unmute a track's send without changing its level", args: [S("trackId"), N("bus"), B("mute")] },
+  { command: "set_send_pan", desc: "Set stereo balance for one send branch (-1 left … 1 right)", args: [S("trackId"), N("bus"), N("pan")] },
+  { command: "set_send_pre_fader", desc: "Place a send before or after the track fader", args: [S("trackId"), N("bus"), B("preFader")] },
   { command: "remove_send", desc: "Remove a track's send to a bus", args: [S("trackId"), N("bus")] },
   { command: "remove_bus", desc: "Remove an aux/return bus (sweeps any sends pointing at it)", args: [N("bus", true, "the bus number")] },
   { command: "rename_bus", desc: "Rename an aux/return bus", args: [N("bus", true, "the bus number"), S("name")] },
@@ -389,6 +392,9 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "create_bus": return `Created a ${a.name ? `"${a.name}" ` : ""}bus`;
     case "add_send": return `Added a send to bus ${a.bus}`;
     case "set_send_level": return `Set send to bus ${a.bus} to ${a.db} dB`;
+    case "set_send_mute": return a.mute ? `Muted send to bus ${a.bus}` : `Unmuted send to bus ${a.bus}`;
+    case "set_send_pan": return `Set send to bus ${a.bus} pan to ${a.pan}`;
+    case "set_send_pre_fader": return `Set send to bus ${a.bus} ${a.preFader ? "pre" : "post"}-fader`;
     case "remove_send": return `Removed a send to bus ${a.bus}`;
     case "list_builtins": return `Listed the built-in effects`;
     case "list_plugins": return `Listed the available plugins`;

@@ -3,6 +3,10 @@ import { pushEscapeHandler } from "../hooks/escapeStack";
 import { useStore } from "../store";
 import { applyProToolsFadePlan } from "./proToolsFadeApply";
 import {
+  currentProToolsDefaultFadeOptions,
+  rememberProToolsDefaultFadeOptions,
+} from "./proToolsFadeDefaults";
+import {
   buildProToolsFadePlan,
   PROTOOLS_FADE_CURVES,
   proToolsFadePath,
@@ -27,12 +31,13 @@ export function ProToolsFadesDialog({ targets, onClose }: {
   const lengthRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const openEpochRef = useRef(projectEpoch);
+  const defaultsRef = useRef(currentProToolsDefaultFadeOptions());
   const [fadeIns, setFadeIns] = useState(true);
   const [fadeOuts, setFadeOuts] = useState(true);
   const [crossfades, setCrossfades] = useState(true);
-  const [edgeLength, setEdgeLength] = useState("10");
-  const [curveIn, setCurveIn] = useState<ProToolsFadeCurve>("linear");
-  const [curveOut, setCurveOut] = useState<ProToolsFadeCurve>("linear");
+  const [edgeLength, setEdgeLength] = useState(String(defaultsRef.current.edgeLengthMs));
+  const [curveIn, setCurveIn] = useState<ProToolsFadeCurve>(defaultsRef.current.curveIn);
+  const [curveOut, setCurveOut] = useState<ProToolsFadeCurve>(defaultsRef.current.curveOut);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parsedLength = Number(edgeLength);
@@ -108,6 +113,14 @@ export function ProToolsFadesDialog({ targets, onClose }: {
       setError(result.error);
       return;
     }
+    rememberProToolsDefaultFadeOptions({
+      fadeIns: true,
+      fadeOuts: true,
+      crossfades: true,
+      edgeLengthMs: parsedLength,
+      curveIn,
+      curveOut,
+    });
     onClose();
   };
 
@@ -163,9 +176,13 @@ export function ProToolsFadesDialog({ targets, onClose }: {
             </svg>
           </div>
           <div className="pt-fades-summary" role="status">
-            {plan.crossfades.length > 0
+            <div>{plan.crossfades.length > 0
               ? `${plan.crossfades.length} existing overlap${plan.crossfades.length === 1 ? "" : "s"} · exact overlap length`
               : "No selected audio overlap · edge fades only"}
+              <span data-testid="pt-fades-default-summary">
+                After Apply: ⌘⌃F uses {lengthValid ? `${parsedLength} ms` : "a valid length"}, {CURVE_LABELS[curveIn]} / {CURVE_LABELS[curveOut]}
+              </span>
+            </div>
             <span>Placement outside existing overlap and audition are not available.</span>
           </div>
           {error && <p id="pt-fades-error" className="pt-fades-error" data-testid="pt-fades-error" role="alert">{error}</p>}

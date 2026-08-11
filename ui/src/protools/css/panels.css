@@ -648,16 +648,37 @@
   white-space: nowrap;
 }
 .pt-send-destination input { flex: 1 1 auto; }
-.pt-send-destination > span {
+.pt-send-position {
   flex: 0 0 auto;
-  padding: 1px 3px;
-  border: 1px solid var(--pt-border);
+  padding: 0 5px;
   color: var(--pt-text-muted);
   font-size: 8px;
   text-transform: uppercase;
 }
+.pt-send-position[aria-pressed="true"],
+.pt-send-controls > button[aria-pressed="true"] {
+  color: var(--pt-on-selected);
+  background: var(--pt-selected);
+}
 .pt-send-bus-actions { justify-content: flex-end; }
 .pt-send-bus-actions button { padding: 0 5px; }
+.pt-send-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 48px minmax(120px, 1fr);
+  gap: 5px;
+}
+.pt-send-pan-control {
+  display: grid;
+  grid-template-columns: 24px minmax(70px, 1fr) 38px;
+  align-items: center;
+  gap: 4px;
+  color: var(--pt-text-muted);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.pt-send-pan-control input { width: 100%; accent-color: var(--pt-selected); }
+.pt-send-pan-control output { color: var(--pt-text); font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
 .pt-send-level {
   grid-column: 1 / -1;
   display: grid;

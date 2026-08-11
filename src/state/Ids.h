@@ -226,6 +226,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (annotationBeat)
     MOSH_DECLARE_ID (annotationColor)
     MOSH_DECLARE_ID (annotationAuthor)
+    MOSH_DECLARE_ID (annotationMemoryLocation)
 
     // LYR-001 — Finish-My-Song LYRIC SHEET. A MOSH_LYRICSHEET node parented under a
     // TRACK's own state (the vocal track) — one sheet per track, mirroring how

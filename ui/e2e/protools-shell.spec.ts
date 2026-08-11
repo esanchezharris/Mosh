@@ -7,6 +7,7 @@ type ProToolsWindow = Window & {
     getState: () => {
       snapshot: Snapshot | null;
       exec: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+      setPxPerSec: (pxPerSec: number) => void;
     };
   };
   __moshCmdTrace?: Array<{
@@ -15,7 +16,10 @@ type ProToolsWindow = Window & {
     ok: boolean;
   }>;
   __moshShellStore?: {
-    getState: () => { timeRange: { start: number; end: number } | null };
+    getState: () => {
+      timeRange: { start: number; end: number } | null;
+      setTimeRange: (range: { start: number; end: number } | null) => void;
+    };
   };
 };
 
@@ -200,6 +204,19 @@ test("tutorial-backed Memory Locations persist markers and recall the timeline",
   await bootProTools(page);
   await execInPage(page, "set_transport", { position: 3 });
 
+  const firstHeader = page.getByTestId("pt-track-header").first();
+  await firstHeader.getByTestId("pt-track-select").click();
+  await page.getByTestId("pt-track-visibility-menu").click();
+  await page.getByTestId("pt-track-visibility-show-selected").click();
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(1);
+  await page.evaluate(() => {
+    const shell = (window as ProToolsWindow).__moshShellStore;
+    const store = (window as ProToolsWindow).__moshStore;
+    if (!shell || !store) throw new Error("Pro Tools view stores are unavailable");
+    shell.getState().setTimeRange({ start: 1.25, end: 2.75 });
+    store.getState().setPxPerSec(144);
+  });
+
   await page.getByTestId("pt-memory-toggle").click();
   const memoryWindow = page.getByTestId("pt-memory-locations");
   await expect(memoryWindow).toBeVisible();
@@ -209,16 +226,37 @@ test("tutorial-backed Memory Locations persist markers and recall the timeline",
   await expect(page.getByTestId("pt-memory-name")).toBeFocused();
   await page.getByTestId("pt-memory-name").fill("Verse In");
   await page.locator("#pt-memory-color").selectOption("#4a90d9");
+  await page.getByTestId("pt-memory-store-selection").check();
+  await page.getByTestId("pt-memory-store-zoom").check();
+  await page.getByTestId("pt-memory-store-visibility").check();
   await page.getByTestId("pt-memory-save").click();
 
   const row = memoryWindow.locator("li").filter({ hasText: "Verse In" });
   await expect(row).toBeVisible();
   await expect(page.locator('[data-ruler="markers"]')).toContainText("Verse In");
+  await page.getByTestId("pt-track-visibility-menu").click();
+  await page.getByTestId("pt-track-visibility-show-all").click();
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(3);
+  await page.evaluate(() => {
+    const shell = (window as ProToolsWindow).__moshShellStore;
+    const store = (window as ProToolsWindow).__moshStore;
+    if (!shell || !store) throw new Error("Pro Tools view stores are unavailable");
+    shell.getState().setTimeRange({ start: 8, end: 9 });
+    store.getState().setPxPerSec(32);
+  });
   await execInPage(page, "set_transport", { position: 0 });
   await row.locator(".pt-memory-recall").click();
   await expect.poll(() => storeVal<number>(page, "transport.position")).toBe(3);
+  await expect.poll(() => storeVal<number>(page, "pxPerSec")).toBe(144);
+  await expect.poll(() => page.evaluate(() =>
+    (window as ProToolsWindow).__moshShellStore?.getState().timeRange ?? null,
+  )).toEqual({ start: 1.25, end: 2.75 });
+  await expect(page.getByTestId("pt-track-header")).toHaveCount(1);
 
   await row.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByTestId("pt-memory-store-selection")).toBeChecked();
+  await expect(page.getByTestId("pt-memory-store-zoom")).toBeChecked();
+  await expect(page.getByTestId("pt-memory-store-visibility")).toBeChecked();
   await page.getByTestId("pt-memory-name").fill("Verse Pickup");
   await page.getByTestId("pt-memory-save").click();
   await expect(memoryWindow).toContainText("Verse Pickup");
@@ -715,7 +753,27 @@ test("Sends route a track through a named Aux return and its insert rack", async
     return snapshot?.tracks.find((track) => track.id === trackId)?.sends?.[0]?.db;
   }, sourceTrackId)).toBe(-9);
   await expect(page.getByTestId("pt-send-level-readout-0")).toHaveText("-9.0 dB");
+  const mute = page.getByTestId("pt-send-mute-0");
+  await mute.click();
+  await expect(mute).toHaveAttribute("aria-pressed", "true");
+  const position = page.getByTestId("pt-send-pre-0");
+  await position.click();
+  await expect(position).toHaveAttribute("aria-pressed", "true");
+  await expect(position).toHaveText("Pre");
+  const pan = page.getByTestId("pt-send-pan-0");
+  await pan.fill("0.35");
+  await expect.poll(() => page.evaluate((trackId) => {
+    const snapshot = (window as ProToolsWindow).__moshStore?.getState().snapshot;
+    return snapshot?.tracks.find((track) => track.id === trackId)?.sends?.[0];
+  }, sourceTrackId)).toMatchObject({ db: -9, mute: true, pan: 0.35, preFader: true });
   await page.screenshot({ path: testInfo.outputPath("protools-sends-wide.png"), animations: "disabled" });
+
+  await page.getByTestId("pt-window-mix").click();
+  const mixStrip = page.locator(`[data-testid="pt-mix-strip"][data-track-id="${sourceTrackId}"]`);
+  await expect(mixStrip.getByTestId("pt-mix-send-mute-0")).toHaveAttribute("aria-pressed", "true");
+  await expect(mixStrip.getByTestId("pt-mix-send-pre-0")).toHaveText("Pre");
+  await expect(mixStrip.getByTestId("pt-mix-send-pan-0")).toHaveValue("0.35");
+  await page.getByTestId("pt-window-edit").click();
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 720, height: 720 });
@@ -723,13 +781,46 @@ test("Sends route a track through a named Aux return and its insert rack", async
   await expect(sends).toBeInViewport();
   await expect(level).toBeInViewport();
   await expect(page.getByTestId("pt-send-level-readout-0")).toHaveText("-9.0 dB");
+  await position.scrollIntoViewIfNeeded();
+  await expect(position).toBeInViewport();
+  await mute.scrollIntoViewIfNeeded();
+  await expect(mute).toBeInViewport();
+  await pan.scrollIntoViewIfNeeded();
+  await expect(pan).toBeInViewport();
+  await position.scrollIntoViewIfNeeded();
+  await expect(position).toBeInViewport();
   await expect(page.getByTestId("pt-clip-list")).toHaveClass(/is-closed/);
   await page.screenshot({ path: testInfo.outputPath("protools-sends-compact.png"), animations: "disabled" });
 
   const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
   const commands = trace.map((entry) => entry.command);
-  for (const command of ["create_bus", "load_builtin", "add_send", "set_send_level"])
+  for (const command of [
+    "create_bus",
+    "load_builtin",
+    "add_send",
+    "set_send_level",
+    "set_send_mute",
+    "set_send_pan",
+    "set_send_pre_fader",
+  ])
     expect(commands).toContain(command);
+  expect(trace).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      command: "set_send_mute",
+      args: { trackId: sourceTrackId, bus: 0, mute: true },
+      ok: true,
+    }),
+    expect.objectContaining({
+      command: "set_send_pan",
+      args: { trackId: sourceTrackId, bus: 0, pan: 0.35 },
+      ok: true,
+    }),
+    expect.objectContaining({
+      command: "set_send_pre_fader",
+      args: { trackId: sourceTrackId, bus: 0, preFader: true },
+      ok: true,
+    }),
+  ]));
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });
 
