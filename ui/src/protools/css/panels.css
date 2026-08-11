@@ -128,6 +128,9 @@
   gap: 3px;
   padding: 1px 4px 2px;
 }
+.pt-track-view-controls[data-automation-target-visible="true"] {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 23px;
+}
 .pt-track-view-controls label { min-width: 0; }
 .pt-track-view-controls select,
 .pt-automation-lanes-toggle {

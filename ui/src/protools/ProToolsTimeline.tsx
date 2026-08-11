@@ -20,6 +20,7 @@ import { proToolsEditableLaneTarget } from "./proToolsLaneTarget";
 import { useProTools } from "./proToolsState";
 import { useProToolsEditSelection } from "./useProToolsEditSelection";
 import { applyHorizontalZoomRange, applyHorizontalZoomStep } from "./proToolsZoom";
+import { proToolsAutomationTargets } from "./sendAutomationTargets";
 import { classifyProToolsIntent, type ProToolsIntent } from "./smartTool";
 import { scaledTrackHeights } from "./trackHeightZoom";
 import { proToolsTrackRowHeight, resolveProToolsTrackView } from "./trackViews";
@@ -51,6 +52,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
   const setHoveredIntent = useProTools((s) => s.setHoveredIntent);
   const trackViews = useProTools((s) => s.trackViews);
   const automationLanesVisible = useProTools((s) => s.automationLanesVisible);
+  const automationTargets = useProTools((s) => s.automationTargets);
   const midiNoteZoom = useProTools((s) => s.midiNoteZoom);
   const completeSingleZoom = useProTools((s) => s.completeSingleZoom);
   const trackHeightScale = useProTools((s) => s.trackHeightScale);
@@ -377,6 +379,9 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
           const trackView = resolveProToolsTrackView(track, trackViews[track.id]);
           const primaryAutomation = trackView === "volume";
           const secondaryAutomation = !primaryAutomation && Boolean(automationLanesVisible[track.id]);
+          const targetOptions = proToolsAutomationTargets(track, snapshot);
+          const automationTarget = targetOptions.find((option) =>
+            option.id === automationTargets[track.id]) ?? targetOptions[0];
           const rowHeight = proToolsTrackRowHeight(
             track,
             trackView,
@@ -422,7 +427,7 @@ export function ProToolsTimeline({ snapshot, contentWidth, scrollRef, onScroll, 
                   : null)}
               {(primaryAutomation || secondaryAutomation) && (
                 <ProToolsAutomationLane track={track} width={contentWidth}
-                  primary={primaryAutomation} targetName="Volume" />
+                  primary={primaryAutomation} target={automationTarget?.target ?? null} />
               )}
             </div>
           );

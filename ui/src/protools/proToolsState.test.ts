@@ -26,6 +26,7 @@ describe("Pro Tools shell state", () => {
       classicTheme: state.classicTheme,
       automationClipboard: state.automationClipboard,
       trackViews: state.trackViews,
+      automationTargets: state.automationTargets,
       automationLanesVisible: state.automationLanesVisible,
       horizontalZoomPresets: state.horizontalZoomPresets,
       audioWaveformZoom: state.audioWaveformZoom,
@@ -64,6 +65,7 @@ describe("Pro Tools shell state", () => {
       classicTheme: false,
       automationClipboard: null,
       trackViews: {},
+      automationTargets: {},
       automationLanesVisible: {},
       horizontalZoomPresets: DEFAULT_HORIZONTAL_ZOOM_PRESETS,
       audioWaveformZoom: 1,
@@ -312,6 +314,19 @@ describe("Pro Tools shell state", () => {
     state.resetForProject(projectEpoch + 1);
     expect(useProTools.getState().trackViews).toEqual({});
     expect(useProTools.getState().automationLanesVisible).toEqual({});
+  });
+
+  it("keeps automation target choices within one project epoch", () => {
+    const state = useProTools.getState();
+
+    state.setAutomationTarget("audio-1", "send:2:pan");
+    expect(useProTools.getState().automationTargets).toEqual({ "audio-1": "send:2:pan" });
+
+    state.resetForProject(projectEpoch);
+    expect(useProTools.getState().automationTargets).toEqual({ "audio-1": "send:2:pan" });
+
+    state.resetForProject(projectEpoch + 1);
+    expect(useProTools.getState().automationTargets).toEqual({});
   });
 
 });

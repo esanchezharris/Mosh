@@ -10,6 +10,7 @@ import { applyProToolsTrackControl, type ProToolsTrackControl } from "./proTools
 import { selectProToolsTrack } from "./proToolsTrackEditSelection";
 import { ProToolsTrackListMenu } from "./ProToolsTrackListMenu";
 import { ProToolsTrackGroupsPanel } from "./ProToolsTrackGroupsPanel";
+import { proToolsAutomationTargets } from "./sendAutomationTargets";
 import {
   proToolsPlaylistRowCount,
   proToolsTrackRowHeight,
@@ -38,7 +39,7 @@ export function ProToolsTrackHeaders({ snapshot }: ProToolsTrackHeadersProps) {
               {allTracks.length === 0 ? "No tracks" : "No tracks shown"}
             </p>
           : tracks.map((track) => (
-            <ProToolsTrackHeader key={track.id} track={track} tracks={tracks} />
+            <ProToolsTrackHeader key={track.id} track={track} tracks={tracks} snapshot={snapshot} />
           ))}
         <AddTrackMenu />
       </div>
@@ -47,9 +48,10 @@ export function ProToolsTrackHeaders({ snapshot }: ProToolsTrackHeadersProps) {
   );
 }
 
-function ProToolsTrackHeader({ track, tracks }: {
+function ProToolsTrackHeader({ track, tracks, snapshot }: {
   readonly track: Track;
   readonly tracks: readonly Track[];
+  readonly snapshot: Snapshot;
 }) {
   const selectedTrackId = useStore((state) => state.selectedTrackId);
   const clearSelection = useStore((state) => state.clearSelection);
@@ -59,6 +61,8 @@ function ProToolsTrackHeader({ track, tracks }: {
   const trackHeightScale = useProTools((state) => state.trackHeightScale);
   const trackSelectionIds = useProTools((state) => state.trackSelectionIds);
   const setTrackView = useProTools((state) => state.setTrackView);
+  const requestedAutomationTarget = useProTools((state) => state.automationTargets[track.id]);
+  const setAutomationTarget = useProTools((state) => state.setAutomationTarget);
   const toggleAutomationLane = useProTools((state) => state.toggleAutomationLane);
   const selectedTrackIds = trackSelectionIds.length > 0
     ? trackSelectionIds
@@ -66,6 +70,11 @@ function ProToolsTrackHeader({ track, tracks }: {
   const selected = selectedTrackIds.includes(track.id);
   const trackViewOptions = proToolsTrackViewOptions(track);
   const trackView = resolveProToolsTrackView(track, requestedTrackView);
+  const automationTargetOptions = proToolsAutomationTargets(track, snapshot);
+  const automationTarget = automationTargetOptions.find((option) => option.id === requestedAutomationTarget)
+    ?? automationTargetOptions[0];
+  const automationTargetVisible = Boolean(automationTarget)
+    && (trackView === "volume" || automationLaneVisible);
   const playlistRows = proToolsPlaylistRowCount(track);
   const heights = scaledTrackHeights(trackHeightScale);
   const rowHeight = proToolsTrackRowHeight(track, trackView, automationLaneVisible, trackHeightScale);
@@ -164,7 +173,7 @@ function ProToolsTrackHeader({ track, tracks }: {
       <span className="pt-track-route" title={track.output?.name ?? "Default output"}>
         {track.output?.name ?? "Default output"}
       </span>
-      <div className="pt-track-view-controls">
+      <div className="pt-track-view-controls" data-automation-target-visible={automationTargetVisible}>
         <label>
           <select data-testid="pt-track-view" aria-label={`${track.name} Track View`}
             value={trackView}
@@ -182,6 +191,22 @@ function ProToolsTrackHeader({ track, tracks }: {
             ))}
           </select>
         </label>
+        {automationTargetVisible && automationTarget && (
+          <label>
+            <select data-testid="pt-automation-target"
+              aria-label={`${track.name} Automation Target`}
+              value={automationTarget.id}
+              onChange={(event) => {
+                const option = automationTargetOptions
+                  .find((candidate) => candidate.id === event.target.value);
+                if (option) setAutomationTarget(track.id, option.id);
+              }}>
+              {automationTargetOptions.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <button type="button" className="pt-automation-lanes-toggle"
           data-testid="pt-automation-lanes"
           aria-label={`${automationLaneVisible ? "Hide" : "Show"} ${track.name} automation lane`}
@@ -207,7 +232,9 @@ function ProToolsTrackHeader({ track, tracks }: {
             );
           })}
           {automationLaneVisible && (
-            <span className="pt-playlist-automation-label">Volume automation</span>
+            <span className="pt-playlist-automation-label">
+              {automationTarget?.label ?? "Automation"} automation
+            </span>
           )}
         </div>
       )}

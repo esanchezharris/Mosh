@@ -11,6 +11,7 @@ import { proToolsVisibilityForShownTracks } from "./proToolsTrackVisibility";
 import type { TimeRangeSel } from "../v2/shellState";
 import type { SpotTimeScale } from "./spotTime";
 import { clampProToolsUniverseHeight } from "./proToolsUniverse";
+import type { ProToolsAutomationTargetId } from "./sendAutomationTargets";
 import {
   proToolsProjectDefaults,
   type ProToolsEditMode,
@@ -44,6 +45,7 @@ type ProToolsActions = {
   readonly setHoveredIntent: (intent: ProToolsIntent | null) => void;
   readonly setAutomationClipboard: (clipboard: AutomationClipboard) => void;
   readonly setTrackView: (trackId: string, view: ProToolsTrackView) => void;
+  readonly setAutomationTarget: (trackId: string, targetId: ProToolsAutomationTargetId) => void;
   readonly setTrackShown: (trackId: string, shown: boolean) => void;
   readonly setShownTrackIds: (trackIds: readonly string[], shownTrackIds: readonly string[]) => void;
   readonly showOnlyTrackIds: (trackIds: readonly string[], shownTrackIds: readonly string[]) => void;
@@ -109,6 +111,9 @@ export const useProTools = create<ProToolsState>((set) => ({
   setAutomationClipboard: (automationClipboard) => set({ automationClipboard }),
   setTrackView: (trackId, view) => set((state) => ({
     trackViews: { ...state.trackViews, [trackId]: view },
+  })),
+  setAutomationTarget: (trackId, targetId) => set((state) => ({
+    automationTargets: { ...state.automationTargets, [trackId]: targetId },
   })),
   setTrackShown: (trackId, shown) => set((state) => ({
     trackVisibility: { ...state.trackVisibility, [trackId]: shown },

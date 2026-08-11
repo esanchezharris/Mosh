@@ -6,6 +6,7 @@ import type { ProToolsTrackVisibility } from "./proToolsTrackVisibility";
 import type { TimeRangeSel } from "../v2/shellState";
 import type { SpotTimeScale } from "./spotTime";
 import { PROTOOLS_UNIVERSE_DEFAULT_HEIGHT } from "./proToolsUniverse";
+import type { ProToolsAutomationTargetId } from "./sendAutomationTargets";
 
 export type ProToolsEditMode = "shuffle" | "slip" | "spot" | "grid";
 export type ProToolsMainWindow = "edit" | "mix";
@@ -38,6 +39,7 @@ export type ProToolsViewState = {
   readonly hoveredIntent: ProToolsIntent | null;
   readonly automationClipboard: AutomationClipboard | null;
   readonly trackViews: Readonly<Record<string, ProToolsTrackView>>;
+  readonly automationTargets: Readonly<Record<string, ProToolsAutomationTargetId>>;
   readonly trackVisibility: ProToolsTrackVisibility;
   readonly previousTrackVisibility: ProToolsTrackVisibility | null;
   readonly automationLanesVisible: Readonly<Record<string, boolean>>;
@@ -83,6 +85,7 @@ export const proToolsProjectDefaults = (projectEpoch: number): ProToolsViewState
   hoveredIntent: null,
   automationClipboard: null,
   trackViews: {},
+  automationTargets: {},
   trackVisibility: {},
   previousTrackVisibility: null,
   automationLanesVisible: {},
