@@ -70,6 +70,11 @@ test("tutorial-backed Batch Fades persist curve-shaped overlap edits", async ({ 
   await trigger.click();
   await expect(dialog).toBeVisible();
   await expect(page.getByTestId("pt-fades-length")).toBeFocused();
+  await expect(page.getByTestId("pt-fades-length")).toHaveValue("250");
+  await expect(page.getByTestId("pt-fades-curve-in")).toHaveValue("convex");
+  await expect(page.getByTestId("pt-fades-curve-out")).toHaveValue("concave");
+  await expect(page.getByTestId("pt-fades-default-summary"))
+    .toContainText("250 ms, Convex / Concave");
   await page.getByTestId("pt-fades-close").focus();
   await page.keyboard.press("Shift+Tab");
   await expect(page.getByTestId("pt-fades-apply")).toBeFocused();
@@ -87,15 +92,32 @@ test("tutorial-backed Batch Fades persist curve-shaped overlap edits", async ({ 
   await page.keyboard.press("Meta+Control+f");
   await expect(dialog).toHaveCount(0);
   await expect.poll(() => persistedFadeState(page, sourceId, neighborId)).toEqual({
-    source: { autoCrossfade: false, fadeInSec: 0.01, fadeOutSec: 1, fadeInType: 1, fadeOutType: 1 },
-    neighbor: { autoCrossfade: false, fadeInSec: 1, fadeOutSec: 0.01, fadeInType: 1, fadeOutType: 1 },
+    source: { autoCrossfade: false, fadeInSec: 0.25, fadeOutSec: 1, fadeInType: 2, fadeOutType: 3 },
+    neighbor: { autoCrossfade: false, fadeInSec: 1, fadeOutSec: 0.25, fadeInType: 2, fadeOutType: 3 },
   });
-  const quickCommands = await page.evaluate((start) => (
+  const quickEntries = await page.evaluate((start) => (
     ((window as ProToolsFadesWindow).__moshCmdTrace ?? [])
       .slice(start)
-      .map((entry) => entry.command)
   ), quickTraceStart);
-  expect(quickCommands).toEqual(["batch_begin", "set_clip_fade", "set_clip_fade", "batch_end"]);
+  expect(quickEntries.map((entry) => entry.command))
+    .toEqual(["batch_begin", "set_clip_fade", "set_clip_fade", "batch_end"]);
+  expect(quickEntries.filter((entry) => entry.command === "set_clip_fade").map((entry) => entry.args))
+    .toEqual([
+      {
+        clipId: sourceId,
+        fadeInSec: 0.25,
+        fadeOutSec: 1,
+        curveIn: "convex",
+        curveOut: "concave",
+      },
+      {
+        clipId: neighborId,
+        fadeInSec: 1,
+        fadeOutSec: 0.25,
+        curveIn: "convex",
+        curveOut: "concave",
+      },
+    ]);
 });
 
 async function createSelectedOverlap(page: Page): Promise<{

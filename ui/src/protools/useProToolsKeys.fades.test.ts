@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandResult, Snapshot } from "../types";
 import { useStore, type State } from "../store";
+import { useSettings } from "../settings/store";
 import { useShell } from "../v2/shellState";
 import { useProTools } from "./proToolsState";
 import { useProToolsKeys } from "./useProToolsKeys";
@@ -70,6 +71,8 @@ describe("useProToolsKeys Create Fades shortcut", () => {
     onOpenFades = vi.fn();
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     runAtomic = vi.fn(async (_label: string, body: (run: State["exec"]) => Promise<void>) => body(exec));
+    localStorage.clear();
+    useSettings.getState().reset();
     useShell.setState({ timeRange: null, timeRangeDragging: false });
     useProTools.getState().resetForProject(useProTools.getState().projectEpoch + 1);
     useStore.setState({
@@ -93,6 +96,7 @@ describe("useProToolsKeys Create Fades shortcut", () => {
       exec: originalExec,
       runAtomic: originalRunAtomic,
     });
+    useSettings.getState().reset();
   });
 
   it("opens Command+F only for an eligible audio selection", () => {
@@ -125,6 +129,24 @@ describe("useProToolsKeys Create Fades shortcut", () => {
       fadeOutSec: 0.01,
       curveIn: "linear",
       curveOut: "linear",
+    });
+  });
+
+  it("uses the persisted last-applied fade settings for Command+Control+F", async () => {
+    useSettings.getState().set("protoolsDefaultFadeLengthMs", 37);
+    useSettings.getState().set("protoolsDefaultFadeCurveIn", "sCurve");
+    useSettings.getState().set("protoolsDefaultFadeCurveOut", "convex");
+    useStore.setState({ selection: new Set(["audio-clip"]), editingClipId: "audio-clip" });
+
+    act(() => window.dispatchEvent(commandF({ ctrlKey: true })));
+
+    await vi.waitFor(() => expect(runAtomic).toHaveBeenCalledWith("create default fades", expect.any(Function)));
+    expect(exec).toHaveBeenCalledWith("set_clip_fade", {
+      clipId: "audio-clip",
+      fadeInSec: 0.037,
+      fadeOutSec: 0.037,
+      curveIn: "sCurve",
+      curveOut: "convex",
     });
   });
 

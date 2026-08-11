@@ -50,6 +50,13 @@ export interface SettingDef {
   constraints?: SettingConstraints;
 }
 
+const PROTOOLS_FADE_CURVE_OPTIONS: EnumOption[] = [
+  { value: "linear", label: "Linear" },
+  { value: "convex", label: "Convex" },
+  { value: "concave", label: "Concave" },
+  { value: "sCurve", label: "S-Curve" },
+];
+
 // The descriptors. Grouped by category in the UI, in array order.
 export const SETTINGS: SettingDef[] = [
   {
@@ -212,6 +219,36 @@ export const SETTINGS: SettingDef[] = [
         { value: "protools", label: "Pro Tools" },
       ],
     },
+  },
+  {
+    id: "protoolsDefaultFadeLengthMs",
+    type: "number",
+    default: 10,
+    scope: "app",
+    category: "Pro Tools",
+    label: "Default fade length",
+    help: "Edge length used by the Pro Tools no-dialog fade shortcut and remembered after a successful Fades dialog Apply, in milliseconds.",
+    constraints: { min: 0, max: 60_000, step: 1 },
+  },
+  {
+    id: "protoolsDefaultFadeCurveIn",
+    type: "enum",
+    default: "linear",
+    scope: "app",
+    category: "Pro Tools",
+    label: "Default fade-in shape",
+    help: "Fade-in shape used by the Pro Tools no-dialog fade shortcut and remembered after a successful Fades dialog Apply.",
+    constraints: { options: PROTOOLS_FADE_CURVE_OPTIONS },
+  },
+  {
+    id: "protoolsDefaultFadeCurveOut",
+    type: "enum",
+    default: "linear",
+    scope: "app",
+    category: "Pro Tools",
+    label: "Default fade-out shape",
+    help: "Fade-out shape used by the Pro Tools no-dialog fade shortcut and remembered after a successful Fades dialog Apply.",
+    constraints: { options: PROTOOLS_FADE_CURVE_OPTIONS },
   },
   {
     // Opt-in crash reporting + anonymous usage telemetry (src/telemetry/, see

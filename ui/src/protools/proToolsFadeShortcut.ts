@@ -4,18 +4,11 @@ import { applyProToolsFadePlan } from "./proToolsFadeApply";
 import {
   buildProToolsFadePlan,
   proToolsFadeTargets,
-  type ProToolsFadeOptions,
 } from "./proToolsFades";
+import { currentProToolsDefaultFadeOptions } from "./proToolsFadeDefaults";
 import { useProTools } from "./proToolsState";
 
-export const DEFAULT_PROTOOLS_FADE_OPTIONS: ProToolsFadeOptions = {
-  fadeIns: true,
-  fadeOuts: true,
-  crossfades: true,
-  edgeLengthMs: 10,
-  curveIn: "linear",
-  curveOut: "linear",
-};
+export { DEFAULT_PROTOOLS_FADE_OPTIONS } from "./proToolsFadeDefaults";
 
 export function handleProToolsFadesShortcut(
   event: KeyboardEvent,
@@ -38,7 +31,7 @@ export function handleProToolsFadesShortcut(
   });
   if (targets.length === 0) return true;
   if (event.metaKey && event.ctrlKey) {
-    const plan = buildProToolsFadePlan(targets, DEFAULT_PROTOOLS_FADE_OPTIONS);
+    const plan = buildProToolsFadePlan(targets, currentProToolsDefaultFadeOptions());
     void applyProToolsFadePlan("create default fades", plan, store.projectEpoch)
       .then((result) => {
         if (!result.stale && result.error) useStore.getState().setLastError(result.error);
