@@ -251,7 +251,16 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **State and commands**: visibility is project-scoped shell state, clears on `projectEpoch` replacement, never mutates a snapshot, and emits no `store.exec` command. The hidden track remains audible because the engine and project graph are unchanged.
 - **Accessibility**: every item is a native menu button named `Hide <track> track` or `Show <track> track`; check state and visible text are redundant, and keyboard activation must not leak Enter into the global Return-to-Zero shortcut.
 - **Active state**: Make Selected Tracks Active/Inactive is a distinct project mutation through `set_track_active`; it never changes Track List visibility, deletes clips, or masquerades as Mute.
-- **Adaptation**: the menu uses Mosh's original check primitive and labelled, scrollable Show Only/Hide groups instead of copying Avid's dots or submenu artwork. Current Edit-bank rows do not model Folder, Aux, Master, or VCA tracks, so those filters remain absent rather than inventing unsupported categories. Visibility-enabled Memory Locations, linked Edit/Mix visibility, and custom command assignments remain gaps.
+- **Adaptation**: the menu uses Mosh's original check primitive and labelled, scrollable Show Only/Hide groups instead of copying Avid's dots or submenu artwork. Current Edit-bank rows do not model Folder, Aux, Master, or VCA tracks, so those filters remain absent rather than inventing unsupported categories. Memory Locations can store this visibility map; linked Edit/Mix visibility and custom command assignments remain gaps.
+
+### Memory Location view recall
+
+- **Structure**: New/Edit Memory Location adds three opt-in properties—Edit selection, horizontal Zoom, and Track visibility—below the existing name and color fields. Marker-only locations remain the default and retain their old wire shape.
+- **Persistence**: `Annotation.memoryLocation` is an additive snapshot object persisted on the annotation ValueTree. `create_annotation` and `edit_annotation` validate and serialize the nested selection/zoom/visibility payload, so undo, replay, JSONL, save/reload, and multiplayer broadcast continue through the existing annotation seam.
+- **Recall order**: activation first awaits `set_transport`. Only an accepted result in the same `projectEpoch` may restore the UI-local selection, zoom, and visibility map. A rejection or replacement project applies none of the stored view state.
+- **Track identity**: stored IDs are stable project track IDs. Recall filters deleted IDs against the current Edit bank before applying selection or visibility; it never invents rows or mutates the snapshot.
+- **Accessibility**: the three native checkboxes remain inside the existing focus-trapped dialog. Existing property values survive a name/color edit; newly enabled properties capture the current view.
+- **Adaptation**: display numbers remain chronological rather than independently assigned slots. Multiple marker rulers, track markers, advanced filters/manage/import, and pre/post-roll properties remain explicit gaps.
 
 ### Universe session overview
 

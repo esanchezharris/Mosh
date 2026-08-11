@@ -3,9 +3,17 @@ import { pushEscapeHandler } from "../hooks/escapeStack";
 import { beatAt, tempoMapFrom } from "../time";
 import { useStore } from "../store";
 import type { Annotation, Snapshot } from "../types";
+import { useShell } from "../v2/shellState";
 import { formatSpotTime } from "./spotTime";
-import { filterMemoryLocations, numberedMemoryLocations } from "./memoryLocations";
+import {
+  captureMemoryLocationProperties,
+  filterMemoryLocations,
+  memoryLocationRecallProperties,
+  numberedMemoryLocations,
+  type NumberedMemoryLocation,
+} from "./memoryLocations";
 import { useProTools, type ProToolsMemoryLocationEditor } from "./proToolsState";
+import { proToolsEditTracks, proToolsShownTracks } from "./proToolsTrackVisibility";
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 const COLORS = [
@@ -42,11 +50,40 @@ export function ProToolsMemoryLocations({ snapshot }: { readonly snapshot: Snaps
     if (!result.ok) setLastError(result.error ?? fallback);
     return result.ok;
   };
-  const seek = (seconds: number) => run(
-    "set_transport",
-    { position: seconds },
-    "The Memory Location could not be recalled.",
-  );
+  const seek = async (location: NumberedMemoryLocation) => {
+    const epoch = useStore.getState().projectEpoch;
+    const recalled = memoryLocationRecallProperties(
+      location.annotation.memoryLocation,
+      proToolsEditTracks(snapshot.tracks).map((track) => track.id),
+    );
+    const ok = await run(
+      "set_transport",
+      { position: location.seconds },
+      "The Memory Location could not be recalled.",
+    );
+    if (!ok || useStore.getState().projectEpoch !== epoch || !recalled) return;
+
+    const trackIds = proToolsEditTracks(snapshot.tracks).map((track) => track.id);
+    if (recalled.editSelection) {
+      const selection = {
+        start: recalled.editSelection.start,
+        end: recalled.editSelection.end,
+      };
+      const selectionTrackIds = recalled.editSelection.trackIds ?? trackIds;
+      useShell.getState().setTimeRange(selection);
+      useShell.getState().setTimeRangeDragging(false);
+      useProTools.getState().setEditSelectionTracks(
+        selectionTrackIds,
+        selectionTrackIds[0] ?? null,
+      );
+    }
+    if (recalled.horizontalZoom !== undefined) {
+      useStore.getState().setPxPerSec(recalled.horizontalZoom);
+    }
+    if (recalled.shownTrackIds) {
+      useProTools.getState().setShownTrackIds(trackIds, recalled.shownTrackIds);
+    }
+  };
   const remove = (annotation: Annotation) => run(
     "remove_annotation",
     { annotationId: annotation.id },
@@ -86,7 +123,7 @@ export function ProToolsMemoryLocations({ snapshot }: { readonly snapshot: Snaps
                       void remove(location.annotation);
                       return;
                     }
-                    void seek(location.seconds);
+                    void seek(location);
                   }}>
                   {location.annotation.text}
                 </button>
@@ -132,6 +169,15 @@ function ProToolsMemoryLocationDialog({ snapshot, editor, onClose }: {
       .find((location) => location.annotation.id === annotation.id)?.seconds ?? 0 : 0;
   const [name, setName] = useState(annotation?.text ?? "");
   const [color, setColor] = useState(annotation?.color ?? "");
+  const [storeSelection, setStoreSelection] = useState(
+    annotation?.memoryLocation?.editSelection !== undefined,
+  );
+  const [storeZoom, setStoreZoom] = useState(
+    annotation?.memoryLocation?.horizontalZoom !== undefined,
+  );
+  const [storeVisibility, setStoreVisibility] = useState(
+    annotation?.memoryLocation?.shownTrackIds !== undefined,
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
@@ -192,14 +238,34 @@ function ProToolsMemoryLocationDialog({ snapshot, editor, onClose }: {
     }
     setSubmitting(true);
     setError(null);
+    const proTools = useProTools.getState();
+    const memoryLocation = captureMemoryLocationProperties({
+      storeSelection,
+      storeZoom,
+      storeVisibility,
+      editSelection: useShell.getState().timeRange,
+      editTrackIds: proTools.editSelectionTrackIds,
+      horizontalZoom: useStore.getState().pxPerSec,
+      shownTrackIds: proToolsShownTracks(snapshot.tracks, proTools.trackVisibility)
+        .map((track) => track.id),
+      fallbackSelection: annotation?.memoryLocation?.editSelection,
+      fallbackHorizontalZoom: annotation?.memoryLocation?.horizontalZoom,
+      fallbackShownTrackIds: annotation?.memoryLocation?.shownTrackIds,
+    });
     const command = editor.mode === "create" ? "create_annotation" : "edit_annotation";
     const args = editor.mode === "create"
       ? {
           text,
           beat: beatAt(tempoMapFrom(snapshot.session), seconds),
           ...(color ? { color } : {}),
+          ...(memoryLocation ? { memoryLocation } : {}),
         }
-      : { annotationId: editor.annotationId, text, color };
+      : {
+          annotationId: editor.annotationId,
+          text,
+          color,
+          memoryLocation: memoryLocation ?? null,
+        };
     const result = await exec(command, args);
     if (useStore.getState().projectEpoch !== openEpoch.current) {
       onClose();
@@ -243,6 +309,27 @@ function ProToolsMemoryLocationDialog({ snapshot, editor, onClose }: {
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          <fieldset className="pt-memory-properties">
+            <legend>Recall properties</legend>
+            <label>
+              <input type="checkbox" data-testid="pt-memory-store-selection"
+                checked={storeSelection} disabled={submitting}
+                onChange={(event) => setStoreSelection(event.currentTarget.checked)} />
+              Edit selection
+            </label>
+            <label>
+              <input type="checkbox" data-testid="pt-memory-store-zoom"
+                checked={storeZoom} disabled={submitting}
+                onChange={(event) => setStoreZoom(event.currentTarget.checked)} />
+              Zoom
+            </label>
+            <label>
+              <input type="checkbox" data-testid="pt-memory-store-visibility"
+                checked={storeVisibility} disabled={submitting}
+                onChange={(event) => setStoreVisibility(event.currentTarget.checked)} />
+              Track visibility
+            </label>
+          </fieldset>
           {error && <p className="pt-memory-error" role="alert">{error}</p>}
           <div className="pt-memory-dialog-actions">
             <button type="button" disabled={submitting} onClick={dismiss}>Cancel</button>

@@ -716,6 +716,18 @@ export type Annotation = {
   beat: number;
   color?: string;
   author?: string;
+  /** Optional Pro Tools-style view state recalled after the marker seek succeeds. */
+  memoryLocation?: MemoryLocationProperties;
+};
+
+export type MemoryLocationProperties = {
+  editSelection?: {
+    start: number;
+    end: number;
+    trackIds?: string[];
+  };
+  horizontalZoom?: number;
+  shownTrackIds?: string[];
 };
 
 // PRJ-FMT — the snapshot WIRE-CONTRACT version this UI build expects. If the backend

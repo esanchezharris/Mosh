@@ -13401,8 +13401,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         };
         const int before = annsArr().size();
 
+        auto* storedSelection = new DynamicObject();
+        storedSelection->setProperty ("start", 2.0);
+        storedSelection->setProperty ("end", 5.0);
+        Array<var> storedTrackIds;
+        storedTrackIds.add ("track-a");
+        storedTrackIds.add ("track-b");
+        storedSelection->setProperty ("trackIds", storedTrackIds);
+        auto* storedView = new DynamicObject();
+        storedView->setProperty ("editSelection", var (storedSelection));
+        storedView->setProperty ("horizontalZoom", 160.0);
+        Array<var> shownTrackIds;
+        shownTrackIds.add ("track-b");
+        storedView->setProperty ("shownTrackIds", shownTrackIds);
+
         auto created = cmd (ops, "create_annotation",
-                            objN ({ { "text", "fix this transition" }, { "beat", 24.0 }, { "color", "#ffd166" }, { "author", "alice" } }));
+                            objN ({ { "text", "fix this transition" }, { "beat", 24.0 }, { "color", "#ffd166" }, { "author", "alice" },
+                                    { "memoryLocation", var (storedView) } }));
         check (ok (created), "create_annotation ok");
         const auto annId = created.getProperty ("data", var()).getProperty ("annotationId", var()).toString();
         check (annId.isNotEmpty(), "create_annotation returns an annotationId");
@@ -13410,6 +13425,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (findAnn (annId).getProperty ("text", var()).toString() == "fix this transition", "annotation text round-trips");
         check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation carries its author");
         check (std::abs ((double) findAnn (annId).getProperty ("beat", -1.0) - 24.0) < 1e-6, "annotation beat is 24");
+        { const auto memoryLocation = findAnn (annId).getProperty ("memoryLocation", var());
+          check (memoryLocation.isObject()
+                 && std::abs ((double) memoryLocation.getProperty ("horizontalZoom", 0.0) - 160.0) < 1e-6
+                 && memoryLocation.getProperty ("editSelection", var()).getProperty ("trackIds", var()).size() == 2,
+                 "annotation Memory Location properties round-trip"); }
 
         check (ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "text", "smooth the drop" } }))), "edit_annotation ok");
         check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "edit reflected in snapshot");
@@ -13427,6 +13447,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "reload")), "reload (annotations) ok");
         check (findAnn (annId).getProperty ("text", var()).toString() == "smooth the drop", "annotation persists across save/reload");
         check (findAnn (annId).getProperty ("author", var()).toString() == "alice", "annotation author persists across save/reload");
+        check (findAnn (annId).getProperty ("memoryLocation", var()).isObject(),
+               "annotation Memory Location properties persist across save/reload");
+
+        check (ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId }, { "memoryLocation", var() } }))),
+               "edit_annotation can clear Memory Location properties");
+        check (! findAnn (annId).hasProperty ("memoryLocation"), "cleared Memory Location is absent from snapshot");
+        check (ok (cmd (ops, "undo")), "undo restores Memory Location properties");
+        check (findAnn (annId).getProperty ("memoryLocation", var()).isObject(),
+               "Memory Location properties return after undo");
+
+        auto* invalidStoredView = new DynamicObject();
+        invalidStoredView->setProperty ("horizontalZoom", 0.0);
+        check (! ok (cmd (ops, "edit_annotation", objN ({ { "annotationId", annId },
+                                                          { "memoryLocation", var (invalidStoredView) } }))),
+               "invalid Memory Location properties are rejected before mutation");
 
         // Caller-supplied id is honoured (this is how the MP broadcast keeps ids stable).
         check (ok (cmd (ops, "create_annotation", objN ({ { "annotationId", "ann-fixed" }, { "text", "shared note" }, { "beat", 4.0 } }))), "create_annotation with an explicit id ok");

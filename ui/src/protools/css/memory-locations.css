@@ -129,6 +129,25 @@
   padding: 12px;
 }
 .pt-memory-dialog form > label { color: var(--pt-text-muted); font-size: 10px; }
+.pt-memory-properties {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 2px 0;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--pt-border);
+  color: var(--pt-text);
+}
+.pt-memory-properties legend {
+  padding: 0 4px;
+  color: var(--pt-text-muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pt-memory-properties label { display: inline-flex; align-items: center; gap: 6px; }
+.pt-memory-properties input { min-height: auto; accent-color: var(--pt-selected); }
 .pt-memory-error { grid-column: 1 / -1; margin: 0; color: var(--pt-danger); }
 .pt-memory-dialog-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 7px; }
 .pt-memory-dialog-actions button[type="submit"] { color: var(--pt-on-selected); background: var(--pt-selected); }

@@ -15,7 +15,7 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
-import type { Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -828,6 +828,55 @@ function stopPlayback() {
 
 const num = (v: unknown, d = 0): number => (typeof v === "number" && isFinite(v) ? v : d);
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
+function mockMemoryLocation(value: unknown): {
+  readonly value?: Annotation["memoryLocation"];
+  readonly error?: string;
+} {
+  if (value === null || value === undefined) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "memoryLocation must be an object or null" };
+  }
+  const source = value as Record<string, unknown>;
+  const normalized: NonNullable<Annotation["memoryLocation"]> = {};
+  const trackIds = (candidate: unknown): string[] | null => {
+    if (!Array.isArray(candidate) || candidate.some((id) => typeof id !== "string" || !id.trim())) {
+      return null;
+    }
+    return [...new Set(candidate as string[])];
+  };
+  if (source.editSelection !== undefined) {
+    if (typeof source.editSelection !== "object" || source.editSelection === null
+        || Array.isArray(source.editSelection)) {
+      return { error: "Memory Location editSelection must be an object" };
+    }
+    const selection = source.editSelection as Record<string, unknown>;
+    if (typeof selection.start !== "number" || !Number.isFinite(selection.start)
+        || typeof selection.end !== "number" || !Number.isFinite(selection.end)
+        || selection.start < 0 || selection.end < selection.start) {
+      return { error: "Memory Location selection must be finite and ordered" };
+    }
+    const ids = selection.trackIds === undefined ? undefined : trackIds(selection.trackIds);
+    if (ids === null) return { error: "Memory Location track ids must be non-empty strings" };
+    normalized.editSelection = {
+      start: selection.start,
+      end: selection.end,
+      ...(ids ? { trackIds: ids } : {}),
+    };
+  }
+  if (source.horizontalZoom !== undefined) {
+    if (typeof source.horizontalZoom !== "number" || !Number.isFinite(source.horizontalZoom)
+        || source.horizontalZoom < 20 || source.horizontalZoom > 400) {
+      return { error: "Memory Location horizontalZoom must be between 20 and 400" };
+    }
+    normalized.horizontalZoom = source.horizontalZoom;
+  }
+  if (source.shownTrackIds !== undefined) {
+    const ids = trackIds(source.shownTrackIds);
+    if (ids === null) return { error: "Memory Location track ids must be non-empty strings" };
+    normalized.shownTrackIds = ids;
+  }
+  return { value: normalized };
+}
 const completeLyricText = (text: string): boolean => {
   const t = text.trim();
   return Boolean(t && !t.includes("___") && /[A-Za-z0-9]/.test(t));
@@ -2130,17 +2179,37 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     case "create_annotation": {
+      const normalizedMemory = mockMemoryLocation(args.memoryLocation);
+      if (normalizedMemory.error) return err(command, normalizedMemory.error);
       pushUndo();
-      const ann = { id: str(args.annotationId) || nextAnnotationId(), text: str(args.text, ""), beat: num(args.beat, 0), color: str(args.color) || undefined, author: args.author != null ? str(args.author) : undefined };
+      const ann: Annotation = {
+        id: str(args.annotationId) || nextAnnotationId(),
+        text: str(args.text, ""),
+        beat: num(args.beat, 0),
+        color: str(args.color) || undefined,
+        author: args.author != null ? str(args.author) : undefined,
+        ...(normalizedMemory.value
+          ? { memoryLocation: structuredClone(normalizedMemory.value) }
+          : {}),
+      };
       (snapshot.annotations ??= []).push(ann);
       invalidate(); return ok(command, { annotationId: ann.id });
     }
     case "edit_annotation": {
       const ann = (snapshot.annotations ?? []).find((x) => x.id === str(args.annotationId));
       if (!ann) return err(command, "annotation not found");
+      const normalizedMemory = mockMemoryLocation(args.memoryLocation);
+      if (Object.prototype.hasOwnProperty.call(args, "memoryLocation") && normalizedMemory.error) {
+        return err(command, normalizedMemory.error);
+      }
       pushUndo();
       if (args.text != null) ann.text = str(args.text, ann.text);
       if (args.color != null) ann.color = str(args.color) || undefined;
+      if (Object.prototype.hasOwnProperty.call(args, "memoryLocation")) {
+        ann.memoryLocation = normalizedMemory.value
+          ? structuredClone(normalizedMemory.value)
+          : undefined;
+      }
       invalidate(); return ok(command);
     }
     case "move_annotation": {
