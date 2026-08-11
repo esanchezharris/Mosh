@@ -9,7 +9,7 @@ export function ProToolsDeviceRack({ track, embedded = false }: {
   readonly embedded?: boolean;
 }) {
   const exec = useStore((state) => state.exec);
-  const plugins = track.plugins ?? [];
+  const plugins = (track.plugins ?? []).filter((plugin) => plugin.type !== "auxsend");
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const [insertOpen, setInsertOpen] = useState(false);
   const closeInsert = useCallback(() => setInsertOpen(false), []);
