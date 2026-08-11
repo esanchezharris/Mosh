@@ -2,6 +2,10 @@
 
 Base: `ce1a33d2` (`origin/main` after PR #637)
 
+Updated 2026-08-11 on `codex/protools-tutorial-parity`: the three selected
+follow-ups below now have source, focused, and browser evidence. Native audible
+routing and physical QuickPunch remain deliberately unclaimed.
+
 This is a behavior audit of the V01–V20 catalog in
 [`VIDEO_PARITY.md`](./VIDEO_PARITY.md), not a pixel-clone claim. Avid documentation
 defines behavior; official Avid tutorials demonstrate operator sequence and visible
@@ -18,10 +22,10 @@ or deeper native contracts rather than missing top-level surfaces.
 | Rank | Tutorial-backed gap | Producer value | Existing safe seam | Decision |
 |---:|---|---|---|---|
 | 1 | The no-dialog fade shortcut still uses a fixed 10 ms Linear preset instead of the last selected Fades settings. Avid's current Shortcuts Guide says Command+Control+F uses the last selected fade shape; C04/C04B establish the repeated edit workflow. | High for vocal cleanup and comp edits because it removes repeated modal setup. | `set_clip_fade`, `buildProToolsFadePlan`, schema-backed UI preferences. | **Implement now.** Persist the last successfully applied length and In/Out shapes; use them for the existing shortcut. Length persistence is a labelled Mosh adaptation because current Mosh fades do not extend hidden source handles from an arbitrary selection. |
-| 2 | QuickPunch plus arbitrary pre/post-roll and a movable play-start flag (V15/V16). | Very high for overdubs. | Only `set_count_in` 0/1/2 bars and bounded Punch exist. | Defer to a native recording slice with physical-device proof; shell-only simulation would be unsafe. |
-| 3 | Send mute, pre-fader switching, pan, and automation (V11/V20). | High for effect A/B and cue mixes. | Snapshot already exposes send mute; only level/add/remove commands ship. | Next engine-backed mixing slice. Add commands, undo/locks/mock coverage, and audible routing proof together. |
+| 2 | QuickPunch plus arbitrary pre/post-roll and a movable play-start flag (V15/V16). | Very high for overdubs. | Only `set_count_in` 0/1/2 bars and bounded Punch exist. | **Contract complete; native work deferred.** [`QUICKPUNCH_PREPOST_CONTRACT.md`](./QUICKPUNCH_PREPOST_CONTRACT.md) freezes additive state/commands, continuous-source semantics, accessibility, recovery, locks, and the guarded physical-device matrix. Shell-only simulation remains prohibited. |
+| 3 | Send mute, pre-fader switching, pan, and automation (V11/V20). | High for effect A/B and cue mixes. | Send level/add/remove, Aux returns, and the native send plug-in seam. | **Mute, pan, and real pre/post implemented.** Focused native/mock/component tests plus serial Chromium cover state and command envelopes. Send automation/meters and native audible routing remain explicit gaps. |
 | 4 | Arbitrary playlist targets and atomic grouped-track comping (V10/V14). | High for vocals and multitrack drums. | `promote_take_region` targets Main on one track. | Defer until one atomic multi-track command can preserve alignment, locks, recovery ids, and undo. |
-| 5 | Memory Locations recalling edit selection, zoom, and track visibility (V13). | Medium-high navigation gain. | Annotations persist marker identity/time only; view state is shell-local. | Requires additive marker metadata plus save/reload and multiplayer tests. |
+| 5 | Memory Locations recalling edit selection, zoom, and track visibility (V13). | Medium-high navigation gain. | Persisted annotations plus shell-local selection/zoom/visibility state. | **Implemented.** Additive nested metadata is validated, undoable, save/reload-safe, replayable, and multiplayer-broadcast; recall is result- and epoch-gated and filters deleted tracks. Focused native/mock/component and serial Chromium evidence cover the contract. |
 | 6 | Multiple automation lanes and independent MIDI-editor modes/tools (V07–V09). | Medium; important in advanced editing, not session-blocking. | One Volume lane and the shared docked Piano Roll exist. | Split into automation-target and MIDI-editor lanes after the audio-first gaps. |
 | 7 | Mix narrow/wide modes, floating windows, VCA/HEAT/EQ/delay-compensation panels (V20). | Medium; improves density and specialized mixing. | Main Mix bank is complete for Mosh-supported track types. | Keep explicit partial parity; do not draw inert controls for engine concepts Mosh does not model. |
 
@@ -32,3 +36,27 @@ or deeper native contracts rather than missing top-level surfaces.
 - **During:** dialog drafts remain local. Invalid input, command rejection, Escape, or project replacement does not replace the remembered preset.
 - **After:** only a successful apply stores the three UI-local preferences. Command+Control+F reads them and sends the same `set_clip_fade` plan through `store.exec`; snapshots are never mutated.
 - **Adaptation:** Mosh remembers edge length with the shapes because its safe existing-overlap model does not expose Pro Tools' source-handle extension. It does not claim Fade Settings file import/export, audition, or exact Avid preset geometry.
+
+## Implemented packet: send control state
+
+- `set_send_mute` preserves the remembered level rather than encoding mute as
+  negative-infinity gain.
+- `set_send_pan` balances only the copied stereo send branch; it does not move the
+  source track pan.
+- `set_send_pre_fader` reorders the send plug-in around the actual track fader, so
+  its snapshot state reports engine placement rather than a cosmetic switch.
+- The three commands are validated, undoable, replayable, JSONL-recorded, and
+  track-locked. Browser evidence verifies Edit inspector and Mix strip agreement;
+  a physical output trace is still required before audible parity is claimed.
+
+## Implemented packet: Memory Location view recall
+
+- New/Edit offers opt-in Edit selection, horizontal Zoom, and Track visibility;
+  marker-only locations retain their old payload.
+- The nested annotation payload is normalized before native/mock mutation and
+  persists through save/reload and Undo.
+- Recall first awaits `set_transport`, checks `projectEpoch`, filters deleted track
+  ids, and then restores the shell-local view without mutating the snapshot.
+- The compact Memory Locations sheet remains keyboard reachable. Independently
+  assigned slot numbers, advanced filtering/import, and pre/post-roll properties
+  remain gaps.
