@@ -14,6 +14,10 @@ export type TelemetrySlice = {
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
 
+  // Optional per-send final-branch readings from the same event. Kept separate so
+  // legacy consumers retain the exact `levels` object contract.
+  sendLevels: Record<string, Level>;
+
   // CAP-AUT-006 — the mute button's live automation state, fed by the 30Hz
   // "mute_automation" event. Keyed by trackId; PRESENCE means "this track's mute is
   // automated", the value means "the curve has it closed at the playhead right now".
@@ -36,6 +40,7 @@ export type TelemetrySlice = {
 
 export const createTelemetrySlice: StateCreator<State, [], [], TelemetrySlice> = (set) => ({
   levels: { tracks: {}, master: { l: -100, r: -100 } },
+  sendLevels: {},
   muteAutomation: {},
   spectrum: { bands: [], level: 0, flux: 0 },
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },

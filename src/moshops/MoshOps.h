@@ -751,6 +751,18 @@ private:
 
     // ── metering (Wave 9): a level-meter tap + registered measurer client / track ──
     struct MeterTap { te::LevelMeterPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
+    struct SendMeterKey
+    {
+        juce::String trackId;
+        int bus = -1;
+
+        bool operator< (const SendMeterKey& other) const
+        {
+            const int trackOrder = trackId.compare (other.trackId);
+            return trackOrder < 0 || (trackOrder == 0 && bus < other.bus);
+        }
+    };
+    struct SendMeterTap { te::AuxSendPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
     te::LevelMeterPlugin* ensureTrackMeter (te::AudioTrack&);
     te::LevelMeterPlugin* findTrackMeter (te::AudioTrack&);
     // ── CAP-AUT-006: the per-track mute gate ── a hidden mixer element carrying the one
@@ -764,6 +776,7 @@ private:
     void reconcileMeterClients();           // sync client map to live taps (undo/redo-safe)
     void unregisterAllMeterClients();       // removeClient on still-valid measurers, then clear
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
+    std::map<SendMeterKey, std::unique_ptr<SendMeterTap>> sendMeterClients;
     te::LevelMeasurer::Client masterClient;
     te::EditPlaybackContext*  lastSeenContext = nullptr;
 

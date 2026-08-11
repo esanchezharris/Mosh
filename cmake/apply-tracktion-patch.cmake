@@ -27,19 +27,39 @@ endif()
 
 find_package(Git REQUIRED)
 
-foreach(patch IN LISTS patches)
-    # Already applied? `git apply -R --check` succeeds only when the patch reverse-applies
-    # cleanly, i.e. it is currently present in the tree. This keeps the patch step
-    # idempotent across re-configures (FetchContent caches the source dir between runs).
+# Patches are an ordered, append-only stack. Later patches may intentionally edit lines
+# introduced by earlier ones, so an earlier patch may no longer reverse-apply after the
+# whole stack lands. Search newest-to-oldest: the newest reverse-applicable patch proves
+# that it and every preceding patch form an already-applied prefix. Apply only the tail.
+# This handles fresh sources, caches carrying an older prefix, and repeated configures.
+set(patches_to_apply ${patches})
+set(reverse_patches ${patches})
+list(REVERSE reverse_patches)
+set(applied_prefix_end -1)
+foreach(candidate IN LISTS reverse_patches)
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero -R --check "${patch}"
+        COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero -R --check "${candidate}"
         RESULT_VARIABLE reverse_ok
         OUTPUT_QUIET ERROR_QUIET)
     if(reverse_ok EQUAL 0)
-        message(STATUS "Mosh dependency patch already applied - skipping: ${patch}")
-        continue()
+        list(FIND patches "${candidate}" applied_prefix_end)
+        break()
     endif()
+endforeach()
 
+if(applied_prefix_end GREATER_EQUAL 0)
+    math(EXPR first_unapplied "${applied_prefix_end} + 1")
+    list(LENGTH patches patch_count)
+    if(first_unapplied LESS patch_count)
+        list(SUBLIST patches ${first_unapplied} -1 patches_to_apply)
+    else()
+        set(patches_to_apply "")
+    endif()
+    list(GET patches ${applied_prefix_end} newest_applied_patch)
+    message(STATUS "Mosh dependency patch prefix already applied through: ${newest_applied_patch}")
+endif()
+
+foreach(patch IN LISTS patches_to_apply)
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" apply --unidiff-zero "${patch}"
         RESULT_VARIABLE apply_res

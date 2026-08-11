@@ -4,6 +4,7 @@ import { IconClose, IconPlus } from "../ui/icons";
 import { useStore } from "../store";
 import type { Bus, CommandResult, Track } from "../types";
 import { ReconciledRange } from "../v2/ReconciledRange";
+import { SendMeter } from "../ui/Meter";
 
 type BusDraft = { readonly bus: number; readonly name: string };
 type CreateBusData = { readonly trackId?: string };
@@ -200,6 +201,7 @@ export function ProToolsSends({ track }: { readonly track: Track }) {
                     </label>
                   </div>
                   <div className="pt-send-level">
+                    <SendMeter trackId={track.id} bus={bus.bus} label={`${bus.name} send output`} />
                     <ReconciledRange key={`${projectEpoch}:${track.id}:${bus.bus}:level`} min={-60} max={6} step={0.5}
                       value={send.db} data-testid={`pt-send-level-${bus.bus}`}
                       aria-label={`${bus.name} send level`}

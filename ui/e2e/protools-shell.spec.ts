@@ -824,6 +824,138 @@ test("Sends route a track through a named Aux return and its insert rack", async
   expect(trace.filter((entry) => !entry.ok)).toEqual([]);
 });
 
+test("send automation and meters stay reachable in Edit and Mix", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await bootProTools(page);
+
+  const sourceHeader = page.getByTestId("pt-track-header").first();
+  const sourceTrackId = await sourceHeader.getAttribute("data-track-id");
+  if (!sourceTrackId) throw new Error("send automation source track id is absent");
+  await sourceHeader.getByTestId("pt-track-select").click();
+
+  const sends = page.getByTestId("pt-sends");
+  await sends.getByTestId("pt-add-bus").click();
+  await sends.getByTestId("pt-new-bus-name").fill("Vocal Plate");
+  await sends.getByTestId("pt-new-bus-name").press("Enter");
+  await sourceHeader.getByTestId("pt-track-select").click();
+  await page.getByTestId("pt-add-send-0").click();
+
+  const automationAddress = await page.evaluate((trackId) => {
+    const track = (window as ProToolsWindow).__moshStore?.getState().snapshot?.tracks
+      .find((candidate) => candidate.id === trackId);
+    const address = track?.sends?.find((send) => send.bus === 0)?.automation;
+    if (!address) throw new Error("send automation address is absent");
+    return address;
+  }, sourceTrackId);
+  const automationToggle = sourceHeader.getByTestId("pt-automation-lanes");
+  await automationToggle.click();
+  const target = sourceHeader.getByTestId("pt-automation-target");
+  await expect(target).toHaveValue("volume");
+  expect(await target.locator("option").allTextContents()).toEqual([
+    "Volume",
+    "Vocal Plate · Level",
+    "Vocal Plate · Pan",
+    "Vocal Plate · Mute",
+  ]);
+  await target.selectOption("send:0:level");
+
+  const editMeter = sends.getByRole("meter", { name: "Vocal Plate send output" });
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(async () => {
+    const values = (await editMeter.getAttribute("aria-valuetext"))
+      ?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [-100, -100];
+    return Math.min(...values);
+  }).toBeGreaterThan(-100);
+  await page.screenshot({
+    path: testInfo.outputPath("protools-send-automation-meter-wide.png"),
+    animations: "disabled",
+  });
+
+  await page.getByTestId("pt-window-mix").click();
+  const mixStrip = page.locator(`[data-testid="pt-mix-strip"][data-track-id="${sourceTrackId}"]`);
+  const mixMeter = mixStrip.getByRole("meter", { name: "Vocal Plate send output" });
+  await expect.poll(async () => {
+    const values = (await mixMeter.getAttribute("aria-valuetext"))
+      ?.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [-100, -100];
+    return Math.min(...values);
+  }).toBeGreaterThan(-100);
+  await page.getByTestId("pt-window-edit").click();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+
+  const lane = page.locator(
+    `[data-testid="pt-lane"][data-track-id="${sourceTrackId}"] [data-testid="protools-automation-lane"]`,
+  );
+  for (const [targetId, label] of [
+    ["send:0:level", "Vocal Plate · Level"],
+    ["send:0:pan", "Vocal Plate · Pan"],
+    ["send:0:mute", "Vocal Plate · Mute"],
+  ] as const) {
+    await target.selectOption(targetId);
+    await expect(lane).toHaveAccessibleName(new RegExp(`^Drums automation, ${label}\\.`));
+    await lane.focus();
+    await lane.press("Enter");
+  }
+
+  const automationTrace = await page.evaluate(() =>
+    ((window as ProToolsWindow).__moshCmdTrace ?? [])
+      .filter((entry) => entry.command === "add_automation_point")
+      .slice(-3));
+  expect(automationTrace.map((entry) => entry.args)).toEqual([
+    {
+      trackId: sourceTrackId,
+      pluginIndex: automationAddress.pluginIndex,
+      paramIndex: automationAddress.levelParamIndex,
+      time: expect.any(Number),
+      value: 0.5,
+    },
+    {
+      trackId: sourceTrackId,
+      pluginIndex: automationAddress.pluginIndex,
+      paramIndex: automationAddress.panParamIndex,
+      time: expect.any(Number),
+      value: 0.5,
+    },
+    {
+      trackId: sourceTrackId,
+      pluginIndex: automationAddress.pluginIndex,
+      paramIndex: automationAddress.muteParamIndex,
+      time: expect.any(Number),
+      value: 0.5,
+    },
+  ]);
+
+  const mutedStart = await storeVal<number>(page, "transport.position");
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => storeVal<number>(page, "transport.position")).toBeGreaterThan(mutedStart);
+  await expect(editMeter).toHaveAttribute("aria-valuenow", "-100");
+  await expect(editMeter).toHaveAttribute(
+    "aria-valuetext",
+    "Left -100.0 dBFS, right -100.0 dBFS",
+  );
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 720, height: 720 });
+  await target.scrollIntoViewIfNeeded();
+  await expect(target).toBeInViewport();
+  await editMeter.scrollIntoViewIfNeeded();
+  await expect(editMeter).toBeInViewport();
+  await page.screenshot({
+    path: testInfo.outputPath("protools-send-automation-meter-compact.png"),
+    animations: "disabled",
+  });
+
+  await page.getByTestId("pt-remove-send-0").click();
+  await expect(page.getByTestId("pt-send-0")).toHaveAttribute("data-assigned", "false");
+  await expect(target).toHaveValue("volume");
+  await expect(target.locator("option")).toHaveCount(1);
+  await expect(target.locator("option")).toHaveText("Volume");
+  await expect(lane).toHaveAccessibleName(/^Drums automation, Volume\./);
+  await expect(page.getByRole("meter", { name: "Vocal Plate send output" })).toHaveCount(0);
+
+  const trace = await page.evaluate(() => (window as ProToolsWindow).__moshCmdTrace ?? []);
+  expect(trace.filter((entry) => !entry.ok)).toEqual([]);
+});
+
 test("Spot mode opens a keyboard modal and moves the clip through the command seam", async ({ page }, testInfo) => {
   // Given: the Pro Tools shell is in Spot mode with a rendered clip focused.
   await page.setViewportSize({ width: 1440, height: 900 });

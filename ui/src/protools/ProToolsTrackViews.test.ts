@@ -46,6 +46,31 @@ const SNAPSHOT: Snapshot = {
       sourceFile: "/tmp/vocal.wav",
       hasRenderLayer: false,
     }],
+    sends: [{
+      bus: 2,
+      db: -6,
+      mute: false,
+      pan: 0,
+      automation: {
+        pluginIndex: 4,
+        levelParamIndex: 0,
+        panParamIndex: 1,
+        muteParamIndex: 2,
+      },
+    }],
+    plugins: [{
+      index: 4,
+      name: "Aux Send",
+      type: "auxsend",
+      enabled: true,
+      external: false,
+      isInstrument: false,
+      params: [
+        { index: 0, name: "Send level", value: 0.7, points: [] },
+        { index: 1, name: "Send pan", value: 0.5, points: [] },
+        { index: 2, name: "Send mute", value: 0, points: [], discrete: true, states: 2 },
+      ],
+    }],
     mixerPlugins: [{
       index: 7,
       name: "Track Fader",
@@ -83,6 +108,7 @@ const SNAPSHOT: Snapshot = {
     monitor: "automatic",
     clips: [],
   }],
+  buses: [{ bus: 2, name: "Plate", trackId: "plate-return" }],
   transport: {
     playing: false,
     recording: false,
@@ -316,6 +342,36 @@ describe("Pro Tools Track Views", () => {
     expect(audioLane()?.querySelector('[data-clip-id="audio-clip"]')).not.toBeNull();
     expect(audioLane()?.querySelector<HTMLElement>("[data-testid=pt-automation-lane-frame]")?.dataset.primary)
       .toBe("false");
+  });
+
+  it("selects a send target and edits its exact automation address", () => {
+    act(() => root.render(React.createElement(React.Fragment, null,
+      React.createElement(ProToolsTrackHeaders, { snapshot: SNAPSHOT }),
+      React.createElement(TimelineHarness),
+    )));
+    const audioHeader = host.querySelector<HTMLElement>('[data-track-id="audio-track"]');
+    const toggle = audioHeader?.querySelector<HTMLButtonElement>("[data-testid=pt-automation-lanes]");
+    if (!toggle) throw new Error("automation-lanes toggle is missing");
+    act(() => toggle.click());
+
+    const targetSelect = audioHeader?.querySelector<HTMLSelectElement>("[data-testid=pt-automation-target]");
+    if (!targetSelect) throw new Error("automation target selector is missing");
+    expect(Array.from(targetSelect.options).map((option) => option.text))
+      .toEqual(["Volume", "Plate · Level", "Plate · Pan", "Plate · Mute"]);
+
+    act(() => setSelectValue(targetSelect, "send:2:mute"));
+    expect(useProTools.getState().automationTargets["audio-track"]).toBe("send:2:mute");
+
+    const lane = host.querySelector<HTMLButtonElement>(
+      '[data-testid="pt-lane"][data-track-id="audio-track"] [data-testid="protools-automation-lane"]',
+    );
+    expect(lane?.getAttribute("aria-label")).toMatch(/^Lead Vocal automation, Plate · Mute\./);
+    if (!lane) throw new Error("send automation lane is missing");
+    act(() => lane.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(execCalls.at(-1)).toEqual({
+      command: "add_automation_point",
+      args: { trackId: "audio-track", pluginIndex: 4, paramIndex: 2, time: 0, value: 0.5 },
+    });
   });
 
   it("marks the instrument Notes view while preserving the editable MIDI surface", () => {

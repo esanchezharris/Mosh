@@ -20,6 +20,14 @@ const TRACK: Track = {
     external: true,
     isInstrument: false,
     params: [],
+  }, {
+    index: 4,
+    name: "Aux Send",
+    type: "auxsend",
+    enabled: true,
+    external: false,
+    isInstrument: false,
+    params: [],
   }],
 };
 
@@ -198,5 +206,11 @@ describe("Pro Tools insert workflow", () => {
     expect(exec).toHaveBeenCalledWith("open_plugin_editor", { trackId: TRACK.id, index: 0 });
     expect(exec).toHaveBeenCalledWith("bypass_plugin", { trackId: TRACK.id, index: 0, bypassed: true });
     expect(exec).toHaveBeenCalledWith("remove_plugin", { trackId: TRACK.id, index: 0 });
+  });
+
+  it("keeps the hidden AuxSend automation plug-in out of the insert rack", () => {
+    expect(button("pt-device-open-0").textContent).toContain("CLA-2A Stereo");
+    expect(document.querySelector("[data-testid=pt-device-open-4]")).toBeNull();
+    expect(host.textContent).not.toContain("Aux Send");
   });
 });

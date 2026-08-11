@@ -91,6 +91,9 @@
 .pt-mix-send-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pt-mix-send-head button { min-width: 0; height: 18px; padding: 0 2px; border: 0; background: transparent; font-size: 8px; }
 .pt-mix-send-head button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.pt-mix-send-row > .meter.send { width: 100%; gap: 1px; }
+.pt-mix-send-row > .meter.send .mbar { height: 2px; }
+.pt-mix-send-row > .meter.send .mmask { background: var(--pt-inset); }
 .pt-mix-send-control { display: grid; grid-template-columns: 20px minmax(0, 1fr) 28px; align-items: center; gap: 2px; color: var(--pt-text-muted); }
 .pt-mix-send-control input { min-width: 0; width: 100%; }
 .pt-mix-send-control output { text-align: right; color: var(--pt-text); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; }

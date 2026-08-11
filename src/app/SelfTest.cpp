@@ -619,6 +619,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // check can inspect the payload).
     std::vector<String> eventTypes;
     var lastEvent;
+    var lastLevelsEvent;
     var lastMpCommitDone;
     bool sawProjectReplacementEvent = false;
     String lastProjectReplacementReason;
@@ -627,6 +628,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     {
         eventTypes.push_back (e.getProperty ("type", var()).toString());
         lastEvent = e;
+        if (e.getProperty ("type", var()).toString() == "levels")
+            lastLevelsEvent = e;
         if (e.getProperty ("type", var()).toString() == "mp_commit_done")
             lastMpCommitDone = e;
         if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
@@ -7041,10 +7044,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
           check (hasReturn, "return track carries an auxreturn plugin"); }
 
         auto cb2 = cmd (ops, "create_bus", args1 ("name", "Delay"));
-        check ((int) cb2["data"].getProperty ("busNumber", -1) == bus0 + 1, "second bus gets the next number");
+        const int bus1 = (int) cb2["data"].getProperty ("busNumber", -1);
+        check (bus1 == bus0 + 1, "second bus gets the next number");
 
         auto gt = cmd (ops, "create_track", args1 ("name", "Gtr"))["data"].getProperty ("trackId", var()).toString();
         check (ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}))), "add_send ok");
+        {
+            te::AuxSendPlugin* rawSend = nullptr;
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                if (track != nullptr && track->itemID.toString() == gt)
+                    rawSend = track->getAuxSendPlugin (bus0);
+
+            const auto parameters = rawSend != nullptr
+                ? rawSend->getAutomatableParameters()
+                : juce::Array<te::AutomatableParameter*> {};
+            check (parameters.size() == 3,
+                   "send owns level, pan, and mute automation parameters");
+            check (parameters.size() > 1 && parameters[1]->getParameterName() == "Send pan",
+                   "send pan is addressable");
+            check (parameters.size() > 2 && parameters[2]->getParameterName() == "Send mute",
+                   "send mute is addressable");
+        }
         { auto s = sendsOf (gt);
           check (s.size() == 1 && (int) s[0].getProperty ("bus", -1) == bus0
                  && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6
@@ -7052,6 +7072,54 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                  && std::abs ((double) s[0].getProperty ("pan", 1.0)) < 0.001
                  && ! (bool) s[0].getProperty ("preFader", true),
                  "send appears post-fader, centered, unmuted, with the right bus + dB"); }
+        const auto automationTrack = cmd (ops, "create_track", args1 ("name", "Send Automation"))["data"]
+            .getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_send", objN ({{ "trackId", automationTrack },
+                                                  { "bus", bus1 }, { "db", -6.0 }}))),
+               "automation fixture send added");
+        const auto automationSends = sendsOf (automationTrack);
+        const auto sendAutomation = automationSends.size() > 0
+            ? automationSends[0].getProperty ("automation", var()) : var();
+        const int sendPluginIndex = (int) sendAutomation.getProperty ("pluginIndex", -1);
+        const int sendLevelParamIndex = (int) sendAutomation.getProperty ("levelParamIndex", -1);
+        const int sendPanParamIndex = (int) sendAutomation.getProperty ("panParamIndex", -1);
+        const int sendMuteParamIndex = (int) sendAutomation.getProperty ("muteParamIndex", -1);
+        check (sendPluginIndex >= 0 && sendLevelParamIndex >= 0
+               && sendPanParamIndex >= 0 && sendMuteParamIndex >= 0,
+               "send snapshot exposes stable generic automation addresses");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", automationTrack },
+                                                              { "pluginIndex", sendPluginIndex },
+                                                              { "paramIndex", sendLevelParamIndex },
+                                                              { "time", 120.0 }, { "value", 0.5 }}))),
+               "send level automation uses the generic parameter command");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", automationTrack },
+                                                              { "pluginIndex", sendPluginIndex },
+                                                              { "paramIndex", sendPanParamIndex },
+                                                              { "time", 120.0 }, { "value", 0.5 }}))),
+               "send pan automation uses the generic parameter command");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", automationTrack },
+                                                              { "pluginIndex", sendPluginIndex },
+                                                              { "paramIndex", sendMuteParamIndex },
+                                                              { "time", 120.0 }, { "value", 0.0 }}))),
+               "send mute automation uses the generic parameter command");
+        auto latestLevelsHasSend = [&] (const String& trackId, int bus) -> bool
+        {
+            const auto payload = lastLevelsEvent.getProperty ("payload", var());
+            const auto sendLevels = payload.getProperty ("sends", var());
+            if (auto* arr = sendLevels.getArray())
+                for (auto& level : *arr)
+                    if (level.getProperty ("trackId", var()).toString() == trackId
+                        && (int) level.getProperty ("bus", -1) == bus
+                        && std::isfinite ((double) level.getProperty ("l", -100.0))
+                        && std::isfinite ((double) level.getProperty ("r", -100.0)))
+                        return true;
+            return false;
+        };
+        lastLevelsEvent = var();
+        if (auto* manager = MessageManager::getInstanceWithoutCreating())
+            manager->runDispatchLoopUntil (80);
+        check (latestLevelsHasSend (automationTrack, bus1),
+               "levels telemetry carries the live send keyed by track and bus");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", 99 }}))), "send to a nonexistent bus rejected");
 
@@ -7083,16 +7151,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                && (bool) sendsOf (gt)[0].getProperty ("preFader", false)
                && std::abs ((double) sendsOf (gt)[0].getProperty ("pan", 0.0) - 0.75) < 0.001,
                "send mute, pan, and pre-fader state persist across save/reload");
+        {
+            const auto restoredSends = sendsOf (automationTrack);
+            const auto restoredAddress = restoredSends.size() > 0
+                ? restoredSends[0].getProperty ("automation", var()) : var();
+            const int restoredPluginIndex = (int) restoredAddress.getProperty ("pluginIndex", -1);
+            const int restoredLevelParamIndex = (int) restoredAddress.getProperty ("levelParamIndex", -1);
+            const int restoredPanParamIndex = (int) restoredAddress.getProperty ("panParamIndex", -1);
+            const int restoredMuteParamIndex = (int) restoredAddress.getProperty ("muteParamIndex", -1);
+            var restoredPlugin;
+            const auto pluginList = trackById (automationTrack).getProperty ("plugins", var());
+            if (auto* arr = pluginList.getArray())
+                for (auto& plugin : *arr)
+                    if ((int) plugin.getProperty ("index", -1) == restoredPluginIndex)
+                        restoredPlugin = plugin;
+            const auto params = restoredPlugin.getProperty ("params", var());
+            check (restoredPlugin.getProperty ("type", var()).toString() == te::AuxSendPlugin::xmlTypeName
+                   && juce::isPositiveAndBelow (restoredLevelParamIndex, params.size())
+                   && juce::isPositiveAndBelow (restoredPanParamIndex, params.size())
+                   && juce::isPositiveAndBelow (restoredMuteParamIndex, params.size())
+                   && (bool) params[restoredLevelParamIndex].getProperty ("automated", false)
+                   && (bool) params[restoredPanParamIndex].getProperty ("automated", false)
+                   && (bool) params[restoredMuteParamIndex].getProperty ("automated", false),
+                   "send automation addresses and curves persist across save/reload");
+        }
+        lastLevelsEvent = var();
+        if (auto* manager = MessageManager::getInstanceWithoutCreating())
+            manager->runDispatchLoopUntil (80);
+        check (latestLevelsHasSend (automationTrack, bus1),
+               "send meter registration reconciles after project reload");
         cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", false }}));
         cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}));
 
         // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
         check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");
         check (sendsOf (gt).size() == 0, "remove_send drops the send");
+        lastLevelsEvent = var();
+        if (auto* manager = MessageManager::getInstanceWithoutCreating())
+            manager->runDispatchLoopUntil (80);
+        check (! latestLevelsHasSend (gt, bus0),
+               "removed send disappears from levels telemetry without a stale read");
         check (! ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send on a missing send errors");
         check (ok (cmd (ops, "undo")), "undo remove_send ok");
         check (sendsOf (gt).size() == 1 && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-6.0)) < 0.6,
                "undo restores the send at its prior level");
+        lastLevelsEvent = var();
+        if (auto* manager = MessageManager::getInstanceWithoutCreating())
+            manager->runDispatchLoopUntil (80);
+        check (latestLevelsHasSend (gt, bus0),
+               "undo restores the send meter registration");
 
         // rename_bus: renames the bus (and its return track) and is NON-undoable.
         auto hasBusNamed = [&] (const String& nm) -> bool {

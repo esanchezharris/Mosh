@@ -79,9 +79,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cpm-cache
-          key: cpm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'CMakeLists.txt') }}
+          # Keep the patch-stack hash ahead of the restore prefix: a dependency patch
+          # change must never restore source containing an older version of that stack.
+          key: cpm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('patches/**') }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'CMakeLists.txt') }}
           restore-keys: |
-            cpm-${{ runner.os }}-${{ github.repository }}-
+            cpm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('patches/**') }}-
 
       - name: Purge a path-stale dep cache (self-heal)
         # Defense-in-depth: restore-keys can prefix-match an older cache, so if the

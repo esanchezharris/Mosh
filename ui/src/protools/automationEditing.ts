@@ -19,6 +19,8 @@ export type AutomationTarget = {
   readonly paramName: string;
   readonly value: number;
   readonly points: readonly AutoPoint[];
+  readonly discrete?: boolean;
+  readonly states?: number;
 };
 
 export type AutomationReplacementBounds = {
@@ -54,6 +56,8 @@ export function firstAutomationTarget(track: Track): AutomationTarget | null {
     paramName: param.name,
     value: param.value,
     points: param.points ?? [],
+    discrete: param.discrete,
+    states: param.states,
   };
 }
 
@@ -68,6 +72,8 @@ export function automationTargetByName(track: Track, paramName: string): Automat
       paramName: param.name,
       value: param.value,
       points: param.points ?? [],
+      discrete: param.discrete,
+      states: param.states,
     };
   }
   return null;

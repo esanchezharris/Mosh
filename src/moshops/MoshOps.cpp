@@ -254,7 +254,7 @@ MoshOps::~MoshOps()
     // flush a late editor callback into the event sink. Ordinary editor close still does.
     pluginHost.closeAllEditors();
     stopTimer();
-    unregisterAllMeterClients();       // balances addClient() for the per-track meter taps only —
+    unregisterAllMeterClients();       // balances addClient() for track and send meter taps —
                                         // masterClient is a separate registration (see below)
     // masterClient (line ~736's ctx->masterLevels.addClient) is never balanced by the
     // per-track path above. Main.cpp's shutdown() destroys MoshOps BEFORE the engine
@@ -325,7 +325,7 @@ void MoshOps::timerCallback()
     // client reports the peak since the last read (getAndClear resets to -100);
     // master comes from the playback context's measurer (null headless → -100).
     reconcileMeterClients();
-    if (! meterClients.empty())
+    if (! meterClients.empty() || ! sendMeterClients.empty())
     {
         Array<var> trackLevels;
         for (auto& [trackId, tap] : meterClients)
@@ -339,6 +339,21 @@ void MoshOps::timerCallback()
             o->setProperty ("l", l);
             o->setProperty ("r", r);
             trackLevels.add (var (o));
+        }
+
+        Array<var> sendLevels;
+        for (auto& [key, tap] : sendMeterClients)
+        {
+            if (tap == nullptr) continue;
+            const float l = tap->client.getAndClearAudioLevel (0).dB;
+            const int chans = tap->client.getNumChannelsUsed();
+            const float r = chans >= 2 ? tap->client.getAndClearAudioLevel (1).dB : l;
+            auto* o = new DynamicObject();
+            o->setProperty ("trackId", key.trackId);
+            o->setProperty ("bus", key.bus);
+            o->setProperty ("l", l);
+            o->setProperty ("r", r);
+            sendLevels.add (var (o));
         }
 
         float ml = -100.0f, mr = -100.0f;
@@ -355,6 +370,8 @@ void MoshOps::timerCallback()
         auto* payload = new DynamicObject();
         payload->setProperty ("tracks", trackLevels);
         payload->setProperty ("master", var (master));
+        if (! sendLevels.isEmpty())
+            payload->setProperty ("sends", sendLevels);
         emit ("levels", var (payload));
     }
 
@@ -3472,6 +3489,19 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             const int volumeIndex = t.getVolumePlugin() != nullptr
                 ? t.pluginList.indexOf (t.getVolumePlugin()) : -1;
             so->setProperty ("preFader", sendIndex >= 0 && volumeIndex >= 0 && sendIndex < volumeIndex);
+            const auto parameters = s->getAutomatableParameters();
+            const int levelParamIndex = parameters.indexOf (s->gain.get());
+            const int panParamIndex = parameters.indexOf (s->getPanParameter());
+            const int muteParamIndex = parameters.indexOf (s->getMuteParameter());
+            if (sendIndex >= 0 && levelParamIndex >= 0 && panParamIndex >= 0 && muteParamIndex >= 0)
+            {
+                auto* automation = new DynamicObject();
+                automation->setProperty ("pluginIndex", sendIndex);
+                automation->setProperty ("levelParamIndex", levelParamIndex);
+                automation->setProperty ("panParamIndex", panParamIndex);
+                automation->setProperty ("muteParamIndex", muteParamIndex);
+                so->setProperty ("automation", var (automation));
+            }
             sends.add (var (so));
         }
     o->setProperty ("sends", sends);
