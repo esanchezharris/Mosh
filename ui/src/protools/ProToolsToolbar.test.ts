@@ -57,6 +57,9 @@ describe("Pro Tools Session menu", () => {
           moshiOpen: false,
           onToggleMoshi: vi.fn(),
           moshiButtonRef: React.createRef<HTMLButtonElement>(),
+          generativeOpen: false,
+          onToggleGenerative: vi.fn(),
+          generativeButtonRef: React.createRef<HTMLButtonElement>(),
         })),
     ));
   });

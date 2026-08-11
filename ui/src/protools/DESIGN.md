@@ -300,6 +300,16 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Accessibility**: opening focuses the composer; Escape or Close dismisses; focus returns to the toolbar trigger; the drawer is complementary rather than modal.
 - **Layout**: the closed drawer has no DOM or layout footprint. The open drawer overlays instead of resizing the timeline.
 
+### Generative Re-imagine drawer
+
+- **Structure**: a separate Re-imagine toolbar trigger opens the shared `GenDrawer` inside a nonmodal bottom-right Pro Tools surface. The shared rack remains the sole owner of Compile, SA3/preview selection, amount, colors, LoRA, Render, Live, A/B, Freeze, Reset, seed, and layer removal; this shell adds reachability, not a duplicate command path.
+- **Target resolution**: the first current non-hidden clip in global selection wins, followed by the current editing clip, the selected track, and then the first track containing a visible clip. A selected track without clips may still show the shared honest empty state. Missing and stale ids are always filtered against the current snapshot.
+- **Truthfulness**: the shared engine badge says `SA3` only when the service reports SA3 available and otherwise says `preview`. Re-imagine creation continues to send `stable_audio3` plus `sa3-medium` only for the real path and `fake` plus an empty model variant for preview.
+- **Accessibility**: opening focuses the shared Compile field (or the first available rack action), Escape or Close dismisses, and focus returns to the Re-imagine trigger. The complementary region is nonmodal. At compact width it becomes a full-width bottom sheet without hiding its Close or create controls.
+- **Safety**: Ask Moshi and Re-imagine are mutually exclusive overlays. `projectEpoch` replacement closes the rack before stale controls can address a new project. The closed drawer has no DOM or timeline layout footprint.
+- **Mutation**: every action remains an existing `store.exec` render-layer command owned by `GenDrawer`; snapshots are read-only. No shell-local mutation or SA3-specific backend fork is introduced.
+- **Evidence boundary**: focused component and mock-Chromium evidence can prove target resolution, exact command envelopes, focus, compact reachability, and preview/SA3 labels. Only a configured service render plus audible/source inspection can prove real SA3 output quality.
+
 ### Mix Window
 
 - **Structure**: the shell toolbar remains the fixed session/navigation owner. The main work area swaps from the Edit timeline to one horizontally scrolling bank of vertical channel strips. Each project track gets a strip; routing groups and Aux returns are included instead of being hidden as Edit-only support objects.
@@ -374,4 +384,5 @@ Strategy: mixed tonal shift plus one-pixel dimensional edges.
 | Spot Sync Point and timestamp recall | Spot dialog | The additive contract is defined, but native/mock persistence is intentionally outside tonight's critical path | Implement [Spot Sync Point contract](../../../docs/protools-clone/SPOT_SYNC_POINT_CONTRACT.md) as one tested native/mock/UI lane |
 | Memory Location slot numbering/import | Toolbar/list surfaces | Recallable Edit selection, horizontal zoom, and Track visibility are supported; independently authored slot numbers, advanced filters, and import remain absent | Later session-navigation slice |
 | True transient detector | Tab navigation | Mosh exposes waveform peaks, not Pro Tools transient metadata; falls back to clip boundaries | Replace when an additive backend transient feed exists |
+| Physical real-SA3 render proof | Re-imagine drawer | Browser/mock evidence proves the control and exact command path, not that a configured model produced useful audio | Run the guarded service/native acceptance lane with a licensed local model and inspect the resulting source/audio |
 | Native Pro Tools behavioral validation | Research/QA | Pro Tools is not installed; browser QA proves Mosh behavior only | Validate later on an authorized reference system |

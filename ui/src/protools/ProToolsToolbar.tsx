@@ -4,7 +4,7 @@ import { useSettings } from "../settings/store";
 import { MoshMenu, MoshMenuItem } from "../chrome/Menu";
 import { MoshTip } from "../chrome/Tooltip";
 import type { Snapshot } from "../types";
-import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconStop } from "../ui/icons";
+import { IconList, IconMore, IconPause, IconPlay, IconSettings, IconSpark, IconStop, IconWaveform } from "../ui/icons";
 import { useTransportControls } from "../v2/useTransportControls";
 import { ProToolsSessionMenu } from "./ProToolsSessionMenu";
 import { ProToolsPunchControls } from "./ProToolsPunchControls";
@@ -40,12 +40,16 @@ const RULERS: readonly { id: ProToolsRuler; label: string }[] = [
   { id: "samples", label: "Samples" },
 ];
 
-export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleMoshi, moshiButtonRef }: {
+export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleMoshi, moshiButtonRef,
+  generativeOpen, onToggleGenerative, generativeButtonRef }: {
   snapshot: Snapshot;
   onOpenSettings: () => void;
   moshiOpen: boolean;
   onToggleMoshi: () => void;
   moshiButtonRef: RefObject<HTMLButtonElement>;
+  generativeOpen: boolean;
+  onToggleGenerative: () => void;
+  generativeButtonRef: RefObject<HTMLButtonElement>;
 }) {
   const exec = useStore((s) => s.exec);
   const transportState = useStore((s) => s.transport);
@@ -171,6 +175,14 @@ export function ProToolsToolbar({ snapshot, onOpenSettings, moshiOpen, onToggleM
 
       <div className="pt-toolbar-group pt-moshi-group">
         <span className="pt-toolbar-label">Assistant</span>
+        <MoshTip side="bottom" label={generativeOpen ? "Close the selected clip Re-imagine rack" : "Re-imagine the selected clip with SA3 or the labelled preview engine"}>
+          <button ref={generativeButtonRef} type="button" className="pt-generative-button"
+            data-testid="pt-open-generative" aria-expanded={generativeOpen}
+            aria-controls={generativeOpen ? "pt-generative-drawer" : undefined}
+            aria-pressed={generativeOpen} onClick={onToggleGenerative}>
+            <IconWaveform size={13} /><span>Re-imagine</span>
+          </button>
+        </MoshTip>
         <MoshTip side="bottom" label={moshiOpen ? "Close Moshi" : "Ask Moshi without changing the Edit Window layout"}>
           <button ref={moshiButtonRef} type="button" className="pt-moshi-button" data-testid="pt-ask-moshi"
             aria-expanded={moshiOpen} aria-controls={moshiOpen ? "pt-moshi-drawer" : undefined}

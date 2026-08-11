@@ -14,6 +14,7 @@ import { useShell } from "../v2/shellState";
 import { ProToolsArrangement } from "./ProToolsArrangement";
 import { ProToolsDetailDock } from "./ProToolsDetailDock";
 import { ProToolsFadesDialog } from "./ProToolsFadesDialog";
+import { ProToolsGenerativeDrawer } from "./ProToolsGenerativeDrawer";
 import { ProToolsMoshiDrawer } from "./ProToolsMoshiDrawer";
 import { ProToolsMemoryLocations } from "./ProToolsMemoryLocations";
 import { ProToolsMixWindow } from "./ProToolsMixWindow";
@@ -37,10 +38,22 @@ export function AppProTools() {
   const resetForProject = useProTools((s) => s.resetForProject);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moshiOpen, setMoshiOpen] = useState(false);
+  const [generativeOpen, setGenerativeOpen] = useState(false);
   const [fadesOpen, setFadesOpen] = useState(false);
   const moshiButtonRef = useRef<HTMLButtonElement>(null);
+  const generativeButtonRef = useRef<HTMLButtonElement>(null);
   const dragging = useFileDrop();
   const openFades = useCallback(() => setFadesOpen(true), []);
+  const closeMoshi = useCallback(() => setMoshiOpen(false), []);
+  const closeGenerative = useCallback(() => setGenerativeOpen(false), []);
+  const toggleMoshi = useCallback(() => {
+    setGenerativeOpen(false);
+    setMoshiOpen((open) => !open);
+  }, []);
+  const toggleGenerative = useCallback(() => {
+    setMoshiOpen(false);
+    setGenerativeOpen((open) => !open);
+  }, []);
 
   useKeyboardShortcuts();
   useProToolsKeys(openFades);
@@ -49,6 +62,7 @@ export function AppProTools() {
   useEffect(() => {
     resetForProject(projectEpoch);
     setFadesOpen(false);
+    setGenerativeOpen(false);
     useShell.getState().setTimeRange(null);
     useShell.getState().setTimeRangeDragging(false);
   }, [projectEpoch, resetForProject]);
@@ -82,8 +96,9 @@ export function AppProTools() {
         data-pt-theme={classicTheme ? "classic" : "dark"}
         data-edit-mode={editMode} data-main-window={mainWindow}>
         {snapshot && <ProToolsToolbar snapshot={snapshot} onOpenSettings={() => setSettingsOpen(true)}
-          moshiOpen={moshiOpen} onToggleMoshi={() => setMoshiOpen((open) => !open)}
-          moshiButtonRef={moshiButtonRef} />}
+          moshiOpen={moshiOpen} onToggleMoshi={toggleMoshi} moshiButtonRef={moshiButtonRef}
+          generativeOpen={generativeOpen} onToggleGenerative={toggleGenerative}
+          generativeButtonRef={generativeButtonRef} />}
         {displayError && <div className="pt-error-bar" role="alert" data-testid="pt-error">⚠ {displayError}</div>}
         <RecoveryNotice />
         <AudioDeviceNotice />
@@ -99,7 +114,9 @@ export function AppProTools() {
         </main>
         {mainWindow === "edit" && <ProToolsDetailDock onOpenFades={openFades} />}
         <ProToolsStatusBar snapshot={snapshot} />
-        <ProToolsMoshiDrawer open={moshiOpen} onClose={() => setMoshiOpen(false)}
+        {snapshot && <ProToolsGenerativeDrawer snapshot={snapshot} open={generativeOpen}
+          onClose={closeGenerative} returnFocusRef={generativeButtonRef} />}
+        <ProToolsMoshiDrawer open={moshiOpen} onClose={closeMoshi}
           returnFocusRef={moshiButtonRef} />
         {snapshot && <ProToolsMemoryLocations snapshot={snapshot} />}
         {fadesOpen && fadeTargets.length > 0 && (
