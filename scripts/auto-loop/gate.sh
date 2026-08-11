@@ -215,6 +215,7 @@ run_harness_selftests() {
   run_step "harness_deps_freshness" bash scripts/auto-loop/deps-freshness-selftest.sh
   run_step "harness_port_ownership" bash scripts/auto-loop/port-ownership-selftest.sh
   run_step "cmake_preset_bundle_metadata" bash tests/cmake-preset-bundle-metadata-test.sh
+  run_step "tracktion_patch_stack" bash tests/apply-tracktion-patch-test.sh
 }
 
 # ── cheap lane ───────────────────────────────────────────────────────────────────

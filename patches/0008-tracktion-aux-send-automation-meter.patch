@@ -1,0 +1,299 @@
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp
+index 2d42e92c..7da3d52e 100644
+--- a/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp
++++ b/modules/tracktion_engine/playback/graph/tracktion_AuxSendNode.cpp
+@@ -44,7 +44,15 @@ AuxSendNode::AuxSendNode (std::unique_ptr<Node> inputNode, int busIDToUse,
+ 
+                     return gain;
+                },
+-               [&sourceSendPlugin] { return sourceSendPlugin.getPan(); }),
++               [&sourceSendPlugin] { return sourceSendPlugin.getPan(); },
++               [&sourceSendPlugin] (choc::buffer::ChannelArrayView<float> audio)
++               {
++                   if (audio.getNumChannels() == 0)
++                       return;
++
++                   auto buffer = tracktion::graph::toAudioBuffer (audio);
++                   sourceSendPlugin.measurer.processBuffer (buffer, 0, buffer.getNumSamples());
++               }),
+       playHeadState (phs),
+       pluginPtr (sourceSendPlugin),
+       sendPlugin (sourceSendPlugin)
+diff --git a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp
+index 2597f36c..6722ca27 100644
+--- a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp
++++ b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.cpp
+@@ -11,6 +11,67 @@
+ namespace tracktion { inline namespace engine
+ {
+ 
++namespace
++{
++struct AuxSendPanParameter final : public AutomatableParameter
++{
++    AuxSendPanParameter (const juce::String& xmlTag, const juce::String& name,
++                         Plugin& owner, juce::Range<float> range)
++        : AutomatableParameter (xmlTag, name, owner, range)
++    {
++    }
++
++    ~AuxSendPanParameter() override
++    {
++        notifyListenersOfDeletion();
++    }
++
++    juce::String valueToString (float value) override
++    {
++        return getPanString (value);
++    }
++
++    float stringToValue (const juce::String& text) override
++    {
++        const float value = text.retainCharacters ("0123456789.-").getFloatValue();
++        return text.contains (TRANS("Left")) ? -value : value;
++    }
++};
++
++struct AuxSendMuteParameter final : public AutomatableParameter
++{
++    AuxSendMuteParameter (const juce::String& xmlTag, const juce::String& name, Plugin& owner)
++        : AutomatableParameter (xmlTag, name, owner, { 0.0f, 1.0f })
++    {
++    }
++
++    ~AuxSendMuteParameter() override
++    {
++        notifyListenersOfDeletion();
++    }
++
++    static bool muted (float value) noexcept          { return value >= 0.5f; }
++    bool isDiscrete() const override                  { return true; }
++    int getNumberOfStates() const override            { return 2; }
++    float getValueForState (int state) const override { return state <= 0 ? 0.0f : 1.0f; }
++    int getStateForValue (float value) const override { return muted (value) ? 1 : 0; }
++    float snapToState (float value) const override    { return muted (value) ? 1.0f : 0.0f; }
++    bool hasLabels() const override                   { return true; }
++    juce::String getLabelForValue (float value) const override
++    {
++        return muted (value) ? TRANS("Muted") : TRANS("Open");
++    }
++    juce::StringArray getAllLabels() const override
++    {
++        return { TRANS("Open"), TRANS("Muted") };
++    }
++    juce::String valueToString (float value) override
++    {
++        return getLabelForValue (value);
++    }
++};
++}
++
+ AuxSendPlugin::AuxSendPlugin (PluginCreationInfo info) : Plugin (info)
+ {
+     auto um = getUndoManager();
+@@ -36,7 +97,14 @@ AuxSendPlugin::AuxSendPlugin (PluginCreationInfo info) : Plugin (info)
+                      [] (float value)             { return juce::Decibels::toString (volumeFaderPositionToDB (value)); },
+                      [] (const juce::String& s)   { return decibelsToVolumeFaderPosition (dbStringToDb (s)); });
+ 
++    addAutomatableParameter (panParameter = new AuxSendPanParameter (
++        "send pan", TRANS("Send pan"), *this, { -1.0f, 1.0f }));
++    addAutomatableParameter (muteParameter = new AuxSendMuteParameter (
++        "send mute", TRANS("Send mute"), *this));
++
+     gain->attachToCurrentValue (gainLevel);
++    panParameter->attachToCurrentValue (pan);
++    muteParameter->attachToCurrentValue (muted);
+ 
+     quickParamName = "send level";
+ }
+@@ -45,6 +113,8 @@ AuxSendPlugin::~AuxSendPlugin()
+ {
+     notifyListenersOfDeletion();
+     gain->detachFromCurrentValue();
++    panParameter->detachFromCurrentValue();
++    muteParameter->detachFromCurrentValue();
+ }
+ 
+ bool AuxSendPlugin::shouldProcess()
+@@ -146,22 +216,17 @@ void AuxSendPlugin::setMute (bool b)
+     if (b)
+         lastVolumeBeforeMute = getGainDb();
+ 
+-    muted = b;
++    muteParameter->setParameter (b ? 1.0f : 0.0f, juce::sendNotification);
+     changed();
+ }
+ 
+-bool AuxSendPlugin::isMute()
+-{
+-    return muted.get();
+-}
+-
+ void AuxSendPlugin::setPan (float newPan)
+ {
+     const auto clamped = juce::jlimit (-1.0f, 1.0f, newPan);
+ 
+-    if (pan.get() != clamped)
++    if (panParameter->getCurrentValue() != clamped)
+     {
+-        pan = clamped;
++        panParameter->setParameter (clamped, juce::sendNotification);
+         changed();
+     }
+ }
+diff --git a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h
+index e4961796..0794b58e 100644
+--- a/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h
++++ b/modules/tracktion_engine/plugins/internal/tracktion_AuxSend.h
+@@ -22,10 +22,13 @@ public:
+     float getGainDb() const                 { return volumeFaderPositionToDB (gain->getCurrentValue()); }
+ 
+     void setMute (bool m);
+-    bool isMute();
++    bool isMute() const                     { return muteParameter->getCurrentValue() >= 0.5f; }
+ 
+     void setPan (float newPan);
+-    float getPan() const                     { return juce::jlimit (-1.0f, 1.0f, pan.get()); }
++    float getPan() const                    { return juce::jlimit (-1.0f, 1.0f, panParameter->getCurrentValue()); }
++
++    AutomatableParameter* getPanParameter() const noexcept   { return panParameter.get(); }
++    AutomatableParameter* getMuteParameter() const noexcept  { return muteParameter.get(); }
+ 
+     int getBusNumber() const                { return busNumber; }
+     juce::String getBusName();
+@@ -63,7 +66,8 @@ public:
+     juce::CachedValue<bool> muted;
+     juce::CachedValue<float> pan;
+ 
+-    AutomatableParameter::Ptr gain;
++    AutomatableParameter::Ptr gain, panParameter, muteParameter;
++    LevelMeasurer measurer;
+ 
+     /// @internal N.B. used only for testing
+     bool isOwnedBy (Track&);
+diff --git a/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h b/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h
+index 8f0c44e4..676fca62 100644
+--- a/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h
++++ b/modules/tracktion_graph/tracktion_graph/tracktion_TestNodes.h
+@@ -462,10 +462,12 @@ public:
+     SendNode (std::unique_ptr<Node> inputNode, int busIDToUse,
+               std::function<float()> getGainFunc = nullptr,
+               std::function<float()> getPanFunc = nullptr,
++              std::function<void(choc::buffer::ChannelArrayView<float>)> measureAudioFunc = nullptr,
+               std::optional<size_t> extraHashToUse_ = {})
+         : input (std::move (inputNode)), busID (busIDToUse),
+           gainFunction (std::move (getGainFunc)),
+           panFunction (std::move (getPanFunc)),
++          measureAudioFunction (std::move (measureAudioFunc)),
+           extraHashToUse (extraHashToUse_)
+     {
+         setOptimisations ({ ClearBuffers::no,
+@@ -487,6 +489,11 @@ public:
+         return panFunction;
+     }
+ 
++    std::function<void(choc::buffer::ChannelArrayView<float>)> getMeasureAudioFunction()
++    {
++        return measureAudioFunction;
++    }
++
+     NodeProperties getNodeProperties() override
+     {
+         auto props = input->getNodeProperties();
+@@ -535,6 +542,7 @@ private:
+     const int busID;
+     std::function<float()> gainFunction;
+     std::function<float()> panFunction;
++    std::function<void(choc::buffer::ChannelArrayView<float>)> measureAudioFunction;
+     std::optional<size_t> extraHashToUse;
+ };
+ 
+@@ -623,6 +631,59 @@ private:
+ };
+ 
+ 
++//==============================================================================
++//==============================================================================
++/** Passes through a fully-processed send branch and reports its final audio. */
++class SendMeasuringNode final : public Node
++{
++public:
++    SendMeasuringNode (std::unique_ptr<Node> inputNode,
++                       std::function<void(choc::buffer::ChannelArrayView<float>)> measureAudioFunc)
++        : input (std::move (inputNode)), measureAudioFunction (std::move (measureAudioFunc))
++    {
++        assert (input != nullptr);
++        assert (measureAudioFunction);
++        setOptimisations ({ ClearBuffers::no, AllocateAudioBuffer::no });
++    }
++
++    NodeProperties getNodeProperties() override
++    {
++        auto props = input->getNodeProperties();
++        constexpr size_t sendMeasuringNodeMagicHash = size_t (0x73656e644d657472);
++        if (props.nodeID != 0)
++            hash_combine (props.nodeID, sendMeasuringNodeMagicHash);
++        return props;
++    }
++
++    std::vector<Node*> getDirectInputNodes() override
++    {
++        return { input.get() };
++    }
++
++    bool isReadyToProcess() override
++    {
++        return input->hasProcessed();
++    }
++
++    void process (ProcessContext& pc) override
++    {
++        auto source = input->getProcessedOutput();
++        setAudioOutput (input.get(), source.audio);
++
++        if (input->numOutputNodes == 1)
++            pc.buffers.midi.swapWith (source.midi);
++        else
++            pc.buffers.midi.copyFrom (source.midi);
++
++        measureAudioFunction (source.audio);
++    }
++
++private:
++    std::unique_ptr<Node> input;
++    std::function<void(choc::buffer::ChannelArrayView<float>)> measureAudioFunction;
++};
++
++
+ //==============================================================================
+ //==============================================================================
+ class ReturnNode final  : public Node
+@@ -811,16 +872,25 @@ private:
+             {
+                 auto gainFunction = sends[(size_t) i]->getGainFunction();
+                 auto panFunction = sends[(size_t) i]->getPanFunction();
++                auto measureAudioFunction = sends[(size_t) i]->getMeasureAudioFunction();
+ 
+                 if (! gainFunction)
+                     continue;
+ 
++                std::unique_ptr<Node> processedSend;
+                 if (panFunction)
+-                    ownedNodes.push_back (makeNode<GainNode> (
++                    processedSend = makeNode<GainNode> (
+                         makeNode<StereoBalanceNode> (sends[(size_t) i], std::move (panFunction), returnNodeID),
+-                        std::move (gainFunction), returnNodeID));
++                        std::move (gainFunction), returnNodeID);
+                 else
+-                    ownedNodes.push_back (makeNode<GainNode> (std::move (sends[(size_t) i]), std::move (gainFunction), returnNodeID));
++                    processedSend = makeNode<GainNode> (
++                        std::move (sends[(size_t) i]), std::move (gainFunction), returnNodeID);
++
++                if (measureAudioFunction)
++                    processedSend = makeNode<SendMeasuringNode> (
++                        std::move (processedSend), std::move (measureAudioFunction));
++
++                ownedNodes.push_back (std::move (processedSend));
+ 				sends.erase (std::find (sends.begin(), sends.end(), sends[(size_t) i]));
+ 			}
+ 
