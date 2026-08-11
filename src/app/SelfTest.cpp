@@ -7045,6 +7045,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         auto gt = cmd (ops, "create_track", args1 ("name", "Gtr"))["data"].getProperty ("trackId", var()).toString();
         check (ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}))), "add_send ok");
+        {
+            te::AuxSendPlugin* rawSend = nullptr;
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                if (track != nullptr && track->itemID.toString() == gt)
+                    rawSend = track->getAuxSendPlugin (bus0);
+
+            const auto parameters = rawSend != nullptr
+                ? rawSend->getAutomatableParameters()
+                : juce::Array<te::AutomatableParameter*> {};
+            check (parameters.size() == 3,
+                   "send owns level, pan, and mute automation parameters");
+            check (parameters.size() > 1 && parameters[1]->getParameterName() == "Send pan",
+                   "send pan is addressable");
+            check (parameters.size() > 2 && parameters[2]->getParameterName() == "Send mute",
+                   "send mute is addressable");
+        }
         { auto s = sendsOf (gt);
           check (s.size() == 1 && (int) s[0].getProperty ("bus", -1) == bus0
                  && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6

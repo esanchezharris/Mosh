@@ -98,8 +98,9 @@ because the graph branch itself moves around the track fader.
 
 ### AuxSendPlugin parameters
 
-Patch the pinned Tracktion source through a new repository patch following the
-existing numbered patch series. `AuxSendPlugin` owns:
+Extend the existing pinned Tracktion AuxSend patch (`0007`) as one combined
+patch. Keeping the overlapping AuxSend hunks together preserves fresh-apply and
+idempotent reconfigure behavior. `AuxSendPlugin` owns:
 
 - existing continuous `Send level` parameter;
 - new continuous `Send pan` parameter with normalized display range `-1..1`;

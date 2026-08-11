@@ -23,8 +23,7 @@
 
 ## File Map
 
-- `patches/0008-tracktion-aux-send-automation-meter.patch`: Tracktion AuxSend parameters, current-value graph reads, and final-branch meter wiring.
-- `cmake/Dependencies.cmake`: appends patch 0008 to the pinned patch manifest.
+- `patches/0007-tracktion-aux-send-mute-pan.patch`: one combined AuxSend patch for static controls, automatable parameters, current-value graph reads, and final-branch meter wiring.
 - `src/moshops/MoshOps.h`: send meter client ownership and reconciliation declarations.
 - `src/moshops/MoshOps.Mixer.cpp`: send meter client lifecycle and payload construction helpers.
 - `src/moshops/MoshOps.cpp`: optional `sends` field on the existing 30 Hz `levels` event; additive send automation addresses in track snapshots.
@@ -46,13 +45,12 @@
 ### Task 1: Make AuxSend Pan and Mute Automatable and Meterable
 
 **Files:**
-- Create: `patches/0008-tracktion-aux-send-automation-meter.patch`
-- Modify: `cmake/Dependencies.cmake`
-- Modify locally for the guarded build only: configured `tracktion_engine-src` files named by patch 0008
+- Modify: `patches/0007-tracktion-aux-send-mute-pan.patch`
+- Modify locally for the guarded build only: configured `tracktion_engine-src` files named by patch 0007
 - Test: `src/app/SelfTest.cpp`
 
 **Interfaces:**
-- Produces: `AuxSendPlugin::pan`, `AuxSendPlugin::mute`, `AuxSendPlugin::measurer`, `getPanParameter()`, `getMuteParameter()`, and a SendNode measurer pointer.
+- Produces: `AuxSendPlugin` pan/mute parameters, `AuxSendPlugin::measurer`, `getPanParameter()`, `getMuteParameter()`, and a SendNode measurement callback.
 - Consumes: existing `AuxSendPlugin::gain`, `AuxSendNode::updateParameterStreams`, `StereoBalanceNode`, `GainNode`, `LevelMeasuringNode`.
 
 - [ ] **Step 1: Write the failing native parameter expectations**
@@ -92,9 +90,14 @@ Expected: the build passes and the Wave 8 parameter assertion fails. The harness
 has no section filter, so this single bounded full self-test is the smallest real
 engine RED proof; do not run it in parallel or repeat unrelated suites.
 
-- [ ] **Step 3: Implement patch 0008 and register it**
+- [ ] **Step 3: Extend the combined AuxSend patch 0007**
 
-Add continuous Pan and discrete Mute parameters, make the static setters write those parameters, read current values from their parameter streams, add a `LevelMeasurer`, pass it through `SendNode`, and wrap the final balanced/gained send branch with `LevelMeasuringNode`. Append patch 0008 after patch 0007 in `MOSH_TRACKTION_PATCHES`.
+Add continuous Pan and discrete Mute parameters, make the static setters write
+those parameters, read current values from their parameter streams, add a
+`LevelMeasurer`, pass a graph-neutral measurement callback through `SendNode`,
+and wrap the final balanced/gained send branch with `SendMeasuringNode`. Regenerate
+patch 0007 as one combined diff because a second patch overlapping its hunks
+breaks the patch helper's reverse-apply idempotence check.
 
 The public contract must be:
 
@@ -110,15 +113,17 @@ AutomatableParameter* getMuteParameter() const noexcept;
 
 - [ ] **Step 4: Verify patch applicability and parameter GREEN**
 
-Run the memory preflight, apply-check patch 0008 against a clean pinned source
-already carrying 0001-0007, then run the same single-job `Mosh` build and one
+Run the memory preflight, reverse-check combined patch 0007 against the configured
+source and forward-check it against a clean pinned source, then run the same single-job `Mosh` build and one
 headless self-test, each behind its own fresh preflight. Expected: patch check,
 compile, and the new Wave 8 parameter assertions PASS.
 
 - [ ] **Step 5: Commit the engine patch independently**
 
 ```bash
-git add patches/0008-tracktion-aux-send-automation-meter.patch cmake/Dependencies.cmake
+git add patches/0007-tracktion-aux-send-mute-pan.patch src/app/SelfTest.cpp \
+  docs/superpowers/specs/2026-08-11-protools-send-automation-meters-design.md \
+  docs/superpowers/plans/2026-08-11-protools-send-automation-meters.md
 git commit -m "feat(engine): automate and meter aux sends"
 ```
 
