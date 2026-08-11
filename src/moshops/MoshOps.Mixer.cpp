@@ -37,8 +37,8 @@ bool positionSendRelativeToFader (te::AudioTrack& track, te::AuxSendPlugin& send
 {
     auto* volume = track.getVolumePlugin();
     if (volume == nullptr) return false;
-    const int sendIndex = track.pluginList.indexOf (&send);
-    const int volumeIndex = track.pluginList.indexOf (volume);
+    const int sendIndex = track.pluginList.state.indexOf (send.state);
+    const int volumeIndex = track.pluginList.state.indexOf (volume->state);
     if (sendIndex < 0 || volumeIndex < 0) return false;
 
     const int targetIndex = preFader

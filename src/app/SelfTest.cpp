@@ -7067,6 +7067,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_send_pre_fader", objN ({{ "trackId", gt }, { "bus", bus0 }, { "preFader", true }}))), "set_send_pre_fader ok");
         check ((bool) sendsOf (gt)[0].getProperty ("preFader", false),
                "send snapshot derives pre-fader state from plugin order");
+        check (ok (cmd (ops, "set_send_pre_fader", objN ({{ "trackId", gt }, { "bus", bus0 }, { "preFader", false }}))),
+               "send can switch back to post-fader");
+        check (! (bool) sendsOf (gt)[0].getProperty ("preFader", true),
+               "send snapshot derives post-fader state after switch");
+        check (ok (cmd (ops, "undo")) && (bool) sendsOf (gt)[0].getProperty ("preFader", false),
+               "undo restores pre-fader send placement");
 
         cmd (ops, "save"); cmd (ops, "reload");
         { bool found = false; auto bv = buses();              // bind to a local (no dangling temporary)
