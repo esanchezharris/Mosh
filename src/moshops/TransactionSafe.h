@@ -92,7 +92,8 @@ inline const std::set<juce::String>& registry()
         "add_automation_point", "remove_automation_point", "set_automation_point",
         "clear_automation",
         // ── sends / buses (additive only) ──
-        "create_bus", "add_send", "set_send_level", "remove_send",
+        "create_bus", "add_send", "set_send_level", "set_send_mute", "set_send_pan",
+        "set_send_pre_fader", "remove_send",
         // ── song structure ──
         "set_tempo", "set_time_signature",
         "create_section", "rename_section", "move_section", "remove_section",

@@ -303,6 +303,14 @@ Spacing derives from a 4px unit: `--pt-space-1: 4px`, `--pt-space-2: 8px`, `--pt
 - **Adaptation**: Mosh has one always-present global Master rather than Pro Tools' user-created Master Fader track. It is rendered as the final full-width strip because V11 explicitly demonstrates mix-bus fader and insert work, while its label identifies the Mosh main bus.
 - **Honest boundary**: this is an in-shell main-view swap, not a native floating/multi-monitor window. Independent Mix visibility, narrow/wide strips, full Sends A-J semantics, VCA faders, routing-group controls beyond the supported fader, and native audible verification remain explicit debt.
 
+### Send controls
+
+- **Structure**: each assigned send exposes destination, Pre/Post placement, mute, stereo pan, level, and removal in the selected-track inspector. The Mix Window repeats the same state in its A-E rows; compact rows remain vertically scrollable instead of hiding controls.
+- **State**: `mute`, `pan`, and `preFader` come from the project snapshot. Mute does not overwrite the stored level; Pre/Post reflects the send plugin's actual position relative to the track fader; pan is a send-branch-only stereo balance and never alters the source track path.
+- **Accessibility**: Pre/Post and Mute are named native pressed buttons. Pan and level are labelled native ranges with numeric output. Focus, active state, and failure reuse the shell's existing tokens and error bar.
+- **Mutation**: `set_send_mute`, `set_send_pan`, and `set_send_pre_fader` are undoable, replayable, JSONL-recorded, track-locked MoshOps commands. Inspector calls are project-epoch guarded. Mix modifier fan-out remains serial, filters tracks that own the destination, and stops at the first rejection.
+- **Adaptation**: Mosh exposes one balance control for the stereo send branch. Mono-source upmix, follow-main-pan, send automation, and full A-J send banks remain named follow-ups rather than inert controls.
+
 ### Spot placement dialog
 
 - **Structure**: modal title and clip identity, native Time Scale select, one editable Start field, validation message, Cancel, and Spot confirmation.
@@ -354,6 +362,6 @@ Strategy: mixed tonal shift plus one-pixel dimensional edges.
 |---|---|---|---|
 | Exact pixel polish against current Pro Tools | Entire shell | Explicit follow-up; Pro Tools is unavailable locally and no proprietary imagery is copied | Later reference-fidelity pass with licensed access |
 | Spot Sync Point and timestamp recall | Spot dialog | The additive contract is defined, but native/mock persistence is intentionally outside tonight's critical path | Implement [Spot Sync Point contract](../../../docs/protools-clone/SPOT_SYNC_POINT_CONTRACT.md) as one tested native/mock/UI lane |
-| Memory Locations | Toolbar/list surfaces | Explicitly outside this delivery | Follow-up navigation slice |
+| Memory Location slot numbering/import | Toolbar/list surfaces | Recallable Edit selection, horizontal zoom, and Track visibility are supported; independently authored slot numbers, advanced filters, and import remain absent | Later session-navigation slice |
 | True transient detector | Tab navigation | Mosh exposes waveform peaks, not Pro Tools transient metadata; falls back to clip boundaries | Replace when an additive backend transient feed exists |
 | Native Pro Tools behavioral validation | Research/QA | Pro Tools is not installed; browser QA proves Mosh behavior only | Validate later on an authorized reference system |

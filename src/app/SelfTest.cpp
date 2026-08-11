@@ -7047,21 +7047,38 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}))), "add_send ok");
         { auto s = sendsOf (gt);
           check (s.size() == 1 && (int) s[0].getProperty ("bus", -1) == bus0
-                 && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6, "send appears with the right bus + dB"); }
+                 && std::abs ((double) s[0].getProperty ("db", 0.0) - (-6.0)) < 0.6
+                 && ! (bool) s[0].getProperty ("mute", true)
+                 && std::abs ((double) s[0].getProperty ("pan", 1.0)) < 0.001
+                 && ! (bool) s[0].getProperty ("preFader", true),
+                 "send appears post-fader, centered, unmuted, with the right bus + dB"); }
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", 99 }}))), "send to a nonexistent bus rejected");
 
         check (ok (cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -3.0 }}))), "set_send_level ok");
         check (std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-3.0)) < 0.6, "send level reflects the new dB");
-        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -100.0 }}));
-        check ((bool) sendsOf (gt)[0].getProperty ("mute", false), "send mutes at -100 dB");
-        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}));
+        check (ok (cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", true }}))), "set_send_mute ok");
+        check ((bool) sendsOf (gt)[0].getProperty ("mute", false)
+               && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-3.0)) < 0.6,
+               "send mute preserves its level");
+        check (ok (cmd (ops, "set_send_pan", objN ({{ "trackId", gt }, { "bus", bus0 }, { "pan", 0.75 }}))), "set_send_pan ok");
+        check (std::abs ((double) sendsOf (gt)[0].getProperty ("pan", 0.0) - 0.75) < 0.001,
+               "send snapshot reflects its stereo pan");
+        check (ok (cmd (ops, "set_send_pre_fader", objN ({{ "trackId", gt }, { "bus", bus0 }, { "preFader", true }}))), "set_send_pre_fader ok");
+        check ((bool) sendsOf (gt)[0].getProperty ("preFader", false),
+               "send snapshot derives pre-fader state from plugin order");
 
         cmd (ops, "save"); cmd (ops, "reload");
         { bool found = false; auto bv = buses();              // bind to a local (no dangling temporary)
           if (auto* arr = bv.getArray()) for (auto& b : *arr) if (b.getProperty ("name", var()).toString() == "Reverb") found = true;
           check (found, "bus name persists across save/reload"); }
-        check (sendsOf (gt).size() == 1, "send persists across save/reload");
+        check (sendsOf (gt).size() == 1
+               && (bool) sendsOf (gt)[0].getProperty ("mute", false)
+               && (bool) sendsOf (gt)[0].getProperty ("preFader", false)
+               && std::abs ((double) sendsOf (gt)[0].getProperty ("pan", 0.0) - 0.75) < 0.001,
+               "send mute, pan, and pre-fader state persist across save/reload");
+        cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", false }}));
+        cmd (ops, "set_send_level", objN ({{ "trackId", gt }, { "bus", bus0 }, { "db", -6.0 }}));
 
         // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
         check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");

@@ -669,6 +669,9 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "create_bus")        return cmdCreateBus (args);
     if (name == "add_send")          return cmdAddSend (args);
     if (name == "set_send_level")    return cmdSetSendLevel (args);
+    if (name == "set_send_mute")     return cmdSetSendMute (args);
+    if (name == "set_send_pan")      return cmdSetSendPan (args);
+    if (name == "set_send_pre_fader") return cmdSetSendPreFader (args);
     if (name == "remove_send")       return cmdRemoveSend (args);
     if (name == "remove_bus")        return cmdRemoveBus (args);
     if (name == "rename_bus")        return cmdRenameBus (args);
@@ -3455,7 +3458,7 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // affordance only on instrument tracks (and arm_track routes live MIDI to them).
     o->setProperty ("isInstrument", trackHasInstrument (t));
 
-    // Sends (post-fader aux sends) owned by this track (Wave 8).
+    // Aux sends owned by this track. Position around the real fader is authoritative.
     juce::Array<var> sends;
     for (auto* p : t.pluginList.getPlugins())
         if (auto* s = dynamic_cast<te::AuxSendPlugin*> (p))
@@ -3464,6 +3467,11 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             so->setProperty ("bus", s->getBusNumber());
             so->setProperty ("db", s->getGainDb());
             so->setProperty ("mute", s->isMute());
+            so->setProperty ("pan", s->getPan());
+            const int sendIndex = t.pluginList.indexOf (s);
+            const int volumeIndex = t.getVolumePlugin() != nullptr
+                ? t.pluginList.indexOf (t.getVolumePlugin()) : -1;
+            so->setProperty ("preFader", sendIndex >= 0 && volumeIndex >= 0 && sendIndex < volumeIndex);
             sends.add (var (so));
         }
     o->setProperty ("sends", sends);

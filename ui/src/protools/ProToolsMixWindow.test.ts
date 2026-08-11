@@ -37,7 +37,7 @@ const SNAPSHOT: Snapshot = {
         isInstrument: false,
         params: [],
       }],
-      sends: [{ bus: 1, db: -12, mute: false }],
+      sends: [{ bus: 1, db: -12, mute: false, pan: 0.2, preFader: false }],
     },
     {
       id: "double",
@@ -50,7 +50,7 @@ const SNAPSHOT: Snapshot = {
       volumeDb: -4,
       pan: -0.1,
       automationMode: "read",
-      sends: [{ bus: 1, db: -10, mute: false }],
+      sends: [{ bus: 1, db: -10, mute: false, pan: -0.4, preFader: false }],
     },
     {
       id: "folder",
@@ -348,12 +348,20 @@ describe("Pro Tools Mix Window", () => {
 
   it("Option changes a matching send on every compatible strip that owns it", async () => {
     const send = vocalStrip().querySelector<HTMLInputElement>("[data-testid=pt-mix-send-level-1]");
-    if (!send) throw new Error("Vocal Verb send is missing");
+    const pan = vocalStrip().querySelector<HTMLInputElement>("[data-testid=pt-mix-send-pan-1]");
+    const mute = vocalStrip().querySelector<HTMLButtonElement>("[data-testid=pt-mix-send-mute-1]");
+    const pre = vocalStrip().querySelector<HTMLButtonElement>("[data-testid=pt-mix-send-pre-1]");
+    if (!send || !pan || !mute || !pre) throw new Error("Vocal Verb send controls are missing");
 
     act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "Alt", code: "AltLeft", altKey: true, bubbles: true,
     })));
-    await act(async () => changeInput(send, "-4"));
+    await act(async () => {
+      changeInput(send, "-4");
+      changeInput(pan, "0.6");
+      mute.click();
+      pre.click();
+    });
     act(() => window.dispatchEvent(new KeyboardEvent("keyup", {
       key: "Alt", code: "AltLeft", altKey: false, bubbles: true,
     })));
@@ -363,6 +371,18 @@ describe("Pro Tools Mix Window", () => {
         ["set_send_level", { trackId: "vocal", bus: 1, db: -4 }],
         ["set_send_level", { trackId: "double", bus: 1, db: -4 }],
       ]));
+    expect(exec.mock.calls.filter(([command]) => command === "set_send_pan")).toEqual([
+      ["set_send_pan", { trackId: "vocal", bus: 1, pan: 0.6 }],
+      ["set_send_pan", { trackId: "double", bus: 1, pan: 0.6 }],
+    ]);
+    expect(exec.mock.calls.filter(([command]) => command === "set_send_mute")).toEqual([
+      ["set_send_mute", { trackId: "vocal", bus: 1, mute: true }],
+      ["set_send_mute", { trackId: "double", bus: 1, mute: true }],
+    ]);
+    expect(exec.mock.calls.filter(([command]) => command === "set_send_pre_fader")).toEqual([
+      ["set_send_pre_fader", { trackId: "vocal", bus: 1, preFader: true }],
+      ["set_send_pre_fader", { trackId: "double", bus: 1, preFader: true }],
+    ]);
   });
 
   it("stops all-strip input routing when hardware reports applied false", async () => {

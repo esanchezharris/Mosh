@@ -479,7 +479,8 @@ const MOCK_TXN_SAFE = new Set([
   "set_track_automation_mode", "write_automation_curve",
   "add_automation_point", "remove_automation_point", "set_automation_point",
   "clear_automation",
-  "create_bus", "add_send", "set_send_level", "remove_send",
+  "create_bus", "add_send", "set_send_level", "set_send_mute", "set_send_pan",
+  "set_send_pre_fader", "remove_send",
   "set_tempo", "set_time_signature",
   "create_section", "rename_section", "move_section", "remove_section",
   "create_clip_group", "ungroup_clip_group", "regroup_clip_group", "rename_clip_group",
@@ -1670,8 +1671,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── sends / returns / aux buses (Wave 8) ─────────────────────────────────
     // A "bus" is an integer; the return is an instrument-free audio track carrying
-    // an aux-return (isReturn/returnBus). Sends are post-fader entries on a track's
-    // sends[], routed purely by matching bus number. Mirrors MoshOps cmdCreateBus/…
+    // an aux-return (isReturn/returnBus). Send controls live on the source track and
+    // route purely by matching bus number. Mirrors MoshOps cmdCreateBus/…
     case "create_bus": {
       pushUndo();
       const used = new Set((snapshot.buses ?? []).map((b) => b.bus));
@@ -1694,7 +1695,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
       if ((t.sends ?? []).some((s) => s.bus === bus)) return err(command, "send already exists");
       pushUndo();
-      (t.sends ??= []).push({ bus, db: Math.max(-60, Math.min(6, num(args.db, 0))), mute: false });
+      (t.sends ??= []).push({
+        bus,
+        db: Math.max(-60, Math.min(6, num(args.db, 0))),
+        mute: Boolean(args.mute),
+        pan: Math.max(-1, Math.min(1, num(args.pan, 0))),
+        preFader: Boolean(args.preFader),
+      });
       invalidate();
       return ok(command, { bus });
     }
@@ -1705,6 +1712,36 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!s) return err(command, "no send to that bus");
       pushUndo();
       s.db = Math.max(-100, Math.min(6, num(args.db, 0)));
+      invalidate();
+      return ok(command);
+    }
+    case "set_send_mute": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.mute = Boolean(args.mute);
+      invalidate();
+      return ok(command);
+    }
+    case "set_send_pan": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.pan = Math.max(-1, Math.min(1, num(args.pan, 0)));
+      invalidate();
+      return ok(command);
+    }
+    case "set_send_pre_fader": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.preFader = Boolean(args.preFader);
       invalidate();
       return ok(command);
     }
