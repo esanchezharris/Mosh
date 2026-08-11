@@ -5,7 +5,14 @@
 // transport / levels / spectrum deliberately bypass the snapshot — they are the
 // 30 Hz telemetry rails and must never re-create the snapshot object.
 import type { StoreApi } from "zustand";
-import type { MoshEvent, Transport, Level, RenderQA } from "../types";
+import {
+  sendLevelKey,
+  type MoshEvent,
+  type Transport,
+  type Level,
+  type RenderQA,
+  type SendLevel,
+} from "../types";
 import { isTrackPatch, applyTrackPatch } from "../snapshotPatch";
 // Collaborator video (redesign). The store routes inbound WebRTC signaling + presence
 // changes into the video room; the room couples back to the seam only via mp_send_signal.
@@ -39,10 +46,18 @@ export function onTransport(ev: MoshEvent, set: Set): void {
 
 export function onLevels(ev: MoshEvent, set: Set): void {
   // Targeted set (no snapshot refetch) — same lightweight path as transport.
-  const p = ev.payload as { tracks: { id: string; l: number; r: number }[]; master: Level };
+  const p = ev.payload as {
+    tracks?: { id: string; l: number; r: number }[];
+    master?: Level;
+    sends?: SendLevel[];
+  };
   const tracks: Record<string, Level> = {};
   for (const t of p.tracks ?? []) tracks[t.id] = { l: t.l, r: t.r };
-  set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } } });
+  const sendLevels: Record<string, Level> = {};
+  for (const send of p.sends ?? []) {
+    sendLevels[sendLevelKey(send.trackId, send.bus)] = { l: send.l, r: send.r };
+  }
+  set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } }, sendLevels });
 }
 
 export function onMuteAutomation(ev: MoshEvent, set: Set): void {

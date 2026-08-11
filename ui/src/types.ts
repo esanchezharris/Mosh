@@ -399,6 +399,13 @@ export type BuiltinPlugin = {
   builtin: true;
 };
 
+export type SendAutomationAddress = {
+  pluginIndex: number;
+  levelParamIndex: number;
+  panParamIndex: number;
+  muteParamIndex: number;
+};
+
 export type Send = {
   bus: number;
   db: number;
@@ -407,6 +414,8 @@ export type Send = {
   pan?: number;
   /** True when the send plugin is physically ordered before the track fader. */
   preFader?: boolean;
+  /** Generic automation address for this hidden AuxSend plug-in. */
+  automation?: SendAutomationAddress;
 };
 // One loaded sound on a track's sampler. `index` is the sampler's own pad index and is
 // how every pad command addresses it; `pitch` is the note that triggers it. A pad whose
@@ -518,6 +527,10 @@ export type TrackOutputs = {
 };
 
 export type Level = { l: number; r: number };           // peak dBFS, -100 floor
+export type SendLevel = Level & { trackId: string; bus: number };
+
+export const sendLevelKey = (trackId: string, bus: number): string =>
+  `${trackId.length}:${trackId}:${bus}`;
 
 export type Bus = { bus: number; name: string; trackId: string };
 

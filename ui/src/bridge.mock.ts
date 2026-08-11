@@ -805,14 +805,30 @@ function startPlayback() {
     // where there's no real audio. Wobbles per track off the playhead; muted tracks
     // read the floor. Shape matches the native `levels` event the store hydrates.
     const toDb = (g: number) => (g <= 0.001 ? -100 : -60 + Math.max(0, Math.min(1, g)) * 60);
-    const tracks = snapshot.tracks
+    const trackFrames = snapshot.tracks
       .filter((t) => !t.isGroup)
       .map((t, i) => {
         const g = t.mute ? 0 : level * (0.6 + 0.4 * Math.abs(Math.sin(pos * 2.3 + i)));
         const db = toDb(g);
-        return { id: t.id, l: db, r: toDb(g * 0.94) };
+        return { track: t, gain: g, reading: { id: t.id, l: db, r: toDb(g * 0.94) } };
       });
-    emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) } });
+    const tracks = trackFrames.map((frame) => frame.reading);
+    const sends = trackFrames.flatMap(({ track, gain }) => (track.sends ?? []).map((send) => {
+      const plugin = ensureSendAutomationPlugin(track, send);
+      const valueAt = (paramIndex: number): number => {
+        const param = plugin.params.find((candidate) => candidate.index === paramIndex);
+        return param?.points?.length ? curveValueAt(param.points, pos) : (param?.value ?? 0);
+      };
+      const muted = valueAt(SEND_MUTE_PARAM_INDEX) >= 0.5;
+      const pan = valueAt(SEND_PAN_PARAM_INDEX) * 2 - 1;
+      const sendGain = muted ? 0 : 10 ** (sendParamToDb(valueAt(SEND_LEVEL_PARAM_INDEX)) / 20);
+      const faderGain = send.preFader ? 1 : 10 ** ((track.volumeDb ?? 0) / 20);
+      const branch = gain * sendGain * faderGain;
+      const left = branch * (pan > 0 ? 1 - pan : 1);
+      const right = branch * 0.94 * (pan < 0 ? 1 + pan : 1);
+      return { trackId: track.id, bus: send.bus, l: toDb(left), r: toDb(right) };
+    }));
+    emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) }, sends });
     emitMuteAutomation();
   }, 1000 / 30);
 }
@@ -821,7 +837,10 @@ function stopPlayback() {
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
   // Drop the meters to the floor when the transport stops.
   const tracks = snapshot.tracks.filter((t) => !t.isGroup).map((t) => ({ id: t.id, l: -100, r: -100 }));
-  emit("levels", { tracks, master: { l: -100, r: -100 } });
+  const sends = snapshot.tracks.flatMap((track) => (track.sends ?? []).map((send) => ({
+    trackId: track.id, bus: send.bus, l: -100, r: -100,
+  })));
+  emit("levels", { tracks, master: { l: -100, r: -100 }, sends });
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -1156,6 +1175,11 @@ function findPlugin(trackId: string, index: number): { track: Track; idx: number
 // `plugins` still resolves for the automation commands, and the mute parameter carries
 // discrete/states so the editor snaps its points.
 const MIXER_INDEX_BASE = 100;
+const SEND_LEVEL_PARAM_INDEX = 0;
+const SEND_PAN_PARAM_INDEX = 1;
+const SEND_MUTE_PARAM_INDEX = 2;
+const sendDbToParam = (db: number): number => Math.max(0, Math.min(1, (db + 100) / 106));
+const sendParamToDb = (value: number): number => -100 + Math.max(0, Math.min(1, value)) * 106;
 function ensureMixerPlugins(t: Track): Plugin[] {
   if (!t.mixerPlugins) {
     t.mixerPlugins = [
@@ -1173,12 +1197,47 @@ function ensureMixerPlugins(t: Track): Plugin[] {
   }
   return t.mixerPlugins;
 }
+function ensureSendAutomationPlugin(t: Track, send: NonNullable<Track["sends"]>[number]): Plugin {
+  const pluginIndex = MIXER_INDEX_BASE + 2 + send.bus;
+  send.automation = {
+    pluginIndex,
+    levelParamIndex: SEND_LEVEL_PARAM_INDEX,
+    panParamIndex: SEND_PAN_PARAM_INDEX,
+    muteParamIndex: SEND_MUTE_PARAM_INDEX,
+  };
+  const mixerPlugins = ensureMixerPlugins(t);
+  let plugin = mixerPlugins.find((candidate) => candidate.index === pluginIndex);
+  if (!plugin) {
+    plugin = {
+      index: pluginIndex,
+      name: `Aux Send ${send.bus + 1}`,
+      type: "auxSend",
+      enabled: true,
+      external: false,
+      isInstrument: false,
+      params: [
+        { index: SEND_LEVEL_PARAM_INDEX, name: "Send level", value: sendDbToParam(send.db) },
+        { index: SEND_PAN_PARAM_INDEX, name: "Send pan", value: ((send.pan ?? 0) + 1) / 2 },
+        { index: SEND_MUTE_PARAM_INDEX, name: "Send mute", value: send.mute ? 1 : 0, discrete: true, states: 2 },
+      ],
+    };
+    mixerPlugins.push(plugin);
+  }
+  return plugin;
+}
+function reconcileSendAutomationPlugins(t: Track): void {
+  const sends = t.sends ?? [];
+  const liveIndices = new Set(sends.map((send) => ensureSendAutomationPlugin(t, send).index));
+  t.mixerPlugins = ensureMixerPlugins(t).filter((plugin) =>
+    plugin.type !== "auxSend" || liveIndices.has(plugin.index));
+}
 /** Resolve an automation target across BOTH the rack and the mixer strip — the native
  *  findParam addresses one flat pluginList, so a mock that only looked in `plugins`
  *  would reject every mute/fader curve the real backend accepts. */
 function findAutomatableParam(trackId: string, pluginIndex: number, paramIndex: number) {
   const t = findTrack(trackId);
   if (!t) return null;
+  reconcileSendAutomationPlugins(t);
   const rack = t.plugins ?? [];
   const plugin = (pluginIndex >= 0 && pluginIndex < rack.length)
     ? rack[pluginIndex]
@@ -1744,13 +1803,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
       if ((t.sends ?? []).some((s) => s.bus === bus)) return err(command, "send already exists");
       pushUndo();
-      (t.sends ??= []).push({
+      const send: NonNullable<Track["sends"]>[number] = {
         bus,
         db: Math.max(-60, Math.min(6, num(args.db, 0))),
         mute: Boolean(args.mute),
         pan: Math.max(-1, Math.min(1, num(args.pan, 0))),
         preFader: Boolean(args.preFader),
-      });
+      };
+      (t.sends ??= []).push(send);
+      ensureSendAutomationPlugin(t, send);
       invalidate();
       return ok(command, { bus });
     }
@@ -1761,6 +1822,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!s) return err(command, "no send to that bus");
       pushUndo();
       s.db = Math.max(-100, Math.min(6, num(args.db, 0)));
+      const level = ensureSendAutomationPlugin(t, s).params
+        .find((param) => param.index === SEND_LEVEL_PARAM_INDEX);
+      if (level) level.value = sendDbToParam(s.db);
       invalidate();
       return ok(command);
     }
@@ -1771,6 +1835,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!s) return err(command, "no send to that bus");
       pushUndo();
       s.mute = Boolean(args.mute);
+      const mute = ensureSendAutomationPlugin(t, s).params
+        .find((param) => param.index === SEND_MUTE_PARAM_INDEX);
+      if (mute) mute.value = s.mute ? 1 : 0;
       invalidate();
       return ok(command);
     }
@@ -1781,6 +1848,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!s) return err(command, "no send to that bus");
       pushUndo();
       s.pan = Math.max(-1, Math.min(1, num(args.pan, 0)));
+      const pan = ensureSendAutomationPlugin(t, s).params
+        .find((param) => param.index === SEND_PAN_PARAM_INDEX);
+      if (pan) pan.value = (s.pan + 1) / 2;
       invalidate();
       return ok(command);
     }
@@ -1800,7 +1870,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const i = (t.sends ?? []).findIndex((x) => x.bus === num(args.bus, -1));
       if (i < 0) return err(command, "no send to that bus");
       pushUndo();
+      const pluginIndex = t.sends![i].automation?.pluginIndex;
       t.sends!.splice(i, 1);
+      if (pluginIndex !== undefined) {
+        t.mixerPlugins = (t.mixerPlugins ?? []).filter((plugin) => plugin.index !== pluginIndex);
+      }
       invalidate();
       return ok(command);
     }
@@ -4747,7 +4821,7 @@ export function mockSnapshot<T = unknown>(): Promise<T> {
   // CAP-AUT-006 — mirror the native self-heal (ensureTrackMuteGate runs from
   // ensureTrackMeter, so every track that has a meter has a mute gate): fill the mixer
   // strip in for every track, whichever of the mock's many track factories made it.
-  for (const t of snapshot.tracks) ensureMixerPlugins(t);
+  for (const t of snapshot.tracks) reconcileSendAutomationPlugins(t);
   return Promise.resolve(clone(snapshot) as unknown as T);
 }
 

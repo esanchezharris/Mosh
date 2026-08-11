@@ -51,3 +51,51 @@ describe("mock automation curve replacement range", () => {
       .toEqual([{ t: 1, v: 0.2 }]);
   });
 });
+
+describe("mock send automation addresses", () => {
+  beforeEach(() => __resetMockForTests());
+
+  it("routes all three native-shaped send addresses through generic automation commands", async () => {
+    await execute("create_bus", { name: "Vocal Verb" });
+    const trackId = (await mockSnapshot<Snapshot>()).tracks[0].id;
+    expect((await execute("add_send", { trackId, bus: 0, db: -6 })).ok).toBe(true);
+
+    const created = await mockSnapshot<Snapshot>();
+    const send = created.tracks.find((track) => track.id === trackId)?.sends?.[0];
+    expect(send?.automation).toEqual({
+      pluginIndex: expect.any(Number),
+      levelParamIndex: expect.any(Number),
+      panParamIndex: expect.any(Number),
+      muteParamIndex: expect.any(Number),
+    });
+
+    const automation = send!.automation!;
+    for (const paramIndex of [
+      automation.levelParamIndex,
+      automation.panParamIndex,
+      automation.muteParamIndex,
+    ]) {
+      expect((await execute("add_automation_point", {
+        trackId,
+        pluginIndex: automation.pluginIndex,
+        paramIndex,
+        time: 1,
+        value: 0.75,
+      })).ok).toBe(true);
+    }
+
+    const updated = await mockSnapshot<Snapshot>();
+    const plugin = updated.tracks.find((track) => track.id === trackId)?.mixerPlugins
+      ?.find((candidate) => candidate.index === automation.pluginIndex);
+    expect(plugin?.params.map((param) => ({
+      index: param.index,
+      points: param.points,
+      discrete: param.discrete,
+      states: param.states,
+    }))).toEqual([
+      { index: automation.levelParamIndex, points: [{ t: 1, v: 0.75 }], discrete: undefined, states: undefined },
+      { index: automation.panParamIndex, points: [{ t: 1, v: 0.75 }], discrete: undefined, states: undefined },
+      { index: automation.muteParamIndex, points: [{ t: 1, v: 0.75 }], discrete: true, states: 2 },
+    ]);
+  });
+});
