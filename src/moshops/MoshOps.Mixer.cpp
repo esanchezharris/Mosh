@@ -159,15 +159,24 @@ juce::var MoshOps::muteAutomationAtPlayhead()
 void MoshOps::reconcileMeterClients()
 {
     std::map<juce::String, te::LevelMeterPlugin*> live;
+    juce::Array<te::LevelMeterPlugin*> livePlugins;
     for (auto* t : te::getAudioTracks (eng.edit()))
         if (t != nullptr)
             if (auto* lm = findTrackMeter (*t))
+            {
                 live[t->itemID.toString()] = lm;
+                livePlugins.add (lm);
+            }
 
     for (auto it = meterClients.begin(); it != meterClients.end();)
     {
         if (live.find (it->first) == live.end())
+        {
+            if (it->second != nullptr && it->second->plugin != nullptr
+                && livePlugins.contains (it->second->plugin))
+                it->second->plugin->measurer.removeClient (it->second->client);
             it = meterClients.erase (it);                    // plugin gone (undo/remove) — drop, no removeClient
+        }
         else
             ++it;
     }
@@ -177,8 +186,47 @@ void MoshOps::reconcileMeterClients()
         if (slot == nullptr) slot = std::make_unique<MeterTap>();
         if (slot->plugin != lm)                              // new / replaced instance — (re)register our client
         {
+            if (slot->plugin != nullptr && livePlugins.contains (slot->plugin))
+                slot->plugin->measurer.removeClient (slot->client);
             slot->plugin = lm;
             lm->measurer.addClient (slot->client);
+        }
+    }
+
+    std::map<SendMeterKey, te::AuxSendPlugin*> liveSends;
+    juce::Array<te::AuxSendPlugin*> liveSendPlugins;
+    for (auto* track : te::getAudioTracks (eng.edit()))
+        if (track != nullptr)
+            for (auto* plugin : track->pluginList.getPlugins())
+                if (auto* send = dynamic_cast<te::AuxSendPlugin*> (plugin))
+                {
+                    liveSends[{ track->itemID.toString(), send->getBusNumber() }] = send;
+                    liveSendPlugins.add (send);
+                }
+
+    for (auto it = sendMeterClients.begin(); it != sendMeterClients.end();)
+    {
+        if (liveSends.find (it->first) == liveSends.end())
+        {
+            if (it->second != nullptr && it->second->plugin != nullptr
+                && liveSendPlugins.contains (it->second->plugin))
+                it->second->plugin->measurer.removeClient (it->second->client);
+            it = sendMeterClients.erase (it);
+        }
+        else
+            ++it;
+    }
+
+    for (auto& [key, send] : liveSends)
+    {
+        auto& slot = sendMeterClients[key];
+        if (slot == nullptr) slot = std::make_unique<SendMeterTap>();
+        if (slot->plugin != send)
+        {
+            if (slot->plugin != nullptr && liveSendPlugins.contains (slot->plugin))
+                slot->plugin->measurer.removeClient (slot->client);
+            slot->plugin = send;
+            send->measurer.addClient (slot->client);
         }
     }
 }
@@ -197,6 +245,17 @@ void MoshOps::unregisterAllMeterClients()
         if (tap != nullptr && tap->plugin != nullptr && live.contains (tap->plugin))
             tap->plugin->measurer.removeClient (tap->client);
     meterClients.clear();
+
+    juce::Array<te::AuxSendPlugin*> liveSends;
+    for (auto* track : te::getAudioTracks (eng.edit()))
+        if (track != nullptr)
+            for (auto* plugin : track->pluginList.getPlugins())
+                if (auto* send = dynamic_cast<te::AuxSendPlugin*> (plugin))
+                    liveSends.add (send);
+    for (auto& [key, tap] : sendMeterClients)
+        if (tap != nullptr && tap->plugin != nullptr && liveSends.contains (tap->plugin))
+            tap->plugin->measurer.removeClient (tap->client);
+    sendMeterClients.clear();
 }
 
 // ── master spectral feed (Moshi reactivity) ──────────────────────────────────
