@@ -25,6 +25,8 @@ export type TurnSource =
   | "brain_chat"
   | "voice"
   | "fastpath"
+  | "section_scope"
+  | "agent_loop"
   | "studio_skill"
   | "studio_skill_blocked"
   | "studio_skill_unsupported"

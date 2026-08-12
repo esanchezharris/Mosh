@@ -224,6 +224,24 @@ describe("FS-B2a — the ask is honest and unserved asks are separated", () => {
     ]);
   });
 
+  it("preserves section and developer-loop provenance", async () => {
+    const routedLog = [
+      seqLine("batch_begin", { turn_id: "section", utterance: "make the chorus louder", source: "section_scope" }, true, false),
+      seqLine("set_track_volume", { trackId: "t1", volumeDb: 2 }, true, true),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { turn_id: "loop", utterance: "build a lofi beat", source: "agent_loop" }, true, false),
+      seqLine("batch_end", {}, true, false),
+    ].join("\n");
+
+    const tuples = await harvest(routedLog);
+    expect(tuples).toEqual([
+      expect.objectContaining({ turnId: "section", source: "section_scope" }),
+    ]);
+    expect(harvestUnservedAsks(routedLog)).toEqual([
+      expect.objectContaining({ turnId: "loop", source: "agent_loop" }),
+    ]);
+  });
+
   it("does not report a served turn, or an unserved one with no recorded ask, as unserved", () => {
     const noAsk =
       [
