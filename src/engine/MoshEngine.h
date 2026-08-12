@@ -24,9 +24,17 @@ public:
         cold empty Edit. The --selftest harness passes true so it is idempotent
         (it saves/reloads internally) and never collides with the GUI session.
         @param freshSessionName  optional isolated-session folder for distinct
-        headless harnesses that must not overwrite each other's evidence. */
+        headless harnesses that must not overwrite each other's evidence.
+        @param nestedEngine  true for a SECONDARY engine constructed inside an
+        already-running harness process (e.g. simulated MP host/guest peers built
+        from within a --selftest run) rather than the one outer engine a launch
+        constructs. Without this, every engine built while MOSH_SELFTEST_SESSION is
+        set would resolve to the same directory as the outer engine and each one's
+        freshSession reset would wipe the others' files out from under them; see
+        mosh::sessionpaths::resolveSessionLeaf. */
     explicit MoshEngine (bool openAudioDevice = true, bool freshSession = false,
-                         const juce::String& freshSessionName = {});
+                         const juce::String& freshSessionName = {},
+                         bool nestedEngine = false);
     ~MoshEngine();
 
     te::Engine& engine() { return *enginePtr; }

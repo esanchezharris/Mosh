@@ -170,7 +170,8 @@ juce::String audiostartup::runProbeChild (const ProbeRequest& request)
     return job.error;
 }
 
-MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::String& freshSessionName)
+MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::String& freshSessionName,
+                        bool nestedEngine)
 {
     audioOpen = openAudioDevice
                 && ! juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", {}).isNotEmpty();
@@ -188,7 +189,8 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
         freshSessionName,
         explicitSession,
-        uniqueTag);
+        uniqueTag,
+        nestedEngine);
     const bool useOwnerSession = ! freshSession
                               && freshSessionName.isEmpty()
                               && explicitSession.isEmpty();

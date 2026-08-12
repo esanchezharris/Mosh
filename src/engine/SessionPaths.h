@@ -68,16 +68,35 @@ namespace mosh::sessionpaths
                                  or "session" means the interactive GUI, never isolated.
         @param explicitOverride  raw MOSH_SELFTEST_SESSION value (may be empty/blank).
         @param uniqueTag         per-process tag; see processTag().
+        @param nestedEngine      true for a SECONDARY MoshEngine constructed inside an
+                                 already-running harness process (e.g. simulated MP
+                                 host/guest peers in SelfTest.cpp) -- never true for the
+                                 one outer engine Main.cpp constructs per launch.
+
+        Without nestedEngine, every MoshEngine built while MOSH_SELFTEST_SESSION is set
+        resolves to the SAME leaf (the override is honored verbatim, baseName is
+        ignored) -- correct for the single outer engine, but it silently collides
+        multiple secondary engines constructed within one process onto one directory,
+        each wiping the others' files via freshSession's reset. nestedEngine=true nests
+        the leaf under the override instead, keyed by the secondary engine's own
+        baseName, so distinct purposes (host/guest/authority/...) get distinct,
+        non-colliding directories while the outer engine still lands exactly at the
+        literal override.
     */
     inline juce::String resolveSessionLeaf (const juce::String& baseName,
                                             const juce::String& explicitOverride,
-                                            const juce::String& uniqueTag)
+                                            const juce::String& uniqueTag,
+                                            bool nestedEngine = false)
     {
         // Preserve an explicit request verbatim for validation. The requested
         // filesystem path does not necessarily win: unsafe or unowned requests are
         // redirected to a unique safety directory by resolveSessionDirectory.
         if (const auto s = explicitOverride.trim(); s.isNotEmpty())
+        {
+            if (nestedEngine && baseName.isNotEmpty() && baseName != "session")
+                return s + "/" + baseName;
             return s;
+        }
 
         // The GUI keeps the owner's real session dir. Auto-isolating here would
         // silently orphan their project every launch.
