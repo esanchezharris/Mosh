@@ -18,7 +18,7 @@ export type Observation<T> =
   | { readonly kind: "failed"; readonly reason: string };
 
 export type SkillOutcome =
-  | { readonly kind: "completed"; readonly skill: string; readonly say: string; readonly changes: ChangeSet }
+  | { readonly kind: "completed"; readonly skill: string; readonly say: string; readonly changes: ChangeSet | null }
   | {
     readonly kind: "needs_choice";
     readonly skill: string;
@@ -149,14 +149,17 @@ async function loadChosenPlugin(
 
   addPluginRecent(entry.uid);
   const after = environment.context();
-  const moved = after.projectEpoch !== target.projectEpoch || after.selectedTrackId !== target.trackId;
+  const projectReplaced = after.projectEpoch !== target.projectEpoch;
+  const selectionMoved = after.selectedTrackId !== target.trackId;
   return {
     kind: "completed",
     skill: "load_named_plugin",
-    say: moved
-      ? `loaded ${entry.name} on ${target.trackName} before the project or selection changed`
+    say: projectReplaced
+      ? `loaded ${entry.name} on ${target.trackName}, then the project changed`
+      : selectionMoved
+        ? `loaded ${entry.name} on ${target.trackName} before the selection changed`
       : `loaded ${entry.name} on ${target.trackName}`,
-    changes,
+    changes: projectReplaced ? null : changes,
   };
 }
 
@@ -247,11 +250,6 @@ const LOAD_NAMED_PLUGIN_SKILL: StudioSkill = {
     }, environment);
   },
 };
-
-export const STUDIO_SKILL_MANIFEST = [{
-  id: LOAD_NAMED_PLUGIN_SKILL.id,
-  description: LOAD_NAMED_PLUGIN_SKILL.description,
-}] as const;
 
 const STUDIO_SKILLS: readonly StudioSkill[] = [LOAD_NAMED_PLUGIN_SKILL];
 

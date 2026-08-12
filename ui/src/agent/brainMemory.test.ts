@@ -15,10 +15,8 @@ const { brainChatMock, executeCommandMock } = vi.hoisted(() => ({
 vi.mock("../bridge", () => ({
   brainChat: brainChatMock,
   executeCommand: executeCommandMock,
-  escalateCandidates: vi.fn(async () => null),
-  archivePair: vi.fn(async () => {}),
-  // This suite reaches applySettingEffects (via useSettings), which fires the same
-  // native-only, fire-and-forget call as archivePair above. A partial vi.mock throws on
+  // This suite reaches applySettingEffects (via useSettings), which fires a native-only,
+  // fire-and-forget telemetry call. A partial vi.mock throws on
   // ACCESS to an undefined export, not on call, so the stub has to exist even though
   // nothing here asserts on telemetry.
   setTelemetryOptIn: vi.fn(async () => {}),

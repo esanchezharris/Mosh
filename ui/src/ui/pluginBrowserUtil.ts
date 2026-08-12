@@ -53,7 +53,7 @@ export function matchEntry(e: PluginEntry, q: string, kind: PluginKind): boolean
 export type PluginMatch =
   | { readonly kind: "none" }
   | { readonly kind: "unique"; readonly entry: PluginEntry }
-  | { readonly kind: "ambiguous"; readonly entries: readonly PluginEntry[]; readonly total: number };
+  | { readonly kind: "ambiguous"; readonly entries: readonly PluginEntry[] };
 
 const normalizePluginText = (value: string): string =>
   value.normalize("NFKD").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -90,7 +90,7 @@ export function resolvePluginMatch(entries: readonly PluginEntry[], rawQuery: st
   const best = ranked.filter((candidate) => candidate.rank === bestRank).map((candidate) => candidate.entry);
   const only = best[0];
   if (best.length === 1 && only) return { kind: "unique", entry: only };
-  return { kind: "ambiguous", entries: best.slice(0, 5), total: best.length };
+  return { kind: "ambiguous", entries: best.slice(0, 5) };
 }
 
 const byName = (a: PluginEntry, b: PluginEntry) => a.name.localeCompare(b.name);

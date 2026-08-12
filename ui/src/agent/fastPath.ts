@@ -1,6 +1,6 @@
 // The deterministic, state-aware phrase matcher. Runs BEFORE the LLM: a confident,
 // whole-utterance match to a known unambiguous phrase produces a FastAction executed
-// locally (no API); anything ambiguous returns null → the LLM brain handles it.
+// locally (no API); anything ambiguous returns null for the bounded studio-skill path.
 // Adapts the owner's DAWN FSM/fuzzy logic (state-gated rules + token-set fuzzy match).
 import { tokenSetScore } from "./fuzzy";
 

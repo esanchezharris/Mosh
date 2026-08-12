@@ -91,7 +91,13 @@ type WorkingTurn = {
 };
 
 function asSource(v: unknown): TurnSource {
-  return v === "brain_chat" || v === "voice" || v === "fastpath" ? v : "unknown";
+  return v === "brain_chat"
+    || v === "voice"
+    || v === "fastpath"
+    || v === "studio_skill"
+    || v === "studio_skill_unsupported"
+    ? v
+    : "unknown";
 }
 
 function asControllerEvent(v: unknown): ControllerEventName | null {

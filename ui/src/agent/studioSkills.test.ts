@@ -145,13 +145,13 @@ describe("runStudioSkill", () => {
     if (outcome.kind === "blocked") expect(outcome.say).toContain("instrument track");
   });
 
-  it("preserves a successful change set if the project changes after the mutation", async () => {
+  it("reports a successful mutation without exposing cross-project undo after replacement", async () => {
     const harness = environment({ onRunBatch: () => harness.setEpoch(13) });
     const outcome = await runStudioSkill("load Serum 2", harness.value);
     expect(outcome.kind).toBe("completed");
     if (outcome.kind === "completed") {
-      expect(outcome.changes.applied).toBe(1);
-      expect(outcome.say).toContain("before the project or selection changed");
+      expect(outcome.changes).toBeNull();
+      expect(outcome.say).toContain("then the project changed");
     }
   });
 

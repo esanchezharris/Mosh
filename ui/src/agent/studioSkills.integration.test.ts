@@ -36,6 +36,7 @@ describe("named plug-in studio skill integration", () => {
 
     expect(outcome.kind).toBe("completed");
     if (outcome.kind !== "completed") return;
+    if (!outcome.changes) throw new Error("same-project load omitted its undoable change set");
     expect(outcome.changes.entries).toHaveLength(1);
     expect(outcome.changes.entries[0]?.command).toBe("load_plugin");
     expect(outcome.changes.applied).toBe(1);

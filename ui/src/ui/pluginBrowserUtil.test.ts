@@ -63,7 +63,6 @@ describe("resolvePluginMatch", () => {
     expect(result.kind).toBe("ambiguous");
     if (result.kind === "ambiguous") {
       expect(result.entries).toHaveLength(5);
-      expect(result.total).toBe(12);
     }
   });
 

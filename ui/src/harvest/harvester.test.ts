@@ -207,6 +207,20 @@ describe("FS-B2a — the ask is honest and unserved asks are separated", () => {
     expect(asks[0]).toMatchObject({ turnId: "n3", utterance: "make it sound purple", source: "brain_chat" });
   });
 
+  it("preserves studio-skill provenance for unsupported asks", () => {
+    const skillLog = [
+      seqLine("batch_begin", { turn_id: "skill", utterance: "load Serum 2", source: "studio_skill" }, true, false),
+      seqLine("load_plugin", { trackId: "t1", pluginId: "serum-2" }, true, true),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { turn_id: "missing", utterance: "master this", source: "studio_skill_unsupported" }, true, false),
+      seqLine("batch_end", {}, true, false),
+    ].join("\n");
+
+    expect(harvestUnservedAsks(skillLog)).toEqual([
+      expect.objectContaining({ turnId: "missing", source: "studio_skill_unsupported" }),
+    ]);
+  });
+
   it("does not report a served turn, or an unserved one with no recorded ask, as unserved", () => {
     const noAsk =
       [
