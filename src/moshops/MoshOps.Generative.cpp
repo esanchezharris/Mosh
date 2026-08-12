@@ -1953,11 +1953,22 @@ juce::var MoshOps::cmdListRaveModels (const juce::var&)
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)
 {
-    jobManager.cancelJob (args.getProperty ("jobId", var()).toString());
+    // GEN-WARMUP: cancelJob() now verifies (and retries once on) the /cancel acknowledgement
+    // instead of firing-and-forgetting it — a POST that never reached a dead/killed service
+    // used to look identical to a real cancel from here. Either way the render layer is
+    // unstuck from "rendering" locally (a producer's Cancel click must never leave the UI
+    // parked there indefinitely); an unacknowledged cancel additionally surfaces as a real
+    // error so the caller knows the background job may still be running server-side.
+    const bool cancelled = jobManager.cancelJob (args.getProperty ("jobId", var()).toString());
     if (auto node = findRenderLayer (args.getProperty ("clipId", var()).toString()); node.isValid())
+    {
         node.setProperty (ids::status, "dirty", nullptr);
-    logLine ("cancel_render", args, true, {}, false);
+        node.setProperty (ids::renderError, cancelled ? juce::String()
+            : juce::String ("cancel was not acknowledged by the generative service — it may still be rendering"), nullptr);
+    }
+    logLine ("cancel_render", args, cancelled, {}, false);
     emitSnapshotInvalidated();
+    if (! cancelled) return errResult ("cancel_render", "generative service did not confirm the cancel");
     return okResult ("cancel_render");
 }
 
