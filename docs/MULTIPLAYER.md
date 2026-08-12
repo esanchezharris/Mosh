@@ -44,6 +44,20 @@ The split is enforced in one place — `LockManager::classify()`
   structural frames are restricted to the same closed command registry Mosh uses for
   outbound structural broadcasts; project/file/export/agent/transport/local-only and
   unknown commands are rejected before command execution.
+- **Buses and track groups** — `create_bus`/`rename_bus`/`remove_bus` and the track-group
+  commands (`create_track_group`/`configure_track_group`/`duplicate_track_group`/
+  `set_track_group_members`/`set_track_group_enabled`/`set_track_groups_suspended`/
+  `rename_track_group`/`remove_track_group`) ride the same structural channel. Both live
+  outside any single track's subtree (a bus's `AUXBUSNAMES` entry, a group's
+  `MOSH_TRACK_GROUPS` entry), so a plain per-track commit can't carry them — the create
+  commands self-broadcast their RESOLVED cross-peer-stable id (a bus's `mpBusId`, a group's
+  `groupId`, mirroring `create_annotation`'s own resolved-id pattern) instead of letting the
+  peer independently re-allocate one (a bus's routing NUMBER, in particular, is a per-engine
+  local-scan counter — an independently-chosen one would break `add_send`'s routing on the
+  peer). A track group's member `trackIds` are translated to/from the sender's stable
+  `moshLogicalId` at the broadcast boundary (raw EditItemIDs are per-engine, the same reason
+  `TrackCommit` exists) — see `src/moshops/MoshOps.Multiplayer.cpp`'s
+  `translateTrackGroupTrackIds`.
 - **Locks + presence** — who's editing which track, name, colour, online status.
 
 ## Track locks & commit-on-move
@@ -51,7 +65,15 @@ The split is enforced in one place — `LockManager::classify()`
 Only **one person edits a given track at a time**. Mosh claims a lock the moment you start
 working on a track and, when you move to a different track, it **commits** the old one
 (serializes it + publishes) and releases the lock so your peer can take it. There's also an
-idle checkpoint (~5 s) so edits get published even if you don't switch tracks. Locks carry a
+idle checkpoint (every 20 s — `MP_IDLE_CHECKPOINT_MS`, `ui/src/store/mp.ts`'s
+`mpIdleCheckpointTick`) so edits get published even if you don't switch tracks, AND so the
+lock lease keeps renewing while you're parked — re-committing implicitly re-claims the same
+track, minting a fresh epoch + a fresh 90 s lease, so another peer merely re-clicking your
+track after 90 s can't silently steal it out from under you. (This closes a real gap: earlier
+revisions of this doc described the checkpoint at a ~5 s cadence, but no such timer actually
+existed anywhere in the codebase until MP-003 — see the 2026-07-17 playtest-readiness audit.)
+It's ticked off the `mp_state` event (already arriving ~4/s while a session is active — the
+native poll loop), not a separate timer. Locks carry a
 monotonic **epoch** (fencing token); a stale commit is rejected (409). A crashed peer's lock
 auto-frees after a ~90 s lease. Presence uses the same grace: an active peer's poll keeps its
 membership alive, while a peer that stays silent for 90 s is removed from the roster, releases
@@ -65,8 +87,8 @@ event, or entering the local undo history. This check applies to the live peer c
 backend-only direct `apply_remote_track` command keeps its legacy/internal blob-only form.
 
 **Practical consequence:** your peer sees your work on a track **when you finish with it /
-move off it**, not keystroke-by-keystroke. Park on a track and your changes checkpoint after
-a few seconds; switch tracks and they flush immediately.
+move off it**, not keystroke-by-keystroke. Park on a track and your changes checkpoint every
+~20 s; switch tracks and they flush immediately.
 
 ## Audio clips — the one real file transfer
 
@@ -231,9 +253,13 @@ sanitized log record, clears stale local undo history, and never echoes back to 
     threaded through explicitly.
 - **Stale lock badge (~250 ms):** after a peer disconnects, their lock chip can linger
   briefly until the relay sweeps it. Self-corrects.
-- **Buses/groups don't replicate yet:** tracks sync; aux/group buses do not.
 - **Tempo is last-writer-wins, not hard-locked:** if both set tempo at once, the later one
   wins. Agree on tempo verbally (Discord) to avoid tug-of-war.
+
+*(MP-003, closed: buses/groups now replicate via the structural channel — see "Session-global
+ops" above — and the lock-lease/idle-checkpoint gap described in the 2026-07-17 playtest-
+readiness audit is fixed by `mpIdleCheckpointTick`, described under "Track locks &
+commit-on-move" above. Both were previously listed here as open limits.)*
 
 ## Verification status
 
