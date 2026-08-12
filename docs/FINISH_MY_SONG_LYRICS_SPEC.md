@@ -1,5 +1,10 @@
 # Finish My Song — Lyric Completion (v1 Spec)
 
+> **⏸️ Finish-My-Song development is PAUSED 2026-08-11, indefinitely** — see
+> `FINISH_MY_SONG_ROADMAP.md` for why and the bar to reopen. v1 (this doc) is shipped and
+> works; this is a stop on further investment, not a rollback. Do not start new work here
+> without the owner reopening it.
+
 > **This is the "why" (scope) doc.** For the **"how" (implementation)**, read
 > [FINISH_MY_SONG_LYRICS_BUILD_SPEC.md](FINISH_MY_SONG_LYRICS_BUILD_SPEC.md) — it supersedes this on
 > implementation detail. The full mumble→own-voice arc is in

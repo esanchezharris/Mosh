@@ -1,3 +1,7 @@
+// PAUSED (2026-08-11, indefinitely) — Finish-My-Song development is paused. See
+// docs/FINISH_MY_SONG_ROADMAP.md for why and the bar to reopen; CLAUDE.md §Paused work.
+// This panel ships and works; do not extend it without the owner reopening the program.
+//
 // Finish-My-Song — the v2 Lyrics tab (per-track lyric sheet). A pure client of the
 // command seam, mirroring the generative drawer's create → edit → review shape.
 //   L0: create a sheet, write lines with ___ gaps, a LIVE flow meter, the rhyme tool.

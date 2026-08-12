@@ -1,5 +1,12 @@
 # FMS phoneme-probe — Stage-0 falsification harness
 
+> **Outcome (2026-08-11): this probe is why Finish-My-Song development is now PAUSED.**
+> The mechanism findings below held up (metric ranks true lyrics, sabotage arm collapses,
+> separation is real) — but the owner's blind-listening review of the actual generated
+> candidates found them far short of usable quality. See `docs/FINISH_MY_SONG_ROADMAP.md`
+> for the pause banner and the bar to reopen. This harness is left as-is (nothing here
+> shipped; it stays a valid reference for whoever reopens the program).
+
 Tests the "the take is a phonetic spec" thesis: CTC phoneme template + weighted
 phonemic-distance rescoring of LLM candidate lines. EXPERIMENT ONLY — nothing here
 ships; no MoshOps registrations; outputs live under `~/mosh-fms-ksb/phoneme-probe/`.

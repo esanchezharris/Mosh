@@ -1,5 +1,32 @@
 # Finish My Song — Full-Arc Roadmap (mumble → own-voice)
 
+> ## ⏸️ PAUSED 2026-08-11, indefinitely
+> The owner has paused all further Finish-My-Song development. **Do not start new work in
+> this area** (any phase, any of `service/lyrics/` · `service/phonology/` ·
+> `service/skeleton/` · `MoshOps.Lyrics.cpp` · `LyricPanel.tsx` · `docs/fms-lyrics-bench/` ·
+> `scripts/fms-killshot/`) without the owner explicitly reopening it. See `CLAUDE.md`
+> §Paused work for the one-line pointer everyone loads.
+>
+> **Why:** the shipped v1 (text lyric completion, Phase 1 below) works and is live in the
+> app. A Stage-0 falsification probe (`scripts/fms-phoneme-probe/RUNBOOK.md`) was run
+> against the *next* idea on this roadmap — treating the mumble take as a phonetic
+> constraint on generation rather than a rhythm skeleton — and confirmed the underlying
+> mechanism (CTC phoneme extraction + weighted phonemic-distance rescoring) genuinely
+> separates matching from non-matching candidates on clean audio. But the owner's own
+> blind-listening review of the probe's actual generated lyric candidates found them **far
+> short of usable quality** — enough to pause the whole area rather than keep iterating on
+> this thread. Session note: `~/Library/Mosh/audits/2026-08-11-phoneme-probe/NOTE.md`
+> (outside the repo, per convention).
+>
+> **What "paused" does *not* mean:** the shipped commands and UI (Phase 1 below) are
+> untouched and still work — this is a stop on *further investment*, not a rollback.
+>
+> **Bar to reopen:** a concrete, owner-approved reason the quality problem is fixable (a
+> different generation strategy, a different model, or evidence the probe's specific
+> shortfall was fixable) — not "the infrastructure is already built."
+
+---
+
 > **Status: Strategic roadmap.** Captures the phase plan, the build-vs-fork-vs-wait decisions, and
 > the prior-art findings while fresh. **Phase 1 (text lyrics) is the invariant core and is specced
 > separately** in `FINISH_MY_SONG_LYRICS_BUILD_SPEC.md`. This doc is *why the arc is sequenced this

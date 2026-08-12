@@ -94,6 +94,27 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 
 ---
 
+## Paused work — do not resume without asking
+
+Unlike "Deferred" above (never started), this is **shipped, working code the owner has
+explicitly told us to stop investing in.** Treat a paused feature exactly like a deferred
+one for planning purposes — don't propose new work on it, don't "helpfully" continue it —
+but don't rip out the existing implementation either; nothing here is broken.
+
+- **Finish-My-Song (mumble → lyrics), PAUSED 2026-08-11, indefinitely.** Ships and works —
+  `ARCHITECTURE.md`'s Lyrics row, `MoshOps.Lyrics.cpp`, `service/lyrics/`,
+  `service/phonology/`, `service/skeleton/`, `LyricPanel.tsx` — but the owner is stopping
+  further investment: a Stage-0 falsification probe (`scripts/fms-phoneme-probe/RUNBOOK.md`)
+  confirmed the underlying phonetic-template mechanism works on clean audio, but the
+  owner's own blind-listening review of the actual generated lyric candidates found them
+  **far short of usable quality** — enough to pause rather than iterate. Overview doc:
+  `docs/FINISH_MY_SONG_ROADMAP.md` (carries the pause banner and the reopening bar). Do not
+  start new lyric/skeleton/phonology work, extend the bench (`docs/fms-lyrics-bench/`), or
+  resume the killshot program (`scripts/fms-killshot/`) without the owner explicitly
+  reopening this.
+
+---
+
 ## Gotchas that still bite
 
 *The traps that have actually cost time more than once. This section is the surviving record — the dated post-mortems it was distilled from went with `docs/worklog/`, so add new traps here.*

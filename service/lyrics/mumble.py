@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Audio "mumble take" → lyric constraint spec (Finish-My-Song Phase 3).
 
+⏸️ Finish-My-Song development is PAUSED (2026-08-11, indefinitely) — see
+docs/FINISH_MY_SONG_ROADMAP.md for why and the bar to reopen. This module ships and works;
+do not extend it without the owner reopening the program.
+
 The producer records themselves humming/mumbling a melody with placeholder words. We turn
 that AUDIO into a lyric sheet they don't have to hand-type:
 

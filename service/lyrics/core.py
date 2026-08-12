@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Lyric generation loop (Finish-My-Song §6, L2) — propose → validate → retry → rank.
 
+⏸️ Finish-My-Song development is PAUSED (2026-08-11, indefinitely) — see
+docs/FINISH_MY_SONG_ROADMAP.md for why and the bar to reopen. This module ships and works;
+do not extend it without the owner reopening the program.
+
 This is where "LLM + phonology" beats "LLM alone": a backend PROPOSES candidate lines
 under the constraint spec (syllable target, rhyme group, locked words), the phonology
 core VALIDATES each (syllables within tol, the rhyme group's end-words actually rhyme),

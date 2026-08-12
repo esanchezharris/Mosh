@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Deterministic phonology core (Finish-My-Song §4) — the actual IP.
 
+⏸️ Finish-My-Song development is PAUSED (2026-08-11, indefinitely) — see
+docs/FINISH_MY_SONG_ROADMAP.md for why and the bar to reopen. This module (incl. the
+`get_rhymes` command) ships and works; do not extend it without the owner reopening the
+program.
+
 No LLM, no network, no audio. Pure functions over ARPAbet phone lists plus a
 `Pronouncer` that looks pronunciations up in a lexicon (the real cmudict when the
 optional `cmudict`/`pronouncing` package is importable, an injected dict in tests,
