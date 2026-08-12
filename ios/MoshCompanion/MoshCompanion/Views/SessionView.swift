@@ -89,6 +89,11 @@ struct ControllerView: View {
     private var statusStrip: some View {
         HStack(spacing: 10) {
             statusPill(connectionTitle, systemImage: connectionIcon, color: connectionColor)
+            if store.paired {
+                statusPill(qualityText, systemImage: qualityIcon, color: qualityColor)
+                    .accessibilityIdentifier("controller.connectionQuality")
+                    .accessibilityLabel("Connection quality: \(qualityAccessibilityLabel)")
+            }
             statusPill(store.controller.agent.uppercased(), systemImage: "sparkles", color: ControllerPalette.bone.opacity(0.82))
             if let take = store.controller.take, take.exists {
                 statusPill(takeText(take), systemImage: "waveform", color: ControllerPalette.bone.opacity(0.82))
@@ -324,6 +329,44 @@ struct ControllerView: View {
             return .orange
         default:
             return ControllerPalette.bone.opacity(0.7)
+        }
+    }
+
+    /// Rough round-trip label for the small connection-quality pill — "42ms" while
+    /// healthy, a plain word once the link itself is the problem.
+    private var qualityText: String {
+        switch store.connectionQuality {
+        case .unknown: return "…"
+        case .good(let ms), .marginal(let ms), .poor(let ms): return "\(Int(ms.rounded()))ms"
+        case .lost: return "lost"
+        }
+    }
+
+    private var qualityIcon: String {
+        switch store.connectionQuality {
+        case .unknown: return "wifi"
+        case .good: return "wifi"
+        case .marginal: return "wifi.exclamationmark"
+        case .poor, .lost: return "wifi.slash"
+        }
+    }
+
+    private var qualityColor: Color {
+        switch store.connectionQuality {
+        case .unknown: return ControllerPalette.bone.opacity(0.55)
+        case .good: return ControllerPalette.lime
+        case .marginal: return ControllerPalette.gold
+        case .poor, .lost: return ControllerPalette.red
+        }
+    }
+
+    private var qualityAccessibilityLabel: String {
+        switch store.connectionQuality {
+        case .unknown: return "measuring"
+        case .good(let ms): return "good, \(Int(ms.rounded())) milliseconds"
+        case .marginal(let ms): return "marginal, \(Int(ms.rounded())) milliseconds"
+        case .poor(let ms): return "poor, \(Int(ms.rounded())) milliseconds"
+        case .lost: return "lost"
         }
     }
 

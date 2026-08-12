@@ -377,6 +377,48 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertTrue(source.didStop)
     }
 
+    func testConnectionQualityClassifiesRoundTripThresholds() {
+        XCTAssertEqual(ConnectionQuality.classify(roundTripMs: 40), .good(ms: 40))
+        XCTAssertEqual(ConnectionQuality.classify(roundTripMs: 119.9), .good(ms: 119.9))
+        XCTAssertEqual(ConnectionQuality.classify(roundTripMs: 120), .marginal(ms: 120))
+        XCTAssertEqual(ConnectionQuality.classify(roundTripMs: 200), .marginal(ms: 200))
+        XCTAssertEqual(ConnectionQuality.classify(roundTripMs: 350), .poor(ms: 350))
+        XCTAssertEqual(ConnectionQuality.classify(roundTripMs: 900), .poor(ms: 900))
+    }
+
+    func testRefreshConnectionQualityClassifiesFastMockRoundTripAsGood() async {
+        let client = MockCompanionClient()
+        let store = CompanionStore(client: client)
+
+        XCTAssertEqual(store.connectionQuality, .unknown)
+        await store.refreshConnectionQuality()
+
+        guard case .good = store.connectionQuality else {
+            XCTFail("Expected good connection quality, got \(store.connectionQuality)")
+            return
+        }
+    }
+
+    func testRefreshConnectionQualityMarksLostOnTransportError() async {
+        let client = MockCompanionClient()
+        client.monitorPingError = CompanionError.server("timeout")
+        let store = CompanionStore(client: client)
+
+        await store.refreshConnectionQuality()
+
+        XCTAssertEqual(store.connectionQuality, .lost)
+    }
+
+    func testRefreshConnectionQualitySkipsWhenUnpaired() async {
+        let client = MockCompanionClient()
+        client.paired = false
+        let store = CompanionStore(client: client)
+
+        await store.refreshConnectionQuality()
+
+        XCTAssertEqual(store.connectionQuality, .unknown)
+    }
+
     func testMonitoringMetricsEstimateLatencyAndDetectAcousticOnset() {
         let samples = [
             MonitoringClockSample(macSendMs: 0, macReceiveMs: 12, phoneReceiveMs: 10, phoneSendMs: 12),
@@ -471,6 +513,7 @@ private final class MockCompanionClient: CompanionClientProtocol {
     var finishedTakeIds: [String] = []
     var canceledTakeIds: [String] = []
     var monitorReports: [MonitoringReportPayload] = []
+    var monitorPingError: Error?
     var isPaired: Bool { paired }
 
     func configure(pairing: PairingPayload) {
@@ -516,7 +559,8 @@ private final class MockCompanionClient: CompanionClientProtocol {
     }
 
     func monitorPing(phoneTimeMs: Double) async throws -> MonitoringPingResponse {
-        MonitoringPingResponse(macTimeMs: 0, phoneTimeMs: phoneTimeMs)
+        if let monitorPingError { throw monitorPingError }
+        return MonitoringPingResponse(macTimeMs: 0, phoneTimeMs: phoneTimeMs)
     }
     func startMonitor(mode: String) async throws -> MonitoringSession {
         MonitoringSession(sessionId: "monitor-1", sampleRate: 48_000, chunkFrames: 2_400)

@@ -36,6 +36,37 @@ enum CompanionConnectionState: Equatable {
     case offline(message: String, lastOnline: Date?)
 }
 
+/// A lightweight, always-visible read on the phone<->Mac link, distinct from the
+/// DEBUG-only `MonitoringDiagnosticRunner` spike (which plays audible probe tones
+/// through the speaker and is a one-shot hardware-proof tool, not something to run
+/// continuously during a take). This is derived from the round-trip time of the
+/// existing `/monitor/ping` heartbeat — no audio, no mic, cheap enough to poll
+/// every few seconds for the whole life of a connected session.
+enum ConnectionQuality: Equatable {
+    case unknown
+    case good(ms: Double)
+    case marginal(ms: Double)
+    case poor(ms: Double)
+    case lost
+
+    /// Same thresholds a producer would expect on a same-room Wi-Fi/LAN hop:
+    /// under ~120ms round trip reads as solid, up to ~350ms is usable but worth a
+    /// glance, and beyond that (or an outright failure) is worth flagging before
+    /// it costs a take.
+    static func classify(roundTripMs: Double) -> ConnectionQuality {
+        if roundTripMs < 120 { return .good(ms: roundTripMs) }
+        if roundTripMs < 350 { return .marginal(ms: roundTripMs) }
+        return .poor(ms: roundTripMs)
+    }
+
+    var roundTripMs: Double? {
+        switch self {
+        case .good(let ms), .marginal(let ms), .poor(let ms): return ms
+        case .unknown, .lost: return nil
+        }
+    }
+}
+
 struct MoshSnapshot: Decodable, Equatable {
     var tracks: [MoshTrack]
     var transport: MoshTransport
