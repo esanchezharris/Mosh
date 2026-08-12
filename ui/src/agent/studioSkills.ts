@@ -26,7 +26,13 @@ export type SkillOutcome =
     readonly options: readonly string[];
     readonly continuation?: StudioSkillContinuation;
   }
-  | { readonly kind: "blocked"; readonly skill: string; readonly say: string }
+  | {
+    readonly kind: "blocked";
+    readonly skill: string;
+    readonly say: string;
+    /** True when the skill recognized the ask but never issued its mutation. */
+    readonly unserved: boolean;
+  }
   | { readonly kind: "unsupported"; readonly say: string };
 
 type PluginChoice = { readonly label: string; readonly entry: PluginEntry };
@@ -132,7 +138,12 @@ async function loadChosenPlugin(
 ): Promise<SkillOutcome> {
   const current = environment.context();
   if (current.projectEpoch !== target.projectEpoch || current.selectedTrackId !== target.trackId) {
-    return { kind: "blocked", skill: "load_named_plugin", say: "the project or selected track changed — try again" };
+    return {
+      kind: "blocked",
+      skill: "load_named_plugin",
+      say: "the project or selected track changed — try again",
+      unserved: true,
+    };
   }
   const changes = await environment.runBatch(`load ${entry.name}`, [{
     command: "load_plugin",
@@ -144,7 +155,12 @@ async function loadChosenPlugin(
     const guidance = /instrument.*audio|audio.*instrument/i.test(error)
       ? "select or create an instrument track and try again"
       : error;
-    return { kind: "blocked", skill: "load_named_plugin", say: `I couldn't load ${entry.name} — ${guidance}` };
+    return {
+      kind: "blocked",
+      skill: "load_named_plugin",
+      say: `I couldn't load ${entry.name} — ${guidance}`,
+      unserved: false,
+    };
   }
 
   addPluginRecent(entry.uid);
@@ -170,7 +186,12 @@ async function continuePluginChoice(
 ): Promise<SkillOutcome> {
   const current = environment.context();
   if (current.projectEpoch !== continuation.projectEpoch || current.selectedTrackId !== continuation.trackId) {
-    return { kind: "blocked", skill: "load_named_plugin", say: "the project or selected track changed — try again" };
+    return {
+      kind: "blocked",
+      skill: "load_named_plugin",
+      say: "the project or selected track changed — try again",
+      unserved: true,
+    };
   }
   const entry = choiceFromReply(utterance, continuation.choices);
   if (!entry) {
@@ -207,15 +228,26 @@ const LOAD_NAMED_PLUGIN_SKILL: StudioSkill = {
         kind: "blocked",
         skill: "load_named_plugin",
         say: "that selected track is no longer available",
+        unserved: true,
       };
     }
 
     const observation = await observePlugins(environment);
     if (observation.kind === "failed") {
-      return { kind: "blocked", skill: "load_named_plugin", say: `I couldn't load ${query} because ${observation.reason}` };
+      return {
+        kind: "blocked",
+        skill: "load_named_plugin",
+        say: `I couldn't load ${query} because ${observation.reason}`,
+        unserved: true,
+      };
     }
     if (environment.context().projectEpoch !== observation.projectEpoch) {
-      return { kind: "blocked", skill: "load_named_plugin", say: "the project changed while I was finding that plug-in — try again" };
+      return {
+        kind: "blocked",
+        skill: "load_named_plugin",
+        say: "the project changed while I was finding that plug-in — try again",
+        unserved: true,
+      };
     }
 
     const match = resolvePluginMatch(observation.value, query);
@@ -224,6 +256,7 @@ const LOAD_NAMED_PLUGIN_SKILL: StudioSkill = {
         kind: "blocked",
         skill: "load_named_plugin",
         say: `I couldn't find ${query} — open Plug-in Manager or rescan, then try again`,
+        unserved: true,
       };
     }
     if (match.kind === "ambiguous") {

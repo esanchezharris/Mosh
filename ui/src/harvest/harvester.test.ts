@@ -212,11 +212,14 @@ describe("FS-B2a — the ask is honest and unserved asks are separated", () => {
       seqLine("batch_begin", { turn_id: "skill", utterance: "load Serum 2", source: "studio_skill" }, true, false),
       seqLine("load_plugin", { trackId: "t1", pluginId: "serum-2" }, true, true),
       seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { turn_id: "blocked", utterance: "load Omnisphere", source: "studio_skill_blocked" }, true, false),
+      seqLine("batch_end", {}, true, false),
       seqLine("batch_begin", { turn_id: "missing", utterance: "master this", source: "studio_skill_unsupported" }, true, false),
       seqLine("batch_end", {}, true, false),
     ].join("\n");
 
     expect(harvestUnservedAsks(skillLog)).toEqual([
+      expect.objectContaining({ turnId: "blocked", source: "studio_skill_blocked" }),
       expect.objectContaining({ turnId: "missing", source: "studio_skill_unsupported" }),
     ]);
   });

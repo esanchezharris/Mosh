@@ -26,6 +26,7 @@ export type TurnSource =
   | "voice"
   | "fastpath"
   | "studio_skill"
+  | "studio_skill_blocked"
   | "studio_skill_unsupported"
   | "unknown";
 

@@ -95,6 +95,7 @@ function asSource(v: unknown): TurnSource {
     || v === "voice"
     || v === "fastpath"
     || v === "studio_skill"
+    || v === "studio_skill_blocked"
     || v === "studio_skill_unsupported"
     ? v
     : "unknown";

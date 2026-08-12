@@ -217,6 +217,9 @@ export function AgentComposer() {
         return;
       }
       if (skill.kind === "blocked") {
+        if (skill.unserved) {
+          await logAgentTurn(skill.say, { utterance: text, source: "studio_skill_blocked" });
+        }
         setSay(skill.say);
         pushAgentUtter("UHOH", skill.say);
         return;
