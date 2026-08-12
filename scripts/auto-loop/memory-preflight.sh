@@ -66,9 +66,9 @@ require_metric 'Data volume free space' "$data_free_gib"
 process_snapshot="$(ps -axo pid=,ppid=,command= 2>/dev/null)"
 codex_app_server_pid="$(printf '%s\n' "$process_snapshot" | awk '
   /\/Applications\/ChatGPT.app\/Contents\/Resources\/codex .* app-server / {
-    print $1
-    exit
+    if (found == "") found = $1
   }
+  END { if (found != "") print found }
 ')"
 codex_children=0
 if [ -n "$codex_app_server_pid" ]; then

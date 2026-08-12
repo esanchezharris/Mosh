@@ -33,6 +33,11 @@ while [ "$i" -lt "${FAKE_CODEX_CHILDREN:-0}" ]; do
   printf '%s 100 node child-%s\n' "$((200 + i))" "$i"
   i=$((i + 1))
 done
+j=0
+while [ "$j" -lt "${FAKE_PS_TRAILING_LINES:-0}" ]; do
+  printf '%s 1 %01024d\n' "$((1000 + j))" 0
+  j=$((j + 1))
+done
 SH
 
 chmod +x "$BIN/memory_pressure" "$BIN/sysctl" "$BIN/df" "$BIN/ps"
@@ -62,6 +67,12 @@ run_subject 0 '[memory-preflight] PASS' \
   env FAKE_MEMORY_FREE_PERCENT=80 FAKE_SWAP_USED_MB=0 \
   FAKE_DATA_FREE_KB=104857600 FAKE_CODEX_CHILDREN=8
 
+# Given a large process snapshot after the app-server row.
+# When the preflight locates the app server under pipefail.
+# Then it consumes the snapshot without making the producer die on SIGPIPE.
+run_subject 0 '[memory-preflight] PASS' \
+  env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
+
 # Given each resource limit is unsafe.
 # When the preflight runs.
 # Then it fails closed with the specific limiting resource.
@@ -86,4 +97,4 @@ printf '%s' "$gate_output" | jq -e \
   '.pass == false and (.steps | length) == 1 and .steps[0].name == "memory_preflight"' \
   >/dev/null
 
-printf 'memory preflight: 6/6 scenarios passed\n'
+printf 'memory preflight: 7/7 scenarios passed\n'
