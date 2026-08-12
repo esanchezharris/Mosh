@@ -78,3 +78,9 @@ python3 -m http.server 8189 -d $P
 - Continuous singing defeats gap segmentation (mainvox = one 46-syllable span) —
   line-scale units need bar-based splitting (the product's mumble.py already bins by
   bars; this harness uses largest-gap recursive splitting as an approximation).
+- **Stage C**: ~100 LLM candidates/line (gpt-class via brain_client, cached).
+  Top-5 vs random-5 rescore separation: lala1-127 **1.59 sd** (2 lines),
+  poppinshit-134 **1.78 sd** (11 lines, every line > 0.9 sd). Top candidates are
+  audibly template-shaped (liquid onsets + open vowels for the la-la take). Blind
+  page at `~/mosh-fms-ksb/phoneme-probe/index.html` (195 blind candidates); owner
+  verdict via `make_probe_page.py --score` is the remaining Stage-D gate.
