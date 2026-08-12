@@ -107,8 +107,27 @@ describe("runStudioSkill", () => {
     const harness = environment({ pluginData: { plugins: duplicates } });
     const outcome = await runStudioSkill("please load serum 2", harness.value);
     expect(outcome.kind).toBe("needs_choice");
-    if (outcome.kind === "needs_choice") expect(outcome.options).toHaveLength(5);
+    if (outcome.kind === "needs_choice") {
+      expect(outcome.options).toHaveLength(5);
+      expect(outcome.continuation?.choices).toHaveLength(5);
+    }
     expect(harness.runBatch).not.toHaveBeenCalled();
+  });
+
+  it("loads an ambiguous candidate selected by its bounded option number", async () => {
+    const duplicates = [
+      { id: "serum-vst3", name: "Serum 2", format: "VST3", manufacturer: "Xfer Records", isInstrument: true },
+      { id: "serum-au", name: "Serum 2", format: "AudioUnit", manufacturer: "Xfer Records", isInstrument: true },
+    ];
+    const harness = environment({ pluginData: { plugins: duplicates } });
+    const choice = await runStudioSkill("load Serum 2", harness.value);
+    if (choice.kind !== "needs_choice" || !choice.continuation) throw new Error("choice continuation missing");
+    const outcome = await runStudioSkill("2", harness.value, choice.continuation);
+    expect(outcome.kind).toBe("completed");
+    expect(harness.runBatch).toHaveBeenCalledWith("load Serum 2", [{
+      command: "load_plugin",
+      args: { trackId: "synth", pluginId: "serum-vst3" },
+    }]);
   });
 
   it("suggests a rescan when no installed plug-in matches", async () => {
@@ -126,10 +145,14 @@ describe("runStudioSkill", () => {
     if (outcome.kind === "blocked") expect(outcome.say).toContain("instrument track");
   });
 
-  it("does not claim completion if the project changes during the load", async () => {
+  it("preserves a successful change set if the project changes after the mutation", async () => {
     const harness = environment({ onRunBatch: () => harness.setEpoch(13) });
     const outcome = await runStudioSkill("load Serum 2", harness.value);
-    expect(outcome.kind).toBe("blocked");
+    expect(outcome.kind).toBe("completed");
+    if (outcome.kind === "completed") {
+      expect(outcome.changes.applied).toBe(1);
+      expect(outcome.say).toContain("before the project or selection changed");
+    }
   });
 
   it("fails closed for unsupported asks without reading or mutating anything", async () => {

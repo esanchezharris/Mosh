@@ -33,7 +33,8 @@ import { retrieveContext } from "../memory/retrieveContext";
 import { rememberPreferenceToolDoc } from "../memory/rememberPreference";
 
 export const agenticLoopOn = (): boolean =>
-  import.meta.env.DEV && import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP === "1";
+  (import.meta.env.DEV || import.meta.env.MODE === "e2e")
+  && import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP === "1";
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
 /** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext+

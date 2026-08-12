@@ -19,9 +19,25 @@ export type Observation<T> =
 
 export type SkillOutcome =
   | { readonly kind: "completed"; readonly skill: string; readonly say: string; readonly changes: ChangeSet }
-  | { readonly kind: "needs_choice"; readonly skill: string; readonly say: string; readonly options: readonly string[] }
+  | {
+    readonly kind: "needs_choice";
+    readonly skill: string;
+    readonly say: string;
+    readonly options: readonly string[];
+    readonly continuation?: StudioSkillContinuation;
+  }
   | { readonly kind: "blocked"; readonly skill: string; readonly say: string }
   | { readonly kind: "unsupported"; readonly say: string };
+
+type PluginChoice = { readonly label: string; readonly entry: PluginEntry };
+
+export type StudioSkillContinuation = {
+  readonly kind: "load_named_plugin";
+  readonly projectEpoch: number;
+  readonly trackId: string;
+  readonly trackName: string;
+  readonly choices: readonly PluginChoice[];
+};
 
 export type StudioSkillEnvironment = {
   readonly context: () => StudioContext;
@@ -79,11 +95,91 @@ async function observePlugins(environment: StudioSkillEnvironment): Promise<Obse
   return { kind: "observed", projectEpoch, value: plugins };
 }
 
-function optionLabels(entries: readonly PluginEntry[]): readonly string[] {
-  const names = new Map<string, number>();
-  for (const entry of entries) names.set(entry.name, (names.get(entry.name) ?? 0) + 1);
-  return entries.map((entry) =>
-    (names.get(entry.name) ?? 0) > 1 ? `${entry.name} (${entry.meta})` : entry.name);
+function pluginChoices(entries: readonly PluginEntry[]): readonly PluginChoice[] {
+  const baseLabels = entries.map((entry) => `${entry.name} — ${entry.meta}`);
+  const totals = new Map<string, number>();
+  for (const label of baseLabels) totals.set(label, (totals.get(label) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return entries.map((entry, index) => {
+    const base = baseLabels[index] ?? entry.name;
+    const occurrence = (seen.get(base) ?? 0) + 1;
+    seen.set(base, occurrence);
+    return {
+      entry,
+      label: (totals.get(base) ?? 0) > 1 ? `${base} (${occurrence})` : base,
+    };
+  });
+}
+
+function numberedChoices(choices: readonly PluginChoice[]): string {
+  return choices.map((choice, index) => `${index + 1}. ${choice.label}`).join("; ");
+}
+
+function choiceFromReply(reply: string, choices: readonly PluginChoice[]): PluginEntry | null {
+  const normalized = reply.trim().toLowerCase();
+  const numbered = normalized.match(/^(?:option\s+)?([1-5])$/)?.[1];
+  if (numbered) return choices[Number(numbered) - 1]?.entry ?? null;
+  const exactLabel = choices.find((choice) => choice.label.toLowerCase() === normalized);
+  if (exactLabel) return exactLabel.entry;
+  const match = resolvePluginMatch(choices.map((choice) => choice.entry), reply);
+  return match.kind === "unique" ? match.entry : null;
+}
+
+async function loadChosenPlugin(
+  entry: PluginEntry,
+  target: Pick<StudioSkillContinuation, "projectEpoch" | "trackId" | "trackName">,
+  environment: StudioSkillEnvironment,
+): Promise<SkillOutcome> {
+  const current = environment.context();
+  if (current.projectEpoch !== target.projectEpoch || current.selectedTrackId !== target.trackId) {
+    return { kind: "blocked", skill: "load_named_plugin", say: "the project or selected track changed — try again" };
+  }
+  const changes = await environment.runBatch(`load ${entry.name}`, [{
+    command: "load_plugin",
+    args: { trackId: target.trackId, pluginId: entry.loadKey },
+  }]);
+  const load = changes.entries.find((change) => change.command === "load_plugin");
+  if (!load?.ok) {
+    const error = load?.error ?? "the plug-in host refused it";
+    const guidance = /instrument.*audio|audio.*instrument/i.test(error)
+      ? "select or create an instrument track and try again"
+      : error;
+    return { kind: "blocked", skill: "load_named_plugin", say: `I couldn't load ${entry.name} — ${guidance}` };
+  }
+
+  addPluginRecent(entry.uid);
+  const after = environment.context();
+  const moved = after.projectEpoch !== target.projectEpoch || after.selectedTrackId !== target.trackId;
+  return {
+    kind: "completed",
+    skill: "load_named_plugin",
+    say: moved
+      ? `loaded ${entry.name} on ${target.trackName} before the project or selection changed`
+      : `loaded ${entry.name} on ${target.trackName}`,
+    changes,
+  };
+}
+
+async function continuePluginChoice(
+  utterance: string,
+  continuation: StudioSkillContinuation,
+  environment: StudioSkillEnvironment,
+): Promise<SkillOutcome> {
+  const current = environment.context();
+  if (current.projectEpoch !== continuation.projectEpoch || current.selectedTrackId !== continuation.trackId) {
+    return { kind: "blocked", skill: "load_named_plugin", say: "the project or selected track changed — try again" };
+  }
+  const entry = choiceFromReply(utterance, continuation.choices);
+  if (!entry) {
+    return {
+      kind: "needs_choice",
+      skill: "load_named_plugin",
+      say: `choose 1–${continuation.choices.length}: ${numberedChoices(continuation.choices)}`,
+      options: continuation.choices.map((choice) => choice.label),
+      continuation,
+    };
+  }
+  return loadChosenPlugin(entry, continuation, environment);
 }
 
 const LOAD_NAMED_PLUGIN_SKILL: StudioSkill = {
@@ -128,50 +224,27 @@ const LOAD_NAMED_PLUGIN_SKILL: StudioSkill = {
       };
     }
     if (match.kind === "ambiguous") {
-      const options = optionLabels(match.entries);
+      const choices = pluginChoices(match.entries);
+      const continuation: StudioSkillContinuation = {
+        kind: "load_named_plugin",
+        projectEpoch: observation.projectEpoch,
+        trackId: track.id,
+        trackName: track.name,
+        choices,
+      };
       return {
         kind: "needs_choice",
         skill: "load_named_plugin",
-        say: `which one: ${options.join(", ")}?`,
-        options,
+        say: `choose 1–${choices.length}: ${numberedChoices(choices)}`,
+        options: choices.map((choice) => choice.label),
+        continuation,
       };
     }
-
-    const current = environment.context();
-    if (current.projectEpoch !== observation.projectEpoch || current.selectedTrackId !== track.id) {
-      return { kind: "blocked", skill: "load_named_plugin", say: "the project or selected track changed — try again" };
-    }
-    const changes = await environment.runBatch(`load ${match.entry.name}`, [{
-      command: "load_plugin",
-      args: { trackId: track.id, pluginId: match.entry.loadKey },
-    }]);
-    const contextAfterLoad = environment.context();
-    if (
-      contextAfterLoad.projectEpoch !== observation.projectEpoch
-      || contextAfterLoad.selectedTrackId !== track.id
-    ) {
-      return {
-        kind: "blocked",
-        skill: "load_named_plugin",
-        say: "the project or selected track changed while the plug-in was loading — verify the session and try again",
-      };
-    }
-    const load = changes.entries.find((entry) => entry.command === "load_plugin");
-    if (!load?.ok) {
-      const error = load?.error ?? "the plug-in host refused it";
-      const guidance = /instrument.*audio|audio.*instrument/i.test(error)
-        ? "select or create an instrument track and try again"
-        : error;
-      return { kind: "blocked", skill: "load_named_plugin", say: `I couldn't load ${match.entry.name} — ${guidance}` };
-    }
-
-    addPluginRecent(match.entry.uid);
-    return {
-      kind: "completed",
-      skill: "load_named_plugin",
-      say: `loaded ${match.entry.name} on ${track.name}`,
-      changes,
-    };
+    return loadChosenPlugin(match.entry, {
+      projectEpoch: observation.projectEpoch,
+      trackId: track.id,
+      trackName: track.name,
+    }, environment);
   },
 };
 
@@ -185,7 +258,9 @@ const STUDIO_SKILLS: readonly StudioSkill[] = [LOAD_NAMED_PLUGIN_SKILL];
 export async function runStudioSkill(
   utterance: string,
   environment: StudioSkillEnvironment,
+  continuation?: StudioSkillContinuation,
 ): Promise<SkillOutcome> {
+  if (continuation) return continuePluginChoice(utterance, continuation, environment);
   for (const skill of STUDIO_SKILLS) {
     const outcome = await skill.run(utterance, environment);
     if (outcome) return outcome;
