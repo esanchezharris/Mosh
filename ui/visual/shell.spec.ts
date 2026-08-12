@@ -58,9 +58,9 @@ for (const theme of THEMES) {
     // The drawer is progressive-disclosure: `agent-drawer-toggle` only renders once a task
     // exists (Composer.tsx), so there is nothing to click at boot. Reaching it the way a user
     // does — an ask that runs as a task — via the deterministic loopBrainMock the agent-loop
-    // spec already relies on. `agenticLoop` must be on for that path to exist.
+    // spec already relies on. The shell visual build opts into the developer-only loop.
     test(`agent drawer open — ${theme}`, async ({ page }) => {
-      await bootShell(page, theme, { agenticLoop: true });
+      await bootShell(page, theme);
       await page.getByTestId("agent-input").fill("build me a lofi sketch");
       await page.getByTestId("agent-send").click();
       await page.getByTestId("agent-drawer").waitFor();

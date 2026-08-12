@@ -1,11 +1,10 @@
 // The composer that lives in Moshi's rail. You ask — by holding the mic to TALK
-// (voice-hero) or by typing (the quiet fallback) — his brain plans, the executor
-// runs the edits as ONE undo step, and the result lands in Monster changes. Voice
-// and text feed the very same run() funnel; nothing downstream knows the difference.
+// (voice-hero) or by typing (the quiet fallback) — a bounded studio skill resolves
+// the request, the executor runs its edits as ONE undo step, and the result lands
+// in Monster changes. Voice and text feed the same run() funnel.
 
 import { useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
-import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch, logAgentTurn } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
@@ -15,6 +14,7 @@ import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type Vo
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
 import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
+import { runStudioSkill, type StudioSkillContinuation } from "../agent/studioSkills";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -71,7 +71,8 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
 
   // Engage/disengage with the toggle (and tear down on unmount → mic goes cold).
   useEffect(() => {
-    const ctrl = ctrlRef.current!;
+    const ctrl = ctrlRef.current;
+    if (!ctrl) return;
     if (handsFreeOn) ctrl.engage(); else ctrl.disengage();
     return () => ctrl.disengage();
   }, [handsFreeOn]);
@@ -120,9 +121,7 @@ export function AgentComposer() {
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-
-  const brainRef = useRef<Brain | null>(null);
-  if (!brainRef.current) brainRef.current = createBrain(() => useStore.getState().snapshot);
+  const pendingSkill = useRef<StudioSkillContinuation | null>(null);
 
   // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
   // acknowledgement so an always-on mic isn't a silent black box.
@@ -145,6 +144,8 @@ export function AgentComposer() {
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+      const continuation = pendingSkill.current;
+      pendingSkill.current = null;
 
       // Section scope FIRST: "rework the hook" → a render bounded to that section's beat
       // range. Deterministic (no LLM arithmetic). It runs BEFORE the fast path because a
@@ -167,7 +168,7 @@ export function AgentComposer() {
       }
 
       // Deterministic fast path: an unambiguous, state-valid phrase runs locally (no API).
-      // Anything ambiguous returns null and falls through to the LLM brain.
+      // Anything ambiguous returns null and falls through to the studio-skill runner.
       const fast = matchFastPath(text, {
         mode: st.currentMode(),
         tempo: st.snapshot?.session?.tempo ?? 120,
@@ -191,11 +192,44 @@ export function AgentComposer() {
         return;
       }
 
-      // The agentic loop (flag-gated, default OFF; gated off in multiplayer):
-      // the ROUTER sends multi-step-shaped asks — sequential clauses, creative
+      const skill = await runStudioSkill(text, {
+        context: () => {
+          const current = useStore.getState();
+          return {
+            projectEpoch: current.projectEpoch,
+            selectedTrackId: current.selectedTrackId,
+            tracks: (current.snapshot?.tracks ?? []).map((track) => ({ id: track.id, name: track.name })),
+          };
+        },
+        exec: (command, args) => useStore.getState().exec(command, args),
+        runBatch: (label, calls) => runAgentBatch(label, calls, { utterance: text, source: "studio_skill" }),
+      }, continuation ?? undefined);
+      if (skill.kind === "completed") {
+        setAgentChangeSet(skill.changes);
+        setSay(skill.say);
+        pushAgentUtter("DONE", skill.say);
+        return;
+      }
+      if (skill.kind === "needs_choice") {
+        pendingSkill.current = skill.continuation ?? null;
+        setSay(skill.say);
+        pushAgentUtter("HUH", skill.say);
+        return;
+      }
+      if (skill.kind === "blocked") {
+        if (skill.unserved) {
+          await logAgentTurn(skill.say, { utterance: text, source: "studio_skill_blocked" });
+        }
+        setSay(skill.say);
+        pushAgentUtter("UHOH", skill.say);
+        return;
+      }
+
+      // The old free-form loop is developer-build-only and never a packaged fallback.
+      // The ROUTER sends multi-step-shaped asks — sequential clauses, creative
       // builds, vague-taste work — into the loop (plan, act, observe, repair,
       // ONE undo unit, live in the v2 drawer); short single-move asks stay on
-      // the cheap single-shot path below. Section-scope and the fast path keep
+      // the fail-closed skill path. Section-scope and the fast path keep
       // their precedence above; hands-free still never reaches an LLM.
       if (loopAllowed() && routeAsk(text) === "loop") {
         await runLoopTask(text, {
@@ -205,18 +239,9 @@ export function AgentComposer() {
         return;
       }
 
-      const reply = await brainRef.current!.send(text);
-      setSay(reply.say ?? null);
-      pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
-      if (reply.commands && reply.commands.length > 0) {
-        const cs = await runAgentBatch(reply.say || text, reply.commands, { utterance: text, source: "brain_chat" });
-        setAgentChangeSet(cs);
-      } else {
-        // FS-B2a (H3) — the brain answered but planned nothing. Without this the ask
-        // leaves no trace, and "what people asked for that we couldn't do" is exactly
-        // what real-session skill mining needs most.
-        await logAgentTurn(reply.say || text, { utterance: text, source: "brain_chat" });
-      }
+      await logAgentTurn(skill.say, { utterance: text, source: "studio_skill_unsupported" });
+      setSay(skill.say);
+      pushAgentUtter("HUH", skill.say);
     } catch {
       setSay("hmm — that broke");
       pushAgentUtter("UHOH");
@@ -262,7 +287,8 @@ export function AgentComposer() {
             handsFree.pauseForPushToTalk();
             if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
             const v = ensureVoice(); if (!v) return;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+            try { e.currentTarget.setPointerCapture(e.pointerId); }
+            catch { v.start(); return; }
             v.start();
           }}
           onPointerUp={() => voiceRef.current?.stop()}

@@ -442,6 +442,7 @@ export const useStore = create<State>((set, get, api) => ({
       set((state) => ({
         projectEpoch: state.projectEpoch + 1,
         projectTransitioning: true,
+        agentChangeSet: null,
         takeDecisionPending: false,
         lastTakeClipId: null,
       }));
@@ -529,6 +530,7 @@ export const useStore = create<State>((set, get, api) => ({
           set((state) => ({
             projectEpoch: state.projectEpoch + (epochManagedByUi ? 0 : 1),
             projectTransitioning: epochManagedByUi ? state.projectTransitioning : false,
+            agentChangeSet: null,
             takeDecisionPending: false,
             lastTakeClipId: null,
             selection: new Set<string>(),

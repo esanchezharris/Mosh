@@ -113,10 +113,22 @@ verify-artifacts/
 scripts/compiler-eval/artifacts/
 
 # Local agent/runtime scratch
+/.agents/
 .gstack/
 .omo/
 .refclone/
 .cache/
+/.tmp/
+/.vite/
+/_salvage/
+/skills
+/skills-lock.json
+/ui/.film/
+/docs/auto-loop/.merge-queue.lock
+
+# Machine-local backups (the canonical files remain tracked)
+/service/.sa3.env.bak-*
+/service/sft/*.local-backup
 
 # macOS
 .DS_Store

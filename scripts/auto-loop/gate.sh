@@ -212,6 +212,7 @@ run_parity_checks() {
 # filesystem + loopback and hermetic (private lock registry, private port window), so they
 # are safe to run alongside a sibling worktree's gate. ~25s total.
 run_harness_selftests() {
+  run_step "memory_preflight_selftest" bash tests/memory-preflight-test.sh
   run_step "harness_deps_freshness" bash scripts/auto-loop/deps-freshness-selftest.sh
   run_step "harness_port_ownership" bash scripts/auto-loop/port-ownership-selftest.sh
   run_step "cmake_preset_bundle_metadata" bash tests/cmake-preset-bundle-metadata-test.sh
