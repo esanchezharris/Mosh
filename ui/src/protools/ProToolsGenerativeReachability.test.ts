@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
 import type { CommandResult, Snapshot } from "../types";
+import { useShell } from "../v2/shellState";
 import { AppProTools } from "./AppProTools";
 
 vi.mock("../bridge", async (importOriginal) => {
@@ -74,6 +75,7 @@ describe("Pro Tools generative reachability", () => {
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
   const originalState = useStore.getState();
+  const originalSelectedClipId = useShell.getState().selectedClipId;
 
   const trigger = () => host.querySelector<HTMLButtonElement>("[data-testid=pt-open-generative]");
   const open = async () => {
@@ -108,6 +110,7 @@ describe("Pro Tools generative reachability", () => {
       loadLoras: vi.fn(async () => {}),
       exec,
     });
+    useShell.setState({ selectedClipId: null });
     act(() => root.render(React.createElement(AppProTools)));
   });
 
@@ -134,6 +137,7 @@ describe("Pro Tools generative reachability", () => {
       loadLoras: originalState.loadLoras,
       exec: originalState.exec,
     });
+    useShell.setState({ selectedClipId: originalSelectedClipId });
   });
 
   it("opens nonmodally on the selected clip, focuses the shared rack, and restores focus", async () => {
@@ -159,6 +163,38 @@ describe("Pro Tools generative reachability", () => {
     await act(async () => create.click());
 
     expect(host.querySelector("[data-testid=engine-badge]")?.textContent).toBe("SA3");
+    expect(exec).toHaveBeenCalledWith("create_render_layer", {
+      clipId: "clip-b",
+      adapter: "stable_audio3",
+      mode: "reimagine",
+      modelVariant: "sa3-medium",
+    });
+  });
+
+  it("targets the focused member when clip-group selection contains multiple clips", async () => {
+    act(() => {
+      useStore.setState({
+        snapshot: {
+          ...SNAPSHOT,
+          clipGroups: [{
+            id: "group-a",
+            name: "Grouped Clips",
+            clipIds: ["clip-a", "clip-b"],
+            active: true,
+          }],
+        },
+        selection: new Set(["clip-a", "clip-b"]),
+      });
+      useShell.setState({ selectedClipId: "clip-b" });
+    });
+
+    await open();
+    expect(host.querySelector("[data-testid=pt-generative-drawer]")?.textContent)
+      .toContain("Direct Target");
+    const create = host.querySelector<HTMLButtonElement>("[data-testid=gen-create]");
+    if (!create) throw new Error("shared Re-imagine create control is missing");
+    await act(async () => create.click());
+
     expect(exec).toHaveBeenCalledWith("create_render_layer", {
       clipId: "clip-b",
       adapter: "stable_audio3",

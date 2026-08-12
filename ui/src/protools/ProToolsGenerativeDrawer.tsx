@@ -3,6 +3,7 @@ import { pushEscapeHandler } from "../hooks/escapeStack";
 import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { GenDrawer } from "../ui/GenDrawer";
+import { useShell } from "../v2/shellState";
 
 type GenerativeTarget = {
   readonly track: Track;
@@ -11,12 +12,16 @@ type GenerativeTarget = {
 
 export function resolveProToolsGenerativeTarget(snapshot: Snapshot, state: {
   readonly selectedClipIds: ReadonlySet<string>;
+  readonly focusedClipId: string | null;
   readonly editingClipId: string | null;
   readonly selectedTrackId: string | null;
 }): GenerativeTarget | null {
   const visible = snapshot.tracks.flatMap((track) => track.clips
     .filter((clip) => !clip.hidden)
     .map((clip) => ({ clip, track })));
+  const focused = visible.find(({ clip }) => clip.id === state.focusedClipId
+    && state.selectedClipIds.has(clip.id));
+  if (focused) return { track: focused.track, selectedClipId: focused.clip.id };
   const selected = visible.find(({ clip }) => state.selectedClipIds.has(clip.id));
   if (selected) return { track: selected.track, selectedClipId: selected.clip.id };
   const editing = visible.find(({ clip }) => clip.id === state.editingClipId);
@@ -42,8 +47,10 @@ export function ProToolsGenerativeDrawer({ snapshot, open, onClose, returnFocusR
   const selectedClipIds = useStore((state) => state.selection);
   const editingClipId = useStore((state) => state.editingClipId);
   const selectedTrackId = useStore((state) => state.selectedTrackId);
+  const focusedClipId = useShell((state) => state.selectedClipId);
   const target = resolveProToolsGenerativeTarget(snapshot, {
     selectedClipIds,
+    focusedClipId,
     editingClipId,
     selectedTrackId,
   });
