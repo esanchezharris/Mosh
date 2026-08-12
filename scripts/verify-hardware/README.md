@@ -54,6 +54,22 @@ guidance** until it's granted. Grant once via the GUI (launch the app, use voice
 `--voice-smoke` passes and is a repeatable regression guard like `--live-audio-smoke`.
 Tune with `MOSH_VOICE_SMOKE_PHRASE` / `MOSH_VOICE_SMOKE_TIMEOUT_MS`.
 
+## Voice-to-MIDI (transcribe_clip)
+
+`python3 scripts/verify-hardware/voice_to_midi_check.py` proves `transcribe_clip`'s
+`mono` mode against synthesized-but-ground-truth-known vocal-like audio: a clean
+stepwise melody, a legato glide with no silence or attack between notes, a single
+sustained note with singing vibrato, and rhythmically loose (non-metronomic) timing.
+Needs no Mosh binary — it drives `service/transcribe/transcribe_cli.py` directly, the
+same subprocess `/transcribe` invokes. Skips cleanly if the transcribe venv isn't
+installed (`service/transcribe/setup-transcribe.sh`).
+
+This exists because the only prior coverage (`--selftest`, gated on
+`MOSH_SELFTEST_TRANSCRIBE`) fed it one flat test tone and only checked "≥1 note" — it
+couldn't have caught a real segmentation bug, and didn't: ordinary vibrato fragmented
+a single sustained note into 11 spurious same-pitch notes. Fixed in
+`transcribe_cli.py` (`_merge_vibrato_fragments`); this script is the regression lock.
+
 ## How `--run-script` works
 
 `Mosh --run-script` reads JSONL from `MOSH_RUN_SCRIPT` (results to stdout and
