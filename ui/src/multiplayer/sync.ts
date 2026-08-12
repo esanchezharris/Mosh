@@ -2,7 +2,9 @@ import type { Snapshot, Track } from "../types";
 
 // MP-001 — pure multiplayer helpers (no React, no bridge): the commit-on-move
 // trigger derivation and the lock-ownership lookups. The selection-driven trigger
-// is only a HINT; the store backstops it with an idle checkpoint timer.
+// is only a HINT; the store backstops it with an idle-checkpoint tick
+// (mpIdleCheckpointTick in store/mp.ts, MP-003) so a track parked without ever
+// switching still periodically publishes + renews its lock lease.
 
 export const SESSION_KEY = "__session__";
 

@@ -561,7 +561,7 @@ export const useStore = create<State>((set, get, api) => ({
       } else if (ev.type === "layer_status") {
         onLayerStatus(ev, set, get);
       } else if (ev.type === "mp_state") {
-        onMpState(ev, set);
+        onMpState(ev, set, get);
       } else if (ev.type === "webrtc_signal") {
         onWebrtcSignal(ev);
       } else if (ev.type === "peer_selection") {

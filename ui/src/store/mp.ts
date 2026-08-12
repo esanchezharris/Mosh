@@ -14,6 +14,13 @@ import {
 // Type-only imports from the store module (erased at compile time — no runtime cycle).
 import type { State } from "../store";
 
+// MP-003 — how often a parked (never-switched) active track re-publishes + renews
+// its lock while idle. Well under the 90s lease (supabase/migrations/0001_mp_relay.sql)
+// so several renewal opportunities happen before it could lapse; ticked off the
+// mp_state event (~4/s while a session is active — the native poll loop), not a
+// separate timer. See mpIdleCheckpointTick's own doc comment for the full story.
+export const MP_IDLE_CHECKPOINT_MS = 20_000;
+
 export type MpSlice = {
   // MP-001 — multiplayer presence, fed by the peer_* / mp_state events (off the
   // snapshot, like transport/levels). All UI-local reactions; mutations still flow
@@ -24,6 +31,9 @@ export type MpSlice = {
   peerPresence: Record<string, PeerPresence>;
   locksByLogicalId: Record<string, string>;        // logicalId -> ownerPeerId
   activeTrackId: string | null;                    // derived; the commit-on-move trigger
+  // MP-003 — when we last committed+(re)claimed activeTrackId (a real track
+  // switch, or an idle checkpoint). Drives mpIdleCheckpointTick's cadence.
+  activeTrackClaimedAtMs: number | null;
   // PR-2 adversarial-review BLOCKER: mp_commit_done previously had no frontend
   // consumer at all — a failed stem upload (commit-on-move, PR-2's async transfer)
   // was invisible; the track just silently stayed sourceMissing for the peer.
@@ -37,6 +47,10 @@ export type MpSlice = {
   mpJoinSession: (code: string, name?: string, color?: string) => Promise<CommandResult>;
   mpLeaveSession: () => Promise<void>;
   syncActiveTrack: () => Promise<void>;            // recompute activeTrack; commit+claim on change
+  // MP-003 — re-commit+re-claim the active track once MP_IDLE_CHECKPOINT_MS has
+  // elapsed since it was last (re)claimed. A cheap no-op most calls (the clock
+  // hasn't elapsed yet); called from the mp_state event handler.
+  mpIdleCheckpointTick: () => Promise<void>;
 };
 
 // Serializes overlapping syncActiveTrack() runs (rapid selection changes) so their
@@ -52,6 +66,7 @@ export const createMpSlice: StateCreator<State, [], [], MpSlice> = (set, get) =>
   peerPresence: {},
   locksByLogicalId: {},
   activeTrackId: null,
+  activeTrackClaimedAtMs: null,
   pendingCommits: {},
   failedCommits: {},
 
@@ -70,6 +85,7 @@ export const createMpSlice: StateCreator<State, [], [], MpSlice> = (set, get) =>
     await get().exec("mp_leave_session");
     set({ mp: { active: false, roomCode: null, selfPeer: null, connected: false },
           peers: {}, peerSelection: {}, peerPresence: {}, locksByLogicalId: {}, activeTrackId: null,
+          activeTrackClaimedAtMs: null,
           pendingCommits: {}, failedCommits: {} });
   },
 
@@ -97,8 +113,8 @@ export const createMpSlice: StateCreator<State, [], [], MpSlice> = (set, get) =>
 
   // Commit-on-move: when the actively-edited track changes, commit+release the
   // previous track (serialize -> publish) and claim the next, then broadcast our
-  // selection. No-op in single-player (mp inactive). Selection is only a hint; the
-  // native idle checkpoint backstops a long edit that never moves off a track.
+  // selection. No-op in single-player (mp inactive). Selection is only a hint;
+  // mpIdleCheckpointTick backstops a long edit that never moves off a track.
   syncActiveTrack: () => {
     const run = async () => {
       const s = get();
@@ -126,7 +142,12 @@ export const createMpSlice: StateCreator<State, [], [], MpSlice> = (set, get) =>
           });
         }
       }
-      if (claim) await s.exec("mp_claim_track", { trackId: claim });
+      if (claim) {
+        await s.exec("mp_claim_track", { trackId: claim });
+        // MP-003 — (re)start the idle-checkpoint clock: a freshly claimed track
+        // shouldn't immediately re-checkpoint itself.
+        set({ activeTrackClaimedAtMs: Date.now() });
+      }
       await s.exec("mp_broadcast_selection", { trackId: next, clipId: [...s.selection][0] ?? null });
     };
     // Chain after the previous run so two rapid selection changes can't interleave
@@ -138,5 +159,56 @@ export const createMpSlice: StateCreator<State, [], [], MpSlice> = (set, get) =>
     mpSyncChain = mpSyncChain.then(run, run);
     void mpSyncChain.catch(() => {});
     return mpSyncChain;
+  },
+
+  // MP-003 — closes two related, previously-open gaps (prior audit:
+  // docs/2026-07-17-mp-playtest-readiness-audit.md §3 #1): the lock lease
+  // (90s, supabase/migrations/0001_mp_relay.sql) is never renewed while parked
+  // on one track, so (a) the peer sees nothing from a long single-track session
+  // until a track switch, and (b) another peer merely re-clicking the same track
+  // after ~90s can silently steal the lock. docs/MULTIPLAYER.md and this file's
+  // own former comments already CLAIMED a "native idle checkpoint" backstopped
+  // this — it did not exist anywhere in the codebase (confirmed by the prior
+  // audit's exhaustive grep); this is that mechanism, built for real.
+  //
+  // Re-committing the active track (serialize+publish — content-addressed/
+  // deduped, so re-sending unchanged audio is cheap) both flushes progress to
+  // the peer (fixes a) AND, by immediately re-claiming the same track right
+  // after, mints a fresh epoch + a fresh 90s lease server-side (mp_try_lock's
+  // own ON CONFLICT branch grants a renewal to the current owner — see
+  // supabase/migrations/0001_mp_relay.sql), fixing the lease-theft gap too (b).
+  // There is a brief (sub-second) window between the commit's lock release and
+  // the re-claim where a peer racing for the SAME track could win it first —
+  // accepted as rare, same posture as tempo's own last-writer-wins; the periodic
+  // MP_IDLE_CHECKPOINT_MS < the 90s lease bounds how long a genuinely idle track
+  // could ever sit unrenewed to begin with.
+  //
+  // Deliberately ticked off the mp_state event (already firing ~4/s while a
+  // session is active — the native poll loop) rather than a dedicated
+  // setInterval, so there is nothing extra to tear down on unmount/leave.
+  mpIdleCheckpointTick: async () => {
+    const s = get();
+    if (!s.mp.active) return;
+    const trackId = s.activeTrackId;
+    if (!trackId) return;
+    const last = s.activeTrackClaimedAtMs;
+    if (last !== null && Date.now() - last < MP_IDLE_CHECKPOINT_MS) return;
+    // Stamp the clock FIRST: mp_state ticks every ~250ms, and the commit/claim
+    // round trip below is async, so without this a burst of ticks while one
+    // checkpoint is still in flight would fire several redundant ones.
+    set({ activeTrackClaimedAtMs: Date.now() });
+    const r = await s.exec("mp_commit_track", { trackId });
+    const lid = r.ok ? (r.data as { logicalId?: string } | undefined)?.logicalId : undefined;
+    if (lid) {
+      set((st) => {
+        const failedCommits = { ...st.failedCommits };
+        delete failedCommits[lid];
+        return { pendingCommits: { ...st.pendingCommits, [lid]: true }, failedCommits };
+      });
+    }
+    // Only re-claim if this is still the track we're actively on (a real track
+    // switch — syncActiveTrack — could have raced ahead while the commit above
+    // was in flight; that path owns its own claim, so don't fight it).
+    if (get().activeTrackId === trackId) await s.exec("mp_claim_track", { trackId });
   },
 });
