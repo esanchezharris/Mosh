@@ -19,7 +19,13 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
   const loadTransformTargets = useStore((s) => s.loadTransformTargets);
   const loadLoras = useStore((s) => s.loadLoras);
   const qaByClip = useStore((s) => s.qaByClip);
+  // GEN-WARMUP — genServiceState distinguishes "still cold-starting, keep waiting" from a
+  // genuine terminal failure; see store/jobs.ts. Retry on mount just like before (the
+  // guards inside load* make a second in-flight call, or an already-loaded one, a no-op).
+  const genServiceState = useStore((s) => s.genServiceState);
+  const genServiceError = useStore((s) => s.genServiceError);
   useEffect(() => { loadColors(); loadTransformTargets(); loadLoras(); }, [loadColors, loadTransformTargets, loadLoras]);
+  const retryService = () => { loadColors(); loadTransformTargets(); loadLoras(); };
 
   // Generative runs on ANY clip type — a MIDI/drum clip is auto-bounced to audio by the
   // backend before the model. Target the SELECTED clip when it's on this track, else the
@@ -43,6 +49,23 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
       </div>
       {!rl ? (
         <>
+          {genServiceState === "error" ? (
+            // A real, actionable failure (dead python3, broken venv — never surfaced this
+            // way for a merely-cold-starting service, see the "warming" branch below).
+            <div className="gen-service-status gen-service-error" data-testid="gen-service-error" role="alert">
+              <span>Generative service unavailable{genServiceError ? ` — ${genServiceError}` : ""}.</span>
+              <button className="btn rack-add" data-testid="gen-service-retry" onClick={retryService}>Retry</button>
+            </div>
+          ) : (genServiceState === "idle" || genServiceState === "warming") && colorsAvail.length === 0 ? (
+            // Cold launch: the Python service is still spawning / importing / (SA3) loading
+            // the model. Distinct from the error state above so a producer who opens the
+            // Generate tab within the first second or two of app launch sees a loading state,
+            // not a dead end — colours/targets/LoRAs populate here automatically once the
+            // retry loop in store/jobs.ts lands them, no need to reopen the tab.
+            <div className="gen-service-status gen-service-warming" data-testid="gen-service-warming" role="status">
+              starting generative service…
+            </div>
+          ) : null}
           <CompileBox clipId={clip.id} trackId={track.id} />
           <div className="gen-create-row">
             <button className="btn rack-add" data-testid="gen-create"

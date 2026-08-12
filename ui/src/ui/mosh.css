@@ -858,6 +858,14 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-compile-input { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 3px 7px; font: inherit; font-size: 11px; }
 .gen-compile-input:disabled { opacity: 0.5; }
 .gen-compile-say { font-size: 11px; line-height: 1.35; color: var(--bone); opacity: 0.85; padding: 4px 7px; border-left: 2px solid var(--ink-line); }
+/* GEN-WARMUP — cold-start distinct-state banners above the create row (store/jobs.ts's
+   genServiceState). "warming" is a neutral, patient loading line (no alarm colour — a
+   cold-starting service is expected, not broken); "error" borrows .gen-error's --rec red
+   plus an inline Retry action, since retries are genuinely exhausted at that point. */
+.gen-service-status { display: flex; align-items: center; gap: 8px; font-size: 11px; padding: 4px 7px; border-radius: 5px; margin-bottom: 6px; }
+.gen-service-warming { color: var(--bone-dim); background: var(--ink); border: 1px solid var(--ink-line); }
+.gen-service-error { color: var(--rec); background: var(--ink); border: 1px solid var(--rec); }
+.gen-service-error span { flex: 1 1 auto; min-width: 0; }
 /* Route B — transform create row + control surface. */
 .gen-create-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .xform-controls { display: flex; flex-direction: column; gap: 4px; }
