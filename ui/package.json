@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:e2e": "tsc --noEmit && vite build --mode e2e",
+    "build:e2e": "tsc --noEmit && VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=1 vite build --mode e2e",
     "build:companion": "vite build --config vite.companion.config.ts",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",

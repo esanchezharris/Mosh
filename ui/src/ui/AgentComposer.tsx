@@ -14,7 +14,7 @@ import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type Vo
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
 import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
-import { runStudioSkill } from "../agent/studioSkills";
+import { runStudioSkill, type StudioSkillContinuation } from "../agent/studioSkills";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -121,6 +121,7 @@ export function AgentComposer() {
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
+  const pendingSkill = useRef<StudioSkillContinuation | null>(null);
 
   // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
   // acknowledgement so an always-on mic isn't a silent black box.
@@ -143,6 +144,8 @@ export function AgentComposer() {
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+      const continuation = pendingSkill.current;
+      pendingSkill.current = null;
 
       // Section scope FIRST: "rework the hook" → a render bounded to that section's beat
       // range. Deterministic (no LLM arithmetic). It runs BEFORE the fast path because a
@@ -200,7 +203,7 @@ export function AgentComposer() {
         },
         exec: (command, args) => useStore.getState().exec(command, args),
         runBatch: (label, calls) => runAgentBatch(label, calls, { utterance: text, source: "studio_skill" }),
-      });
+      }, continuation ?? undefined);
       if (skill.kind === "completed") {
         setAgentChangeSet(skill.changes);
         setSay(skill.say);
@@ -208,6 +211,7 @@ export function AgentComposer() {
         return;
       }
       if (skill.kind === "needs_choice") {
+        pendingSkill.current = skill.continuation ?? null;
         setSay(skill.say);
         pushAgentUtter("HUH", skill.say);
         return;

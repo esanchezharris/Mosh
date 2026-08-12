@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
     window.localStorage.clear();
     window.localStorage.setItem("mosh.settings", JSON.stringify({
       version: 2, template: null,
-      values: { theme: "dark", agenticLoop: true },
+      values: { theme: "dark" },
       keyOverrides: {},
     }));
   });

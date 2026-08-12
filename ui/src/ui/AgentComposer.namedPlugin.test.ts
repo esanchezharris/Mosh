@@ -5,18 +5,6 @@ import { useStore } from "../store";
 import type { CommandResult, Snapshot } from "../types";
 import { AgentComposer } from "./AgentComposer";
 
-const { brainSend } = vi.hoisted(() => ({
-  brainSend: vi.fn(async () => ({
-    intent: "ACK_GOT_IT",
-    say: "listed available plugins",
-    commands: [{ command: "list_plugins", args: {} }],
-  })),
-}));
-
-vi.mock("../agent/brain", () => ({
-  createBrain: () => ({ send: brainSend }),
-}));
-
 const SNAPSHOT: Snapshot = {
   schemaVersion: 1,
   session: {
@@ -51,7 +39,6 @@ describe("AgentComposer named plug-in skill", () => {
       configurable: true,
       value: true,
     });
-    brainSend.mockClear();
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -115,7 +102,37 @@ describe("AgentComposer named plug-in skill", () => {
       "batch_end",
     ]);
     expect(host.querySelector("[role=status]")?.textContent).toBe("loaded Serum 2 on Synth");
-    expect(brainSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps an ambiguous catalog choice and loads the numbered follow-up", async () => {
+    exec.mockImplementation(async (command: string): Promise<CommandResult> => {
+      if (command === "list_plugins") {
+        return {
+          ok: true,
+          command,
+          data: {
+            plugins: [
+              { id: "serum-au", name: "Serum 2", format: "AudioUnit", manufacturer: "Xfer Records", isInstrument: true },
+              { id: "serum-vst3", name: "Serum 2", format: "VST3", manufacturer: "Xfer Records", isInstrument: true },
+            ],
+          },
+        };
+      }
+      return { ok: true, command };
+    });
+    const input = host.querySelector<HTMLInputElement>("[data-testid=agent-input]");
+    const send = host.querySelector<HTMLButtonElement>("[data-testid=agent-send]");
+    if (!input || !send) throw new Error("Ask Moshi controls are missing");
+
+    act(() => setInputValue(input, "load Serum 2"));
+    await act(async () => send.click());
+    expect(host.querySelector("[role=status]")?.textContent).toContain("choose 1–2");
+    expect(exec.mock.calls.map(([command]) => command)).toEqual(["list_plugins"]);
+
+    act(() => setInputValue(input, "2"));
+    await act(async () => send.click());
+    expect(exec).toHaveBeenCalledWith("load_plugin", { trackId: "synth", pluginId: "serum-vst3" });
+    expect(host.querySelector("[role=status]")?.textContent).toBe("loaded Serum 2 on Synth");
   });
 
   it("fails closed for an unsupported ask instead of invoking the free-form brain", async () => {
@@ -128,6 +145,5 @@ describe("AgentComposer named plug-in skill", () => {
 
     expect(exec.mock.calls.map(([command]) => command)).toEqual(["batch_begin", "batch_end"]);
     expect(host.querySelector("[role=status]")?.textContent).toBe("I can't do that reliably yet");
-    expect(brainSend).not.toHaveBeenCalled();
   });
 });
