@@ -50,6 +50,49 @@ export function matchEntry(e: PluginEntry, q: string, kind: PluginKind): boolean
   return e.name.toLowerCase().includes(needle) || e.vendor.toLowerCase().includes(needle);
 }
 
+export type PluginMatch =
+  | { readonly kind: "none" }
+  | { readonly kind: "unique"; readonly entry: PluginEntry }
+  | { readonly kind: "ambiguous"; readonly entries: readonly PluginEntry[]; readonly total: number };
+
+const normalizePluginText = (value: string): string =>
+  value.normalize("NFKD").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+function pluginMatchRank(entry: PluginEntry, query: string): number | null {
+  const name = normalizePluginText(entry.name);
+  const vendor = normalizePluginText(entry.vendor);
+  const vendorThenName = `${vendor} ${name}`.trim();
+  const nameThenVendor = `${name} ${vendor}`.trim();
+  if (name === query) return 0;
+  if (vendorThenName === query || nameThenVendor === query) return 1;
+  if (name.startsWith(query) || vendorThenName.startsWith(query) || nameThenVendor.startsWith(query)) return 2;
+  if (name.includes(query) || vendor.includes(query) || vendorThenName.includes(query)) return 3;
+  return null;
+}
+
+/** Resolve producer text against the same entries the plug-in browser renders. */
+export function resolvePluginMatch(entries: readonly PluginEntry[], rawQuery: string): PluginMatch {
+  const query = normalizePluginText(rawQuery);
+  if (!query) return { kind: "none" };
+
+  const ranked = entries
+    .map((entry) => ({ entry, rank: pluginMatchRank(entry, query) }))
+    .filter((candidate): candidate is { readonly entry: PluginEntry; readonly rank: number } =>
+      candidate.rank !== null)
+    .sort((left, right) =>
+      left.rank - right.rank
+      || left.entry.name.localeCompare(right.entry.name)
+      || left.entry.vendor.localeCompare(right.entry.vendor)
+      || left.entry.meta.localeCompare(right.entry.meta)
+      || left.entry.uid.localeCompare(right.entry.uid));
+  const bestRank = ranked[0]?.rank;
+  if (bestRank === undefined) return { kind: "none" };
+  const best = ranked.filter((candidate) => candidate.rank === bestRank).map((candidate) => candidate.entry);
+  const only = best[0];
+  if (best.length === 1 && only) return { kind: "unique", entry: only };
+  return { kind: "ambiguous", entries: best.slice(0, 5), total: best.length };
+}
+
 const byName = (a: PluginEntry, b: PluginEntry) => a.name.localeCompare(b.name);
 
 // "Other" always sorts last; everything else alphabetical.
@@ -177,11 +220,14 @@ const FAV_KEY = "mosh.pluginFavorites";
 const RECENT_KEY = "mosh.recentPlugins";
 
 function readList(key: string): string[] {
-  try { const v = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(v) ? (v as string[]) : []; }
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
+  }
   catch { return []; }
 }
 function writeList(key: string, v: string[]): void {
-  try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* noop */ }
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch { return; }
 }
 
 export function loadFavorites(): string[] { return readList(FAV_KEY); }
