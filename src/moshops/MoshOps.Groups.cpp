@@ -2,6 +2,7 @@
 #include "state/ClipGroup.h"
 #include "state/TrackGroup.h"
 #include "state/Ids.h"
+#include "multiplayer/LogicalId.h"
 
 namespace mosh
 {
@@ -249,7 +250,15 @@ juce::var MoshOps::cmdCreateTrackGroup (const juce::var& args)
         if (! parseTrackGroupMixAttributes (args.getProperty ("mixAttributes", var()), mixAttributes))
             return errResult ("create_track_group", "mixAttributes must contain only supported attributes");
     }
-    const auto groupId = Uuid().toString();
+    // MP-003 — stable cross-peer id: reuse the caller's if supplied (the
+    // structural-broadcast re-exec passes its own resolved id back — see the
+    // broadcast below), else mint one. Idempotent on replay: a re-delivered
+    // create must not append a duplicate group (mirrors create_annotation).
+    auto groupId = args.getProperty ("groupId", var()).toString();
+    if (groupId.isNotEmpty())
+        if (const auto existing = findTrackGroupById (groupId); existing.isValid())
+            return okResult ("create_track_group", trackGroupResult (existing));
+    if (groupId.isEmpty()) groupId = Uuid().toString();
 
     beginTxn ("create_track_group");
     if (! groups.isValid())
@@ -263,7 +272,26 @@ juce::var MoshOps::cmdCreateTrackGroup (const juce::var& args)
     const auto group = groups.getChildWithProperty (ids::id, groupId);
     logLine ("create_track_group", args, true, {}, true);
     emitSnapshotInvalidated();
-    return okResult ("create_track_group", trackGroupResult (group));
+
+    // Broadcast the RESOLVED groupId; translateTrackGroupTrackIds (via
+    // broadcastStructuralIfActive's caller contract) still needs `trackIds`
+    // translated from our local raw ids to the cross-peer-stable moshLogicalId —
+    // done here explicitly (not by the dispatch site) because this function also
+    // owns minting groupId.
+    auto* broadcastArgs = new DynamicObject();
+    broadcastArgs->setProperty ("groupId", groupId);
+    broadcastArgs->setProperty ("name", name);
+    broadcastArgs->setProperty ("kind", kind);
+    Array<var> trackIdVars;
+    for (const auto& t : trackIds) trackIdVars.add (t);
+    broadcastArgs->setProperty ("trackIds", trackIdVars);
+    Array<var> mixAttrVars;
+    for (const auto& a : mixAttributes) mixAttrVars.add (a);
+    broadcastArgs->setProperty ("mixAttributes", mixAttrVars);
+    return broadcastStructuralIfActive (
+        "create_track_group",
+        translateTrackGroupTrackIds ("create_track_group", var (broadcastArgs), true),
+        okResult ("create_track_group", trackGroupResult (group)));
 }
 
 juce::var MoshOps::cmdConfigureTrackGroup (const juce::var& args)
@@ -298,7 +326,13 @@ juce::var MoshOps::cmdConfigureTrackGroup (const juce::var& args)
     TrackGroup::replaceMixAttributes (group, mixAttributes, &undoManager());
     logLine ("configure_track_group", args, true, {}, true);
     emitSnapshotInvalidated();
-    return okResult ("configure_track_group", trackGroupResult (group));
+
+    // MP-003 — groupId is already a portable UUID; only trackIds needs
+    // translating to the cross-peer-stable moshLogicalId before broadcasting.
+    return broadcastStructuralIfActive (
+        "configure_track_group",
+        translateTrackGroupTrackIds ("configure_track_group", args, true),
+        okResult ("configure_track_group", trackGroupResult (group)));
 }
 
 juce::var MoshOps::cmdDuplicateTrackGroup (const juce::var& args)
@@ -320,15 +354,40 @@ juce::var MoshOps::cmdDuplicateTrackGroup (const juce::var& args)
     if (! parseTrackGroupMixAttributes (args.getProperty ("mixAttributes", var()), mixAttributes))
         return errResult ("duplicate_track_group", "mixAttributes must contain only supported attributes");
 
-    const auto groupId = Uuid().toString();
-    auto duplicate = TrackGroup::create (groupId, name, kind, trackIds);
+    // MP-003 — the DUPLICATE's id, distinct from `groupId` above (which names the
+    // SOURCE, already a portable UUID and unchanged by this op). newGroupId is
+    // reused from a peer's replay if supplied (resolved-id broadcast pattern, like
+    // create_track_group) so both peers' copies share one identity; idempotent on
+    // a re-delivered duplicate.
+    auto newGroupId = args.getProperty ("newGroupId", var()).toString();
+    if (newGroupId.isNotEmpty())
+        if (const auto existing = findTrackGroupById (newGroupId); existing.isValid())
+            return okResult ("duplicate_track_group", trackGroupResult (existing));
+    if (newGroupId.isEmpty()) newGroupId = Uuid().toString();
+
+    auto duplicate = TrackGroup::create (newGroupId, name, kind, trackIds);
     TrackGroup::replaceMixAttributes (duplicate, mixAttributes, nullptr);
     beginTxn ("duplicate_track_group");
     source.getParent().appendChild (duplicate, &undoManager());
-    const auto group = source.getParent().getChildWithProperty (ids::id, groupId);
+    const auto group = source.getParent().getChildWithProperty (ids::id, newGroupId);
     logLine ("duplicate_track_group", args, true, {}, true);
     emitSnapshotInvalidated();
-    return okResult ("duplicate_track_group", trackGroupResult (group));
+
+    auto* broadcastArgs = new DynamicObject();
+    broadcastArgs->setProperty ("groupId", args.getProperty ("groupId", var()).toString());   // source, portable
+    broadcastArgs->setProperty ("newGroupId", newGroupId);
+    broadcastArgs->setProperty ("name", name);
+    broadcastArgs->setProperty ("kind", kind);
+    Array<var> trackIdVars;
+    for (const auto& t : trackIds) trackIdVars.add (t);
+    broadcastArgs->setProperty ("trackIds", trackIdVars);
+    Array<var> mixAttrVars;
+    for (const auto& a : mixAttributes) mixAttrVars.add (a);
+    broadcastArgs->setProperty ("mixAttributes", mixAttrVars);
+    return broadcastStructuralIfActive (
+        "duplicate_track_group",
+        translateTrackGroupTrackIds ("duplicate_track_group", var (broadcastArgs), true),
+        okResult ("duplicate_track_group", trackGroupResult (group)));
 }
 
 juce::var MoshOps::cmdSetTrackGroupMembers (const juce::var& args)
@@ -349,7 +408,10 @@ juce::var MoshOps::cmdSetTrackGroupMembers (const juce::var& args)
     TrackGroup::replaceMemberIds (group, trackIds, &undoManager());
     logLine ("set_track_group_members", args, true, {}, true);
     emitSnapshotInvalidated();
-    return okResult ("set_track_group_members", trackGroupResult (group));
+    return broadcastStructuralIfActive (
+        "set_track_group_members",
+        translateTrackGroupTrackIds ("set_track_group_members", args, true),
+        okResult ("set_track_group_members", trackGroupResult (group)));
 }
 
 juce::var MoshOps::cmdSetTrackGroupEnabled (const juce::var& args)

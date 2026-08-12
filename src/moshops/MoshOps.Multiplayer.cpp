@@ -11,11 +11,13 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
+#include "state/TrackGroup.h"
 #include "engine/SourceRef.h"
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
 #include "multiplayer/AudioRefValidation.h"
 #include <juce_cryptography/juce_cryptography.h>
+#include <set>
 #include <thread>
 
 namespace mosh
@@ -47,6 +49,15 @@ namespace
             "load_master_plugin", "load_master_builtin", "remove_master_plugin",
             "reorder_master_plugin", "bypass_master_plugin", "set_master_plugin_param",
             "set_key", "set_count_in", "set_record_options",
+            // MP-003 — buses (create/rename/remove; create self-broadcasts its
+            // resolved bus number + mpBusId, see cmdCreateBus) and track groups
+            // (create/configure/duplicate/set_members self-broadcast trackIds
+            // translated to moshLogicalId, see translateTrackGroupTrackIds; the
+            // rest carry only the group's own portable UUID).
+            "create_bus", "rename_bus", "remove_bus",
+            "create_track_group", "configure_track_group", "duplicate_track_group",
+            "set_track_group_members", "set_track_group_enabled", "set_track_groups_suspended",
+            "rename_track_group", "remove_track_group",
         };
         return allowed.contains (name);
     }
@@ -340,12 +351,55 @@ juce::var MoshOps::broadcastStructuralIfActive (const juce::String& name, const 
     return result;
 }
 
+juce::var MoshOps::translateTrackGroupTrackIds (const juce::String& command, const juce::var& args, bool toLogical)
+{
+    static const std::set<juce::String> trackIdCommands {
+        "create_track_group", "configure_track_group", "duplicate_track_group", "set_track_group_members"
+    };
+    if (! trackIdCommands.count (command))
+        return args;
+
+    auto* srcArray = args.getProperty ("trackIds", var()).getArray();
+    if (srcArray == nullptr)
+        return args;
+
+    Array<var> translated;
+    for (auto& v : *srcArray)
+    {
+        const auto id = v.toString();
+        if (toLogical)
+        {
+            if (auto* t = findTrack (id))
+            {
+                const auto lid = logicalid::ensureTrack (t->state);
+                if (lid.isNotEmpty())
+                    translated.add (lid);
+            }
+        }
+        else if (auto* t = findTrackByLogicalId (id))
+            translated.add (t->itemID.toString());
+    }
+
+    // Copy every other property through unchanged, then replace trackIds.
+    auto* out = new DynamicObject();
+    if (auto* src = args.getDynamicObject())
+        out->getProperties() = src->getProperties();
+    out->setProperty ("trackIds", translated);
+    return var (out);
+}
+
 juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
 {
     const auto name = args.getProperty ("command", var()).toString();
-    const auto commandArgs = args.getProperty ("args", var());
-    if (! isStructuralCommand (name) || ! commandArgs.isObject())
+    if (! isStructuralCommand (name) || ! args.getProperty ("args", var()).isObject())
         return errResult ("mp_apply_structural", "structural command is not allowed");
+
+    // MP-003 — groups: `trackIds` (create/configure/duplicate_track_group,
+    // set_track_group_members) arrives in the SENDER's cross-peer-stable
+    // moshLogicalId form (see cmdCreateTrackGroup etc.'s own broadcast); translate
+    // it back into OUR local raw ids before replaying — a no-op for every other
+    // command (see translateTrackGroupTrackIds's doc comment).
+    const auto commandArgs = translateTrackGroupTrackIds (name, args.getProperty ("args", var()), false);
 
     // Re-execute a peer's structural op locally: applyingRemote_ bypasses the lock
     // guard (it is incoming history) AND short-circuits broadcastStructuralIfActive
@@ -430,6 +484,59 @@ juce::var MoshOps::contentAddressWholeProjectNoUpload()
     if (auto a = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS); a.isValid())
         if (auto xml = a.createXml())
             d->setProperty ("annotations", xml->toString());
+
+    // MP-003 — buses and track groups also ride the bootstrap bundle, not just the
+    // live structural channel (create_bus/create_track_group's own broadcast).
+    // Reason: cmdMpApplyBootstrap WIPES AND RE-CREATES every track below (fresh,
+    // remapped local EditItemIDs) to adopt the host's whole project — a track
+    // group applied EARLIER, e.g. from a live message a late-joiner's poll caught
+    // in the same backlog batch as this bootstrap, would end up pointing at
+    // EditItemIDs the wipe just deleted. Carrying groups/buses INSIDE the bundle
+    // lets cmdMpApplyBootstrap (re-)apply them AFTER the wipe, against the
+    // tracks it JUST created, so they can never be orphaned by it.
+    Array<var> buses;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr)
+            if (auto* r = firstAuxReturnOn (*t))
+            {
+                const int bus = r->busNumber.get();
+                auto* bo = new DynamicObject();
+                bo->setProperty ("bus", bus);
+                bo->setProperty ("name", eng.edit().getAuxBusName (bus).isNotEmpty()
+                                             ? eng.edit().getAuxBusName (bus) : ("Bus " + String (bus + 1)));
+                bo->setProperty ("mpBusId", logicalid::ensureBus (t->state));
+                buses.add (var (bo));
+            }
+    d->setProperty ("buses", buses);
+
+    Array<var> trackGroups;
+    if (auto groups = eng.edit().state.getChildWithName (ids::MOSH_TRACK_GROUPS); groups.isValid())
+        for (int i = 0; i < groups.getNumChildren(); ++i)
+        {
+            const auto group = groups.getChild (i);
+            if (! group.hasType (ids::MOSH_TRACK_GROUP)) continue;
+            auto* go = new DynamicObject();
+            go->setProperty ("groupId", group[ids::id].toString());
+            go->setProperty ("name", group[ids::trackGroupName].toString());
+            go->setProperty ("kind", group[ids::trackGroupKind].toString());
+            go->setProperty ("enabled", (bool) group.getProperty (ids::trackGroupEnabled, true));
+            Array<var> mixAttrs;
+            for (const auto& a : TrackGroup::mixAttributes (group)) mixAttrs.add (a);
+            go->setProperty ("mixAttributes", mixAttrs);
+            // Member ids translated to the cross-peer-stable moshLogicalId (raw
+            // EditItemIDs are per-engine — see translateTrackGroupTrackIds).
+            Array<var> logicalTrackIds;
+            for (const auto& trackId : TrackGroup::memberIds (group))
+                if (auto* mt = findTrack (trackId))
+                {
+                    const auto lid = logicalid::ensureTrack (mt->state);
+                    if (lid.isNotEmpty()) logicalTrackIds.add (lid);
+                }
+            go->setProperty ("trackIds", logicalTrackIds);
+            trackGroups.add (var (go));
+        }
+    d->setProperty ("trackGroups", trackGroups);
+
     return var (d);
 }
 
@@ -520,6 +627,50 @@ juce::String MoshOps::validateBootstrapBundle (const juce::var& args) const
         }
     }
 
+    // MP-003 — buses/trackGroups are ADDITIVE (a bundle from a peer that predates
+    // this feature simply omits them, same posture as annotations above): absent
+    // is fine, present must be well-formed so a malformed/tampered bundle can't
+    // reach the destructive apply phase.
+    const auto busesValue = args.getProperty ("buses", var());
+    if (! busesValue.isVoid())
+    {
+        auto* busesArray = busesValue.getArray();
+        if (busesArray == nullptr)
+            return "bootstrap buses must be an array";
+        for (const auto& bus : *busesArray)
+        {
+            if (! bus.isObject())
+                return "bootstrap bus entry must be an object";
+            if (! bus.getProperty ("bus", var()).isInt() && ! bus.getProperty ("bus", var()).isInt64())
+                return "bootstrap bus entry requires an integer bus number";
+            if (! bus.getProperty ("mpBusId", var()).isString() || bus.getProperty ("mpBusId", var()).toString().isEmpty())
+                return "bootstrap bus entry requires a string mpBusId";
+        }
+    }
+
+    const auto trackGroupsValue = args.getProperty ("trackGroups", var());
+    if (! trackGroupsValue.isVoid())
+    {
+        auto* groupsArray = trackGroupsValue.getArray();
+        if (groupsArray == nullptr)
+            return "bootstrap trackGroups must be an array";
+        for (const auto& group : *groupsArray)
+        {
+            if (! group.isObject())
+                return "bootstrap track group entry must be an object";
+            if (! group.getProperty ("groupId", var()).isString() || group.getProperty ("groupId", var()).toString().isEmpty())
+                return "bootstrap track group entry requires a string groupId";
+            if (auto* memberIds = group.getProperty ("trackIds", var()).getArray())
+            {
+                for (const auto& memberId : *memberIds)
+                    if (! memberId.isString())
+                        return "bootstrap track group trackIds must be strings";
+            }
+            else if (! group.getProperty ("trackIds", var()).isVoid())
+                return "bootstrap track group trackIds must be an array";
+        }
+    }
+
     return {};
 }
 
@@ -591,6 +742,64 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
     int annotationCount = 0;
     if (auto annotations = edit.state.getChildWithName (ids::MOSH_ANNOTATIONS); annotations.isValid())
         annotationCount = annotations.getNumChildren();
+
+    // MP-003 — buses and track groups. The track wipe above already removed any
+    // LOCAL bus (a bus's return track is a regular AudioTrack), so just
+    // (re)create each of the host's; drop any local track groups, then adopt
+    // the host's, translating member ids from the sender's stable moshLogicalId
+    // to the LOCAL ids the track-apply loop above JUST (re)created — never
+    // against anything from before this bootstrap (see
+    // contentAddressWholeProjectNoUpload's doc comment for why that matters:
+    // a live create_track_group message a late-joiner's poll caught in the same
+    // backlog batch as this bootstrap would otherwise point at EditItemIDs the
+    // wipe above just deleted). applyingRemote_ suppresses the inner commands'
+    // own re-broadcast (this bundle IS the sync, not a new local edit) the same
+    // way cmdMpApplyStructural does for a single op; routed through execute()
+    // so each still gets its normal transaction/journal treatment. Best-effort:
+    // one failed bus/group must not fail the whole adoption.
+    {
+        const ScopedValueSetter<bool> remoteApply (applyingRemote_, true);
+        if (auto* busesArray = args.getProperty ("buses", var()).getArray())
+            for (auto& bv : *busesArray)
+            {
+                auto* busArgs = new DynamicObject();
+                busArgs->setProperty ("name", bv.getProperty ("name", var()));
+                busArgs->setProperty ("bus", bv.getProperty ("bus", var()));
+                busArgs->setProperty ("mpBusId", bv.getProperty ("mpBusId", var()));
+                auto* busCmd = new DynamicObject();
+                busCmd->setProperty ("command", "create_bus");
+                busCmd->setProperty ("args", var (busArgs));
+                execute (var (busCmd));
+            }
+
+        if (auto existingGroups = edit.state.getChildWithName (ids::MOSH_TRACK_GROUPS); existingGroups.isValid())
+            edit.state.removeChild (existingGroups, nullptr);
+        if (auto* groupsArray = args.getProperty ("trackGroups", var()).getArray())
+            for (auto& gv : *groupsArray)
+            {
+                auto* groupArgs = new DynamicObject();
+                groupArgs->setProperty ("groupId", gv.getProperty ("groupId", var()));
+                groupArgs->setProperty ("name", gv.getProperty ("name", var()));
+                groupArgs->setProperty ("kind", gv.getProperty ("kind", var()));
+                groupArgs->setProperty ("mixAttributes", gv.getProperty ("mixAttributes", var()));
+                groupArgs->setProperty ("trackIds", gv.getProperty ("trackIds", var()));
+                auto* groupCmd = new DynamicObject();
+                groupCmd->setProperty ("command", "create_track_group");
+                groupCmd->setProperty ("args", translateTrackGroupTrackIds ("create_track_group", var (groupArgs), false));
+                execute (var (groupCmd));
+
+                if (! (bool) gv.getProperty ("enabled", true))
+                {
+                    auto* enabledArgs = new DynamicObject();
+                    enabledArgs->setProperty ("groupId", gv.getProperty ("groupId", var()));
+                    enabledArgs->setProperty ("enabled", false);
+                    auto* enabledCmd = new DynamicObject();
+                    enabledCmd->setProperty ("command", "set_track_group_enabled");
+                    enabledCmd->setProperty ("args", var (enabledArgs));
+                    execute (var (enabledCmd));
+                }
+            }
+    }
 
     undoManager().clearUndoHistory();
     ++editRevision_;
