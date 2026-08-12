@@ -72,6 +72,8 @@ run_subject 0 '[memory-preflight] PASS' \
 # Then it consumes the snapshot without making the producer die on SIGPIPE.
 run_subject 0 '[memory-preflight] PASS' \
   env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
+run_subject 0 'codex_children=8' \
+  env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
 
 # Given each resource limit is unsafe.
 # When the preflight runs.
@@ -97,4 +99,4 @@ printf '%s' "$gate_output" | jq -e \
   '.pass == false and (.steps | length) == 1 and .steps[0].name == "memory_preflight"' \
   >/dev/null
 
-printf 'memory preflight: 7/7 scenarios passed\n'
+printf 'memory preflight: 8/8 scenarios passed\n'
