@@ -54,6 +54,29 @@ def _monophonic(notes: list) -> list:
     return out
 
 
+def _merge_vibrato_fragments(notes: list, max_gap: float = 0.05) -> list:
+    """A sustained sung note with vibrato re-triggers Basic Pitch's onset detector
+    every LFO cycle, fragmenting one held note into many same-pitch notes touching
+    end-to-end (measured: a 3s A4 with 5.5Hz/50-cent vibrato split into 11 pieces, every
+    boundary at exactly 0ms gap, same MIDI pitch throughout — quantization already
+    absorbs the vibrato's pitch wobble, only the note SEGMENTATION breaks). Merge
+    adjacent notes of the same pitch separated by <= max_gap: real short rests between
+    a deliberate re-attack of the same pitch are audible pauses, comfortably above this
+    threshold; a vibrato re-trigger is not. Keeps the louder velocity of the pair.
+    Input must already be monophonic (post `_monophonic`)."""
+    if not notes:
+        return notes
+    out = [dict(notes[0])]
+    for n in notes[1:]:
+        prev = out[-1]
+        if n["pitch"] == prev["pitch"] and n["start"] - prev["end"] <= max_gap:
+            prev["end"] = n["end"]
+            prev["velocity"] = max(prev["velocity"], n["velocity"])
+        else:
+            out.append(dict(n))
+    return out
+
+
 def main() -> "None":
     if len(sys.argv) < 3:
         _emit_fail("usage: transcribe_cli.py <input-audio> <mono|poly>")
@@ -102,6 +125,7 @@ def main() -> "None":
     notes.sort(key=lambda n: (n["start"], -n["velocity"]))
     if mode == "mono":
         notes = _monophonic(notes)
+        notes = _merge_vibrato_fragments(notes)
 
     _OUT.write(json.dumps({"ok": True, "notes": notes}))
 
