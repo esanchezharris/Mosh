@@ -1,10 +1,12 @@
 # Pro Tools tutorial parity audit — 2026-08-10
 
-Base: `256f19bf` (`origin/main` after PR #638)
+Base: `f900934d` (`origin/main` after PR #639)
 
-Updated 2026-08-11 on `codex/protools-send-automation-meters`: the selected
-mixing follow-up now has native source/self-test, focused UI, and serial Chromium
-evidence. Native audible routing and physical QuickPunch remain deliberately unclaimed.
+Updated 2026-08-11 on `codex/protools-sa3-tutorial-parity`: the send-control,
+automation, and final-branch-meter slice is complete. This pass reranks only the
+remaining tutorial-backed behavior and separately records a Mosh-specific Re-imagine
+reachability defect. Native audible routing, physical QuickPunch, and real-SA3 output
+remain deliberately unclaimed.
 
 This is a behavior audit of the V01–V20 catalog in
 [`VIDEO_PARITY.md`](./VIDEO_PARITY.md), not a pixel-clone claim. Avid documentation
@@ -16,18 +18,36 @@ Mosh behavior only. No tutorial media or proprietary asset is stored in the repo
 
 The core producer path is covered: Edit/Mix navigation, routing and recording, static
 and dynamic clip gain, fades, automation, playlists, inserts, sends/Aux returns, Memory
-Locations, MIDI editing, groups, zoom, and session actions. Remaining gaps are variants
-or deeper native contracts rather than missing top-level surfaces.
+Locations, MIDI editing, groups, zoom, and session actions. The send slice no longer
+occupies the implementation queue. Remaining tutorial gaps are deeper recording,
+comping, automation, and source-handle contracts rather than missing top-level chrome.
 
 | Rank | Tutorial-backed gap | Producer value | Existing safe seam | Decision |
 |---:|---|---|---|---|
-| 1 | The no-dialog fade shortcut still uses a fixed 10 ms Linear preset instead of the last selected Fades settings. Avid's current Shortcuts Guide says Command+Control+F uses the last selected fade shape; C04/C04B establish the repeated edit workflow. | High for vocal cleanup and comp edits because it removes repeated modal setup. | `set_clip_fade`, `buildProToolsFadePlan`, schema-backed UI preferences. | **Implement now.** Persist the last successfully applied length and In/Out shapes; use them for the existing shortcut. Length persistence is a labelled Mosh adaptation because current Mosh fades do not extend hidden source handles from an arbitrary selection. |
-| 2 | QuickPunch plus arbitrary pre/post-roll and a movable play-start flag (V15/V16). | Very high for overdubs. | Only `set_count_in` 0/1/2 bars and bounded Punch exist. | **Contract complete; native work deferred.** [`QUICKPUNCH_PREPOST_CONTRACT.md`](./QUICKPUNCH_PREPOST_CONTRACT.md) freezes additive state/commands, continuous-source semantics, accessibility, recovery, locks, and the guarded physical-device matrix. Shell-only simulation remains prohibited. |
-| 3 | Send mute, pre-fader switching, pan, automation, and metering (V11/V20). | High for effect A/B and cue mixes. | AuxSend's real parameter/graph seam plus the existing 30 Hz level rail. | **Implemented; native audible proof pending.** Level, Pan, and Mute are generic automation targets addressed from the physical AuxSend plug-in. Edit and Mix show its final delivered stereo branch. Native self-test, focused UI tests, and serial Chromium cover persistence, addresses, lifecycle, accessibility, and visible response; a physical output trace remains required before audible parity is claimed. |
-| 4 | Arbitrary playlist targets and atomic grouped-track comping (V10/V14). | High for vocals and multitrack drums. | `promote_take_region` targets Main on one track. | Defer until one atomic multi-track command can preserve alignment, locks, recovery ids, and undo. |
-| 5 | Memory Locations recalling edit selection, zoom, and track visibility (V13). | Medium-high navigation gain. | Persisted annotations plus shell-local selection/zoom/visibility state. | **Implemented.** Additive nested metadata is validated, undoable, save/reload-safe, replayable, and multiplayer-broadcast; recall is result- and epoch-gated and filters deleted tracks. Focused native/mock/component and serial Chromium evidence cover the contract. |
-| 6 | Multiple automation lanes and independent MIDI-editor modes/tools (V07–V09). | Medium; important in advanced editing, not session-blocking. | One Volume lane and the shared docked Piano Roll exist. | Split into automation-target and MIDI-editor lanes after the audio-first gaps. |
-| 7 | Mix narrow/wide modes, floating windows, VCA/HEAT/EQ/delay-compensation panels (V20). | Medium; improves density and specialized mixing. | Main Mix bank is complete for Mosh-supported track types. | Keep explicit partial parity; do not draw inert controls for engine concepts Mosh does not model. |
+| 1 | QuickPunch plus arbitrary pre/post-roll and a movable play-start flag (V15/V16). | Very high for overdubs and vocal punch workflows. | Bounded Punch, count-in, transport ranges, and the frozen additive contract. | **Next native priority, not a shell simulation.** [`QUICKPUNCH_PREPOST_CONTRACT.md`](./QUICKPUNCH_PREPOST_CONTRACT.md) defines continuous-source recording, state, commands, recovery, locks, accessibility, and guarded physical-device acceptance. |
+| 2 | Arbitrary playlist targets and atomic grouped-track comping (V10/V14). | High for vocals and phase-aligned multitrack drums. | `promote_take_region` currently targets Main on one track; Track Groups already carry stable membership. | Add one atomic multi-track promotion command only after source-range, recovery-id, lock, and undo semantics are frozen. |
+| 3 | Multiple simultaneous automation lanes plus independent MIDI-editor modes/tools (V07–V09). | Medium-high for detailed mix and MIDI editing. | Primary/secondary generic automation lanes and the shared docked Piano Roll exist. | Extend the lane model without duplicating command ownership; keep one explicit MIDI edit target until multi-target writes are defined. |
+| 4 | Direct crossfade resize/nudge, source-handle placement, and audition (C04/C04B). | Medium-high for dialogue and vocal comp cleanup. | Persisted fades, overlap-aware crossfades, remembered defaults, and timeline handles. | Define hidden-source bounds and audition ownership first; never imply Pre/Centered/Post when media handles cannot support it. |
+| 5 | Full Memory Location properties: arbitrary slot numbers, pre/post-roll, advanced filters, and import (V13). | Medium navigation and recall gain. | Persisted annotation metadata plus safe UI-local recall. | Add only properties with a durable project contract; keep imported/current-Pro-Tools formats out until mapped explicitly. |
+| 6 | Expanded send/mix variants: A–J banks, follow-main-pan, mono/stereo format controls, narrow/wide strips, VCA/HEAT/EQ/delay compensation, and floating windows (V11/V20). | Medium; useful in larger mixes but below recording/comping. | Sends A–E, one stereo balance, Edit/Mix banks, real meters, and supported engine concepts. | Preserve explicit partial parity and add modeled behaviors incrementally; do not draw inert controls for unsupported engine concepts. |
+
+## Mosh-specific session-readiness finding: direct Re-imagine reachability
+
+This is not an Avid tutorial-parity item. It is a Mosh workflow defect found while
+checking whether the Pro Tools shell can remain the producer's primary surface:
+
+- The shared `GenDrawer` already owns Compile, truthful SA3/preview selection,
+  Re-imagine amount, colors, LoRA, Render, Live, A/B, Freeze, Reset, seed, and
+  layer removal through existing MoshOps commands.
+- Before this branch, Pro Tools exposed only the free-form Ask Moshi composer; the
+  direct rack was mounted by other shells and could not be reached from the Pro Tools
+  Edit Window.
+- This branch adds one nonmodal, keyboard-reachable toolbar drawer around that shared
+  component. It resolves the current selected clip without snapshot mutation, closes
+  on project replacement, and cannot overlap Ask Moshi.
+- Mock Chromium can prove the exact `create_render_layer`/`render_layer` envelopes and
+  honest engine badge. It cannot prove that a configured Stable Audio 3 service rendered
+  useful or audible audio; that remains a separate guarded native/service acceptance lane.
 
 ## Implemented packet: remembered Default Fade settings
 

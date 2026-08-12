@@ -243,7 +243,10 @@
 .pt-view-group { padding-top: 4px; align-items: center; }
 .pt-classic-button { min-width: 48px !important; }
 .pt-moshi-group { flex: 0 0 auto; }
-.pt-moshi-button { display: flex; align-items: center; gap: 5px; min-width: 92px !important; font-weight: 700; }
+.pt-moshi-button,
+.pt-generative-button { display: flex; align-items: center; gap: 5px; font-weight: 700; }
+.pt-moshi-button { min-width: 92px !important; }
+.pt-generative-button { min-width: 96px !important; }
 
 .pt-menu {
   display: grid;

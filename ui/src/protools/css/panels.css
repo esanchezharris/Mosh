@@ -477,6 +477,48 @@
 .pt-moshi-drawer .v2-toast { position: static; display: flex; align-items: center; gap: 7px; transform: none; padding: 7px 8px; border: 1px solid var(--pt-highlight); color: var(--pt-text); background: var(--pt-inset); }
 .pt-moshi-drawer .v2-toast-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pt-moshi-drawer .v2-toast-undo { border: 1px solid var(--pt-border); color: var(--pt-text); background: var(--pt-raised); }
+.pt-generative-drawer {
+  --ink: var(--pt-inset);
+  --ink-deep: var(--pt-canvas);
+  --ink-raise: var(--pt-raised);
+  --ink-line: var(--pt-border);
+  --ink-line-soft: var(--pt-highlight);
+  --bone: var(--pt-text);
+  --bone-dim: var(--pt-text-muted);
+  --mist: var(--pt-text);
+  --lime: var(--pt-selected);
+  --lime-glow: var(--pt-selected);
+  --lime-dim: color-mix(in srgb, var(--pt-selected) 55%, transparent);
+  --warn: var(--pt-preroll);
+  --rec: var(--pt-danger);
+  --danger: var(--pt-danger);
+  --on-accent: var(--pt-on-selected);
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  position: fixed;
+  z-index: 96;
+  right: 12px;
+  bottom: calc(var(--pt-status-h) + 12px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(480px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 100px));
+  overflow: hidden;
+  border: 1px solid var(--pt-highlight);
+  color: var(--pt-text);
+  background: var(--pt-raised);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.55);
+}
+.pt-generative-head { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 10px; border-bottom: 1px solid var(--pt-border); background: var(--pt-surface); }
+.pt-generative-head > div { display: grid; }
+.pt-generative-head span { color: var(--pt-text-muted); font-size: 9px; }
+.pt-generative-head button { min-height: 28px; border: 1px solid var(--pt-border); color: var(--pt-text); background: var(--pt-raised); }
+.pt-generative-body { min-height: 0; padding: 10px; overflow: auto; }
+.pt-generative-drawer .gen { box-sizing: border-box; width: 100%; min-width: 0; padding: 0; overflow: visible; border: 0; }
+.pt-generative-drawer .btn { border-radius: 2px; }
+.pt-generative-drawer .gen-head { gap: 8px; }
+.pt-generative-drawer .nlabel { flex-basis: 88px; }
+.pt-generative-empty { padding: 12px; color: var(--pt-text-muted); background: var(--pt-inset); }
 .pt-wave-inspector {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(220px, 0.7fr);
