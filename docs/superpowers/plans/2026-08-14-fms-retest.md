@@ -73,13 +73,17 @@ owner to authorize a rented box. Task 5 needs the owner's ears.
 
 The fixtures are currently world-readable and contain ground truth.
 
+The tree contains subdirectories (`asr-draft/`, `source-aif/`), so a flat
+`chmod 600 <dir>/*` would strip their execute bit and make them unenterable.
+Split by type:
+
 ```bash
-chmod 700 ~/mosh-fms-ksb/bench/datasets/own-pairs
-chmod 600 ~/mosh-fms-ksb/bench/datasets/own-pairs/*
+find ~/mosh-fms-ksb/bench/datasets/own-pairs -type d -exec chmod 700 {} +
+find ~/mosh-fms-ksb/bench/datasets/own-pairs -type f -exec chmod 600 {} +
 ls -la ~/mosh-fms-ksb/bench/datasets/own-pairs | head -5
 ```
 
-Expected: directory `drwx------`, files `-rw-------`.
+Expected: directories `drwx------`, files `-rw-------`, and the subdirectories still enterable.
 
 - [ ] **Step 2: Write the failing test**
 
