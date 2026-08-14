@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-14
 
-**Status:** architecture approved; written spec awaiting owner review
+**Status:** written specification approved for implementation planning
 
 **Branch:** `codex/moshi-agent-skills-next`
 
