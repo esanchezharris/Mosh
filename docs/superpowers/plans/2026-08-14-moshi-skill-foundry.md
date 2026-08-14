@@ -51,7 +51,7 @@ flowchart LR
 | 3 | `docs/superpowers/plans/2026-08-14-moshi-skill-foundry-slice-c-live-shell-composer.md` | The existing shared Moshi composer, task drawer, and change toast are reachable in the Live shell with Pro Tools parity. |
 | 4 | `docs/superpowers/plans/2026-08-14-moshi-skill-foundry-slice-e-certification-owner-proof.md` | Frozen benchmarks, native/package/physical gates, four curriculum packets, owner approval, and exact post-merge signed-bundle verification promote the four journeys. |
 
-Slices B and D may run in parallel only after Slice A is merged. Slice C starts after both B and D are merged so their `ui/package.json` changes are reconciled before C adds its built-refusal script. Slice E starts only after A-D are merged.
+Slices B and D may run in parallel only after Slice A is merged. Slice C starts after both B and D are merged: it has a functional dependency on Slice B's runtime (`runStudioSkill`, the string-token continuation contract, and `createStudioSkillRuntimeV1`), plus a textual dependency on Slice D's one-line `ui/package.json` addition (the `"teach-moshi"` script), which Slice C must preserve byte-for-byte while adding its own built-refusal script. Slice B itself makes no `ui/package.json` changes. Slice E starts only after A-D are merged.
 
 ## Program Execution Protocol
 

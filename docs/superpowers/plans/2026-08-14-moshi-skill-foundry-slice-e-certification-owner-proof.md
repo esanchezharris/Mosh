@@ -15,7 +15,7 @@
 - macOS Apple Silicon arm64 only. Skills execute and certify only in Mosh; Ableton is optional reference evidence.
 - Slice E begins only after A-D merge. The implementation PR must merge before any real curriculum, approval, native resource, or final-release evidence is created.
 - The closure run starts from clean merged `main` (or an explicitly immutable release commit equal to the recorded build identity). No commit follows closure start. Any tracked change requires a new PR, merge, and complete closure restart.
-- No approved payload, report, approval, bundle entry, resource index, curriculum packet, manual evidence, attestation, or release verification is tracked. Never create or commit `resources/skills/native/`.
+- No approved payload, report, approval, bundle entry, resource index, curriculum packet, manual evidence, attestation, or release verification is tracked. Nothing under `resources/skills/native/` is ever git-tracked: the empty index is CMake-generated at build time into the build/staging tree (Slice A), never written into the source tree, and real bundle entries are staged from an owner-local directory outside git and copied into the packaged app's `Resources` only at package time (Task 5). Enforceable invariant, checked at every gate: `git ls-files resources/skills/native/` must return nothing — a non-empty result is a hard failure, not a warning.
 - Preserve the exact acyclic graph:
 
   ```text
@@ -167,7 +167,23 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
   expect(gradeCertificationCaseV1(invalidFill, {...obs, batchBegan:true}).code).toBe("invalid_fill_after_batch_begin");
   expect(gradeCertificationCaseV1(nonSuccess, {...obs, mutationCount:1}).code).toBe("prohibited_mutation");
   expect(validateNativeArtifactGraphV1).toHaveBeenCalledTimes(1);
+  // sabotage: a driver that self-reports "completed" for every case regardless of what it
+  // actually did must still be caught on ground truth, never on its own self-report.
+  const alwaysCompletedObs = {...obs, outcome:{kind:"completed",code:null}};
+  expect(gradeCertificationCaseV1(c, alwaysCompletedObs).passed).toBe(false); // predicates/mutation still fail it
+  expect(summarizeCoreRouterGateV1(cases.map((cc) => gradeCertificationCaseV1(cc, alwaysCompletedObs))))
+    .toMatchObject({overallPassed:false});
+  // pass-bar boundary, pinned in both directions so it cannot silently loosen
+  expect(summarizeCoreRouterGateV1(journeyResultsAtScore(26, 30)).journeyPassed).toBe(false);
+  expect(summarizeCoreRouterGateV1(journeyResultsAtScore(27, 30)).journeyPassed).toBe(true);
+  expect(summarizeCoreRouterGateV1(aggregateResultsAtScore(107, 120)).overallPassed).toBe(false);
+  expect(summarizeCoreRouterGateV1(aggregateResultsAtScore(108, 120)).overallPassed).toBe(true);
   ```
+
+  The sabotage assertions are the RED-proof this repo's `freeze_layer` incident (CLAUDE.md
+  "Gotchas that still bite") never got: a suite and grader written and unit-tested only against
+  each other, with the one place real behaviour is exercised (the Phase II closure run) single-shot,
+  untracked, and never re-run in CI. `grep -rn SABOTAGE` the diff before landing, per repo convention.
 
 - [ ] **Run RED**
 
@@ -194,7 +210,7 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
   git commit -m "test(agent): define frozen skill certification suites"
   ```
 
-  Expected: 160/120/40 and 20/16/4 counts, every category/fill invariant, and sole-A-validator assertions pass.
+  Expected: 160/120/40 and 20/16/4 counts, every category/fill invariant, sole-A-validator assertions, the sabotage-fixture rejection, and both pass-bar boundary pairs (26/30 fail, 27/30 pass; 107/120 fail, 108/120 pass) all pass.
 
 ### Task 2: Implement the Finite Driver, Mock Gate, and Native Mosh Gate
 
@@ -216,6 +232,18 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
 
   Test missing/malformed/mismatched result, nonzero exit, process timeout, dropped case, owner-root access, and active child at manual exit. D's process-supervisor tests remain the authority for PID/start-identity signaling.
 
+- [ ] **Write a RED sabotage-fixture test proving the native gate cannot be faked green**
+
+  Add `ui/src/agent/skillFoundry/certification/fixtures/broken-native-driver.mjs`, mirroring how Slice D's `fixtures/fake-certifier.mjs` stands in for the real driver process (Slice D Task 6): for every request it writes a `result.json` claiming `{status:"completed"}` regardless of the case's actual fixture/initial state, and never touches MoshOps — so native JSONL and final state never actually change. Point `nativeRunner.test.ts` at it across a full 120-case supported slice and assert the gate is graded on ground truth, not on the driver's self-report:
+
+  ```ts
+  const faked = await runNativeGateV1({...invocation, bin: BROKEN_NATIVE_DRIVER_FIXTURE}, supervisor);
+  expect(faked.summary.overallPassed).toBe(false);
+  expect(faked.summary.supportedPassed).toBeLessThan(108);
+  ```
+
+  This closes the same hole `freeze_layer` shipped through for weeks behind a passing selftest check (CLAUDE.md "Gotchas that still bite"): a self-reported `completed` status must never be trusted without matching final-state predicates and zero prohibited mutation from real native JSONL. `grep -rn SABOTAGE` the diff before landing.
+
 - [ ] **Run RED**
 
   Run: `npm --prefix ui test -- --run src/agent/skillFoundry/certification/goalLoop.test.ts src/agent/skillFoundry/certification/mockRunner.test.ts src/agent/skillFoundry/certification/nativeRunner.test.ts`
@@ -225,6 +253,8 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
 - [ ] **Implement the exact entry mode and pure gate loop**
 
   `Main.cpp` accepts only the fixed D driver argv before normal GUI startup. Validate absolute same-run-root regular request/result files, bounded sizes, no link, create-only result, one result then clean exit. The UI dispatches only schema/mock/native/packaged/acceptance/release stages. No request field selects an executable, shell command, owner session, or arbitrary output.
+
+  `Main.cpp` dispatches every mode by `commandLine.contains(...)` substring match — the exact footgun behind SLF-CONC-001, where `--selftest` matches inside `--selftest-undo` and undo must be checked first. Prove `--skill-foundry-certify-driver-v1` collides with none of the existing literals (`--brain-smoke`, `--selftest-undo`, `--golden-selftest`, `--live-audio-smoke`, `--midi-record-smoke`, `--audio-recovery-smoke`, `--scan-plugins-deep`, `--run-script`, `--voice-smoke`, `--demo3`, `--demo5`, `--demo6`, `--selftest`, `--mic`, plus Task 3's `--skill-candidate-test`/`--skill-candidate-auth`) in either direction — no existing flag is a substring of the new one and the new one is not a substring of any existing flag — and state explicitly where in the existing match-ordering chain the new check is inserted (before the generic `headless`/`--selftest` dispatch, since it must win independently of selftest mode).
 
   The runner revalidates run nonce/ID, payload/eval/catalog/source/build hashes, runs only the next state, and returns pure bytes/data. It never calls `DraftStoreV1.writeArtifactBytes` or a ledger function.
 
@@ -247,6 +277,15 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
   cmake --build --preset macos-arm64-app
   ctest --test-dir build-macos-arm64 --output-on-failure
   npm --prefix ui test -- --run src/agent/skillFoundry/certification/goalLoop.test.ts src/agent/skillFoundry/certification/mockRunner.test.ts src/agent/skillFoundry/certification/nativeRunner.test.ts
+  # SLF-CONC-001-class check: the new flag must not be a substring of, or contain, any existing
+  # commandLine.contains(...) literal in Main.cpp.
+  FLAGS="$(rg -o 'commandLine\.contains \("(--[a-zA-Z0-9-]+)"\)' -r '$1' src/Main.cpp | sort -u)"
+  echo "$FLAGS" | rg -qx -- '--skill-foundry-certify-driver-v1'
+  while IFS= read -r f; do
+    [ "$f" = "--skill-foundry-certify-driver-v1" ] && continue
+    case "--skill-foundry-certify-driver-v1" in *"$f"*) echo "COLLISION: $f"; exit 1 ;; esac
+    case "$f" in *"--skill-foundry-certify-driver-v1"*) echo "COLLISION: $f"; exit 1 ;; esac
+  done <<< "$FLAGS"
   git add ui/src/agent/skillFoundry/certification ui/scripts/teachMoshi src/app/SkillFoundryCertificationDriver.* src/Main.cpp src/webview/WebBridge.* ui/src/bridge.ts src/app/SelfTest.cpp tests/CMakeLists.txt
   git commit -m "feat(agent): run bounded Mosh skill certification"
   ```
@@ -270,6 +309,8 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
 - [ ] **Implement QA-only compile and Vite boundaries**
 
   Add `macos-arm64-skill-qa`/`macos-arm64-skill-qa-app` as arm64 RelWithDebInfo presets with C++ and Vite candidate flags. CMake fatally rejects `MOSH_SKILL_CANDIDATE_TEST=ON` with Release. Non-QA binaries recognize candidate flags only to print a bounded unavailable message and exit `64`; the bridge function and UI loader code are absent.
+
+  `--skill-candidate-test` and `--skill-candidate-auth` enter the same substring-dispatch chain as every other mode, so they carry the same SLF-CONC-001 risk as Task 2's driver flag: prove each collides with no existing `commandLine.contains(...)` literal in `src/Main.cpp` in either direction, and state where each sits in the match order. Note that these two collide with *each other* by prefix — `commandLine.contains("--skill-candidate-test")` is false for `--skill-candidate-auth`, but any future shortening to a shared `--skill-candidate` stem would match both, so keep the full literals and never introduce a bare-stem check. Because the non-QA build must still *recognize* these flags to exit `64`, that recognition path is compiled into Release and is therefore inside the collision surface too — assert the ordering in both the QA and non-QA builds, not only the QA one.
 
 - [ ] **Make the smoke create and execute its own artifacts**
 
@@ -398,6 +439,7 @@ Never add a tracked native resource directory. Synthetic test fixtures must be c
   test -z "$(git status --porcelain=v1)"
   git diff --check origin/main...HEAD
   git diff --stat origin/main...HEAD
+  test -z "$(git ls-files resources/skills/native/)"
   scripts/auto-loop/memory-preflight.sh
   ```
 
@@ -665,3 +707,5 @@ Once Task 7 starts, no `git add`, `git commit`, source edit, documentation edit,
 - [ ] No commit or tracked edit occurs after closure starts.
 
 Slice E is not complete at compile, mock green, QA green, approval, or signing alone. It completes only when D records `certified` for all four native journeys from external verification of the exact final signed Mosh app built from the immutable merged commit.
+
+**`certified` is not protected by any standing gate.** Unlike a MoshOps command, which stays proven by `--selftest`/CI on every subsequent change, the native `certified` state comes from Phase II: a single, unrepeated, untracked, owner-supervised closure run with no CI re-entry point. Once it finishes, nothing re-runs it — a later change to the router, the catalog, a dependency, or any file the four journeys depend on can silently invalidate the certification with no automated signal. The only way to know `certified` still means something is to rerun the entire closure program from a newly merged clean commit. Do not assume a standing regression gate protects this state the way one protects everything else in this repo.

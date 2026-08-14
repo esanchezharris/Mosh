@@ -141,9 +141,14 @@ lowercase dashed `juce::Uuid` values with a null UndoManager, returns the count,
 and never stamps clips or plug-ins. Call it on every edit adoption and before
 each post-record take enumeration. Never replace malformed IDs; fail ID mutations
 on empty/duplicate IDs. Legacy index plus optional ID must resolve identically.
-Keep validates all guards before `beginTxn`, then uses
-`switchTakePreservingDirectFile` and `deleteAllUnusedTakes(false)` inside that
-single transaction. Preserve legacy `{clipId}` behavior.
+This is a behavioral rewrite of `cmdKeepTake`, not a light touch: today it
+accepts only `{clipId}`, takes no target take id, and calls
+`w->deleteAllUnusedTakes(false)` on whichever take is already current — it never
+calls `switchTakePreservingDirectFile`. Rewrite it to accept an optional target
+`takeId`. Validate all guards before `beginTxn`, then, inside that single
+transaction, call `switchTakePreservingDirectFile` when a target id is supplied
+and `deleteAllUnusedTakes(false)` to keep it. Preserve legacy `{clipId}`-only
+behavior unchanged: with no target id, keep whichever take is already current.
 
 Mirror IDs and guards in the mock using deterministic UUID-shaped fixture IDs.
 Snapshot the whole clip before mock Keep so one Undo restores IDs and selection.
@@ -540,8 +545,9 @@ always resumes before any new matcher.
 
 - [ ] **Step 1: Write and run RED precedence/fallback cases**
 
-Prove section rework still owns bare redo; `matchRememberPreference` calls only
-`agent_memory_write` and never skill routing; all four core phrases call
+Prove section rework still owns bare redo; the existing `matchRemember` (the
+current unexported helper in `fastPath.ts`, called today from `matchFastPath`)
+calls only `agent_memory_write` and never skill routing; all four core phrases call
 `runStudioSkill`; only a token string is stored; token is cleared before await;
 replacement clears both React token and continuation store; packaged vague,
 injection-shaped, and multi-step asks never call brain/dev loop; existing dev
@@ -557,8 +563,9 @@ Expected RED: Composer still stores raw continuation data and bypasses runtime.
 
 - [ ] **Step 2: Implement one typed core path, verify, and commit**
 
-Export only remember matching from `fastPath.ts`; keep its existing non-MoshOps
-preference write outside registry. If a token exists, consume it through
+Add `export` to the existing `matchRemember` function in `fastPath.ts` in place
+(no rename, no new sibling export); keep its existing non-MoshOps preference
+write outside registry. If a token exists, consume it through
 `runStudioSkill` first. Otherwise run section/remember branches, then the shared
 runtime. Store a returned token only after await. On project epoch change call
 `clearStudioSkillContinuations()`. Hands-free may retain its direct deterministic
@@ -578,7 +585,7 @@ git commit -m "refactor(agent): consolidate four core routing"
 
 ### Task 8: Prove Four Journeys, Relaunch, and Three Loopback Passes
 
-**Files:** Create `ui/src/agent/skillFoundry/fourCore.integration.test.ts`; modify `src/app/SelfTest.cpp`, `scripts/blackhole-live-audio-gate.sh`.
+**Files:** Create `ui/src/agent/skillFoundry/fourCore.integration.test.ts`; modify `src/Main.cpp`, `src/app/SelfTest.cpp`, `scripts/blackhole-live-audio-gate.sh`.
 
 **Interfaces:** Public `runStudioSkill` proof plus isolated native persistence and
 owner-gated CoreAudio loopback evidence. Actual microphone/audibility proof remains Slice E manual evidence. No Ableton execution counts as proof.
@@ -611,8 +618,25 @@ Redo Keep, Save, and print:
 take-cycle passes=3 kept_id=<uuid> source=<absolute-scratch-wav>
 ```
 
-Never use an owner session. Update the BlackHole script to require/derive an
-`_harness/` session, pass it into live smoke, then launch a second process:
+None of this exists today: `--live-audio-smoke` (`src/Main.cpp` → `runLiveAudioSmoke`
+in `src/app/SelfTest.cpp`) performs one arm→record→stop pass and checks a single
+non-silent WAV — it has no concept of switching by stable id, Keep, an
+Undo-restores-ids/Redo cycle, or the `take-cycle passes=...` line above. Add a
+new native smoke mode (e.g. a `--take-cycle-smoke` command-line flag in
+`Main.cpp`, dispatching to a new `runTakeCycleSmoke` in `SelfTest.cpp`, parallel
+to `runLiveAudioSmoke`) that implements the growing-ID loop, ID-based switch,
+Keep, Undo-restore, Redo, Save, and the `take-cycle passes=3 kept_id=<uuid>
+source=<absolute-scratch-wav>` print — this is native work, not a shell change.
+The flag name is a free choice; only the dispatch discipline is fixed. `Main.cpp`
+selects modes by SUBSTRING match (`commandLine.contains(...)`), which is exactly
+the footgun behind SLF-CONC-001 — `commandLine.contains("--selftest")` is also
+true for `--selftest-undo`, so the longer flag must be matched FIRST. Prove the
+new flag collides with no existing `commandLine.contains(...)` check in
+`Main.cpp` (in either direction: no existing flag is a substring of the new one,
+and the new one is a substring of no existing flag), and state its required
+match position relative to the existing checks. Update the BlackHole script only
+to require/derive an `_harness/` session, pass it through, and invoke the new
+native mode; then launch a second process:
 
 ```bash
 printf '%s\n' '{"command":"__snapshot","args":{"label":"take-relaunch"}}' \

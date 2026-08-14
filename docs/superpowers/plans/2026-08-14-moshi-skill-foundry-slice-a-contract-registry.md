@@ -175,7 +175,7 @@ The hash literal above is the **verified** digest — `printf 'a\n' | shasum -a 
 
 - [ ] **Step 3: Define exact contracts and quotas**
 
-Copy field-for-field types for `SourceStatusV1`, `SkillManifestV1`, `SkillReleaseV1`, `SkillActivationIndexV1`, `SourceRefV1`, `SkillArtifactRefV1`, `CertificationReportV1`, `SkillApprovalV1`, `NativeSkillPayloadV1`, `NativeSkillBundleEntryV1`, `NativeReleaseVerificationV1`, `SkillSlotV1`, `ValueRefV1`, `SkillStepV1`, `PredicateV1`, `SkillOutcomeV1`, `SkillChoiceV1`, `RecordingLifecycleResultV1`, `RecordingLifecycleEnvironmentV1`, `NativeSkillHandlerV1`, `StudioSkillRegistryV1`, `NativeSourceByteSetV1`, `MoshBuildIdentityInputV1`, `AbletonReferenceV1`, and `ManualEvidenceV1`. `SkillManifestV1.execution.confirmation` remains the required union `"never"|"on_ambiguity"|"always"`; it is neither defaulted nor normalized before exact-byte review hashing. Use this exact outcome-code union:
+Copy field-for-field types for `SourceStatusV1`, `SkillManifestV1`, `SkillReleaseV1`, `SkillActivationIndexV1`, `SourceRefV1`, `SkillArtifactRefV1`, `CertificationReportV1`, `SkillApprovalV1`, `NativeSkillPayloadV1`, `NativeSkillBundleEntryV1`, `NativeReleaseVerificationV1`, `SkillSlotV1`, `ValueRefV1`, `SkillStepV1`, `PredicateV1`, `SkillOutcomeV1`, `SkillChoiceV1`, `RecordingLifecycleResultV1`, `RecordingLifecycleEnvironmentV1`, `NativeSkillHandlerV1`, `StudioSkillRegistryV1`, `NativeSourceByteSetV1`, `MoshBuildIdentityInputV1`, `AbletonReferenceV1`, and `ManualEvidenceV1`. `SkillManifestV1.execution.confirmation` remains the required union `"never"|"on_ambiguity"|"always"`; it is neither defaulted nor normalized before exact-byte review hashing. This task also freezes two types the spec never names but that later slices consume across separate worktrees — `ResolvedTargetIdentityV1` (Task 6/8 guard comparisons) and `CatalogFingerprintV1` (`catalogs.ts`, `SkillCompatibilityContextV1`) — defined explicitly below rather than left to an implementer to guess. Use this exact outcome-code union:
 
 ```ts
 export type SkillReasonCodeV1 = "no_match"|"ambiguous_skill"|"missing_slot"|"invalid_slot"|
@@ -201,6 +201,28 @@ export type NativeSourceByteSetV1 = { readonly schemaVersion:1; readonly files:r
 export type MoshBuildIdentityInputV1 = { readonly appVersion:string; readonly gitCommit:string; readonly gitState:"clean"|"dirty"|"unknown"; readonly target:string; readonly configuration:string; readonly architecture:string };
 export type ContinuationChoiceValueV1 = { readonly id:string; readonly label:string; readonly value:SlotValueV1 };
 ```
+
+Define the target-staleness identity captured at resolution time (Task 8's preflight) and compared by both continuation guards (Task 6/8), and the catalog fingerprint that fills `SkillManifestV1.compatibility`'s three fields verbatim:
+
+```ts
+export type ResolvedTargetKindV1 = "track"|"clip"|"plugin"|"take";
+export type ResolvedTargetIdentityV1 = {
+  readonly kind:ResolvedTargetKindV1;
+  readonly id:string;
+  readonly name:string;
+  readonly catalogId?:string;
+};
+export type CatalogFingerprintV1 = {
+  readonly schemaVersion:1;
+  readonly commandCatalogSha256:string;
+  readonly predicateCatalogVersion:number;
+  readonly resolverCatalogVersion:number;
+};
+```
+
+Guards compare a captured `ResolvedTargetIdentityV1` against a freshly resolved target by exact structural equality — every field, including an absent `catalogId` — before proceeding through `before_begin`/`before_commit`; any difference is `stale_context`. `kind` covers every primitive/predicate target shape Task 2's closed catalog can resolve (`selected_track`, `track_by_unique_name`, and `plugin_by_name` resolve `"track"`/`"plugin"`; `"clip"`/`"take"` are reserved for later slices' resolvers so the union does not need to grow when they land); `id` is the resolved entity's stable snapshot ID; `name` and the optional `catalogId` (set only for `"plugin"`, per Task 2 Step 3's `PluginHost::idFor`) are the identity-bearing fields whose drift means the same ID now points at a different real thing.
+
+`CatalogFingerprintV1` pins the three closed catalogs a manifest's `compatibility` block is checked against, matching `SkillManifestV1.compatibility.{commandCatalogSha256,predicateCatalogVersion,resolverCatalogVersion}` exactly: `commandCatalogSha256` is `sha256Bytes(canonicalJsonBytes(...))` over the closed `OWNER_PRIMITIVES_V1.observations` and `OWNER_PRIMITIVES_V1.mutations` descriptors (Task 2), keyed by primitive name — the same `canonicalJsonBytes`/`sha256Bytes` primitives this task defines, no second canonicalization path; `predicateCatalogVersion` is a hand-bumped integer constant pinned to the exact key set of `OWNER_PREDICATES_V1`; `resolverCatalogVersion` is a hand-bumped integer constant pinned to the exact key set of `OWNER_PRIMITIVES_V1.resolvers`. Task 2's `catalogFingerprintV1()` returns exactly this shape once those catalogs exist to fingerprint.
 
 `SkillCompatibilityContextV1` carries exact `appVersion`, `gitCommit`, `gitState`, `moshBuildIdentity`, `CatalogFingerprintV1`, and the canonical source-set SHA keyed by native handler; do not create a second compatibility context in an adapter.
 
@@ -376,7 +398,7 @@ Use `lstat`/`fstat`, current UID, `O_NOFOLLOW|O_CLOEXEC`, regular-file/link-coun
 
 - [ ] **Step 4: Add dedicated bridge reads**
 
-Register threaded `read_certified_skill_packages`, `read_skill_source_status`, and `read_certified_native_skills` directly in `WebBridge::buildOptions`; none appears in MoshOps or `AGENT_COMMANDS`. Keep literal bridge calls in `bridge.ts`, and put the public camel-case V1 wrappers in `skillFoundry/nativeReads.ts`; `nativeAdapter.ts` remains registry adaptation only. Mock/test returns explicit synthetic build identity and empty in-memory envelopes and never reads disk. A real missing binding rejects; production native adaptation rejects `dirty`, `unknown`, or payload/build mismatch.
+Register `read_certified_skill_packages`, `read_skill_source_status`, and `read_certified_native_skills` as three independent top-level `.withNativeFunction(...)` entries in `WebBridge::buildOptions`, each following the **threaded-relay pattern already used by `brain_chat`/`escalate_candidates`/`archive_pair`** (`src/webview/WebBridge.cpp:251-317`): `juce::Thread::launch ([...] { auto result = <read>(); juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); }); });`. This is a different shape from the `list_directory` special case (`WebBridge.cpp:195-208`), which is dispatched *inside* the `execute_command` handler via `asyncCommandHandler` and therefore still passes through `commandHandler` and telemetry's command-name redaction — the three skill reads must never enter that path: never routed through `commandHandler`, never appear in `AGENT_COMMANDS` or MoshOps, and never reachable via `execute_command`'s `args[0].command` dispatch. Each launched thread calls the matching loader entry point directly — `CertifiedSkillLoader::readFromEnvironment()`, `readSourceStatusFromEnvironment()`, `readBundledNativeFromApplication()` — never the message thread, since Task 4 Step 3's filesystem admission does blocking `lstat`/`fstat`/read syscalls; each resolves its JUCE `var` back via `callAsync` exactly once. Keep literal bridge calls in `bridge.ts`, and put the public camel-case V1 wrappers in `skillFoundry/nativeReads.ts`; `nativeAdapter.ts` remains registry adaptation only. Mock/test returns explicit synthetic build identity and empty in-memory envelopes and never reads disk. A real missing binding rejects; production native adaptation rejects `dirty`, `unknown`, or payload/build mismatch.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -384,7 +406,7 @@ Run: `cmake --preset macos-arm64-debug && cmake --build --preset macos-arm64-tes
 
 Run: `cd ui && npm test -- --run src/agent/skillFoundry/nativeBridgeBoundary.test.ts && npm run typecheck`
 
-Expected: PASS; boundary test proves both reads are non-MoshOps/model-inaccessible.
+Expected: PASS; boundary test proves all three reads are non-MoshOps/model-inaccessible.
 
 ```bash
 git add src/agent/CertifiedSkillLoader.* tests/test_certified_skill_loader.cpp CMakeLists.txt tests/CMakeLists.txt src/webview/WebBridge.cpp ui/src/bridge.ts ui/src/agent/skillFoundry/nativeReads.ts ui/src/agent/skillFoundry/nativeBridgeBoundary.test.ts
@@ -400,14 +422,14 @@ git commit -m "feat(agent): read certified skills safely"
 - Create: `ui/src/agent/skillFoundry/nativeAdapter.ts`
 - Create: `ui/src/agent/skillFoundry/declarativeAdapter.ts`
 - Create: `ui/scripts/verifySkillIdentityUniverse.mts`
-- Create: `resources/skills/native/index.json`
-- Create: `resources/skills/declarative/index.json`
 - Create: `tests/fixtures/skill-foundry/release-owner-active.json`
 - Test: `ui/src/agent/skillFoundry/registry.test.ts`
 - Test: `ui/src/agent/skillFoundry/adapters.test.ts`
 - Test: `ui/src/agent/skillFoundry/skillIdentityUniverse.test.ts`
 - Modify: `ui/package.json`
 - Modify: `cmake/BuildUI.cmake`
+
+`resources/skills/native/index.json` and `resources/skills/declarative/index.json` are never created in the source tree and never committed. Slice E's global constraints explicitly forbid tracking `resources/skills/native/` and enumerate "resource index" among what must not be committed; Slice A ships zero bundled skills of either origin (Task 9 Step 3 parses only the native resource envelope, and the declarative one has no real content yet), so the same argument applies to `resources/skills/declarative/` too — nothing here can populate either index with anything but an empty shell. `cmake/BuildUI.cmake` CMake-generates both as schema-valid **empty** indexes into the build/staging tree, the same mechanism this task already uses below for the owner active-index fixture (`MOSH_RELEASE_OWNER_ACTIVE_INDEX`).
 
 **Interfaces:**
 - Produces: locked registry functions, immutable `StudioSkillRegistryV1`, `adaptNativeSkillV1`, `adaptDeclarativeSkillV1`; no competing alias or alternate registry class.
@@ -435,7 +457,7 @@ Build candidate/alias maps locally, validate all entries, then freeze/copy one r
 
 Native adapter binds only the closed handler map (`sessionControlV1`, `takeCycleV1`, `explicitBalanceV1`, `loadNamedPluginV1`) and consumes the Task 3 `validateNativeArtifactGraphV1` result; it does not implement a second graph checker. Declarative adapter accepts only `ValidatedDeclarativeSkillV1` and closes over its exact artifact.
 
-Add `verify:skill-identities` to `ui/package.json`. `cmake/BuildUI.cmake` adds always-run `MoshSkillIdentityGate`, passing `$<CONFIG>`, `PROJECT_VERSION`, target, architecture, both bundled indexes, and `${CMAKE_BINARY_DIR}/skill-foundry/release-owner-active.json` before `Mosh` builds. CMake copies an explicitly supplied `MOSH_RELEASE_OWNER_ACTIVE_INDEX` there or generates the schema-valid empty production map; the fixture is test-only, and the gate never reads the real owner root. The script imports the same validator and exits nonzero on any canonical-ID or alias collision across all three inputs. In `Release` it also rejects dirty/unknown Git, stale commit, non-Release build identity, source-set hash drift, catalog drift, wrong version, or wrong architecture. Debug validates shapes/collisions but permits a dirty tree. Startup separately passes the actual parsed owner `active.json` through the same validator before atomic registry replacement.
+Add `verify:skill-identities` to `ui/package.json`. `cmake/BuildUI.cmake` generates `resources/skills/native/index.json` and `resources/skills/declarative/index.json` as schema-valid **empty** indexes under `${CMAKE_BINARY_DIR}/skill-foundry/resources/skills/{native,declarative}/index.json` — never in the source tree — then adds always-run `MoshSkillIdentityGate`, passing `$<CONFIG>`, `PROJECT_VERSION`, target, architecture, those two generated bundled indexes, and `${CMAKE_BINARY_DIR}/skill-foundry/release-owner-active.json` before `Mosh` builds. CMake copies an explicitly supplied `MOSH_RELEASE_OWNER_ACTIVE_INDEX` there or generates the schema-valid empty production map; the fixture is test-only, and the gate never reads the real owner root. `git ls-files resources/skills/native/ resources/skills/declarative/` must return empty — Task 10 Step 4 asserts this directly. The script imports the same validator and exits nonzero on any canonical-ID or alias collision across all three inputs. In `Release` it also rejects dirty/unknown Git, stale commit, non-Release build identity, source-set hash drift, catalog drift, wrong version, or wrong architecture. Debug validates shapes/collisions but permits a dirty tree. Startup separately passes the actual parsed owner `active.json` through the same validator before atomic registry replacement.
 
 - [ ] **Step 4: Run GREEN and commit**
 
@@ -444,7 +466,7 @@ Run: `cd ui && npm test -- --run src/agent/skillFoundry/registry.test.ts src/age
 Expected: PASS.
 
 ```bash
-git add ui/src/agent/skillFoundry/{registry,nativeAdapter,declarativeAdapter,registry.test,adapters.test}.ts ui/scripts/verifySkillIdentityUniverse.mts ui/src/agent/skillFoundry/skillIdentityUniverse.test.ts ui/package.json cmake/BuildUI.cmake resources/skills/{native,declarative}/index.json tests/fixtures/skill-foundry/release-owner-active.json
+git add ui/src/agent/skillFoundry/{registry,nativeAdapter,declarativeAdapter,registry.test,adapters.test}.ts ui/scripts/verifySkillIdentityUniverse.mts ui/src/agent/skillFoundry/skillIdentityUniverse.test.ts ui/package.json cmake/BuildUI.cmake tests/fixtures/skill-foundry/release-owner-active.json
 git commit -m "feat(agent): add collision-safe skill registry"
 ```
 
@@ -680,9 +702,10 @@ Run:
 git diff --check origin/main...
 ! rg -n 'install_skill|write_skill|MOSH_SKILL_CANDIDATE_TEST' ui/src/agent/skillFoundry src/agent src/webview/WebBridge.cpp
 ! rg -n 'service/skills/library\.jsonl' ui/src/agent/skillFoundry src/agent src/webview/WebBridge.cpp
+test -z "$(git ls-files resources/skills/native/ resources/skills/declarative/)"
 ```
 
-Expected: no runtime writer, candidate loader, or service-mined catalog reference. `load_named_plugin` may appear only as the canonical legacy alias and tests. If verification requires a correction, commit it, return to Step 1, and rerun every focused/native gate against the new clean HEAD; never carry forward evidence from the superseded commit.
+Expected: no runtime writer, candidate loader, or service-mined catalog reference; neither bundled resource index is tracked in the source tree. `load_named_plugin` may appear only as the canonical legacy alias and tests. If verification requires a correction, commit it, return to Step 1, and rerun every focused/native gate against the new clean HEAD; never carry forward evidence from the superseded commit.
 
 ## Slice A Completion Criteria
 
