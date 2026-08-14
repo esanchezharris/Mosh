@@ -205,12 +205,10 @@ export type ContinuationChoiceValueV1 = { readonly id:string; readonly label:str
 Define the target-staleness identity captured at resolution time (Task 8's preflight) and compared by both continuation guards (Task 6/8), and the catalog fingerprint that fills `SkillManifestV1.compatibility`'s three fields verbatim:
 
 ```ts
-export type ResolvedTargetKindV1 = "track"|"clip"|"plugin"|"take";
 export type ResolvedTargetIdentityV1 = {
-  readonly kind:ResolvedTargetKindV1;
-  readonly id:string;
-  readonly name:string;
-  readonly catalogId?:string;
+  readonly role:string;
+  readonly entityKind:"track"|"plugin";
+  readonly entityId:string;
 };
 export type CatalogFingerprintV1 = {
   readonly schemaVersion:1;
@@ -220,7 +218,9 @@ export type CatalogFingerprintV1 = {
 };
 ```
 
-Guards compare a captured `ResolvedTargetIdentityV1` against a freshly resolved target by exact structural equality — every field, including an absent `catalogId` — before proceeding through `before_begin`/`before_commit`; any difference is `stale_context`. `kind` covers every primitive/predicate target shape Task 2's closed catalog can resolve (`selected_track`, `track_by_unique_name`, and `plugin_by_name` resolve `"track"`/`"plugin"`; `"clip"`/`"take"` are reserved for later slices' resolvers so the union does not need to grow when they land); `id` is the resolved entity's stable snapshot ID; `name` and the optional `catalogId` (set only for `"plugin"`, per Task 2 Step 3's `PluginHost::idFor`) are the identity-bearing fields whose drift means the same ID now points at a different real thing.
+`role` is the manifest slot name that resolved the target (for example `"trackId"`), so Task 8's preflight and the Task 6/8 guards can re-run the *same* resolver against fresh state and compare; `entityKind` is the resolved entity class; `entityId` is its stable snapshot ID. Guards compare a captured `ResolvedTargetIdentityV1` against a freshly resolved target by exact structural equality across all three fields before proceeding through `before_begin`/`before_commit`; any difference is `stale_context`. Re-resolving by `role` rather than storing a name snapshot is what makes a rename detectable: `track_by_unique_name` re-run after a rename either resolves a different `entityId` or fails outright, and both are `stale_context`.
+
+`entityKind` is deliberately only `"track"|"plugin"` — the exact set Task 2's closed resolver catalog can produce (`selected_track`, `track_by_unique_name`, `plugin_by_name`). It is **expected to grow additively in Slice B**, whose capture-review-choose-a-take journey resolves clips and takes; widening this union is an additive change to a Slice A type and does not require renaming or restructuring it. Slice B must widen the union rather than smuggling a clip or take ID through `"track"`.
 
 `CatalogFingerprintV1` pins the three closed catalogs a manifest's `compatibility` block is checked against, matching `SkillManifestV1.compatibility.{commandCatalogSha256,predicateCatalogVersion,resolverCatalogVersion}` exactly: `commandCatalogSha256` is `sha256Bytes(canonicalJsonBytes(...))` over the closed `OWNER_PRIMITIVES_V1.observations` and `OWNER_PRIMITIVES_V1.mutations` descriptors (Task 2), keyed by primitive name — the same `canonicalJsonBytes`/`sha256Bytes` primitives this task defines, no second canonicalization path; `predicateCatalogVersion` is a hand-bumped integer constant pinned to the exact key set of `OWNER_PREDICATES_V1`; `resolverCatalogVersion` is a hand-bumped integer constant pinned to the exact key set of `OWNER_PRIMITIVES_V1.resolvers`. Task 2's `catalogFingerprintV1()` returns exactly this shape once those catalogs exist to fingerprint.
 
