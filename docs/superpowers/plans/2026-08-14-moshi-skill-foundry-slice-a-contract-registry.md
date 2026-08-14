@@ -161,7 +161,7 @@ expect(SKILL_LIMITS_V1).toMatchObject({ maxLoadedLocalSkills:64, manifestBytes:6
   certificationBytes:262144, approvalBytes:16384, releaseBytes:4096,
   startupPackageBytes:8388608, activationEntries:64, sourceStatusEntries:256,
   choices:5, continuations:16, continuationTtlMs:600000, continuationInvalidAttempts:3 });
-expect(await sha256Bytes(utf8Bytes("a\n"))).toBe("87428fc522803d31065e7bce3cf03fe475096631e5e07bbbf2d7b8c15e8e65e");
+expect(await sha256Bytes(utf8Bytes("a\n"))).toBe("87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7");
 expect(new TextDecoder().decode(canonicalJsonBytes({z:1,a:[true,"é"]}))).toBe('{"a":[true,"é"],"z":1}');
 ```
 
@@ -170,6 +170,8 @@ expect(new TextDecoder().decode(canonicalJsonBytes({z:1,a:[true,"é"]}))).toBe('
 Run: `cd ui && npm test -- --run src/agent/skillFoundry/contracts.test.ts`
 
 Expected: FAIL because all three modules are absent.
+
+The hash literal above is the **verified** digest — `printf 'a\n' | shasum -a 256` reproduces it exactly. If `sha256Bytes` disagrees, the implementation is wrong; **never** paste your own output back into the assertion to reach GREEN. That assertion is the only thing pinning exact-byte hashing, and the whole slice's integrity chain rests on it. (An earlier revision of this plan carried a 63-character literal that diverged at character 49 — a paste-back would have turned this test into a tautology.)
 
 - [ ] **Step 3: Define exact contracts and quotas**
 
@@ -253,6 +255,8 @@ Expected: FAIL because catalogs/parsers are absent.
 - [ ] **Step 3: Implement closed descriptors and additive plug-in identity**
 
 Pin native IDs `session-control`, `capture-review-choose-take`, `explicit-balance`, `load-named-plugin`; pin alias `{load_named_plugin:"load-named-plugin"}`. Encode argument types, permitted `ValueRefV1` sources, transaction class, and result schema. In `addExternalPluginMetadata`, add `o.setProperty ("catalogId", PluginHost::idFor (plugin.desc));`; add `catalogId?: string` to `Plugin`. Missing identity fails `plugin_instance_added_once` closed.
+
+`MoshOpsInternal.h` does **not** currently include `PluginHost.h` (it includes `state/Ids.h`, `plugins/spectral/MasterSpectralTapPlugin.h`, and conditionally `plugins/transform/RaveInsertPlugin.h`), so this edit also needs `#include "plugins/hosting/PluginHost.h"` — `PluginHost::idFor` is declared at `src/plugins/hosting/PluginHost.h:102`. **This task's own GREEN command is TypeScript-only and no Catch2 target compiles this header**, so the edit is unverified until Task 4's app build compiles it. Hand the exact header hunk to Task 4 as a known-unverified change, and do not consider Task 2 proven until that build is green. `MoshOpsInternal.h` is included by every `MoshOps*.cpp` translation unit, so this one line forces a large recompile — landing Task 2 before Task 4's app build lets one rebuild absorb both.
 
 - [ ] **Step 4: Implement parsers and every boundary pair**
 
@@ -401,7 +405,7 @@ git commit -m "feat(agent): read certified skills safely"
 - Create: `tests/fixtures/skill-foundry/release-owner-active.json`
 - Test: `ui/src/agent/skillFoundry/registry.test.ts`
 - Test: `ui/src/agent/skillFoundry/adapters.test.ts`
-- Test: `ui/scripts/verifySkillIdentityUniverse.test.ts`
+- Test: `ui/src/agent/skillFoundry/skillIdentityUniverse.test.ts`
 - Modify: `ui/package.json`
 - Modify: `cmake/BuildUI.cmake`
 
@@ -419,9 +423,11 @@ expect(result).toMatchObject({ok:false,code:"duplicate_identity"});
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd ui && npm test -- --run src/agent/skillFoundry/registry.test.ts src/agent/skillFoundry/adapters.test.ts scripts/verifySkillIdentityUniverse.test.ts`
+Run: `cd ui && npm test -- --run src/agent/skillFoundry/registry.test.ts src/agent/skillFoundry/adapters.test.ts src/agent/skillFoundry/skillIdentityUniverse.test.ts`
 
 Expected: FAIL.
+
+The identity-universe test lives at `ui/src/agent/skillFoundry/skillIdentityUniverse.test.ts`, **not** beside the `.mts` script. `ui/vitest.config.ts` sets `include: ["src/**/*.test.ts"]`, and a CLI filter narrows that set rather than extending it — a test under `ui/scripts/` is silently never collected, and "No test files found" for that filter reads as **green** in a run where the other two files pass. The cross-set ID/alias collision gate would ship untested. Test `validateReleaseIdentityUniverseV1` directly from `registry.ts` in `src/`; the `.mts` wrapper is exercised end-to-end by `npm run verify:skill-identities` in Step 4. Confirm the RED is a real import/assertion failure and never "No test files found".
 
 - [ ] **Step 3: Implement atomic registry publication**
 
@@ -433,12 +439,12 @@ Add `verify:skill-identities` to `ui/package.json`. `cmake/BuildUI.cmake` adds a
 
 - [ ] **Step 4: Run GREEN and commit**
 
-Run: `cd ui && npm test -- --run src/agent/skillFoundry/registry.test.ts src/agent/skillFoundry/adapters.test.ts scripts/verifySkillIdentityUniverse.test.ts && npm run typecheck && npm run verify:skill-identities -- --configuration Debug`
+Run: `cd ui && npm test -- --run src/agent/skillFoundry/registry.test.ts src/agent/skillFoundry/adapters.test.ts src/agent/skillFoundry/skillIdentityUniverse.test.ts && npm run typecheck && npm run verify:skill-identities -- --configuration Debug`
 
 Expected: PASS.
 
 ```bash
-git add ui/src/agent/skillFoundry/{registry,nativeAdapter,declarativeAdapter,registry.test,adapters.test}.ts ui/scripts/verifySkillIdentityUniverse{,.test}.ts ui/package.json cmake/BuildUI.cmake resources/skills/{native,declarative}/index.json tests/fixtures/skill-foundry/release-owner-active.json
+git add ui/src/agent/skillFoundry/{registry,nativeAdapter,declarativeAdapter,registry.test,adapters.test}.ts ui/scripts/verifySkillIdentityUniverse.mts ui/src/agent/skillFoundry/skillIdentityUniverse.test.ts ui/package.json cmake/BuildUI.cmake resources/skills/{native,declarative}/index.json tests/fixtures/skill-foundry/release-owner-active.json
 git commit -m "feat(agent): add collision-safe skill registry"
 ```
 
