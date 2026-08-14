@@ -412,7 +412,16 @@ python3 scripts/fms-killshot/overlap.py --selftest
 for t in scripts/fms-killshot/*_test.py; do python3 "$t" || echo "FAILED: $t"; done
 ```
 
-Expected: every command exits 0. Record any failure verbatim before proceeding — a red here changes what Phase 1's result can mean.
+Expected: 20 of 22 pass. **Two are already red on clean `main` and are not caused by this work** — verified by checking out `main` at `6fee7100` and running them directly:
+
+- `scripts/fms-killshot/render_hybrid_test.py:66` — `clip = md["score"][0]` → `KeyError: 'score'`
+- `scripts/fms-killshot/resing_score_test.py:80` — `clip = res["score"][0]` → `KeyError: 'score'`
+
+Both fail on the same case, `authors one clip — no_asserted_scored_lines`: the authoring path returns a result with no `score` key. Every other assertion in both files passes.
+
+These are the SoulX hybrid-render and resing-scoring path. Phase 1 replaces that renderer with YingMusic and reuses only `overlap.py`, `energy_compare.py`, `segment_stt_check.py` and `make_listening_page.py`, none of which are red — so Phase 1 may proceed. **But do not reuse `render_hybrid` or `resing_score` for any Phase-1 measurement.** A scoring path that can return no `score` key is capable of failing open, so if a later phase needs either, fix the `KeyError` and RED-prove it first.
+
+Full baseline recorded outside git at `~/Library/Mosh/audits/2026-08-14-fms-retest/pre-run-test-baseline.md`. Record any *new* failure verbatim before proceeding — a red beyond these two changes what Phase 1's result can mean.
 
 - [ ] **Step 2: Run the native gate on a clean tree**
 
