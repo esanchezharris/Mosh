@@ -1,0 +1,89 @@
+# YingMusic-Singer-Plus — License Review
+
+**Date:** 2026-08-14
+
+**Status:** factual review complete; **not legal advice**. Distribution requires sign-off from someone qualified to give it.
+
+**Trigger:** the owner's Round-3 decision recorded the YingMusic posture as *"potential product backend — promotion-eligible if quality passes, with a formal license review before distribution."* This is that review, done up front so a Phase-1 quality pass does not walk into a licensing surprise.
+
+**Scope:** what the licenses say, what obligations attach, and what would have to be true to ship. It does not decide whether to ship.
+
+---
+
+## 1. The two licenses
+
+Verified against the upstream repository, not a secondary summary.
+
+| Component | License | Source |
+| --- | --- | --- |
+| Code and model weights | **CC BY 4.0** | `github.com/ASLP-lab/YingMusic-Singer-Plus`: *"The code and model weights in this project are licensed under CC BY 4.0"* |
+| The VAE — weights **and** inference code, at `src/YingMusic-Singer/utils/stable-audio-tools` | **Stability AI Community License** | same repo: *"derived from Stable Audio Open by Stability AI, and are licensed under the Stability AI Community License"* |
+
+**Correction to prior notes:** the upstream component is **Stable Audio Open**, not "Stable Audio 2". Earlier internal notes said the latter. The license conclusion is unchanged, but the component name is now stated correctly.
+
+**The VAE is not severable.** It is 156.1M of the model's 727.3M parameters (CFM 453.6M, VAE 156.1M, melody extractor 117.6M). There is no "ship the permissive part only" option — the VAE is how audio is encoded and decoded. The Stability terms therefore govern any shipped build, and they are the binding constraint. CC BY 4.0 is the *looser* of the two and is not what to plan around.
+
+## 2. What the Stability AI Community License actually requires
+
+Verified against the license text distributed with Stable Audio Open (agreement last updated 2024-07-05).
+
+**Revenue gate.** Free for research, non-commercial, **and commercial** use *"unless you're using the Core Models for a commercial purpose and you or your organization generate over USD $1M (or local currency equivalent) of annual revenue, **regardless of the source of that revenue**."* Above that, an Enterprise license and registration with Stability AI are required.
+
+Read that clause carefully: the trigger is **total organizational revenue from any source**, not revenue attributable to Mosh or to this feature. A profitable unrelated business line puts you over the line even if Mosh earns nothing.
+
+**Attribution, on every distribution.** Two distinct obligations:
+
+1. Retain, in a `NOTICE` text file distributed with the work: *"This Stability AI Model is licensed under the Stability AI Community License, Copyright © Stability AI Ltd. All Rights Reserved"*
+2. *"prominently display 'Powered by Stability AI' on a related website, user interface, blogpost, about page, or product documentation."*
+
+Obligation 2 is a **product-surface requirement**, not a legal-boilerplate one. Shipping this backend means "Powered by Stability AI" appears somewhere a user can see. That is a product decision, not only a compliance checkbox.
+
+**Distributing a Derivative Work** additionally requires providing the full agreement to third parties, including the notice file, and — if the model is modified — adding your own attributions, marking which apply to the original materials, and documenting the changes.
+
+**Outputs.** You own them and may use them at your discretion, with two limits: they may not be used to *"create or improve any foundational generative AI model (excluding the Models or Derivative Works)"*, and they remain subject to Stability's Acceptable Use Policy.
+
+## 3. What CC BY 4.0 adds
+
+CC BY 4.0 does not restrict commercial use. It requires attribution to the ASLP-lab authors, a link to the license, and an indication of whether changes were made. It is satisfied by ordinary third-party attribution in the app's licenses screen.
+
+Worth noting rather than acting on: applying CC BY 4.0 to *model weights* is an unusual fit — the license was written for creative works and its notions of "adapted material" map awkwardly onto fine-tunes and quantizations. This creates ambiguity about whether a fine-tuned or quantized derivative must itself carry CC BY 4.0. It is not a blocker; it is a question to put to counsel if Mosh ever fine-tunes these weights rather than shipping them as-is.
+
+## 4. Interaction with the "cloud qualify, local ship" decision
+
+The owner's compute decision was: rent a box to qualify, but **only a local or owner-PC path may become the product backend.** That decision maximizes the licensing surface.
+
+- **Phase 1 as planned — a rented box, internal evaluation, no distribution.** Comfortably inside the license. Nothing here needs resolving before Task 4.
+- **Shipping locally — the intended end state.** Mosh would distribute the weights to end users. Full obligations attach: `NOTICE` file, "Powered by Stability AI" on a user-visible surface, the full agreement passed downstream, plus the revenue gate.
+- **A hosted service instead.** Would avoid distributing weights, but the "Powered by Stability AI" display obligation still attaches to commercial use, and the revenue gate is unaffected.
+
+There is no configuration in which the Stability attribution obligation disappears while the model is in the product.
+
+## 5. What would have to be true to ship
+
+Nothing here blocks Phase 1. All of it blocks distribution.
+
+1. **Confirm Mosh's total annual revenue is under USD $1M**, counting all sources. If it is over — or expected to cross during the product's life — an Enterprise license and registration are required, and their cost is unknown and must be obtained from Stability before this backend is committed to.
+2. **Accept "Powered by Stability AI" on a user-visible surface.** A product call, not a legal one.
+3. **Ship a `NOTICE` file** carrying the required copyright line, and pass the full agreement downstream.
+4. **Attribute ASLP-lab under CC BY 4.0** in the licenses screen, indicating any changes.
+5. **Confirm the Acceptable Use Policy** is compatible with a user-facing vocal-synthesis feature — this is the item most likely to contain a surprise, since AUPs commonly restrict voice cloning and impersonation. **Not yet reviewed; see §6.**
+6. **Have counsel confirm all of the above**, and specifically the CC-BY-4.0-on-weights ambiguity in §3 if Mosh fine-tunes rather than ships as-is.
+
+## 6. Open questions
+
+- **The Stability Acceptable Use Policy has not been reviewed.** It is incorporated by reference and binds both use and outputs. For a feature that renders a *performer's own voice singing new words*, its voice/impersonation provisions are directly on point and could matter more than any other clause in this document. This is the single highest-value follow-up.
+- **Enterprise license cost** is unpublished; only Stability can quote it.
+- **Which entity's revenue counts** — the individual owner, a company, or both — is a fact about Mosh's structure, not about the license.
+- The upstream README documents **Linux and Windows** environments and Python 3.10. It states no macOS or Apple Silicon path. That is an engineering constraint rather than a licensing one, but it bears on "local ship": the local target would be the owner's Windows/NVIDIA machine, not the canonical Apple Silicon build.
+
+## 7. Bottom line
+
+The licensing is **workable but not free of obligations**, and none of the obligations are hidden. Below $1M organizational revenue this is usable commercially, at the price of a visible "Powered by Stability AI" credit, a notice file, and downstream delivery of the agreement. Above $1M it requires a commercial negotiation whose cost is currently unknown.
+
+The one item that could still change the answer is the Acceptable Use Policy's treatment of voice synthesis. That should be read before Phase 1's result creates any pressure to commit.
+
+## Sources
+
+- [YingMusic-Singer-Plus repository](https://github.com/ASLP-lab/YingMusic-Singer-Plus) — license statements for code, weights, and the VAE component
+- [Stability AI license overview](https://stability.ai/license) — revenue threshold and commercial-use terms
+- [Stable Audio Open license text](https://huggingface.co/stabilityai/stable-audio-open-1.0/blob/main/LICENSE.md) — attribution, notice, and Derivative Work obligations

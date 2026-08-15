@@ -6,7 +6,7 @@
 
 **Architecture:** Three phases, strictly gated. Phase 1 is a known-text renderer kill-shot: the target words are *given*, so it isolates render quality from the mumble-interpretation problem that failed in 2026-08. It runs on a rented NVIDIA box against three existing owner vocal pairs and is judged by the owner unblinded. Phase 1 failing ends the retest. Phase 1 passing unlocks only Phase 2 — a backend-blind confirmation of the frozen winners — and only Phase 2 may reopen product integration. Phase 3 (mumble interpretation, then one-click Mosh proof) is specified but not authorized by this plan.
 
-**Tech Stack:** Python 3 (stdlib + existing `~/Library/Mosh/venvs/lyrics-bench`), YingMusic-Singer-Plus (~727M params, Stable Audio 2 VAE + flow-matching DiT, CUDA-only), a rented NVIDIA GPU box (RunPod-class), the existing `scripts/fms-killshot/` analysis tooling, and the Mosh native gate.
+**Tech Stack:** Python 3 (stdlib + existing `~/Library/Mosh/venvs/lyrics-bench`), YingMusic-Singer-Plus (~727M params, Stable Audio Open VAE + flow-matching DiT, CUDA-only), a rented NVIDIA GPU box (RunPod-class), the existing `scripts/fms-killshot/` analysis tooling, and the Mosh native gate.
 
 ## Scope note
 
@@ -546,7 +546,7 @@ backend-blind confirmation** — not product integration, not a shipping claim.
 
 - [ ] **Step 2: Note the license position**
 
-The owner chose "potential product backend." Record that YingMusic-Singer-Plus is CC BY 4.0 for code and main weights, **but its Stable Audio 2 VAE component carries the separate Stability AI Community License** — not simple permissive. A formal license review is required before distribution, and is not satisfied by a quality pass.
+The owner chose "potential product backend." The review is already done: [`docs/superpowers/specs/2026-08-14-yingmusic-license-review.md`](../specs/2026-08-14-yingmusic-license-review.md). Carry its §5 conditions into the verdict — in particular that the $1M Stability revenue gate counts **total organizational revenue from any source**, and that shipping requires a visible "Powered by Stability AI" credit. Its one unresolved item is the Stability Acceptable Use Policy's treatment of voice synthesis, which should be read before a Phase-1 pass creates pressure to commit.
 
 - [ ] **Step 3: Commit and open a PR**
 
