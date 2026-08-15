@@ -377,6 +377,11 @@ export type Plugin = {
   params: PluginParam[];
   rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
   moshFx?: MoshFxReadout;
+  // Stable plugin-catalog identity (PluginHost::idFor), set for every external plugin —
+  // the Skill Foundry's plugin_instance_added_once predicate compares this against a
+  // resolved plugin_by_name binding's identity (docs/superpowers/plans/
+  // 2026-08-14-moshi-skill-foundry-slice-a-contract-registry.md, Task 2).
+  catalogId?: string;
 };
 
 export type AvailablePlugin = {
