@@ -19,7 +19,18 @@ Verified against the upstream repository, not a secondary summary.
 | Code and model weights | **CC BY 4.0** | `github.com/ASLP-lab/YingMusic-Singer-Plus`: *"The code and model weights in this project are licensed under CC BY 4.0"* |
 | The VAE — weights **and** inference code, at `src/YingMusic-Singer/utils/stable-audio-tools` | **Stability AI Community License** | same repo: *"derived from Stable Audio Open by Stability AI, and are licensed under the Stability AI Community License"* |
 
-**Correction to prior notes:** the upstream component is **Stable Audio Open**, not "Stable Audio 2". Earlier internal notes said the latter. The license conclusion is unchanged, but the component name is now stated correctly.
+**The project contradicts itself about which Stability model the VAE comes from, and this is unresolved.**
+
+- The README says the VAE is *"derived from Stable Audio Open by Stability AI"*, and the repo ships `LICENSE-STABILITY` — verbatim *"STABILITY AI COMMUNITY LICENSE AGREEMENT, Last Updated: July 5, 2024"*, which is the licence Stable Audio Open 1.0 is released under.
+- But `initialization.py` names the checkpoint **`stable_audio_2_0_vae_20hz_official.ckpt`**.
+
+Those are different releases. Stable Audio Open 1.0's weights are publicly released under the Community License. **Stable Audio 2.0's are not released on that footing.** If the shipped VAE is genuinely from Stable Audio 2.0, the README's licence claim may not cover it — which would be an upstream problem rather than one Mosh created, but Mosh would inherit the exposure by distributing it.
+
+Benign readings exist: the filename may be a misnomer, or may refer to the architecture lineage (both are built on the `stable-audio-tools` codebase) rather than the 2.0 release weights. I could not resolve it from the repository alone.
+
+**Status: open, and it is now the review's most material unknown.** It does not affect Phase 1, which is internal research use. It must be resolved before distribution — by asking the upstream authors directly which checkpoint the VAE derives from, and getting the answer in writing.
+
+*(This supersedes an earlier note in this document that "corrected" the component name to Stable Audio Open. That correction was premature — it trusted the README over the code.)*
 
 **The VAE is not severable.** It is 156.1M of the model's 727.3M parameters (CFM 453.6M, VAE 156.1M, melody extractor 117.6M). There is no "ship the permissive part only" option — the VAE is how audio is encoded and decoded. The Stability terms therefore govern any shipped build, and they are the binding constraint. CC BY 4.0 is the *looser* of the two and is not what to plan around.
 
