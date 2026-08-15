@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { canonicalJsonBytes, sha256Bytes, utf8Bytes } from "./hash";
-import { SKILL_LIMITS_V1 } from "./limits";
+import { FOUNDRY_LIMITS_V1, SKILL_LIMITS_V1 } from "./limits";
 
 describe("SKILL_LIMITS_V1", () => {
   it("matches the frozen v1 quotas", () => {
@@ -25,6 +25,50 @@ describe("SKILL_LIMITS_V1", () => {
       continuations: 16,
       continuationTtlMs: 600000,
       continuationInvalidAttempts: 3,
+    });
+  });
+});
+
+// The manifest-content quotas need the SAME literal pin, and for a reason that is easy to
+// miss: every boundary test in validate.test.ts is written RELATIVE to this object
+// (`withSlotCount(FOUNDRY_LIMITS_V1.slots)` / `... + 1`). Those tests correctly prove the
+// validator enforces whatever the constant says — but they follow the constant wherever it
+// goes. Loosening `slots: 16` to `9999` keeps the entire suite green, which was verified by
+// mutation before this test existed. Without the pin below, any future repair loop can widen
+// a quota to make something pass and nothing goes red: the "test that cannot fail" shape
+// CLAUDE.md calls this repo's recurring failure mode.
+//
+// Values are the design spec's quota table (`docs/superpowers/specs/
+// 2026-08-14-moshi-skill-foundry-design.md` §8.1), checked row by row. `toEqual`, not
+// `toMatchObject`, so a silently ADDED quota also reds — a new bound is a deliberate
+// contract change and should have to be stated here.
+describe("FOUNDRY_LIMITS_V1", () => {
+  it("matches the frozen v1 manifest-content quotas", () => {
+    expect(FOUNDRY_LIMITS_V1).toEqual({
+      skillIdChars: 64,
+      titleChars: 80,
+      descriptionChars: 512,
+      positiveExamples: 32,
+      negativeExamples: 32,
+      exampleChars: 256,
+      tags: 16,
+      enumValues: 32,
+      slots: 16,
+      preconditions: 16,
+      declaredStepNodes: 32,
+      expandedPreflightCalls: 32,
+      expandedMutationCommands: 32,
+      postconditions: 16,
+      argumentsPerCall: 16,
+      provenanceReferences: 32,
+      claimIdsPerReference: 16,
+      maxChoices: 5,
+      stringSlotChars: 1024,
+      listSlotItems: 16,
+      maxMutationsMin: 1,
+      maxMutationsMax: 32,
+      timeoutMsMin: 100,
+      timeoutMsMax: 120000,
     });
   });
 });
