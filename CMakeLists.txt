@@ -156,6 +156,82 @@ else()
     set(MOSH_USE_WIN_WEBVIEW2 0)
 endif()
 
+# ── Native build identity (Skill Foundry Task 4) ──────────────────────────────
+# CertifiedSkillLoader::readBundledNativeFromApplication() (src/agent/CertifiedSkillLoader.cpp)
+# stamps every bundled native-skill package with an EXACT build identity —
+# nativeIdentity.ts's canonicalMoshBuildIdentityV1 accepts ONLY the literal shape
+# `git=<40-lower-hex>|version=<SemVer>|target=Mosh|configuration=Release|architecture=arm64`,
+# and a Release build with a dirty/unknown git state or a stale commit fails closed. Set here
+# (before both the Mosh and MoshTests targets, which are configured further down / in
+# tests/CMakeLists.txt via add_subdirectory) so both see the SAME values. Unavailable git
+# info becomes the literal string "unknown", never a guessed value.
+#
+# Tracked via CMAKE_CONFIGURE_DEPENDS on .git/HEAD and whatever ref it points at, so an
+# amended/checked-out HEAD forces a reconfigure instead of silently baking in a stale commit
+# until someone remembers to re-run cmake by hand.
+set(MOSH_GIT_COMMIT "unknown")
+set(MOSH_GIT_STATE "unknown")
+find_package(Git QUIET)
+if (GIT_EXECUTABLE AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    set(_mosh_git_head_file "${CMAKE_SOURCE_DIR}/.git/HEAD")
+    if (EXISTS "${_mosh_git_head_file}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_mosh_git_head_file}")
+        file(READ "${_mosh_git_head_file}" _mosh_git_head_contents)
+        string(STRIP "${_mosh_git_head_contents}" _mosh_git_head_contents)
+        if (_mosh_git_head_contents MATCHES "^ref: (.+)$")
+            set(_mosh_git_ref_file "${CMAKE_SOURCE_DIR}/.git/${CMAKE_MATCH_1}")
+            if (EXISTS "${_mosh_git_ref_file}")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_mosh_git_ref_file}")
+            endif()
+        endif()
+        unset(_mosh_git_ref_file)
+        unset(_mosh_git_head_contents)
+    endif()
+    unset(_mosh_git_head_file)
+
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE _mosh_git_commit_out
+        RESULT_VARIABLE _mosh_git_commit_result
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if (_mosh_git_commit_result EQUAL 0 AND _mosh_git_commit_out MATCHES "^[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]$")
+        set(MOSH_GIT_COMMIT "${_mosh_git_commit_out}")
+
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" status --porcelain
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE _mosh_git_dirty_out
+            RESULT_VARIABLE _mosh_git_dirty_result
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if (_mosh_git_dirty_result EQUAL 0)
+            if (_mosh_git_dirty_out STREQUAL "")
+                set(MOSH_GIT_STATE "clean")
+            else()
+                set(MOSH_GIT_STATE "dirty")
+            endif()
+        endif()
+        unset(_mosh_git_dirty_out)
+        unset(_mosh_git_dirty_result)
+    endif()
+    unset(_mosh_git_commit_out)
+    unset(_mosh_git_commit_result)
+endif()
+message(STATUS "Mosh build identity: git=${MOSH_GIT_COMMIT} state=${MOSH_GIT_STATE}")
+
+# Fixed Apple-Silicon-only architecture tuple (see the arm64-only note near the top of this
+# file); a non-Apple host falls back to CMAKE_SYSTEM_PROCESSOR so a Linux/Windows build still
+# stamps SOMETHING deterministic rather than an empty string (that build's identity will
+# never satisfy canonicalMoshBuildIdentityV1's arm64-only Release check regardless — this is
+# purely so the loader's `build` envelope is never blank on those platforms).
+if (APPLE)
+    set(MOSH_BUILD_ARCHITECTURE "${CMAKE_OSX_ARCHITECTURES}")
+else()
+    set(MOSH_BUILD_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
 # ── The app target ───────────────────────────────────────────────────────────
 if (MOSH_BUILD_APP)
     set(MOSH_APP_EXTRA_ARGS "")
@@ -265,7 +341,13 @@ if (MOSH_BUILD_APP)
         src/training/TrainingJobManager.cpp
         # iPhone companion remote control + phone-take ingest
         src/remote/RemoteCompanionProtocol.cpp
-        src/remote/RemoteCompanionServer.cpp)
+        src/remote/RemoteCompanionServer.cpp
+        # Skill Foundry Task 4 — engine-free native safe loader for certified skill
+        # packages (see the file header for the security contract). Registered here
+        # so the ordinary Mosh app build compiles it; tests/CMakeLists.txt also
+        # compiles it directly into MoshTests (it has zero tracktion_engine
+        # dependency, same posture as AgentMemoryStore.h).
+        src/agent/CertifiedSkillLoader.cpp)
 
     set(MOSH_VST3_HOSTING_SDK
         "${tracktion_engine_SOURCE_DIR}/modules/juce/modules/juce_audio_processors_headless/format_types/VST3_SDK/public.sdk/source/vst/hosting")
@@ -301,6 +383,14 @@ if (MOSH_BUILD_APP)
         TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1
         # Mosh build identity / stage flags
         MOSH_VERSION_STRING="${PROJECT_VERSION}"
+        # Skill Foundry Task 4 — the rest of the native build-identity tuple
+        # CertifiedSkillLoader::readBundledNativeFromApplication() stamps onto every
+        # bundled native-skill package (see the "Native build identity" block above,
+        # computed once before this target so MoshTests can share the same values).
+        MOSH_GIT_COMMIT_STRING="${MOSH_GIT_COMMIT}"
+        MOSH_GIT_STATE_STRING="${MOSH_GIT_STATE}"
+        MOSH_BUILD_ARCHITECTURE_STRING="${MOSH_BUILD_ARCHITECTURE}"
+        MOSH_BUILD_CONFIGURATION_STRING="$<CONFIG>"
         # RT-safety tripwire — Debug ONLY. Release leaves MOSH_RT_GUARD undefined so the
         # guard header collapses to inline no-ops and RealtimeAudioGuard.cpp compiles to
         # nothing (no global operator new override) → Release binary byte-unaffected.
