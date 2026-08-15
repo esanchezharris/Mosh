@@ -622,12 +622,27 @@ TEST_CASE ("readBundledNative: a missing resources root is a HARD failure (unlik
     REQUIRE (countDiagnosticsWithCode (result.getProperty ("diagnostics", var()), "root_unreachable") == 1);
 }
 
-TEST_CASE ("readBundledNative: a relative root is a hard failure", "[skillfoundry][loader]")
-{
-    auto result = CertifiedSkillLoader::readBundledNative (File ("relative/resources/dir"));
-    REQUIRE_FALSE ((bool) result.getProperty ("ok", true));
-    REQUIRE (countDiagnosticsWithCode (result.getProperty ("diagnostics", var()), "root_unreachable") == 1);
-}
+// DELIBERATELY NOT TESTED: "readBundledNative rejects a relative root".
+//
+// There is no such contract to test, for two independent reasons, and a test that claimed
+// otherwise lived here until it was removed — it passed, but never for the reason its name gave.
+//
+// 1. A `juce::File` cannot carry relativeness at all. `parseAbsolutePath` resolves a relative
+//    string against `File::getCurrentWorkingDirectory()` inside the constructor
+//    (juce_File.cpp:227), so `File ("relative/resources/dir")` is already absolute here. The old
+//    test passed only because <cwd>/relative/resources/dir happens not to exist and therefore
+//    failed the `! isDirectory()` arm of the same guard — i.e. it silently duplicated the
+//    "missing resources root" case directly above, while also tripping the Debug-mode
+//    `jassertfalse` in that constructor and printing a spurious assertion on every run.
+// 2. Unlike the owner root, this path has no user-controlled string seam to attack:
+//    `readBundledNativeFromApplication()` derives it from `nativeSkillsResourcesDir()` inside the
+//    app bundle. There is no `$MOSH_AGENT_DIR` equivalent for bundled native skills, so a relative
+//    override is not reachable input.
+//
+// The owner-root case is the one that DOES matter, and it is covered — a relative
+// `$MOSH_AGENT_DIR` is rejected on the raw environment string before any `juce::File` exists,
+// because the `File`-level guard is unreachable for reason (1). See the
+// `readFromEnvironment` / `readSourceStatusFromEnvironment` cases above.
 
 #else // JUCE_WINDOWS
 
