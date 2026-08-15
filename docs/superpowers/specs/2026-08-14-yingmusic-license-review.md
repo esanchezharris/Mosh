@@ -66,12 +66,24 @@ Nothing here blocks Phase 1. All of it blocks distribution.
 2. **Accept "Powered by Stability AI" on a user-visible surface.** A product call, not a legal one.
 3. **Ship a `NOTICE` file** carrying the required copyright line, and pass the full agreement downstream.
 4. **Attribute ASLP-lab under CC BY 4.0** in the licenses screen, indicating any changes.
-5. **Confirm the Acceptable Use Policy** is compatible with a user-facing vocal-synthesis feature — this is the item most likely to contain a surprise, since AUPs commonly restrict voice cloning and impersonation. **Not yet reviewed; see §6.**
+5. **The Acceptable Use Policy has now been reviewed — it does not block this feature.** See §5a.
 6. **Have counsel confirm all of the above**, and specifically the CC-BY-4.0-on-weights ambiguity in §3 if Mosh fine-tunes rather than ships as-is.
+
+## 5a. Acceptable Use Policy — reviewed, does not block
+
+The AUP (as published, last updated 2025-07-31) is incorporated by reference and binds both use and outputs. It was the item most likely to contain a surprise. It does not.
+
+**It contains no provision addressing voice cloning, voice synthesis, or generating a person's voice or likeness**, and no restriction specific to music, singing, or audio generation. The nearest applicable clause is the impersonation prohibition: *"Impersonation of others without consent or legal right, including defamatory content"*, together with a requirement to *"appropriately disclose when someone is interacting with AI where it is not apparent."*
+
+For the feature as scoped, that clause is satisfied by construction. The scope lock is a performer completing **their own** vocal, from **their own** enrollment clip — the consent question the impersonation clause exists to police does not arise. Two things follow rather than block:
+
+- **Keep the scope lock enforced in the product, not just the plan.** The AUP's protection here comes entirely from the fact that the voice is the user's own. A future feature that let a user enroll *someone else's* voice would land squarely inside the impersonation prohibition and would need its own consent mechanism.
+- **The disclosure clause is live.** Rendered vocals should be identifiable as AI-rendered where that is not otherwise apparent. This is cheap to honor and is an ordinary product affordance.
+
+Standing caveat: AUPs are updated unilaterally and this one is notably thin on voice — a domain regulators are actively moving on. Re-read it before shipping rather than relying on this snapshot.
 
 ## 6. Open questions
 
-- **The Stability Acceptable Use Policy has not been reviewed.** It is incorporated by reference and binds both use and outputs. For a feature that renders a *performer's own voice singing new words*, its voice/impersonation provisions are directly on point and could matter more than any other clause in this document. This is the single highest-value follow-up.
 - **Enterprise license cost** is unpublished; only Stability can quote it.
 - **Which entity's revenue counts** — the individual owner, a company, or both — is a fact about Mosh's structure, not about the license.
 - The upstream README documents **Linux and Windows** environments and Python 3.10. It states no macOS or Apple Silicon path. That is an engineering constraint rather than a licensing one, but it bears on "local ship": the local target would be the owner's Windows/NVIDIA machine, not the canonical Apple Silicon build.
@@ -80,10 +92,11 @@ Nothing here blocks Phase 1. All of it blocks distribution.
 
 The licensing is **workable but not free of obligations**, and none of the obligations are hidden. Below $1M organizational revenue this is usable commercially, at the price of a visible "Powered by Stability AI" credit, a notice file, and downstream delivery of the agreement. Above $1M it requires a commercial negotiation whose cost is currently unknown.
 
-The one item that could still change the answer is the Acceptable Use Policy's treatment of voice synthesis. That should be read before Phase 1's result creates any pressure to commit.
+The item that could have changed the answer — the Acceptable Use Policy's treatment of voice synthesis — has now been read, and does not block the feature as scoped (§5a). What remains is commercial and structural: confirm the revenue position, accept the visible credit, and have counsel sign off.
 
 ## Sources
 
 - [YingMusic-Singer-Plus repository](https://github.com/ASLP-lab/YingMusic-Singer-Plus) — license statements for code, weights, and the VAE component
 - [Stability AI license overview](https://stability.ai/license) — revenue threshold and commercial-use terms
 - [Stable Audio Open license text](https://huggingface.co/stabilityai/stable-audio-open-1.0/blob/main/LICENSE.md) — attribution, notice, and Derivative Work obligations
+- [Stability AI Acceptable Use Policy](https://stability.ai/use-policy) — impersonation and disclosure clauses (§5a)
