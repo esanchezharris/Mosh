@@ -26,6 +26,8 @@
 
 #include "agent/CertifiedSkillLoader.h"
 
+#include <cstdlib>
+
 #if ! JUCE_WINDOWS
  #include <fcntl.h>
  #include <sys/stat.h>
@@ -80,6 +82,35 @@ namespace
                 out.add (p.getProperty ("directoryName", var()).toString());
         return out;
     }
+
+    // Mirrors tests/test_brain_proxy.cpp / tests/test_generative_jobmanager.cpp's ScopedEnv
+    // exactly: sets an env var for the scope, restores the prior value (or unsets) on exit.
+    // Used ONLY by the readFromEnvironment()/readSourceStatusFromEnvironment() test below —
+    // this repo's own --selftest machinery also reads $MOSH_AGENT_DIR (see CLAUDE.md), so
+    // it must never leak a value past its one TEST_CASE.
+    struct ScopedEnv
+    {
+        const char* key;
+        juce::String prev;
+        bool had = false;
+        ScopedEnv (const char* k, const juce::String& v) : key (k)
+        {
+            if (auto* p = std::getenv (k)) { prev = p; had = true; }
+           #if JUCE_WINDOWS
+            _putenv_s (k, v.toRawUTF8());
+           #else
+            ::setenv (k, v.toRawUTF8(), 1);
+           #endif
+        }
+        ~ScopedEnv()
+        {
+           #if JUCE_WINDOWS
+            _putenv_s (key, had ? prev.toRawUTF8() : "");
+           #else
+            if (had) ::setenv (key, prev.toRawUTF8(), 1); else ::unsetenv (key);
+           #endif
+        }
+    };
 
 #if ! JUCE_WINDOWS
     void chmodOwnerOnly (const File& f)
@@ -166,12 +197,33 @@ TEST_CASE ("read: a single valid package is admitted with exact bytes and a veri
     REQUIRE (skillFile.getProperty ("utf8", var()).toString() == "{\"tag\":\"skill\"}");
 }
 
-TEST_CASE ("read: a relative $MOSH_AGENT_DIR override fails closed with zero packages",
+// NOTE: this used to call CertifiedSkillLoader::read (File ("relative/agent/dir")) directly.
+// That cannot exercise the "relative" contract: juce::File's constructor (parseAbsolutePath)
+// silently resolves a relative string against the process CWD, so by the time read() sees a
+// juce::File it is ALREADY absolute — the isAbsolutePath guard inside read() is structurally
+// unreachable through that seam. The real (and only) place a relative $MOSH_AGENT_DIR is still
+// observable as relative is the raw environment-variable STRING, before any juce::File is
+// constructed from it — i.e. inside readFromEnvironment()/readSourceStatusFromEnvironment().
+// This test now exercises that real seam. ScopedEnv save/restores $MOSH_AGENT_DIR so no other
+// test (or this repo's own --selftest machinery, which also reads $MOSH_AGENT_DIR) observes it.
+TEST_CASE ("readFromEnvironment: a relative $MOSH_AGENT_DIR override fails closed with zero packages",
            "[skillfoundry][loader]")
 {
-    auto result = CertifiedSkillLoader::read (File ("relative/agent/dir"));
+    ScopedEnv env ("MOSH_AGENT_DIR", "relative/agent/dir");
+
+    auto result = CertifiedSkillLoader::readFromEnvironment();
     REQUIRE_FALSE ((bool) result.getProperty ("ok", true));
     REQUIRE (result.getProperty ("packages", var()).size() == 0);
+    REQUIRE (countDiagnosticsWithCode (result.getProperty ("diagnostics", var()), "root_not_absolute") == 1);
+}
+
+TEST_CASE ("readSourceStatusFromEnvironment: a relative $MOSH_AGENT_DIR override fails closed",
+           "[skillfoundry][loader]")
+{
+    ScopedEnv env ("MOSH_AGENT_DIR", "relative/agent/dir");
+
+    auto result = CertifiedSkillLoader::readSourceStatusFromEnvironment();
+    REQUIRE_FALSE ((bool) result.getProperty ("ok", true));
     REQUIRE (countDiagnosticsWithCode (result.getProperty ("diagnostics", var()), "root_not_absolute") == 1);
 }
 

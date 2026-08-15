@@ -109,8 +109,15 @@ struct CertifiedSkillLoader
     /** Pure: the agent root for a given override string (empty => the real default,
         ~/Library/Mosh/agent — identical to AgentMemoryStore::resolveGlobalRoot(), a
         SIBLING subtree of the same root, not a competing one). Does NOT itself validate
-        absoluteness or safety — a relative or unsafe override is still returned here
-        verbatim; read()/readSourceStatus() are what fail it closed. */
+        absoluteness or safety — an unsafe override is still returned here verbatim;
+        read()/readSourceStatus() are what fail it closed on unsafe roots (wrong owner,
+        group/world-writable, symlink). NOTE: relativeness specifically canNOT be caught
+        this way, because juce::File's constructor (parseAbsolutePath) silently resolves a
+        relative string against the process's CWD before this function — or read() — ever
+        sees it; by the time a juce::File exists, it is always absolute. That is why
+        readFromEnvironment()/readSourceStatusFromEnvironment() check
+        juce::File::isAbsolutePath() on the raw environment STRING before constructing a
+        juce::File at all — the only seam where a relative override is still observable. */
     static juce::File resolveAgentRoot (const juce::String& overrideDir);
 
     /** Full owner-package load: activeIndex + sourceStatusIndex + every admitted package

@@ -437,11 +437,20 @@ namespace
                 return result;
             }
 
-        auto* pkg = new juce::DynamicObject();
+        // Both DynamicObjects are wrapped in a juce::var IMMEDIATELY at allocation, not at
+        // the end of the function: the loop below can return early (a single bad leaf
+        // quarantines the whole package), and a raw `new DynamicObject()` held only in a
+        // local pointer across that early return would leak — nothing would ever have
+        // incremented its refcount, so no destructor would ever free it. Holding each in a
+        // juce::var from the start means an early return still runs the var's destructor,
+        // which drops the refcount to zero and frees it.
+        juce::var pkgVar (new juce::DynamicObject());
+        auto* pkg = pkgVar.getDynamicObject();
         pkg->setProperty ("directoryName", directoryName);
         pkg->setProperty ("skillIdFromDirectory", id);
         pkg->setProperty ("versionFromDirectory", version);
-        auto* files = new juce::DynamicObject();
+        juce::var filesVar (new juce::DynamicObject());
+        auto* files = filesVar.getDynamicObject();
         juce::int64 totalBytes = 0;
         for (const auto& spec : leafSpecs)
         {
@@ -455,10 +464,10 @@ namespace
             files->setProperty (spec.jsonKey, leaf.fileVar);
             totalBytes += (juce::int64) leaf.fileVar.getProperty ("bytes", 0);
         }
-        pkg->setProperty ("files", juce::var (files));
+        pkg->setProperty ("files", filesVar);
 
         result.ok = true;
-        result.packageVar = juce::var (pkg);
+        result.packageVar = pkgVar;
         result.totalBytes = totalBytes;
         return result;
     }
@@ -686,6 +695,22 @@ juce::var CertifiedSkillLoader::read (const juce::File& agentRoot)
 juce::var CertifiedSkillLoader::readFromEnvironment()
 {
     const auto overrideDir = juce::SystemStats::getEnvironmentVariable ("MOSH_AGENT_DIR", {}).trim();
+
+    // Check absoluteness at the STRING level, before any juce::File is constructed.
+    // juce::File's constructor (parseAbsolutePath) silently resolves a relative path
+    // against the process's current working directory — by the time resolveAgentRoot()
+    // hands back a juce::File, relativeness is no longer observable, so read()'s
+    // isAbsolutePath guard on agentRoot.getFullPathName() can never fire for this seam.
+    // A relative $MOSH_AGENT_DIR must fail closed HERE, or it silently reads packages
+    // from a CWD-relative location.
+    if (overrideDir.isNotEmpty() && ! juce::File::isAbsolutePath (overrideDir))
+    {
+        juce::Array<juce::var> diagnostics;
+        diagnostics.add (makeDiagnostic (overrideDir, "root_not_absolute",
+            "$MOSH_AGENT_DIR override must be an absolute path"));
+        return makeCertifiedSkillLoadResult (false, {}, {}, {}, diagnostics, 0);
+    }
+
     return read (resolveAgentRoot (overrideDir));
 }
 
@@ -735,6 +760,17 @@ juce::var CertifiedSkillLoader::readSourceStatus (const juce::File& agentRoot)
 juce::var CertifiedSkillLoader::readSourceStatusFromEnvironment()
 {
     const auto overrideDir = juce::SystemStats::getEnvironmentVariable ("MOSH_AGENT_DIR", {}).trim();
+
+    // See readFromEnvironment() above: the string-level check must happen before a
+    // juce::File is ever constructed from overrideDir, or relativeness is unobservable.
+    if (overrideDir.isNotEmpty() && ! juce::File::isAbsolutePath (overrideDir))
+    {
+        juce::Array<juce::var> diagnostics;
+        diagnostics.add (makeDiagnostic (overrideDir, "root_not_absolute",
+            "$MOSH_AGENT_DIR override must be an absolute path"));
+        return makeSourceStatusResult (false, {}, diagnostics);
+    }
+
     return readSourceStatus (resolveAgentRoot (overrideDir));
 }
 
