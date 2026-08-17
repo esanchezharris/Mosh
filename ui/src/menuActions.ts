@@ -90,7 +90,10 @@ export interface ActionStore {
   reconcileTransport?: (transport: Partial<ActionStore["transport"]>) => void;
   projectTransitioning?: boolean;
   currentMode?: () => "idle" | "recording" | "reviewing";
-  enterRecord?: (bar?: number) => Promise<void>;
+  // Skill Foundry Slice B, Task 2 — the store's enterRecord now resolves to a
+  // RecordingStoreOutcomeV1 this call site never inspects; Promise<unknown> keeps this
+  // action-store shape decoupled from that result type.
+  enterRecord?: (bar?: number) => Promise<unknown>;
   toggleRecord?: () => Promise<void>;
   snapshot?: Snapshot | null;
   clipboard?: unknown;
