@@ -482,6 +482,9 @@ _training_lock = threading.Lock()
 # The trainer SUBPROCESS deliberately does not hold this: it is a separate
 # process with its own Metal budget, and holding the lock for a 20-60 minute
 # run would freeze every render in the app.
+import memprobe          # noqa: E402 — cheap (~4ms) system-memory probe
+import sa3_release       # noqa: E402 — pure release-decision thresholds
+
 _mlx_lock = threading.RLock()
 
 
@@ -769,15 +772,54 @@ def _run_training_job(job_id: str) -> None:
         })
 
 
+def _training_active() -> bool:
+    with _training_lock:
+        return any(j.get("status") in ("queued", "running")
+                   for j in _training_jobs.values())
+
+
+def _maybe_release_sa3() -> None:
+    """Hand the render model's ~9.2 GB back when memory is genuinely tight.
+
+    Runs on the MLX-owning thread, between jobs, so no render is in flight.
+    Costs the next audition a measured +1.1 s (2.8 s -> 3.9 s steady state),
+    which is why it is gated rather than unconditional — see `sa3_release` for
+    the thresholds and the measurements behind them.
+    """
+    if _job_q.qsize():
+        return                      # more work queued: releasing now is pure loss
+    try:
+        from sa3 import engine as E
+    except Exception:               # noqa: BLE001 — FakeAdapter-only machine
+        return
+    if not E.loaded():
+        return
+    available = memprobe.available_fraction()
+    active = _training_active()
+    if not sa3_release.should_release(available, active):
+        return
+    if E.unload():
+        # Logged because an unexplained extra second on the next take is exactly
+        # the kind of thing that gets diagnosed as "the model got slower".
+        print(f"[sa3] released the render model — {sa3_release.explain(available, active)}",
+              flush=True)
+
+
 def _worker_loop() -> None:
     """The ONE thread that ever runs an adapter — serializes inference so the
-    process-global MLX model is never touched concurrently (05 §6 priority queue)."""
+    process-global MLX model is never touched concurrently (05 §6 priority queue).
+    Also the ONE thread that may touch MLX at all: the state is thread-affine
+    (see `_run_on_mlx_thread`), which is why the release check lives here too."""
     while True:
         _prio, _seq_n, job_id = _job_q.get()
         try:
             _run_job(job_id)
         finally:
             _job_q.task_done()
+            try:
+                _maybe_release_sa3()
+            except Exception as e:  # noqa: BLE001 — never let housekeeping kill the worker
+                print(f"[sa3] release check failed: {e}", flush=True)
 
 
 def _training_worker_loop() -> None:

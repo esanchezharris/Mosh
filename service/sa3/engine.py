@@ -17,6 +17,7 @@ contiguous-first path; the coverage stitch fallback only covers clips past the c
 """
 from __future__ import annotations
 
+import gc
 import math
 import os
 import sys
@@ -61,6 +62,57 @@ def get_engine():
         if _engine is None:
             _engine = _Engine()
         return _engine
+
+
+def loaded() -> bool:
+    """Is the model currently resident? (~9.2 GB when true.)"""
+    return _engine is not None
+
+
+def unload() -> bool:
+    """Drop the singleton and hand MLX's memory back. True if something was freed.
+
+    Measured on the reference Mac: the resident model is **9.2 GB** (service
+    footprint 30 MB -> 9,168 MB after one render), and this genuinely returns it
+    — a probe that built the engine, evaluated conditioning, then dropped it and
+    called `clear_cache()` went **5,935 MB -> 451 MB**. The next render pays a
+    reload measured at **+1.1 s** (steady state 2.8 s keeping the model vs 3.9 s
+    releasing between takes, 3 samples each in one process).
+
+    That +1.1 s replaces an earlier +3.6 s estimate, which was wrong: it compared
+    a cold PROCESS against a warm one and so charged this reload for Python
+    startup and a cold page cache as well. The weights stay in the OS page cache
+    across a release, which is most of why the real cost is small.
+
+    Both halves are required. Dropping the reference alone leaves MLX holding
+    the buffers in its own cache, so the memory does NOT come back and the only
+    thing achieved is a 3.6 s reload later — the worst of both.
+
+    MUST be called on the single MLX-owning thread (`server.py`'s render worker),
+    for the same reason everything else touching MLX must: the state is
+    thread-affine, not merely non-concurrent. Never call it with a render in
+    flight — the engine is process-global and mutated per call.
+    """
+    global _engine
+    with _engine_lock:
+        if _engine is None:
+            return False
+        _engine = None
+
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+    except AttributeError:
+        try:
+            import mlx.core as mx
+            mx.metal.clear_cache()   # older MLX
+        except Exception as e:  # noqa: BLE001
+            print(f"[sa3] clear_cache unavailable: {e}", flush=True)
+    except Exception as e:  # noqa: BLE001 — mlx absent (FakeAdapter-only machine)
+        print(f"[sa3] clear_cache skipped: {e}", flush=True)
+    gc.collect()
+    return True
 
 
 class _Engine:

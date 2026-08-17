@@ -38,9 +38,12 @@ That is a real tension in the product, because "listen while it trains" is
 exactly what the Lab is for. It is NOT yet handled here: `batch_plan` still
 budgets for the trainer alone. The options, none of them free, are to reserve
 render headroom in the plan (smaller batch, slower training, for everyone),
-release the render model between auditions (a ~1.7 s reload per take), or
-simply warn. Pick one deliberately rather than letting a producer discover it
-as "training got mysteriously slow".
+release the render model between auditions, or simply warn.
+
+RESOLVED 2026-08-17: the release path shipped (`sa3.engine.unload` +
+`sa3_release`), gated on a ~4 ms free-memory probe so it fires only when memory
+is actually tight — 45% free while a run is active, 30% idle. Measured cost when
+it does fire: **+1.1 s per audition**, returning 9.2 GB.
 """
 
 from __future__ import annotations
