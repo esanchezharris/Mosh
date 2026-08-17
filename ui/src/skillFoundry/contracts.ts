@@ -6,7 +6,15 @@
 // semantic authority for every runtime artifact shape. New type groups are appended here,
 // task by task, each under its own banner comment naming the task that introduced it.
 //
-import type { SourceStatusV1 as SliceASourceStatusV1 } from "../agent/skillFoundry/contracts";
+import type {
+  SourceStatusV1 as SliceASourceStatusV1,
+  PredicateV1,
+  SkillReasonCodeV1,
+  CatalogFingerprintV1,
+  CertificationReportV1,
+  SkillArtifactRefV1,
+} from "../agent/skillFoundry/contracts";
+export type { PredicateV1, SkillReasonCodeV1, CatalogFingerprintV1, CertificationReportV1, SkillArtifactRefV1 };
 
 // Task 1 — the CLI wire contract: the exhaustive `teach-moshi` command union, the stable
 // JSON envelope every invocation emits, and the dependency-injection seam `runTeachMoshiV1`
@@ -385,6 +393,108 @@ export type ReferenceLocatorV1 = {
   bytes: number;
   fileIdentity: ReferenceFileIdentityV1;
   recordedAt: string;
+};
+
+// ---------------------------------------------------------------------------------------
+// Task 6 — evals, candidate authoring, native draft seeding, process supervision
+// ---------------------------------------------------------------------------------------
+
+/** LOCKED exactly for Slice E — do not add/remove/rename a member without updating both slices. */
+export type SelectedJourneyActionV1 =
+  | { journeyId: "session-control"; action: "play" | "stop" | "from_start" | "save" | "undo" | "redo" }
+  | { journeyId: "capture-review-choose-take"; action: "record_start" | "record_stop" | "audition" | "again" | "keep" }
+  | { journeyId: "explicit-balance"; action: "mute" | "unmute" | "solo" | "set_level" }
+  | { journeyId: "load-named-plugin"; action: "load" };
+
+export type EvalExpectedOutcomeV1 =
+  | { kind: "completed"; code: null }
+  | { kind: "needs_choice"; code: "ambiguous_skill" | "ambiguous_target" }
+  | {
+      kind: "blocked";
+      code: Exclude<SkillReasonCodeV1, "no_match" | "ambiguous_skill" | "ambiguous_target" | "unsupported_intent">;
+    }
+  | { kind: "unsupported"; code: "no_match" | "unsupported_intent" };
+
+export type EvalNegativeCategoryV1 = "negative" | "ambiguity" | "stale_state" | "malformed_input" | "injection" | "expected_failure";
+export type InvalidFillPhaseV1 = "none" | "candidate_selection" | "slot_validation" | "entity_resolution" | "preflight";
+
+export type EvalCaseV1 = {
+  schemaVersion: 1;
+  id: string;
+  selected: SelectedJourneyActionV1;
+  supported: boolean;
+  utterance: string;
+  fixtureSha256: string;
+  initialStateSha256: string;
+  expectedOutcome: EvalExpectedOutcomeV1;
+  finalStatePredicates: readonly PredicateV1[];
+  prohibitedEffects: readonly string[];
+  evidenceLevel: "schema" | "mock" | "native" | "packaged" | "physical";
+  scoringCategory: "selection" | EvalNegativeCategoryV1;
+  invalidFillPhase: InvalidFillPhaseV1;
+  expectedObservation?: string;
+};
+
+export type ProcessKindV1 = "mock" | "native_or_packaged" | "native_or_packaged_gate" | "repair_cycle";
+
+export type ProcessSpecV1 = {
+  kind: ProcessKindV1;
+  executable: string;
+  args: readonly string[];
+  cwd: string;
+  env: Readonly<Record<string, string>>;
+  logDirectory: string;
+};
+
+export type ProcessResultV1 = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  stdoutPath: string;
+  stderrPath: string;
+  pid: number;
+  startedAt: string;
+  finishedAt: string;
+};
+
+export type ProcessSupervisorV1 = { run(spec: ProcessSpecV1): Promise<ProcessResultV1> };
+
+export type CertificationInvocationV1 = {
+  draftId: string;
+  runId: string;
+  bin: string;
+  artifact: SkillArtifactRefV1;
+  evalSha256: string;
+  catalogFingerprint: CatalogFingerprintV1;
+  sourceStatusIndexSha256: string;
+};
+
+export type CertificationDriverResultV1 =
+  | { kind: "completed"; report: CertificationReportV1 }
+  | {
+      kind: "needs_manual_evidence";
+      runId: string;
+      caseId: string;
+      expectedObservation: string;
+      artifact: SkillArtifactRefV1;
+      evalSha256: string;
+    }
+  | { kind: "blocked"; code: string; message: string };
+
+export type CertificationRunnerPortV1 = { run(input: CertificationInvocationV1, supervisor: ProcessSupervisorV1): Promise<CertificationDriverResultV1> };
+
+export type SeedNativeCoreDraftInputV1 = { goal: string; nativePayloadBytes: Uint8Array; evalsJsonlBytes: Uint8Array };
+export type SeedNativeCoreDraftResultV1 = {
+  draft: DraftSnapshotV1;
+  artifact: { kind: "native_payload"; sha256: string };
+  evalSha256: string;
+};
+
+export type AuthorCandidateArtifactsInputV1 = { draftId: string; candidateBytes: Uint8Array; evalsBytes: Uint8Array };
+export type AuthorCandidateArtifactsResultV1 = {
+  changed: boolean;
+  candidateSha256: string;
+  evalSha256: string;
 };
 
 export type DraftStoreV1 = {

@@ -156,6 +156,18 @@ export function createDraftStoreV1(
     if (state.length === 0) {
       throw new Error(`draft not found: ${draftId}`);
     }
+    let markerExists = true;
+    try {
+      await readFile(join(draftDir, ".authoring-v1.json"));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      markerExists = false;
+    }
+    if (markerExists) {
+      throw Object.assign(new Error(`draft_update_incomplete: ${draftId} has an interrupted authoring transaction`), {
+        code: "draft_update_incomplete",
+      });
+    }
     return {
       draftId,
       draftDir,
