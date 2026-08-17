@@ -331,7 +331,7 @@ const pendingActionByToken = new Map<string, { readonly action: ExplicitBalanceA
 // Handler entry point
 // ---------------------------------------------------------------------------------------
 
-export const explicitBalanceV1: NativeSkillHandlerV1 = async ({ payload, environment, slots, continuationToken }) => {
+export const explicitBalanceV1: NativeSkillHandlerV1 = async ({ payload, environment, utterance, slots, continuationToken }) => {
   if (continuationToken) {
     // Same real-clock discipline as issueChoiceV1 — the store's own clock, not
     // environment.nowMs() (see that function's comment).
@@ -342,7 +342,10 @@ export const explicitBalanceV1: NativeSkillHandlerV1 = async ({ payload, environ
     if (!pending || taken.payload.skillId !== payload.id || taken.payload.artifactSha256 !== payload.compatibility.nativeSourceSha256) {
       return blocked(payload, "stale_context", "That choice is no longer valid — ask again.");
     }
-    const replyText = typeof slots.reply === "string" ? slots.reply : "";
+    // The reply text is the resuming utterance itself unless a caller supplies a distinct
+    // `slots.reply` — mirrors loadNamedPlugin.ts's own resume fallback, since the runtime
+    // (runtime.ts) dispatches a resume as `handler({..., utterance: <reply text>, slots: {}, continuationToken})`.
+    const replyText = typeof slots.reply === "string" ? slots.reply : utterance;
     const chosen = matchChoiceReply(replyText, taken.payload.choices);
     if (!chosen) return blocked(payload, "invalid_slot", "That wasn't one of the options — ask again.");
 
