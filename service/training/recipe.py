@@ -24,6 +24,23 @@ thrashes — measured at 12.65 s/step versus ~1.1 s healthy, which is *worse
 per sample than batch=1*. Hence the default is batch 2 x grad-accum 2
 (effective batch 4 at ~31 GB), not a literal batch 4 (~49 GB), which only
 works with every other app closed.
+
+**The footprint below covers the TRAINER ONLY, and that is not the whole
+picture once the LoRA Lab exists.** Auditioning a take mid-run makes the SA3
+render model resident in the service alongside the trainer. Measured
+2026-08-17 on the 64 GB reference machine: trainer at 26 GB, one audition
+during the run, and free memory fell from 88% to 19% with swap going 2 GB ->
+24 GB — the same silent thrash as an over-large batch, dropping a run that
+should pace ~1.1 s/step to roughly 65 s/step. Nothing errors; the run just
+becomes ~50x slower while looking healthy.
+
+That is a real tension in the product, because "listen while it trains" is
+exactly what the Lab is for. It is NOT yet handled here: `batch_plan` still
+budgets for the trainer alone. The options, none of them free, are to reserve
+render headroom in the plan (smaller batch, slower training, for everyone),
+release the render model between auditions (a ~1.7 s reload per take), or
+simply warn. Pick one deliberately rather than letting a producer discover it
+as "training got mysteriously slow".
 """
 
 from __future__ import annotations

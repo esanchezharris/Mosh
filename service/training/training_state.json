@@ -57,6 +57,15 @@
       },
       "status": "ready",
       "updatedAt": 1781424901.690975
+    },
+    {
+      "bundlePath": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/labrun6/corpus-bundle",
+      "error": "training cancelled",
+      "jobId": "42f154e6ddba",
+      "outputDir": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/labrun6/training-output",
+      "progress": 0.0,
+      "status": "error",
+      "updatedAt": 1786965778.023679
     }
   ]
 }
