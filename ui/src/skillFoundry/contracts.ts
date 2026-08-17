@@ -557,6 +557,24 @@ export type SkillApprovalV1 = {
 
 export type ApproveDraftInputV1 = { draftId: string; reviewSha256: string; attestationBytes: Uint8Array };
 
+// ---------------------------------------------------------------------------------------
+// Task 8 — install/rollback/revoke and the activation index
+// ---------------------------------------------------------------------------------------
+
+// Slice A already defines `SkillActivationIndexV1` — re-exported, not forked (see the
+// SourceStatusV1/AbletonReferenceV1 precedent above).
+export type { SkillActivationIndexV1 } from "../agent/skillFoundry/contracts";
+
+export type InstallDraftResultV1 =
+  | { ok: true; skillId: string; version: string; packagePath: string; activated: boolean; changed: boolean }
+  | { ok: false; code: "wrong_state" | "package_conflict" | "invalid_artifact" | "activation_failed"; message: string };
+
+export type RollbackSkillResultV1 =
+  | { ok: true; skillId: string; version: string; changed: boolean }
+  | { ok: false; code: "not_found" | "invalid_artifact" | "activation_failed"; message: string };
+
+export type RevokeSkillResultV1 = { ok: true; skillId: string; changed: boolean };
+
 export type DraftStoreV1 = {
   createDraft(input: CreateDraftInputV1): Promise<CreateDraftResultV1>;
   loadDraft(draftId: string): Promise<DraftSnapshotV1>;
