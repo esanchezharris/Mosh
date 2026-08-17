@@ -136,6 +136,15 @@ export type ServiceCapabilities = {
   transformReal: boolean;    // Route B/C: a real RAVE model is installed vs the fake tilt/saturation
   trainingBackend: string;  // "fake" (stub) | "local_pmetal" (real, this Mac) | "remote_http" (real, rented GPU)
   trainingBlockers?: string[];  // why a real backend still can't train here (missing binary/checkpoint)
+  // The measured default recipe for this machine + corpus (service/training/recipe.py
+  // recommend_recipe). Delivered rather than derived because the epoch curve was fit
+  // to real runs (145 / 44 / 11 epochs at 33 / 189 / 424 clips) and a second copy in
+  // TypeScript would drift invisibly the moment either side is re-measured.
+  trainingRecipe?: {
+    epochs: number; steps: number; batchSize: number; gradAccum: number;
+    effectiveBatch: number; footprintGb: number; estMinutes: number;
+    clipCount: number; note?: string;
+  };
 };
 
 // LoRA library card from GET /loras (via list_loras) — the drop-in adapter dir.

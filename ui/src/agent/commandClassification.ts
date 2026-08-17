@@ -69,6 +69,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   get_clip_peaks: "waveform peak arrays for canvas drawing — meaningless to the model",
   file_peaks: "waveform peak arrays for the file browser — meaningless to the model",
   audition_file: "pre-import audition is a listening affordance; the agent can't hear it",
+  render_lora_take: "the LoRA Lab's audition render. It exists BECAUSE the numbers disagree with the ears — a 25-epoch adapter beat a 44-epoch one that scored 0.14 higher — so the whole verb is 'produce a candidate for a human to judge'. An agent calling it would be generating audio it cannot evaluate, and the only signal that decides the outcome is the one it does not have",
   stop_audition: "pre-import audition is a listening affordance; the agent can't hear it",
   audition_note: "sounds a note through the track's instrument for the producer to hear — a listening affordance the agent can't hear, and it changes nothing, so there is no result for it to reason about",
   all_notes_off: "panic-stops whatever the keyboard or piano roll left sounding; a live-performance affordance, not a musical edit",

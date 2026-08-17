@@ -170,6 +170,7 @@ rename_track_group	Track
 render_ahead_arm	Clip
 render_ahead_tick	Unguarded
 render_layer	Clip
+render_lora_take	Unguarded
 reorder_master_plugin	SessionGlobal
 reorder_plugin	Track
 rescan_plugins	Unguarded

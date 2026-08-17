@@ -21,6 +21,11 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "list_directory", "list_training_sources", "list_lora_adapters", "list_drum_kits",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file", "detect_clip_bpm",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
+        // LoRA Lab audition. Renders a candidate adapter stack to a wav under the
+        // session's lab/ dir and touches NO track, clip or render layer — it is
+        // deliberately not clip-parented, which is exactly why it cannot contend.
+        // `sourceClipId` only READS a clip's audio to stage an input.
+        "render_lora_take",
         // AGT-MEM (Phase-B memory lane, M1) — pure file I/O (no ValueTree mutation,
         // no track/clip target), same posture as get_rhymes/get_lyric_corpus_stats above.
         // M3 adds delete/clear (the memory drawer's per-item delete + per-tier

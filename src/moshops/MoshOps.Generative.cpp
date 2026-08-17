@@ -1804,6 +1804,230 @@ juce::var MoshOps::cmdListLoras (const juce::var&)
     return okResult ("list_loras", r);
 }
 
+//==============================================================================
+// LoRA Lab — render one audition take.
+//
+// The Lab's premise, learned the expensive way: best-SCORING is not best-SOUNDING.
+// A 25-epoch adapter beat a 44-epoch one by ear while scoring 0.14 lower, and the
+// right epoch count differed per corpus (145 / 44 / 11 for 33 / 189 / 424 clips).
+// So the only trustworthy way to choose a checkpoint is to listen to it, and this
+// is the command that makes listening possible.
+//
+// Three things it deliberately is NOT:
+//
+//   * not clip-parented. render_layer needs a MOSH_RENDERLAYER on a clip, because
+//     its result becomes that clip's audio. A take is the opposite — a candidate
+//     you will probably discard. Attaching one to the arrangement to hear it would
+//     mean every audition mutates the project.
+//   * not a preview path. It submits to the same adapter, with the same params, as
+//     a real render. An audition that went through a cheaper path would be
+//     answering a different question than the one being asked.
+//   * not synchronous. execute_command runs on the message thread, and an SA3
+//     render is seconds to minutes; waiting inline would freeze the whole UI. The
+//     poll lives on a background thread and reports through `lab_take`.
+//
+// An EMPTY adapter stack is legal and meaningful: it renders the stock model, which
+// is the baseline every take is judged against. Without it "is this better?" has no
+// denominator — and the owner's own note during the training round was that they
+// could not tell how good the base model was on these prompts.
+juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
+{
+    const auto prompt = args.getProperty ("prompt", var()).toString().trim();
+    if (prompt.isEmpty())
+        return errResult ("render_lora_take", "missing 'prompt'");
+
+    const int seed = (int) args.getProperty ("seed", 42);
+    const double seconds = juce::jlimit (1.0, 60.0, (double) args.getProperty ("seconds", 12.0));
+    const auto sourceClipId = args.getProperty ("sourceClipId", var()).toString();
+
+    // The stack, in order — order matters, adapters merge sequentially.
+    Array<var> stack;
+    if (auto sv = args.getProperty ("adapters", var()); sv.isArray())
+        if (auto* arr = sv.getArray())          // NEVER inline the getArray() call: the
+            for (const auto& e : *arr)          // juce::var temporary dies at the end of
+            {                                   // the if-condition (a real UAF here before).
+                auto* lo = new DynamicObject();
+                lo->setProperty ("name", e.getProperty ("name", var()));
+                lo->setProperty ("value", e.getProperty ("value", 100.0));
+                stack.add (var (lo));
+            }
+
+    // Validate the SOURCE before anything expensive. ensureServiceRunning() can
+    // spawn a Python process and block for seconds on the message thread, so a
+    // call naming a clip that does not exist must be rejected before paying for
+    // that — and it makes the failure testable on a machine with no service.
+    te::WaveAudioClip* sourceWave = nullptr;
+    if (sourceClipId.isNotEmpty())
+    {
+        auto* clip = findClip (sourceClipId);
+        if (clip == nullptr)
+            return errResult ("render_lora_take", "source clip not found: " + sourceClipId);
+        sourceWave = dynamic_cast<te::WaveAudioClip*> (clip);
+        if (sourceWave == nullptr)
+            return errResult ("render_lora_take",
+                              "audition source must be an audio clip (MIDI/drum clips need a bounce first)");
+    }
+
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("render_lora_take", "generative service unavailable");
+
+    // Identity: the same stack + prompt + seed + source must reuse its wav, and a
+    // RETRAINED adapter of the same name must not. Names alone cannot tell those
+    // apart, so fold in each adapter's content digest — resolved here rather than
+    // trusted from the caller, because a UI that forgot to send it would silently
+    // downgrade the key to name-only and serve stale audio from a previous run's
+    // checkpoint. That is precisely the bug this key exists to prevent.
+    juce::var shaByName;
+    if (auto lr = jobManager.listLoras(); (bool) lr.getProperty ("ok", false))
+    {
+        auto lv = lr.getProperty ("loras", var());        // named local: keep it alive
+        if (auto* rows = lv.getArray())
+        {
+            auto* m = new DynamicObject();
+            for (const auto& r : *rows)
+                m->setProperty (juce::Identifier (r.getProperty ("name", var()).toString()),
+                                r.getProperty ("sha12", var()));
+            shaByName = var (m);
+        }
+    }
+
+    juce::String key;
+    key << prompt << "|" << seed << "|" << juce::String (seconds, 3) << "|" << sourceClipId;
+    for (const auto& e : stack)
+    {
+        const auto nm = e.getProperty ("name", var()).toString();
+        key << "|" << nm << "@" << e.getProperty ("value", var()).toString()
+            << "#" << (shaByName.isObject() ? shaByName.getProperty (juce::Identifier (nm), var()).toString()
+                                            : juce::String());
+    }
+    const auto takeId = juce::String (juce::MD5 (key.toUTF8()).toHexString()).substring (0, 16);
+
+    auto jobDir = eng.sessionDir().getChildFile ("lab").getChildFile (takeId);
+    jobDir.createDirectory();
+    auto input    = jobDir.getChildFile ("input.wav");
+    auto output   = jobDir.getChildFile ("output.wav");
+    auto manifest = jobDir.getChildFile ("output_manifest.json");
+
+    auto readyResult = [&] (const char* cache)
+    {
+        auto* d = new DynamicObject();
+        d->setProperty ("takeId", takeId);
+        d->setProperty ("status", "ready");
+        d->setProperty ("cache", cache);
+        d->setProperty ("outputWav", output.getFullPathName());
+        return okResult ("render_lora_take", var (d));
+    };
+
+    // Cache HIT: 22 minutes of training then a minute per audition — re-hearing a
+    // take you already rendered must be instant, or A/B comparison is unusable.
+    if (output.existsAsFile() && manifest.existsAsFile())
+    {
+        emit ("lab_take", [&] { auto* o = new DynamicObject();
+            o->setProperty ("takeId", takeId); o->setProperty ("status", "ready");
+            o->setProperty ("cache", "hit");
+            o->setProperty ("outputWav", output.getFullPathName()); return var (o); }());
+        logLine ("render_lora_take", args, true, {}, false);
+        return readyResult ("hit");
+    }
+
+    // Optional re-imagine source. This is how these adapters are actually USED —
+    // over the producer's own beats — so auditioning purely text-to-audio would
+    // grade them in a mode nobody works in.
+    input.deleteFile();
+    juce::String mode = "generate";
+    if (sourceWave != nullptr)
+    {
+        const auto src = sourceWave->getCurrentSourceFile();
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (src));
+        const double lenSec = (rd != nullptr && rd->sampleRate > 0.0)
+                            ? (double) rd->lengthInSamples / rd->sampleRate : 0.0;
+        rd.reset();
+        if (lenSec <= 0.0 || ! stageWavRegionAt44k (src, 0.0, juce::jmin (lenSec, seconds), input))
+            return errResult ("render_lora_take", "could not stage the source clip's audio");
+        mode = "reimagine";
+    }
+
+    auto* p = new DynamicObject();
+    p->setProperty ("prompt", prompt);
+    p->setProperty ("seed", seed);
+    p->setProperty ("mode", mode);
+    p->setProperty ("loras", stack);
+    p->setProperty ("duration_s", seconds);
+    // No colours and no ASTD here on purpose: a take exists to answer "what did the
+    // TRAINING do", and a colour stacked on top would confound the one variable the
+    // Lab is there to isolate.
+    p->setProperty ("colors", Array<var>{});
+
+    const auto jobId = jobManager.submitJob ("stable_audio3", input, output, manifest, var (p));
+    if (jobId.isEmpty())
+        return errResult ("render_lora_take", "job submit failed");
+
+    emit ("lab_take", [&] { auto* o = new DynamicObject();
+        o->setProperty ("takeId", takeId); o->setProperty ("status", "rendering");
+        o->setProperty ("jobId", jobId); o->setProperty ("progress", 0.0); return var (o); }());
+
+    // Poll on a background thread; marshal every event back to the message thread.
+    std::thread ([this, takeId, jobId, output, manifest]
+    {
+        juce::String lastErr;
+        for (int i = 0; i < 1800; ++i)          // 100ms ticks -> ~180s ceiling
+        {
+            auto st = jobManager.jobStatus (jobId, 1000);
+            if (! st.isObject())
+            {
+                // The file+manifest pair is the durable contract: a render can finish
+                // and write both while /status is already unreachable during teardown.
+                if (output.existsAsFile() && manifest.existsAsFile()) break;
+                if (! jobManager.isHealthy (250))
+                {
+                    lastErr = "generative service stopped answering while rendering take " + takeId;
+                    break;
+                }
+                juce::Thread::sleep (100);
+                continue;
+            }
+            const auto status = st.getProperty ("status", juce::var()).toString();
+            const auto progress = st.getProperty ("progress", 0.0);
+            if (const auto e = st.getProperty ("error", juce::var()).toString(); e.isNotEmpty()) lastErr = e;
+            juce::MessageManager::callAsync ([this, takeId, jobId, progress]
+            {
+                emit ("lab_take", [&] { auto* o = new juce::DynamicObject();
+                    o->setProperty ("takeId", takeId); o->setProperty ("status", "rendering");
+                    o->setProperty ("jobId", jobId); o->setProperty ("progress", progress);
+                    return juce::var (o); }());
+            });
+            if (status == "ready" || (output.existsAsFile() && manifest.existsAsFile())
+                || status == "error" || status == "cancelled")
+                break;
+            juce::Thread::sleep (100);
+        }
+        juce::MessageManager::callAsync ([this, takeId, output, manifest, lastErr]
+        {
+            // Trust the FILES, not the last status word. A take whose wav and
+            // manifest both landed is playable regardless of what /status said on
+            // the way past, and reporting it as an error would hide a good render.
+            const bool ok = output.existsAsFile() && manifest.existsAsFile();
+            emit ("lab_take", [&] { auto* o = new juce::DynamicObject();
+                o->setProperty ("takeId", takeId);
+                o->setProperty ("status", ok ? "ready" : "error");
+                o->setProperty ("outputWav", ok ? output.getFullPathName() : juce::String());
+                o->setProperty ("error", ok ? juce::String() : (lastErr.isNotEmpty() ? lastErr
+                                                                                     : juce::String ("render produced no audio")));
+                return juce::var (o); }());
+        });
+    }).detach();
+
+    logLine ("render_lora_take", args, true, {}, false);
+    auto* d = new DynamicObject();
+    d->setProperty ("takeId", takeId);
+    d->setProperty ("status", "rendering");
+    d->setProperty ("jobId", jobId);
+    d->setProperty ("cache", "miss");
+    d->setProperty ("outputWav", output.getFullPathName());
+    return okResult ("render_lora_take", var (d));
+}
+
 juce::var MoshOps::cmdListTransformTargets (const juce::var&)
 {
     // Route B: the transform target list (instruments / models) for the generative UI.

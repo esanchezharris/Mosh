@@ -205,6 +205,9 @@ def _guest_capability_summary() -> dict:
     change, which this pass avoids. `/capabilities` itself also carries the venv flags
     (for parity with /health) but nothing proxies it to the UI today."""
     from adapters import transform_adapter as _tx
+    # One call: the descriptor probes the filesystem for the trainer binary and
+    # the base checkpoint, and calling it twice doubles that for no reason.
+    training = _training_descriptor()
     return {
         "transcribe": _transcribe_available(),
         "skeleton": _skeleton_available(),
@@ -214,7 +217,13 @@ def _guest_capability_summary() -> dict:
         "trainingBackend": lora_trainer_adapter.backend_name(),
         # Why a real backend still can't train here (missing binary/checkpoint).
         # Empty for the stub, whose only honest signal is the "preview" label.
-        "trainingBlockers": _training_descriptor().get("blockers", []),
+        "trainingBlockers": training.get("blockers", []),
+        # The measured recipe defaults, carrying THIS machine's memory plan
+        # (batch size is chosen from physical RAM). Delivered rather than
+        # re-derived in TypeScript: the epoch curve was fit to real runs, and a
+        # second copy would drift invisibly the moment either side is
+        # re-measured. The UI recomputes only the clip-count-dependent part.
+        "trainingRecipe": training.get("recipe", {}),
     }
 
 

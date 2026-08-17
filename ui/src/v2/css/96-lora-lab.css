@@ -1,0 +1,208 @@
+/* ============================================================================
+   LORA LAB — train an adapter on your own music, then listen to the checkpoints.
+
+   The design argument, in one line: the numbers were wrong, so the ears decide.
+   During the round that built the local trainer, a 25-epoch adapter beat a
+   44-epoch one that scored 0.14 HIGHER, and the in-run probe stayed flat
+   (0.885 -> 0.899) across a run whose adapters plainly improved. A dashboard of
+   metrics would render the least trustworthy information at the largest size.
+
+   So the visual hierarchy is inverted from the obvious one:
+
+     LARGEST   the waveform + its play button — one per take
+     MEDIUM    the epoch counter, because epochs are the knob that matters
+     SMALL     step, pace, legs — one disclosure down
+     ABSENT    any score next to a take. A number beside a play button becomes
+               the thing people rank by, and this number lies.
+
+   Tokens only. Every colour resolves through --v2-* so the Lab follows the
+   agentic accent scope declared in 95-fms-agent.css.
+   ============================================================================ */
+
+.v2-shell .lab {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+  background: var(--v2-surface-sunken);
+}
+
+/* ── blockers: honest unavailability ─────────────────────────────────────────
+   Shown INSTEAD of a Train button that would error on click. The fix command is
+   part of the message, because "training is unavailable" without a next step is
+   a dead end dressed as an explanation. */
+.v2-shell .lab-block {
+  border: 1px solid var(--v2-line-strong);
+  border-left: 3px solid var(--v2-warn, var(--v2-accent));
+  border-radius: var(--v2-radius-sm);
+  padding: 10px 12px;
+  background: var(--v2-surface-2);
+  font-size: var(--v2-fs-sm);
+  color: var(--v2-text);
+}
+.v2-shell .lab-block p { margin: 4px 0 6px; color: var(--v2-dim); }
+.v2-shell .lab-block ul { margin: 4px 0 6px; padding-left: 18px; color: var(--v2-dim); }
+.v2-shell .lab-block code {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: var(--v2-radius-xs);
+  background: var(--v2-surface-sunken-solid);
+  font-size: var(--v2-fs-xs);
+  color: var(--v2-text);
+  user-select: all;   /* it exists to be copied into a terminal */
+}
+
+/* ── the run header ──────────────────────────────────────────────────────── */
+.v2-shell .lab-run {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface);
+}
+.v2-shell .lab-run-top { display: flex; align-items: baseline; gap: 10px; }
+.v2-shell .lab-epochs { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; }
+/* Epochs get display size because they are the number a producer acts on. */
+.v2-shell .lab-epochs-n {
+  font-size: var(--v2-fs-display);
+  line-height: 1;
+  color: var(--v2-accent);
+  font-variant-numeric: tabular-nums;   /* stops the counter jittering as it ticks */
+}
+.v2-shell .lab-epochs-of { font-size: var(--v2-fs-xs); color: var(--v2-dim); letter-spacing: var(--v2-tracking-caps); }
+.v2-shell .lab-eta { font-size: var(--v2-fs-xs); color: var(--v2-dim); font-variant-numeric: tabular-nums; }
+.v2-shell .lab-prog { width: 100%; }
+
+.v2-shell .lab-detail { font-size: var(--v2-fs-xs); color: var(--v2-dim); }
+.v2-shell .lab-detail summary { cursor: pointer; user-select: none; padding: 2px 0; }
+.v2-shell .lab-detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  padding: 6px 0 2px;
+  font-variant-numeric: tabular-nums;
+}
+.v2-shell .lab-detail-grid > span:nth-child(odd) { color: var(--v2-faint); letter-spacing: var(--v2-tracking-caps); }
+.v2-shell .err { color: var(--v2-rec); }
+
+/* ── the ask: prompt + seed + source ─────────────────────────────────────── */
+.v2-shell .lab-ask { display: flex; gap: 8px; align-items: stretch; }
+.v2-shell .lab-prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface-sunken-solid);
+  color: var(--v2-text);
+  font-size: var(--v2-fs-sm);
+}
+.v2-shell .lab-prompt:focus-visible { outline: 2px solid var(--v2-accent-soft); outline-offset: 1px; }
+.v2-shell .lab-prompt::placeholder { color: var(--v2-faint); }
+.v2-shell .lab-seed { display: flex; align-items: center; gap: 6px; font-size: var(--v2-fs-xs); color: var(--v2-dim); }
+.v2-shell .lab-seed input {
+  width: 68px;
+  padding: 8px;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface-sunken-solid);
+  color: var(--v2-text);
+  font-variant-numeric: tabular-nums;
+}
+.v2-shell .lab-source { display: flex; align-items: center; gap: 8px; font-size: var(--v2-fs-xs); color: var(--v2-dim); }
+.v2-shell .lab-source select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface-sunken-solid);
+  color: var(--v2-text);
+  font-size: var(--v2-fs-xs);
+}
+
+/* ── the take sheet ──────────────────────────────────────────────────────── */
+.v2-shell .lab-sheet { display: flex; flex-direction: column; gap: 6px; }
+.v2-shell .lab-hint {
+  padding: 10px 12px;
+  border: 1px dashed var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  font-size: var(--v2-fs-xs);
+  color: var(--v2-dim);
+  line-height: 1.5;
+}
+.v2-shell .lab-hint.dim { color: var(--v2-faint); }
+
+.v2-shell .lab-take {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface);
+}
+.v2-shell .lab-take.on { border-color: var(--v2-accent-soft); background: var(--v2-surface-2); }
+
+.v2-shell .lab-play {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  /* The biggest control on the row. Auditioning is the verb this whole surface
+     exists for, so it gets the largest, easiest target. */
+}
+.v2-shell .lab-play.on { background: var(--v2-accent); color: var(--v2-accent-ink); }
+.v2-shell .lab-play:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.v2-shell .lab-take-id { flex: 0 0 116px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.v2-shell .lab-take-label { font-size: var(--v2-fs-sm); color: var(--v2-text); }
+.v2-shell .lab-take-sub {
+  font-size: var(--v2-fs-2xs);
+  color: var(--v2-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The widest element on the row, by construction. */
+.v2-shell .lab-take-wave { flex: 1 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; }
+.v2-shell .lab-wave { width: 100%; height: 40px; display: block; }
+.v2-shell .lab-take-note { font-size: var(--v2-fs-2xs); color: var(--v2-dim); }
+.v2-shell .lab-take-note.dim { color: var(--v2-faint); }
+.v2-shell .lab-take-note.err { color: var(--v2-rec); }
+
+.v2-shell .lab-cue { flex: 0 0 auto; }
+
+/* The base row sits apart: it is not a take, it is the comparison. */
+.v2-shell .lab-sheet-base { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--v2-line); }
+.v2-shell .lab-restore { align-self: flex-start; margin-top: 4px; font-size: var(--v2-fs-2xs); }
+
+/* ── motion: exactly one moment ──────────────────────────────────────────────
+   A landing checkpoint slides in while its waveform strokes once, left to right
+   — the tape passing the head. Nothing else in the Lab animates, deliberately:
+   a surface you sit in front of for twenty minutes should be still, and one
+   moving thing is legible where five are noise. */
+@keyframes labTakeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes labWaveStroke {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.v2-shell .lab-take { animation: labTakeIn 140ms ease-out both; }
+.v2-shell .lab-wave { animation: labWaveStroke 400ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-shell .lab-take,
+  .v2-shell .lab-wave { animation: none; }
+}

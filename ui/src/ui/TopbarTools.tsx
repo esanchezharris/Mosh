@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
+import { useLoraLab } from "./dock/useLoraLab";
 import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import type { RemotePairingInfo } from "../bridge";
@@ -325,6 +326,16 @@ export function TrainingTool({
               title="This trains a deterministic placeholder LoRA stub on this Mac — no GPU, no real fine-tune">{previewLabel}</span>
           )}</div>
           <div className="pop-note">Use only music you can legally train on. YouTube is discovery/reference. Import local files for training.</div>
+          {/* The Lab is the destination: this popover is the RIGHTS registry (the part
+              that must stay a deliberate, form-shaped act), and everything after a
+              corpus exists — training, auditioning checkpoints, keeping one — happens
+              in a workspace you can leave open while you listen. A popover cannot be
+              that: it closes the moment you click the arrangement to hear a beat. */}
+          <div className="pop-actions">
+            <button className="btn primary" data-testid="open-lora-lab"
+              title="Train, audition checkpoints, and keep the one that sounds right"
+              onClick={() => { useLoraLab.getState().show(); close(); }}>Open LoRA Lab</button>
+          </div>
           <div className="pop-group">
             <div className="pop-label">Add source</div>
             <label className="pop-row"><span>Beat title</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Track/beat name" /></label>
