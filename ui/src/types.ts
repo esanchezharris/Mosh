@@ -149,6 +149,12 @@ export type AvailableLora = {
   reason?: string;   // why it's unusable (when valid === false)
   rank?: number;     // adapter rank from the safetensors header
   sha12?: string;    // content identity (retrain-in-place ⇒ new sha ⇒ cache MISS)
+  // Which shelf it sits on. "library" = the producer's KEPT rack (`sa3/`);
+  // "lab" = a training checkpoint on trial (`sa3/lab/`), auditionable through
+  // the identical render path but deliberately kept out of the rack menu so one
+  // run's six checkpoints can't bury the adapters someone actually chose.
+  // Absent from an older service ⇒ treat as "library" (the pre-Lab world).
+  family?: "library" | "lab";
 };
 
 // Lane B — a RAVE model in the library (RAVE_MODEL_DIR / ~/AI/rave-models), from list_rave_models.
