@@ -398,6 +398,7 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
     `output_format`: `"safetensors"` here versus the stub's `"json_stub"` —
     which is what the artifact-shape test keys on to prove this ran.
     """
+    from . import lab_publish as LAB
     from . import local_pmetal as LP
     from . import recipe as R
     from . import sa3_precompute as PC
@@ -439,8 +440,30 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
     run_dir = out / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     argv = LP.build_argv(LP.trainer_bin(), LP.base_dit_path(), pre["manifest_path"], str(run_dir), cfg)
+
+    # Publish each checkpoint into sa3/lab/ AS IT LANDS, not at the end. A default
+    # run is ~20 minutes and checkpoints six times; waiting until completion to
+    # make them auditionable would mean the producer sits watching a progress bar
+    # with nothing to listen to, when a take from step 200 has been sitting on
+    # disk for a quarter of an hour. Publishing is a symlink + a small JSON, and
+    # it is skip-if-present, so doing it on every 0.5s poll costs nothing.
+    #
+    # Deliberately fail-soft: a run that trains successfully but cannot publish
+    # (odd permissions on the lora dir) is still a successful run whose artifacts
+    # are on disk. It must not die at the last step over a link.
+    label = str(config.get("label") or out.name)
+
+    def _progress(state: dict[str, Any]) -> None:
+        try:
+            takes = LAB.publish(run_dir, label, state.get("checkpoints"), final=False)
+            state = {**state, "takes": takes}
+        except Exception as e:  # noqa: BLE001
+            print(f"[lab] publish skipped: {e}", flush=True)
+        if on_progress:
+            on_progress(state)
+
     code = LP.run_training(argv, run_dir, cfg["steps"],
-                           should_cancel=should_cancel, on_progress=on_progress)
+                           should_cancel=should_cancel, on_progress=_progress)
     if code == 130:
         raise RuntimeError("training cancelled")
     if code != 0:
@@ -451,6 +474,14 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
         raise RuntimeError("trainer finished but produced no adapter (missing mosh_lora.safetensors)")
 
     checkpoints = LP._scan_checkpoints(run_dir)
+    # Final publish — this one includes `mosh_lora.safetensors` itself (`@final`),
+    # which the in-run publishes skip because it does not exist until the trainer
+    # exits. Same fail-soft posture: a link problem never fails a finished run.
+    try:
+        takes = LAB.publish(run_dir, label, checkpoints, final=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[lab] final publish failed: {e}", flush=True)
+        takes = []
     config_payload = _config_payload({**config, **cfg, "backend": "local_pmetal"})
     adapter_id = _digest_json({"bundle_hash": manifest.get("bundle_hash"), "config": config_payload})[:16]
     quality = {
@@ -473,7 +504,9 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
         "quality": quality,
         "output_format": "safetensors",
         "run_dir": str(run_dir),
+        "run_label": label,
         "checkpoints": checkpoints,
+        "takes": takes,
     }
     manifest_path = out / "adapter.manifest.json"
     write_json(manifest_path, manifest_payload)
@@ -487,7 +520,12 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
         "backend": "local_pmetal",
         "output_format": "safetensors",
         "run_dir": str(run_dir),
+        "run_label": label,
         "checkpoints": checkpoints,
+        # The auditionable takes, by registry name — what the Lab's take sheet
+        # renders. Distinct from `checkpoints` (paths on disk): a take is a name
+        # the render path can resolve, which is the only form the audition can use.
+        "takes": takes,
     }
 
 
