@@ -497,6 +497,66 @@ export type AuthorCandidateArtifactsResultV1 = {
   evalSha256: string;
 };
 
+// ---------------------------------------------------------------------------------------
+// Task 7 — manual evidence and review/approval
+// ---------------------------------------------------------------------------------------
+
+export type ManualEvidenceArtifactV1 = { kind: "audio" | "image" | "video" | "log" | "other"; localPath: string; sha256: string; bytes: number };
+
+export type ManualEvidenceV1 = {
+  schemaVersion: 1;
+  runId: string;
+  caseId: string;
+  artifact: SkillArtifactRefV1;
+  evalSha256: string;
+  expectedObservation: string;
+  decision: "passed" | "failed" | "physical_not_required";
+  observed: string;
+  actor: string;
+  recordedAt: string;
+  artifacts: readonly ManualEvidenceArtifactV1[];
+};
+
+export type PendingManualEvidenceV1 = {
+  runId: string;
+  caseId: string;
+  expectedObservation: string;
+  artifact: SkillArtifactRefV1;
+  evalSha256: string;
+};
+
+export type RecordManualEvidenceInputV1 = { draftId: string; evidenceBytes: Uint8Array; pending: PendingManualEvidenceV1 };
+export type ManualEvidenceRecordResultV1 =
+  | { ok: true; record: ManualEvidenceV1; changed: boolean }
+  | { ok: false; code: "invalid_artifact" | "stale_evidence" | "missing_reviewer_statement" | "quota_exceeded"; message: string };
+
+export type SkillReviewV1 = { reviewSha256: string; markdown: string; artifactSha256: string; certificationReportSha256: string };
+
+export type ApprovalAttestationV1 = {
+  schemaVersion: 1;
+  reviewSha256: string;
+  exactStatement: string;
+  actor: string;
+  channel: string;
+  conversationLocator?: string;
+  approvedAt: string;
+};
+
+export type SkillApprovalV1 = {
+  schemaVersion: 1;
+  state: "owner_approved";
+  reviewSha256: string;
+  artifact: SkillArtifactRefV1;
+  certificationReportSha256: string;
+  exactStatement: string;
+  actor: string;
+  channel: string;
+  conversationLocator?: string;
+  approvedAt: string;
+};
+
+export type ApproveDraftInputV1 = { draftId: string; reviewSha256: string; attestationBytes: Uint8Array };
+
 export type DraftStoreV1 = {
   createDraft(input: CreateDraftInputV1): Promise<CreateDraftResultV1>;
   loadDraft(draftId: string): Promise<DraftSnapshotV1>;
