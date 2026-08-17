@@ -99,7 +99,9 @@ export async function recoverAuthoringMarkerV1(
     });
   }
 
-  if (!marker.staleAppended) {
+  // Same first-time-creation exception as the main path (see authorCandidateArtifactsV1).
+  const wasEdit = marker.old.candidateSha256 !== null || marker.old.evalSha256 !== null;
+  if (!marker.staleAppended && wasEdit) {
     await appendStaleIfLegalV1(draftDir, deps);
   }
 
@@ -188,7 +190,13 @@ export async function authorCandidateArtifactsV1(
     expectedSha256: oldEvalSha256 ?? undefined,
   });
 
-  await appendStaleIfLegalV1(draftDir, deps);
+  // Only a genuine EDIT of previously-existing content can invalidate downstream proof —
+  // authoring a draft's FIRST-EVER candidate/evals is not a regression, so it must not mark
+  // the draft "stale" (which would deadlock `validate`'s "must be source_reviewed" gate on a
+  // draft that has never yet been schema_valid in the first place).
+  if (oldCandidateSha256 !== null || oldEvalSha256 !== null) {
+    await appendStaleIfLegalV1(draftDir, deps);
+  }
 
   await unlink(markerPath(draftDir));
   await fsyncDirectoryV1(draftDir);

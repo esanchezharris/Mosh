@@ -58,6 +58,32 @@ const ALLOWLIST = new Set<string>([
   // this at the function). Its sibling `list_plugins` IS a real dispatched command and is
   // correctly cased in the mock — which is why only this one shows up here.
   "current_snapshot",
+  // Skill Foundry (Slice D) — the SAME class of false positive as `current_snapshot` above,
+  // but from the `teach-moshi` CLI's own wire contract, not the runtime primitive catalog.
+  // `TeachMoshiCommandV1` (skillFoundry/contracts.ts) is a discriminated union whose members
+  // use `command: "init" | "add-source" | ...` as their TYPE discriminant field, e.g.:
+  //     export type TeachMoshiCommandV1 =
+  //       | { command: "init"; goal: string; id?: string }
+  //       | { command: "certify"; draftId: string; bin: string }
+  //       ...
+  // The scanner's `command:\s*["']name["']` regex matches these type-literal members exactly
+  // like a real dispatch object literal. None of these are MoshOps commands, none reach
+  // executeCommand/the mock, and none exist in src/moshops/ or the agent catalog — teach-moshi
+  // is an entirely separate offline CLI tool (ui/src/skillFoundry/cli.ts), never loaded by the
+  // packaged app's UI. Hyphenated command names ("add-source", "add-reference",
+  // "record-evidence", "refresh-source", "revoke-source") don't match the scanner's
+  // `[a-z_][a-z_0-9]*` character class at all, which is why only the unhyphenated ten show up
+  // here.
+  "approve",
+  "certify",
+  "gc",
+  "init",
+  "install",
+  "review",
+  "revoke",
+  "rollback",
+  "status",
+  "validate",
 ]);
 
 function listSourceFiles(dir: string): string[] {

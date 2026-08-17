@@ -44,6 +44,8 @@ export type FoundryErrorCodeV1 =
   | "stale_attestation"
   | "review_sha_mismatch"
   | "package_conflict"
+  | "conflict"
+  | "acquisition_mismatch"
   | "activation_failed"
   | "gc_revalidation_failed"
   | "lock_contention"

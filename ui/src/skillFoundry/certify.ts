@@ -188,12 +188,15 @@ export function createDefaultCertificationRunnerV1(
       const resultPath = join(runDir, "result.json");
       await atomicWriteBytesV1(requestPath, canonicalJsonBytes(input));
 
+      // Real env, not an empty object: the spawned process needs PATH (and, for the test
+      // fixture, FAKE_CERTIFIER_MODE) to run at all — an empty env silently breaks even a
+      // correctly-shaped executable.
       const spec: ProcessSpecV1 = {
         kind: "native_or_packaged",
         executable: input.bin,
         args: ["--skill-foundry-certify-driver-v1", "--request", requestPath, "--result", resultPath],
         cwd: runDir,
-        env: {},
+        env: process.env as Record<string, string>,
         logDirectory: runDir,
       };
 
