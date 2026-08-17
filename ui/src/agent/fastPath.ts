@@ -88,7 +88,10 @@ const LEADING_CONNECTOR_RE = /^(?:that|my|i)\s+(.+)$/i;
 const BARE_CONNECTOR_RE = /^(?:that|my|i)$/i;
 const PROJECT_SCOPE_RE = /^(.+?)\s+(?:for|in)\s+this\s+(?:song|track|project)$/i;
 
-function matchRemember(rawText: string, ctx: FastCtx): FastAction | null {
+// Skill Foundry Slice B, Task 7 (correction 2) — exported in place, no rename: only the
+// existing non-MoshOps memory-write branch AgentComposer.tsx's typed core path needs to
+// call directly (it must run before the shared runtime, never through skill routing).
+export function matchRemember(rawText: string, ctx: FastCtx): FastAction | null {
   if (ctx.mode === "recording") return null;   // never mid-take — a stray word shouldn't write memory
   const cleaned = rawText.trim().replace(LEADING_FILLER_RE, "");
   const m = cleaned.match(REMEMBER_RE);
