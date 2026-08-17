@@ -154,3 +154,16 @@ export async function atomicPublishDirectoryV1(
 export function unsafePathFailureV1(path: string, reason: string): UnsafePathFailureV1 {
   return { code: "unsafe_path", path, reason };
 }
+
+const SAFE_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * The one path-traversal defense every ID that becomes a path component MUST pass BEFORE
+ * it is ever joined into a filesystem path (draft IDs, source-card IDs, run IDs, ...): a
+ * lowercase ASCII slug with no ".", "/", or any other character `path.join` could interpret
+ * structurally. Deliberately stricter than "not containing .." — it is an ALLOWLIST, not a
+ * blocklist, so no encoding trick or platform quirk can smuggle a separator through.
+ */
+export function isSafePathComponentV1(value: string, maxLength = 64): boolean {
+  return value.length > 0 && value.length <= maxLength && SAFE_SLUG_REGEX.test(value);
+}

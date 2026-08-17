@@ -227,3 +227,109 @@ export type QuotaMutationDeltaV1 = {
   draftBytesDelta?: number;
   runArtifactBytesDelta?: number;
 };
+
+// ---------------------------------------------------------------------------------------
+// Task 4 — hash-chained state ledger and draft store
+// ---------------------------------------------------------------------------------------
+
+/** The declarative-path monotonic chain plus native's fork, blocked/stale, and terminals. */
+export type DraftLifecycleStateV1 =
+  | "draft"
+  | "source_reviewed"
+  | "schema_valid"
+  | "mock_green"
+  | "native_green"
+  | "packaged_green"
+  | "acceptance_green"
+  | "owner_approved"
+  | "release_packaged_green"
+  | "certified"
+  | "blocked"
+  | "stale"
+  | "rejected"
+  | "superseded"
+  | "revoked";
+
+export type DraftArtifactKindV1 = "declarative" | "native";
+
+export type ExecutionIdentityV1 = {
+  gitCommit: string;
+  appVersion: string;
+  build: { kind: "offline"; toolVersion: "teach-moshi-v1" } | { kind: "mosh"; moshBuildIdentity: string };
+};
+
+export type FoundryStateRecordResultV1 = "passed" | "failed" | "blocked";
+
+export type FoundryStateRecordV1 = {
+  schemaVersion: 1;
+  sequence: number;
+  previousRecordSha256: string;
+  state: DraftLifecycleStateV1;
+  artifactHashes: Readonly<Record<string, string>>;
+  executionIdentity: ExecutionIdentityV1;
+  testCommand: string;
+  startedAt: string;
+  finishedAt: string;
+  result: FoundryStateRecordResultV1;
+  recordSha256: string;
+};
+
+export type AppendStateTransitionInputV1 = {
+  state: DraftLifecycleStateV1;
+  artifactKind: DraftArtifactKindV1;
+  artifactHashes: Readonly<Record<string, string>>;
+  executionIdentity: ExecutionIdentityV1;
+  testCommand: string;
+  startedAt: string;
+  finishedAt: string;
+  result: FoundryStateRecordResultV1;
+};
+
+export type ClockV1 = { now(): Date };
+
+export type DraftArtifactNameV1 =
+  | "request"
+  | "candidate"
+  | "evals"
+  | "state"
+  | "manualEvidence"
+  | "certification"
+  | "approval"
+  | "releaseVerification";
+
+export type DraftSnapshotV1 = {
+  draftId: string;
+  draftDir: string;
+  statePath: string;
+  requestPath: string;
+  sourcesDir: string;
+  referencesDir: string;
+  state: readonly FoundryStateRecordV1[];
+  currentState: DraftLifecycleStateV1 | null;
+};
+
+export type ArtifactWriteResultV1 =
+  | { ok: true; sha256: string; bytes: number }
+  | { ok: false; code: "already_exists" | "hash_mismatch" | "not_found"; message: string };
+
+export type CreateDraftInputV1 = { goal: string; id?: string };
+export type CreateDraftResultV1 = {
+  skillId: string;
+  draftDir: string;
+  statePath: string;
+  requestPath: string;
+};
+
+export type DraftStoreV1 = {
+  createDraft(input: CreateDraftInputV1): Promise<CreateDraftResultV1>;
+  loadDraft(draftId: string): Promise<DraftSnapshotV1>;
+  readArtifactBytes(draftId: string, name: DraftArtifactNameV1, options?: { missing?: "throw" }): Promise<Uint8Array>;
+  readArtifactBytes(draftId: string, name: DraftArtifactNameV1, options: { missing: "null" }): Promise<Uint8Array | null>;
+  writeArtifactBytes(
+    draftId: string,
+    name: DraftArtifactNameV1,
+    bytes: Uint8Array,
+    options: { createOnly: boolean; expectedSha256?: string },
+  ): Promise<ArtifactWriteResultV1>;
+  createRunArtifactRoot(runId: string): Promise<string>;
+};
