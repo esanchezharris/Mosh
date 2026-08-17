@@ -22,14 +22,30 @@ def _digest_json(payload: dict[str, Any]) -> str:
 
 
 def _backend_mode() -> str:
+    """Which trainer runs: a real local fine-tune, a rented GPU, or the stub.
+
+    NOTE the bare `"local"` alias deliberately maps to `local_pmetal`, not to
+    `fake`. It used to mean the stub, which was harmless while no real local
+    trainer existed and is a live footgun now — anyone asking for "local"
+    means "train on this machine".  `local_fake` still selects the stub
+    explicitly, which is what the tests want.
+    """
     forced = os.environ.get("MOSH_TRAINING_BACKEND", "").strip().lower()
-    if forced in {"fake", "stub", "local", "local_fake"}:
+    if forced in {"fake", "stub", "local_fake"}:
         return "fake"
+    if forced in {"local", "local_pmetal", "pmetal"}:
+        return "local_pmetal"
     if forced in {"remote", "remote_http", "remote-gpu", "gpu"}:
         return "remote_http"
     remote_url = os.environ.get("MOSH_TRAINING_REMOTE_URL", "").strip()
     if remote_url:
         return "remote_http"
+    try:
+        from . import local_pmetal
+        if local_pmetal.available():
+            return "local_pmetal"
+    except Exception:  # noqa: BLE001 — a missing/broken local trainer must not break the service
+        pass
     return "fake"
 
 
@@ -362,7 +378,137 @@ def _remote_train(corpus_bundle: str, output_dir: str, config: dict[str, Any]) -
             pass
 
 
-def train(corpus_bundle: str, output_dir: str, config: dict[str, Any]) -> dict[str, Any]:
-    if _backend_mode() == "remote_http":
+def train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
+          should_cancel: Any = None, on_progress: Any = None) -> dict[str, Any]:
+    mode = _backend_mode()
+    if mode == "remote_http":
         return _remote_train(corpus_bundle, output_dir, config)
+    if mode == "local_pmetal":
+        return _local_train(corpus_bundle, output_dir, config,
+                            should_cancel=should_cancel, on_progress=on_progress)
     return _fake_train(corpus_bundle, output_dir, config)
+
+
+def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
+                 should_cancel: Any = None, on_progress: Any = None) -> dict[str, Any]:
+    """A real fine-tune on this machine: precompute -> pmetal -> collect.
+
+    Returns the same envelope shape the fake and remote paths return, so
+    `server.py`'s result handling is unchanged. The distinguishing field is
+    `output_format`: `"safetensors"` here versus the stub's `"json_stub"` —
+    which is what the artifact-shape test keys on to prove this ran.
+    """
+    from . import local_pmetal as LP
+    from . import recipe as R
+    from . import sa3_precompute as PC
+
+    ready, blockers = LP.readiness()
+    if not ready:
+        raise RuntimeError("local trainer unavailable: " + "; ".join(blockers))
+
+    bundle_path = Path(corpus_bundle)
+    manifest = _load_manifest(bundle_path)
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # ── phase 1: precompute (in-process, holds the MLX lock via the caller) ──
+    clips = _clips_from_bundle(bundle_path, manifest)
+    if not clips:
+        raise RuntimeError("corpus bundle contains no usable clips")
+    pre_dir = out / "precompute"
+    pre = PC.precompute(clips, str(pre_dir), on_progress=None)
+    if pre["count"] == 0:
+        raise RuntimeError(f"precompute produced no samples (skipped: {pre['skipped']})")
+
+    # ── recipe: caller's explicit steps win; otherwise the measured curve ──
+    plan = R.recommend_recipe(pre["count"])
+    cfg = {
+        "rank": int(config.get("rank", 16)),
+        "alpha": float(config.get("alpha", config.get("rank", 16))),
+        "lr": float(config.get("lr", 1e-4)),
+        "seed": int(config.get("seed", 42)),
+        "batch_size": int(config.get("batch_size", plan["batchSize"])),
+        "grad_accum": int(config.get("grad_accum", plan["gradAccum"])),
+        "steps": int(config.get("steps", plan["steps"])),
+        "checkpoint_every": int(config.get("checkpoint_every", max(1, plan["steps"] // 6))),
+        "probe_every": int(config.get("probe_every", 100)),
+        "dtype": str(config.get("dtype", "bf16")),
+    }
+
+    # ── phase 2: train ──
+    run_dir = out / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    argv = LP.build_argv(LP.trainer_bin(), LP.base_dit_path(), pre["manifest_path"], str(run_dir), cfg)
+    code = LP.run_training(argv, run_dir, cfg["steps"],
+                           should_cancel=should_cancel, on_progress=on_progress)
+    if code == 130:
+        raise RuntimeError("training cancelled")
+    if code != 0:
+        raise RuntimeError(f"trainer exited {code} — see {run_dir / 'progress.json'} and ~/.cache/pmetal/logs/pmetal.log")
+
+    final = run_dir / "mosh_lora.safetensors"
+    if not final.is_file():
+        raise RuntimeError("trainer finished but produced no adapter (missing mosh_lora.safetensors)")
+
+    checkpoints = LP._scan_checkpoints(run_dir)
+    config_payload = _config_payload({**config, **cfg, "backend": "local_pmetal"})
+    adapter_id = _digest_json({"bundle_hash": manifest.get("bundle_hash"), "config": config_payload})[:16]
+    quality = {
+        "source_count": pre["count"],
+        "steps": cfg["steps"],
+        "epochs": round(cfg["steps"] * cfg["batch_size"] * cfg["grad_accum"] / max(1, pre["count"]), 1),
+        "checkpoints": len(checkpoints),
+        "backend": "local_pmetal",
+        # NOT a quality score: the probe has repeatedly pointed the opposite way
+        # from how an adapter actually sounds. Kept for diagnostics only.
+        "probes": len(LP._read_probes(run_dir)),
+    }
+    manifest_payload = {
+        "schema_version": 1,
+        "adapter_id": adapter_id,
+        "bundle_hash": manifest.get("bundle_hash", ""),
+        "corpus_bundle": str(bundle_path),
+        "artifact_path": str(final),
+        "config": config_payload,
+        "quality": quality,
+        "output_format": "safetensors",
+        "run_dir": str(run_dir),
+        "checkpoints": checkpoints,
+    }
+    manifest_path = out / "adapter.manifest.json"
+    write_json(manifest_path, manifest_payload)
+    return {
+        "ok": True,
+        "adapter_id": adapter_id,
+        "artifact_path": str(final),
+        "manifest_path": str(manifest_path),
+        "bundle_hash": manifest.get("bundle_hash", ""),
+        "quality": quality,
+        "backend": "local_pmetal",
+        "output_format": "safetensors",
+        "run_dir": str(run_dir),
+        "checkpoints": checkpoints,
+    }
+
+
+def _clips_from_bundle(bundle_path: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Corpus-bundle sources -> the {id, wav, caption} triples precompute wants.
+
+    The caption is the prompt the adapter learns to answer, so an absent one is
+    a real weakness rather than a cosmetic gap — fall back through the fields
+    most likely to carry human description before giving up on empty.
+    """
+    clips: list[dict[str, Any]] = []
+    for src in manifest.get("sources", []) or []:
+        rel = src.get("audio_path") or src.get("path") or src.get("file") or ""
+        if not rel:
+            continue
+        p = Path(rel)
+        if not p.is_absolute():
+            p = bundle_path / rel
+        clips.append({
+            "id": str(src.get("id") or p.stem),
+            "wav": str(p),
+            "caption": str(src.get("caption") or src.get("title") or src.get("notes") or "").strip(),
+        })
+    return clips

@@ -241,6 +241,58 @@ class _Engine:
         lat = self._encoder(mx.array(patches)); mx.eval(lat)
         return lat.astype(self.DTYPE)                                 # (1, 256, T_LAT)
 
+    # ── training-precompute variants of encode_init/_cond ──────────────────
+    #
+    # These exist because LoRA training needs a DIFFERENT shape than rendering
+    # does, and getting the difference wrong fails SILENTLY — the adapter
+    # trains with a perfectly healthy loss curve and is simply wrong. Two
+    # traps, both of which the parity test guards:
+    #
+    #  1. T_lat is PER SAMPLE here (ceil of the clip's own length), not the
+    #     engine's fixed render grid. Training clips vary in length; padding
+    #     them all to one grid would train the adapter on silence.
+    #  2. `seconds_total` must be the clip's REAL pre-padding duration, not
+    #     the padded length. It is the conditioning the model learns to
+    #     answer, so a padded value teaches a wrong length↔content mapping.
+    #
+    # Both return RAW conditioning (pre-`to_cond_embed`) — the trainer applies
+    # the projection itself, exactly as the DiT does at inference.
+    def encode_for_training(self, path):
+        """Encode one training clip → ((256, T_lat) latent, real seconds).
+
+        Mirrors `encode_init` but sizes the latent grid to the clip instead of
+        the render grid, and reports the clip's true duration.
+        """
+        S, mx, np = self.S, self.mx, self.np
+        if self._encoder is None:
+            self._encoder = S.load_encoder("same-l", mx.float32)[0]
+        a = S.read_wav(path)                                          # (2, T)
+        n_orig = a.shape[-1]
+        seconds = n_orig / S.SAMPLE_RATE                              # REAL, pre-padding
+        t_lat = max(1, math.ceil(n_orig / self.SAMPLES_PER_LATENT))
+        tgt = t_lat * self.SAMPLES_PER_LATENT
+        a = a[:, :tgt] if n_orig >= tgt else np.pad(a, ((0, 0), (0, tgt - n_orig)))
+        patches = S.patch_audio(a[None], patch_size=256)              # (1, 512, t_lat*16)
+        if patches.shape[-1] % 16 != 0:
+            raise ValueError(f"SAME-L requires T_audio_patches % 16 == 0, got {patches.shape[-1]}")
+        lat = self._encoder(mx.array(patches)); mx.eval(lat)
+        return lat.astype(self.DTYPE)[0], seconds                     # (256, t_lat), float
+
+    def cond_for_training(self, prompt, seconds):
+        """Raw conditioning for one training clip → ((257,768), (768,)).
+
+        Mirrors `_cond` but takes the clip's own duration rather than the
+        engine's render length, and drops the batch dim for storage.
+        """
+        S, mx = self.S, self.mx
+        embeds, mask = self.enc.encode([prompt], max_len=256)
+        embeds = embeds.astype(self.DTYPE)
+        embeds_padded = S.apply_prompt_padding(embeds, mask, self.padding_emb.astype(self.DTYPE))
+        seconds_embed = self.secs_embedder(float(seconds)).astype(self.DTYPE)   # (1,1,768)
+        cross_attn = mx.concatenate([embeds_padded, seconds_embed], axis=1)     # (1,257,768)
+        mx.eval(cross_attn)
+        return cross_attn[0], seconds_embed[0, 0, :]                            # (257,768), (768,)
+
     # ── carved from mlx_inproc._cond ──
     def _cond(self, prompt):
         S, mx = self.S, self.mx
