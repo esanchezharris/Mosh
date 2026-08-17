@@ -85,6 +85,22 @@ def main() -> None:
         print("     (this test is MANDATORY on a dev Mac — do not let it skip silently in CI)")
         return
 
+    # `engine_available()` only checks that the SA3 tree is present — it does NOT
+    # mean this interpreter can load the models. The gate runs each *_test.py
+    # under the SYSTEM python3, which lacks sentencepiece/mlx, so constructing
+    # the engine there raises rather than returning False. Skip on that too, or
+    # this test reds every gate run for a reason that has nothing to do with the
+    # code under test.
+    try:
+        _probe_engine = E.get_engine()
+    except Exception as exc:  # noqa: BLE001
+        print(f"SKIP sa3_precompute_parity_test: engine present but not loadable here ({type(exc).__name__}: {exc})")
+        print("     Run under the MLX venv to actually exercise it:")
+        print("       MOSH_ENABLE_SA3=1 ~/AI/stable-audio-3/optimized/mlx/.venv/bin/python \\")
+        print("         service/training/sa3_precompute_parity_test.py")
+        return
+    del _probe_engine
+
     import numpy as np
     import sa3_precompute as PC
 
