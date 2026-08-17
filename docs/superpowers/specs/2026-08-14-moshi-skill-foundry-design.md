@@ -113,7 +113,9 @@ The implementation must begin from the current behavior rather than its older
 plans:
 
 - `AgentComposer` routes section-scoped rework, deterministic fast paths, then
-  `runStudioSkill`; the developer-only free-form loop is not a packaged fallback.
+  `runStudioSkill`; at the time of writing the developer-only free-form loop was
+  not a packaged fallback *(superseded by the §9.4 experimental lane,
+  amended 2026-08-17)*.
 - `studioSkills.ts` currently exposes one production studio skill:
   `load_named_plugin`.
 - `skills.ts` contains thirteen typed workflow definitions and
@@ -375,6 +377,13 @@ child group (`SIGTERM`, ten-second grace, then `SIGKILL`). It preserves logs,
 removes its own temporary roots, and never kills a PID it did not spawn.
 
 ## 6. Online-resource curriculum
+
+*Posture note (2026-08-17): intake is seed-probe-only. Mass tutorial-transcript
+harvesting is out of scope on both legal (DMCA §1201 litigation trend) and
+extractability grounds; the merged Slice-D intake already enforces this
+structurally via closed, fail-closed rights/acquisition enums. Skill growth
+comes primarily from owner demonstration ("remember that") and usage promotion
+(§9.4), not mining.*
 
 ### 6.1 Authority order
 
@@ -1123,7 +1132,9 @@ The packaged path is:
 The model never receives or selects the raw command catalog on this path. It can
 choose only among retrieved skill IDs and fill their published slot schemas. An
 invalid response, provider failure, tie, missing slot, or unavailable candidate
-causes clarification or refusal, never raw-command fallback.
+causes clarification or refusal on this path; when the experimental lane (§9.4)
+is enabled, an *unsupported* outcome may instead fall through to that lane —
+never to unflagged raw-command execution inside the skill path itself.
 
 Manifest titles, descriptions, examples, tags, and response strings are always
 encoded as length-bounded untrusted JSON data, never concatenated into system or
@@ -1141,9 +1152,6 @@ router asks a deterministic choice or refuses. An exact invocation means the
 utterance names a unique manifest ID or the user selects a returned choice; v1
 does not add a hidden command syntax.
 
-The developer-only free-form loop remains an experiment and is never the
-packaged fallback.
-
 ### 9.3 Live-shell reachability
 
 Replace the Live shell's Moshi stub with the same shared `AgentComposer`, task
@@ -1157,9 +1165,50 @@ The shared composer must behave identically in Live and Pro Tools shells for:
 - task and change feedback;
 - Escape/close/focus return;
 - project replacement and stale continuation invalidation;
-- packaged refusal behavior.
+- packaged behavior for unsupported asks: with the §9.4 lane off, the current
+  refusal/missing-skill turn; with it on, the experimental lane with its badge,
+  logging, and undo rail — identical in both shells.
 
 This is runtime convenience for the owner, not a teaching recorder.
+
+### 9.4 Experimental lane (graduated trust)
+
+*Amended 2026-08-17 by owner decision, superseding this section's earlier
+"never the packaged fallback" posture, after the stress-test research review
+(reconciliation plan: owner-local). The prior sentence read: "The
+developer-only free-form loop remains an experiment and is never the packaged
+fallback."*
+
+Certified skills stay the fast, silent, certain path — nothing in §9.2 changes
+for them. When §9.2 returns **unsupported** (and only then), a packaged build
+MAY route the utterance through the existing agent loop as an *experimental
+lane*, under all of the following:
+
+- **Owner-visible toggle.** The lane runs only when the producer's
+  `experimentalMoshi` setting is on. The compile-time kill switch remains. The
+  default (on vs. opt-in) is set by the P1 novice-jam probe result
+  (≥20/25 acceptable → on).
+- **Same rails, no exceptions.** Lane turns use the identical typed catalog
+  validation, destructive-command screen, one-undo-unit transactional batching
+  (FS-B2a manifest digest, pre-state fingerprint, proof-of-ownership rollback),
+  and turn provenance (`turn_id`, `source`, `utterance`) as every other agent
+  turn. The lane adds no command, no tool, and no bypass.
+- **Always flagged.** Every lane result is visibly marked experimental (change
+  toast chip, drawer badge). Silent execution is reserved for certified skills.
+- **Always logged.** Lane entries are recorded (missing-skill telemetry
+  continues) and every completed lane task appends a usage-ledger record; a
+  normalized command sequence with repeated un-undone successes is promotable
+  into the Slice-D draft lifecycle as an `owner_usage`-sourced candidate.
+  Repeated post-promotion undo demotes it.
+- **Multiplayer-gated off.** The lane never runs while a multiplayer session is
+  active.
+- **Budgeted.** The loop's existing step/planner/wall-clock budgets apply
+  unchanged.
+
+An invalid model response inside the lane fails the turn; it never degrades to
+unvalidated execution. The lane is how novel long-tail asks get served and how
+new skills earn their way into the certified set — certainty is the product of
+usage evidence plus replay verification (§10), not hand authoring alone.
 
 ## 10. Certification goal loop
 
@@ -1318,6 +1367,11 @@ Failed attempts remain in the ledger and cannot be overwritten.
 - Explicit level values validate against the existing safe range and reach the
   exact snapshot value.
 - Multi-target actions expand only within the fixed mutation cap.
+  *(Resolution, 2026-08-17: the `explicitBalanceV1` skill itself is
+  single-target. Bulk multi-name operations — "mute everything but drums" —
+  are served by the deterministic fast path's `matchTrackOp`, which runs at
+  fast-path precedence above skill routing and already enforces the mutation
+  cap. This bullet is satisfied by that path, not by widening the skill.)*
 - One atomic undo restores every changed target.
 - Vague taste requests are unsupported and write no mutation.
 
@@ -1477,13 +1531,26 @@ present in the fixed allowlist.
 
 ### Slice E — certification and owner reference
 
-- Implement the finite goal loop, frozen benchmark manifests, immutable
-  reports, manual checkpoints, and the QA-only packaged candidate loader.
-- After native approval, build and verify the exact signed Release bundle and
-  record `NativeReleaseVerificationV1` before certification.
-- Run the single Ableton reference block only after the offline contracts exist,
-  so owner time answers specific questions rather than generating raw footage.
-- Certify all four journeys through packaged and physical gates.
+*De-scoped 2026-08-17 by owner decision after the stress-test research review.
+The frozen 160-case benchmark, graders, immutable reports, and QA-only packaged
+candidate loader are WITHDRAWN. Certification for owner-local and
+usage-promoted skills is now:*
+
+- **Scratch-session dry-run replay**: the candidate's command sequence replays
+  headlessly (`--run-script`) against seed projects with postcondition
+  fingerprint asserts; a passing replay flips `mock_green -> native_green` and
+  replaces the Slice-D `fake-certifier.mjs` fixture.
+- **Usage-based promotion/demotion**: repeated un-undone lane successes promote
+  a draft; repeated post-promotion undo demotes/revokes it (Slice-D ledger,
+  revoke, and GC paths).
+- **The living quality instrument** is the novice-jam bench suite
+  (`agentBench.mts --suite novice-jam`), deliberately unfrozen.
+- The four core journeys retain their native selftest sections (Slice B) and
+  the signed-bundle install verification built in Slices A/D
+  (`CertifiedSkillLoader`, `packageLifecycle`) remains the packaged-trust
+  boundary for native built-ins.
+- The optional single Ableton reference block is unchanged: reference evidence
+  only, never a gate.
 
 Each slice receives its own implementation plan, worktree, review, and evidence.
 No slice may claim the program complete while a later required slice remains
