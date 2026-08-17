@@ -150,6 +150,35 @@ export async function atomicPublishDirectoryV1(
   await fsyncDirectoryV1(parent);
 }
 
+/**
+ * Open+read one EXPLICIT small file with `O_NOFOLLOW`, bounded by `maxBytes`. Used for the
+ * foundry's OWN small JSON artifacts (source cards, mirrors, ...) where the caller already
+ * knows the exact path and just needs a safe, bounded, non-following read — a lighter
+ * sibling of `inspectExternalRegularFileV1` that skips owner/hardlink checks for files this
+ * process itself created. Throws (never a discriminated result) — callers own translating
+ * that into their own domain error shape.
+ */
+export async function readBoundedNoFollowV1(path: string, maxBytes: number): Promise<Uint8Array> {
+  const handle = await open(path, O_RDONLY | O_NOFOLLOW);
+  try {
+    const stats = await handle.stat({ bigint: true });
+    if (!stats.isFile()) throw new Error(`not a regular file: ${path}`);
+    const size = Number(stats.size);
+    if (size > maxBytes) throw new Error(`exceeds ${maxBytes} bytes: ${path} (${size} bytes)`);
+    const buffer = Buffer.alloc(size);
+    let readTotal = 0;
+    while (readTotal < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, readTotal, buffer.length - readTotal, readTotal);
+      if (bytesRead === 0) break;
+      readTotal += bytesRead;
+    }
+    if (readTotal !== size) throw new Error(`size changed while reading: ${path}`);
+    return new Uint8Array(buffer);
+  } finally {
+    await handle.close();
+  }
+}
+
 /** `{code:"unsafe_path", ...}` helper — kept in one place so the message shape is uniform. */
 export function unsafePathFailureV1(path: string, reason: string): UnsafePathFailureV1 {
   return { code: "unsafe_path", path, reason };

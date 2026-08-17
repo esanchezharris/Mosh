@@ -320,6 +320,105 @@ export type CreateDraftResultV1 = {
   requestPath: string;
 };
 
+// ---------------------------------------------------------------------------------------
+// Task 5 — source cards, source status/freshness, and external reference locators
+// ---------------------------------------------------------------------------------------
+
+// Mirrors service/corpus/recipe_source_intake.py's `project_skill_source` output exactly
+// (camelCase field names; same closed enums) — see that module's RIGHTS_VALUES /
+// ACQUISITION_VALUES / PLATFORM_HANDLING_VALUES / CLAIM_ORIGIN_VALUES / SOURCE_STATE_VALUES.
+export type SourceCardRightsV1 =
+  | "official_public_documentation"
+  | "creator_authorized"
+  | "user_owned_or_licensed"
+  | "manual_paraphrase_only";
+export type SourceCardAcquisitionV1 =
+  | "official_https_page"
+  | "creator_authorized_file"
+  | "user_supplied_local_file"
+  | "manual_viewing_notes";
+export type SourceCardPlatformHandlingV1 = "metadata_and_short_paraphrases_only" | "local_locator_only";
+export type SourceCardClaimOriginV1 = "source_text" | "owner_observation" | "asr_ocr" | "codex_inference";
+export type SourceCardStateV1 = "current" | "stale" | "superseded" | "revoked";
+
+export type SourceCardClaimV1 = {
+  claimId: string;
+  origin: SourceCardClaimOriginV1;
+  workflowMoment: string;
+  paraphrase: string;
+  boundary: string;
+};
+
+export type SourceCardV1 = {
+  schemaVersion: 1;
+  sourceCardId: string;
+  sourceVersion: string;
+  rights: SourceCardRightsV1;
+  acquisition: SourceCardAcquisitionV1;
+  platformHandling: SourceCardPlatformHandlingV1;
+  evidenceSha256: string;
+  reviewer: string;
+  reviewedAt: string;
+  state: SourceCardStateV1;
+  dependentIds: readonly string[];
+  claims: readonly SourceCardClaimV1[];
+  sourceSnapshotSha256: string;
+};
+
+// Slice A's `SourceStatusV1` shape (ui/src/agent/skillFoundry/contracts.ts) — re-declared
+// here rather than imported because Slice A ships no standalone `parseSourceStatusV1`
+// (verified: it validates this shape only INLINE inside `validateSourceStatusForInvocationV1`).
+// Slice D is the sole durable writer of this index, so it owns construction/validation on
+// write; the field names and semantics are identical to Slice A's runtime-read type by
+// design, so a value built here type-checks against Slice A's `SourceStatusV1` too.
+export type SourceStatusEntryV1 = {
+  sourceCardId: string;
+  sourceSnapshotSha256: string;
+  state: SourceCardStateV1;
+  checkedAt: string;
+  reviewAfter: string;
+};
+
+export type SourceStatusV1 = {
+  schemaVersion: 1;
+  generation: number;
+  updatedAt: string;
+  entries: readonly SourceStatusEntryV1[];
+};
+
+export type ReferenceFileIdentityV1 = { device: number; inode: number; mtimeNs: string };
+
+export type ReferenceLocatorV1 = {
+  schemaVersion: 1;
+  referenceId: string;
+  absolutePath: string;
+  sha256: string;
+  bytes: number;
+  fileIdentity: ReferenceFileIdentityV1;
+  recordedAt: string;
+};
+
+export type AbletonReferenceCheckpointV1 = {
+  name: string;
+  narration: string;
+  observedState?: Record<string, unknown>;
+  unobservedOrAmbiguous: readonly string[];
+};
+
+export type AbletonReferenceSetRefV1 = { path: string; sha256: string };
+
+export type AbletonReferenceV1 = {
+  schemaVersion: 1;
+  journeyId: string;
+  liveVersion: string;
+  startedAt: string;
+  goal: string;
+  checkpoints: readonly AbletonReferenceCheckpointV1[];
+  beforeSet?: AbletonReferenceSetRefV1;
+  afterSet?: AbletonReferenceSetRefV1;
+  ownerRules: { variables: readonly string[]; forbidden: readonly string[] };
+};
+
 export type DraftStoreV1 = {
   createDraft(input: CreateDraftInputV1): Promise<CreateDraftResultV1>;
   loadDraft(draftId: string): Promise<DraftSnapshotV1>;
