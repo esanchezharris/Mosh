@@ -162,3 +162,6 @@ service/teardown/probe/.assets/
 .playwright-cli/
 .clangd
 .scratch-v2/
+
+# LoRA trainer binary staged by service/training/setup-trainer.sh (~29MB, fetched not committed)
+resources/trainer/
