@@ -117,3 +117,113 @@ export type TeachMoshiDepsV1 = {
     command: Extract<TeachMoshiCommandV1, { command: K }>,
   ) => Promise<CommandHandlerResultV1>;
 };
+
+// ---------------------------------------------------------------------------------------
+// Task 3 — exact foundry LOCAL STORAGE caps (plan Global Constraints, "Exact foundry caps").
+//
+// DELIBERATELY a separate name from Slice A's `FOUNDRY_LIMITS_V1` (declarative-manifest
+// GRAMMAR bounds, `ui/src/agent/skillFoundry/limits.ts`) — these bound the Skill Foundry's
+// own draft/source/reference/eval/state/evidence/run-artifact filesystem storage, a
+// completely different axis. Never import or alias the two together.
+// ---------------------------------------------------------------------------------------
+
+export const FOUNDRY_STORAGE_LIMITS_V1 = Object.freeze({
+  /** Drafts. */
+  maxDrafts: 32,
+  /** One draft's metadata tree, in bytes (64 MiB). */
+  maxDraftBytes: 67108864,
+  /** All draft metadata combined, in bytes (1 GiB). */
+  maxAllDraftBytes: 1073741824,
+  /** Source cards per draft. */
+  maxSourceCardsPerDraft: 32,
+  /** One imported source card OR attestation, in bytes (1 MiB). */
+  maxSourceCardBytes: 1048576,
+  /** Reference locators per draft. */
+  maxReferencesPerDraft: 32,
+  /** One referenced external regular file, in bytes (4 GiB). */
+  maxExternalReferenceBytes: 4294967296,
+  /** Eval cases. */
+  maxEvalCases: 512,
+  /** `evals.jsonl`, in bytes (4 MiB). */
+  maxEvalsJsonlBytes: 4194304,
+  /** `state.jsonl` records. */
+  maxStateRecords: 4096,
+  /** `state.jsonl`, in bytes (4 MiB). */
+  maxStateLedgerBytes: 4194304,
+  /** `manual-evidence.jsonl` records. */
+  maxManualEvidenceRecords: 128,
+  /** `manual-evidence.jsonl`, in bytes (4 MiB). */
+  maxManualEvidenceBytes: 4194304,
+  /** One certification run artifact tree, in bytes (2 GiB). */
+  maxRunArtifactBytes: 2147483648,
+  /** All foundry-owned run artifacts, in bytes (20 GiB). */
+  maxAllRunArtifactBytes: 21474836480,
+});
+
+// ---------------------------------------------------------------------------------------
+// Task 3 — safe roots, durable writes, lock, quota
+// ---------------------------------------------------------------------------------------
+
+/** Every path the foundry reads or writes, resolved once per invocation. */
+export type FoundryPathsV1 = {
+  homeDir: string;
+  uid: number;
+  /** `<homeDir>/Library/Mosh/teach` */
+  teachRoot: string;
+  draftsRoot: string;
+  artifactsRoot: string;
+  /** Mirrored current reviewed source-card metadata (Task 5). */
+  sourceCardsRoot: string;
+  /** A DIRECTORY (not a file) — lock acquisition renames a staged dir onto this path. */
+  lockPath: string;
+  /** `$MOSH_AGENT_DIR` if set (validated absolute+safe) else `<homeDir>/Library/Mosh/agent`. */
+  agentRoot: string;
+  certifiedRoot: string;
+  activePath: string;
+  sourceStatusPath: string;
+};
+
+export type UnsafePathFailureV1 = { code: "unsafe_path"; path: string; reason: string };
+
+export type InspectedExternalFileV1 = {
+  bytes: number;
+  device: number;
+  inode: number;
+  mtimeNs: string;
+  sha256: string;
+};
+
+export type InspectExternalFileFailureCodeV1 =
+  | "not_found"
+  | "symlink"
+  | "not_regular_file"
+  | "wrong_owner"
+  | "hard_linked"
+  | "oversized";
+
+export type InspectExternalFileFailureV1 = { ok: false; code: InspectExternalFileFailureCodeV1; message: string };
+export type InspectExternalFileResultV1 = { ok: true; value: InspectedExternalFileV1 } | InspectExternalFileFailureV1;
+
+export type FoundryLockMetadataV1 = {
+  schemaVersion: 1;
+  nonce: string;
+  pid: number;
+  processStartIdentity: string;
+  command: string;
+  acquiredAt: string;
+};
+
+export type FoundryQuotaSnapshotV1 = {
+  draftCount: number;
+  draftBytesById: Readonly<Record<string, number>>;
+  allDraftBytes: number;
+  allRunArtifactBytes: number;
+};
+
+export type QuotaMutationDeltaV1 = {
+  /** Set when creating a brand-new draft; absent for a mutation to an existing draft. */
+  newDraft?: true;
+  draftId?: string;
+  draftBytesDelta?: number;
+  runArtifactBytesDelta?: number;
+};
