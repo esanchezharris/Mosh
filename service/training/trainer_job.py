@@ -379,18 +379,28 @@ def _remote_train(corpus_bundle: str, output_dir: str, config: dict[str, Any]) -
 
 
 def train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
-          should_cancel: Any = None, on_progress: Any = None) -> dict[str, Any]:
+          should_cancel: Any = None, on_progress: Any = None,
+          run_on_mlx: Any = None) -> dict[str, Any]:
+    """`run_on_mlx(fn)` runs `fn` on the caller's single MLX-owning thread.
+
+    Required in the real service because MLX state is thread-AFFINE: precompute
+    touching the SA3 engine from the training thread leaves every later render
+    failing with "There is no Stream(gpu, 0) in current thread" until the process
+    restarts. Optional here so tests and CLI callers can pass None and run
+    precompute inline on their own single thread."""
     mode = _backend_mode()
     if mode == "remote_http":
         return _remote_train(corpus_bundle, output_dir, config)
     if mode == "local_pmetal":
         return _local_train(corpus_bundle, output_dir, config,
-                            should_cancel=should_cancel, on_progress=on_progress)
+                            should_cancel=should_cancel, on_progress=on_progress,
+                            run_on_mlx=run_on_mlx)
     return _fake_train(corpus_bundle, output_dir, config)
 
 
 def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
-                 should_cancel: Any = None, on_progress: Any = None) -> dict[str, Any]:
+                 should_cancel: Any = None, on_progress: Any = None,
+                 run_on_mlx: Any = None) -> dict[str, Any]:
     """A real fine-tune on this machine: precompute -> pmetal -> collect.
 
     Returns the same envelope shape the fake and remote paths return, so
@@ -417,7 +427,11 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
     if not clips:
         raise RuntimeError("corpus bundle contains no usable clips")
     pre_dir = out / "precompute"
-    pre = PC.precompute(clips, str(pre_dir), on_progress=None)
+    # On the MLX-owning thread when the caller provides one (the service always
+    # does). Running it on this thread instead poisons every subsequent render —
+    # see train()'s docstring.
+    _pre = lambda: PC.precompute(clips, str(pre_dir), on_progress=None)  # noqa: E731
+    pre = run_on_mlx(_pre) if run_on_mlx else _pre()
     if pre["count"] == 0:
         raise RuntimeError(f"precompute produced no samples (skipped: {pre['skipped']})")
 
@@ -532,20 +546,53 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
 def _clips_from_bundle(bundle_path: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Corpus-bundle sources -> the {id, wav, caption} triples precompute wants.
 
+    The audio key is `copied_path` — the bundle's OWN copy under `sources/`,
+    written by TrainerRegistry's build. (This function first looked for
+    `audio_path`/`path`/`file`, keys the manifest has never had; it silently
+    yielded zero clips and the job died with "corpus bundle contains no usable
+    clips". A unit test with a hand-written manifest cannot catch that, because
+    the fixture agrees with the reader instead of with the writer — only a real
+    bundle does.)
+
+    `copied_path` is ABSOLUTE, so it goes stale the moment the bundle is moved
+    or copied — which happens routinely: harness runs copy the bundle out of a
+    session dir that gets wiped, and a producer can relocate their Mosh data.
+    So an absolute miss falls back to resolving the basename inside THIS bundle,
+    then to the original `local_path`. The bundle is meant to be
+    self-contained; that is only true if it is read self-containedly.
+
     The caption is the prompt the adapter learns to answer, so an absent one is
     a real weakness rather than a cosmetic gap — fall back through the fields
     most likely to carry human description before giving up on empty.
     """
     clips: list[dict[str, Any]] = []
     for src in manifest.get("sources", []) or []:
-        rel = src.get("audio_path") or src.get("path") or src.get("file") or ""
-        if not rel:
+        p: Path | None = None
+        copied = str(src.get("copied_path") or "")
+        if copied:
+            cand = Path(copied)
+            if cand.is_file():
+                p = cand
+            else:
+                # Same bundle, new location: find our own copy by name.
+                local = bundle_path / "sources" / cand.name
+                if local.is_file():
+                    p = local
+        if p is None:
+            for key in ("local_path", "audio_path", "path", "file"):
+                raw = str(src.get(key) or "")
+                if not raw:
+                    continue
+                cand = Path(raw) if os.path.isabs(raw) else bundle_path / raw
+                if cand.is_file():
+                    p = cand
+                    break
+        if p is None:
+            print(f"[training] skipping source with no readable audio: "
+                  f"{src.get('source_id') or src.get('id') or '?'}", flush=True)
             continue
-        p = Path(rel)
-        if not p.is_absolute():
-            p = bundle_path / rel
         clips.append({
-            "id": str(src.get("id") or p.stem),
+            "id": str(src.get("source_id") or src.get("id") or p.stem),
             "wav": str(p),
             "caption": str(src.get("caption") or src.get("title") or src.get("notes") or "").strip(),
         })

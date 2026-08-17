@@ -221,7 +221,12 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
     });
     if (!res.ok || !res.data) return;
     const d = res.data;
-    const progress = (d.progress ?? {}) as Record<string, unknown>;
+    // `progress` is a coarse 0..1 FLOAT for a generic bar; the per-step numbers
+    // live in `detail`. Reading step/loss/eta off `progress` yields undefined for
+    // every field and a header frozen at zero for the whole run, with training
+    // working perfectly the entire time — which reads as a dead UI rather than a
+    // wrong field.
+    const progress = (d.detail ?? {}) as Record<string, unknown>;
     const status = str(d.status) || run.status;
 
     set({

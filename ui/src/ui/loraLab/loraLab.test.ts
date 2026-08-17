@@ -24,12 +24,9 @@ import { BASELINE_KEY, renderKey } from "../../store/loraLab";
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe("LoRA Lab — audition loop", () => {
-  let exec: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     useStore.getState().resetLab();
     useStore.setState({ labPrompt: "rage trap instrumental, distorted 808", labSeed: 7 } as never);
-    exec = vi.fn();
   });
 
   it("renders a take through render_lora_take with the adapter at full strength", async () => {

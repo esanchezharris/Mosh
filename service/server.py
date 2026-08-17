@@ -483,6 +483,56 @@ _training_lock = threading.Lock()
 # process with its own Metal budget, and holding the lock for a 20-60 minute
 # run would freeze every render in the app.
 _mlx_lock = threading.RLock()
+
+
+# ── the ONE MLX thread ───────────────────────────────────────────────────────
+# MLX state is THREAD-AFFINE, not merely non-concurrent. Precompute used to run
+# on the training worker thread while renders run on `_worker_loop`'s; after any
+# training run, the next render died with
+#
+#     There is no Stream(gpu, 0) in current thread.
+#
+# and kept dying until the service was restarted — so "train once, then audition"
+# (the LoRA Lab's entire loop) was broken end to end, while a render on a
+# freshly-started service worked perfectly. A lock cannot fix that: serialising
+# two threads still leaves two threads.
+#
+# So every in-process MLX touch is funnelled onto the render worker thread as a
+# pseudo-job. The trainer SUBPROCESS is unaffected — separate process, own Metal
+# budget — and deliberately does NOT hold the lock, or a 20-minute run would
+# freeze every render in the app. (It previously did exactly that: the lock was
+# held across the whole train_lora call, subprocess included, contradicting the
+# comment right above it.)
+_MLX_TASK_ADAPTER = "__mlx_task__"
+
+
+def _run_on_mlx_thread(fn, timeout: float = 3600.0):
+    """Run `fn()` on the render worker thread; return its value or raise."""
+    box: dict = {}
+    done = threading.Event()
+
+    def _task():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller's thread
+            box["error"] = exc
+        finally:
+            done.set()
+
+    job_id = uuid.uuid4().hex[:12]
+    with _lock:
+        _jobs[job_id] = {"status": "queued", "progress": 0.0,
+                         "adapter": _MLX_TASK_ADAPTER, "fn": _task}
+    # Priority 0: ahead of queued renders. Precompute gates a job the producer
+    # has already committed twenty minutes to; a render is seconds and can wait.
+    _job_q.put((0, next(_seq), job_id))
+    if not done.wait(timeout):
+        raise RuntimeError("MLX task timed out")
+    with _lock:
+        _jobs.pop(job_id, None)
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 _training_q: "queue.PriorityQueue" = queue.PriorityQueue()
 _training_seq = itertools.count()
 
@@ -572,6 +622,13 @@ def _run_job(job_id: str) -> None:
             return
         job["status"] = "rendering"
         adapter_id = job.get("adapter", "fake")
+        mlx_task = job.get("fn") if adapter_id == _MLX_TASK_ADAPTER else None
+    if mlx_task is not None:
+        # An in-process MLX unit of work (today: training precompute), run HERE so
+        # it shares this thread — and therefore MLX's stream — with every render.
+        with _mlx_lock:
+            mlx_task()
+        return
     try:
         soulx_real = False
         if adapter_id == "soulx":
@@ -669,14 +726,21 @@ def _run_training_job(job_id: str) -> None:
                     "leg": state.get("leg"),
                     "legs": state.get("legs"),
                     "checkpoints": state.get("checkpoints") or [],
+                    # Published takes, by registry name — the take sheet's rows.
+                    # Distinct from `checkpoints` (paths on disk): only a name the
+                    # render path can resolve is auditionable.
+                    "takes": state.get("takes") or [],
                 }
 
         # The MLX lock covers PRECOMPUTE, which runs in THIS process and touches
         # the same process-global SA3 engine renders use. It does not cover the
         # trainer subprocess (see _mlx_lock).
-        with _mlx_lock:
-            result = train_lora(job["bundle_path"], job["output_dir"], job["config"],
-                                should_cancel=_cancelled, on_progress=_on_progress)
+        # No blanket lock here: precompute takes it on the MLX thread (via
+        # run_on_mlx=_run_on_mlx_thread below), and the trainer subprocess must
+        # NOT hold it or every render blocks for the whole run.
+        result = train_lora(job["bundle_path"], job["output_dir"], job["config"],
+                            should_cancel=_cancelled, on_progress=_on_progress,
+                            run_on_mlx=_run_on_mlx_thread)
         with _training_lock:
             _training_jobs[job_id]["progress"] = 1.0
             _training_jobs[job_id]["status"] = "ready"
@@ -962,6 +1026,13 @@ class Handler(BaseHTTPRequestHandler):
                     "jobId": jid,
                     "status": job["status"],
                     "progress": job.get("progress", 0.0),
+                    # `progress` is a coarse 0..1 float for a generic bar. `detail`
+                    # is what a producer actually reads: step, loss, s/step, ETA,
+                    # auto-chunk leg, and the takes published so far. It was
+                    # already being computed and stored on every callback and then
+                    # never sent, so the LoRA Lab's header had nothing to render
+                    # and sat at zero for the whole run while training was fine.
+                    "detail": job.get("detail") or {},
                     "outputDir": job.get("output_dir", ""),
                     "error": job.get("error"),
                     "result": job.get("result"),
@@ -978,6 +1049,13 @@ class Handler(BaseHTTPRequestHandler):
                     "jobId": jid,
                     "status": job["status"],
                     "progress": job.get("progress", 0.0),
+                    # `progress` is a coarse 0..1 float for a generic bar. `detail`
+                    # is what a producer actually reads: step, loss, s/step, ETA,
+                    # auto-chunk leg, and the takes published so far. It was
+                    # already being computed and stored on every callback and then
+                    # never sent, so the LoRA Lab's header had nothing to render
+                    # and sat at zero for the whole run while training was fine.
+                    "detail": job.get("detail") or {},
                     "outputDir": job.get("output_dir", ""),
                     "error": job.get("error"),
                     "result": job.get("result"),
@@ -998,7 +1076,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             input_wav = data.get("inputWav", "")
             output_wav = data.get("outputWav", "")
-            if not input_wav or not os.path.exists(input_wav):
+            # `generate` is text-to-audio: it has no source by definition, and the
+            # SA3 adapter already handles that (`has_src = input_wav and
+            # os.path.exists(...)`, then renders from the prompt alone). This gate
+            # used to demand the file unconditionally, which no caller noticed
+            # because every existing generate render is clip-parented and stages
+            # the clip's audio anyway — so the first genuinely source-free caller
+            # (the LoRA Lab auditioning a bare prompt, and its stock-model
+            # baseline) failed at submit with "inputWav missing" and surfaced as
+            # "job submit failed" two layers up.
+            #
+            # Deliberately narrow: every OTHER mode still requires a readable
+            # input, because for them a missing source is a real error that would
+            # otherwise turn into a silent re-imagine of nothing.
+            mode = str((data.get("params") or {}).get("mode", "") or "")
+            if mode != "generate" and (not input_wav or not os.path.exists(input_wav)):
                 self._send(400, {"ok": False, "error": "inputWav missing"})
                 return
             job_id = uuid.uuid4().hex[:12]

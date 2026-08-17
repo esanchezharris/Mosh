@@ -33,7 +33,14 @@ echo "LoRA trainer setup"
 echo "=================="
 
 # ── 1. the trainer binary ────────────────────────────────────────────────────
-if [ -x "$DEST/pmetal" ] && [ -f "$DEST/mlx.metallib" ]; then
+# Note the `-nt` test: a staged binary that is OLDER than the build gets REPLACED.
+# This block used to be a plain "already staged? then stop", which meant rebuilding
+# the trainer and re-running this script silently kept shipping the previous
+# binary — you get a clean build, a clean stage, and none of your changes, with
+# nothing anywhere saying so. Only `--check` is allowed to be non-mutating.
+src_bin_probe="${PMETAL_SRC}/target/release/pmetal"
+if [ -x "$DEST/pmetal" ] && [ -f "$DEST/mlx.metallib" ] \
+   && ! [ "$src_bin_probe" -nt "$DEST/pmetal" ]; then
   say "OK   trainer staged at $DEST"
 elif [ "$check_only" = 1 ]; then
   say "MISS trainer not staged at $DEST"
