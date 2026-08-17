@@ -195,13 +195,22 @@ def main() -> int:
         real_card_path = tmp_dir / "real_card.md"
         real_card_path.write_text(valid.raw_text, encoding="utf-8")
 
-        symlink_path = tmp_dir / "symlink_card.md"
-        symlink_path.symlink_to(real_card_path)
+        # NOTE: the temp filename deliberately avoids the substring "symlink" — an earlier
+        # version named it "symlink_card.md" and the loose `"symlink" in e` check kept
+        # passing even with the dedicated symlink guard deleted, because the rejection
+        # message embeds the (rejected) file's own path. Asserting the exact guard phrase
+        # against a neutrally-named path is what actually proves the guard fired.
+        link_path = tmp_dir / "sl_card.md"
+        link_path.symlink_to(real_card_path)
         try:
-            intake.project_skill_source_from_path(symlink_path)
+            intake.project_skill_source_from_path(link_path)
             check("symlink source card is rejected", False, failures)
         except intake.SkillSourceProjectionError as exc:
-            check("symlink source card is rejected", any("symlink" in e for e in exc.errors), failures)
+            check(
+                "symlink source card is rejected",
+                any("must not be a symlink" in e for e in exc.errors),
+                failures,
+            )
 
         fifo_path = tmp_dir / "fifo_card.md"
         os.mkfifo(fifo_path)
