@@ -82,6 +82,11 @@ export function isLegalStateTransitionV1(
   if (TERMINAL_STATES.has(last)) {
     return { ok: false, reason: `"${last}" is terminal; no further transitions are legal` };
   }
+  // Abandonment ("rejected"/"superseded"/"revoked") is an OWNER DECISION legal from any
+  // non-terminal state — including "blocked" and "stale" — independent of proven progress.
+  if (to === "rejected" || to === "superseded" || to === "revoked") {
+    return { ok: true };
+  }
   if (last === "stale") {
     return to === "source_reviewed" ? { ok: true } : { ok: false, reason: '"stale" may only resume to "source_reviewed"' };
   }

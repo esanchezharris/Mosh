@@ -212,6 +212,21 @@ describe("isLegalStateTransitionV1", () => {
     expect(isLegalStateTransitionV1([record("stale")], "source_reviewed", "declarative")).toEqual({ ok: true });
     expect(isLegalStateTransitionV1([record("stale")], "draft", "declarative").ok).toBe(false);
   });
+
+  it("rejected/superseded/revoked (abandonment) is legal from any non-terminal state, including draft/blocked/stale", () => {
+    for (const abandon of ["rejected", "superseded", "revoked"] as const) {
+      expect(isLegalStateTransitionV1([record("draft")], abandon, "declarative")).toEqual({ ok: true });
+      expect(isLegalStateTransitionV1([record("mock_green")], abandon, "declarative")).toEqual({ ok: true });
+      expect(isLegalStateTransitionV1([record("blocked")], abandon, "declarative")).toEqual({ ok: true });
+      expect(isLegalStateTransitionV1([record("stale")], abandon, "declarative")).toEqual({ ok: true });
+    }
+  });
+
+  it("abandonment is illegal once a draft is already certified/rejected/superseded/revoked (terminal)", () => {
+    for (const terminal of ["certified", "rejected", "superseded", "revoked"] as const) {
+      expect(isLegalStateTransitionV1([record(terminal)], "rejected", "declarative").ok).toBe(false);
+    }
+  });
 });
 
 describe("appendStateTransitionV1 / readStateLedgerV1 — chain integrity", () => {

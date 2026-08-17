@@ -575,6 +575,17 @@ export type RollbackSkillResultV1 =
 
 export type RevokeSkillResultV1 = { ok: true; skillId: string; changed: boolean };
 
+// ---------------------------------------------------------------------------------------
+// Task 9 — garbage collection
+// ---------------------------------------------------------------------------------------
+
+export type FoundryGcEntryV1 = { path: string; kind: "tmp" | "run_artifact" | "draft"; ageDays: number };
+export type FoundryGcPlanV1 = { entries: readonly FoundryGcEntryV1[]; planSha256: string; generatedAt: string };
+export type FoundryGcApplyResultV1 = {
+  removed: readonly string[];
+  skipped: readonly { path: string; reason: "gc_revalidation_failed" }[];
+};
+
 export type DraftStoreV1 = {
   createDraft(input: CreateDraftInputV1): Promise<CreateDraftResultV1>;
   loadDraft(draftId: string): Promise<DraftSnapshotV1>;
