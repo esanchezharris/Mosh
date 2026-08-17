@@ -8,15 +8,12 @@
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  FOUNDRY_STORAGE_LIMITS_V1,
-  type AbletonReferenceCheckpointV1,
-  type AbletonReferenceSetRefV1,
-  type AbletonReferenceV1,
-  type ReferenceLocatorV1,
-} from "./contracts";
+import { FOUNDRY_STORAGE_LIMITS_V1, type AbletonReferenceV1, type ReferenceLocatorV1 } from "./contracts";
 import { atomicWriteBytesV1, inspectExternalRegularFileV1 } from "./safeFs";
 import { canonicalJsonBytes, sha256Bytes } from "../agent/skillFoundry/hash";
+
+type AbletonReferenceCheckpointV1 = AbletonReferenceV1["checkpoints"][number];
+type AbletonReferenceSetRefV1 = NonNullable<AbletonReferenceV1["beforeSet"]>;
 
 export type ParseIssueV1 = { path: string; message: string };
 export type ParseAbletonReferenceResultV1 =

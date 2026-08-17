@@ -6,6 +6,8 @@
 // semantic authority for every runtime artifact shape. New type groups are appended here,
 // task by task, each under its own banner comment naming the task that introduced it.
 //
+import type { SourceStatusV1 as SliceASourceStatusV1 } from "../agent/skillFoundry/contracts";
+
 // Task 1 — the CLI wire contract: the exhaustive `teach-moshi` command union, the stable
 // JSON envelope every invocation emits, and the dependency-injection seam `runTeachMoshiV1`
 // dispatches through. Concrete command handlers are wired in `commands.ts` (stubbed in Task
@@ -365,26 +367,13 @@ export type SourceCardV1 = {
   sourceSnapshotSha256: string;
 };
 
-// Slice A's `SourceStatusV1` shape (ui/src/agent/skillFoundry/contracts.ts) — re-declared
-// here rather than imported because Slice A ships no standalone `parseSourceStatusV1`
-// (verified: it validates this shape only INLINE inside `validateSourceStatusForInvocationV1`).
-// Slice D is the sole durable writer of this index, so it owns construction/validation on
-// write; the field names and semantics are identical to Slice A's runtime-read type by
-// design, so a value built here type-checks against Slice A's `SourceStatusV1` too.
-export type SourceStatusEntryV1 = {
-  sourceCardId: string;
-  sourceSnapshotSha256: string;
-  state: SourceCardStateV1;
-  checkedAt: string;
-  reviewAfter: string;
-};
-
-export type SourceStatusV1 = {
-  schemaVersion: 1;
-  generation: number;
-  updatedAt: string;
-  entries: readonly SourceStatusEntryV1[];
-};
+// Slice A ALREADY defines `SourceStatusV1` and `AbletonReferenceV1` structurally identically
+// (`ui/src/agent/skillFoundry/contracts.ts`) — this module re-exports them rather than
+// forking a second copy. `SourceStatusEntryV1` is a locally named alias for Slice A's inline
+// entry shape (Slice A does not name it separately); Slice D is the sole durable WRITER of
+// this index, but the type itself is Slice A's, since Slice A's runtime is the reader.
+export type { SourceStatusV1, AbletonReferenceV1 } from "../agent/skillFoundry/contracts";
+export type SourceStatusEntryV1 = SliceASourceStatusV1["entries"][number];
 
 export type ReferenceFileIdentityV1 = { device: number; inode: number; mtimeNs: string };
 
@@ -396,27 +385,6 @@ export type ReferenceLocatorV1 = {
   bytes: number;
   fileIdentity: ReferenceFileIdentityV1;
   recordedAt: string;
-};
-
-export type AbletonReferenceCheckpointV1 = {
-  name: string;
-  narration: string;
-  observedState?: Record<string, unknown>;
-  unobservedOrAmbiguous: readonly string[];
-};
-
-export type AbletonReferenceSetRefV1 = { path: string; sha256: string };
-
-export type AbletonReferenceV1 = {
-  schemaVersion: 1;
-  journeyId: string;
-  liveVersion: string;
-  startedAt: string;
-  goal: string;
-  checkpoints: readonly AbletonReferenceCheckpointV1[];
-  beforeSet?: AbletonReferenceSetRefV1;
-  afterSet?: AbletonReferenceSetRefV1;
-  ownerRules: { variables: readonly string[]; forbidden: readonly string[] };
 };
 
 export type DraftStoreV1 = {
