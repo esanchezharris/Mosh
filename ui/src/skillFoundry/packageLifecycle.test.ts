@@ -160,6 +160,12 @@ describe("installDraftV1", () => {
     expect(active.generation).toBe(1);
   });
 
+  it("rejects install for a native draft id, even if a same-shaped ledger existed", async () => {
+    const { store } = await buildOwnerApprovedDraft(foundry);
+    const result = await installDraftV1({ draftId: "session-control" }, { store, paths: foundry.paths, clock: CLOCK, identityDeps: FAKE_IDENTITY_DEPS, compatibilityContext });
+    expect(result.ok).toBe(false);
+  });
+
   it("rejects install when the draft is not owner_approved", async () => {
     const store = createDraftStoreV1(foundry.paths, CLOCK, FAKE_IDENTITY_DEPS);
     const created = await store.createDraft({ goal: "Not approved" });
