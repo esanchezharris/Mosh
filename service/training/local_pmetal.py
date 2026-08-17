@@ -56,20 +56,27 @@ _MIN_BASE_DIT_BYTES = 2 * (1 << 30)  # a real SA3-medium DiT is ~2.7GB
 
 
 def trainer_bin() -> str | None:
-    """Resolve the bundled trainer. Env override wins, then the app bundle, then dev."""
+    """Resolve the trainer binary.
+
+    An explicit `MOSH_TRAINER_BIN` is EXCLUSIVE: if it is set, that path is the
+    only candidate. Falling back to a bundled binary when the user named a
+    specific one would silently train with something other than what they
+    asked for — the sort of surprise that costs an hour of confusion later, and
+    it makes "point at a debug build" impossible to trust.
+    """
     env = os.environ.get("MOSH_TRAINER_BIN", "").strip()
-    candidates = [env] if env else []
+    if env:
+        p = Path(os.path.expanduser(env))
+        return str(p) if p.is_file() and os.access(p, os.X_OK) else None
     here = Path(__file__).resolve()
-    candidates += [
+    for c in (
         # Inside Mosh.app: service/ lives in Resources/, the trainer in Helpers/.
-        str(here.parents[2] / "Helpers" / "trainer" / "pmetal"),
+        here.parents[2] / "Helpers" / "trainer" / "pmetal",
         # Dev tree: <repo>/resources/trainer/pmetal
-        str(here.parents[2] / "resources" / "trainer" / "pmetal"),
-    ]
-    for c in candidates:
-        p = Path(os.path.expanduser(c))
-        if p.is_file() and os.access(p, os.X_OK):
-            return str(p)
+        here.parents[2] / "resources" / "trainer" / "pmetal",
+    ):
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c)
     return None
 
 
