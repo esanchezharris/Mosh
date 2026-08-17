@@ -134,7 +134,8 @@ export type ServiceCapabilities = {
   whisper: boolean;
   phonology: boolean;
   transformReal: boolean;    // Route B/C: a real RAVE model is installed vs the fake tilt/saturation
-  trainingBackend: string;  // "fake" | "remote_http"
+  trainingBackend: string;  // "fake" (stub) | "local_pmetal" (real, this Mac) | "remote_http" (real, rented GPU)
+  trainingBlockers?: string[];  // why a real backend still can't train here (missing binary/checkpoint)
 };
 
 // LoRA library card from GET /loras (via list_loras) — the drop-in adapter dir.

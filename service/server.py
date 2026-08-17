@@ -212,6 +212,9 @@ def _guest_capability_summary() -> dict:
         "phonology": _phonology_available(),
         "transformReal": _tx.available(),
         "trainingBackend": lora_trainer_adapter.backend_name(),
+        # Why a real backend still can't train here (missing binary/checkpoint).
+        # Empty for the stub, whose only honest signal is the "preview" label.
+        "trainingBlockers": _training_descriptor().get("blockers", []),
     }
 
 
@@ -365,15 +368,41 @@ def _sa3_descriptor() -> dict:
 
 
 def _training_descriptor() -> dict:
+    """What the trainer can do on THIS machine, and what is missing if it can't.
+
+    `blockers` is the load-bearing field: it lets the UI say "the base
+    checkpoint is missing, run setup-trainer.sh" instead of offering a Train
+    button that fails on click. `output_formats` distinguishes a real
+    fine-tune ("safetensors") from the stub ("json_stub") — the artifact-shape
+    test keys on exactly that.
+    """
+    backend = lora_trainer_adapter.backend_name()
+    blockers: list[str] = []
+    recipe_defaults: dict = {}
+    if backend == "local_pmetal":
+        try:
+            from training import local_pmetal as _lp
+            _, blockers = _lp.readiness()
+        except Exception as exc:  # noqa: BLE001
+            blockers = [f"local trainer unavailable: {exc}"]
+    try:
+        from training import recipe as _recipe
+        # Clip count is per-corpus, so the UI recomputes; this is the shape +
+        # the machine-dependent memory plan.
+        recipe_defaults = _recipe.recommend_recipe(33)
+    except Exception:  # noqa: BLE001
+        recipe_defaults = {}
     return {
         "id": "lora_trainer",
-        "version": "0.1.0",
-        "available": TRAINING_ENABLED,
-        "output_formats": ["json_stub"],
-        "runtime_requirements": ["cpu"],
+        "version": "0.2.0",
+        "available": TRAINING_ENABLED and not blockers,
+        "output_formats": ["safetensors"] if backend == "local_pmetal" else ["json_stub"],
+        "runtime_requirements": ["metal", "sa3-base-checkpoint"] if backend == "local_pmetal" else ["cpu"],
         "packaging_mode": "python_service",
         "service_build": SERVICE_BUILD,
-        "backend": lora_trainer_adapter.backend_name(),
+        "backend": backend,
+        "blockers": blockers,
+        "recipe": recipe_defaults,
     }
 
 
@@ -432,6 +461,19 @@ _job_q: "queue.PriorityQueue" = queue.PriorityQueue()
 _seq = itertools.count()
 _training_jobs: dict[str, dict] = {}
 _training_lock = threading.Lock()
+# Serializes every in-process MLX/SA3 model call across BOTH worker threads.
+#
+# `sa3/engine.py` states it plainly in its own header: the loaded model is
+# process-global and mutated per call, so it must never be called
+# concurrently. Until training precompute existed that was guaranteed for
+# free — one worker thread owned every render. Precompute broke it: it runs
+# on the TRAINING worker, so a precompute overlapping a render is a corrupted
+# DiT or a crash, and intermittently so.
+#
+# The trainer SUBPROCESS deliberately does not hold this: it is a separate
+# process with its own Metal budget, and holding the lock for a 20-60 minute
+# run would freeze every render in the app.
+_mlx_lock = threading.RLock()
 _training_q: "queue.PriorityQueue" = queue.PriorityQueue()
 _training_seq = itertools.count()
 
@@ -550,7 +592,8 @@ def _run_job(job_id: str) -> None:
             if _jobs[job_id].get("cancel"):
                 _jobs[job_id]["status"] = "cancelled"
                 return
-        manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+        with _mlx_lock:  # see _mlx_lock: the SA3 engine is not thread-safe
+            manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
         os.makedirs(os.path.dirname(os.path.abspath(job["manifest"])), exist_ok=True)
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
@@ -590,7 +633,41 @@ def _run_training_job(job_id: str) -> None:
                 _training_jobs[job_id]["progress"] = step / 6.0
             time.sleep(0.05)
 
-        result = train_lora(job["bundle_path"], job["output_dir"], job["config"])
+        # Real progress + cancellation for the local trainer. The stub path is
+        # seconds long and the fake progress above is fine for it; a real run is
+        # 20-60 minutes, so the UI needs the trainer's own step counter and a
+        # Stop that actually reaches the process group.
+        def _cancelled() -> bool:
+            with _training_lock:
+                return bool(_training_jobs.get(job_id, {}).get("cancel"))
+
+        def _on_progress(state: dict) -> None:
+            total = max(1, int(state.get("totalSteps") or 1))
+            done = int(state.get("step") or 0)
+            with _training_lock:
+                j = _training_jobs.get(job_id)
+                if j is None:
+                    return
+                # Reserve the top of the bar for export; training is the bulk.
+                j["progress"] = min(0.98, done / total)
+                j["detail"] = {
+                    "phase": state.get("phase"),
+                    "step": done,
+                    "totalSteps": total,
+                    "loss": state.get("loss"),
+                    "sPerStep": state.get("sPerStep"),
+                    "etaSeconds": state.get("etaSeconds"),
+                    "leg": state.get("leg"),
+                    "legs": state.get("legs"),
+                    "checkpoints": state.get("checkpoints") or [],
+                }
+
+        # The MLX lock covers PRECOMPUTE, which runs in THIS process and touches
+        # the same process-global SA3 engine renders use. It does not cover the
+        # trainer subprocess (see _mlx_lock).
+        with _mlx_lock:
+            result = train_lora(job["bundle_path"], job["output_dir"], job["config"],
+                                should_cancel=_cancelled, on_progress=_on_progress)
         with _training_lock:
             _training_jobs[job_id]["progress"] = 1.0
             _training_jobs[job_id]["status"] = "ready"
