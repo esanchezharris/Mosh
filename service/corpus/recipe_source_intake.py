@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
+import stat
 import sys
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -43,7 +47,44 @@ TIMESTAMP_PATTERN = re.compile(r"\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b")
 TRANSCRIPT_HINTS = re.compile(r"\b(transcript|verbatim|caption(?:s)?|subtitles?)\b", re.IGNORECASE)
 
 FIELD_LINE_PATTERN = re.compile(r"^-\s*`([^`]+)`:\s*(.*)$")
-TABLE_SPLIT_PATTERN = re.compile(r"^\|.+\|$")
+
+# Task 2 — Skill Foundry `SourceCardV1` projection (spec §6.2, Global Constraints).
+#
+# These enums are DELIBERATELY separate from the legacy recipe-mining rubric's
+# `rights_status`/`media_handling` free-text fields above: the Skill Source section
+# uses the exact closed allowlists the Skill Foundry CLI (Slice D) requires, so a
+# card can carry both an old-style recipe rubric AND a new-style skill-source
+# projection without the two vocabularies colliding.
+RIGHTS_VALUES = {
+    "official_public_documentation",
+    "creator_authorized",
+    "user_owned_or_licensed",
+    "manual_paraphrase_only",
+}
+ACQUISITION_VALUES = {
+    "official_https_page",
+    "creator_authorized_file",
+    "user_supplied_local_file",
+    "manual_viewing_notes",
+}
+PLATFORM_HANDLING_VALUES = {
+    "metadata_and_short_paraphrases_only",
+    "local_locator_only",
+}
+CLAIM_ORIGIN_VALUES = {
+    "source_text",
+    "owner_observation",
+    "asr_ocr",
+    "codex_inference",
+}
+SOURCE_STATE_VALUES = {"current", "stale", "superseded", "revoked"}
+
+SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+MAX_SKILL_SOURCE_CARD_BYTES = 1_048_576
+MAX_CLAIMS = 10
+MIN_CLAIMS = 1
+MAX_SOURCE_CARD_ID_CHARS = 64
 
 
 @dataclass(frozen=True)
@@ -54,12 +95,22 @@ class ScoreRow:
 
 
 @dataclass(frozen=True)
+class ClaimRow:
+    claim_id: str
+    origin: str
+    workflow_moment: str
+    paraphrase: str
+    boundary: str
+
+
+@dataclass(frozen=True)
 class CandidateCard:
     path: Path | None
     fields: dict[str, str]
     scores: dict[str, ScoreRow]
     total_score: int | None
     raw_text: str
+    claims: list[ClaimRow] = field(default_factory=list)
 
     def safe_summary(self) -> dict[str, object]:
         blockers = split_lines(self.fields.get("vetoes_or_blockers", ""))
@@ -117,11 +168,12 @@ def path_is_inside_repo(path_text: str) -> bool:
 def parse_candidate_card(text: str, path: Path | None = None) -> CandidateCard:
     fields: dict[str, str] = {}
     scores: dict[str, ScoreRow] = {}
+    claims: list[ClaimRow] = []
     total_score: int | None = None
     lines = text.splitlines()
     current_key: str | None = None
     current_value: list[str] = []
-    in_score_table = False
+    current_table: str | None = None  # "score" | "claims" | None
 
     def flush_field() -> None:
         nonlocal current_key, current_value
@@ -149,19 +201,40 @@ def parse_candidate_card(text: str, path: Path | None = None) -> CandidateCard:
             score = -1
         scores[normalize_key(cells[0])] = ScoreRow(cells[0], score, cells[2])
 
+    def parse_claim_row(line: str) -> None:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) != 5 or normalize_key(cells[0]) == "claim id":
+            return
+        if cells[0] == "" or re.fullmatch(r"-+", cells[0]):
+            return
+        claims.append(ClaimRow(claim_id=cells[0], origin=cells[1], workflow_moment=cells[2], paraphrase=cells[3], boundary=cells[4]))
+
     for line in lines:
         stripped = line.strip()
-        if TABLE_SPLIT_PATTERN.match(stripped):
-            in_score_table = in_score_table or stripped.startswith("| Dimension")
-            if in_score_table:
+        # Table rows are consumed by prefix, NOT by a full-line `^\|.+\|$` match: GFM data
+        # rows commonly omit the trailing "|" (see the fixtures), so only header/separator
+        # rows are guaranteed to have one. `startswith("|")` while `current_table` is set (or
+        # the row IS a recognized header, which also bootstraps `current_table`) is the actual
+        # admission rule; this mirrors the pre-Task-2 score-table behavior exactly.
+        if stripped.startswith("| Dimension"):
+            current_table = "score"
+            parse_score_row(stripped)
+            continue
+        if stripped.startswith("| Claim ID"):
+            current_table = "claims"
+            parse_claim_row(stripped)
+            continue
+        if stripped.startswith("|"):
+            if current_table == "score":
                 parse_score_row(stripped)
+                continue
+            if current_table == "claims":
+                parse_claim_row(stripped)
+                continue
             continue
         if stripped.startswith("## "):
-            if normalize_key(stripped[3:]) != "score":
-                in_score_table = False
-            continue
-        if in_score_table and stripped.startswith("|"):
-            parse_score_row(stripped)
+            heading = normalize_key(stripped[3:])
+            current_table = heading if heading in ("score", "claims") else None
             continue
         match = FIELD_LINE_PATTERN.match(line)
         if match:
@@ -182,7 +255,7 @@ def parse_candidate_card(text: str, path: Path | None = None) -> CandidateCard:
                 total_score = int(raw_total)
             except ValueError:
                 total_score = None
-    return CandidateCard(path=path, fields=fields, scores=scores, total_score=total_score, raw_text=text)
+    return CandidateCard(path=path, fields=fields, scores=scores, total_score=total_score, raw_text=text, claims=claims)
 
 
 def validate_candidate_card(card: CandidateCard, repo_root: Path | None = None) -> list[str]:
@@ -263,6 +336,193 @@ def looks_like_media_locator(value: str) -> bool:
     return bool(re.search(r"\.(?:wav|mp3|m4a|flac|aac|ogg|mp4|mov|mkv|webm|png|jpg|jpeg|gif)$", value, re.IGNORECASE))
 
 
+class SkillSourceProjectionError(ValueError):
+    """Raised when a card cannot be projected into a bounded `SourceCardV1`."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("; ".join(errors))
+        self.errors = errors
+
+
+def project_skill_source(card: CandidateCard) -> dict[str, object]:
+    """Project one already-parsed `CandidateCard` into a bounded `SourceCardV1` dict.
+
+    Rejects (raises `SkillSourceProjectionError`) rather than silently coercing: unknown or
+    unresolved rights/acquisition/platform-handling/state values, an out-of-range or
+    duplicate claim set, and any decoded string carrying an embedded media/transcript
+    payload. `sourceSnapshotSha256` intentionally excludes reviewer/timestamps/dependencies/
+    state so unchanged evidence can extend freshness on a later `refresh-source` without
+    disturbing certified skills that pinned the earlier snapshot hash.
+    """
+    errors: list[str] = []
+
+    source_card_id = card.fields.get("source_id", "").strip()
+    if (
+        not source_card_id
+        or len(source_card_id) > MAX_SOURCE_CARD_ID_CHARS
+        or not SKILL_SLUG_PATTERN.fullmatch(source_card_id)
+    ):
+        errors.append(f"invalid source card id: {source_card_id!r}")
+
+    source_version = card.fields.get("source_version", "").strip()
+
+    rights = card.fields.get("rights", "").strip()
+    if rights not in RIGHTS_VALUES:
+        errors.append(f"unresolved or unknown rights: {rights!r}")
+
+    acquisition = card.fields.get("acquisition", "").strip()
+    if acquisition not in ACQUISITION_VALUES:
+        errors.append(f"unresolved or unofficial acquisition: {acquisition!r}")
+
+    platform_handling = card.fields.get("platform_handling", "").strip()
+    if platform_handling not in PLATFORM_HANDLING_VALUES:
+        errors.append(f"unresolved platform handling: {platform_handling!r}")
+
+    evidence_sha256 = card.fields.get("evidence_sha256", "").strip().lower()
+    if evidence_sha256 and not HEX64_PATTERN.fullmatch(evidence_sha256):
+        errors.append("evidence_sha256 must be 64 lowercase hex characters")
+
+    reviewer = card.fields.get("reviewer", "").strip()
+    reviewed_at = card.fields.get("reviewed_at", "").strip()
+
+    state = card.fields.get("source_state", "").strip()
+    if state not in SOURCE_STATE_VALUES:
+        errors.append(f"unknown source_state: {state!r}")
+
+    dependent_ids = split_lines(card.fields.get("dependent_ids", "").replace(",", "\n"))
+
+    claims = card.claims
+    if len(claims) < MIN_CLAIMS:
+        errors.append("at least one claim is required")
+    if len(claims) > MAX_CLAIMS:
+        errors.append(f"claim ceiling exceeded: {len(claims)} claims (max {MAX_CLAIMS})")
+
+    seen_claim_ids: set[str] = set()
+    claim_payload: list[dict[str, str]] = []
+    for claim in claims:
+        if claim.claim_id in seen_claim_ids:
+            errors.append(f"duplicate claim id: {claim.claim_id}")
+        seen_claim_ids.add(claim.claim_id)
+        if claim.origin not in CLAIM_ORIGIN_VALUES:
+            errors.append(f"unknown claim origin for {claim.claim_id}: {claim.origin!r}")
+        for field_name, value in (
+            ("workflow_moment", claim.workflow_moment),
+            ("paraphrase", claim.paraphrase),
+            ("boundary", claim.boundary),
+        ):
+            if value and contains_media_or_transcript_payload(value, field_name=field_name):
+                errors.append(f"unsafe payload in claim {claim.claim_id} field {field_name}")
+        claim_payload.append(
+            {
+                "claimId": claim.claim_id,
+                "origin": claim.origin,
+                "workflowMoment": claim.workflow_moment,
+                "paraphrase": claim.paraphrase,
+                "boundary": claim.boundary,
+            }
+        )
+
+    for field_name, value in (("reviewer", reviewer), ("source_version", source_version)):
+        if value and contains_media_or_transcript_payload(value, field_name=field_name):
+            errors.append(f"unsafe payload in {field_name}")
+    for dependent_id in dependent_ids:
+        if contains_media_or_transcript_payload(dependent_id, field_name="dependent_ids"):
+            errors.append("unsafe payload in dependent_ids")
+            break
+
+    if errors:
+        raise SkillSourceProjectionError(errors)
+
+    # `sourceSnapshotSha256` covers stable identity/version/rights/acquisition/evidence/
+    # ordered claims only — reviewer/timestamps/dependencies/state are excluded on purpose
+    # (spec §5.3/§6.2). Canonical JSON (sorted keys, no whitespace) over the UTF-8 bytes.
+    snapshot_payload = {
+        "sourceCardId": source_card_id,
+        "sourceVersion": source_version,
+        "rights": rights,
+        "acquisition": acquisition,
+        "platformHandling": platform_handling,
+        "evidenceSha256": evidence_sha256,
+        "claims": claim_payload,
+    }
+    snapshot_bytes = json.dumps(snapshot_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    source_snapshot_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
+
+    return {
+        "schemaVersion": 1,
+        "sourceCardId": source_card_id,
+        "sourceVersion": source_version,
+        "rights": rights,
+        "acquisition": acquisition,
+        "platformHandling": platform_handling,
+        "evidenceSha256": evidence_sha256,
+        "reviewer": reviewer,
+        "reviewedAt": reviewed_at,
+        "state": state,
+        "dependentIds": dependent_ids,
+        "claims": claim_payload,
+        "sourceSnapshotSha256": source_snapshot_sha256,
+    }
+
+
+def read_source_card_text(path: Path) -> str:
+    """lstat + bounded-read + strict-UTF-8-decode one EXPLICIT source card file.
+
+    Rejects symlinks and non-regular files (FIFOs, devices, ...) before reading any bytes,
+    and rejects a file larger than `MAX_SKILL_SOURCE_CARD_BYTES` from its `lstat` size alone
+    — no partial read of an oversized file is attempted.
+    """
+    st = path.lstat()
+    if stat.S_ISLNK(st.st_mode):
+        raise SkillSourceProjectionError([f"source card must not be a symlink: {path}"])
+    if not stat.S_ISREG(st.st_mode):
+        raise SkillSourceProjectionError([f"source card must be a regular file: {path}"])
+    if st.st_size > MAX_SKILL_SOURCE_CARD_BYTES:
+        raise SkillSourceProjectionError(
+            [f"source card exceeds {MAX_SKILL_SOURCE_CARD_BYTES} bytes: {path} ({st.st_size} bytes)"]
+        )
+    raw = path.read_bytes()
+    if len(raw) > MAX_SKILL_SOURCE_CARD_BYTES:
+        raise SkillSourceProjectionError(
+            [f"source card exceeds {MAX_SKILL_SOURCE_CARD_BYTES} bytes: {path} ({len(raw)} bytes)"]
+        )
+    try:
+        return raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SkillSourceProjectionError([f"source card is not valid UTF-8: {exc}"]) from exc
+
+
+def project_skill_source_from_path(path: Path) -> dict[str, object]:
+    text = read_source_card_text(path)
+    card = parse_candidate_card(text, path=path)
+    return project_skill_source(card)
+
+
+def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    """0600 unique sibling temp -> file fsync -> `os.replace` -> parent fsync."""
+    path = path.resolve()
+    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    tmp_path = path.parent / f".{path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    dir_fd = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
 def iter_candidate_paths(paths: Iterable[str]) -> list[Path]:
     candidates: list[Path] = []
     for raw in paths:
@@ -299,7 +559,28 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("paths", nargs="+", help="markdown card files or directories")
     index.add_argument("--json", action="store_true", help="emit JSON instead of text")
 
+    project = sub.add_parser(
+        "project-skill-source", help="project a bounded SourceCardV1 JSON from one explicit card file"
+    )
+    project.add_argument("card", help="explicit markdown source card file (no globs, no directories)")
+    project.add_argument("--out", help="atomically write the JSON here instead of stdout")
+
     args = parser.parse_args(argv)
+
+    if args.command == "project-skill-source":
+        try:
+            projected = project_skill_source_from_path(Path(args.card))
+        except SkillSourceProjectionError as exc:
+            print(f"FAIL {args.card}")
+            for error in exc.errors:
+                print(f"  - {error}")
+            return 1
+        if args.out:
+            write_json_atomic(Path(args.out), projected)
+        else:
+            print(json.dumps(projected, indent=2, sort_keys=True))
+        return 0
+
     cards = [load_candidate_card(path) for path in iter_candidate_paths(args.paths)]
 
     if args.command == "validate":
