@@ -146,6 +146,23 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 - **Selftest check counts are environment-dependent.** A dev Mac with SA3/RAVE/whisper weights
   reports ~1681; hermetic CI reports 1656; a Release bundle without them reports fewer still.
   Never paste a locally-observed count into `MOSH_SELFTEST_BASELINE` — it reds every CI run.
+- **A bare `--selftest` runs FEWER checks than the gate does, and the gap hides a flaky one.**
+  The gate sets `MOSH_SERVICE_PORT` (a freshly reserved port per run, `run_selftest_x3` in
+  `gate.sh`); a plain local `--selftest` does not, so the service-dependent checks never run.
+  Observed 2026-08-16 on a Release bundle: **3226 checks locally vs 3227 under the gate.** So
+  "3226/3226, 0 failed" locally is NOT the same statement as a green `selftest_x3`, and you
+  cannot reproduce a gate selftest red without exporting `MOSH_SERVICE_PORT` (plus a distinct
+  `_harness/` `MOSH_SELFTEST_SESSION`) yourself.
+  The 3227th is `set_clip_loop — MIDI` → *"midi loop: the render REPEATS the notes
+  (last-quarter energy > 1.1× the unlooped baseline)"*, and it is **~25% flaky**: 3 failures in
+  12 runs (gate ×3 runs each: 0/3, 1/3, 1/3; direct repro 1/3), identical binary and identical
+  env each time. It is a rendered-audio energy heuristic, so it fails on a render that came out
+  quieter than the threshold, not on a logic change. `failed_max: 1` with `deterministic: true`
+  and all three `checks` equal is this signature — `deterministic` there means the three runs
+  agreed on the check COUNT, **not** that they agreed on pass/fail, which is easy to misread as
+  "consistently broken". Re-run before believing it; if it fails twice running, then suspect the
+  code. Fixing the threshold (or making the check seed the render deterministically) would be
+  worth more than another re-run loop.
 - **Vacuous verification is this repo's recurring failure mode.** A test that cannot fail looks
   exactly like one that passes. RED-prove every new guard, count assertions, and check the fixture
   isn't stubbed. `grep SABOTAGE` before landing anything that involved a RED-proof.
