@@ -30,7 +30,8 @@ import { buildStudioSkillRegistryV1 } from "./registry";
 import { loadBundledNativeSkillsV1, loadCertifiedOwnerSkillsV1 } from "./loadCertifiedSkills";
 import { readBundledNativeSkillsV1, readCertifiedSkillPackagesV1 } from "./nativeReads";
 import { catalogFingerprintV1 } from "./catalogs";
-import { NATIVE_HANDLERS_V1 } from "./native/index";
+import { NATIVE_HANDLERS_V1, NATIVE_PAYLOADS_V1 } from "./native/index";
+import { adaptCodeBoundNativeSkillV1 } from "./nativeAdapter";
 import type {
   NativeSkillPayloadV1,
   RegisteredSkillV1,
@@ -180,21 +181,80 @@ async function defaultCompatibilityContextV1(): Promise<SkillCompatibilityContex
 
 let defaultRuntimePromise: Promise<StudioSkillRuntimeV1> | null = null;
 
+// DESIGN DECISION — CODE-BOUND SEEDING (owner decision): builds one registry candidate per
+// compiled-in payload (`NATIVE_PAYLOADS_V1`, native/payloads.ts) via `adaptCodeBoundNativeSkillV1`
+// (nativeAdapter.ts — see its own header for the full trust-root reasoning). Takes NO
+// parameters: the only data it can ever process is the compiled-in constant it imports
+// directly, so there is no route from here to a byte a user, a plugin, or a resource on disk
+// supplied. This is the ONLY call site of `adaptCodeBoundNativeSkillV1` in production code —
+// see codeBoundNativeBoundary.test.ts for the durable guard that keeps it that way.
+//
+// A payload literal failing adaptation here would mean `native/payloads.ts` itself is broken
+// (a build-time bug in a compiled-in constant, not a runtime attacker) — quarantined rather
+// than thrown, matching every other loader's "one bad candidate never takes down the boot"
+// discipline, but this path should never actually see a failure in practice.
+function buildCodeBoundNativeSkillCandidatesV1(): {
+  readonly accepted: readonly RegisteredSkillV1[];
+  readonly quarantined: readonly { readonly id: string; readonly code: string; readonly message: string }[];
+} {
+  const accepted: RegisteredSkillV1[] = [];
+  const quarantined: { id: string; code: string; message: string }[] = [];
+  for (const payload of NATIVE_PAYLOADS_V1) {
+    const adapted = adaptCodeBoundNativeSkillV1(payload);
+    if (adapted.ok) accepted.push(adapted.value);
+    else quarantined.push({ id: adapted.id, code: adapted.code, message: adapted.message });
+  }
+  return { accepted, quarantined };
+}
+
+// PRECEDENCE (owner decision): a bundled-index-accepted native candidate (`bundledAccepted` —
+// `loadBundledNativeSkillsV1`'s real `.accepted`, an EXTERNAL artifact-graph loader) WINS over
+// a code-bound one (`codeBoundAccepted` — `buildCodeBoundNativeSkillCandidatesV1()`'s
+// compiled-in seed) with the SAME id — post-ship native staging (Slice E) can then update a
+// core skill without an app release, and should be able to shadow the compiled-in default once
+// it does. Only code-bound ids ABSENT from `bundledAccepted` are appended; duplicate ids within
+// one `native` candidate list would otherwise be rejected by `buildStudioSkillRegistryV1` as a
+// same-origin collision (registry.ts) rather than resolved by precedence. Exported (pure, no
+// I/O) so the precedence rule itself is directly testable without standing up a full
+// artifact-graph fixture through the bridge — see runtime.precedence.test.ts.
+export function mergeCodeBoundNativeCandidatesV1(
+  bundledAccepted: readonly RegisteredSkillV1[],
+  codeBoundAccepted: readonly RegisteredSkillV1[],
+): readonly RegisteredSkillV1[] {
+  const bundledIds = new Set(bundledAccepted.map((candidate) => candidate.id));
+  return [...bundledAccepted, ...codeBoundAccepted.filter((candidate) => !bundledIds.has(candidate.id))];
+}
+
 /** Builds the default runtime exactly once per process: reads both certified-package
  *  sources, validates every candidate through Slice A's real chain checks (a failure
  *  quarantines that ONE package, never the whole boot), adapts native survivors, and
  *  publishes ONE atomic registry generation. Never adapts the handler map directly —
  *  `NATIVE_HANDLERS_V1` is the closed map every call goes through regardless of which
- *  (if any) native packages were admitted. */
+ *  (if any) native packages were admitted.
+ *
+ *  CODE-BOUND SEEDING (owner decision): both `ownerLoad`/`nativeLoad` above are EXTERNAL
+ *  artifact-graph loaders (owner packages under $MOSH_AGENT_DIR, the app's staged bundled
+ *  native resources) — both empty in a shipped app until Slice E's post-ship staging lands
+ *  (bridge.ts's `realNative()` gate; nativeReads.ts's EMPTY_* envelope note). Without a
+ *  second seed, the registry would be empty and the four core skills — including
+ *  `load_named_plugin`, which works in production today via the legacy `studioSkills.ts`
+ *  path — would be INACTIVE (the regression flagged in 0e860fea's own commit message).
+ *  `buildCodeBoundNativeSkillCandidatesV1()` seeds those same four ids directly from the
+ *  compiled-in `NATIVE_PAYLOADS_V1`, whose trust root is the app's own code signature rather
+ *  than an external artifact graph. `mergeCodeBoundNativeCandidatesV1` (above) applies the
+ *  precedence rule between the two. */
 async function buildDefaultRuntimeV1(): Promise<StudioSkillRuntimeV1> {
   const compatibility = await defaultCompatibilityContextV1();
 
   const ownerLoad = await loadCertifiedOwnerSkillsV1({ readPackages: readCertifiedSkillPackagesV1, compatibility });
   const nativeLoad = await loadBundledNativeSkillsV1({ readBundledNative: readBundledNativeSkillsV1, compatibility });
 
+  const codeBound = buildCodeBoundNativeSkillCandidatesV1();
+  const nativeCandidates = mergeCodeBoundNativeCandidatesV1(nativeLoad.accepted, codeBound.accepted);
+
   const registryResult = await buildStudioSkillRegistryV1({
     generation: 1,
-    native: nativeLoad.accepted,
+    native: nativeCandidates,
     builtin: [],
     owner: ownerLoad.accepted,
   });

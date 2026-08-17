@@ -1,45 +1,29 @@
-// Skill Foundry Slice B, Task 7 — the composer now routes load-named-plugin through the
-// ONE registry-backed runtime (runtime.ts's `runStudioSkillV1`) instead of the legacy
-// single-skill `studioSkills.ts` copy. The default (lazy, production) runtime's registry is
-// empty in this slice (no bundled/certified native resources ship yet — see
-// loadCertifiedSkills.ts's own "expected Slice A steady state" note), so this file mocks
-// `../agent/skillFoundry/runtime` to swap in a runtime built the SAME way runtime.test.ts's
-// own fixture is (the real `createStudioSkillRuntimeV1` over the four real native
-// payloads/handlers) — this exercises the REAL `loadNamedPluginV1` handler end-to-end
-// through actual AgentComposer UI interaction, not a stand-in.
+// Skill Foundry Slice B, Task 7 (+ owner decision, CODE-BOUND SEEDING) — the composer routes
+// load-named-plugin through the ONE registry-backed runtime (runtime.ts's `runStudioSkillV1`)
+// instead of the legacy single-skill `studioSkills.ts` copy.
+//
+// This file exercises the REAL, UNMOCKED default (lazy, production) runtime —
+// `runStudioSkillV1` -> `buildDefaultRuntimeV1` — end to end through actual AgentComposer UI
+// interaction. Before the owner's code-bound-seeding fix, the default runtime's registry was
+// empty outside a real WebView/native bridge (both `loadCertifiedOwnerSkillsV1`/
+// `loadBundledNativeSkillsV1` are external artifact-graph loaders that return nothing without
+// $MOSH_AGENT_DIR / staged native resources — see runtime.defaultRuntime.test.ts's header for
+// the full account), so this file used to mock `../agent/skillFoundry/runtime` to swap in a
+// hand-built registry just to have anything to test against. Now that
+// `buildDefaultRuntimeV1` seeds the four core skills directly from the compiled-in
+// `NATIVE_PAYLOADS_V1` (nativeAdapter.ts's `adaptCodeBoundNativeSkillV1`), the SAME registry
+// the default runtime would carry in a shipped app is already populated in this jsdom test
+// environment — bridge.ts's `readCertifiedSkillPackages`/`readCertifiedNativeSkills` already
+// return their empty envelopes here (no `window.__JUCE__`, i.e. `realNative()` is false; see
+// bridge.ts), which is exactly the "both external sources empty" case code-bound seeding
+// exists for. No mocking of runtime.ts (or the bridge) is needed at all — this is now a true
+// proof that a shipped app serves "load OTT" out of the box.
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../store";
 import type { CommandResult, Snapshot, Track } from "../types";
-
-vi.mock("../agent/skillFoundry/runtime", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../agent/skillFoundry/runtime")>();
-  const { buildStudioSkillRegistryV1 } = await import("../agent/skillFoundry/registry");
-  const { createContinuationStoreV1 } = await import("../agent/skillFoundry/continuations");
-  const { NATIVE_HANDLERS_V1, NATIVE_PAYLOADS_V1 } = await import("../agent/skillFoundry/native/index");
-
-  const candidates = NATIVE_PAYLOADS_V1.map((payload) => ({
-    id: payload.id,
-    origin: "native" as const,
-    aliases: payload.legacyAliases,
-    manifest: payload,
-  }));
-  const registryResult = await buildStudioSkillRegistryV1({ generation: 1, native: candidates, builtin: [], owner: [] });
-  if (!registryResult.ok) throw new Error("test fixture: the four native payloads failed to register");
-  const testRuntime = actual.createStudioSkillRuntimeV1({
-    registry: registryResult.registry,
-    continuations: createContinuationStoreV1(),
-    nativeHandlers: NATIVE_HANDLERS_V1,
-  });
-
-  return {
-    ...actual,
-    runStudioSkillV1: (utterance: string, environment: Parameters<typeof actual.runStudioSkillV1>[1], continuationToken?: string) =>
-      testRuntime.run(utterance, environment, continuationToken),
-    clearDefaultStudioSkillContinuationsV1: async () => { testRuntime.onProjectReplaced(); },
-  };
-});
+import { __resetDefaultStudioSkillRuntimeForTestsV1, clearDefaultStudioSkillContinuationsV1 } from "../agent/skillFoundry/runtime";
 
 import { AgentComposer } from "./AgentComposer";
 
@@ -160,11 +144,28 @@ describe("AgentComposer named plug-in skill", () => {
   let exec: ReturnType<typeof vi.fn>;
   const originalState = useStore.getState();
 
-  beforeEach(() => {
+  beforeEach(async () => {
     Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
       configurable: true,
       value: true,
     });
+    // Fresh default-runtime generation per test — the registry itself is deterministic
+    // (compiled-in constants, no I/O variance), but this keeps each test's continuation
+    // routing table/private handler stores isolated rather than relying solely on the
+    // composer's own mount-time `clearDefaultStudioSkillContinuationsV1()` effect.
+    //
+    // Built and AWAITED here, before the component ever mounts: `buildDefaultRuntimeV1()`
+    // does real async work (catalog fingerprint hashing, two bridge reads) that spans more
+    // event-loop turns than a single `act(async () => send.click())` flushes. Without this,
+    // the first interaction races the registry build — observed as a flaky "exec never
+    // called" failure in one test and a stray extra call bleeding into the NEXT test (the
+    // first test's still-in-flight promise resolving mid-way through the second, since
+    // `buildSkillEnvironment` reads the store's `exec` live). Pre-building here (the SAME
+    // path AgentComposer's own mount effect calls) makes every subsequent `runStudioSkillV1`
+    // call resolve on just the handler's own async work, matching this test's original
+    // (mocked-runtime) timing.
+    __resetDefaultStudioSkillRuntimeForTestsV1();
+    await clearDefaultStudioSkillContinuationsV1();
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
