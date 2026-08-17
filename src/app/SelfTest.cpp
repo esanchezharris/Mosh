@@ -7,6 +7,7 @@
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
+#include "state/TakeIdentity.h"
 #include "state/Migrations.h"
 #include "state/TrackIcons.h"
 #include "state/SafeMode.h"
@@ -7613,6 +7614,156 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                       peak = juce::jmax (peak, rbuf.getMagnitude (ch, 0, rbuf.getNumSamples()));
               }
               check (peak > 0.01f, "the switched take's source RENDERS non-silent (880 Hz tone)"); }
+        }
+
+        // ── Stable take identity (Skill Foundry Slice B, Task 1) ──
+        // A lane INDEX shifts under Keep/Undo; capture-review-choose-take needs a handle
+        // that survives all of that. Build a dedicated 2-take direct-file fixture (mirrors
+        // the take-peaks fixture above) and prove: list_takes / clipToVar / controllerToVar
+        // all agree on the same unique, persisted ids; keep_take accepts an explicit stable
+        // takeId and refuses a malformed/unknown one with ZERO mutation; keep_take-by-id
+        // switches AND collapses the lane set in one transaction; one Undo restores the
+        // full ordered id set (not fresh ids) and the prior selection; the legacy
+        // {clipId}-only Keep is unchanged; and ids survive save/reload.
+        {
+            section ("Stable take identity (Skill Foundry Slice B, Task 1)");
+            const auto idTrack = cmd (ops, "create_track", args1 ("name", "TakeIdFx"))["data"].getProperty ("trackId", var()).toString();
+            const auto idClipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", idTrack }, { "seconds", 1.0 }, { "freq", 220.0 }}))["data"].getProperty ("clipId", var()).toString();
+            const auto extraClipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", idTrack }, { "seconds", 1.0 }, { "freq", 880.0 }}))["data"].getProperty ("clipId", var()).toString();
+            te::WaveAudioClip* idWave = nullptr;
+            juce::File fA, fB;
+            for (auto* tr : te::getAllTracks (eng.edit()))
+                if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                    for (auto* c : at->getClips())
+                        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                        {
+                            if (w->itemID.toString() == idClipId) { idWave = w; fA = w->getCurrentSourceFile(); }
+                            if (w->itemID.toString() == extraClipId) fB = w->getCurrentSourceFile();
+                        }
+            check (idWave != nullptr && fA.existsAsFile() && fB.existsAsFile(),
+                   "take-identity fixture: the clip and two source files resolved");
+            idWave->addTake (fA);
+            idWave->addTake (fB);
+            // This fixture builds its take tree directly (addTake), the same shortcut the
+            // take-peaks fixture above uses because headless has no audio input to actually
+            // record — so it never passes through cmdStopRecording's post-record backfill.
+            // A real recording lands through cmdStopRecording, which calls this same
+            // function; simulate that here so the fixture's ids exist exactly as a real
+            // landed take's would.
+            mosh::takeidentity::backfill (eng.edit().state);
+
+            auto ltA = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+            check (ok (ltA), "list_takes on the id fixture ok");
+            const auto ltTakes = ltA["data"].getProperty ("takes", var());
+            check (ltTakes.size() == 2, "list_takes reports two takes on the id fixture");
+            const auto lId0 = ltTakes[0].getProperty ("id", var()).toString();
+            const auto lId1 = ltTakes[1].getProperty ("id", var()).toString();
+            check (lId0.isNotEmpty() && lId1.isNotEmpty() && lId0 != lId1,
+                   "list_takes reports two unique, non-empty stable ids");
+            check (mosh::takeidentity::isValid (lId0) && mosh::takeidentity::isValid (lId1),
+                   "list_takes' ids are well-shaped (lowercase dashed uuid)");
+
+            auto idClipSnapshot = [&ops, &idClipId]() -> juce::var
+            {
+                auto snap = ops.snapshot();
+                auto tracksVar = snap.getProperty ("tracks", var());
+                if (auto* trackArr = tracksVar.getArray())
+                    for (auto& trackVar : *trackArr)
+                    {
+                        auto clipsVar = trackVar.getProperty ("clips", var());
+                        if (auto* clipArr = clipsVar.getArray())
+                            for (auto& clipVar : *clipArr)
+                                if (clipVar.getProperty ("id", var()).toString() == idClipId)
+                                    return clipVar;
+                    }
+                return {};
+            };
+            {
+                const auto clip = idClipSnapshot();
+                const auto takeIds = clip.getProperty ("takeIds", var());
+                check (takeIds.size() == 2
+                           && takeIds[0].toString() == lId0
+                           && takeIds[1].toString() == lId1,
+                       "clipToVar's takeIds matches list_takes exactly, in order");
+                check (clip.getProperty ("currentTakeId", var()).toString() == lId0,
+                       "clipToVar's currentTakeId names the take at the current index");
+            }
+            {
+                const auto controller = ops.snapshot().getProperty ("controller", var());
+                const auto take = controller.getProperty ("take", var());
+                if (take.getProperty ("clipId", var()).toString() == idClipId)
+                {
+                    const auto ctakeIds = take.getProperty ("takeIds", var());
+                    check (ctakeIds.size() == 2
+                               && ctakeIds[0].toString() == lId0
+                               && ctakeIds[1].toString() == lId1,
+                           "controllerToVar's takeIds matches list_takes exactly, in order");
+                    check (take.getProperty ("currentTakeId", var()).toString() == lId0,
+                           "controllerToVar's currentTakeId matches the current take");
+                }
+            }
+
+            // Guard: a malformed or unknown (but well-shaped) takeId is refused BEFORE
+            // any transaction opens — zero mutation, both takes remain exactly as they were.
+            check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", idClipId }, { "takeId", "not-a-real-id" }}))),
+                   "keep_take with a malformed takeId is refused");
+            check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", idClipId }, { "takeId", mosh::takeidentity::newId() }}))),
+                   "keep_take with an unknown (but well-shaped) takeId is refused");
+            {
+                const auto clip = idClipSnapshot();
+                check (clip.getProperty ("takeIds", var()).size() == 2,
+                       "the refused Keep attempts mutated nothing — both takes remain");
+            }
+
+            // Keep the SECOND take by its stable id (current selection is still index 0 /
+            // fA) — one transaction both switches AND collapses the lane set to it.
+            auto kept = cmd (ops, "keep_take", objN ({{ "clipId", idClipId }, { "takeId", lId1 }}));
+            check (ok (kept), "keep_take with an explicit, valid stable id ok");
+            check (idWave->getCurrentSourceFile() == fB,
+                   "keep_take-by-id switches the playing source to the kept take");
+            {
+                auto lt2 = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+                check ((int) lt2["data"].getProperty ("numTakes", -1) == 1,
+                       "keep_take-by-id reduces the lane set to exactly one take");
+            }
+
+            // ONE Undo restores the FULL ordered id set (the exact prior ids, not fresh
+            // ones) and the prior selection.
+            check (ok (cmd (ops, "undo", objN ({}))), "undo after keep_take-by-id ok");
+            check (idWave->getCurrentSourceFile() == fA, "one undo restores the ORIGINAL playing source");
+            {
+                auto lt3 = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+                const auto takes3 = lt3["data"].getProperty ("takes", var());
+                check (takes3.size() == 2, "one undo restores both takes");
+                check (takes3[0].getProperty ("id", var()).toString() == lId0
+                           && takes3[1].getProperty ("id", var()).toString() == lId1,
+                       "one undo restores the EXACT prior ordered id set (not fresh ids)");
+            }
+
+            // Legacy {clipId}-only Keep is UNCHANGED: it keeps whichever take is already
+            // current, with no takeId argument at all.
+            check (ok (cmd (ops, "set_current_take", objN ({{ "clipId", idClipId }, { "takeIndex", 1 }}))),
+                   "re-switch to take 1 for the legacy-Keep check");
+            auto legacyKept = cmd (ops, "keep_take", objN ({{ "clipId", idClipId }}));
+            check (ok (legacyKept), "legacy {clipId}-only keep_take still ok");
+            check (idWave->getCurrentSourceFile() == fB,
+                   "legacy keep_take kept whichever take was already current (take 1)");
+            check (ok (cmd (ops, "undo", objN ({}))), "undo the legacy-Keep check");
+            check (ok (cmd (ops, "undo", objN ({}))), "undo the re-switch-to-take-1 for the legacy-Keep check");
+            check (idWave->getCurrentSourceFile() == fA, "the id fixture is restored to its original take-0 state");
+
+            // Save/reload survival: ids must not be regenerated across a round trip.
+            check (ok (cmd (ops, "save", objN ({}))), "save the take-identity fixture ok");
+            check (ok (cmd (ops, "reload", objN ({}))), "reload the take-identity fixture ok");
+            {
+                auto lt4 = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+                check (ok (lt4), "list_takes after reload ok");
+                const auto takes4 = lt4["data"].getProperty ("takes", var());
+                check (takes4.size() == 2, "reload preserves both takes");
+                check (takes4[0].getProperty ("id", var()).toString() == lId0
+                           && takes4[1].getProperty ("id", var()).toString() == lId1,
+                       "reload preserves the EXACT same ids — no regeneration");
+            }
         }
 
         // ── CTL-001: live MIDI controller -> armed instrument track ──

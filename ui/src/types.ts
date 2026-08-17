@@ -173,6 +173,11 @@ export type RenderQA = {
 // them as separate lanes. set_current_take / keep_take act on this tree.
 export type ClipTake = {
   index: number;        // position in the take tree (the command handle)
+  /** Skill Foundry Slice B, Task 1 — a stable, persisted take id (state/TakeIdentity.h)
+   *  that survives Keep/Undo/save/relaunch, unlike `index` (a lane position that shifts
+   *  under those). Empty only for a take that predates the identity backfill and has not
+   *  yet been re-adopted (see MoshEngine::wireEditResolvers). */
+  id?: string;
   description?: string; // engine-supplied take description (file/name), if any
   isCurrent?: boolean;  // the take that currently plays
   /** Per-take waveform peaks ([min,max] bucket pairs — the main-lane shape).
@@ -251,6 +256,12 @@ export type Clip = {
   numTakes?: number;
   currentTakeIndex?: number;
   takes?: ClipTake[];
+  /** Skill Foundry Slice B, Task 1 — additive, index-order-matching stable-id
+   *  projections of `takes`/`currentTakeIndex` (state/TakeIdentity.h). `takeIds[i]`
+   *  names the same take as `takes[i]`; `currentTakeId` names the take at
+   *  `currentTakeIndex`. Present under the same condition as `takes`. */
+  takeIds?: string[];
+  currentTakeId?: string;
 };
 
 /** Pro Tools-style arrangement group. Unlike a routing folder, this owns no signal
@@ -314,6 +325,12 @@ export type ControllerTake = {
   kept?: boolean;
   numTakes?: number;
   currentTakeIndex?: number;
+  /** Skill Foundry Slice B, Task 1 — same additive stable-id projection Clip carries
+   *  (state/TakeIdentity.h), so the producer-controller surface and the main clip
+   *  snapshot always agree on the same take by the same id. Present under the same
+   *  condition as `numTakes`/`currentTakeIndex` (hasLanes). */
+  takeIds?: string[];
+  currentTakeId?: string;
 };
 
 export type ControllerState = {

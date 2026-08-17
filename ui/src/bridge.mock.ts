@@ -43,6 +43,15 @@ let trackGroupSeq = 0;
 // landedClipId). Module-local rather than a snapshot field — see the accept_render branch.
 const landedLayers = new Set<string>();
 const nextClipId = () => String(++clipSeq);
+// Skill Foundry Slice B, Task 1 — deterministic, UUID-SHAPED fixture take ids, mirroring
+// native state/TakeIdentity.h's lowercase-dashed-uuid shape (so dev/e2e/tests can assert
+// on the same "looks like a stable id" shape without depending on crypto.randomUUID()'s
+// real randomness). Monotonic per mock instance; never reused, never reassigned.
+let mockTakeIdSeq = 0;
+const nextTakeId = (): string => {
+  const hex = (++mockTakeIdSeq).toString(16).padStart(8, "0");
+  return `${hex}-0000-4000-8000-000000000000`;
+};
 const nextTrackId = () => String(++trackSeq);
 const nextClipGroupId = () => `clip-group-${++clipGroupSeq}`;
 const nextTrackGroupId = () => `track-group-${++trackGroupSeq}`;
@@ -1002,6 +1011,21 @@ function ensureInstrument(t: Track, drum: boolean): void {
   }
   t.isInstrument = t.plugins.some((p) => p.isInstrument);
 }
+// Skill Foundry Slice B, Task 1 — recompute the additive stable-id projections
+// (`takeIds`/`currentTakeId`) from `takes`/`currentTakeIndex`, mirroring the native
+// clipToVar projection (state/TakeIdentity.h). Call this any time `takes` or
+// `currentTakeIndex` changes so the index-based and id-based views never drift.
+function syncTakeIdProjections(clip: Clip): void {
+  if (!clip.takes || clip.takes.length === 0) {
+    delete clip.takeIds;
+    delete clip.currentTakeId;
+    return;
+  }
+  clip.takeIds = clip.takes.map((tk) => tk.id ?? "");
+  const idx = clip.currentTakeIndex ?? clip.takes.findIndex((tk) => tk.isCurrent);
+  clip.currentTakeId = idx >= 0 && idx < clip.takes.length ? (clip.takes[idx]!.id ?? "") : "";
+}
+
 function pushUndo() {
   if (inBatch) return;
   history.push(clone(snapshot)); future.length = 0;
@@ -1330,15 +1354,17 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
     if (existing && existing.takes) {
       const index = existing.takes.length;
       existing.takes.forEach((take) => (take.isCurrent = false));
-      existing.takes.push({ index, description: `Take ${index + 1}`, isCurrent: true });
+      existing.takes.push({ index, id: nextTakeId(), description: `Take ${index + 1}`, isCurrent: true });
       existing.numTakes = existing.takes.length;
       existing.currentTakeIndex = index;
+      syncTakeIdProjections(existing);
       landed.push({ id: existing.id });
     } else {
       const clip = waveClip("take", Math.max(0, snapshot.transport.position - 2), 2);
-      clip.takes = [{ index: 0, description: "Take 1", isCurrent: true }];
+      clip.takes = [{ index: 0, id: nextTakeId(), description: "Take 1", isCurrent: true }];
       clip.numTakes = 1;
       clip.currentTakeIndex = 0;
+      syncTakeIdProjections(clip);
       track.clips.push(clip);
       landed.push({ id: clip.id });
     }
@@ -3015,7 +3041,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // distinct across takes, mirroring the engine's additive field shape
       // ([min,max] bucket pairs) so the lanes draw real ink in dev/e2e.
       const withPeaks = takes.map((tk) => ({ ...tk, peaks: mockTakePeaks(f.clip.id, tk.index) }));
-      return ok(command, { takes: withPeaks, numTakes: f.clip.numTakes ?? takes.length, currentTakeIndex: f.clip.currentTakeIndex ?? 0 });
+      return ok(command, {
+        takes: withPeaks,
+        numTakes: f.clip.numTakes ?? takes.length,
+        currentTakeIndex: f.clip.currentTakeIndex ?? 0,
+        // Skill Foundry Slice B, Task 1 — additive stable-id projections (mirrors native
+        // cmdListTakes' "id" field / clipToVar's takeIds/currentTakeId).
+        takeIds: f.clip.takeIds ?? takes.map((tk) => tk.id ?? ""),
+        currentTakeId: f.clip.currentTakeId ?? "",
+      });
     }
     case "set_current_take": {
       const f = findClip(str(args.clipId)); if (!f?.clip.takes) return err(command, "clip has no takes");
@@ -3024,6 +3058,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.takes.forEach((tk) => (tk.isCurrent = tk.index === idx));
       f.clip.currentTakeIndex = idx;
+      syncTakeIdProjections(f.clip);
       invalidate(); return ok(command);
     }
     case "promote_take_region": {
@@ -3068,6 +3103,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (hasRight) middle.fadeOutSec = 0;
       middle.takes?.forEach((take) => { take.isCurrent = take.index === takeIndex; });
       middle.currentTakeIndex = takeIndex;
+      syncTakeIdProjections(middle);
       segments.push(middle);
 
       let tail: Clip | undefined;
@@ -3095,11 +3131,29 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "keep_take": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       if (!f.clip.takes || f.clip.takes.length === 0) return err(command, "clip has no takes");
+
+      // Skill Foundry Slice B, Task 1 — an OPTIONAL, stable-id target for Keep, additive
+      // to the legacy `{clipId}`-only call (which keeps whichever take is already
+      // current — unchanged below). Resolved and guarded BEFORE pushUndo/any mutation,
+      // mirroring the native command's "validate every guard before beginTxn" discipline:
+      // a malformed or unknown id mutates nothing.
+      let targetIndex = -1;
+      if (typeof args.takeId === "string") {
+        const takeId = args.takeId;
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(takeId))
+          return err(command, "malformed takeId");
+        const matches = f.clip.takes.filter((tk) => tk.id === takeId);
+        if (matches.length === 0) return err(command, "no take with that id");
+        if (matches.length > 1) return err(command, "duplicate takeId in take set");
+        targetIndex = f.clip.takes.findIndex((tk) => tk.id === takeId);
+      }
+
       pushUndo();
-      const cur = f.clip.currentTakeIndex ?? f.clip.takes.findIndex((tk) => tk.isCurrent);
+      const cur = targetIndex >= 0 ? targetIndex : (f.clip.currentTakeIndex ?? f.clip.takes.findIndex((tk) => tk.isCurrent));
       const kept = f.clip.takes[cur >= 0 ? cur : 0] ?? f.clip.takes[0];
       if (kept?.description) f.clip.name = kept.description; // flatten the comp to the kept take
       delete f.clip.takes; delete f.clip.numTakes; delete f.clip.currentTakeIndex;
+      delete f.clip.takeIds; delete f.clip.currentTakeId;
       invalidate(); return ok(command);
     }
     case "mark_take": {
