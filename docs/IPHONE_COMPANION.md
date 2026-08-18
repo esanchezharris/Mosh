@@ -329,7 +329,7 @@ must be resolved before any TestFlight build can even be uploaded.
    = YES` targets currently have nothing wiring `ASSETCATALOG_COMPILER_APPICON_NAME`
    either).
 2. **`DEVELOPMENT_TEAM` is empty on every build configuration**
-   (`project.pbxproj`: four occurrences, all `DEVELOPMENT_TEAM = "";`) and
+   (`project.pbxproj`: six occurrences — 3 targets × Debug/Release — all `DEVELOPMENT_TEAM = "";`) and
    `CODE_SIGN_STYLE = Automatic`. That is correct for the free
    Personal-Team simulator/device gates this repo already relies on
    (`scripts/iphone-companion-device-gate.sh`), but TestFlight/App Store

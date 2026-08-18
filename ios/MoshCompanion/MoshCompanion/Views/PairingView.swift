@@ -52,7 +52,7 @@ struct PairingView: View {
                         } label: {
                             Label("Paste", systemImage: "doc.on.clipboard")
                         }
-                        .disabled(!clipboardHasPairingLink)
+                        .disabled(!clipboardHasStrings)
                     }
                 }
 
@@ -70,8 +70,16 @@ struct PairingView: View {
     /// copying the popover's URL manually — a one-tap paste avoids re-typing a
     /// base64 payload by hand, the main friction point of the manual-pairing
     /// fallback this view exists for.
-    private var clipboardHasPairingLink: Bool {
-        UIPasteboard.general.string?.hasPrefix("mosh://pair") == true
+    ///
+    /// iOS 16+ pasteboard privacy: reading `.string` outside a user paste
+    /// gesture fires the system "would like to paste" alert — and this
+    /// property is evaluated on every body render, so checking content here
+    /// would alert the user the moment the screen appears. `hasStrings` is
+    /// metadata-only (no alert); the actual content read stays inside
+    /// `pasteFromClipboard()`, where the alert is a legitimate response to
+    /// the user's own tap.
+    private var clipboardHasStrings: Bool {
+        UIPasteboard.general.hasStrings
     }
 
     private func pasteFromClipboard() {
