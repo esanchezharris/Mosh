@@ -53,13 +53,55 @@ describe("buildLoopSystemPrompt", () => {
     const p = buildLoopSystemPrompt(SNAP);
     expect(p).toContain('"status": "continue" | "done" | "need_user"');
     expect(p).toContain("- set_tempo(bpm) — ");           // the catalog rendering
-    expect(p).toContain(LOOP_RULES.split("\n")[1]!);       // plan-first rule
+    expect(p).toContain(LOOP_RULES.split("\n")[1]!);       // act-vs-defer rule
     expect(p).toContain("master: -3dB");
   });
 
   it("injects producer knowledge for the ask, like the single-shot path", () => {
     expect(buildLoopSystemPrompt(SNAP, "put a compressor on the master bus")).toContain("Producer knowledge");
     expect(buildLoopSystemPrompt(SNAP)).not.toContain("Producer knowledge");
+  });
+});
+
+describe("LOOP_RULES — calibration-v2 (act-vs-defer + dosage)", () => {
+  // The 2026-08-17 novice-jam ladder found three failure modes: grok wrong-defers
+  // on a clear ask with an unspecified amount, opus over-acts (dup commands,
+  // reflexive saves, 23-command spree on a genuinely ambiguous ask), r5 mixes one
+  // wrong-defer with one ambiguity violation (a command on a pure-taste ask). These
+  // pin the rewritten prose so a later edit can't silently drop the fix.
+
+  it("tells the model to act on a clear ask with a missing amount, using a sensible default", () => {
+    expect(LOOP_RULES).toContain("A missing AMOUNT is NOT a reason to ask");
+    expect(LOOP_RULES).toContain("pick one modest, musically sensible default");
+    // no longer requires BOTH a target and an explicit outcome before acting —
+    // that was the grok-4.3 over-defer trigger ("make it faster" etc).
+    expect(LOOP_RULES).not.toContain("AND what outcome is wanted");
+  });
+
+  it("still requires deferring when the ask names no concrete action at all (pure taste)", () => {
+    expect(LOOP_RULES).toContain("no concrete action at all");
+    expect(LOOP_RULES).toContain("mix this properly");
+  });
+
+  it("caps dosage: no repeats, no extra tracks/buses/sections, no reflexive save", () => {
+    expect(LOOP_RULES).toContain("DOSAGE");
+    expect(LOOP_RULES).toContain("Never repeat an identical command.");
+    expect(LOOP_RULES).toContain("Never create a second track/bus/section when one already covers it.");
+    expect(LOOP_RULES).toContain("Never `save` unless the producer asked to save.");
+  });
+
+  it("a mid-task defer carries NO commands — no partial nudge toward the guess", () => {
+    expect(LOOP_RULES).toContain("with NO commands on that reply");
+    expect(LOOP_RULES).toContain('not a chance to sneak in a "helpful" partial action');
+  });
+
+  it("the per-step plan gate matches the same act-vs-defer calibration (mockLoopChat keys off it)", () => {
+    const planInstruction = renderTaskContext({
+      ask: "make it faster", plan: [], planIdx: 0, history: [], stepsLeft: 5, repliesLeft: 5, mode: "plan",
+    });
+    expect(planInstruction).toContain("A missing AMOUNT is not a reason to ask");
+    // loopBrainMock.ts's modeOf() keys off this exact substring to detect "plan" mode.
+    expect(planInstruction).toContain("make a plan");
   });
 });
 

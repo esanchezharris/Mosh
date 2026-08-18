@@ -15,10 +15,10 @@ function taskOf(messages: ChatMessage[]): string {
 function modeOf(messages: ChatMessage[]): "plan" | "compile" | "other" {
   const user = messages[messages.length - 1]?.content ?? "";
   // Matched on a stable SUBSTRING, not an anchored sentence: MODE_INSTRUCTION.plan
-  // now leads with the ambiguity gate ("Is the TASK specific enough…? … Otherwise
-  // make a plan"), so a ^-anchored match silently fell through to "other" and the
-  // script ended at step 0. Both phrasings contain "make a plan"; compile/repair/
-  // continue contain none of it.
+  // leads with the act-vs-defer gate ("Does the TASK name a concrete thing and
+  // direction…? … Otherwise make a plan"), so a ^-anchored match silently fell
+  // through to "other" and the script ended at step 0. Every plan phrasing has
+  // contained "make a plan"; compile/repair/continue contain none of it.
   if (/make a plan/i.test(user)) return "plan";
   if (/give the commands for the next step/i.test(user)) return "compile";
   return "other";

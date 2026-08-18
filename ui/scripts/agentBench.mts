@@ -45,7 +45,9 @@ import {
   type BrainUsage, type Cmd as EngineCmd,
 } from "./lib/realEngine.mts";
 import { AGENT_TASKS, type AgentTask } from "../src/bench/agentTasks";
+import { NOVICE_JAM_TASKS } from "../src/bench/noviceJamTasks";
 import { scoreTask, type TaskScore } from "../src/bench/goalChecks";
+import { isAcceptable } from "../src/bench/acceptability";
 import { validateCommand } from "../src/agent/commands";
 import { screenDestructive, DESTRUCTIVE_BLOCK_REASON, type AgentCommandCall } from "../src/agent/destructiveScreen";
 import { makeSingleShotRunner } from "../src/bench/singleShotRunner";
@@ -55,6 +57,10 @@ import type { Snapshot } from "../src/types";
 
 const env = loadEnv();
 const RUNNER = argFlag("runner", "single")!;
+// --suite novice-jam selects the P1 25-task novice-phrased probe
+// (src/bench/noviceJamTasks.ts) in place of the default expert-phrased suite.
+const SUITE = argFlag("suite", "default")!;
+const TASKS: readonly AgentTask[] = SUITE === "novice-jam" ? NOVICE_JAM_TASKS : AGENT_TASKS;
 const CLAUDE_CLI = process.argv.includes("--claude-cli");
 const CODEX_CLI = process.argv.includes("--codex-cli");
 if (CLAUDE_CLI && CODEX_CLI) throw new Error("--claude-cli and --codex-cli are mutually exclusive");
@@ -74,12 +80,13 @@ const cfg = CLI_TRANSPORT
       argFlag("model"),
     );
 const BIN = findBin(argFlag("bin"));
-const TAG = argFlag("tag", `${cfg.model.replace(/[^a-zA-Z0-9.-]/g, "_")}-${RUNNER}`)!;
+const TAG = argFlag("tag", `${cfg.model.replace(/[^a-zA-Z0-9.-]/g, "_")}-${RUNNER}${SUITE !== "default" ? `-${SUITE}` : ""}`)!;
 const OUT_DIR = argFlag("out-dir", join(process.cwd(), "..", "docs", "agent-bench"))!;
 const MAX_STEPS = Number(argFlag("max-steps", "8"));
 // Reply-token cap per chat call. 800 = the shipped BrainProxy default;
 // always-on-thinking models need headroom (their reasoning spends the cap).
 const CHAT_MAX_TOKENS = Number(argFlag("chat-max-tokens", "800"));
+const NO_THINK = process.argv.includes("--no-think"); // local mlx thinking models: chat_template_kwargs enable_thinking:false (HTTP transport only)
 const TASK_FILTER = (argFlag("tasks", "all") || "all").split(",");
 const RENDER = !process.argv.includes("--no-render");
 const ART_DIR = join(homedir(), "mosh-agentbench-artifacts", TAG);
@@ -185,7 +192,7 @@ function makeRunner(usage: BrainUsage): AgentRunner {
         return call(cfg.model, messages, usage);
       }
     }
-    const opts = { maxTokens: CHAT_MAX_TOKENS };
+    const opts = { maxTokens: CHAT_MAX_TOKENS, noThink: NO_THINK };
     try {
       return await callBrain(cfg, messages, usage, opts);
     } catch (e) {
@@ -212,6 +219,8 @@ type Row = {
   results: Array<{ command: string; ok: boolean; error?: string }>;
   wallMs: number; brainError?: string;
   renders: string[];
+  /** Stricter than score.success — see src/bench/acceptability.ts. */
+  acceptable: boolean;
 };
 
 async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
@@ -226,6 +235,11 @@ async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
   const wallMs = Date.now() - t0;
 
   const score = scoreTask(task, before, run);
+  const acceptable = isAcceptable(
+    { par: task.par, maxSteps: task.maxSteps ?? MAX_STEPS, ambiguous: task.ambiguous },
+    score,
+    run,
+  );
 
   const renders: string[] = [];
   if (RENDER && task.render) {
@@ -244,12 +258,12 @@ async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
     commands: run.transcript.flatMap((s) => s.commands.map((c) => c.command)),
     results: run.transcript.flatMap((s) =>
       s.results.map((r) => ({ command: r.command, ok: r.ok, error: r.error?.slice(0, 160) }))),
-    wallMs, brainError: run.error, renders,
+    wallMs, brainError: run.error, renders, acceptable,
   };
 }
 
 async function main() {
-  const tasks = TASK_FILTER[0] === "all" ? [...AGENT_TASKS] : AGENT_TASKS.filter((t) => TASK_FILTER.includes(t.id));
+  const tasks = TASK_FILTER[0] === "all" ? [...TASKS] : TASKS.filter((t) => TASK_FILTER.includes(t.id));
   if (tasks.length === 0) throw new Error(`--tasks matched nothing (${TASK_FILTER.join(",")})`);
   const usage: BrainUsage = { promptTokens: 0, completionTokens: 0, calls: 0 };
   const runner = makeRunner(usage);
@@ -272,15 +286,20 @@ async function main() {
     byCat[r.category].total++;
     if (r.score.success) byCat[r.category].pass++;
   }
-  const action = rows.filter((r) => !AGENT_TASKS.find((t) => t.id === r.id)?.ambiguous);
-  const ambiguous = rows.filter((r) => AGENT_TASKS.find((t) => t.id === r.id)?.ambiguous);
+  const action = rows.filter((r) => !TASKS.find((t) => t.id === r.id)?.ambiguous);
+  const ambiguous = rows.filter((r) => TASKS.find((t) => t.id === r.id)?.ambiguous);
   const effs = rows.map((r) => r.score.stepEff).filter((x): x is number => x !== null);
+  const acceptableCount = rows.filter((r) => r.acceptable).length;
   const board = {
-    tag: TAG, model: cfg.model, base: cfg.base, runner: RUNNER, bin: BIN,
+    tag: TAG, model: cfg.model, base: cfg.base, runner: RUNNER, bin: BIN, suite: SUITE,
     maxSteps: MAX_STEPS, ranAt: new Date().toISOString(),
     success: rows.filter((r) => r.score.success).length / rows.length,
     passed: rows.filter((r) => r.score.success).length,
     total: rows.length,
+    // Stricter than `success` — see src/bench/acceptability.ts. This is the
+    // number the P1 novice-jam kill-line (killLineCount, ≥80%) is read from.
+    acceptable: acceptableCount,
+    acceptableRate: acceptableCount / rows.length,
     stepEffMean: effs.length ? effs.reduce((a, b) => a + b, 0) / effs.length : null,
     cmdErrRateMean: rows.reduce((a, r) => a + r.score.cmdErrRate, 0) / rows.length,
     invalidRateMean: rows.reduce((a, r) => a + r.score.invalidRate, 0) / rows.length,
@@ -295,7 +314,7 @@ async function main() {
   const md = [
     `# MoshAgentBench — ${TAG}`,
     ``,
-    `model \`${cfg.model}\` @ \`${cfg.base}\` · runner **${RUNNER}** · ${board.passed}/${board.total} = **${pct(board.success)}** · ${new Date().toISOString().slice(0, 10)}`,
+    `model \`${cfg.model}\` @ \`${cfg.base}\` · suite **${SUITE}** · runner **${RUNNER}** · ${board.passed}/${board.total} = **${pct(board.success)}** · acceptable ${board.acceptable}/${board.total} = **${pct(board.acceptableRate)}** · ${new Date().toISOString().slice(0, 10)}`,
     ``,
     `step-eff ${pct(board.stepEffMean)} · cmd-err ${pct(board.cmdErrRateMean)} · invalid ${pct(board.invalidRateMean)} · wrong-defers ${board.wrongDefers} · defer-correct ${pct(board.deferCorrect)} · tokens ${usage.promptTokens}+${usage.completionTokens} (${usage.calls} calls)`,
     ``,
@@ -310,7 +329,7 @@ async function main() {
     ``,
   ].join("\n");
   writeFileSync(join(OUT_DIR, `scoreboard.${TAG}.md`), md);
-  console.log(`agent-bench[${TAG}]: ${board.passed}/${board.total} = ${pct(board.success)} → ${jsonPath}`);
+  console.log(`agent-bench[${TAG}]: ${board.passed}/${board.total} = ${pct(board.success)} · acceptable ${board.acceptable}/${board.total} = ${pct(board.acceptableRate)} → ${jsonPath}`);
 }
 
 main().catch((e) => {
