@@ -114,7 +114,7 @@ manifest-hashed, refusing to run if the target it's building on doesn't match
 what it expects — is still the more disciplined version of the above; still
 not built, same reasoning this file already gave.)
 
-### 2.3 Pre-register before training on it — DRAFT written, owner steps remain
+### 2.3 Pre-register before training on it — FROZEN 2026-08-18, launch under way
 
 `R7_TRAINING_PLAN.md` / `R7_FREEZE_MEMO.md` now exist (2026-08-17,
 `claude/r7-prep`), mirroring `R6_TRAINING_PLAN.md`/`R6_FREEZE_MEMO.md`'s
@@ -123,16 +123,16 @@ shape, naming: the mix's row count/sha256 (§2.2 above), the recipe
 untested local-MLX lane, so no confound with r6's still-open experiment),
 and the gate (the standing §P9 legs plus a new novice-jam-suite leg reading
 against r5's own 16/25 bar with the three named misses tracked
-individually). **Status: DRAFT, not frozen — per this program's own
-discipline, still requires, in order:**
+individually). **Status: FROZEN 2026-08-18 — the owner resolved
+`R7_FREEZE_MEMO.md` §1 to base (a) `Qwen/Qwen3-30B-A3B-Instruct-2507` (clean
+single-variable read) and the memo is frozen (checkbox + status line +
+commit). Launch is under way on a recorded lane deviation — local MLX rather
+than the frozen §2a cloud lane, after provider failures; see the memo's
+post-freeze deviation notes (incl. the max_seq_length NaN incident and its
+fix). Remaining:**
 
-1. The owner resolves `R7_FREEZE_MEMO.md` §1 (which base:
-   `Qwen/Qwen3-30B-A3B-Instruct-2507` for a clean single-variable read, or
-   `Qwen3.6-35B-A3B` for a second deliberate variable — see the memo for
-   the tradeoff, presented without a pre-chosen winner) and freezes the
-   memo (checkbox + status line + commit).
-2. Launch per `R7_TRAINING_PLAN.md` §2.1 (pace smoke first, per §P7.3).
-3. Gate per `R7_TRAINING_PLAN.md` §3 / `R7_FREEZE_MEMO.md` §5, using
+1. Complete the launch per `R7_TRAINING_PLAN.md` §2.1 as deviated.
+2. Gate per `R7_TRAINING_PLAN.md` §3 / `R7_FREEZE_MEMO.md` §5, using
    `EVAL_RUNBOOK.md` for the standing legs and the novice-jam suite for the
    new one.
 

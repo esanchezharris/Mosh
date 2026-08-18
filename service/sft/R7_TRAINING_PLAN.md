@@ -1,9 +1,11 @@
 # r7 training plan — coverage fold-in on the proven r5 recipe
 
-*Status: PROPOSAL — not pre-registered, not launched. This is the plan to be
-turned into a formal pre-registration (see
-[`R7_FREEZE_MEMO.md`](R7_FREEZE_MEMO.md)) before any `a3b-r7` training
-starts, per this program's own discipline (§P1–§P9 of
+*Status: PRE-REGISTERED — [`R7_FREEZE_MEMO.md`](R7_FREEZE_MEMO.md) was frozen
+2026-08-18 (base (a) chosen by the owner; see the memo). Launch is in progress
+on a recorded lane deviation (local MLX, not the frozen §2a cloud lane — see
+the memo's post-freeze deviation notes, incl. the max_seq_length NaN incident).
+Per this program's own discipline nothing below moves now that the
+pre-registration is committed (§P1–§P9 of
 `docs/bench/PROGRAM_STAGE1_2026-07.md`, and `R6_TRAINING_PLAN.md`'s own
 header note: nothing moves after a pre-registration is committed). Every
 number below is cited to a file already in this repo (mostly
@@ -280,7 +282,7 @@ does not do (docs-only ticket, same disposition as `R6_TRAINING_PLAN.md`
    novice-jam suite specifically for legs 4/5.
 4. Record the read in `docs/bench/PROGRAM_STAGE1_2026-07.md` (a new §
    entry, mirroring how §P7/§P8/§P9 and r6's own record each got one) and
-   update `R7_FREEZE_MEMO.md`'s status line from DRAFT to the actual
+   update `R7_FREEZE_MEMO.md`'s status line from FROZEN to the actual
    PASS/MISS/HALT disposition — never edit the pre-registered sections
    themselves.
 5. If it clears leg 4 decisively (materially above 16/25) and/or closes one
