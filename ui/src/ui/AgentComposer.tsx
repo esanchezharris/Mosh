@@ -1,11 +1,10 @@
 // The composer that lives in Moshi's rail. You ask — by holding the mic to TALK
-// (voice-hero) or by typing (the quiet fallback) — his brain plans, the executor
-// runs the edits as ONE undo step, and the result lands in Monster changes. Voice
-// and text feed the very same run() funnel; nothing downstream knows the difference.
+// (voice-hero) or by typing (the quiet fallback) — a bounded studio skill resolves
+// the request, the executor runs its edits as ONE undo step, and the result lands
+// in Monster changes. Voice and text feed the same run() funnel.
 
 import { useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
-import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch, logAgentTurn } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
@@ -15,6 +14,16 @@ import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type Vo
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
 import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
+// Skill Foundry Slice B, Task 7 — the composer's shared-runtime step now calls the ONE
+// registry-backed runtime (Task 6) directly, replacing the legacy single-skill
+// `studioSkills.ts` import it used to route through. `studioSkills.ts` itself is untouched
+// (its own header note: Task 7 "retires it as a routing path", not deletes it) — every
+// other precedence rule (section rework, fast path incl. remember/track-ops, dev loop,
+// unsupported) is unchanged.
+import { runStudioSkillV1, clearDefaultStudioSkillContinuationsV1 } from "../agent/skillFoundry/runtime";
+import type { SkillOutcomeV1, StudioSkillEnvironmentV1 } from "../agent/skillFoundry/contracts";
+import { readSkillSourceStatusV1 } from "../agent/skillFoundry/nativeReads";
+import { createRecordingLifecycleEnvironmentV1 } from "../recordingLifecycle";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -71,7 +80,8 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
 
   // Engage/disengage with the toggle (and tear down on unmount → mic goes cold).
   useEffect(() => {
-    const ctrl = ctrlRef.current!;
+    const ctrl = ctrlRef.current;
+    if (!ctrl) return;
     if (handsFreeOn) ctrl.engage(); else ctrl.disengage();
     return () => ctrl.disengage();
   }, [handsFreeOn]);
@@ -120,9 +130,10 @@ export function AgentComposer() {
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-
-  const brainRef = useRef<Brain | null>(null);
-  if (!brainRef.current) brainRef.current = createBrain(() => useStore.getState().snapshot);
+  // Skill Foundry Slice B, Task 7 — the composer stores ONLY the opaque continuation
+  // token (a bare string); the runtime is the one thing that resolves it back to a
+  // handler/payload. No typed continuation shape lives in React state any more.
+  const pendingSkillToken = useRef<string | null>(null);
 
   // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
   // acknowledgement so an always-on mic isn't a silent black box.
@@ -139,12 +150,107 @@ export function AgentComposer() {
   const voiceRef = useRef<VoiceInput | null | undefined>(undefined);
   const handsFree = useHandsFree((heard) => flashSay(`“${heard}” (not a command)`));
 
+  // Skill Foundry Slice B, Task 7 — a project-epoch change (new/opened/reloaded project)
+  // invalidates any pending continuation: clear the React token AND the runtime's own
+  // (and each native handler's private) continuation store, so a stale choice answered
+  // against the PREVIOUS project can never resolve against the new one.
+  const projectEpoch = useStore((s) => s.projectEpoch);
+  useEffect(() => {
+    pendingSkillToken.current = null;
+    void clearDefaultStudioSkillContinuationsV1();
+  }, [projectEpoch]);
+
+  // Skill Foundry Slice B, Task 7 — the ONE environment the registry-backed runtime
+  // (all four native skills) is driven through. `context`/`exec`/`runBatch` mirror what
+  // the retired `studioSkills.ts` routing path built; `snapshot`/`readSourceStatus`/
+  // `refresh`/`recording` are new — required by `StudioSkillEnvironmentV1` (contracts.ts)
+  // but never used by the pre-Task-7 composer, which only ever reached load-named-plugin.
+  const buildSkillEnvironment = (text: string): StudioSkillEnvironmentV1 => ({
+    context: () => {
+      const current = useStore.getState();
+      return {
+        projectEpoch: current.projectEpoch,
+        selectedTrackId: current.selectedTrackId,
+        tracks: (current.snapshot?.tracks ?? []).map((track) => ({ id: track.id, name: track.name })),
+      };
+    },
+    // A plain read of the store's already-fetched snapshot — NOT a forced re-fetch. A
+    // handler that needs guaranteed-fresh state calls `refresh()` first (session-control's
+    // `runSave` does exactly this), matching the one existing precedent for the contract.
+    snapshot: async () => {
+      const snap = useStore.getState().snapshot;
+      if (!snap) throw new Error("no session snapshot available");
+      return snap;
+    },
+    exec: (command, args, transaction) => useStore.getState().exec(command, args, transaction),
+    readSourceStatus: readSkillSourceStatusV1,
+    runBatch: (label, calls) => runAgentBatch(label, calls, { utterance: text, source: "studio_skill" }),
+    refresh: () => useStore.getState().refresh(),
+    // The Task 2 adapter (recordingLifecycle.ts) narrows the store's own richer
+    // enterRecord/stopRecord/navTake/keepTake outcomes down to the generic
+    // RecordingLifecycleEnvironmentV1 shape takeCycleV1/session-control's Stop consume.
+    recording: createRecordingLifecycleEnvironmentV1({
+      enterRecord: (bar) => useStore.getState().enterRecord(bar),
+      stopRecord: () => useStore.getState().stopRecord(),
+      navTake: (delta) => useStore.getState().navTake(delta),
+      keepTake: () => useStore.getState().keepTake(),
+    }),
+  });
+
+  // Skill Foundry Slice B, Task 7 — the three terminal outcomes are handled identically
+  // whether the runtime call was a continuation resume or a fresh match; only
+  // `unsupported` is NOT handled here (the fresh-match caller alone may fall through to
+  // the gated dev loop for it — a resume never does, see the caller below).
+  const finishSkillOutcome = async (skill: SkillOutcomeV1, text: string): Promise<boolean> => {
+    if (skill.kind === "completed") {
+      setAgentChangeSet(skill.changes);
+      setSay(skill.say);
+      pushAgentUtter("DONE", skill.say);
+      return true;
+    }
+    if (skill.kind === "needs_choice") {
+      // Task 7 — ONLY the opaque token string is retained; the runtime (plus each native
+      // handler's own private continuation store) owns everything it resolves to.
+      pendingSkillToken.current = skill.continuationToken;
+      setSay(skill.say);
+      pushAgentUtter("HUH", skill.say);
+      return true;
+    }
+    if (skill.kind === "blocked") {
+      if (skill.unserved) {
+        await logAgentTurn(skill.say, { utterance: text, source: "studio_skill_blocked" });
+      }
+      setSay(skill.say);
+      pushAgentUtter("UHOH", skill.say);
+      return true;
+    }
+    return false;
+  };
+
   // The single funnel: typed text and final speech both arrive here.
   const run = async (text: string) => {
     if (!text || useStore.getState().agentBusy) return;
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+
+      // Skill Foundry Slice B, Task 7 — a continuation ALWAYS resumes before any new
+      // matcher gets a look at the utterance: not section rework, not the fast path
+      // (remember/track-ops/RULES), not a fresh skill match. The token is read and
+      // cleared BEFORE any await, so a stale/failed resume can never be replayed.
+      const token = pendingSkillToken.current;
+      pendingSkillToken.current = null;
+      if (token) {
+        const skill = await runStudioSkillV1(text, buildSkillEnvironment(text), token);
+        if (!(await finishSkillOutcome(skill, text))) {
+          // Defensive: an (unexpected) unsupported resume still gets user feedback —
+          // never silently dropped, and never routed to the dev loop/brain.
+          await logAgentTurn(skill.say, { utterance: text, source: "studio_skill_unsupported" });
+          setSay(skill.say);
+          pushAgentUtter("HUH", skill.say);
+        }
+        return;
+      }
 
       // Section scope FIRST: "rework the hook" → a render bounded to that section's beat
       // range. Deterministic (no LLM arithmetic). It runs BEFORE the fast path because a
@@ -167,7 +273,11 @@ export function AgentComposer() {
       }
 
       // Deterministic fast path: an unambiguous, state-valid phrase runs locally (no API).
-      // Anything ambiguous returns null and falls through to the LLM brain.
+      // Owns explicit "remember" (never skill routing — its own non-MoshOps write) and
+      // bulk/multi-name track ops (matchTrackOp) ABOVE skill routing, at their existing
+      // precedence — unchanged by Task 7 (owner resolution: explicit-balance stays
+      // single-target; matchTrackOp is not extended, removed, or relocated). Anything
+      // ambiguous returns null and falls through to the studio-skill runtime.
       const fast = matchFastPath(text, {
         mode: st.currentMode(),
         tempo: st.snapshot?.session?.tempo ?? 120,
@@ -191,11 +301,17 @@ export function AgentComposer() {
         return;
       }
 
-      // The agentic loop (flag-gated, default OFF; gated off in multiplayer):
-      // the ROUTER sends multi-step-shaped asks — sequential clauses, creative
+      // Skill Foundry Slice B, Task 7 — the shared runtime: the ONE registry-backed path
+      // for all four native skills (session-control, capture-review-choose-take,
+      // explicit-balance, load-named-plugin).
+      const skill = await runStudioSkillV1(text, buildSkillEnvironment(text));
+      if (await finishSkillOutcome(skill, text)) return;
+
+      // The old free-form loop is developer-build-only and never a packaged fallback.
+      // The ROUTER sends multi-step-shaped asks — sequential clauses, creative
       // builds, vague-taste work — into the loop (plan, act, observe, repair,
       // ONE undo unit, live in the v2 drawer); short single-move asks stay on
-      // the cheap single-shot path below. Section-scope and the fast path keep
+      // the fail-closed skill path. Section-scope and the fast path keep
       // their precedence above; hands-free still never reaches an LLM.
       if (loopAllowed() && routeAsk(text) === "loop") {
         await runLoopTask(text, {
@@ -205,18 +321,9 @@ export function AgentComposer() {
         return;
       }
 
-      const reply = await brainRef.current!.send(text);
-      setSay(reply.say ?? null);
-      pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
-      if (reply.commands && reply.commands.length > 0) {
-        const cs = await runAgentBatch(reply.say || text, reply.commands, { utterance: text, source: "brain_chat" });
-        setAgentChangeSet(cs);
-      } else {
-        // FS-B2a (H3) — the brain answered but planned nothing. Without this the ask
-        // leaves no trace, and "what people asked for that we couldn't do" is exactly
-        // what real-session skill mining needs most.
-        await logAgentTurn(reply.say || text, { utterance: text, source: "brain_chat" });
-      }
+      await logAgentTurn(skill.say, { utterance: text, source: "studio_skill_unsupported" });
+      setSay(skill.say);
+      pushAgentUtter("HUH", skill.say);
     } catch {
       setSay("hmm — that broke");
       pushAgentUtter("UHOH");
@@ -262,7 +369,8 @@ export function AgentComposer() {
             handsFree.pauseForPushToTalk();
             if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
             const v = ensureVoice(); if (!v) return;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+            try { e.currentTarget.setPointerCapture(e.pointerId); }
+            catch { v.start(); return; }
             v.start();
           }}
           onPointerUp={() => voiceRef.current?.stop()}

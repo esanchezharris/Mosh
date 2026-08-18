@@ -47,6 +47,12 @@ os.environ["MOSH_ENABLE_TRANSFORM"] = "1"  # let availability fall out of the (e
 for _env in ("BASIC_PITCH_PY", "WHISPER_PY", "SKELETON_PY", "PHONOLOGY_PY", "TRANSFORM_PY",
              "RAVE_MODEL_DIR", "MOSH_TRAINING_REMOTE_URL", "MOSH_TRAINING_BACKEND"):
     os.environ.pop(_env, None)
+# The local trainer auto-detects when its binary AND the SA3 base checkpoint are
+# present. This dev Mac HAS the checkpoint, so without these overrides the guest
+# pass would see a real "local_pmetal" backend and fail on a machine difference
+# rather than on a code change — point both at the empty guest tmp.
+os.environ["MOSH_TRAINER_BIN"] = os.path.join(_GUEST_TMP, "no-trainer", "pmetal")
+os.environ["MOSH_SA3_BASE_DIT"] = os.path.join(_GUEST_TMP, "no-trainer", "dit.safetensors")
 
 import server  # noqa: E402
 
@@ -118,8 +124,10 @@ def main():
         check("capabilities.whisper false", guest_caps.get("whisper") is False, str(guest_caps))
         check("capabilities.phonology is a bool", isinstance(guest_caps.get("phonology"), bool), str(guest_caps))
         check("capabilities.transformReal false", guest_caps.get("transformReal") is False, str(guest_caps))
-        check("capabilities.trainingBackend is 'fake' absent MOSH_TRAINING_REMOTE_URL",
+        check("capabilities.trainingBackend is 'fake' with no remote URL and no local trainer assets",
               guest_caps.get("trainingBackend") == "fake", str(guest_caps.get("trainingBackend")))
+        check("capabilities.trainingBlockers is a list", isinstance(guest_caps.get("trainingBlockers"), list),
+              str(guest_caps.get("trainingBlockers")))
 
         # ── /skeleton_spec: honest "not installed" vs "no melody" ───────────────────
         with tempfile.TemporaryDirectory() as d:

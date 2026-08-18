@@ -1,5 +1,6 @@
 // The "Ask Mosh" composer bar. Wraps the existing AgentComposer (voice + text → the
-// agent pipeline) so the whole brain/voice/fast-path stack is reused unchanged. The
+// agent pipeline) so voice, deterministic fast paths, and bounded studio skills are
+// shared across shells. The
 // left "+" is the existing FileOptions control (File / Open / Save / Recent / Settings
 // / Export / Samples via the shared runAction dispatcher) — demo-faithful and gives v2
 // every app/file surface for free. Reference/hum affordances ride inside AgentComposer.

@@ -104,20 +104,38 @@ test("transform target picker hides the preview badge once a real RAVE model is 
   await expect(gen.getByTestId("xform-preview")).toHaveCount(0);
 });
 
+// The mock's DEFAULT backend is `local_pmetal` — a set-up Mac — since local
+// training landed. It used to be `fake`, which meant every dev-browser session
+// and every screenshot of the Lab opened with a bold "Local training isn't set
+// up on this Mac" on a machine where it plainly was. These specs therefore drive
+// the posture EXPLICITLY rather than leaning on the default, and the first one
+// pins the default itself so a revert cannot pass quietly.
+test("the Training popover shows NO preview badge on the default (set-up) Mac", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-overflow").click();
+  await page.getByTestId("v2-tool-training").click();
+  // Prove the capabilities fetch actually settled before asserting an ABSENCE —
+  // otherwise this passes on a popover that simply has not loaded yet.
+  await expect(page.getByTestId("training-tool-body")).toBeVisible();
+  await expect(page.getByTestId("training-preview-badge")).toHaveCount(0);
+});
+
 test("the Type-beat Training popover labels itself preview under the fake backend", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-overflow").click();
   await page.getByTestId("v2-tool-training").click();
+  await setCapabilities(page, { trainingBackend: "fake" });
   await expect(page.getByTestId("training-preview-badge")).toBeVisible();
   await expect(page.getByTestId("training-preview-badge")).toHaveText("preview");
 });
 
-test("the Training popover hides the preview badge once a remote GPU backend is configured", async ({ page }) => {
+test("the Training popover hides the preview badge once a real backend is configured", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-overflow").click();
   await page.getByTestId("v2-tool-training").click();
-  // Confirm the mock-default (fake) badge first — proves the initial capabilities fetch
-  // already settled, so the override below can't race it.
+  // Start from the stub so the badge is definitely present — an assertion that
+  // it DISAPPEARS proves nothing if it was never there.
+  await setCapabilities(page, { trainingBackend: "fake" });
   await expect(page.getByTestId("training-preview-badge")).toBeVisible();
   await setCapabilities(page, { trainingBackend: "remote_http" });
   await expect(page.getByTestId("training-preview-badge")).toHaveCount(0);

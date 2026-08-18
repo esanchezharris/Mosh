@@ -70,10 +70,12 @@ describe("settingsByCategory", () => {
 
   it("keeps settings within a group in schema order", () => {
     const groups = settingsByCategory();
-    const appearance = groups.find((g) => g.category === "Appearance")!;
+    const appearance = groups.find((g) => g.category === "Appearance");
+    if (!appearance) throw new Error("Appearance settings group is missing");
     expect(appearance.settings.map((s) => s.id)).toEqual(["skin", "theme", "uiScale"]);
-    const moshi = groups.find((g) => g.category === "Moshi")!;
-    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "handsFree", "handsFreePauseOnRecord", "bestOfNServing", "agenticLoop", "agentMemory"]);
+    const moshi = groups.find((g) => g.category === "Moshi");
+    if (!moshi) throw new Error("Moshi settings group is missing");
+    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "handsFree", "handsFreePauseOnRecord", "agentMemory"]);
   });
 
   it("covers every setting exactly once", () => {
@@ -120,7 +122,7 @@ describe("coerceSetting", () => {
     expect(coerceSetting("voiceOn", false)).toBe(false);
     expect(coerceSetting("voiceOn", true)).toBe(true);
     // a non-boolean from corrupted storage falls back to the default
-    expect(coerceSetting("voiceOn", "yes" as unknown as boolean)).toBe(true);
+    expect(coerceSetting("voiceOn", "yes")).toBe(true);
   });
 
   it("returns the default for an unknown id", () => {

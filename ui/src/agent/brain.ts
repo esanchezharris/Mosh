@@ -1,9 +1,3 @@
-// WP-11 best-of-n (flag `bestOfNServing`, default OFF): after the single-shot reply
-// parses, taste-classified command batches escalate through the native relay (the
-// service draws + ranks more candidates; any failure keeps the single-shot reply),
-// and corrective batches get ONE validator-retry re-prompt carrying the exact
-// validation failure. Living HERE means both shells + the voice path inherit it.
-//
 // M2 (Phase-B memory lane, flag `agentMemory`, default ON): before building the
 // system prompt, hydrate the agent-memory pools (memoized after the first turn — see
 // memory/hydrate.ts) and fold the few relevant preferences/patterns/project-notes
@@ -19,10 +13,9 @@
 // is now non-empty for every flag-on session, not just ones with existing content —
 // an intentional M3 change from M2's "only when pools are non-empty" gate.
 
-import { archivePair, brainChat, demoBrainAvailable, escalateCandidates } from "../bridge";
+import { brainChat, demoBrainAvailable } from "../bridge";
 import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
-import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
 import { useSettings } from "../settings/store";
 import { ensureMemoryHydrated, poolsNonEmpty } from "./memory/hydrate";
 import { retrieveContext } from "./memory/retrieveContext";
@@ -35,7 +28,6 @@ export type { BrainReply } from "./brainCore";
 
 export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => void };
 
-const bestOfNOn = (): boolean => useSettings.getState().get("bestOfNServing") === true;
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
 /** The M2/M3 memory section for one turn's query: the remember_preference tool doc
@@ -66,36 +58,8 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         const { content } = await brainChat(messages);
         const reply = parseReply(content);
 
-        // Best-of-n augmentation (flag-gated). It must NEVER discard the valid
-        // single-shot reply: its own inner failures return null, and this guard
-        // catches anything that escapes (e.g. manifest/catalog build) so a
-        // best-of-n error can't escape into the provider-failure posture below.
-        let chosen = reply;
-        let replaced = false;
-        try {
-          const esc = await maybeEscalate(text, reply, snap, messages, {
-            enabled: bestOfNOn, escalate: escalateCandidates,
-          });
-          if (esc) { chosen = esc.reply; replaced = true; }
-          else {
-            // Validator-retry (corrective ops) — one re-prompt with the exact failure.
-            const retried = await maybeValidatorRetry(text, reply, messages, {
-              enabled: bestOfNOn, chat: brainChat, parse: parseReply, archive: archivePair,
-            });
-            if (retried) { chosen = retried; replaced = true; }
-          }
-        } catch { /* keep the single-shot reply — never degrade to the mock */ }
-
-        // History: the raw content normally; when best-of-n REPLACED the reply,
-        // record what actually executed so turn N+1's "that" / "same again"
-        // refers to the real edits, not the discarded single-shot draft.
-        history.push({
-          role: "assistant",
-          content: replaced
-            ? JSON.stringify({ intent: chosen.intent, say: chosen.say, commands: chosen.commands })
-            : content,
-        });
-        return chosen;
+        history.push({ role: "assistant", content });
+        return reply;
       } catch {
         if (demoBrainAvailable()) return mockBrainReply(text, snap);
         return { intent: "UHOH", say: "can't reach my brain — check setup and try again" };

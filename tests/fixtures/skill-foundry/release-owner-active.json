@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "generation": 1,
+  "skills": {
+    "owner-set-volume": {
+      "version": "1.0.0",
+      "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "releaseSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}

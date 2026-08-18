@@ -23,7 +23,8 @@ export const LOOP_PREAMBLE = [
 
 export const LOOP_RULES = [
   "Rules:",
-  '- FIRST, check the ask is specific enough to act on. It must name WHAT to work on (which track, clip, section — or clearly the whole song) AND what outcome is wanted. If either is missing, so that acting means GUESSING which thing or which direction the producer meant, reply status "need_user" with one short question in `say` — no plan, no commands. A broad but clear ask is NOT a reason to ask: if you can name the target and the outcome, get on with it.',
+  '- FIRST, check the ask names a concrete thing to act on (a track, clip, section, effect, or clearly the whole song) and a concrete direction (louder, faster, repeat it, add hats, echo, a bassline...). A missing AMOUNT is NOT a reason to ask — pick one modest, musically sensible default (faster ⇒ tempo +8–12%; louder/quieter ⇒ ±2–3dB; "repeat it" ⇒ once, right after; add-an-element asks ⇒ one of it) and say what you chose in `say`, then act. Reply status "need_user" with one short question in `say` — no plan, no commands — ONLY when the ask names no concrete action at all (pure taste: "make it professional", "mix this properly", "make it hit different") or when acting means picking among named things that genuinely cannot be resolved from the session below.',
+  "- DOSAGE: do the smallest command set that satisfies the ask — one bounded change, or one small atomic group of it. Never repeat an identical command. Never create a second track/bus/section when one already covers it. Never `save` unless the producer asked to save. One ask is not an invitation to a full production pass.",
   "- Plan first: a few short steps, never padded. Put concrete commands ON a step whenever you already know them — steps with commands run without asking you again.",
   '- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.',
   '- trackId/clipId are STRING ids: match one from the session exactly and pass it as a JSON string, e.g. "trackId": "17" — never the bare number 17.',
@@ -31,7 +32,7 @@ export const LOOP_RULES = [
   "- Each message shows the CURRENT session and the results of prior steps — trust them over memory; ids and positions may have changed since you planned.",
   "- A failed command's error is shown VERBATIM. Fix the call or route around it; never repeat a failed command unchanged.",
   '- Stop with status "done" the moment the request is satisfied.',
-  '- At ANY point, if continuing means guessing at something only the producer can decide, stop with status "need_user" and ask it in `say`. Parking is a real, correct outcome — not a failure.',
+  '- At ANY point, if continuing means guessing at something only the producer can decide, stop with status "need_user" and ask it in `say`, with NO commands on that reply. Parking is a real, correct outcome — not a failure, and not a chance to sneak in a "helpful" partial action toward your guess.',
   "- Stay in character. Never mention JSON, models, commands, or that you're an AI.",
 ].join("\n");
 
@@ -64,7 +65,7 @@ export type TaskContext = {
 };
 
 const MODE_INSTRUCTION: Record<TaskContextMode, (c: TaskContext) => string> = {
-  plan: (c) => `Is the TASK specific enough to act on — do you know WHAT to work on and WHAT outcome is wanted? If not, reply status "need_user" with one short question. Otherwise make a plan (include each step's commands when you already know them).${c.ask ? "" : ""}`,
+  plan: (c) => `Does the TASK name a concrete thing and direction to act on? A missing AMOUNT is not a reason to ask — pick a sensible default and say what you chose. Reply status "need_user" with one short question ONLY if it names no concrete action at all, or requires picking among things that can't be resolved. Otherwise make a plan (include each step's commands when you already know them).${c.ask ? "" : ""}`,
   compile: (c) => `Give the commands for the next step: ${c.goal ?? "(unnamed)"}.`,
   repair: () => "The latest step results above include FAILURES. Fix or route around them — never repeat a failed command unchanged.",
   continue: () => 'If the TASK is complete, reply status "done". Otherwise give the next commands.',

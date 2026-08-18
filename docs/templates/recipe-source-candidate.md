@@ -55,3 +55,29 @@
 - `decision`:
 - `recipe_authoring_next_step`:
 - `phase0_checks_to_run_after_authoring`:
+
+## Skill Source
+
+Bounded projection into a `SourceCardV1` for the Skill Foundry (`teach-moshi project-skill-source`).
+This section is independent of the recipe-mining rubric above — it feeds skill provenance, not
+recipe scoring. `source_id` above is reused as the skill source card ID and must be a safe lowercase
+slug (`[a-z0-9]+(?:-[a-z0-9]+)*`).
+
+- `source_version`:
+- `rights`: <!-- one of: official_public_documentation | creator_authorized | user_owned_or_licensed | manual_paraphrase_only -->
+- `acquisition`: <!-- one of: official_https_page | creator_authorized_file | user_supplied_local_file | manual_viewing_notes -->
+- `platform_handling`: <!-- one of: metadata_and_short_paraphrases_only | local_locator_only -->
+- `evidence_sha256`:
+- `reviewer`:
+- `reviewed_at`:
+- `source_state`: <!-- one of: current | stale | superseded | revoked -->
+- `dependent_ids`:
+
+## Claims
+
+1-10 unique short paraphrased claims. `origin` is one of: `source_text | owner_observation |
+asr_ocr | codex_inference`.
+
+| Claim ID | Origin | Workflow Moment | Paraphrase | Boundary |
+| --- | --- | --- | --- | --- |
+|  |  |  |  |  |

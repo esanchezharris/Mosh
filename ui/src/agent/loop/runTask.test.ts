@@ -7,7 +7,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { runLoopTask, agenticLoopOn } from "./runTask";
 import { useTaskStore } from "./taskStore";
 import { useStore } from "../../store";
-import { useSettings } from "../../settings/store";
 import { __resetMockForTests } from "../../bridge.mock";
 import type { Snapshot } from "../../types";
 
@@ -38,7 +37,10 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
     expect(snap().session.tempo).toBe(80);                                  // step 1
     const drums = snap().tracks.find((t) => t.name === "Drums");
     expect(drums, "add_drum_pattern created its Drums track").toBeTruthy(); // step 2
-    expect((drums!.clips[0]!.notes ?? []).length).toBeGreaterThanOrEqual(8);
+    if (!drums) throw new Error("add_drum_pattern did not create its Drums track");
+    const firstClip = drums.clips[0];
+    if (!firstClip) throw new Error("add_drum_pattern did not create a clip");
+    expect((firstClip.notes ?? []).length).toBeGreaterThanOrEqual(8);
 
     // beats only: ACK_WORKING at start, DONE at the end — no per-step spam
     expect(utters[0]).toBe("ACK_WORKING");
@@ -71,10 +73,7 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
     expect(JSON.stringify(snap())).toBe(before);
   });
 
-  it("agenticLoopOn follows the settings flag (default OFF)", () => {
+  it("agenticLoopOn stays off without the developer build flag", () => {
     expect(agenticLoopOn()).toBe(false);
-    useSettings.getState().set("agenticLoop", true);
-    expect(agenticLoopOn()).toBe(true);
-    useSettings.getState().set("agenticLoop", false);
   });
 });

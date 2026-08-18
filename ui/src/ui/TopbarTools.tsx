@@ -8,8 +8,10 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
+import { useLoraLab } from "./dock/useLoraLab";
 import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
+import type { RemotePairingInfo } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "./RecentProjectList";
 import { historyRows, historyRowHint } from "./commandLogHistory";
@@ -215,6 +217,7 @@ export function TrainingTool({
   // triggered lazily via Pop's onOpen below (see that prop's comment for why not here).
   const previewLabel = useStore((s) => trainingPreviewLabel(s.capabilities));
   const loadCapabilities = useStore((s) => s.loadCapabilities);
+  const loadLoras = useStore((s) => s.loadLoras);
   const [title, setTitle] = useState("");
   const [creator, setCreator] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -224,7 +227,10 @@ export function TrainingTool({
   const [bundlePath, setBundlePath] = useState("");
   const [lastJobId, setLastJobId] = useState("");
   const sources = training?.sources ?? [];
-  const adapters = training?.adapters ?? [];
+  // Kept adapters only: a run's on-trial checkpoints live in the Lab's take
+  // sheet, and letting six of them bury three kept ones is the reason the rack
+  // filters family !== "lab" everywhere.
+  const library = useStore((st) => st.availableLoras).filter((l) => l.family !== "lab");
   const jobs = training?.jobs ?? [];
   const blockedSources = sources.filter((s) => !s.eligible);
   const readyToBuild = sources.length > 0 && blockedSources.length === 0;
@@ -301,7 +307,9 @@ export function TrainingTool({
   const syncAdapter = async () => {
     if (!lastJobId) return;
     await exec("import_lora_adapter", { jobId: lastJobId });
-    await refresh();
+    // Re-read the LIBRARY, not just the snapshot: import now enrolls into
+    // $MOSH_LORA_DIR/sa3, which reaches the UI through list_loras.
+    await Promise.all([refresh(), loadLoras()]);
   };
 
   return (
@@ -315,15 +323,28 @@ export function TrainingTool({
       // overflow tools), so a plain useEffect here would fire at app load — the same
       // eager-spawn bug this pass fixed elsewhere. onOpen only fires on the actual
       // open transition (a user click), the correct lazy trigger point.
-      onOpen={loadCapabilities}
+      onOpen={() => { loadCapabilities(); void loadLoras(); }}
     >
       {() => (
         <>
-          <div className="pop-head">Type-Beat Training{previewLabel && (
+          {/* Anchor for e2e: asserting the ABSENCE of the preview badge needs a
+              positive signal that the popover actually rendered, or the assertion
+              passes on a popover that simply has not opened yet. */}
+          <div className="pop-head" data-testid="training-tool-body">Type-Beat Training{previewLabel && (
             <span className="pop-head-badge" data-testid="training-preview-badge"
               title="This trains a deterministic placeholder LoRA stub on this Mac — no GPU, no real fine-tune">{previewLabel}</span>
           )}</div>
           <div className="pop-note">Use only music you can legally train on. YouTube is discovery/reference. Import local files for training.</div>
+          {/* The Lab is the destination: this popover is the RIGHTS registry (the part
+              that must stay a deliberate, form-shaped act), and everything after a
+              corpus exists — training, auditioning checkpoints, keeping one — happens
+              in a workspace you can leave open while you listen. A popover cannot be
+              that: it closes the moment you click the arrangement to hear a beat. */}
+          <div className="pop-actions">
+            <button className="btn primary" data-testid="open-lora-lab"
+              title="Train, audition checkpoints, and keep the one that sounds right"
+              onClick={() => { useLoraLab.getState().show(); close(); }}>Open LoRA Lab</button>
+          </div>
           <div className="pop-group">
             <div className="pop-label">Add source</div>
             <label className="pop-row"><span>Beat title</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Track/beat name" /></label>
@@ -381,13 +402,21 @@ export function TrainingTool({
             <div className="pop-note tc" title={bundlePath || ""}>{bundlePath ? `bundle: ${bundlePath}` : "no bundle yet"}</div>
           </div>
           <div className="pop-group">
-            <div className="pop-label">Adapters</div>
+            {/* The producer's LIBRARY — the adapters the render path can actually
+                reach ($MOSH_LORA_DIR/sa3), read through the same list_loras every
+                other rack surface uses. This used to list a training/adapters dir
+                nothing rendered from, each row offering an "Activate" that wrote a
+                field with no consumer. There is no single active adapter: a render
+                takes an ordered, weighted STACK, chosen in the rack or the Lab. */}
+            <div className="pop-label">Library</div>
             <div className="modal-list training-list">
-              {adapters.length === 0 && <div className="rack-empty">no adapters yet</div>}
-              {adapters.map((a) => (
-                <div key={a.adapterId} className="plugin-row">
-                  <span className="pr-name">{a.adapterId}{a.active ? " · active" : ""}</span>
-                  <button className="btn" onClick={() => void exec("activate_lora_adapter", { adapterId: a.adapterId }).then(refresh)}>Activate</button>
+              {library.length === 0 && <div className="rack-empty">no adapters yet — train one in the LoRA Lab</div>}
+              {library.map((a) => (
+                <div key={a.name} className="plugin-row">
+                  <span className="pr-name" title={a.hint || a.name}>
+                    {a.displayName || a.name}{a.trigger ? ` · ${a.trigger}` : ""}
+                  </span>
+                  {!a.valid && <span className="pr-sub err">{a.reason || "unusable"}</span>}
                 </div>
               ))}
             </div>
@@ -782,12 +811,7 @@ export function RemoteTool({ label, title, className, ariaLabel, testId }: ToolC
         <>
           <div className="pop-head">iPhone Companion</div>
           {pairing ? (
-            <>
-              <PairingQR url={pairing.pairingUrl} />
-              <div className="remote-code tc">{pairing.token.slice(0, 6).toUpperCase()}</div>
-              <div className="pop-note tc">{pairing.host}:{pairing.port}</div>
-              <div className="pop-actions"><button className="btn" onClick={stop}>Stop remote</button></div>
-            </>
+            <PairingPanel pairing={pairing} onStop={stop} />
           ) : (
             <>
               <div className="pop-note">{lastError && lastError.includes("dev") ? "Companion runs on the native app only (unavailable in web dev)." : "Pair an iPhone to control the session."}</div>
@@ -797,6 +821,31 @@ export function RemoteTool({ label, title, className, ariaLabel, testId }: ToolC
         </>
       )}
     </Pop>
+  );
+}
+
+// The QR the phone actually scans. DEFAULT is the Safari `webUrl` — it opens the
+// no-install DAWN pad at /web in mobile Safari, so a phone WITHOUT the native
+// MoshCompanion app can still drive the session. `pairingUrl` is a mosh:// deep
+// link that iOS cannot open unless that app is installed, which made the old
+// always-deep-link QR a dead end on an un-provisioned phone.
+function PairingPanel({ pairing, onStop }: { pairing: RemotePairingInfo; onStop: () => void }) {
+  const [useAppLink, setUseAppLink] = useState(false);
+  return (
+    <>
+      <PairingQR url={useAppLink ? pairing.pairingUrl : pairing.webUrl} />
+      <div className="pop-note tc">
+        {useAppLink ? "Opens the MoshCompanion app (must be installed)." : "Scan with the iPhone Camera \u2014 opens in Safari, no app needed."}
+      </div>
+      <div className="remote-code tc">{pairing.token.slice(0, 6).toUpperCase()}</div>
+      <div className="pop-note tc">{pairing.host}:{pairing.port}</div>
+      <div className="pop-actions">
+        <button className="btn" onClick={() => setUseAppLink((v) => !v)}>
+          {useAppLink ? "Safari link" : "App link"}
+        </button>
+        <button className="btn" onClick={onStop}>Stop remote</button>
+      </div>
+    </>
   );
 }
 

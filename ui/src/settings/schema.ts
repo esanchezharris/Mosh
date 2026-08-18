@@ -1,5 +1,6 @@
 // ============================================================================
 // Declarative settings schema — the SINGLE source of truth for app settings.
+// allow: SIZE_OK — this file is the intentionally centralized pure-data settings table.
 //
 // Settings/skins/templates are UI presentation, so they live UI-LOCAL (persisted
 // to localStorage by settings/store.ts), NEVER as backend commands — the swappable
@@ -137,24 +138,6 @@ export const SETTINGS: SettingDef[] = [
     category: "Moshi",
     label: "Pause hands-free while recording",
     help: "Fallback for audio inputs that can’t be shared: while a take is recording, stop listening for commands and resume when the take ends. Leave off to keep barge-in (saying “stop” / “keep that” mid-take).",
-  },
-  {
-    id: "bestOfNServing",
-    type: "bool",
-    default: false,
-    scope: "app",
-    category: "Moshi",
-    label: "Best-of-N (experimental)",
-    help: "For creative asks (notes, re-imagine settings, arrangement), Moshi drafts several candidate plans in the cloud and picks the best-scoring one — slower on those turns. Chosen-vs-rejected drafts (your request text + the proposed edits) are saved locally to ~/Library/Mosh/dpo-pairs to improve Moshi.",
-  },
-  {
-    id: "agenticLoop",
-    type: "bool",
-    default: false,
-    scope: "app",
-    category: "Moshi",
-    label: "Agentic loop (experimental)",
-    help: "Moshi works bigger asks in steps: plans, acts, checks the result, and repairs — with live progress and a Stop button. One undo still reverts the whole task. Off = the classic one-shot behavior.",
   },
   {
     id: "agentMemory",

@@ -341,12 +341,25 @@ juce::var MoshOps::cmdCancelTrainingJob (const juce::var& args)
     return okResult ("cancel_training_job");
 }
 
+// Enroll a trained adapter into the producer's LoRA library, where the render
+// path can actually reach it.
+//
+// This used to copy the artifact to `<session>/training/adapters/<id>/
+// adapter.lora.json` — a directory nothing renders from, under a filename whose
+// extension lied about an 86MB safetensors. That name is a fossil of the stub
+// era, when `adapter.lora.json` WAS the only artifact any trainer produced. The
+// render path reads `$MOSH_LORA_DIR/sa3/*.safetensors` (loras/registry.py), so
+// importing appeared to work and changed nothing you could hear.
+//
+// It now routes through the same validate-stage-replace install that
+// `promote_lora_checkpoint` uses. The case it uniquely serves is a REMOTE
+// (rented-GPU) run: `_remote_train` does not publish takes into `sa3/lab/` the
+// way a local run does, so its artifact has no other door into the rack.
 juce::var MoshOps::cmdImportLoraAdapter (const juce::var& args)
 {
     const auto jobId = args.getProperty ("jobId", var()).toString();
     auto artifactPath = args.getProperty ("artifactPath", var()).toString();
-    auto manifestPath = args.getProperty ("manifestPath", var()).toString();
-    auto adapterId = args.getProperty ("adapterId", var()).toString();
+    auto name = args.getProperty ("name", var()).toString().trim();
 
     if (artifactPath.isEmpty() && jobId.isNotEmpty())
     {
@@ -355,58 +368,44 @@ juce::var MoshOps::cmdImportLoraAdapter (const juce::var& args)
         {
             auto result = st.getProperty ("result", var());
             artifactPath = result.getProperty ("artifact_path", var()).toString();
-            manifestPath = result.getProperty ("manifest_path", var()).toString();
-            adapterId = result.getProperty ("adapter_id", var()).toString();
+            if (name.isEmpty())
+                name = result.getProperty ("adapter_id", var()).toString();
         }
     }
 
-    String error;
-    auto rec = trainerRegistry.importAdapter (artifactPath, manifestPath, adapterId, error);
-    if (! error.isEmpty()) return errResult ("import_lora_adapter", error);
+    if (artifactPath.isEmpty())
+        return errResult ("import_lora_adapter", "no artifact to import (pass artifactPath, or a jobId whose run has finished)");
+    if (name.isEmpty())
+        name = juce::File (artifactPath).getFileNameWithoutExtension();
+    if (name.isEmpty())
+        return errResult ("import_lora_adapter", "missing 'name' for the imported adapter");
+
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("import_lora_adapter", "generative service unavailable");
+
+    auto* body = new DynamicObject();
+    body->setProperty ("path", artifactPath);
+    body->setProperty ("name", name);
+    body->setProperty ("trigger", args.getProperty ("trigger", ""));
+    body->setProperty ("hint", args.getProperty ("hint", ""));
+    body->setProperty ("notes", args.getProperty ("notes", ""));
+
+    auto r = jobManager.installLora (var (body));
+    if (! (bool) r.getProperty ("ok", false))
+    {
+        // Pass the reason through: "unsupported source extension: adapter.lora.json"
+        // is exactly what a producer importing a STUB run needs to read.
+        const auto why = r.getProperty ("error", var()).toString();
+        return errResult ("import_lora_adapter", why.isNotEmpty() ? why : juce::String ("import failed"));
+    }
+
+    auto* d = new DynamicObject();
+    d->setProperty ("name", name);
+    d->setProperty ("adapter", r.getProperty ("adapter", var()));
     logLine ("import_lora_adapter", args, true, {}, false);
-    emitSnapshotInvalidated();
-    return okResult ("import_lora_adapter", rec);
+    return okResult ("import_lora_adapter", var (d));
 }
 
-juce::var MoshOps::cmdActivateLoraAdapter (const juce::var& args)
-{
-    const auto adapterId = args.getProperty ("adapterId", var()).toString();
-    if (adapterId.isEmpty()) return errResult ("activate_lora_adapter", "missing adapterId");
-
-    auto adapters = trainerRegistry.listAdapters();
-    auto adapterList = adapters.getProperty ("adapters", Array<var>());
-    String adapterPath, corpusHash;
-    if (auto* arr = adapterList.getArray())
-        for (auto& a : *arr)
-            if (a.getProperty ("adapterId", var()).toString() == adapterId)
-            {
-                adapterPath = a.getProperty ("artifactPath", var()).toString();
-                corpusHash = a.getProperty ("bundleHash", var()).toString();
-                break;
-            }
-    if (adapterPath.isEmpty())
-        adapterPath = args.getProperty ("adapterPath", var()).toString();
-    if (corpusHash.isEmpty())
-        corpusHash = args.getProperty ("corpusHash", var()).toString();
-    if (adapterPath.isEmpty())
-        return errResult ("activate_lora_adapter", "adapter not found");
-
-    String error;
-    auto rec = trainerRegistry.activateAdapter (adapterId, adapterPath, corpusHash, error);
-    if (! error.isEmpty()) return errResult ("activate_lora_adapter", error);
-    logLine ("activate_lora_adapter", args, true, {}, false);
-    emitSnapshotInvalidated();
-    return okResult ("activate_lora_adapter", rec);
-}
-
-juce::var MoshOps::cmdListLoraAdapters (const juce::var&)
-{
-    return okResult ("list_lora_adapters", trainerRegistry.listAdapters());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Stage 6 — export (the full producer loop ends here)
-// ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdExportAudio (const juce::var& args)
 {
     auto& edit = eng.edit();
