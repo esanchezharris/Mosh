@@ -12,6 +12,13 @@ Those are the two ways a render can look good while being wrong:
 
 Both raise `ScoreError`. A violation is a FAILED RENDER that stays in the
 denominator; it is never a retry.
+
+Scope of the CLI below: it automates ONLY the exact-sample guard (reference vs
+first/alternate vocal renders). `assert_instrumental_null` needs the before/after
+FULL MIXES plus the phrase's vocal span in samples — artifacts the render
+directory layout does not carry — so it is a library function for the mix step,
+not something the CLI can apply. Do not read a green CLI run as instrumental-null
+coverage.
 """
 import wave
 
@@ -54,7 +61,9 @@ def _main(argv):
     import json
     import pathlib
 
-    parser = argparse.ArgumentParser(description="Apply the frozen render guards.")
+    parser = argparse.ArgumentParser(
+        description="Apply the exact-sample guard across a render directory."
+    )
     parser.add_argument("--frozen", required=True, help="path to frozen.json")
     parser.add_argument("--renders", required=True, help="directory of Phase-1 renders")
     ns = parser.parse_args(argv)

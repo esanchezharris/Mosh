@@ -221,7 +221,7 @@ git commit -m "test(fms): freeze the phase-1 pilot phrase set"
 
 **Interfaces:**
 - Consumes: `span_seconds` from Task 1; the existing `scripts/fms-killshot/overlap.py` and `energy_compare.py` for waveform comparison.
-- Produces: `assert_exact_samples(a_path, b_path) -> None` and `assert_instrumental_null(mix_before, mix_after, vocal_span) -> None`, both raising `ScoreError` on violation, plus a `--frozen/--renders` CLI that applies both across a render directory and exits nonzero on the first violation.
+- Produces: `assert_exact_samples(a_path, b_path) -> None` and `assert_instrumental_null(mix_before, mix_after, vocal_span) -> None`, both raising `ScoreError` on violation, plus a `--frozen/--renders` CLI that applies the exact-sample guard across a render directory and exits nonzero on the first violation. (`assert_instrumental_null` is library-only: it needs the before/after full mixes plus the vocal span in samples, which the render directory does not carry — it is applied at the mix step, not by this CLI.)
 
 The existing killshot tooling does **not** enforce exact-sample-count or
 instrumental-null. Those are the two silent-corruption modes that would let a
