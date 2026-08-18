@@ -327,7 +327,10 @@ export function TrainingTool({
     >
       {() => (
         <>
-          <div className="pop-head">Type-Beat Training{previewLabel && (
+          {/* Anchor for e2e: asserting the ABSENCE of the preview badge needs a
+              positive signal that the popover actually rendered, or the assertion
+              passes on a popover that simply has not opened yet. */}
+          <div className="pop-head" data-testid="training-tool-body">Type-Beat Training{previewLabel && (
             <span className="pop-head-badge" data-testid="training-preview-badge"
               title="This trains a deterministic placeholder LoRA stub on this Mac — no GPU, no real fine-tune">{previewLabel}</span>
           )}</div>
