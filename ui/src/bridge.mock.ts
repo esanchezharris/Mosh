@@ -4039,7 +4039,20 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, {
         targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"],
         freeText: true,
-        capabilities: { transcribe: true, skeleton: true, whisper: true, phonology: true, transformReal: false, trainingBackend: "fake" },
+        // `trainingBackend` is "local_pmetal", NOT "fake". The fixture said "fake"
+        // from before local training existed, and the consequence was that every
+        // dev-browser session — and every screenshot and e2e run of the LoRA Lab —
+        // opened with "Local training isn't set up on this Mac", which on a machine
+        // where it plainly IS set up is a false alarm the UI states in bold. The
+        // mock's job is to model a fully-equipped dev Mac (see `transcribe` etc.
+        // above); a stub trainer is no longer part of that picture.
+        //
+        // Tests that need the DEGRADED posture set `capabilities` directly through
+        // the dev-only window.__moshStore handle rather than branching here — and
+        // the honest guest-Mac path is still covered where it belongs, against the
+        // real service, by service/scripts/guest_degradation_test.py.
+        capabilities: { transcribe: true, skeleton: true, whisper: true, phonology: true,
+                        transformReal: false, trainingBackend: "local_pmetal", trainingBlockers: [] },
       });
     case "create_render_layer": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
