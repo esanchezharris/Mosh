@@ -1,6 +1,6 @@
 # r7 pre-registration / freeze memo
 
-**Status: DRAFT — not yet frozen.** Following this program's own discipline
+**Status: FROZEN 2026-08-18.** Following this program's own discipline
 (every prior cycle — §P1/§P7/§P8/§P9 in `docs/bench/PROGRAM_STAGE1_2026-07.md`,
 and `R6_FREEZE_MEMO.md`'s own instance of this same rule — registers
 recipe/data/gate **before** the run and never edits them afterward), this
@@ -28,7 +28,7 @@ cycle with its own open decision (its own §1) and its own gate. See
 `R7_TRAINING_PLAN.md` §4.1 names a fork this memo cannot pre-decide — which
 base model r7 trains against:
 
-- [ ] **(a) `Qwen/Qwen3-30B-A3B-Instruct-2507`** — the same base
+- [x] **(a) `Qwen/Qwen3-30B-A3B-Instruct-2507`** — the same base
       r4/r5/r6 all use. Single-variable change vs the last passing gate
       (`a3b-r5-cuda`): data only. Conservative; directly comparable to every
       existing gate read.
@@ -42,18 +42,39 @@ base model r7 trains against:
       16` would map to layers 24–39, not 32–47) before any gate read can be
       trusted.
 
-Chosen: ‹TBD — check one box above before freezing›.
-Chosen by / date: ‹TBD›.
+Chosen: **(a) Qwen/Qwen3-30B-A3B-Instruct-2507** — single-variable discipline: the r7 read isolates the DATA change (119 coverage rows + regenerated prompt); the Qwen3.6 base question stays a separately registrable cycle.
+Chosen by / date: owner ("sounds good go for it"), 2026-08-18.
 
 ## §2 — Adapter identity
 
 - **Adapter id:** `a3b-r7`
-- **Base model:** per §1's chosen option (‹TBD›).
+- **Base model:** `Qwen/Qwen3-30B-A3B-Instruct-2507` per §1.
 - **Trainer:** `service/sft/sft_cuda_train.py` (trl + peft, rented CUDA —
   **not** `sft_cli.py`/mlx-lm; this is r5's CUDA lane, not r6's local-MLX
   lane — see `R7_TRAINING_PLAN.md` §2 for why).
 - **Lane:** rented CUDA, 80GB card, bf16 LoRA (`--4bit` NOT set — omit it;
   matches `a3b-r5-cuda`'s recorded `qlora_4bit: false`).
+
+
+### §2a — Lane amendment at freeze time (budget-fitted, recorded before launch)
+
+The plan's default 80GB bf16 lane is replaced, at freeze, by:
+
+- **Card:** rented RTX 5090 32GB (Vast offer 47364955, ~$0.374/hr, 881Mbps) —
+  the owner's balance ($6.24) makes the 80GB bf16 lane a ~2% margin bet; the
+  QLoRA lane costs ~$2.5 and preserves a second attempt.
+- **Recipe:** `sft_cuda_train.py --4bit` — bitsandbytes NF4 QLoRA; all other
+  recipe-shaping flags exactly as §2 records (rank 16, attn-only q/k/v/o via
+  the same layer-restricted discovery that produced `a3b-r5-cuda`,
+  `--save-steps 1000` so an SSH drop cannot lose the run).
+- **Gate serve (this cycle):** `serve_openai.py` ON THE BOX — the NF4-trained
+  adapter served against the same NF4 base it trained on (self-consistent;
+  the train/serve precision rule honored WITHIN the cycle). The Mac benches
+  over the network with the standing novice-jam recipe.
+- **Explicitly out of scope for the gate:** fusing this NF4 adapter onto the
+  Mac's mlx-4-bit base. That is the known-unverified cross-quantization step
+  (R6_TRAINING_PLAN §4.3); if attempted after a passing gate it gets its own
+  verification read and does not retroactively change this cycle's result.
 
 ## §3 — Data: `s2-mix-v6-prep`
 
