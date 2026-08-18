@@ -567,6 +567,36 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/drumkits"
             COMMENT "Staging drum kits into Mosh.app/Contents/Resources/drumkits"
             VERBATIM)
+
+        # LoRA Lab — stage the local trainer (the `pmetal` CLI + mlx.metallib)
+        # into Contents/Helpers/, which is where Apple expects nested Mach-O
+        # executables. Resources/ is allowed but is a notarization smell and
+        # some signing pipelines skip it.
+        #
+        # TWO THINGS THAT BITE LATER IF FORGOTTEN:
+        #  1. mlx.metallib MUST sit beside the binary. Without it pmetal falls
+        #     through to downloading the shader library from GitHub on first
+        #     train — a network reach from inside a shipped app.
+        #  2. The nested binary must be codesigned inside-out (same team ID,
+        #     --options runtime) BEFORE the outer bundle. An unsigned nested
+        #     executable fails notarization for the whole app, and it fails at
+        #     distribution time — long after this builds fine locally.
+        #
+        # resources/trainer/ is populated by service/training/setup-trainer.sh
+        # (or, in CI, fetched from a pinned pmetal release + sha256-verified).
+        # It is deliberately NOT committed: the binary is ~29MB.
+        # Staged only when present, so a checkout without it still builds.
+        if(EXISTS "${CMAKE_SOURCE_DIR}/resources/trainer/pmetal")
+            add_custom_command(TARGET Mosh POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        "${CMAKE_SOURCE_DIR}/resources/trainer"
+                        "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Helpers/trainer"
+                COMMENT "Staging the pmetal LoRA trainer into Mosh.app/Contents/Helpers/trainer"
+                VERBATIM)
+        else()
+            message(STATUS "LoRA trainer not staged (resources/trainer/pmetal absent) — "
+                           "local training will report a blocker until service/training/setup-trainer.sh runs")
+        endif()
     endif()
 
     # ── Non-Apple (Windows): native voice is stubbed (no SFSpeechRecognizer), and

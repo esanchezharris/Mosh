@@ -152,6 +152,7 @@
 .v2-shell .v2-flow-syl.ok,         /* lyric flow: syllables hitting the grid */
 .v2-shell .v2-flow-rhyme.st-perfect, /* lyric flow: a perfect rhyme grade */
 .v2-shell .v2-clip-badge.working, /* a clip mid-render — transcribing / lyrics / flow */
+.v2-shell .lab,                   /* the LoRA LAB — training a model, then generating from it */
 .v2-shell .gen {                  /* the GENERATIVE drawer (classic Dock.tsx, mounted by v2's Inspector) */
   --v2-accent: var(--v2-accent-agentic);
   --v2-accent-ink: var(--v2-accent-agentic-ink);
@@ -188,6 +189,7 @@
 .v2-shell .v2-skel-confirm .v2-btn,
 .v2-shell .v2-flow-dot.on,
 .v2-shell .v2-composer-face-btn,
+.v2-shell .lab .btn.x,                      /* the take sheet's hide button — chrome inside an agentic panel */
 .v2-shell .v2-composer-plus .fo-trigger {   /* the File menu "+" — app chrome, not the agent */
   --v2-accent: var(--v2-accent-neutral);
   --v2-accent-ink: var(--v2-accent-neutral-ink);

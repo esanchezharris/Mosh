@@ -134,7 +134,17 @@ export type ServiceCapabilities = {
   whisper: boolean;
   phonology: boolean;
   transformReal: boolean;    // Route B/C: a real RAVE model is installed vs the fake tilt/saturation
-  trainingBackend: string;  // "fake" | "remote_http"
+  trainingBackend: string;  // "fake" (stub) | "local_pmetal" (real, this Mac) | "remote_http" (real, rented GPU)
+  trainingBlockers?: string[];  // why a real backend still can't train here (missing binary/checkpoint)
+  // The measured default recipe for this machine + corpus (service/training/recipe.py
+  // recommend_recipe). Delivered rather than derived because the epoch curve was fit
+  // to real runs (145 / 44 / 11 epochs at 33 / 189 / 424 clips) and a second copy in
+  // TypeScript would drift invisibly the moment either side is re-measured.
+  trainingRecipe?: {
+    epochs: number; steps: number; batchSize: number; gradAccum: number;
+    effectiveBatch: number; footprintGb: number; estMinutes: number;
+    clipCount: number; note?: string;
+  };
 };
 
 // LoRA library card from GET /loras (via list_loras) — the drop-in adapter dir.
@@ -148,6 +158,12 @@ export type AvailableLora = {
   reason?: string;   // why it's unusable (when valid === false)
   rank?: number;     // adapter rank from the safetensors header
   sha12?: string;    // content identity (retrain-in-place ⇒ new sha ⇒ cache MISS)
+  // Which shelf it sits on. "library" = the producer's KEPT rack (`sa3/`);
+  // "lab" = a training checkpoint on trial (`sa3/lab/`), auditionable through
+  // the identical render path but deliberately kept out of the rack menu so one
+  // run's six checkpoints can't bury the adapters someone actually chose.
+  // Absent from an older service ⇒ treat as "library" (the pre-Lab world).
+  family?: "library" | "lab";
 };
 
 // Lane B — a RAVE model in the library (RAVE_MODEL_DIR / ~/AI/rave-models), from list_rave_models.

@@ -18,9 +18,14 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     static const std::set<juce::String> unguarded {
         "list_plugins", "list_builtins", "list_audio_devices", "list_midi_inputs",
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors", "list_loras",
-        "list_directory", "list_training_sources", "list_lora_adapters", "list_drum_kits",
+        "list_directory", "list_training_sources", "list_drum_kits",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file", "detect_clip_bpm",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
+        // LoRA Lab audition. Renders a candidate adapter stack to a wav under the
+        // session's lab/ dir and touches NO track, clip or render layer — it is
+        // deliberately not clip-parented, which is exactly why it cannot contend.
+        // `sourceClipId` only READS a clip's audio to stage an input.
+        "render_lora_take", "promote_lora_checkpoint",
         // AGT-MEM (Phase-B memory lane, M1) — pure file I/O (no ValueTree mutation,
         // no track/clip target), same posture as get_rhymes/get_lyric_corpus_stats above.
         // M3 adds delete/clear (the memory drawer's per-item delete + per-tier
@@ -68,7 +73,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "mp_fetch_missing_stems",
         "import_training_source", "approve_training_source", "build_training_corpus",
         "submit_training_job", "training_job_status", "cancel_training_job",
-        "import_lora_adapter", "activate_lora_adapter",
+        "import_lora_adapter", 
     };
 
     // Track-scoped: mutate exactly one track (args carry a trackId). Key = that

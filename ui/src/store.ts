@@ -36,6 +36,13 @@ import { createTelemetrySlice, type TelemetrySlice } from "./store/telemetry";
 import { createMpSlice, type MpSlice } from "./store/mp";
 import { createJobsSlice, type JobsSlice } from "./store/jobs";
 import { createCatalogsSlice, type CatalogsSlice } from "./store/catalogs";
+// LoRA Lab (train -> audition -> keep). Its own slice: the Lab owns run polling,
+// take auditions and UI-local cue/dismissal state, none of which any other
+// surface reads.
+import { createLoraLabSlice, type LoraLabSlice } from "./store/loraLab";
+// Keep main's WIDER recordingLifecycle import: it grew observeRecordingLane +
+// two types while this branch was out. Taking either side wholesale would have
+// dropped the other — the Lab slice or the recording lane.
 import {
   landedRecordingClipIds, observeRecordingLane, type RecordingCommandData,
   type RecordingLaneObservationV1, type RecordingStoreOutcomeV1,
@@ -244,7 +251,7 @@ export type State = {
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
-} & TelemetrySlice & MpSlice & JobsSlice & CatalogsSlice;
+} & TelemetrySlice & MpSlice & JobsSlice & CatalogsSlice & LoraLabSlice;
 
 type StateGet = () => State;
 type StateSet = (state: Partial<State> | ((state: State) => Partial<State>)) => void;
@@ -437,6 +444,7 @@ export const useStore = create<State>((set, get, api) => ({
   ...createMpSlice(set, get, api),
   ...createJobsSlice(set, get, api),
   ...createCatalogsSlice(set, get, api),
+  ...createLoraLabSlice(set, get, api),
 
   snapshot: null,
   projectEpoch: 0,
@@ -603,6 +611,11 @@ export const useStore = create<State>((set, get, api) => ({
         onLayerRenderProgress(ev, set);
       } else if (ev.type === "layer_status") {
         onLayerStatus(ev, set, get);
+      } else if (ev.type === "lab_take") {
+        // LoRA Lab audition render finished (or progressed). Event-driven, unlike
+        // the training run's 1s poll: a take becoming playable is the moment the
+        // producer is actually waiting on.
+        get().onLabTakeEvent((ev as unknown as { payload?: unknown }).payload ?? ev);
       } else if (ev.type === "mp_state") {
         onMpState(ev, set);
       } else if (ev.type === "webrtc_signal") {
