@@ -567,14 +567,19 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "ungroup_clip_group") return cmdUngroupClipGroup (args);
     if (name == "regroup_clip_group") return cmdRegroupClipGroup (args);
     if (name == "rename_clip_group")  return cmdRenameClipGroup (args);
+    // MP-003 — groups replicate via structural broadcast. The four commands that
+    // carry member `trackIds` (raw per-engine EditItemIDs) self-broadcast with
+    // those ids translated to the cross-peer-stable moshLogicalId (see
+    // translateTrackGroupTrackIds); the rest carry only the group's own already-
+    // portable UUID, so a plain dispatch-site wrap replays their args verbatim.
     if (name == "create_track_group") return cmdCreateTrackGroup (args);
     if (name == "configure_track_group") return cmdConfigureTrackGroup (args);
     if (name == "duplicate_track_group") return cmdDuplicateTrackGroup (args);
     if (name == "set_track_group_members") return cmdSetTrackGroupMembers (args);
-    if (name == "set_track_group_enabled") return cmdSetTrackGroupEnabled (args);
-    if (name == "set_track_groups_suspended") return cmdSetTrackGroupsSuspended (args);
-    if (name == "rename_track_group") return cmdRenameTrackGroup (args);
-    if (name == "remove_track_group") return cmdRemoveTrackGroup (args);
+    if (name == "set_track_group_enabled") return broadcastStructuralIfActive (name, args, cmdSetTrackGroupEnabled (args));
+    if (name == "set_track_groups_suspended") return broadcastStructuralIfActive (name, args, cmdSetTrackGroupsSuspended (args));
+    if (name == "rename_track_group") return broadcastStructuralIfActive (name, args, cmdRenameTrackGroup (args));
+    if (name == "remove_track_group") return broadcastStructuralIfActive (name, args, cmdRemoveTrackGroup (args));
     // LYR-001 — Finish-My-Song lyric sheet (per-track).
     if (name == "create_lyric_sheet")   return cmdCreateLyricSheet (args);
     if (name == "remove_lyric_sheet")   return cmdRemoveLyricSheet (args);
@@ -684,15 +689,17 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
     if (name == "disable_track_meter") return cmdDisableTrackMeter (args);
     if (name == "enable_all_meters")   return cmdEnableAllMeters (args);
-    if (name == "create_bus")        return cmdCreateBus (args);
+    if (name == "create_bus")        return cmdCreateBus (args);   // self-broadcasts its resolved bus number + mpBusId
     if (name == "add_send")          return cmdAddSend (args);
     if (name == "set_send_level")    return cmdSetSendLevel (args);
     if (name == "set_send_mute")     return cmdSetSendMute (args);
     if (name == "set_send_pan")      return cmdSetSendPan (args);
     if (name == "set_send_pre_fader") return cmdSetSendPreFader (args);
     if (name == "remove_send")       return cmdRemoveSend (args);
-    if (name == "remove_bus")        return cmdRemoveBus (args);
-    if (name == "rename_bus")        return cmdRenameBus (args);
+    // MP-003 — bus number is stable cross-peer once create_bus's own broadcast
+    // pins it (see cmdCreateBus), so these replay args verbatim.
+    if (name == "remove_bus")        return broadcastStructuralIfActive (name, args, cmdRemoveBus (args));
+    if (name == "rename_bus")        return broadcastStructuralIfActive (name, args, cmdRenameBus (args));
     if (name == "get_clip_peaks")    return cmdGetClipPeaks (args);
     if (name == "file_peaks")        return cmdFilePeaks (args);
     if (name == "list_plugins")      return cmdListPlugins (args);
@@ -3801,6 +3808,16 @@ juce::var MoshOps::controllerToVar()
 te::AudioTrack* MoshOps::findTrack (const juce::String& id)
 {
     return te::findAudioTrackForID (eng.edit(), te::EditItemID::fromString (id));
+}
+
+te::AudioTrack* MoshOps::findTrackByLogicalId (const juce::String& logicalId)
+{
+    if (logicalId.isEmpty())
+        return nullptr;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && logicalid::track (t->state) == logicalId)
+            return t;
+    return nullptr;
 }
 
 bool MoshOps::trackHasInstrument (te::AudioTrack& t)

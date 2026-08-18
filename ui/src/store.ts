@@ -617,7 +617,7 @@ export const useStore = create<State>((set, get, api) => ({
         // producer is actually waiting on.
         get().onLabTakeEvent((ev as unknown as { payload?: unknown }).payload ?? ev);
       } else if (ev.type === "mp_state") {
-        onMpState(ev, set);
+        onMpState(ev, set, get);
       } else if (ev.type === "webrtc_signal") {
         onWebrtcSignal(ev);
       } else if (ev.type === "peer_selection") {

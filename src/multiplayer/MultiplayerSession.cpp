@@ -589,6 +589,11 @@ void MultiplayerSession::pollLoop (SessionGeneration generation)
                         }
                         msgOut->setProperty ("tracks", answer.getProperty ("tracks", var()));
                         msgOut->setProperty ("annotations", answer.getProperty ("annotations", var()));
+                        // MP-003 — buses/track groups ride the bundle too (see
+                        // MoshOps::contentAddressWholeProjectNoUpload's doc comment for why
+                        // they must be re-applied AFTER cmdMpApplyBootstrap's track wipe).
+                        msgOut->setProperty ("buses", answer.getProperty ("buses", var()));
+                        msgOut->setProperty ("trackGroups", answer.getProperty ("trackGroups", var()));
                         const var msgOutVar (msgOut);
                         const auto stemFiles = answer.getProperty ("stemFiles", var());
 
@@ -656,6 +661,10 @@ void MultiplayerSession::pollLoop (SessionGeneration generation)
                         auto* withFlag = new DynamicObject();
                         withFlag->setProperty ("tracks", msg.getProperty ("tracks", var()));
                         withFlag->setProperty ("annotations", msg.getProperty ("annotations", var()));
+                        // MP-003 — buses/track groups ride the bundle too (see
+                        // MoshOps::contentAddressWholeProjectNoUpload's doc comment).
+                        withFlag->setProperty ("buses", msg.getProperty ("buses", var()));
+                        withFlag->setProperty ("trackGroups", msg.getProperty ("trackGroups", var()));
                         withFlag->setProperty ("stemsPrefetched", true);
                         withFlag->setProperty ("source", "peer");
                         const auto result = applyBootstrap_ (var (withFlag));

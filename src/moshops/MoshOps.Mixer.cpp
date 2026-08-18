@@ -14,6 +14,7 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
+#include "multiplayer/LogicalId.h"
 
 #include <cmath>
 
@@ -450,6 +451,16 @@ te::AudioTrack* MoshOps::findReturnTrackForBus (int bus)
     return nullptr;
 }
 
+te::AudioTrack* MoshOps::findBusByLogicalId (const juce::String& mpBusId)
+{
+    if (mpBusId.isEmpty())
+        return nullptr;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && logicalid::bus (t->state) == mpBusId)
+            return t;
+    return nullptr;
+}
+
 int MoshOps::allocateBusNumber()
 {
     juce::Array<int> used;
@@ -466,7 +477,36 @@ int MoshOps::allocateBusNumber()
 juce::var MoshOps::cmdCreateBus (const juce::var& args)
 {
     auto& edit = eng.edit();
-    const int bus = allocateBusNumber();
+
+    // MP-003 — buses replicate via structural broadcast (create_bus/rename_bus/
+    // remove_bus). mpBusId (LogicalId.h) is the stable cross-peer identity, set
+    // by a peer's replay; a re-delivered create must not mint a second return
+    // track for the same bus.
+    const auto suppliedMpBusId = args.getProperty ("mpBusId", var()).toString();
+    if (suppliedMpBusId.isNotEmpty())
+        if (auto* existing = findBusByLogicalId (suppliedMpBusId))
+            if (auto* r = firstAuxReturnOn (*existing))
+            {
+                auto* data = new DynamicObject();
+                data->setProperty ("busNumber", r->busNumber.get());
+                data->setProperty ("trackId", existing->itemID.toString());
+                data->setProperty ("name", existing->getName());
+                data->setProperty ("mpBusId", suppliedMpBusId);
+                return okResult ("create_bus", var (data));
+            }
+
+    // A supplied `bus` number (peer replay) is honored when free, so both peers'
+    // AuxSendPlugin::busNumber references (which travel with a SENDING track's
+    // own normal commit, unaffected by this command) keep resolving to the SAME
+    // return track — a bus number is a per-engine local-scan counter
+    // (LogicalId.h), so an independently re-allocated one could silently diverge
+    // from what the host chose. Falls back to a fresh local allocation if that
+    // exact number is already taken by something else here (best-effort, same
+    // posture as tempo's own last-writer-wins — a numbering collision is rare in
+    // a 2-peer session and not hard-guaranteed against).
+    const auto requestedBus = (int) args.getProperty ("bus", -1);
+    const int bus = (requestedBus >= 0 && findReturnTrackForBus (requestedBus) == nullptr)
+                        ? requestedBus : allocateBusNumber();
     auto name = args.getProperty ("name", var()).toString();
     if (name.isEmpty()) name = "Bus " + String (bus + 1);
 
@@ -486,14 +526,27 @@ juce::var MoshOps::cmdCreateBus (const juce::var& args)
     // enable_all_meters already covers for every AudioTrack, buses included.
     ensureTrackMeter (*track);
     edit.setAuxBusName (bus, name);
+    const auto mpBusId = suppliedMpBusId.isNotEmpty() ? suppliedMpBusId : logicalid::ensureBus (track->state);
+    if (suppliedMpBusId.isNotEmpty())
+        track->state.setProperty (ids::mpBusId, suppliedMpBusId, nullptr);
 
     auto* data = new DynamicObject();
     data->setProperty ("busNumber", bus);
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("name", name);
+    data->setProperty ("mpBusId", mpBusId);
     logLine ("create_bus", args, true, {}, true);
     emitSnapshotInvalidated();
-    return okResult ("create_bus", var (data));
+
+    // Broadcast the RESOLVED bus number + stable id -- replaying the raw local
+    // args on the peer would let it independently (and possibly differently)
+    // allocate its own number (see above).
+    auto* broadcastArgs = new DynamicObject();
+    broadcastArgs->setProperty ("name", name);
+    broadcastArgs->setProperty ("bus", bus);
+    broadcastArgs->setProperty ("mpBusId", mpBusId);
+    return broadcastStructuralIfActive ("create_bus", var (broadcastArgs),
+                                        okResult ("create_bus", var (data)));
 }
 
 juce::var MoshOps::cmdAddSend (const juce::var& args)

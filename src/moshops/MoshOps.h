@@ -207,11 +207,24 @@ private:
     // mutation). `wait:true` runs synchronously (harness/agents/the bootstrap auto-
     // trigger's callers don't need this); otherwise async (mirrors cmdTranscribeClip).
     juce::var cmdMpFetchMissingStems (const juce::var& args);
-    // Structural channel — scalar session-global ops (tempo/timesig/master/key)
-    // broadcast to the peer; mp_apply_structural re-executes a peer's op locally,
-    // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
+    // Structural channel — scalar session-global ops (tempo/timesig/master/key),
+    // buses (create/rename/remove) and track groups (create/configure/duplicate/
+    // set members/set enabled/set suspended/rename/remove) broadcast to the peer;
+    // mp_apply_structural re-executes a peer's op locally, guard-bypassed +
+    // without re-broadcasting (echo-free).
     juce::var broadcastStructuralIfActive (const juce::String& name, const juce::var& args, juce::var result);
     juce::var cmdMpApplyStructural  (const juce::var& args);
+    // MP-003 — buses/groups replication. A bus/track-group command's args can
+    // carry raw per-engine ids (a bus's routing NUMBER re-allocated fresh here;
+    // a group's member `trackIds`, which are raw EditItemID strings — the SAME
+    // reason TrackCommit uses moshLogicalId instead, see LogicalId.h) that are
+    // meaningless verbatim on the peer. translateTrackGroupTrackIds swaps a
+    // "trackIds" array between this engine's local ids and the cross-peer-stable
+    // moshLogicalId (toLogical=true outbound, false inbound); unresolved entries
+    // are dropped rather than failing the whole op. No-op (returns args
+    // unchanged) for any command other than the four that carry trackIds
+    // (create/configure/duplicate_track_group, set_track_group_members).
+    juce::var translateTrackGroupTrackIds (const juce::String& command, const juce::var& args, bool toLogical);
     // Resolve every affected lock key (track logicalIds or the session key) for a
     // guarded command. Track scope includes trackId, trackIds, Track Group members,
     // and enabled Mix-linked peers; Clip scope includes singular clipId and every
@@ -704,6 +717,10 @@ private:
                                            const juce::var& logArgs);
     te::VolumeAndPanPlugin* ensureVolumePlugin (te::AudioTrack&);
     te::AudioTrack* findTrack (const juce::String& id);
+    // MP-003 — cross-peer lookup: scans for the track carrying this moshLogicalId
+    // (the identity a peer's structural/commit messages address by), as opposed
+    // to findTrack's raw per-engine EditItemID lookup.
+    te::AudioTrack* findTrackByLogicalId (const juce::String& logicalId);
     te::FolderTrack* findGroupTrack (const juce::String& id);   // MIX-008 submix folder lookup
     te::Clip*       findClip  (const juce::String& id);
     // True when the track hosts an instrument plugin (external synth or a builtin
@@ -751,6 +768,10 @@ private:
                                      te::AutomatableParameter&, float before, float after);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
     te::AudioTrack*      findReturnTrackForBus (int bus);
+    // MP-003 — cross-peer lookup by the bus's stable mpBusId (LogicalId.h), used
+    // to make a replayed create_bus idempotent (a bus's routing NUMBER is a
+    // per-engine local-scan counter, not portable identity — see cmdCreateBus).
+    te::AudioTrack*      findBusByLogicalId (const juce::String& mpBusId);
     int                  allocateBusNumber();
 
     // ── metering (Wave 9): a level-meter tap + registered measurer client / track ──

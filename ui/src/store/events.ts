@@ -191,7 +191,7 @@ export function onLayerStatus(ev: MoshEvent, set: Set, get: Get): void {
   void get().refresh();
 }
 
-export function onMpState(ev: MoshEvent, set: Set): void {
+export function onMpState(ev: MoshEvent, set: Set, get: Get): void {
   // MP-001 — session + roster + lock table (the native poll loop pushes the
   // relay's {peers, locks} here). Targeted set, no snapshot refetch.
   const p = ev.payload as {
@@ -220,6 +220,10 @@ export function onMpState(ev: MoshEvent, set: Set): void {
   // collaborators, drop departed ones); tear it down entirely when the session ends.
   if (p.active) useVideo.getState().syncPeers(Object.keys(peers));
   else useVideo.getState().teardown();
+  // MP-003 — piggyback the idle-checkpoint check on this already-~4/s-while-active
+  // event rather than a dedicated timer (see mpIdleCheckpointTick's own doc
+  // comment). A no-op on almost every tick (the clock hasn't elapsed yet).
+  if (p.active) void get().mpIdleCheckpointTick();
 }
 
 export function onWebrtcSignal(ev: MoshEvent): void {
