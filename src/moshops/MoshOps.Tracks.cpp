@@ -308,6 +308,13 @@ juce::var MoshOps::cmdSetTrackIcon (const juce::var& args)
 
 juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
 {
+    // A2 — pre-risky-op save, matching cmdRemovePlugin/cmdLoadPlugin. deleteTrack() below
+    // destroys every plugin hosted on this track in-place, and a third-party VST3/AU can
+    // SIGSEGV the process on teardown — the same in-process-crash class remove_plugin already
+    // guards. Persisting first means such a crash recovers to the pre-removal state instead of
+    // also losing unrelated unsaved work made before this command.
+    eng.saveIfDirty();
+
     const auto id = args.getProperty ("trackId", var()).toString();
     auto* track = findTrack (id);
     if (track == nullptr) return errResult ("remove_track", "no track: " + id);
