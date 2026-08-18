@@ -1,5 +1,10 @@
 # Finish My Song — Lyrics v1 Build Spec
 
+> **⏸️ Finish-My-Song development is PAUSED 2026-08-11, indefinitely** — see
+> `FINISH_MY_SONG_ROADMAP.md` for why and the bar to reopen. v1 (this doc) shipped and is
+> live in the app already; this is a stop on further investment, not a rollback. Do not
+> start new work here without the owner reopening it.
+
 > **Status: Build-ready.** Implementation spec for **v1 = text-first lyric completion** — the
 > invariant core under every later phase. Supersedes the scoping spec
 > (`FINISH_MY_SONG_LYRICS_SPEC.md`) on *implementation detail*; read that first for the *why*. The

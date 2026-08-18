@@ -1,3 +1,8 @@
+// PAUSED (2026-08-11, indefinitely) — Finish-My-Song development is paused. See
+// docs/FINISH_MY_SONG_ROADMAP.md for why and the bar to reopen; CLAUDE.md §Paused work.
+// These commands ship and work; do not extend them without the owner reopening the
+// program.
+//
 // RFC 001 (A-PR1) — MoshOps partial-class split: the lyric-domain command
 // bodies (LYR-001 Finish-My-Song lyric sheet + skeleton/build-from-clip lane),
 // moved VERBATIM from MoshOps.cpp. Same class, same member functions — only

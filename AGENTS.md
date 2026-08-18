@@ -14,7 +14,8 @@ fresh-settings **default**; Live/v2/classic stay selectable; research + design e
 `docs/protools-clone/`, with the Live spec + parity audit in `docs/live-clone/`),
 **generative render layers on any track** (MIDI/drum auto-bounce), the single generative
 tier (the synthetic Tier-A neural insert was removed; the real-time RAVE insert is gated
-behind `MOSH_ENABLE_ANIRA`), **Finish-My-Song Phases 1–3** (lyrics → skeleton → sing),
+behind `MOSH_ENABLE_ANIRA`), **Finish-My-Song Phases 1–3** (lyrics → skeleton → sing;
+**development paused 2026-08-11** — see `CLAUDE.md` §Paused work),
 the re-imagine overhaul (in-place apply + reactive re-render), the real-recipes
 beat generator (`generate_beat_recipe`), `add_drum_pattern` (DRM-002), and the additive
 **Windows + NVIDIA/CUDA port** (refreshed 2026-07-07, FIT-010 #245; the Windows build

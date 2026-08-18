@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Phase-2 mumble -> rhythmic SKELETON core (Finish-My-Song roadmap §2 + Phase-3 Stage 1).
 
+⏸️ Finish-My-Song development is PAUSED (2026-08-11, indefinitely) — see
+docs/FINISH_MY_SONG_ROADMAP.md for why and the bar to reopen. This module ships and works;
+do not extend it without the owner reopening the program.
+
 Turns a hummed/mumbled take (Basic-Pitch note onsets, optionally + an F0 contour) into the
 SAME `LineSpec` the Phase-1 lyric engine consumes — a wordless skeleton (every slot a `___`
 gap) carrying the syllable count + stress contour per bar. NO words, NO synthesis.
