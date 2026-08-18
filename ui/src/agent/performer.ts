@@ -5,10 +5,14 @@ import type { FastAction } from "./fastPath";
 
 export type FastDeps = {
   runBatch: (label: string, cmds: { command: string; args?: Record<string, unknown> }[]) => Promise<void>;
-  enterRecord: (bar?: number) => Promise<void>;
-  stopRecord: () => Promise<void>;
-  keepTake: () => Promise<void>;
-  navTake: (delta: number) => Promise<void>;
+  // Skill Foundry Slice B, Task 2 — the store's own recording-lifecycle methods now
+  // resolve to a RecordingStoreOutcomeV1 (see recordingLifecycle.ts), which this router
+  // never inspects (it only awaits and discards, per handleFast below) — `Promise<unknown>`
+  // keeps this dependency shape decoupled from that result type on purpose.
+  enterRecord: (bar?: number) => Promise<unknown>;
+  stopRecord: () => Promise<unknown>;
+  keepTake: () => Promise<unknown>;
+  navTake: (delta: number) => Promise<unknown>;
   utter: (intent: string, say?: string) => void;
   // AGT-MEM (M3) — its own dep (not routed through runBatch) because
   // agent_memory_write is deliberately outside AGENT_COMMANDS/validateCommand — see

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   builtinEntry, installedEntry, matchEntry, buildPluginRows, visibleRange,
   loadPluginEntry, loadPluginEntryToTracks, loadMasterPluginEntry, loadPluginRecents,
+  resolvePluginMatch,
   type PluginRow,
 } from "./pluginBrowserUtil";
 import type { AvailablePlugin, BuiltinPlugin } from "../types";
@@ -33,6 +34,46 @@ describe("matchEntry", () => {
     expect(matchEntry(e, "xfer", "all")).toBe(true);
     expect(matchEntry(e, "zzz", "all")).toBe(false);
     expect(matchEntry(e, "   ", "all")).toBe(true);
+  });
+});
+
+describe("resolvePluginMatch", () => {
+  const serumFamily = [
+    installedEntry(vst("serum-1", "Serum", "Xfer Records", true)),
+    installedEntry(vst("serum-2", "Serum 2", "Xfer Records", true)),
+    installedEntry(vst("serum-2-fx", "Serum 2 FX", "Xfer Records")),
+  ];
+
+  it("prefers a case-insensitive exact name over prefix and substring matches", () => {
+    const result = resolvePluginMatch(serumFamily, "  sErUm   2 ");
+    expect(result.kind).toBe("unique");
+    if (result.kind === "unique") expect(result.entry.loadKey).toBe("serum-2");
+  });
+
+  it("accepts an exact manufacturer plus name", () => {
+    const result = resolvePluginMatch(serumFamily, "Xfer Records Serum 2");
+    expect(result.kind).toBe("unique");
+    if (result.kind === "unique") expect(result.entry.name).toBe("Serum 2");
+  });
+
+  it("reports only the highest-ranked ambiguous candidates and caps their display at five", () => {
+    const entries = Array.from({ length: 12 }, (_, index) =>
+      installedEntry(vst(`synth-${index}`, `Dream Synth ${index}`, "Example", true)));
+    const result = resolvePluginMatch(entries, "Dream");
+    expect(result.kind).toBe("ambiguous");
+    if (result.kind === "ambiguous") {
+      expect(result.entries).toHaveLength(5);
+    }
+  });
+
+  it("falls back to a unique substring after exact and prefix tiers miss", () => {
+    const result = resolvePluginMatch(serumFamily, "2 fx");
+    expect(result.kind).toBe("unique");
+    if (result.kind === "unique") expect(result.entry.name).toBe("Serum 2 FX");
+  });
+
+  it("returns none when no name or manufacturer match exists", () => {
+    expect(resolvePluginMatch(serumFamily, "Omnisphere")).toEqual({ kind: "none" });
   });
 });
 

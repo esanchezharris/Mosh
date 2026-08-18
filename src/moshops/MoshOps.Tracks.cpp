@@ -12,6 +12,7 @@
 #include "MoshOpsInternal.h"
 #include "RecordingLanding.h"
 #include "state/Ids.h"
+#include "state/TakeIdentity.h"
 #include "state/TrackIcons.h"
 #include "multiplayer/LogicalId.h"
 #include <cmath>
@@ -82,6 +83,35 @@ juce::String switchTakePreservingDirectFile (
         engine.edit().restartPlayback();
     }
     return {};
+}
+
+// Skill Foundry Slice B, Task 1 — a Project-independent replacement for the deletion half
+// of `WaveAudioClip::deleteAllUnusedTakes`. That Tracktion method only prunes when
+// `engine.getProjectManager().getProject(edit)` is non-null (tracktion_WaveAudioClip.cpp:
+// `if (auto proj = getProjectForEdit (edit))` gates its ENTIRE body) — Mosh never
+// registers a `te::Project` for its Edit, so that call has always been a confirmed no-op
+// in this app: `keep_take` accepted, logged, and emitted `snapshot_invalidated`, but never
+// actually removed a single take. `cmdKeepTake` still calls `deleteAllUnusedTakes(false)`
+// first (harmless, and the literal instruction this rewrite is built against), then this
+// helper does the real work directly on the TAKES ValueTree — the same "operate on state,
+// not Tracktion's ProjectItemID machinery" posture `switchTakePreservingDirectFile` above
+// already established for take SWITCHING. Keeps exactly the take at `keepIndex`; removes
+// every other source-bearing child, in the SAME transaction (same UndoManager), so one
+// Undo restores the full ordered set.
+void pruneOtherTakes (te::WaveAudioClip& clip, int keepIndex, juce::UndoManager& undo)
+{
+    auto takes = clip.state.getChildWithName (te::IDs::TAKES);
+    if (! takes.isValid())
+        return;
+
+    juce::Array<juce::ValueTree> sourced;
+    for (auto child : takes)
+        if (child.hasProperty (te::IDs::source))
+            sourced.add (child);
+
+    for (int i = sourced.size(); --i >= 0;)
+        if (i != keepIndex)
+            takes.removeChild (sourced.getReference (i), &undo);
 }
 }
 
@@ -1149,6 +1179,13 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     // track.getClips() right after this returns.
     transport.stop (discard, false);
 
+    // Skill Foundry Slice B, Task 1 — stable take identity (state/TakeIdentity.h). A
+    // landed take is a BRAND NEW TAKES child with no id yet; stamp it here, before the
+    // clip is ever reported back (clipToVar below), so `landed`/list_takes/controllerToVar
+    // agree on a stable id from the very first snapshot that shows the take. Non-undoable
+    // (null UndoManager) — matches this whole command's own non-undoable posture.
+    mosh::takeidentity::backfill (eng.edit().state);
+
     // ARE-003: the landed clip's start is auto-adjusted by record latency inside
     // Tracktion; we just read it back via clipToVar (no app-side alignment).
     Array<var> landed;
@@ -1266,6 +1303,9 @@ juce::var MoshOps::cmdListTakes (const juce::var& args)
         if (! takeChild.hasProperty (te::IDs::source)) continue;
         auto* t = new juce::DynamicObject();
         t->setProperty ("index", i);
+        // Skill Foundry Slice B, Task 1 — stable id (state/TakeIdentity.h). Empty only for
+        // a take that predates the identity backfill and has not yet been re-adopted.
+        t->setProperty ("id", mosh::takeidentity::idFor (takeChild));
         t->setProperty ("description", descs[i]);
         t->setProperty ("isCurrent", i == current);
         te::SourceFileReference sfr (eng.edit(), takeChild, te::IDs::source);
@@ -1420,8 +1460,62 @@ juce::var MoshOps::cmdKeepTake (const juce::var& args)
     auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (w == nullptr) return errResult ("keep_take", "no wave clip");
     if (! w->hasAnyTakes()) return errResult ("keep_take", "no takes to keep");
+
+    // Skill Foundry Slice B, Task 1 — an OPTIONAL, stable-id target for Keep, additive to
+    // the legacy `{clipId}`-only call (which keeps whichever take is already current —
+    // unchanged below). Resolve the id to a take INDEX before opening any transaction, so
+    // a malformed or unknown id is refused with ZERO mutation (the same "validate every
+    // guard before beginTxn" discipline every other MoshOps command follows) — never a
+    // half-open, never-committed transaction, and never an empty undo entry.
+    int targetIndex = -1;
+    if (args.hasProperty ("takeId"))
+    {
+        const auto takeId = args.getProperty ("takeId", var()).toString();
+        if (! mosh::takeidentity::isValid (takeId))
+            return errResult ("keep_take", "malformed takeId");
+
+        int matches = 0;
+        int i = 0;
+        for (auto takeChild : w->state.getChildWithName (te::IDs::TAKES))
+        {
+            if (! takeChild.hasProperty (te::IDs::source)) continue;
+            if (mosh::takeidentity::idFor (takeChild) == takeId)
+            {
+                targetIndex = i;
+                ++matches;
+            }
+            ++i;
+        }
+        if (matches == 0) return errResult ("keep_take", "no take with that id");
+        // Two take children sharing one id should never happen (ids are unique on write —
+        // TakeIdentity.h) but a corrupted/hand-edited project could still carry one; refuse
+        // rather than guess which take the caller meant.
+        if (matches > 1) return errResult ("keep_take", "duplicate takeId in take set");
+    }
+
     beginTxn ("keep_take");
+    if (targetIndex >= 0)
+    {
+        // Same data-loss-safe switch cmdSetCurrentTake/cmdPromoteTakeRegion use: a
+        // direct-file take (loop-overdub recordings) does not resolve as a project item,
+        // so plain WaveAudioClip::setCurrentTake would silently DELETE it.
+        if (const auto error = switchTakePreservingDirectFile (*w, targetIndex, eng, undoManager()); error.isNotEmpty())
+        {
+            undoManager().undoCurrentTransactionOnly();
+            return errResult ("keep_take", error);
+        }
+    }
+    // With no target id, this keeps whichever take is ALREADY current — the exact legacy
+    // `{clipId}`-only behavior, unchanged.
     w->deleteAllUnusedTakes (false);   // keep the current take; preserve source files → undo-safe
+    // deleteAllUnusedTakes above only prunes through Tracktion's own ProjectItemID/Project
+    // machinery, which Mosh never registers (see pruneOtherTakes' own comment) — so it is
+    // a confirmed no-op here, not a redundant safety net. pruneOtherTakes is the REAL
+    // deletion, keeping exactly whichever take is now current (the just-switched target,
+    // or — with no target id — whichever was already current) in the SAME transaction.
+    const int keepIndex = targetIndex >= 0 ? targetIndex : effectiveCurrentTakeIndex (*w);
+    if (keepIndex >= 0)
+        pruneOtherTakes (*w, keepIndex, undoManager());
     logLine ("keep_take", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("keep_take");

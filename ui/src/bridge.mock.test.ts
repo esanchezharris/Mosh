@@ -44,6 +44,46 @@ const ALLOWLIST = new Set<string>([
   // executor can push it into the same entries/results arrays as a real command) —
   // an unrelated result-object literal, not a dispatch call.
   "remember_preference",
+  // Skill Foundry (Slice A) — ANOTHER STATIC-SCAN FALSE POSITIVE, and a purer one than
+  // remember_preference above: the scanner's `command:\s*["']name["']` regex cannot tell an
+  // object literal from a TYPE ANNOTATION, and the only non-test match is the parameter type
+  // in agent/skillFoundry/primitives.ts:
+  //     export async function runObservationV1(
+  //       command: "current_snapshot" | "list_plugins",
+  // `current_snapshot` is a closed FOUNDRY primitive name (catalogs.ts's OWNER_PRIMITIVES_V1),
+  // not a MoshOps command — there is no such command in src/moshops/ and none in the agent
+  // catalog. It never reaches executeCommand or the mock: runObservationV1 returns the snapshot
+  // already bound by the executor's before-phase, deliberately, so the seven-phase run observes
+  // ONE consistent pre-state rather than re-reading a moving target (primitives.ts explains
+  // this at the function). Its sibling `list_plugins` IS a real dispatched command and is
+  // correctly cased in the mock — which is why only this one shows up here.
+  "current_snapshot",
+  // Skill Foundry (Slice D) — the SAME class of false positive as `current_snapshot` above,
+  // but from the `teach-moshi` CLI's own wire contract, not the runtime primitive catalog.
+  // `TeachMoshiCommandV1` (skillFoundry/contracts.ts) is a discriminated union whose members
+  // use `command: "init" | "add-source" | ...` as their TYPE discriminant field, e.g.:
+  //     export type TeachMoshiCommandV1 =
+  //       | { command: "init"; goal: string; id?: string }
+  //       | { command: "certify"; draftId: string; bin: string }
+  //       ...
+  // The scanner's `command:\s*["']name["']` regex matches these type-literal members exactly
+  // like a real dispatch object literal. None of these are MoshOps commands, none reach
+  // executeCommand/the mock, and none exist in src/moshops/ or the agent catalog — teach-moshi
+  // is an entirely separate offline CLI tool (ui/src/skillFoundry/cli.ts), never loaded by the
+  // packaged app's UI. Hyphenated command names ("add-source", "add-reference",
+  // "record-evidence", "refresh-source", "revoke-source") don't match the scanner's
+  // `[a-z_][a-z_0-9]*` character class at all, which is why only the unhyphenated ten show up
+  // here.
+  "approve",
+  "certify",
+  "gc",
+  "init",
+  "install",
+  "review",
+  "revoke",
+  "rollback",
+  "status",
+  "validate",
 ]);
 
 function listSourceFiles(dir: string): string[] {

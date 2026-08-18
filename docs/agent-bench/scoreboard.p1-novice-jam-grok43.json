@@ -1,0 +1,1142 @@
+{
+  "tag": "p1-novice-jam-grok43",
+  "model": "grok-4.3",
+  "base": "https://api.x.ai/v1",
+  "runner": "loop",
+  "bin": "/Users/emiliosanchez-harris/Mosh/.claude/worktrees/foundry-a/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "suite": "novice-jam",
+  "maxSteps": 8,
+  "ranAt": "2026-08-17T09:10:12.760Z",
+  "success": 0.68,
+  "passed": 17,
+  "total": 25,
+  "acceptable": 13,
+  "acceptableRate": 0.52,
+  "stepEffMean": 0.7564102564102563,
+  "cmdErrRateMean": 0.03333333333333333,
+  "invalidRateMean": 0,
+  "wrongDefers": 4,
+  "deferCorrect": 1,
+  "byCat": {
+    "mix": {
+      "pass": 3,
+      "total": 5
+    },
+    "arrange": {
+      "pass": 2,
+      "total": 5
+    },
+    "compose-drums": {
+      "pass": 0,
+      "total": 2
+    },
+    "compose-melody": {
+      "pass": 2,
+      "total": 2
+    },
+    "master": {
+      "pass": 2,
+      "total": 2
+    },
+    "generative": {
+      "pass": 1,
+      "total": 1
+    },
+    "lyrics": {
+      "pass": 1,
+      "total": 2
+    },
+    "repair": {
+      "pass": 2,
+      "total": 2
+    },
+    "ambiguous": {
+      "pass": 4,
+      "total": 4
+    }
+  },
+  "usage": {
+    "promptTokens": 211002,
+    "completionTokens": 2337,
+    "calls": 32
+  },
+  "rows": [
+    {
+      "id": "nj-drums-slap",
+      "category": "mix",
+      "ask": "make the drums slap harder",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Drums",
+              "field": "volumeDb",
+              "dir": "up",
+              "min": 1,
+              "max": 8
+            },
+            "pass": true,
+            "note": "volumeDb moved up 4.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 9523,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-vocal-too-quiet",
+      "category": "mix",
+      "ask": "the singing is too quiet, bring it up a little",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Vocal",
+              "field": "volumeDb",
+              "dir": "up",
+              "min": 1,
+              "max": 8
+            },
+            "pass": true,
+            "note": "volumeDb moved up 3.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 5905,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-guitar-echo",
+      "category": "mix",
+      "ask": "put that spacey echo on the guitar",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "pluginOnTrack",
+              "track": "Guitar",
+              "nameIncludes": "delay"
+            },
+            "pass": false,
+            "note": "plugin ~\"delay\" missing"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 3734,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-reverb-vocal-room",
+      "category": "mix",
+      "ask": "the vocals feel dry, put them in a room or something",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "busCountDelta",
+              "delta": 1
+            },
+            "pass": false,
+            "note": "Δbuses 0 ≠ 1"
+          },
+          {
+            "check": {
+              "kind": "sendExists",
+              "track": "Vocal"
+            },
+            "pass": false,
+            "note": "\"Vocal\" has no sends"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "load_builtin"
+      ],
+      "results": [
+        {
+          "command": "load_builtin",
+          "ok": true
+        }
+      ],
+      "wallMs": 6844,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-clear-solo-mute",
+      "category": "mix",
+      "ask": "why can't i hear everything — something's muted or soloed, fix it",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Vocal",
+              "field": "mute",
+              "eq": false
+            },
+            "pass": true,
+            "note": "mute=false"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "808",
+              "field": "solo",
+              "eq": false
+            },
+            "pass": true,
+            "note": "solo=false"
+          }
+        ],
+        "stepEff": 0.3333333333333333,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "set_track_mute",
+        "set_track_solo",
+        "set_track_mute",
+        "set_track_solo"
+      ],
+      "results": [
+        {
+          "command": "set_track_mute",
+          "ok": true
+        },
+        {
+          "command": "set_track_solo",
+          "ok": true
+        },
+        {
+          "command": "set_track_mute",
+          "ok": true
+        },
+        {
+          "command": "set_track_solo",
+          "ok": true
+        }
+      ],
+      "wallMs": 9438,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-somewhere-to-sing",
+      "category": "arrange",
+      "ask": "give me somewhere to sing",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackCount",
+              "delta": 1
+            },
+            "pass": true,
+            "note": "Δtracks 1"
+          }
+        ],
+        "stepEff": 0.3333333333333333,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "create_track",
+        "arm_track",
+        "set_input_monitor",
+        "set_count_in"
+      ],
+      "results": [
+        {
+          "command": "create_track",
+          "ok": true
+        },
+        {
+          "command": "arm_track",
+          "ok": true
+        },
+        {
+          "command": "set_input_monitor",
+          "ok": true
+        },
+        {
+          "command": "set_count_in",
+          "ok": true
+        }
+      ],
+      "wallMs": 21801,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-start-over",
+      "category": "arrange",
+      "ask": "start it over from the top",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "transportPos",
+              "minSec": 0,
+              "maxSec": 0.5
+            },
+            "pass": true,
+            "note": "pos 0s"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_transport"
+      ],
+      "results": [
+        {
+          "command": "set_transport",
+          "ok": true
+        }
+      ],
+      "wallMs": 10048,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-make-faster",
+      "category": "arrange",
+      "ask": "make it faster",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempo",
+              "min": 121,
+              "max": 170
+            },
+            "pass": false,
+            "note": "tempo 120 < 121"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 4883,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-fill-the-gap",
+      "category": "arrange",
+      "ask": "there's a big silent gap in the drums around 4 to 8 seconds, close it up so the next part comes right after",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "delete_time_range",
+              "min": 1
+            },
+            "pass": false,
+            "note": "delete_time_range ×0 < 1"
+          },
+          {
+            "check": {
+              "kind": "clipStart",
+              "track": "Drums",
+              "clipIndex": 1,
+              "minSec": 3.9,
+              "maxSec": 4.1
+            },
+            "pass": true,
+            "note": "start 4s"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "move_clip"
+      ],
+      "results": [
+        {
+          "command": "move_clip",
+          "ok": true
+        }
+      ],
+      "wallMs": 14155,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-repeat-that-part",
+      "category": "arrange",
+      "ask": "the 808 part is good, just repeat it again right after itself",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "clipCount",
+              "track": "808",
+              "delta": 1
+            },
+            "pass": false,
+            "note": "Δclips 0 ≠ 1"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "duplicate_clip",
+              "min": 1
+            },
+            "pass": false,
+            "note": "duplicate_clip ×0 < 1"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 11206,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-drums-groove",
+      "category": "compose-drums",
+      "ask": "gimme a beat, something with some bounce to it",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackCount",
+              "delta": 1
+            },
+            "pass": true,
+            "note": "Δtracks 1"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_drum_pattern",
+              "min": 1
+            },
+            "pass": true,
+            "note": "add_drum_pattern ×1"
+          },
+          {
+            "check": {
+              "kind": "midiNoteCount",
+              "track": "Drums",
+              "min": 8
+            },
+            "pass": false,
+            "note": "0 notes < 8"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "create_track",
+        "add_drum_pattern"
+      ],
+      "results": [
+        {
+          "command": "create_track",
+          "ok": true
+        },
+        {
+          "command": "add_drum_pattern",
+          "ok": true
+        }
+      ],
+      "wallMs": 21722,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-hats-more",
+      "category": "compose-drums",
+      "ask": "the drums feel flat, add some hats or something on top",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_drum_pattern",
+              "min": 1
+            },
+            "pass": false,
+            "note": "add_drum_pattern ×0 < 1"
+          },
+          {
+            "check": {
+              "kind": "trackCount",
+              "delta": 1
+            },
+            "pass": true,
+            "note": "Δtracks 1"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.5,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "add_drum_pattern",
+        "create_track"
+      ],
+      "results": [
+        {
+          "command": "add_drum_pattern",
+          "ok": false,
+          "error": "track holds wave audio — a drum sampler would silence it; use a drum track"
+        },
+        {
+          "command": "create_track",
+          "ok": true
+        }
+      ],
+      "wallMs": 18994,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-bassline-simple",
+      "category": "compose-melody",
+      "ask": "throw a simple bassline under it, keep it in the key we're in",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_note",
+              "min": 3
+            },
+            "pass": true,
+            "note": "add_note ×4"
+          },
+          {
+            "check": {
+              "kind": "notesInKey",
+              "track": "808",
+              "tonic": "A",
+              "mode": "minor",
+              "minNotes": 3
+            },
+            "pass": true,
+            "note": "4/4 in A minor"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note"
+      ],
+      "results": [
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        }
+      ],
+      "wallMs": 10145,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-melody-idea",
+      "category": "compose-melody",
+      "ask": "give the keys a little melody idea, nothing fancy, keep it in key",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_note",
+              "min": 3
+            },
+            "pass": true,
+            "note": "add_note ×4"
+          },
+          {
+            "check": {
+              "kind": "notesInKey",
+              "track": "Keys",
+              "tonic": "C",
+              "mode": "major",
+              "minNotes": 3
+            },
+            "pass": true,
+            "note": "4/4 in C major"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note"
+      ],
+      "results": [
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        }
+      ],
+      "wallMs": 14528,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-glue-it-together",
+      "category": "master",
+      "ask": "can you glue this together so it sounds like one thing",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterChainContains",
+              "nameIncludes": "comp"
+            },
+            "pass": true,
+            "note": "master ~\"comp\" present"
+          }
+        ],
+        "stepEff": 0.5,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "load_master_builtin",
+        "load_master_builtin"
+      ],
+      "results": [
+        {
+          "command": "load_master_builtin",
+          "ok": true
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": true
+        }
+      ],
+      "wallMs": 10592,
+      "renders": [
+        "/Users/emiliosanchez-harris/mosh-agentbench-artifacts/p1-novice-jam-grok43/nj-glue-it-together.before.wav",
+        "/Users/emiliosanchez-harris/mosh-agentbench-artifacts/p1-novice-jam-grok43/nj-glue-it-together.after.wav"
+      ],
+      "acceptable": true
+    },
+    {
+      "id": "nj-master-too-loud",
+      "category": "master",
+      "ask": "the whole thing is blasting my ears, turn it down a bit",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterDelta",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 1,
+              "max": 6
+            },
+            "pass": true,
+            "note": "master volumeDb moved down 3.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_master_volume"
+      ],
+      "results": [
+        {
+          "command": "set_master_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 11767,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-weird-ai-flavor",
+      "category": "generative",
+      "ask": "run this drum loop through one of those AI filters, give it some character",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOkAny",
+              "names": [
+                "compile_render",
+                "create_render_layer"
+              ],
+              "min": 1
+            },
+            "pass": true,
+            "note": "compile_render|create_render_layer ×2"
+          }
+        ],
+        "stepEff": 0.3333333333333333,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "create_render_layer",
+        "compile_render",
+        "render_layer"
+      ],
+      "results": [
+        {
+          "command": "create_render_layer",
+          "ok": true
+        },
+        {
+          "command": "compile_render",
+          "ok": true
+        },
+        {
+          "command": "render_layer",
+          "ok": true
+        }
+      ],
+      "wallMs": 9205,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-write-some-words",
+      "category": "lyrics",
+      "ask": "help me start some lyrics for the hook, something about missing someone",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "create_lyric_sheet",
+              "min": 1
+            },
+            "pass": false,
+            "note": "create_lyric_sheet ×0 < 1"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 5873,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-first-line-lyrics",
+      "category": "lyrics",
+      "ask": "put 'nobody said forever' as the opening line",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "set_lyric_line",
+              "min": 1
+            },
+            "pass": true,
+            "note": "set_lyric_line ×2"
+          }
+        ],
+        "stepEff": 0.3333333333333333,
+        "cmdErrRate": 0.3333333333333333,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "create_lyric_sheet",
+        "set_lyric_line",
+        "set_lyric_line"
+      ],
+      "results": [
+        {
+          "command": "create_lyric_sheet",
+          "ok": false,
+          "error": "track already has a lyric sheet"
+        },
+        {
+          "command": "set_lyric_line",
+          "ok": true
+        },
+        {
+          "command": "set_lyric_line",
+          "ok": true
+        }
+      ],
+      "wallMs": 15353,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-808-too-hot",
+      "category": "repair",
+      "ask": "the 808 is way too hot, it's peaking — fix it",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "netTrackLevelDelta",
+              "track": "808",
+              "dir": "down",
+              "minDb": 6
+            },
+            "pass": true,
+            "note": "net level moved down 6.0 dB"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "808",
+              "field": "mute",
+              "eq": false
+            },
+            "pass": true,
+            "note": "mute=false"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 9580,
+      "renders": [
+        "/Users/emiliosanchez-harris/mosh-agentbench-artifacts/p1-novice-jam-grok43/nj-808-too-hot.before.wav",
+        "/Users/emiliosanchez-harris/mosh-agentbench-artifacts/p1-novice-jam-grok43/nj-808-too-hot.after.wav"
+      ],
+      "acceptable": true
+    },
+    {
+      "id": "nj-undo-hate",
+      "category": "repair",
+      "ask": "i hate what i just did, go back",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempo",
+              "eq": 120
+            },
+            "pass": true,
+            "note": "tempo 120"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "undo",
+              "min": 1
+            },
+            "pass": true,
+            "note": "undo ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "undo"
+      ],
+      "results": [
+        {
+          "command": "undo",
+          "ok": true
+        }
+      ],
+      "wallMs": 8180,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-amb-professional",
+      "category": "ambiguous",
+      "ask": "make it sound professional",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 5035,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-amb-mix-properly",
+      "category": "ambiguous",
+      "ask": "mix this properly",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 7697,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-amb-hit-different",
+      "category": "ambiguous",
+      "ask": "make it hit different",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 5501,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-amb-empty-middle",
+      "category": "ambiguous",
+      "ask": "it feels empty in the middle",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 5324,
+      "renders": [],
+      "acceptable": true
+    }
+  ]
+}

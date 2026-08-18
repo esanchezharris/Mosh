@@ -6,6 +6,26 @@ A LoRA is a `<name>.safetensors` under `$MOSH_LORA_DIR/sa3/` (default
 the rack menu. Only the `sa3/` family is listed (applied via the SA3 adapter);
 other subdirs (e.g. `ace/`) are archival and ignored here.
 
+## Two families: `library` and `lab`
+
+AMENDED for the LoRA Lab. This docstring used to say flatly that other subdirs
+are ignored — `sa3/lab/` is now the ONE exception, and the exception is the
+whole mechanism behind auditioning a checkpoint before keeping it.
+
+  `sa3/*.safetensors`      family "library" — the producer's kept rack
+  `sa3/lab/*.safetensors`  family "lab"     — training checkpoints on trial
+
+Both resolve by name through `resolve()`, so a lab checkpoint renders through
+exactly the same path a kept LoRA does — which is the point: auditioning must
+exercise the real render, not a preview of it. They differ only in where the UI
+shows them. The rack menu filters `family !== "library"` so a 6-checkpoint run
+doesn't bury the producer's kept adapters; the Lab shows the lab family.
+
+A lab file whose name collides with a library name is listed INVALID with a
+reason rather than silently dropped or silently shadowing — a checkpoint that
+vanishes from the sheet with no explanation is the kind of thing you debug for
+an hour.
+
 Product name is "LoRA"; the files are DoRA-rows format internally. Only the
 safetensors HEADER is parsed (8-byte LE length + JSON): tensor shapes give the
 rank, `lora_config` metadata gives adapter_type/alpha. sha256 of the full file
@@ -39,6 +59,14 @@ _sha_cache: dict = {}
 def lora_dir() -> str:
     root = os.environ.get("MOSH_LORA_DIR") or os.path.expanduser("~/Library/Mosh/loras")
     return os.path.join(root, "sa3")
+
+
+def lab_dir() -> str:
+    """Training checkpoints on trial. A subdir of the library dir on purpose:
+    `lora_dir()`'s scan skips it for free (it filters on `.safetensors`), and
+    "keeping" a take is then a copy one level up rather than a move across
+    roots."""
+    return os.path.join(lora_dir(), "lab")
 
 
 def enabled() -> bool:
@@ -80,7 +108,7 @@ def _resolve_adapter_type(raw: str) -> str:
     return "dora-rows" if raw == "dora" else raw
 
 
-def _inspect(path: str) -> dict:
+def _inspect(path: str, family: str = "library") -> dict:
     """One adapter file -> full record (server-side; includes the abs path)."""
     name = os.path.splitext(os.path.basename(path))[0]
     st = os.stat(path)
@@ -88,7 +116,7 @@ def _inspect(path: str) -> dict:
         "name": name, "displayName": name, "trigger": "", "hint": "", "notes": "",
         "sizeBytes": st.st_size, "valid": False, "reason": "",
         "rank": 0, "alpha": 0, "adapterType": "", "tensors": 0,
-        "sha12": "", "sha256": "", "file": path,
+        "sha12": "", "sha256": "", "file": path, "family": family,
     }
 
     # Sidecar first — even an invalid file keeps its human metadata.
@@ -154,12 +182,8 @@ def _inspect(path: str) -> dict:
     return rec
 
 
-def list_loras() -> list[dict]:
-    """Full records (incl. `file` + sha) sorted by name; [] when absent/disabled.
-    Invalid files are listed with valid:false + a reason (never hidden)."""
-    if not enabled():
-        return []
-    d = lora_dir()
+def _scan(d: str, family: str) -> list[dict]:
+    """One directory -> records, sorted by name. Missing dir = no rows."""
     if not os.path.isdir(d):
         return []
     rows = []
@@ -170,9 +194,32 @@ def list_loras() -> list[dict]:
         if not os.path.isfile(path):
             continue
         try:
-            rows.append(_inspect(path))
+            rows.append(_inspect(path, family))
         except Exception as e:  # noqa: BLE001 — one bad file never kills the scan
             print(f"[loras] failed to inspect {path}: {e}", flush=True)
+    return rows
+
+
+def list_loras() -> list[dict]:
+    """Full records (incl. `file` + sha) sorted by name; [] when absent/disabled.
+    Invalid files are listed with valid:false + a reason (never hidden).
+
+    Library rows first, then lab rows. A lab row whose name is already taken by
+    a library LoRA is returned INVALID with a reason: `resolve()` keys on name,
+    so allowing the duplicate would make which file renders depend on scan
+    order, and dropping it would make a checkpoint disappear from the Lab with
+    no explanation. Neither is acceptable; saying so out loud is."""
+    if not enabled():
+        return []
+    rows = _scan(lora_dir(), "library")
+    taken = {r["name"] for r in rows}
+    for r in _scan(lab_dir(), "lab"):
+        if r["name"] in taken:
+            r["valid"] = False
+            r["reason"] = (f"name collides with a library LoRA ({r['name']}) — "
+                           "rename the run or the kept adapter")
+        taken.add(r["name"])
+        rows.append(r)
     return rows
 
 
@@ -221,4 +268,9 @@ def resolve(selection: list[dict], lab: bool = False) -> list[tuple[str, str, fl
 
 
 def available() -> bool:
-    return enabled() and any(r["valid"] for r in list_loras())
+    """Does this Mac have a usable KEPT LoRA? Deliberately library-only.
+
+    It gates whether the rack surfaces at all, and the rack shows the library
+    family — so counting lab checkpoints here would open an empty rack for
+    someone who has only ever trained and never kept."""
+    return enabled() and any(r["valid"] for r in list_loras() if r.get("family") != "lab")

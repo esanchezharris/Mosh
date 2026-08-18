@@ -26,6 +26,7 @@ import { useLaneMarquee } from "./useLaneMarquee";
 import { boundsOf } from "./marqueeHit";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 import { trackIconGlyph } from "../trackIcons";
+import { IphoneControllerDialog } from "../IphoneControllerDialog";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
@@ -384,6 +385,13 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
   // confirm-gated (mirrors the bus-removal confirm in Inspector.tsx's SendsSection),
   // though unlike a bus deletion it IS a plain undoable Edit mutation — the dialog says so.
   const [confirmRemove, setConfirmRemove] = useState(false);
+  // Right-click the track you are about to sing on -> "Set up iPhone controller".
+  // Anchored at the cursor, so it is a plain absolutely-positioned panel rather than
+  // MoshMenu (which is trigger-anchored). Dismissal is pointerdown-outside + Escape
+  // ONLY: a scroll-dismiss listener here would fire on the very click that opens it
+  // when that click also scrolls the lane list into view.
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [iphoneOpen, setIphoneOpen] = useState(false);
   const clipCount = track.clips.length;
   const selectTrack = () => {
     setSelectedClip(null);
@@ -417,6 +425,10 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
       aria-label={`${track.name} track`}
       data-testid="v2-track-header"
       data-track-id={track.id}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
     >
       <button
         type="button"
@@ -542,6 +554,30 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
         />,
         document.body,
       )}
+      {menuAt && createPortal(
+        <div className="v2-ctx-scrim" onPointerDown={() => setMenuAt(null)} data-testid="v2-track-ctx-scrim">
+          <div
+            className="v2-menu-panel-floating v2-ctx-menu"
+            role="menu"
+            aria-label={`${track.name} track actions`}
+            data-testid="v2-track-ctx"
+            style={{ left: menuAt.x, top: menuAt.y }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="v2-ctx-item"
+              data-testid="v2-track-ctx-iphone"
+              onClick={() => { setMenuAt(null); setIphoneOpen(true); }}
+            >
+              Set up iPhone controller
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+      {iphoneOpen && <IphoneControllerDialog onClose={() => setIphoneOpen(false)} />}
     </div>
   );
 }

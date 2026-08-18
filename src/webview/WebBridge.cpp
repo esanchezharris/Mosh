@@ -1,5 +1,6 @@
 #include "WebBridge.h"
 #include "UiResourcePathGuard.h"
+#include "../agent/CertifiedSkillLoader.h"
 #include "../brain/BrainProxy.h"
 #include "../voice/NativeSpeech.h"
 // Crash/telemetry module (src/telemetry/) — opt-in, privacy-respecting. This is
@@ -520,6 +521,51 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                         completion (juce::var (o));            // resolved once (incl. cancel → empty)
                         pickerBusy = false;                    // allow the next dialog
                     });
+            })
+        // Skill Foundry Task 4 — three DEDICATED, non-MoshOps native reads for the
+        // certified skill loader (src/agent/CertifiedSkillLoader.{h,cpp}). Each is its
+        // OWN top-level `.withNativeFunction` entry, threaded EXACTLY like brain_chat /
+        // escalate_candidates / archive_pair above: the loader does blocking
+        // lstat/fstat/read syscalls (bounded, but still real I/O), so it must never run
+        // on the message thread. Deliberately NOT the `list_directory` shape further up
+        // (dispatched *inside* execute_command via asyncCommandHandler, still passing
+        // through commandHandler and telemetry's command-name redaction) — these three
+        // NEVER touch commandHandler, never appear in AGENT_COMMANDS or MoshOps, and are
+        // never reachable via execute_command's `args[0].command` dispatch. See
+        // ui/src/agent/skillFoundry/nativeBridgeBoundary.test.ts for the durable guard on
+        // both the TS and native-source sides of that boundary.
+        .withNativeFunction (
+            juce::Identifier ("read_certified_skill_packages"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                juce::Thread::launch ([completion]() mutable
+                {
+                    auto result = CertifiedSkillLoader::readFromEnvironment();
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("read_skill_source_status"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                juce::Thread::launch ([completion]() mutable
+                {
+                    auto result = CertifiedSkillLoader::readSourceStatusFromEnvironment();
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("read_certified_native_skills"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                juce::Thread::launch ([completion]() mutable
+                {
+                    auto result = CertifiedSkillLoader::readBundledNativeFromApplication();
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
             });
 }
 

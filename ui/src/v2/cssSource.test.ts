@@ -38,6 +38,7 @@ describe("v2 stylesheet reconstruction is not vacuous", () => {
     expect(css).toContain(".v2-clip");            // 30-arrangement
     expect(css).toContain(".v2-errbar");          // 70-notices
     expect(css).toContain(".v2-agent-head");      // 95-fms-agent
+    expect(css).toContain(".lab-take");           // 96-lora-lab
   });
 
   it("finds every partition's content, not just the first one", () => {
@@ -46,7 +47,7 @@ describe("v2 stylesheet reconstruction is not vacuous", () => {
     for (const f of PARTITION_FILES) {
       expect(css.length, `partition contributed nothing: ${f}`).toBeGreaterThan(0);
     }
-    expect(PARTITION_FILES.length).toBe(11);
+    expect(PARTITION_FILES.length).toBe(12);
   });
 });
 

@@ -5,6 +5,7 @@
 #include "SourceRef.h"
 #include "state/Migrations.h"
 #include "state/ProjectName.h"
+#include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
 #include "state/SafeMode.h"
 
@@ -824,6 +825,14 @@ juce::var MoshEngine::recentProjects() const
 // Tracktion stores audio refs RELATIVE to the edit — the precondition for portability.
 void MoshEngine::wireEditResolvers()
 {
+    // Skill Foundry Slice B, Task 1 — stable take identity (state/TakeIdentity.h). This is
+    // the ONE chokepoint every edit-adoption path already calls (ctor cold start,
+    // reloadInSafeMode, reloadFromFile, adoptEditFile — itself called from newProject/
+    // openProject/saveProjectAs), so backfilling here covers every case "on every edit
+    // adoption" (Task 1) needs without a second call site per path. Idempotent and cheap
+    // (a no-op recursive walk once every take already has an id) — see TakeIdentity.h.
+    mosh::takeidentity::backfill (editPtr->state);
+
     editPtr->editFileRetriever = [this] { return editPath; };
     editPtr->filePathResolver = [this] (const juce::String& path) -> juce::File
     {

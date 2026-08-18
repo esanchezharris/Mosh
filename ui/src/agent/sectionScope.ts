@@ -94,7 +94,7 @@ export type SectionRework =
 /**
  * Resolve a "rework the <section>" request to a section-scoped render. Returns null when
  * the utterance isn't a rework request, names no known section, or there are no sections
- * — so the caller falls through to the LLM brain unchanged.
+ * — so the caller falls through to the bounded studio-skill path unchanged.
  */
 export function resolveSectionRework(text: string, snapshot: Snapshot | null): SectionRework | null {
   if (!snapshot) return null;
