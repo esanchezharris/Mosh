@@ -493,7 +493,7 @@ int runGoldenSelfTest (MoshEngine& eng, MoshOps& ops)
     check (phoneLog.contains ("\"source\": \"phone_controller\""), "phone source survives into the command log");
 
     section ("Layer 3: peer apply committed track ValueTree golden");
-    MoshEngine receiverEng (false, true, "session-golden-selftest-receiver");
+    MoshEngine receiverEng (false, true, "session-golden-selftest-receiver", /*nestedEngine=*/true);
     MoshOps receiverOps (receiverEng);
 
     const auto senderCreate = cmd (ops, "create_track", args1 ("name", "Peer Sender"));
@@ -11551,7 +11551,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     section ("Multiplayer: commit envelope identity binds the applied track");
     {
-        MoshEngine identityEng (false, true, "session-mp-commit-identity");
+        MoshEngine identityEng (false, true, "session-mp-commit-identity", /*nestedEngine=*/true);
         MoshOps    identityOps (identityEng);
         std::vector<String> identityEvents;
         identityOps.setEventSink ([&] (const var& event)
@@ -12529,7 +12529,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
             const auto savedSelftestSession = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
             ::unsetenv ("MOSH_SELFTEST_SESSION");
-            auto authorityEngine = std::make_unique<MoshEngine> (false, true, "session-c010-bootstrap-authority");
+            auto authorityEngine = std::make_unique<MoshEngine> (false, true, "session-c010-bootstrap-authority", /*nestedEngine=*/true);
             if (savedSelftestSession.isNotEmpty())
                 ::setenv ("MOSH_SELFTEST_SESSION", savedSelftestSession.toRawUTF8(), 1);
             else
@@ -13048,9 +13048,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // resolving via the worker's prefetch stage (the "receive path" case).
         section ("Multiplayer PR-2: stem transfer order + receive path (live session)");
         {
-            MoshEngine ordHostEng (false, true, "session-pr2-order-host");
+            MoshEngine ordHostEng (false, true, "session-pr2-order-host", /*nestedEngine=*/true);
             MoshOps    ordHostOps (ordHostEng);
-            MoshEngine ordGuestEng (false, true, "session-pr2-order-guest");
+            MoshEngine ordGuestEng (false, true, "session-pr2-order-guest", /*nestedEngine=*/true);
             MoshOps    ordGuestOps (ordGuestEng);
             check (ordHostEng.sessionDir() != ordGuestEng.sessionDir(),
                    "order: host and guest use distinct owned session roots");
@@ -13155,7 +13155,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             section ("Multiplayer PR-2: no-freeze proxy (MOSH_RELAY_BLOB_DELAY_MS)");
 
-            MoshEngine nfEng (false, true, "session-pr2-nofreeze-host");
+            MoshEngine nfEng (false, true, "session-pr2-nofreeze-host", /*nestedEngine=*/true);
             MoshOps    nfOps (nfEng);
             juce::var nfLastEvent;
             nfOps.setEventSink ([&] (const juce::var& e) { nfLastEvent = e; });
@@ -13213,7 +13213,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             section ("Multiplayer PR-2: MOSH_MP_SYNC_TRANSFER kill switch");
 
-            MoshEngine syncEng (false, true, "session-pr2-syncswitch-host");
+            MoshEngine syncEng (false, true, "session-pr2-syncswitch-host", /*nestedEngine=*/true);
             MoshOps    syncOps (syncEng);
 
             auto syncSess = cmd (syncOps, "mp_create_session", objN ({ { "name", "Sync" }, { "color", "#666666" } }));
@@ -13400,9 +13400,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // not a same-directory coincidence.
         section ("Multiplayer P4: self-healing stem fetch (mp_fetch_missing_stems)");
         {
-            MoshEngine hostEng (false, true, "session-mp-selfheal-host");
+            MoshEngine hostEng (false, true, "session-mp-selfheal-host", /*nestedEngine=*/true);
             MoshOps    hostOps (hostEng);
-            MoshEngine guestEng (false, true, "session-mp-selfheal-guest");
+            MoshEngine guestEng (false, true, "session-mp-selfheal-guest", /*nestedEngine=*/true);
             MoshOps    guestOps (guestEng);
             check (hostEng.sessionDir() != guestEng.sessionDir(),
                    "self-heal: host and guest use distinct owned session roots");
@@ -13634,9 +13634,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // cloud relay now also works against relay/server.py.
         section ("Multiplayer P4: bootstrap end-to-end on the local relay");
         {
-            MoshEngine bootHostEng (false, true, "session-mp-bootstrap-host");
+            MoshEngine bootHostEng (false, true, "session-mp-bootstrap-host", /*nestedEngine=*/true);
             MoshOps    bootHostOps (bootHostEng);
-            MoshEngine bootGuestEng (false, true, "session-mp-bootstrap-guest");
+            MoshEngine bootGuestEng (false, true, "session-mp-bootstrap-guest", /*nestedEngine=*/true);
             MoshOps    bootGuestOps (bootGuestEng);
             check (bootHostEng.sessionDir() != bootGuestEng.sessionDir(),
                    "bootstrap: host and guest use distinct owned session roots");

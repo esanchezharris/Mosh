@@ -47,6 +47,53 @@ TEST_CASE ("an explicit session override is retained for directory validation", 
     REQUIRE (resolveSessionLeaf ("session-selftest", "   ", "pid1-aaaa") != "   ");
 }
 
+TEST_CASE ("a nested secondary engine does not collide with the outer explicit override",
+          "[sessionpaths]")
+{
+    // Bug: a --selftest run with MOSH_SELFTEST_SESSION set constructs several
+    // SECONDARY MoshEngine instances in-process (simulated MP host/guest peers).
+    // Pre-fix, every one of them resolved to the exact same leaf as the outer
+    // engine (the override, verbatim) -- so each one's freshSession reset wiped
+    // the others' files, cascading into save() failures later in the run.
+    const auto outer  = resolveSessionLeaf ("session-selftest", "_harness/session-mp-selftest-1", "pid1-aaaa");
+    const auto host    = resolveSessionLeaf ("session-mp-bootstrap-host",  "_harness/session-mp-selftest-1", "pid1-aaaa", true);
+    const auto guest   = resolveSessionLeaf ("session-mp-bootstrap-guest", "_harness/session-mp-selftest-1", "pid1-aaaa", true);
+
+    // The outer engine still lands EXACTLY at the literal override -- gate.sh,
+    // verify.py and run-mp-selftest.sh depend on this.
+    REQUIRE (outer == "_harness/session-mp-selftest-1");
+
+    // Secondary engines nest under it, keyed by their own purpose name, so they
+    // don't collide with the outer engine OR each other.
+    REQUIRE (host  != outer);
+    REQUIRE (guest != outer);
+    REQUIRE (host  != guest);
+    REQUIRE (host.startsWith (outer + "/"));
+    REQUIRE (guest.startsWith (outer + "/"));
+}
+
+TEST_CASE ("nested-engine nesting only applies once an explicit override is set",
+          "[sessionpaths]")
+{
+    // With no MOSH_SELFTEST_SESSION, nestedEngine is a no-op: the per-process
+    // auto-isolation formula (baseName already makes secondary engines distinct)
+    // is unaffected.
+    const auto withFlag    = resolveSessionLeaf ("session-mp-bootstrap-host", "", "pid1-aaaa", true);
+    const auto withoutFlag = resolveSessionLeaf ("session-mp-bootstrap-host", "", "pid1-aaaa", false);
+    REQUIRE (withFlag == withoutFlag);
+}
+
+TEST_CASE ("nested-engine nesting never applies to the GUI/no-purpose leaf", "[sessionpaths]")
+{
+    // A nested engine is never constructed for the interactive GUI, but the
+    // resolver must not nest an empty/"session" baseName even if asked -- that
+    // would mean isolating the owner's real session dir.
+    REQUIRE (resolveSessionLeaf ("", "_harness/session-mp-selftest-1", "pid1-aaaa", true)
+             == "_harness/session-mp-selftest-1");
+    REQUIRE (resolveSessionLeaf ("session", "_harness/session-mp-selftest-1", "pid1-aaaa", true)
+             == "_harness/session-mp-selftest-1");
+}
+
 TEST_CASE ("an unset override auto-isolates a headless leaf per process", "[sessionpaths]")
 {
     const auto leaf = resolveSessionLeaf ("session-selftest", "", "pid1-aaaa");
