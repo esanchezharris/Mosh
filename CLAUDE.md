@@ -264,6 +264,14 @@ but don't rip out the existing implementation either; nothing here is broken.
   the registration, never a branch or a commit — so the only other real risks are uncommitted
   changes and DETACHED heads whose commit is on no ref (tag those `rescue/wt-<sha>` first;
   `git branch --all --contains <sha>` finds them).
+- **A bulk delete/archive list can swallow a REGISTERED WORKTREE nested inside it.**
+  `~/Library/Mosh/work/repairs/` looked like repair-debug artifacts; inside it lived the
+  registered `playtest-578` worktree (an OPEN PR's checkout). The 2026-08-18 cleanup archived
+  and deleted it, and only a `git worktree list` glance afterwards caught it (restored clean via
+  `git worktree add` — zero loss only because the tree happened to be clean and pushed). Before
+  composing any delete/archive list, prefix-match every candidate path against every path in
+  `git worktree list --porcelain` — a worktree can live arbitrarily deep inside a directory that
+  reads as scratch.
 - **A long-lived branch's tests decay as `main` moves under it, and its own green gate hides
   that.** #471 forked 2026-07-27 with a correct, passing safe-mode check; `e274cafa` then added
   the `_harness/` session prefix (08-01) and #606 renamed projects to `.mosh` (08-04). Its CI
