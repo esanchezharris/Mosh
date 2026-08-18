@@ -4145,18 +4145,38 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (r3["data"].getProperty ("cache", var()).toString() == "miss", "editing a note -> source signature changed -> cache MISS");
 
-        // Bypassing the instrument changes the bounced audio AND the source signature ->
-        // cache MISS. Guards the enabled-state coverage: a stale render must NOT survive a
-        // bypass (the dangerous "serves the wrong audio" direction).
-        int instIdx = -1;
+        // Bypassing a device changes the source signature -> cache MISS. Proven on an
+        // insert FX (the bounce stays audible through the instrument): load a compressor,
+        // render (MISS: new device in the signature), bypass it, render again (MISS:
+        // enabled state is in the signature). A stale render must NOT survive a bypass
+        // (the dangerous "serves the wrong audio" direction).
+        check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", mt }, { "type", "compressor" }}))),
+               "load_builtin (compressor FX) on the MIDI track ok");
+        int fxIdx = -1, instIdx = -1;
         { auto trk = trackById (mt);
           if (auto* arr = trk.getProperty ("plugins", var()).getArray())
-            for (auto& pl : *arr) if ((bool) pl.getProperty ("isInstrument", false))
-                { instIdx = (int) pl.getProperty ("index", -1); break; } }
-        check (instIdx >= 0, "MIDI track has an instrument plugin to bypass");
-        cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", true } }));
+            for (auto& pl : *arr)
+            {
+                if (pl.getProperty ("type", var()).toString() == "compressor") fxIdx = (int) pl.getProperty ("index", -1);
+                if ((bool) pl.getProperty ("isInstrument", false) && instIdx < 0) instIdx = (int) pl.getProperty ("index", -1);
+            } }
+        check (fxIdx >= 0 && instIdx >= 0, "MIDI track carries the instrument + the new FX");
+        check (cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}))
+                   ["data"].getProperty ("cache", var()).toString() == "miss",
+               "adding an FX -> source signature changed -> cache MISS");
+        cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", fxIdx }, { "bypassed", true } }));
         auto rb = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
-        check (rb["data"].getProperty ("cache", var()).toString() == "miss", "bypassing the instrument -> cache MISS (no stale render served)");
+        check (rb["data"].getProperty ("cache", var()).toString() == "miss", "bypassing the FX -> cache MISS (no stale render served)");
+
+        // Bypassing the INSTRUMENT kills the bounce outright — the track then has no
+        // audio-producing node, so render_layer refuses with the "add an instrument"
+        // guard instead of transforming silence (and, equally, never serves a stale
+        // artifact). Before patch 0009 this path false-passed: the whole-mix leak made
+        // the bounce non-silent, so the guard never fired. Un-bypass to continue.
+        cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", true } }));
+        auto rbi = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+        check (! ok (rbi), "bypassing the INSTRUMENT -> render refuses (silent bounce guard; no stale render served)");
+        cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", false } }));
 
         // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
         // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
