@@ -4770,9 +4770,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // stem contains ONLY its own track's audio, not the full mix. Frame-count/
         // existence/naming checks (above) can't tell an isolated stem from an
         // accidental full-mix render (a real regression: te::toBitSet() in the
-        // pinned tracktion_engine doesn't actually restrict tracksToDo to the given
-        // track — see the comment above MoshOps::cmdExportStems — so a "stem" built
-        // from tracksToDo alone silently renders every track). Reads the whole file
+        // pinned tracktion_engine didn't restrict tracksToDo to the given track —
+        // ROOT-FIXED by patch 0009; cmdExportStems keeps its allowedClips
+        // workaround as belt-and-braces, and these checks now guard both). Reads the whole file
         // as mono (channel-summed) samples so RMS/diff comparisons are format-agnostic.
         auto wavMonoSamples = [] (const File& f) -> std::vector<float>
         {
@@ -7043,6 +7043,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Tail-energy profile, not onset counting: a looped render carries energy
         // all the way to the file's end; an unlooped one-note render is silent in
         // the final quarter. (Onset thresholding flapped run to run on pluck tails.)
+        //
+        // History: this check was ~25% flaky for weeks ("ambient session hot tail").
+        // The ambient tail was REAL, and it was a bug: tracktion's toBitSet set a bit
+        // for EVERY track in the edit, so Renderer::tracksToDo never isolated and a
+        // "solo track" bounce rendered the whole session mix (8s 330 Hz crop tone +
+        // consolidate tones, clipping at peak 1.0). The looped note's tail then rode
+        // on that mix with a random 4OSC start phase, and the 1.1× margin flapped.
+        // Patch 0009 fixes toBitSet; the baseline-silence check below is the guard
+        // that the isolation stays fixed — the neighbor tone track is created HERE
+        // so the guard owns a fixture that actually carries the would-be leak.
         auto wavEnergyProfile = [] (const juce::File& f) -> std::pair<double, double> {
             juce::AudioFormatManager fm;
             fm.registerBasicFormats();
@@ -7064,6 +7074,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             return { peak, tail };
         };
 
+        // The isolation guard's fixture: a LOUD neighbor spanning the full 8s. With
+        // toBitSet patched, a solo-track bounce must leave this tone out entirely;
+        // if isolation ever regresses, the baseline's last quarter goes hot
+        // (~0.16 mean-abs measured from the leak) and the silence check below reds.
+        const auto nbTrack = cmd (ops, "create_track", args1 ("name", "MidiLoopNeighbor"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "add_test_tone_clip",
+             objN ({{ "trackId", nbTrack }, { "seconds", 8.0 }, { "freq", 440.0 }, { "name", "midiloop-neighbor-tone" }}));
+
         const auto lt = cmd (ops, "create_track", args1 ("name", "MidiLoop"))["data"].getProperty ("trackId", var()).toString();
         auto* lo = new DynamicObject(); lo->setProperty ("trackId", lt); lo->setProperty ("start", 0.0); lo->setProperty ("length", 8.0);
         const auto lc = cmd (ops, "add_midi_clip", var (lo))["data"].getProperty ("clipId", var()).toString();
@@ -7072,10 +7090,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lb0 = cmd (ops, "bounce_track", objN ({{ "trackId", lt }, { "mode", "inPlace" }}));
 
         const auto baselineProfile = wavEnergyProfile (juce::File (lb0["data"].getProperty ("file", var()).toString()));
-        // The ambient session can carry a hot tail for ANY render (proven ambient,
-        // not loop-related — a virgin one-note clip shows it too), so the loop proof
-        // is RELATIONAL: looped energy exceeds the unlooped baseline, and deactivate
-        // returns EXACTLY to the baseline.
+        // A solo-track bounce of a one-note clip is DIGITALLY SILENT in the last
+        // quarter (measured 0.0 exactly; the 4OSC release ends ~0.6s in). Anything
+        // hot here means another track leaked into the render — the toBitSet bug.
+        check (baselineProfile.second < 0.01,
+               "midi loop: bounce ISOLATION — the unlooped baseline's last quarter is silent"
+               " (tail=" + juce::String (baselineProfile.second, 6) + ", neighbor tone stayed out)");
         cmd (ops, "undo");   // undo the baseline bounce (MIDI clip returns)
         check (! ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", lc }, { "enabled", true }, { "start", 0.0 }, { "length", 0.0 }}))),
                "midi loop: enabling with a zero length errors");
@@ -7090,12 +7110,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               "midi loop: the snapshot carries the additive beat fields"); }
 
         // The repeat is REAL: bouncing the looped clip repeats the note across the
-        // clip (16 beat-interval repeats over 8s), not once.
+        // clip (16 beat-interval repeats over 8s), not once. With isolation fixed
+        // the baseline tail is 0, so the relational form alone would be vacuous
+        // (anything > 0 passes) — the 0.02 absolute floor is what actually asserts
+        // repeats reached the last quarter (measured looped tail 0.140 ± 0.001,
+        // 7× margin; an unlooped render measures 0.0).
         auto lb = cmd (ops, "bounce_track", objN ({{ "trackId", lt }, { "mode", "inPlace" }}));
         check (ok (lb), "midi loop: bounce of the looped clip ok");
         const auto loopedProfile = wavEnergyProfile (juce::File (lb["data"].getProperty ("file", var()).toString()));
-        check (loopedProfile.first > 0.01 && loopedProfile.second > baselineProfile.second * 1.1,
-               "midi loop: the render REPEATS the notes (last-quarter energy > 1.1× the unlooped baseline)");
+        check (loopedProfile.first > 0.01
+                   && loopedProfile.second > juce::jmax (baselineProfile.second * 1.1, 0.02),
+               "midi loop: the render REPEATS the notes (last-quarter energy"
+               " tail=" + juce::String (loopedProfile.second, 6)
+               + " > max(1.1× baseline=" + juce::String (baselineProfile.second, 6) + ", 0.02))");
         cmd (ops, "undo");   // undo the bounce (the MIDI clip returns)
         cmd (ops, "undo");   // undo the loop set
         check (! trackById (lt)["clips"][0].hasProperty ("midiLoopStartBeats"),
@@ -7116,6 +7143,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (std::abs (disabledProfile.second - baselineProfile.second) < 0.005,
                "midi loop: deactivated, the render returns EXACTLY to the unlooped baseline profile");
         cmd (ops, "undo");   // bounce
+        // The neighbor was only this section's isolation fixture — take it back out
+        // so later sections (and any full-mix export) see the world they were written
+        // against.
+        cmd (ops, "remove_track", objN ({{ "trackId", nbTrack }}));
     }
 
     // ─── Wave 8: sends / returns / aux buses ───

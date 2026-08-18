@@ -747,6 +747,11 @@ bool MoshOps::writeSilentStemFile (const juce::File& dest, juce::AudioFormat* fo
 // NON-undoable (read/render, no ValueTree mutation the undo system needs to
 // know about) — same posture as export_audio.
 //
+// ── UPDATE: the upstream toBitSet bug described below is ROOT-FIXED by Mosh
+// dependency patch 0009 (patches/0009-tracktion-tobitset-respect-given-tracks.patch),
+// which also fixes bounce_track/freeze_track isolation. The allowedClips
+// workaround here is retained as belt-and-braces; the history stands:
+//
 // ── CORRECTNESS FIX (found by adversarial review, empirically reproduced): the
 // original version of this command set ONLY `params.tracksToDo = te::toBitSet(one)`
 // to try to isolate the single target track, per the spec's "NO allowedClips —
