@@ -86,6 +86,7 @@ const MAX_STEPS = Number(argFlag("max-steps", "8"));
 // Reply-token cap per chat call. 800 = the shipped BrainProxy default;
 // always-on-thinking models need headroom (their reasoning spends the cap).
 const CHAT_MAX_TOKENS = Number(argFlag("chat-max-tokens", "800"));
+const NO_THINK = process.argv.includes("--no-think"); // local mlx thinking models: chat_template_kwargs enable_thinking:false (HTTP transport only)
 const TASK_FILTER = (argFlag("tasks", "all") || "all").split(",");
 const RENDER = !process.argv.includes("--no-render");
 const ART_DIR = join(homedir(), "mosh-agentbench-artifacts", TAG);
@@ -191,7 +192,7 @@ function makeRunner(usage: BrainUsage): AgentRunner {
         return call(cfg.model, messages, usage);
       }
     }
-    const opts = { maxTokens: CHAT_MAX_TOKENS };
+    const opts = { maxTokens: CHAT_MAX_TOKENS, noThink: NO_THINK };
     try {
       return await callBrain(cfg, messages, usage, opts);
     } catch (e) {
