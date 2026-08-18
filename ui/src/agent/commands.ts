@@ -174,7 +174,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "list_takes", desc: "List the take lanes on a clip", args: [S("clipId")] },
   { command: "set_current_take", desc: "Select which take lane is active", args: [S("clipId"), N("takeIndex")] },
   { command: "promote_take_region", desc: "Promote one time range from an alternate take into the main playlist; splits the clip at the range boundaries and preserves every take", args: [S("clipId"), N("takeIndex"), N("start", true, "absolute timeline seconds"), N("end", true, "absolute timeline seconds")] },
-  { command: "keep_take", desc: "Keep the current take lane, remove the rest", args: [S("clipId")] },
+  { command: "keep_take", desc: "Keep a take lane, remove the rest — pass takeId to target a specific stable take id, or omit it to keep whichever take is already current", args: [S("clipId"), S("takeId", false, "optional stable take id (from list_takes); omit to keep whichever take is current")] },
 
   // ── history / session ─────────────────────────────────────────────────────
   { command: "undo", desc: "Undo the last change", args: [] },

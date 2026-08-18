@@ -15,6 +15,7 @@
 import type { Snapshot } from "../types";
 import { validateCommand } from "./commands";
 import type { AgentCommandCall, ChangeSet } from "./executor";
+import { ALWAYS_OK_ATOMIC_GUARD, runAtomicSkillPlanV1, type AtomicSkillPlanV1 } from "./skillFoundry/atomicPlan";
 import { checkSkillChangeSet } from "./skillHarnessResult";
 import {
   expandSkillTemplate,
@@ -125,107 +126,8 @@ export type SkillRunResult =
       readonly guarantee: SkillGuarantee;
     };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 const detail = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Read authoritative status. A malformed or unreadable answer is NEVER read as
- *  "nothing happened" — it returns null, which every caller treats as unprovable. */
-async function readStatus(
-  deps: SkillHarnessDeps,
-  transactionId: string,
-): Promise<TxnStatus | null> {
-  let result: BridgeResult;
-  try {
-    result = await deps.exec("batch_status", { transactionId });
-  } catch {
-    return null;
-  }
-  if (!result.ok || !isRecord(result.data)) return null;
-  const data = result.data as TxnStatus;
-  if (typeof data.found !== "boolean") return null;
-  return data;
-}
-
-function unprovable(
-  skill: string,
-  stage: SkillFailureStage,
-  reason: string,
-  transactionId: string,
-  failureCode?: string,
-): SkillRunResult {
-  return {
-    ok: false,
-    skill,
-    stage,
-    reason: `${reason} The edit state could not be proven and needs recovery.`,
-    rolledBack: false,
-    outcome: "needs_recovery",
-    transactionId,
-    failureCode,
-    guarantee: "atomic",
-  };
-}
-
-/**
- * Step 4 / step 5's failure path: EXACT rollback of the identified, still-open transaction.
- *
- * `rolledBack: true` is returned only when authoritative status says `rolled_back` AND the
- * reported fingerprint equals the captured pre-state. A transport success or a merely
- * requested undo is never enough — fs-b2.md forbids saying "rolled back" on that basis, and
- * the UI must never fall back to undoAgentBatch() for an ambiguous transaction.
- */
-async function rollbackExactly(
-  skill: string,
-  stage: SkillFailureStage,
-  reason: string,
-  plan: SkillTransactionPlan,
-  preFingerprint: string | undefined,
-  deps: SkillHarnessDeps,
-): Promise<SkillRunResult> {
-  const { transactionId } = plan;
-  try {
-    await deps.exec("batch_rollback", { transactionId });
-  } catch {
-    /* A lost rollback response is resolved by status below, never by a second undo. */
-  }
-
-  const status = await readStatus(deps, transactionId);
-  if (status === null || !status.found)
-    return unprovable(skill, stage, `${reason} Rollback status was unreadable.`, transactionId);
-
-  if (status.status !== "rolled_back")
-    return unprovable(
-      skill,
-      stage,
-      `${reason} Rollback did not complete (status: ${status.status ?? "unknown"}).`,
-      transactionId,
-      status.failureCode,
-    );
-
-  if (preFingerprint !== undefined && status.fingerprint !== preFingerprint)
-    return unprovable(
-      skill,
-      stage,
-      `${reason} Rollback reported success but the session did not match its pre-transaction state.`,
-      transactionId,
-      status.failureCode,
-    );
-
-  return {
-    ok: false,
-    skill,
-    stage,
-    reason: `${reason} The edit was restored to its previous state.`,
-    rolledBack: true,
-    outcome: "restored",
-    transactionId,
-    guarantee: "atomic",
-  };
-}
 
 /**
  * The BEST-EFFORT path, for a skill the engine's transactionSafe registry cannot admit.
@@ -397,270 +299,25 @@ export async function runSkill(
   if (untransactable !== null)
     return runBestEffort(skill, validated.slots, plan.steps.map((step) => step.call), before, untransactable, deps);
 
-  // ── STEP 2: idempotent batch_begin with the full manifest ──
-  // The engine validates the whole manifest against its own transactionSafe registry
-  // BEFORE opening the Tracktion transaction, so a rejection here has mutated nothing.
-  let begin: BridgeResult;
-  try {
-    begin = await deps.exec("batch_begin", {
-      transactionId: plan.transactionId,
-      name: plan.name,
-      commands: plan.manifest,
-    });
-  } catch (error) {
-    // A rejected begin promise is ambiguous: the transaction may or may not be open.
-    // Resolve it by id — never by inferring from the rejection.
-    const status = await readStatus(deps, plan.transactionId);
-    if (status === null)
-      return unprovable(
-        skill.name,
-        "begin",
-        `Could not open a transaction: ${detail(error)}.`,
-        plan.transactionId,
-      );
-    if (!status.found)
-      return noEdit("begin", `Could not open a transaction: ${detail(error)}. No edit was made.`);
-    // It IS open despite the lost response — roll it back rather than proceeding blind.
-    return rollbackExactly(
-      skill.name,
-      "begin",
-      `The transaction opened but its response was lost.`,
-      plan,
-      status.preFingerprint,
-      deps,
-    );
-  }
-
-  if (!begin.ok)
-    return noEdit("begin", `${skill.name} was refused before any change: ${begin.error ?? "unknown error"}`);
-
-  const beginStatus = isRecord(begin.data) ? (begin.data as TxnStatus) : null;
-  const preFingerprint = beginStatus?.preFingerprint;
-
-  // ── STEP 3: execute each manifested command; resolve every ambiguity by status ──
-  const entries: {
-    index: number;
-    command: string;
-    summary: string;
-    ok: boolean;
-    error?: string;
-  }[] = [];
-
-  for (const step of plan.steps) {
-    let result: BridgeResult | null = null;
-    try {
-      result = await deps.exec(step.call.command, step.call.args ?? {}, step.meta);
-    } catch (error) {
-      // TRANSPORT LOSS. This is the case FS-B1 could only report as unknown. Ask the
-      // authority what actually happened.
-      const status = await readStatus(deps, plan.transactionId);
-      if (status === null || !status.found)
-        return unprovable(
-          skill.name,
-          "execution",
-          `${step.call.command} did not return (${detail(error)}) and its transaction could not be read.`,
-          plan.transactionId,
-        );
-      if (status.status === "needs_recovery")
-        return unprovable(
-          skill.name,
-          "execution",
-          `${step.call.command} did not return (${detail(error)}).`,
-          plan.transactionId,
-          status.failureCode,
-        );
-
-      const recorded = status.entries?.find((e) => e.requestId === step.meta.requestId);
-      if (recorded && recorded.state !== "pending") {
-        // It DID execute; only the response was lost. Consume the recorded result.
-        result = recorded.result ?? { ok: recorded.state === "applied" };
-      } else {
-        // It did not execute. Retry the SAME requestId — the engine replays rather than
-        // double-applying if it turns out to have run after all.
-        try {
-          result = await deps.exec(step.call.command, step.call.args ?? {}, step.meta);
-        } catch (retryError) {
-          return rollbackExactly(
-            skill.name,
-            "execution",
-            `${step.call.command} could not be completed (${detail(retryError)}).`,
-            plan,
-            preFingerprint,
-            deps,
-          );
-        }
-      }
-    }
-
-    entries.push({
-      index: step.meta.index,
-      command: step.call.command,
-      summary: step.call.command.replace(/_/g, " "),
-      ok: result.ok,
-      error: result.ok ? undefined : result.error,
-    });
-
-    // ── STEP 4: a resolved failure → exact rollback ──
-    if (!result.ok)
-      return rollbackExactly(
-        skill.name,
-        "execution",
-        `${step.call.command} failed: ${result.error ?? "unknown error"}.`,
-        plan,
-        preFingerprint,
-        deps,
-      );
-  }
-
-  const changes: SkillExecutionSummary = {
-    applied: entries.filter((entry) => entry.ok).length,
-    entries,
-  };
-
-  // Cross-check the engine's own accounting against ours before trusting either.
-  const applyStatus = await readStatus(deps, plan.transactionId);
-  if (applyStatus === null || !applyStatus.found)
-    return unprovable(
-      skill.name,
-      "execution",
-      "The transaction's status became unreadable after its commands ran.",
-      plan.transactionId,
-    );
-  if (applyStatus.status === "needs_recovery")
-    return unprovable(
-      skill.name,
-      "execution",
-      "The engine could not prove the transaction's edit state.",
-      plan.transactionId,
-      applyStatus.failureCode,
-    );
-  if (applyStatus.applied !== plan.steps.length || applyStatus.canCommit !== true)
-    return rollbackExactly(
-      skill.name,
-      "execution",
-      `The engine recorded ${applyStatus.applied ?? 0} of ${plan.steps.length} commands as applied.`,
-      plan,
-      preFingerprint,
-      deps,
-    );
-
-  // ── STEP 5: evaluate the postcondition WHILE THE TRANSACTION IS STILL OPEN ──
-  let after: Snapshot;
-  try {
-    after = await deps.snapshot();
-  } catch (error) {
-    return rollbackExactly(
-      skill.name,
-      "postcondition",
-      `Could not read the resulting session state: ${detail(error)}.`,
-      plan,
-      preFingerprint,
-      deps,
-    );
-  }
-
-  let postcondition: SkillCheck;
-  try {
-    postcondition = skill.postcondition(before, after, validated.slots, changes);
-  } catch (error) {
-    return rollbackExactly(
-      skill.name,
-      "postcondition",
-      `Postcondition failed: ${detail(error)}.`,
-      plan,
-      preFingerprint,
-      deps,
-    );
-  }
-  if (!postcondition.ok)
-    return rollbackExactly(
-      skill.name,
-      "postcondition",
-      postcondition.reason,
-      plan,
-      preFingerprint,
-      deps,
-    );
-
-  // ── STEP 6: only now, commit. A lost response resolves through status. ──
-  let commit: BridgeResult | null = null;
-  try {
-    commit = await deps.exec("batch_end", { transactionId: plan.transactionId });
-  } catch (error) {
-    const status = await readStatus(deps, plan.transactionId);
-    if (status?.status === "committed")
-      return {
-        ok: true,
-        skill: skill.name,
-        slots: validated.slots,
-        calls: plan.steps.map((step) => step.call),
-        transactionId: plan.transactionId,
-        changes,
-        outcome: "committed",
-        guarantee: "atomic",
-      };
-    return unprovable(
-      skill.name,
-      "commit",
-      `The commit response was lost (${detail(error)}).`,
-      plan.transactionId,
-      status?.failureCode,
-    );
-  }
-
-  if (!commit.ok) {
-    const status = await readStatus(deps, plan.transactionId);
-    if (status?.status === "committed")
-      return {
-        ok: true,
-        skill: skill.name,
-        slots: validated.slots,
-        calls: plan.steps.map((step) => step.call),
-        transactionId: plan.transactionId,
-        changes,
-        outcome: "committed",
-        guarantee: "atomic",
-      };
-    if (status?.canRollback === true)
-      return rollbackExactly(
-        skill.name,
-        "commit",
-        `The change could not be committed: ${commit.error ?? "unknown error"}.`,
-        plan,
-        preFingerprint,
-        deps,
-      );
-    return unprovable(
-      skill.name,
-      "commit",
-      `The change could not be committed: ${commit.error ?? "unknown error"}.`,
-      plan.transactionId,
-      status?.failureCode,
-    );
-  }
-
-  // Every other unresolved state is a refusal, not a success.
-  const finalStatus = isRecord(commit.data) ? (commit.data as TxnStatus) : null;
-  if (finalStatus?.status !== "committed") {
-    const status = await readStatus(deps, plan.transactionId);
-    if (status?.status !== "committed")
-      return unprovable(
-        skill.name,
-        "commit",
-        "The commit did not report a committed transaction.",
-        plan.transactionId,
-        status?.failureCode,
-      );
-  }
-
-  return {
-    ok: true,
+  // ── STEPS 2–6: the trusted, dynamic atomic runner (skillFoundry/atomicPlan.ts) ──
+  // The static catalog's own slot/precondition validation and template expansion happened
+  // above (STEP 1); everything from here — batch_begin, per-command execution with
+  // status-driven transport-loss reconciliation, the postcondition check, and commit — is
+  // the extracted trusted runner. This adapter supplies an always-green guard at both
+  // checkpoints, so the observable behavior of a static catalog skill is unchanged by the
+  // extraction: the guard seams exist for a dynamic (owner-authored) plan, not for this path.
+  const atomicPlan: AtomicSkillPlanV1 = {
     skill: skill.name,
+    version: "1",
     slots: validated.slots,
-    calls: plan.steps.map((step) => step.call),
-    transactionId: plan.transactionId,
-    changes,
-    outcome: "committed",
-    guarantee: "atomic",
+    before,
+    transaction: plan,
+    verifyPostcondition: (b, a, changes) => skill.postcondition(b, a, validated.slots, changes),
   };
+
+  return runAtomicSkillPlanV1(atomicPlan, {
+    snapshot: deps.snapshot,
+    exec: deps.exec,
+    guard: ALWAYS_OK_ATOMIC_GUARD,
+  });
 }

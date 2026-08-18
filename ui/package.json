@@ -32,7 +32,9 @@
     "agent-bench": "tsx scripts/agentBench.mts",
     "moshi-bench": "tsx scripts/moshiBench.mts",
     "policy-probe": "tsx scripts/policyProbe.mts",
-    "synthesize": "tsx scripts/synthesizeDriver.mts"
+    "synthesize": "tsx scripts/synthesizeDriver.mts",
+    "verify:skill-identities": "tsx scripts/verifySkillIdentityUniverse.mts",
+    "teach-moshi": "tsx src/skillFoundry/cli.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

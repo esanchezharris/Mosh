@@ -55,3 +55,21 @@
 - `decision`: reject
 - `recipe_authoring_next_step`: none
 - `phase0_checks_to_run_after_authoring`: none
+
+## Skill Source
+
+- `source_version`: unknown
+- `rights`: official_public_documentation
+- `acquisition`: official_https_page
+- `platform_handling`: metadata_and_short_paraphrases_only
+- `evidence_sha256`: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd
+- `reviewer`: mosh-owner
+- `reviewed_at`: 2026-06-30T00:00:00Z
+- `source_state`: current
+- `dependent_ids`:
+
+## Claims
+
+| Claim ID | Origin | Workflow Moment | Paraphrase | Boundary |
+| --- | --- | --- | --- | --- |
+| c1 | source_text | drop | ![rack screenshot](assets/rack.png) embedded in the note itself | not allowed |

@@ -5,18 +5,8 @@
     "expires": "2026-09-01"
   },
   {
-    "command": "activate_lora_adapter",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
     "command": "analyze_lyrics",
     "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "approve_training_source",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
     "expires": "2026-09-01"
   },
   {
@@ -30,19 +20,14 @@
     "expires": "2026-09-01"
   },
   {
-    "command": "build_training_corpus",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
-    "expires": "2026-09-01"
-  },
-  {
     "command": "cancel_lyric_job",
     "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
     "expires": "2026-09-01"
   },
   {
     "command": "cancel_render",
-    "reason": "Stage-5 render-loop tail command with NO current coverage on any surface (discovered by this ledger's first run \u2014 the 2026-06-08 gate coverage has since drifted). real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
-    "expires": "2026-08-15"
+    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-08-16: STILL UNCOVERED \u2014 zero mentions across all three coverage surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Real coverage gap, not a bookkeeping one. P3 target: a conformance EXTRA family or a selftest section exercising submit -> cancel -> assert no artifact lands and the layer returns to idle.",
+    "expires": "2026-09-01"
   },
   {
     "command": "cancel_training_job",
@@ -75,23 +60,8 @@
     "expires": "2026-09-01"
   },
   {
-    "command": "import_training_source",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "list_lora_adapters",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
     "command": "list_loras",
     "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "list_training_sources",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
     "expires": "2026-09-01"
   },
   {
@@ -101,13 +71,13 @@
   },
   {
     "command": "load_rave_model",
-    "reason": "anira-gated (MOSH_ENABLE_ANIRA off by default); add_rave_insert path is verify-covered but model hot-swap is not. real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
-    "expires": "2026-08-15"
+    "reason": "Re-reviewed 2026-08-16: claim re-verified and still true. MOSH_ENABLE_ANIRA is still OFF by default (cmake/Dependencies.cmake:59), so this command is absent from every default build. add_rave_insert IS verify-covered (scripts/verify-hardware/rave_insert_check.py) but model HOT-SWAP is not. Covering it requires an anira-gated build, so this waiver is structural rather than a to-do \u2014 revisit only if anira ships on by default.",
+    "expires": "2026-09-01"
   },
   {
     "command": "mp_send_signal",
-    "reason": "MP lane: covered by vitest MP store tests only; dispatch-level exercise is a P6 matrix:locks target.",
-    "expires": "2026-08-15"
+    "reason": "Re-reviewed 2026-08-16: THE PREVIOUS REASON WAS STALE and is corrected here. It claimed 'covered by vitest MP store tests only'; no test file references mp_send_signal at all. It appears only in bridge.mock.ts, commandClassification.ts, store/events.ts, webrtc/useVideo.ts and the native dispatch \u2014 so it is uncovered on the three gate surfaces AND in vitest. P6 matrix:locks target; the signalling payload is WebRTC plumbing, so a store-level vitest asserting dispatch shape is the cheap first step.",
+    "expires": "2026-09-01"
   },
   {
     "command": "regenerate_lyric",
@@ -121,12 +91,7 @@
   },
   {
     "command": "reject_render",
-    "reason": "Stage-5 render-loop tail command with NO current coverage on any surface (discovered by this ledger's first run \u2014 the 2026-06-08 gate coverage has since drifted). real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
-    "expires": "2026-08-15"
-  },
-  {
-    "command": "submit_training_job",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-08-16: STILL UNCOVERED \u2014 zero mentions across all three coverage surfaces. Pairs with cancel_render; cover them together, since reject is the accept/reject taste-label branch and needs the JSONL label asserted, not just the layer state.",
     "expires": "2026-09-01"
   },
   {
