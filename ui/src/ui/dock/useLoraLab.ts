@@ -10,7 +10,12 @@ import { create } from "zustand";
 import { clampWindow, moveWindow, resizeWindow, type FloatWin, type ResizeEdge } from "./dockLayout";
 
 const KEY = "mosh.loraLab";
-const DEFAULT: FloatWin = { id: "lora-lab", x: 160, y: 90, w: 820, h: 560, minW: 560, minH: 380 };
+// Sized to fit a TYPICAL run without scrolling: stub/blocker notice + run header
+// + prompt + source + six take rows + the kept rack measures ~693px of content,
+// and 560 gave a 513px viewport — so the run header, the one thing you watch
+// while training, scrolled out of view exactly when it mattered. Measured, not
+// guessed; re-measure if the Lab grows another section rather than nudging it.
+const DEFAULT: FloatWin = { id: "lora-lab", x: 160, y: 70, w: 860, h: 760, minW: 560, minH: 380 };
 
 const bounds = () => ({
   w: typeof window !== "undefined" ? window.innerWidth : 1280,
