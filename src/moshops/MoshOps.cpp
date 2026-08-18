@@ -15,6 +15,7 @@
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
+#include "state/TakeIdentity.h"
 #include "state/RenderLayer.h"
 #include "state/Migrations.h"
 #include "state/SafeMode.h"
@@ -3588,19 +3589,31 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         if (w->hasAnyTakes())
         {
             const int currentTake = effectiveCurrentTakeIndex (*w);
+            // Skill Foundry Slice B, Task 1 — the ordered stable-id set for this clip's
+            // takes (state/TakeIdentity.h). Read alongside index i so `takes[i].id` and
+            // `takeIds[i]` name the SAME take, and `currentTakeId` is the id at whichever
+            // index is current today — additive to the existing index-based fields.
+            const auto stableIds = mosh::takeidentity::orderedIds (w->state.getChildWithName (te::IDs::TAKES));
             o->setProperty ("numTakes", w->getNumTakes (false));
             o->setProperty ("currentTakeIndex", currentTake);
             auto descs = w->getTakeDescriptions();
             juce::Array<juce::var> takes;
+            juce::Array<juce::var> takeIdsVar;
             for (int i = 0; i < descs.size(); ++i)
             {
+                const auto id = i < stableIds.size() ? stableIds[i] : juce::String();
                 auto* t = new juce::DynamicObject();
                 t->setProperty ("index", i);
+                t->setProperty ("id", id);
                 t->setProperty ("description", descs[i]);
                 t->setProperty ("isCurrent", i == currentTake);
                 takes.add (juce::var (t));
+                takeIdsVar.add (id);
             }
             o->setProperty ("takes", takes);
+            o->setProperty ("takeIds", takeIdsVar);
+            o->setProperty ("currentTakeId", (currentTake >= 0 && currentTake < stableIds.size())
+                ? stableIds[currentTake] : juce::String());
         }
     }
     else if (auto* mc = dynamic_cast<te::MidiClip*> (&c))
@@ -3759,8 +3772,18 @@ juce::var MoshOps::controllerToVar()
         take->setProperty ("kept", ! hasLanes);
         if (hasLanes)
         {
+            const int currentTake = effectiveCurrentTakeIndex (*latestWave);
+            // Skill Foundry Slice B, Task 1 — same ordered stable-id projection clipToVar
+            // exposes, so the producer-controller "which take am I reviewing" surface and
+            // the main clip snapshot always name the same take by the same id.
+            const auto stableIds = mosh::takeidentity::orderedIds (latestWave->state.getChildWithName (te::IDs::TAKES));
+            juce::Array<juce::var> takeIdsVar;
+            for (auto& id : stableIds) takeIdsVar.add (id);
             take->setProperty ("numTakes", latestWave->getNumTakes (false));
-            take->setProperty ("currentTakeIndex", effectiveCurrentTakeIndex (*latestWave));
+            take->setProperty ("currentTakeIndex", currentTake);
+            take->setProperty ("takeIds", takeIdsVar);
+            take->setProperty ("currentTakeId", (currentTake >= 0 && currentTake < stableIds.size())
+                ? stableIds[currentTake] : juce::String());
         }
     }
 

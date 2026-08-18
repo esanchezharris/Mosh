@@ -39,6 +39,10 @@ target_sources(MoshTests PRIVATE
     test_annotations.cpp
     test_remote_companion.cpp
     test_recording_landing.cpp
+    # Skill Foundry Slice B, Task 1 — stable, persisted take identity. Engine-free
+    # (juce_core + juce_data_structures only), same posture as RecordingLanding.h/
+    # test_recording_landing.cpp above.
+    test_take_identity.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_audio_ref.cpp
     test_multiplayer_lock_manager.cpp

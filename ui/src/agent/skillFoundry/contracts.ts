@@ -446,9 +446,14 @@ export type ContinuationChoiceValueV1 = { readonly id: string; readonly label: s
 // can be detected. Modeled minimally as an entity kind + ID pair, tagged with the manifest
 // role (e.g. `"trackId"`) that resolved it, so `atomicPlan`/`declarativeExecutor` can
 // re-resolve the same role and compare.
+// Widened ADDITIVELY for Slice B (2026-08-14 four-core-runtime plan, correction 1):
+// `capture-review-choose-take`'s native take handler resolves clips and stable take ids
+// (state/TakeIdentity.h), not just tracks/plugins. "track" | "plugin" is Slice A's
+// original, narrower union — "clip" | "take" are net-new roles a resolved target
+// identity may now carry; nothing that matched the old union stops matching this one.
 export type ResolvedTargetIdentityV1 = {
   readonly role: string;
-  readonly entityKind: "track" | "plugin";
+  readonly entityKind: "track" | "plugin" | "clip" | "take";
   readonly entityId: string;
 };
 

@@ -13,8 +13,9 @@ import type { CatalogFingerprintV1, NativeSkillPayloadV1, SkillCompatibilityCont
 import { canonicalMoshBuildIdentityV1 } from "./nativeIdentity";
 import { sha256Bytes, utf8Bytes } from "./hash";
 import { validateNativeArtifactGraphV1, type ValidatedDeclarativeSkillV1 } from "./packageValidation";
-import { adaptNativeSkillV1 } from "./nativeAdapter";
+import { adaptNativeSkillV1, adaptCodeBoundNativeSkillV1 } from "./nativeAdapter";
 import { adaptDeclarativeSkillV1 } from "./declarativeAdapter";
+import { NATIVE_PAYLOADS_V1 } from "./native/index";
 
 // ---------------------------------------------------------------------------------------
 // Shared fixture helpers (mirrors packageValidation.test.ts's own helpers — kept local
@@ -205,6 +206,92 @@ describe("adaptNativeSkillV1 — forwards Task 3 graph failures verbatim (no sec
     expect(graph).toMatchObject({ ok: false, code: "chain_mismatch" });
     const result = adaptNativeSkillV1(graph);
     expect(result).toEqual(graph);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// adaptCodeBoundNativeSkillV1 — owner decision, CODE-BOUND SEEDING. Unlike
+// `adaptNativeSkillV1` above, this adapter's whole INPUT is the compiled-in
+// `NATIVE_PAYLOADS_V1` constant (native/payloads.ts) — there is no Task 3 artifact graph to
+// forward, because there is no external byte source to check. What it DOES still enforce is
+// schema-level shape (`parseNativeSkillPayloadV1`) and the same legacy-alias pin
+// `adaptNativeSkillV1` enforces — see nativeAdapter.ts's own header for the full trust-root
+// reasoning. These tests corrupt PAYLOAD CLONES (never `NATIVE_PAYLOADS_V1` itself, which
+// stays real/compiled-in throughout) to prove each check is load-bearing.
+// ---------------------------------------------------------------------------------------
+
+describe("adaptCodeBoundNativeSkillV1 — the compiled-in, code-bound seeding path", () => {
+  it("accepts every real compiled-in payload (NATIVE_PAYLOADS_V1) unmodified", () => {
+    for (const payload of NATIVE_PAYLOADS_V1) {
+      const result = adaptCodeBoundNativeSkillV1(payload);
+      expect(result).toMatchObject({ ok: true, value: { id: payload.id, origin: "native" } });
+    }
+  });
+
+  it("pins load_named_plugin -> load-named-plugin for the real compiled-in payload", () => {
+    const payload = NATIVE_PAYLOADS_V1.find((p) => p.id === "load-named-plugin");
+    if (!payload) throw new Error("test fixture: load-named-plugin payload missing from NATIVE_PAYLOADS_V1");
+    const result = adaptCodeBoundNativeSkillV1(payload);
+    expect(result).toMatchObject({ ok: true, value: { id: "load-named-plugin", origin: "native", aliases: ["load_named_plugin"] } });
+  });
+
+  it("forwards the validated payload as the candidate manifest", () => {
+    const payload = NATIVE_PAYLOADS_V1.find((p) => p.id === "explicit-balance");
+    if (!payload) throw new Error("test fixture: explicit-balance payload missing from NATIVE_PAYLOADS_V1");
+    const result = adaptCodeBoundNativeSkillV1(payload);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.manifest).toMatchObject({ id: "explicit-balance", handlerKey: "explicitBalanceV1" });
+  });
+
+  // GUARD-REMOVAL PROOF (a) — alias pinning. Temporarily deleting the alias-pin loop in
+  // `adaptCodeBoundNativeSkillV1` (nativeAdapter.ts) makes this test fail; see the session
+  // report for the observed RED output. Restored before landing.
+  it("GUARD-REMOVAL PROOF (a): rejects a payload clone whose alias is pinned to a DIFFERENT id", () => {
+    const base = NATIVE_PAYLOADS_V1.find((p) => p.id === "session-control");
+    if (!base) throw new Error("test fixture: session-control payload missing from NATIVE_PAYLOADS_V1");
+    const corrupted: NativeSkillPayloadV1 = { ...base, legacyAliases: ["load_named_plugin"] };
+    const result = adaptCodeBoundNativeSkillV1(corrupted);
+    expect(result).toMatchObject({ ok: false, code: "unpinned_native_alias" });
+  });
+
+  it("rejects a payload clone whose alias is not in the closed NATIVE_SKILL_LEGACY_ALIASES_V1 table at all", () => {
+    const base = NATIVE_PAYLOADS_V1.find((p) => p.id === "load-named-plugin");
+    if (!base) throw new Error("test fixture: load-named-plugin payload missing from NATIVE_PAYLOADS_V1");
+    const corrupted: NativeSkillPayloadV1 = { ...base, legacyAliases: ["not_a_real_alias"] };
+    const result = adaptCodeBoundNativeSkillV1(corrupted);
+    expect(result).toMatchObject({ ok: false, code: "unpinned_native_alias" });
+  });
+
+  // GUARD-REMOVAL PROOF (b) — schema-level validation. Temporarily making
+  // `adaptCodeBoundNativeSkillV1` skip its `parseNativeSkillPayloadV1` call (e.g. treating
+  // the raw payload as already-validated) makes this test fail; see the session report for
+  // the observed RED output. Restored before landing.
+  it("GUARD-REMOVAL PROOF (b): rejects a payload clone with a corrupted/invalid schemaVersion", () => {
+    const base = NATIVE_PAYLOADS_V1.find((p) => p.id === "load-named-plugin");
+    if (!base) throw new Error("test fixture: load-named-plugin payload missing from NATIVE_PAYLOADS_V1");
+    const corrupted = { ...base, schemaVersion: 2 } as unknown as NativeSkillPayloadV1;
+    const result = adaptCodeBoundNativeSkillV1(corrupted);
+    expect(result).toMatchObject({ ok: false, code: "invalid_code_bound_payload_schema" });
+  });
+
+  it("rejects a payload clone with an id outside the closed NATIVE_SKILL_IDS_V1 universe", () => {
+    const base = NATIVE_PAYLOADS_V1.find((p) => p.id === "session-control");
+    if (!base) throw new Error("test fixture: session-control payload missing from NATIVE_PAYLOADS_V1");
+    const corrupted = { ...base, id: "not-a-real-native-id" } as unknown as NativeSkillPayloadV1;
+    const result = adaptCodeBoundNativeSkillV1(corrupted);
+    // Caught at the schema gate (parseNativeSkillPayloadV1 also checks NATIVE_SKILL_IDS_V1
+    // membership) before this adapter's own defense-in-depth id check ever runs — either way
+    // the candidate is rejected, never silently admitted with an out-of-universe id.
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a payload clone whose handlerKey is not one of the four closed literal values", () => {
+    const base = NATIVE_PAYLOADS_V1.find((p) => p.id === "session-control");
+    if (!base) throw new Error("test fixture: session-control payload missing from NATIVE_PAYLOADS_V1");
+    const corrupted = { ...base, handlerKey: "notARealHandlerV1" } as unknown as NativeSkillPayloadV1;
+    const result = adaptCodeBoundNativeSkillV1(corrupted);
+    expect(result.ok).toBe(false);
   });
 });
 

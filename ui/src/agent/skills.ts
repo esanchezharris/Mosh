@@ -137,6 +137,19 @@ const clipFor = (
 const midiNoteClipCount = (track: Track): number =>
   track.clips.filter((clip) => clip.type === "midi" && (clip.notes?.length ?? 0) > 0).length;
 
+// Skill Foundry Slice B, Task 4 — factored out of SET_TRACK_LEVEL_SKILL's own postcondition
+// below (unchanged behavior for that still-uncertified legacy skill) so
+// ui/src/agent/skillFoundry/native/explicitBalance.ts's atomic postcondition can reuse the
+// EXACT same "did the track reach the requested level" check rather than re-deriving its own
+// epsilon/rounding rule.
+export function trackVolumeReachedV1(after: Snapshot, trackId: string, requestedDb: number): SkillCheck {
+  const afterTrack = trackFor(after, trackId);
+  if (!afterTrack) return { ok: false, reason: `Track "${trackId}" was not preserved.` };
+  if (typeof afterTrack.volumeDb !== "number" || Math.abs(afterTrack.volumeDb - requestedDb) > 1e-6)
+    return { ok: false, reason: `Track "${trackId}" did not reach ${requestedDb} dB.` };
+  return { ok: true };
+}
+
 export const SET_TRACK_LEVEL_SKILL: SkillDefinition = {
   name: "set_track_level",
   description: "Set the level of an existing session track, optionally muting or unmuting it.",
@@ -199,8 +212,8 @@ export const SET_TRACK_LEVEL_SKILL: SkillDefinition = {
     const afterTrack = trackFor(after, trackId);
     if (!beforeTrack || !afterTrack)
       return { ok: false, reason: `Track "${trackId}" was not preserved.` };
-    if (typeof afterTrack.volumeDb !== "number" || Math.abs(afterTrack.volumeDb - requestedDb) > 1e-6)
-      return { ok: false, reason: `Track "${trackId}" did not reach ${requestedDb} dB.` };
+    const levelCheck = trackVolumeReachedV1(after, trackId, requestedDb);
+    if (!levelCheck.ok) return levelCheck;
 
     if (owns(slots, "mute")) {
       const requestedMute = slots.mute;
