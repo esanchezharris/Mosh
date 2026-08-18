@@ -8,6 +8,7 @@ final class CompanionStore: ObservableObject {
     @Published private(set) var errorText: String?
     @Published private(set) var connectionState: CompanionConnectionState
     @Published private(set) var paired: Bool
+    @Published private(set) var connectionQuality: ConnectionQuality = .unknown
     @Published var selectedTrackId: String?
     @Published var selectedRenderClipId: String?
 
@@ -19,6 +20,10 @@ final class CompanionStore: ObservableObject {
     private let client: CompanionClientProtocol
     private var eventSeq = 0
     private var lastOnlineAt: Date?
+    private var heartbeatTask: Task<Void, Never>?
+    /// Overridable for tests that want a tight loop; production uses a few-second
+    /// cadence since this is a reassurance indicator, not a monitoring dashboard.
+    var heartbeatIntervalNanoseconds: UInt64 = 4_000_000_000
 
     init(client: CompanionClientProtocol = CompanionClient()) {
         self.client = client
@@ -43,6 +48,7 @@ final class CompanionStore: ObservableObject {
         Task { await speech.refreshAvailability() }
         if paired {
             connectionState = .connecting
+            startHeartbeat()
         }
     }
 
@@ -57,6 +63,7 @@ final class CompanionStore: ObservableObject {
             paired = true
             connectionState = .connecting
             receipts.insert("Paired with \(payload.host)", at: 0)
+            startHeartbeat()
             Task { await refresh() }
         } catch {
             errorText = error.localizedDescription
@@ -230,6 +237,7 @@ final class CompanionStore: ObservableObject {
             Task { await recorder.cancel(client: client) }
         }
 
+        stopHeartbeat()
         client.clearPairing()
         paired = false
         pairingText = ""
@@ -241,7 +249,42 @@ final class CompanionStore: ObservableObject {
         eventSeq = 0
         lastOnlineAt = nil
         connectionState = .unpaired
+        connectionQuality = .unknown
         browser.start()
+    }
+
+    /// Starts the background heartbeat that keeps `connectionQuality` current for
+    /// the whole life of a paired session — including a silent stretch mid-take
+    /// where nothing else would otherwise trigger a network round trip.
+    private func startHeartbeat() {
+        guard heartbeatTask == nil else { return }
+        heartbeatTask = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                await self.refreshConnectionQuality()
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(nanoseconds: self.heartbeatIntervalNanoseconds)
+            }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
+    /// One round trip against the existing `/monitor/ping` endpoint. Exposed
+    /// (not `private`) so tests can drive it directly without spinning the
+    /// heartbeat's sleep loop.
+    func refreshConnectionQuality() async {
+        guard paired else { return }
+        let sentAtMs = Date().timeIntervalSince1970 * 1000.0
+        do {
+            _ = try await client.monitorPing(phoneTimeMs: sentAtMs)
+            let roundTripMs = Date().timeIntervalSince1970 * 1000.0 - sentAtMs
+            connectionQuality = .classify(roundTripMs: roundTripMs)
+        } catch {
+            connectionQuality = .lost
+        }
     }
 
     private func reconcileRenderTargetSelection() {
