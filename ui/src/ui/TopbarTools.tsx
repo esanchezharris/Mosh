@@ -10,6 +10,7 @@ import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
+import type { RemotePairingInfo } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "./RecentProjectList";
 import { historyRows, historyRowHint } from "./commandLogHistory";
@@ -782,12 +783,7 @@ export function RemoteTool({ label, title, className, ariaLabel, testId }: ToolC
         <>
           <div className="pop-head">iPhone Companion</div>
           {pairing ? (
-            <>
-              <PairingQR url={pairing.pairingUrl} />
-              <div className="remote-code tc">{pairing.token.slice(0, 6).toUpperCase()}</div>
-              <div className="pop-note tc">{pairing.host}:{pairing.port}</div>
-              <div className="pop-actions"><button className="btn" onClick={stop}>Stop remote</button></div>
-            </>
+            <PairingPanel pairing={pairing} onStop={stop} />
           ) : (
             <>
               <div className="pop-note">{lastError && lastError.includes("dev") ? "Companion runs on the native app only (unavailable in web dev)." : "Pair an iPhone to control the session."}</div>
@@ -797,6 +793,31 @@ export function RemoteTool({ label, title, className, ariaLabel, testId }: ToolC
         </>
       )}
     </Pop>
+  );
+}
+
+// The QR the phone actually scans. DEFAULT is the Safari `webUrl` — it opens the
+// no-install DAWN pad at /web in mobile Safari, so a phone WITHOUT the native
+// MoshCompanion app can still drive the session. `pairingUrl` is a mosh:// deep
+// link that iOS cannot open unless that app is installed, which made the old
+// always-deep-link QR a dead end on an un-provisioned phone.
+function PairingPanel({ pairing, onStop }: { pairing: RemotePairingInfo; onStop: () => void }) {
+  const [useAppLink, setUseAppLink] = useState(false);
+  return (
+    <>
+      <PairingQR url={useAppLink ? pairing.pairingUrl : pairing.webUrl} />
+      <div className="pop-note tc">
+        {useAppLink ? "Opens the MoshCompanion app (must be installed)." : "Scan with the iPhone Camera \u2014 opens in Safari, no app needed."}
+      </div>
+      <div className="remote-code tc">{pairing.token.slice(0, 6).toUpperCase()}</div>
+      <div className="pop-note tc">{pairing.host}:{pairing.port}</div>
+      <div className="pop-actions">
+        <button className="btn" onClick={() => setUseAppLink((v) => !v)}>
+          {useAppLink ? "Safari link" : "App link"}
+        </button>
+        <button className="btn" onClick={onStop}>Stop remote</button>
+      </div>
+    </>
   );
 }
 
