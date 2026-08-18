@@ -14,16 +14,26 @@
 import { useStore } from "../../store";
 import { epochsFor, formatDuration } from "./recipe";
 
+/** `clipCount` here is only a FALLBACK — the live rights registry, used when the
+ *  run itself has not reported its corpus (an older service, or the first poll
+ *  before training starts). */
 export function RunHeader({ clipCount }: { clipCount: number }) {
   const run = useStore((s) => s.labRun);
   const recipe = useStore((s) => s.capabilities?.trainingRecipe);
 
   if (!run) return null;
 
-  const batch = recipe?.batchSize ?? 2;
-  const accum = recipe?.gradAccum ?? 2;
-  const epochsDone = clipCount > 0 ? epochsFor(clipCount, run.step, batch, accum) : 0;
-  const epochsTotal = clipCount > 0 ? epochsFor(clipCount, run.totalSteps, batch, accum) : 0;
+  // Prefer the RUN's own facts over anything live. The epoch readout used to be
+  // computed entirely from the current registry and the current recommended
+  // recipe — neither of which describes the run being watched. It showed "—" for
+  // a finished run once its sources were cleared, and re-scaled itself mid-run
+  // if the producer registered more sources, silently restating the progress of
+  // a training that had not changed.
+  const clips = run.clipCount ?? clipCount;
+  const batch = run.batchSize ?? recipe?.batchSize ?? 2;
+  const accum = run.gradAccum ?? recipe?.gradAccum ?? 2;
+  const epochsDone = clips > 0 ? epochsFor(clips, run.step, batch, accum) : 0;
+  const epochsTotal = clips > 0 ? epochsFor(clips, run.totalSteps, batch, accum) : 0;
   const frac = run.totalSteps > 0 ? Math.min(1, run.step / run.totalSteps) : 0;
 
   const pill =

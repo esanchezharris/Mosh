@@ -186,6 +186,17 @@
 .v2-shell .lab-sheet-base { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--v2-line); }
 .v2-shell .lab-restore { align-self: flex-start; margin-top: 4px; font-size: var(--v2-fs-2xs); }
 
+/* Train / Stop. The one thing that starts work, so it is the only PRIMARY
+   button in the Lab — everything else here is a listening affordance. */
+.v2-shell .lab-go { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v2-shell .lab-train,
+.v2-shell .lab-stop { display: inline-flex; align-items: center; gap: 8px; }
+.v2-shell .lab-go-n {
+  font-size: var(--v2-fs-2xs);
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Keep, and the kept rack ─────────────────────────────────────────────────
    Keep is the Lab's only durable verb, so it reads as a quiet secondary control
    rather than a primary one: the loud button on a row is PLAY, because the

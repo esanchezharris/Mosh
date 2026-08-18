@@ -729,6 +729,14 @@ def _run_training_job(job_id: str) -> None:
                     "leg": state.get("leg"),
                     "legs": state.get("legs"),
                     "checkpoints": state.get("checkpoints") or [],
+                    # Facts about THIS run (see trainer_job's run_facts): the
+                    # corpus it actually trained on and the batch it used. The
+                    # UI must not re-derive these from live state — the registry
+                    # and the recommended recipe both move independently of a
+                    # run in flight.
+                    "clipCount": state.get("clipCount"),
+                    "batchSize": state.get("batchSize"),
+                    "gradAccum": state.get("gradAccum"),
                     # Published takes, by registry name — the take sheet's rows.
                     # Distinct from `checkpoints` (paths on disk): only a name the
                     # render path can resolve is auditionable.

@@ -467,6 +467,27 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
     # are on disk. It must not die at the last step over a link.
     label = str(config.get("label") or out.name)
 
+    # Facts about THIS run, fixed the moment the recipe resolves and attached to
+    # every progress emission.
+    #
+    # They exist because the UI had no other honest source. The Lab's epoch
+    # readout was deriving "N of M epochs" from the CURRENT rights registry
+    # (`snapshot.training.sources.length`) and the CURRENT recommended recipe —
+    # neither of which is what this run is doing. Two visible consequences: the
+    # headline number read "—" whenever the registry was empty (a finished run
+    # still has epochs), and adding sources mid-run silently re-scaled the epoch
+    # count of a training that had not changed at all.
+    #
+    # `clipCount` is `pre["count"]` — the clips that actually survived precompute,
+    # not the manifest's source_count, because a clip that was skipped never
+    # reached an epoch.
+    run_facts = {
+        "clipCount": int(pre["count"]),
+        "batchSize": int(cfg["batch_size"]),
+        "gradAccum": int(cfg["grad_accum"]),
+        "effectiveBatch": int(cfg["batch_size"]) * int(cfg["grad_accum"]),
+    }
+
     def _progress(state: dict[str, Any]) -> None:
         try:
             takes = LAB.publish(run_dir, label, state.get("checkpoints"), final=False)
@@ -474,7 +495,7 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
         except Exception as e:  # noqa: BLE001
             print(f"[lab] publish skipped: {e}", flush=True)
         if on_progress:
-            on_progress(state)
+            on_progress({**run_facts, **state})
 
     code = LP.run_training(argv, run_dir, cfg["steps"],
                            should_cancel=should_cancel, on_progress=_progress)
@@ -502,6 +523,11 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
         "source_count": pre["count"],
         "steps": cfg["steps"],
         "epochs": round(cfg["steps"] * cfg["batch_size"] * cfg["grad_accum"] / max(1, pre["count"]), 1),
+        # Same facts on the result: a run that has FINISHED still has to be able
+        # to say what it did, and by then the live registry may have moved on.
+        "clipCount": int(pre["count"]),
+        "batchSize": int(cfg["batch_size"]),
+        "gradAccum": int(cfg["grad_accum"]),
         "checkpoints": len(checkpoints),
         "backend": "local_pmetal",
         # NOT a quality score: the probe has repeatedly pointed the opposite way

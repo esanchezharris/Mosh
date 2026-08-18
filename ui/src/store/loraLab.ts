@@ -54,6 +54,13 @@ export type LabRun = {
   etaSeconds: number | null;
   leg: number | null;
   legs: number | null;
+  /** Facts about THIS run, from the service — NOT re-derived from live state.
+   *  The corpus it trained on and the batch it used; both are fixed when the
+   *  run starts, while the rights registry and the recommended recipe keep
+   *  moving. null until the first status carries them (or on an older service). */
+  clipCount: number | null;
+  batchSize: number | null;
+  gradAccum: number | null;
   error?: string;
 };
 
@@ -97,6 +104,12 @@ export type LoraLabSlice = {
   setLabStackValue: (name: string, value: number) => void;
   /** Audition the whole stack as one take. */
   auditionLabStack: () => Promise<void>;
+  /** Build the corpus from approved sources and start a run. */
+  startLabRun: (label?: string) => Promise<boolean>;
+  /** Stop the run in flight. */
+  stopLabRun: () => Promise<void>;
+  /** Message from a refused start (no approved sources, blockers, ...). */
+  labStartError: string;
   stopLabAudition: () => void;
   pollLabRun: () => Promise<void>;
   onLabTakeEvent: (payload: unknown) => void;
@@ -130,6 +143,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
   labStack: [],
   labKeepError: {},
   labKeeping: null,
+  labStartError: "",
 
   setLabPrompt: (s) => set({ labPrompt: s }),
   setLabSource: (clipId) => set({ labSourceClipId: clipId }),
@@ -198,6 +212,61 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
     // when its `lab_take` event lands (see onLabTakeEvent).
     if (status === "ready" && outputWav)
       void executeCommand({ command: "audition_file", args: { path: outputWav } });
+  },
+
+  startLabRun: async (label) => {
+    // Build, then submit. Two commands rather than one because the corpus is a
+    // real artifact the producer can inspect, and because building is where the
+    // rights gate refuses — a source without proof never reaches a bundle.
+    set({ labStartError: "" });
+    const built = await executeCommand<CommandResult<{ bundlePath?: string; sourceCount?: number }>>({
+      command: "build_training_corpus", args: {},
+    });
+    if (!built.ok || !built.data?.bundlePath) {
+      set({ labStartError: built.error || "no approved sources to train on" });
+      return false;
+    }
+
+    const runLabel = (label || "").trim() || `run-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`;
+    const res = await executeCommand<CommandResult<{ jobId?: string }>>({
+      command: "submit_training_job",
+      args: {
+        corpusBundle: built.data.bundlePath,
+        // No steps/batch here on purpose: omitted, the service applies the
+        // MEASURED epoch curve for this corpus size (recipe.py), which is the
+        // whole point of having one. The Lab's knobs override it explicitly.
+        config: { rank: 16, lr: 0.0001, label: runLabel },
+      },
+    });
+    const jobId = res.data?.jobId ?? "";
+    if (!res.ok || !jobId) {
+      set({ labStartError: res.error || "could not start training" });
+      return false;
+    }
+
+    set({
+      labRun: {
+        jobId, label: runLabel, status: "precompute",
+        step: 0, totalSteps: 0, loss: null, sPerStep: null, etaSeconds: null,
+        leg: null, legs: null,
+        // Unknown until the run reports them — deliberately NOT seeded from the
+        // live registry or the recommended recipe, which is the bug this whole
+        // field exists to fix.
+        clipCount: null, batchSize: null, gradAccum: null,
+      },
+      labTakes: [], labRenders: {}, labCued: null, labDismissed: [],
+    } as Partial<State>);
+    return true;
+  },
+
+  stopLabRun: async () => {
+    const run = get().labRun;
+    if (!run?.jobId) return;
+    await executeCommand({ command: "cancel_training_job", args: { jobId: run.jobId } });
+    // Don't fake the status — the next poll reports what actually happened.
+    // Cancellation has to reach a process group, and claiming "stopped" before
+    // it has would be a lie the UI tells for as long as the trainer takes to die.
+    void get().pollLabRun();
   },
 
   promoteLabTake: async (take, keptName) => {
@@ -374,6 +443,12 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
         etaSeconds: typeof progress.etaSeconds === "number" ? progress.etaSeconds : run.etaSeconds,
         leg: typeof progress.leg === "number" ? progress.leg : run.leg,
         legs: typeof progress.legs === "number" ? progress.legs : run.legs,
+        // Sticky: once the run has told us what it is training on, keep it. A
+        // later poll that omits the field (or a service that predates it) must
+        // not blank a number the header is already showing.
+        clipCount: typeof progress.clipCount === "number" ? progress.clipCount : run.clipCount,
+        batchSize: typeof progress.batchSize === "number" ? progress.batchSize : run.batchSize,
+        gradAccum: typeof progress.gradAccum === "number" ? progress.gradAccum : run.gradAccum,
         error: str(d.error) || undefined,
       },
     });
@@ -403,6 +478,6 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
 
   resetLab: () => set({
     labRun: null, labTakes: [], labRenders: {}, labCued: null, labDismissed: [],
-    labStack: [], labKeepError: {}, labKeeping: null,
+    labStack: [], labKeepError: {}, labKeeping: null, labStartError: "",
   }),
 });

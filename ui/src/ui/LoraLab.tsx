@@ -49,6 +49,9 @@ export function LoraLab() {
   // transfer between corpora — so the count has to come from the real registry,
   // not a guess.
   const training = useStore((s) => s.snapshot?.training ?? null);
+  const startRun = useStore((s) => s.startLabRun);
+  const stopRun = useStore((s) => s.stopLabRun);
+  const startError = useStore((s) => s.labStartError);
 
   // Capabilities are fetched LAZILY on open, never at app init: the fetch spawns
   // the generative service, execute_command is synchronous on the UI thread, and
@@ -74,6 +77,9 @@ export function LoraLab() {
   const blockers = trainingBlockers(capabilities);
   const isStub = trainingPreviewLabel(capabilities) !== null;
   const clipCount = training?.sources?.length ?? 0;
+  // Only APPROVED sources reach a corpus, so that — not the raw registry count —
+  // is what decides whether Train can do anything.
+  const eligibleClips = (training?.sources ?? []).filter((x) => x.eligible).length;
   const audioClips = (snapshot?.tracks ?? [])
     .flatMap((t) => t.clips.map((c) => ({ ...c, trackName: t.name })))
     .filter((c) => c.type === "wave");
@@ -99,6 +105,32 @@ export function LoraLab() {
             <code>service/training/setup-trainer.sh --check</code>
           </div>
         )}
+
+        {/* Train / Stop. The Lab could watch a run and audition its takes but had
+            no way to START one — submit_training_job was wired only into the old
+            topbar popover, which kept the job id in component state and never
+            told the Lab about it. So `labRun` was always null, the run header
+            never rendered, and the Lab was a viewer for a run nothing here could
+            begin. This is the missing link. */}
+        <div className="lab-go">
+          {run && (run.status === "training" || run.status === "precompute") ? (
+            <button className="btn ghost lab-stop" data-testid="lab-stop"
+              title="Stop this run. Checkpoints already published stay auditionable."
+              onClick={() => void stopRun()}>Stop training</button>
+          ) : (
+            <button className="btn primary lab-train" data-testid="lab-train"
+              disabled={isStub || blockers.length > 0 || eligibleClips === 0}
+              title={isStub ? "The trainer is a stub on this Mac"
+                     : blockers.length > 0 ? "Training is blocked — see above"
+                     : eligibleClips === 0 ? "Add and approve some sources first (Training tools)"
+                     : `Train on ${eligibleClips} approved clip${eligibleClips === 1 ? "" : "s"}`}
+              onClick={() => void startRun()}>
+              {run ? "Train again" : "Train"}
+              {eligibleClips > 0 && <span className="lab-go-n">{eligibleClips} clips</span>}
+            </button>
+          )}
+          {startError && <span className="lab-take-note err" data-testid="lab-start-error">{startError}</span>}
+        </div>
 
         <RunHeader clipCount={clipCount} />
 
