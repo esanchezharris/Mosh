@@ -426,6 +426,12 @@ private:
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
     juce::var cmdListLoras        (const juce::var& args);
+    juce::var cmdPromoteLoraCheckpoint (const juce::var& args);
+    // LoRA Lab — render ONE audition take from an arbitrary adapter stack. Unlike
+    // render_layer this is not clip-parented and creates no MOSH_RENDERLAYER: the
+    // whole point is to hear a checkpoint that has not been kept (and may never
+    // be) without attaching it to the arrangement. Async; emits `lab_take`.
+    juce::var cmdRenderLoraTake   (const juce::var& args);
     juce::var cmdListTransformTargets (const juce::var& args);   // Route B discovery
     juce::var cmdListRaveModels   (const juce::var& args);       // Lane B — RAVE model browser (non-gated fs scan)
    #if MOSH_HAVE_ANIRA
@@ -523,8 +529,6 @@ private:
     juce::var cmdTrainingJobStatus      (const juce::var& args);
     juce::var cmdCancelTrainingJob      (const juce::var& args);
     juce::var cmdImportLoraAdapter      (const juce::var& args);
-    juce::var cmdActivateLoraAdapter    (const juce::var& args);
-    juce::var cmdListLoraAdapters       (const juce::var& args);
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.

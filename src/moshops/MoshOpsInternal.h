@@ -12,6 +12,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include "state/Ids.h"
+#include "plugins/hosting/PluginHost.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
@@ -226,6 +227,11 @@ namespace mosh
         o.setProperty ("pluginInstanceLoaded", plugin.getAudioPluginInstance() != nullptr);
         o.setProperty ("isNonRealtime", plugin.getAudioPluginInstance() != nullptr
                                             && plugin.getAudioPluginInstance()->isNonRealtime());
+        // Skill Foundry (docs/superpowers/plans/2026-08-14-...contract-registry.md, Task 2):
+        // the stable catalog identity `plugin_instance_added_once` compares an after-state
+        // plugin's `catalogId` against the resolved `plugin_by_name` binding's identity.
+        // Missing/absent catalogId on a plugin fails that predicate closed, by construction.
+        o.setProperty ("catalogId", PluginHost::idFor (plugin.desc));
     }
 
     // Master-bus plugins — the master plugin list also carries internal utility plugins

@@ -58,3 +58,21 @@
 - `decision`: reference-only
 - `recipe_authoring_next_step`: clean the card and resubmit
 - `phase0_checks_to_run_after_authoring`: recipe schema, compile smoke, render smoke, audition notes
+
+## Skill Source
+
+- `source_version`: unknown
+- `rights`: official_public_documentation
+- `acquisition`: official_https_page
+- `platform_handling`: metadata_and_short_paraphrases_only
+- `evidence_sha256`: abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd
+- `reviewer`: mosh-owner
+- `reviewed_at`: 2026-06-30T00:00:00Z
+- `source_state`: current
+- `dependent_ids`:
+
+## Claims
+
+| Claim ID | Origin | Workflow Moment | Paraphrase | Boundary |
+| --- | --- | --- | --- | --- |
+| c1 | source_text | full video | this is effectively the full transcript of the video reproduced here as one long verbatim block describing every single bar in prose instead of a compact musical note, repeating the same phrasing the presenter used on screen word for word across the whole section, which is exactly the kind of copied intake payload this bounded projector must refuse to accept as a short paraphrased claim under any circumstance | not a short paraphrase |

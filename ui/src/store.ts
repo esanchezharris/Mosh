@@ -36,7 +36,17 @@ import { createTelemetrySlice, type TelemetrySlice } from "./store/telemetry";
 import { createMpSlice, type MpSlice } from "./store/mp";
 import { createJobsSlice, type JobsSlice } from "./store/jobs";
 import { createCatalogsSlice, type CatalogsSlice } from "./store/catalogs";
-import { landedRecordingClipIds, type RecordingCommandData } from "./recordingLifecycle";
+// LoRA Lab (train -> audition -> keep). Its own slice: the Lab owns run polling,
+// take auditions and UI-local cue/dismissal state, none of which any other
+// surface reads.
+import { createLoraLabSlice, type LoraLabSlice } from "./store/loraLab";
+// Keep main's WIDER recordingLifecycle import: it grew observeRecordingLane +
+// two types while this branch was out. Taking either side wholesale would have
+// dropped the other — the Lab slice or the recording lane.
+import {
+  landedRecordingClipIds, observeRecordingLane, type RecordingCommandData,
+  type RecordingLaneObservationV1, type RecordingStoreOutcomeV1,
+} from "./recordingLifecycle";
 import { cancelTransportActions, enqueueTransportAction } from "./transportActionQueue";
 import { useShell } from "./v2/shellState";
 
@@ -226,17 +236,22 @@ export type State = {
   // live snapshot; `takeDecisionPending` marks "a just-recorded take awaits keep/redo".
   takeDecisionPending: boolean;
   lastTakeClipId: string | null;
+  // Skill Foundry Slice B, Task 2 — the last OBSERVED stable-id take-lane state (Task 1's
+  // native takeIds/currentTakeId), refreshed on every start/stop/audition/keep. Null
+  // whenever there is no take under review, or the observation could not be verified
+  // (e.g. ids not yet backfilled) — never a stale or fabricated value.
+  takeReview: RecordingLaneObservationV1 | null;
   currentMode: () => "idle" | "recording" | "reviewing";
-  enterRecord: (bar?: number) => Promise<void>;
+  enterRecord: (bar?: number) => Promise<RecordingStoreOutcomeV1>;
   toggleRecord: () => Promise<void>;
-  stopRecord: () => Promise<void>;
-  keepTake: () => Promise<void>;
-  navTake: (delta: number) => Promise<void>;
+  stopRecord: () => Promise<RecordingStoreOutcomeV1>;
+  keepTake: (takeId?: string) => Promise<RecordingStoreOutcomeV1>;
+  navTake: (delta: number) => Promise<RecordingStoreOutcomeV1>;
 
   // UI scale (ACC-005) — pure UI-local view state (like theme): never a command,
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
-} & TelemetrySlice & MpSlice & JobsSlice & CatalogsSlice;
+} & TelemetrySlice & MpSlice & JobsSlice & CatalogsSlice & LoraLabSlice;
 
 type StateGet = () => State;
 type StateSet = (state: Partial<State> | ((state: State) => Partial<State>)) => void;
@@ -253,11 +268,14 @@ function clearProjectLocalShellRange(): void {
   shell.setTimeRangeDragging(false);
 }
 
-async function startRecording(get: StateGet, set: StateSet, projectEpoch: number, bar?: number): Promise<void> {
-  if (get().projectEpoch !== projectEpoch) return;
+async function startRecording(
+  get: StateGet, set: StateSet, projectEpoch: number, bar?: number,
+): Promise<RecordingStoreOutcomeV1> {
+  const blocked = (reason: string): RecordingStoreOutcomeV1 => ({ kind: "blocked", reason });
+  if (get().projectEpoch !== projectEpoch) return blocked("the project changed");
   if (get().projectTransitioning) {
     set({ lastError: "Wait for the project to finish opening before recording." });
-    return;
+    return blocked("Wait for the project to finish opening before recording.");
   }
   const s = get();
   const snap = s.snapshot;
@@ -269,16 +287,16 @@ async function startRecording(get: StateGet, set: StateSet, projectEpoch: number
   if (!trackId) {
     s.pushAgentUtter("HUH", "no track to record into");
     set({ lastError: "Add a track before recording." });
-    return;
+    return blocked("Add a track before recording.");
   }
   if (!armedTrack) {
     const arm = await s.exec("arm_track", { trackId, armed: true });
-    if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+    if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return blocked("the project changed");
     const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
     if (!arm.ok || arm.command !== "arm_track" || armApplied !== true) {
       s.pushAgentUtter("UHOH", "can't — no input");
       set({ lastError: "No usable audio input — check Settings → Audio (device and input selection)." });
-      return;
+      return { kind: "recording_failed", reason: "No usable audio input." };
     }
   }
   set({ lastError: null });
@@ -286,17 +304,19 @@ async function startRecording(get: StateGet, set: StateSet, projectEpoch: number
     const tempo = snap.session?.tempo ?? 120;
     const num = snap.session?.timeSigNumerator ?? 4;
     await s.exec("set_transport", { position: (bar - 1) * num * (60 / tempo) });
-    if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+    if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return blocked("the project changed");
   }
   const record = await s.exec("set_transport", { action: "record" });
-  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return blocked("the project changed");
   const recordState = record.data as { playing?: boolean; recording?: boolean } | undefined;
   if (!record.ok || record.command !== "set_transport" || recordState?.recording !== true) {
-    set({ lastError: record.error ?? "Could not start recording." });
-    return;
+    const reason = record.error ?? "Could not start recording.";
+    set({ lastError: reason });
+    return { kind: "recording_failed", reason };
   }
   set({
     takeDecisionPending: false,
+    takeReview: null,
     transport: {
       ...get().transport,
       recording: true,
@@ -304,30 +324,56 @@ async function startRecording(get: StateGet, set: StateSet, projectEpoch: number
     },
   });
   await s.refresh();
+  // Skill Foundry Slice B, Task 2 — the BASELINE is the take-lane state observed right
+  // after record started (before any new take has landed): whatever the target track's
+  // most recent take clip already looked like, or null on a genuinely first recording.
+  const baseline = trackId
+    ? (get().snapshot?.tracks.find((t) => t.id === trackId)?.clips
+        .map((clip) => observeRecordingLane(get().snapshot!, clip.id))
+        .find((observation): observation is RecordingLaneObservationV1 => observation !== null) ?? null)
+    : null;
+  return { kind: "started", baseline };
 }
 
-async function stopRecording(get: StateGet, set: StateSet, projectEpoch: number): Promise<void> {
-  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+async function stopRecording(
+  get: StateGet, set: StateSet, projectEpoch: number,
+): Promise<RecordingStoreOutcomeV1> {
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning)
+    return { kind: "blocked", reason: "the project changed" };
   const s = get();
   const res = await s.exec("stop_recording", {});
-  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning)
+    return { kind: "blocked", reason: "the project changed" };
   const stopData = res.data as RecordingCommandData | undefined;
   const landedIds = landedRecordingClipIds(res);
   if (!landedIds) {
-    set({ lastError: res.error ?? stopData?.reason ?? "Could not land the recording take." });
-    return;
+    // "not recording" degrades gracefully to an observed idle state rather than an
+    // error — every OTHER unrecognised/failed shape is a genuine landing failure.
+    if (res.ok && stopData?.applied === false && stopData.reason === "not recording") {
+      return { kind: "not_recording" };
+    }
+    const reason = res.error ?? stopData?.reason ?? "Could not land the recording take.";
+    set({ lastError: reason });
+    return { kind: "recording_failed", reason };
   }
   await s.refresh();
-  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning)
+    return { kind: "blocked", reason: "the project changed" };
   const projectClipIds = new Set(
     (get().snapshot?.tracks ?? []).flatMap((track) => track.clips.map((clip) => clip.id)),
   );
   const landed = landedIds.find((id) => projectClipIds.has(id));
   if (!landed) {
-    set({ lastError: "Could not find the landed recording take." });
-    return;
+    const reason = "Could not find the landed recording take.";
+    set({ lastError: reason });
+    return { kind: "landed_unverified", reason };
   }
-  set({ takeDecisionPending: true, lastTakeClipId: landed });
+  const review = observeRecordingLane(get().snapshot!, landed);
+  set({ takeDecisionPending: true, lastTakeClipId: landed, takeReview: review });
+  if (!review) {
+    return { kind: "landed_unverified", reason: "the landed take's stable id could not be verified" };
+  }
+  return { kind: "reviewing", review };
 }
 
 async function refreshSnapshot(
@@ -398,6 +444,7 @@ export const useStore = create<State>((set, get, api) => ({
   ...createMpSlice(set, get, api),
   ...createJobsSlice(set, get, api),
   ...createCatalogsSlice(set, get, api),
+  ...createLoraLabSlice(set, get, api),
 
   snapshot: null,
   projectEpoch: 0,
@@ -442,8 +489,10 @@ export const useStore = create<State>((set, get, api) => ({
       set((state) => ({
         projectEpoch: state.projectEpoch + 1,
         projectTransitioning: true,
+        agentChangeSet: null,
         takeDecisionPending: false,
         lastTakeClipId: null,
+        takeReview: null,
       }));
       transitionEpoch = get().projectEpoch;
     }
@@ -529,8 +578,10 @@ export const useStore = create<State>((set, get, api) => ({
           set((state) => ({
             projectEpoch: state.projectEpoch + (epochManagedByUi ? 0 : 1),
             projectTransitioning: epochManagedByUi ? state.projectTransitioning : false,
+            agentChangeSet: null,
             takeDecisionPending: false,
             lastTakeClipId: null,
+            takeReview: null,
             selection: new Set<string>(),
             selectedTrackId: null,
             expandedTracks: new Set<string>(),
@@ -560,6 +611,11 @@ export const useStore = create<State>((set, get, api) => ({
         onLayerRenderProgress(ev, set);
       } else if (ev.type === "layer_status") {
         onLayerStatus(ev, set, get);
+      } else if (ev.type === "lab_take") {
+        // LoRA Lab audition render finished (or progressed). Event-driven, unlike
+        // the training run's 1s poll: a take becoming playable is the moment the
+        // producer is actually waiting on.
+        get().onLabTakeEvent((ev as unknown as { payload?: unknown }).payload ?? ev);
       } else if (ev.type === "mp_state") {
         onMpState(ev, set, get);
       } else if (ev.type === "webrtc_signal") {
@@ -827,15 +883,17 @@ export const useStore = create<State>((set, get, api) => ({
 
   takeDecisionPending: false,
   lastTakeClipId: null,
+  takeReview: null,
   currentMode: () => {
     const s = get();
     if (s.transport.recording) return "recording";
     if (s.takeDecisionPending) return "reviewing";
     return "idle";
   },
-  enterRecord: (bar) => {
+  enterRecord: async (bar) => {
     const projectEpoch = get().projectEpoch;
-    return enqueueTransportAction(() => startRecording(get, set, projectEpoch, bar));
+    const outcome = await enqueueTransportAction(() => startRecording(get, set, projectEpoch, bar));
+    return outcome ?? { kind: "blocked", reason: "cancelled" };
   },
   toggleRecord: () => {
     const projectEpoch = get().projectEpoch;
@@ -862,29 +920,50 @@ export const useStore = create<State>((set, get, api) => ({
       await startRecording(get, set, projectEpoch);
     });
   },
-  stopRecord: () => {
+  stopRecord: async () => {
     const projectEpoch = get().projectEpoch;
-    return enqueueTransportAction(() => stopRecording(get, set, projectEpoch));
+    const outcome = await enqueueTransportAction(() => stopRecording(get, set, projectEpoch));
+    return outcome ?? { kind: "blocked", reason: "cancelled" };
   },
-  keepTake: async () => {
+  keepTake: async (takeId) => {
     const s = get();
-    if (!s.lastTakeClipId) { s.pushAgentUtter("HUH", "nothing to keep"); return; }
-    const res = await s.exec("keep_take", { clipId: s.lastTakeClipId });
-    if (!res.ok) { s.pushAgentUtter("UHOH", "can't keep that yet"); return; }
-    set({ takeDecisionPending: false, lastTakeClipId: null });
+    if (!s.lastTakeClipId) {
+      s.pushAgentUtter("HUH", "nothing to keep");
+      return { kind: "blocked", reason: "nothing to keep" };
+    }
+    const res = await s.exec(
+      "keep_take",
+      takeId ? { clipId: s.lastTakeClipId, takeId } : { clipId: s.lastTakeClipId },
+    );
+    if (!res.ok) {
+      s.pushAgentUtter("UHOH", "can't keep that yet");
+      return { kind: "blocked", reason: res.error ?? "can't keep that yet" };
+    }
+    set({ takeDecisionPending: false, lastTakeClipId: null, takeReview: null });
     await s.refresh();
+    return { kind: "kept", review: null };
   },
   navTake: async (delta) => {
     const s = get();
     const clipId = s.lastTakeClipId;
-    if (!clipId) { s.pushAgentUtter("HUH", "no takes"); return; }
+    if (!clipId) {
+      s.pushAgentUtter("HUH", "no takes");
+      return { kind: "blocked", reason: "no takes" };
+    }
     const clip = s.snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId) as
       (Clip & { currentTakeIndex?: number; numTakes?: number }) | undefined;
     const next = Math.max(0, Math.min((clip?.numTakes ?? 1) - 1, (clip?.currentTakeIndex ?? 0) + delta));
     const res = await s.exec("set_current_take", { clipId, takeIndex: next });
-    if (!res.ok) { s.pushAgentUtter("UHOH", "no other takes yet"); return; }
+    if (!res.ok) {
+      s.pushAgentUtter("UHOH", "no other takes yet");
+      return { kind: "blocked", reason: "no other takes yet" };
+    }
     await s.exec("set_transport", { action: "to_start" });
     await s.refresh();
+    const review = observeRecordingLane(get().snapshot!, clipId);
+    set({ takeReview: review });
+    if (!review) return { kind: "landed_unverified", reason: "the take's stable id could not be verified" };
+    return { kind: "reviewing", review };
   },
 
   uiScale: useSettings.getState().get("uiScale") as number,

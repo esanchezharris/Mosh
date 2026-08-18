@@ -350,5 +350,11 @@ namespace mosh::ids
     MOSH_DECLARE_ID (LORAS)            // LoRA rack selection (≤2 LORA children, ordered)
     MOSH_DECLARE_ID (LORA)             // one selected LoRA: name + value (0–100 UI strength)
 
+    // Skill Foundry Slice B, Task 1 — stable, persisted take identity (state/TakeIdentity.h).
+    // Additive property on a Tracktion TAKES child, alongside its own `source`. Written
+    // once, on first sight of that take (mosh::takeidentity::backfill), with a NULL
+    // UndoManager — a lowercase dashed juce::Uuid string. Never reassigned.
+    MOSH_DECLARE_ID (moshTakeId)
+
 #undef MOSH_DECLARE_ID
 } // namespace mosh::ids

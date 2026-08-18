@@ -4,6 +4,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUBJECT="$REPO/scripts/auto-loop/memory-preflight.sh"
 GATE="$REPO/scripts/auto-loop/gate.sh"
+HOST_PATH="$PATH"
 FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/private/tmp}/mosh-memory-preflight.XXXXXX")"
 BIN="$FIXTURE_ROOT/bin"
 mkdir -p "$BIN"
@@ -33,6 +34,11 @@ while [ "$i" -lt "${FAKE_CODEX_CHILDREN:-0}" ]; do
   printf '%s 100 node child-%s\n' "$((200 + i))" "$i"
   i=$((i + 1))
 done
+j=0
+while [ "$j" -lt "${FAKE_PS_TRAILING_LINES:-0}" ]; do
+  printf '%s 1 %01024d\n' "$((1000 + j))" 0
+  j=$((j + 1))
+done
 SH
 
 chmod +x "$BIN/memory_pressure" "$BIN/sysctl" "$BIN/df" "$BIN/ps"
@@ -42,7 +48,7 @@ run_subject() {
   shift 2
   local output rc
   set +e
-  output="$(env PATH="$BIN:/usr/bin:/bin:/usr/sbin:/sbin" "$@" "$SUBJECT" 2>&1)"
+  output="$(env PATH="$BIN:$HOST_PATH" "$@" "$SUBJECT" 2>&1)"
   rc=$?
   set -e
   if [ "$rc" -ne "$expected_rc" ]; then
@@ -62,6 +68,14 @@ run_subject 0 '[memory-preflight] PASS' \
   env FAKE_MEMORY_FREE_PERCENT=80 FAKE_SWAP_USED_MB=0 \
   FAKE_DATA_FREE_KB=104857600 FAKE_CODEX_CHILDREN=8
 
+# Given a large process snapshot after the app-server row.
+# When the preflight locates the app server under pipefail.
+# Then it consumes the snapshot without making the producer die on SIGPIPE.
+run_subject 0 '[memory-preflight] PASS' \
+  env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
+run_subject 0 'codex_children=8' \
+  env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
+
 # Given each resource limit is unsafe.
 # When the preflight runs.
 # Then it fails closed with the specific limiting resource.
@@ -74,7 +88,7 @@ run_subject 1 'Codex child process count 65 exceeds 64' env FAKE_CODEX_CHILDREN=
 # When the cheap gate starts.
 # Then memory preflight is its only recorded step and no suite begins.
 set +e
-gate_output="$(env PATH="$BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+gate_output="$(env PATH="$BIN:$HOST_PATH" \
   FAKE_MEMORY_FREE_PERCENT=20 "$GATE" cheap "$REPO" HEAD 2>&1)"
 gate_rc=$?
 set -e
@@ -86,4 +100,4 @@ printf '%s' "$gate_output" | jq -e \
   '.pass == false and (.steps | length) == 1 and .steps[0].name == "memory_preflight"' \
   >/dev/null
 
-printf 'memory preflight: 6/6 scenarios passed\n'
+printf 'memory preflight: 8/8 scenarios passed\n'

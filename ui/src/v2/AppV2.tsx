@@ -24,6 +24,7 @@ import { SessionPicker } from "./SessionPicker";
 import { MissingMediaBanner } from "../ui/MissingMediaBanner";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
+import { LoraLab } from "../ui/LoraLab";
 import { ChangeToast } from "./ChangeToast";
 import { MemoryToast } from "./MemoryToast";
 import { MoshTipProvider } from "../chrome/Tooltip";
@@ -95,6 +96,7 @@ export function AppV2() {
       <PianoRoll />
       <AutomationPanel />
       <DrumWindow />
+      <LoraLab />
       <ChangeToast />
       <MemoryToast />
     </div>
