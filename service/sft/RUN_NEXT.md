@@ -34,61 +34,108 @@ inputs to any of the above.
 
 ## 2. Folding `r7_coverage_demonstrations.jsonl` into a future cycle
 
-**Not yet done. Requires, in order:**
+### 2.1 Refresh the embedded system prompt — ✅ DONE (2026-08-17, `claude/r7-prep`)
 
-### 2.1 Refresh the embedded system prompt (mandatory — see the drift finding)
+Ran exactly as prescribed:
 
 ```sh
-cd ui && npx tsx scripts/build_assist_sft.mts   # regenerates assist_demonstrations.jsonl against current HEAD
-cd ../service/sft && python3 validate_system_prompt_drift.py   # should now report OK
+cd ui && npx tsx scripts/build_assist_sft.mts
+# → wrote 35 verified assist demonstrations (0 skipped) → service/sft/assist_demonstrations.jsonl
+cd ../service/sft && python3 validate_system_prompt_drift.py
 ```
 
-Then re-point `build_r7_coverage_sft.py`'s `SYSTEM` constant at the freshly
-regenerated row (it already loads it from `assist_demonstrations.jsonl` row 0
-at runtime — no other code change needed) and re-run:
+The drift check did **not** go straight to OK. It still reported "2
+command(s) in the embedded system prompt no longer exist in the current
+catalog: `['set_clip_fade', 'set_clip_loop']`" — but this was a **false
+positive**, not real staleness: both commands are very much still in
+`ui/src/agent/commands.ts` (lines 102/107). Root cause: `sft_catalog.py`'s
+`_COMMAND_LINE_RE` used `re.M` without `re.S`, so it silently dropped any
+`AGENT_COMMANDS` entry whose `args: [...]` wraps onto a second source line
+(`set_clip_fade`/`set_clip_loop` are the only two that do) — `load_catalog()`
+returned 155 of the real 157 entries with no error. Fixed by adding `re.S`
+to the regex flags (see `sft_catalog.py`'s inline comment for the full
+explanation). After the fix, `load_catalog()` returns all 157 commands and:
+
+```
+$ python3 validate_system_prompt_drift.py
+OK: no known drift between the embedded system prompt and the current catalog/rules.
+```
+
+`build_r7_coverage_sft.py`'s `SYSTEM` constant needed no change (it already
+loads `assist_demonstrations.jsonl` row 0 at runtime, as this file
+predicted) — re-ran:
 
 ```sh
 python3 build_r7_coverage_sft.py
+# → wrote 119 validated rows, sha256 392262600bc922b17fa863cdd5b26362f38fb24daa0b57ed3f57ac06ccb60150
 python3 validate_sft_rows.py r7_coverage_demonstrations.jsonl
+# → OK: 119 row(s) across 1 file(s), 0 violations (157 commands / 8 intents cross-checked)
 python3 -m pytest validate_sft_rows_test.py -q
+# → 16 passed
 ```
 
-Confirm the new sha256 in `r7_coverage_demonstrations.manifest.json` differs
-from the one in this pass's commit (it should — the embedded prompt changed).
+New sha256 (`392262600bc9…`) differs from the committed one
+(`c596ba5ee760…`) — confirmed, per this file's own prediction.
 
-### 2.2 Build the candidate mix (once a base target exists to build on)
+### 2.2 Build the candidate mix — ✅ DONE (2026-08-17, owner's Mac)
 
-This step needs the actual `.sft-data/` tree, which is gitignored and not
-present in a fresh worktree (same fact `EVAL_FIXTURE_AUDIT.md` and
-`SFT_COVERAGE_MATRIX.md` both already document) — run it on a machine that
-has it, i.e. the owner's Mac, mirroring `prepare_r5_prep.py`'s exact shape:
+One deviation from the illustrative command below: `.sft-data/s2-mix-v5/`
+does not exist on disk under that literal name — the real dir is
+`.sft-data/s2-mix-v5-prep/` (the same "prep while the prior cycle runs"
+naming `prepare_r5_prep.py` uses; it was never renamed after freezing).
+Verified byte-identical to `R6_FREEZE_MEMO.md` §3's frozen v5 shas before
+using it as the base, so this is genuinely v5's content, not a lookalike.
+`.sft.env` also does not currently exist on disk in either checkout
+(gitignored, machine-local, apparently not regenerated since the last
+`setup-sft.sh` run) — invoked the venv interpreter directly
+(`~/Library/Mosh/venvs/sft/bin/python3`) instead of sourcing it.
 
 ```sh
-cd service/sft
-# once a3b-r6 has landed (or whatever the base-mix target actually is —
-# this is illustrative, NOT a command to run blind):
 OUT=.sft-data/s2-mix-v6-prep
 mkdir -p "$OUT"
-cp .sft-data/s2-mix-v5/train.jsonl "$OUT/train.jsonl"
-cp .sft-data/s2-mix-v5/valid.jsonl "$OUT/valid.jsonl"
-cat r7_coverage_demonstrations.jsonl >> "$OUT/train.jsonl"
-"$SFT_PY" filter_by_length.py --model ~/AI/models/mlx/Qwen3-30B-A3B-Instruct-2507-4bit --data "$OUT" --max-seq 4096
+cp .sft-data/s2-mix-v5-prep/train.jsonl "$OUT/train.jsonl"   # sha 3c4e2e8b… matches frozen v5
+cp .sft-data/s2-mix-v5-prep/valid.jsonl "$OUT/valid.jsonl"   # sha 9047ab96… matches frozen v5
+cat r7_coverage_demonstrations.jsonl >> "$OUT/train.jsonl"    # 12,994 + 119 = 13,113
+~/Library/Mosh/venvs/sft/bin/python3 filter_by_length.py \
+  --model ~/AI/models/mlx/Qwen3-30B-A3B-Instruct-2507-4bit --data "$OUT" --max-seq 4096
+# → train.jsonl: 13113 -> 13113 (over-max 0, no-completion-room 0)
+# → valid.jsonl: 1650 -> 1650 (over-max 0, no-completion-room 0)
 ```
+
+Final: train **13,113 rows**, sha256
+`9e8853344d2ac111ae6da5f239b71017b97815f394d6335fae94a9aa4549dbaf`; valid
+**1,650 rows**, sha256
+`9047ab96fd7e8f7f2155d6acc9c9b391c7989ed6205d119c46be764dfa4f3638`
+(unchanged from v5 — valid split not touched by the append). Full build
+record: `.sft-data/s2-mix-v6-prep/manifest.json`.
 
 (A proper `prepare_r7_prep.py` mirroring `prepare_r5_prep.py` — audit-gated,
 manifest-hashed, refusing to run if the target it's building on doesn't match
-what it expects — is the more disciplined version of the above; not built
-here since there is no live "r6 is running, prep the next one" state to audit
-against yet, unlike the r4→r5 case that script was built for.)
+what it expects — is still the more disciplined version of the above; still
+not built, same reasoning this file already gave.)
 
-### 2.3 Pre-register before training on it
+### 2.3 Pre-register before training on it — DRAFT written, owner steps remain
 
-Per this program's own standing rule (quoted throughout
-`R6_COVERAGE_PREP_NOTE.md`): **do not** silently train `a3b-r6` (or fold this
-into any currently-frozen memo). Write a new `R7_TRAINING_PLAN.md` /
-`R7_FREEZE_MEMO.md` pair (or whatever the next adapter id actually is —
-decided after r6's own result is known) naming: the new mix's row count and
-sha256 (from the regenerated manifest above), which base/precision it trains
-against, and the gate it's read against — mirroring the shape
-`R6_TRAINING_PLAN.md`/`R6_FREEZE_MEMO.md` already use. Then, and only then,
-launch.
+`R7_TRAINING_PLAN.md` / `R7_FREEZE_MEMO.md` now exist (2026-08-17,
+`claude/r7-prep`), mirroring `R6_TRAINING_PLAN.md`/`R6_FREEZE_MEMO.md`'s
+shape, naming: the mix's row count/sha256 (§2.2 above), the recipe
+(`a3b-r5-cuda`'s CUDA/trl+peft lane, reused verbatim — **not** r6's
+untested local-MLX lane, so no confound with r6's still-open experiment),
+and the gate (the standing §P9 legs plus a new novice-jam-suite leg reading
+against r5's own 16/25 bar with the three named misses tracked
+individually). **Status: DRAFT, not frozen — per this program's own
+discipline, still requires, in order:**
+
+1. The owner resolves `R7_FREEZE_MEMO.md` §1 (which base:
+   `Qwen/Qwen3-30B-A3B-Instruct-2507` for a clean single-variable read, or
+   `Qwen3.6-35B-A3B` for a second deliberate variable — see the memo for
+   the tradeoff, presented without a pre-chosen winner) and freezes the
+   memo (checkbox + status line + commit).
+2. Launch per `R7_TRAINING_PLAN.md` §2.1 (pace smoke first, per §P7.3).
+3. Gate per `R7_TRAINING_PLAN.md` §3 / `R7_FREEZE_MEMO.md` §5, using
+   `EVAL_RUNBOOK.md` for the standing legs and the novice-jam suite for the
+   new one.
+
+None of r6's own files (`R6_TRAINING_PLAN.md`/`R6_FREEZE_MEMO.md`/
+`s2-mix-v5`) are touched by anything in this section — r6 remains exactly
+as §1 above describes it, untouched and separately gated.
