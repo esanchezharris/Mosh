@@ -31,9 +31,18 @@ target_sources(MoshTests PRIVATE
     test_lyrics.cpp
     test_agent_memory.cpp
     test_agent_txn.cpp
+    # Skill Foundry Task 4 — the native safe loader for certified skill packages.
+    # Engine-free (juce_core + juce_data_structures + juce_cryptography only), same
+    # posture as AgentMemoryStore.h/test_agent_memory.cpp above.
+    test_certified_skill_loader.cpp
+    ${CMAKE_SOURCE_DIR}/src/agent/CertifiedSkillLoader.cpp
     test_annotations.cpp
     test_remote_companion.cpp
     test_recording_landing.cpp
+    # Skill Foundry Slice B, Task 1 — stable, persisted take identity. Engine-free
+    # (juce_core + juce_data_structures only), same posture as RecordingLanding.h/
+    # test_recording_landing.cpp above.
+    test_take_identity.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_audio_ref.cpp
     test_multiplayer_lock_manager.cpp
@@ -90,7 +99,18 @@ target_compile_definitions(MoshTests PRIVATE
     JUCE_STANDALONE_APPLICATION=1
     MOSH_TESTING=1
     # RT-safety tripwire active in the test target so test_rt_guard.cpp can exercise it.
-    MOSH_RT_GUARD=1)
+    MOSH_RT_GUARD=1
+    # Skill Foundry Task 4 — same build-identity macros as the Mosh app target (set by
+    # the root CMakeLists.txt's "Native build identity" block, ABOVE this
+    # add_subdirectory(tests) call, so MOSH_GIT_COMMIT/MOSH_GIT_STATE/
+    # MOSH_BUILD_ARCHITECTURE are already defined variables here). MoshTests never
+    # defines MOSH_VERSION_STRING (no PROJECT_VERSION need there today), so
+    # CertifiedSkillLoader.cpp's buildIdentityVar() degrades appVersion to "unknown" in
+    # this target — by design (see that function's own comment), not a gap.
+    MOSH_GIT_COMMIT_STRING="${MOSH_GIT_COMMIT}"
+    MOSH_GIT_STATE_STRING="${MOSH_GIT_STATE}"
+    MOSH_BUILD_ARCHITECTURE_STRING="${MOSH_BUILD_ARCHITECTURE}"
+    MOSH_BUILD_CONFIGURATION_STRING="$<CONFIG>")
 
 target_link_libraries(MoshTests PRIVATE
     Catch2::Catch2WithMain

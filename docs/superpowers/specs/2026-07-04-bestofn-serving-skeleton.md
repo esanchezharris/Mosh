@@ -1,5 +1,9 @@
 # Best-of-n serving skeleton (WP-11) — spec v2 (post-panel)
 
+> **Historical:** this experimental single-shot orchestration is not reachable from
+> the shipped Ask Moshi surface. Its UI setting was removed when bounded studio
+> skills replaced raw command planning; keep this document only as design history.
+
 **Program**: `docs/plans/MOSHI_TRAINING_PROGRAM_2026-07.md` §5 Stage-2 items 3–4.
 **Posture**: flag-gated, OFF by default, zero new MoshOps commands, minimal C++ (one
 bridge relay on the `brain_chat` precedent). Builds while r3 trains — candidates come

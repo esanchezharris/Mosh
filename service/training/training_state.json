@@ -57,6 +57,35 @@
       },
       "status": "ready",
       "updatedAt": 1781424901.690975
+    },
+    {
+      "bundlePath": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/labrun6/corpus-bundle",
+      "error": "training cancelled",
+      "jobId": "42f154e6ddba",
+      "outputDir": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/labrun6/training-output",
+      "progress": 0.0,
+      "status": "error",
+      "updatedAt": 1786965778.023679
+    },
+    {
+      "artifactPath": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/stage3/training-output/run/mosh_lora.safetensors",
+      "bundleHash": "26d71ff02ad8b855eef598fe20d0e55637496d6bfa66dd677df81e70e761607e",
+      "bundlePath": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/stage3/corpus-bundle",
+      "error": "",
+      "jobId": "3d4e33ccc82e",
+      "manifestPath": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/stage3/training-output/adapter.manifest.json",
+      "outputDir": "/private/tmp/claude-501/-Users-emiliosanchez-harris-Mosh--claude-worktrees-pmetal-sa3-lora-local-f93057/bf9cb911-131b-4c18-8d20-b870452302e8/scratchpad/stage3/training-output",
+      "progress": 1.0,
+      "quality": {
+        "backend": "local_pmetal",
+        "checkpoints": 5,
+        "epochs": 20.0,
+        "probes": 3,
+        "source_count": 24,
+        "steps": 120
+      },
+      "status": "ready",
+      "updatedAt": 1787016408.710352
     }
   ]
 }

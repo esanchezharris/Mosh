@@ -231,3 +231,14 @@ targeting (`add_note` under a 4-bit MLX serve) is a **covered** command (402
 rows) whose training-row count was never the issue. If a future cycle wants
 to close bucket C (the 10 newest commands), that is a fresh synthesis round
 on top of whatever mix r6 lands on — out of scope for this document.
+
+**Addendum (post-r6 prep, not part of the r6 registration above):** an
+r5 novice-jam bench found `add_drum_pattern` (bucket C, zero rows here) as a
+live miss — exactly the "add training data" fix this section says bucket C
+needs once a future cycle takes it up. That candidate data now exists as a
+standalone, unmerged increment: `r7_coverage_demonstrations.jsonl` (119
+rows, validated by `validate_sft_rows.py`), documented in
+`R6_COVERAGE_PREP_NOTE.md` / `RUN_NEXT.md`. It is NOT folded into `s2-mix-v5`
+and does not change any count in this table — this note exists so the next
+reader of this matrix doesn't have to rediscover that prep work already
+started.

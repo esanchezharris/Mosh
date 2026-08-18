@@ -21,7 +21,16 @@ export type TrajectoryKind = "imitation";
 export type CommandCall = { command: string; args?: Record<string, unknown> };
 
 /** Where a turn's utterance came from. Direct human manipulation is never a turn. */
-export type TurnSource = "brain_chat" | "voice" | "fastpath" | "unknown";
+export type TurnSource =
+  | "brain_chat"
+  | "voice"
+  | "fastpath"
+  | "section_scope"
+  | "agent_loop"
+  | "studio_skill"
+  | "studio_skill_blocked"
+  | "studio_skill_unsupported"
+  | "unknown";
 
 /** One command inside a turn, with its original log outcome + allowlist tag. */
 export type TupleCommand = {

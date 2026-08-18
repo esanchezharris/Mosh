@@ -171,4 +171,111 @@ describe("bridge mock recording finalization parity", () => {
       && Reflect.get(entry, "command") === "promote_take_region"
       && Reflect.get(entry, "undoable") === true)).toBe(true);
   });
+
+  // Skill Foundry Slice B, Task 1 — stable, persisted take identity (mirrors the native
+  // state/TakeIdentity.h RED/GREEN suite in tests/test_take_identity.cpp and the
+  // SelfTest.cpp "Stable take identity" section).
+  describe("stable take identity", () => {
+    async function twoTakeFixture() {
+      const created = await exec("create_track", { name: "Take ID Fixture" });
+      const trackId = typeof created.data === "object" && created.data !== null
+        ? Reflect.get(created.data, "trackId") : undefined;
+      if (typeof trackId !== "string") throw new Error("create_track did not return a trackId");
+      await exec("arm_track", { trackId, armed: true });
+      for (let take = 0; take < 2; take += 1) {
+        await exec("set_transport", { action: "record" });
+        await exec("set_transport", { action: "stop" });
+      }
+      const track = (await mockSnapshot<Snapshot>()).tracks.find((candidate) => candidate.id === trackId)!;
+      const clipId = track.clips[0]!.id;
+      return { trackId, clipId };
+    }
+
+    it("list_takes reports two unique, non-empty, uuid-shaped stable ids", async () => {
+      const { clipId } = await twoTakeFixture();
+      const listed = await exec("list_takes", { clipId });
+      const data = listed.data as { takes?: { id?: string }[]; takeIds?: string[]; currentTakeId?: string } | undefined;
+      expect(data?.takes).toHaveLength(2);
+      const [id0, id1] = data!.takes!.map((tk) => tk.id);
+      expect(id0).toBeTruthy();
+      expect(id1).toBeTruthy();
+      expect(id0).not.toBe(id1);
+      const uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+      expect(id0).toMatch(uuidShape);
+      expect(id1).toMatch(uuidShape);
+      expect(data?.takeIds).toEqual([id0, id1]);
+      expect(data?.currentTakeId).toBe(id1); // the SECOND recording landed last and is current
+    });
+
+    it("clip snapshot's takeIds/currentTakeId agree with list_takes", async () => {
+      const { clipId } = await twoTakeFixture();
+      const listed = await exec("list_takes", { clipId });
+      const listedIds = (listed.data as { takeIds?: string[] }).takeIds;
+      const snap = await mockSnapshot<Snapshot>();
+      const clip = snap.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)!;
+      expect(clip.takeIds).toEqual(listedIds);
+      expect(clip.currentTakeId).toBe(listedIds?.[1]);
+    });
+
+    it("keep_take refuses a malformed takeId with zero mutation", async () => {
+      const { clipId } = await twoTakeFixture();
+      const before = await exec("list_takes", { clipId });
+      const result = await exec("keep_take", { clipId, takeId: "not-a-real-id" });
+      expect(result.ok).toBe(false);
+      const after = await exec("list_takes", { clipId });
+      expect(after.data).toEqual(before.data);
+    });
+
+    it("keep_take refuses an unknown (but well-shaped) takeId with zero mutation", async () => {
+      const { clipId } = await twoTakeFixture();
+      const before = await exec("list_takes", { clipId });
+      const result = await exec("keep_take", { clipId, takeId: "ffffffff-0000-4000-8000-000000000000" });
+      expect(result.ok).toBe(false);
+      const after = await exec("list_takes", { clipId });
+      expect(after.data).toEqual(before.data);
+    });
+
+    it("keep_take with an explicit stable id keeps THAT take (not whichever is current) and collapses the lane set", async () => {
+      const { clipId } = await twoTakeFixture();
+      const listed = await exec("list_takes", { clipId });
+      const data = listed.data as { takeIds?: string[]; currentTakeId?: string };
+      const [id0] = data.takeIds!;
+      // id0 is the FIRST take ("Take 1"); the SECOND take ("Take 2") is current by
+      // default — targeting id0 explicitly must keep take 1's content, not whichever
+      // is current, proving the id actually SELECTS rather than being ignored.
+      expect(data.currentTakeId).not.toBe(id0);
+      const kept = await exec("keep_take", { clipId, takeId: id0 });
+      expect(kept.ok).toBe(true);
+      const snap = await mockSnapshot<Snapshot>();
+      const clip = snap.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)!;
+      expect(clip.name).toBe("Take 1");
+      expect(clip.takes).toBeUndefined();
+      expect(clip.numTakes).toBeUndefined();
+      expect(clip.takeIds).toBeUndefined();
+      expect(clip.currentTakeId).toBeUndefined();
+    });
+
+    it("one undo after keep_take-by-id restores the exact prior ordered id set", async () => {
+      const { clipId } = await twoTakeFixture();
+      const listed = await exec("list_takes", { clipId });
+      const priorIds = (listed.data as { takeIds?: string[] }).takeIds!;
+      await exec("keep_take", { clipId, takeId: priorIds[0] });
+      expect((await exec("undo")).data).toEqual({ undone: true });
+      const relisted = await exec("list_takes", { clipId });
+      const relistedIds = (relisted.data as { takeIds?: string[] }).takeIds;
+      expect(relistedIds).toEqual(priorIds); // the EXACT prior ids, not fresh ones
+    });
+
+    it("legacy {clipId}-only keep_take is unchanged: it keeps whichever take is current", async () => {
+      const { clipId } = await twoTakeFixture();
+      const listed = await exec("list_takes", { clipId });
+      const currentTakeId = (listed.data as { currentTakeId?: string }).currentTakeId;
+      expect(currentTakeId).toBeTruthy();
+      const kept = await exec("keep_take", { clipId });
+      expect(kept.ok).toBe(true);
+      const snap = await mockSnapshot<Snapshot>();
+      const clip = snap.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)!;
+      expect(clip.takes).toBeUndefined();
+    });
+  });
 });

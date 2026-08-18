@@ -362,9 +362,19 @@ function LoraRack({ clip }: { clip: Clip }) {
   const lorasAvail = useStore((s) => s.availableLoras);
   const rl = clip.renderLayer!;
   const active: RenderLora[] = rl.loras ?? [];
-  if (lorasAvail.length === 0 && active.length === 0) return null;
+  // The rack is the KEPT shelf. `sa3/lab/` checkpoints come down the same
+  // list_loras call (one endpoint, one scan) and must be filtered out here, or a
+  // single training run drops six near-identical entries into the producer's
+  // "+ LoRA…" menu and buries the adapters they actually chose to keep.
+  //
+  // Filtered for the menu and the is-there-anything check ONLY — `lorasAvail`
+  // stays whole for the metadata lookup below, so a lab take that IS on the clip
+  // (auditioned, or stacked) still renders with its real display name instead of
+  // degrading to a bare filename.
+  const library = lorasAvail.filter((m) => m.family !== "lab");
+  if (library.length === 0 && active.length === 0) return null;
   const setLoras = (next: RenderLora[]) => exec("set_render_param", { clipId: clip.id, loras: next });
-  const addable = lorasAvail.filter((m) => (m.valid ?? true) && !active.some((a) => a.name === m.name));
+  const addable = library.filter((m) => (m.valid ?? true) && !active.some((a) => a.name === m.name));
   const sum = active.reduce((s, a) => s + a.value / 100, 0);
   return (
     <>

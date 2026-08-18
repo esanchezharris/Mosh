@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:e2e": "tsc --noEmit && vite build --mode e2e",
+    "build:e2e": "tsc --noEmit && VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=1 vite build --mode e2e",
     "build:companion": "vite build --config vite.companion.config.ts",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
@@ -32,7 +32,9 @@
     "agent-bench": "tsx scripts/agentBench.mts",
     "moshi-bench": "tsx scripts/moshiBench.mts",
     "policy-probe": "tsx scripts/policyProbe.mts",
-    "synthesize": "tsx scripts/synthesizeDriver.mts"
+    "synthesize": "tsx scripts/synthesizeDriver.mts",
+    "verify:skill-identities": "tsx scripts/verifySkillIdentityUniverse.mts",
+    "teach-moshi": "tsx src/skillFoundry/cli.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

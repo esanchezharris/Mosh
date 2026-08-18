@@ -1,0 +1,139 @@
+{
+  "tag": "p1-smoke2-grok",
+  "model": "grok-4.3",
+  "base": "https://api.x.ai/v1",
+  "runner": "loop",
+  "bin": "/Users/emiliosanchez-harris/Mosh/.claude/worktrees/foundry-a/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "suite": "novice-jam",
+  "maxSteps": 8,
+  "ranAt": "2026-08-17T09:04:56.983Z",
+  "success": 0.6666666666666666,
+  "passed": 2,
+  "total": 3,
+  "acceptable": 2,
+  "acceptableRate": 0.6666666666666666,
+  "stepEffMean": 1,
+  "cmdErrRateMean": 0,
+  "invalidRateMean": 0,
+  "wrongDefers": 1,
+  "deferCorrect": 1,
+  "byCat": {
+    "mix": {
+      "pass": 1,
+      "total": 1
+    },
+    "arrange": {
+      "pass": 0,
+      "total": 1
+    },
+    "ambiguous": {
+      "pass": 1,
+      "total": 1
+    }
+  },
+  "usage": {
+    "promptTokens": 19651,
+    "completionTokens": 122,
+    "calls": 3
+  },
+  "rows": [
+    {
+      "id": "nj-vocal-too-quiet",
+      "category": "mix",
+      "ask": "the singing is too quiet, bring it up a little",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Vocal",
+              "field": "volumeDb",
+              "dir": "up",
+              "min": 1,
+              "max": 8
+            },
+            "pass": true,
+            "note": "volumeDb moved up 3.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 10167,
+      "renders": [],
+      "acceptable": true
+    },
+    {
+      "id": "nj-make-faster",
+      "category": "arrange",
+      "ask": "make it faster",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempo",
+              "min": 121,
+              "max": 170
+            },
+            "pass": false,
+            "note": "tempo 120 < 121"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 3811,
+      "renders": [],
+      "acceptable": false
+    },
+    {
+      "id": "nj-amb-professional",
+      "category": "ambiguous",
+      "ask": "make it sound professional",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 6043,
+      "renders": [],
+      "acceptable": true
+    }
+  ]
+}
