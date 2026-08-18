@@ -375,6 +375,52 @@ def main() -> int:
     # delta here is the adapter doing work; near-zero is the all-zeros shape.
     check(d > 0.01, f"the adapter MOVES the sound: diff-RMS {d:.4f} vs base rms {rms(a):.4f}")
 
+    # ── 5) KEEP: promote a take, and prove it outlives its run ──────────────
+    # The one durable action in the Lab, and the one whose failure mode is
+    # delayed: a kept adapter that was merely another link into the run dir
+    # still promotes cleanly, still renders, and evaporates later when the
+    # producer deletes the experiment. So this checks the bytes, not the call.
+    print(f"\n[5] keeping {final} into the library")
+    kept_name = "labcheck-kept"
+    lib = Path(REG.lora_dir())
+    for stale in lib.glob(f"{kept_name}.*"):
+        stale.unlink()
+
+    results, proc = run_script(binary, [
+        {"command": "promote_lora_checkpoint", "args": {"source": final, "name": kept_name}},
+        # Refusals are part of the contract: keeping onto a name already in use
+        # must fail rather than silently replace a decision the producer made.
+        {"command": "promote_lora_checkpoint", "args": {"source": final, "name": kept_name}},
+        {"command": "promote_lora_checkpoint", "args": {"source": "no-such-take@1", "name": "nope"}},
+    ], art, "keep", timeout=300)
+    kept = by_command(results).get("promote_lora_checkpoint", [])
+    check(len(kept) == 3 and kept[0].get("ok"), f"promote succeeded ({[k.get('ok') for k in kept]})")
+    check(not kept[1].get("ok") and "already exists" in (kept[1].get("error") or ""),
+          f"a second promote onto the same name is REFUSED: {kept[1].get('error')!r}")
+    check(not kept[2].get("ok"), "promoting an unknown take is refused")
+
+    kept_file = lib / f"{kept_name}.safetensors"
+    check(kept_file.is_file(), f"kept adapter on disk: {kept_file}")
+    check(not kept_file.is_symlink(),
+          "kept adapter is a SYMLINK — it will evaporate when the run is deleted")
+    check(kept_file.stat().st_size > 1_000_000,
+          f"kept adapter is real ({kept_file.stat().st_size/1e6:.1f}MB)")
+
+    rows = {r["name"]: r for r in REG.list_loras()}
+    check(rows.get(kept_name, {}).get("family") == "library",
+          "kept adapter joins the LIBRARY family (so it shows in the rack, not the sheet)")
+    check(rows.get(kept_name, {}).get("valid"), "kept adapter is valid to the registry")
+
+    # Drop the run's lab links, exactly as deleting the run would.
+    sys.path.insert(0, str(HERE.parent.parent / "service" / "training"))
+    import lab_publish as LP  # noqa: E402
+    dropped = LP.forget("labcheck")
+    check(dropped > 0, f"forget() removed {dropped} lab links")
+    rows = {r["name"]: r for r in REG.list_loras()}
+    check(final not in rows, "the take is gone after forget()")
+    check(rows.get(kept_name, {}).get("valid"),
+          "THE KEPT ADAPTER SURVIVED its run being forgotten")
+
     print(f"\n    listen:  open {wav_base.parent.parent}")
     return report(checks)
 

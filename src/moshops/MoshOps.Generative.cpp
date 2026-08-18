@@ -2028,6 +2028,64 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
     return okResult ("render_lora_take", var (d));
 }
 
+// "Keep" — the LoRA Lab's one durable verb.
+//
+// Everything else the Lab does is disposable on purpose: takes are symlinks into a
+// run directory, and deleting the run is meant to be a complete cleanup. This is
+// the one action that says "I decided about this one", so it COPIES rather than
+// links (service/loras/promote.py explains why at length: a kept adapter that was
+// another link would evaporate when the producer tidied up the experiment it came
+// from — losing a decision, which is the worst outcome this feature could have).
+//
+// Not a transaction, and not undoable: it writes a file into the producer's library
+// outside the edit, exactly like `import_lora_adapter`. Undo covers the arrangement,
+// not the filesystem — so the safety here is that it REFUSES to overwrite an
+// existing name rather than that it can be reversed.
+juce::var MoshOps::cmdPromoteLoraCheckpoint (const juce::var& args)
+{
+    const auto source = args.getProperty ("source", var()).toString().trim();
+    if (source.isEmpty())
+        return errResult ("promote_lora_checkpoint", "missing 'source' (the take to keep)");
+
+    auto name = args.getProperty ("name", var()).toString().trim();
+    if (name.isEmpty())
+    {
+        // A take is `<run>@<step>`; `@` cannot appear in a run label, so the run
+        // part is a reasonable default name when the UI doesn't supply one.
+        name = source.upToFirstOccurrenceOf ("@", false, false).trim();
+        if (name.isEmpty()) name = source;
+    }
+
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("promote_lora_checkpoint", "generative service unavailable");
+
+    auto* body = new DynamicObject();
+    body->setProperty ("source", source);
+    body->setProperty ("name", name);
+    body->setProperty ("trigger", args.getProperty ("trigger", ""));
+    body->setProperty ("hint", args.getProperty ("hint", ""));
+    body->setProperty ("notes", args.getProperty ("notes", ""));
+    body->setProperty ("displayName", args.getProperty ("displayName", ""));
+
+    auto r = jobManager.promoteLora (var (body));
+    if (! (bool) r.getProperty ("ok", false))
+    {
+        // A refusal is the producer's answer, not a fault: pass the reason through
+        // verbatim ("a kept adapter named 'ken' already exists — pick another name")
+        // rather than flattening it to a generic failure.
+        const auto why = r.getProperty ("error", var()).toString();
+        return errResult ("promote_lora_checkpoint",
+                          why.isNotEmpty() ? why : juce::String ("promote failed"));
+    }
+
+    auto* d = new DynamicObject();
+    d->setProperty ("name", name);
+    d->setProperty ("source", source);
+    d->setProperty ("adapter", r.getProperty ("adapter", var()));
+    logLine ("promote_lora_checkpoint", args, true, {}, false);
+    return okResult ("promote_lora_checkpoint", var (d));
+}
+
 juce::var MoshOps::cmdListTransformTargets (const juce::var&)
 {
     // Route B: the transform target list (instruments / models) for the generative UI.

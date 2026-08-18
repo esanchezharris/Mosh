@@ -38,6 +38,15 @@ public:
     juce::var listColors();
     juce::var listLoras();
 
+    /** "Keep" a LoRA Lab take: POST /loras/promote copies an auditioned checkpoint
+        out of `sa3/lab/` into the real library so it survives the run being deleted.
+        SYNCHRONOUS but fast (a ~25MB file copy + a header validation — no model), so
+        it is safe on the message thread alongside the other list* calls. Returns
+        { ok, adapter } or { ok:false, error } — a REFUSAL (invalid take, name already
+        taken) arrives as ok:false with a reason meant for the producer, not as a
+        transport failure. */
+    juce::var promoteLora (const juce::var& body);
+
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();
 

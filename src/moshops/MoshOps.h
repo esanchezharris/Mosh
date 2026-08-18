@@ -413,6 +413,7 @@ private:
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
     juce::var cmdListLoras        (const juce::var& args);
+    juce::var cmdPromoteLoraCheckpoint (const juce::var& args);
     // LoRA Lab — render ONE audition take from an arbitrary adapter stack. Unlike
     // render_layer this is not clip-parented and creates no MOSH_RENDERLAYER: the
     // whole point is to hear a checkpoint that has not been kept (and may never

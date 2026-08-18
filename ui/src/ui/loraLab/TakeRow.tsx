@@ -14,7 +14,7 @@
 // particular number has repeatedly pointed the wrong way. It belongs in
 // Diagnostics, labelled as a divergence check, or nowhere.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
 import { renderKey, type LabTake } from "../../store/loraLab";
 import { executeCommand } from "../../bridge";
@@ -66,6 +66,16 @@ export function TakeRow({ take }: { take: TakeRowModel }) {
   const dismiss = useStore((s) => s.dismissLabTake);
   const setCued = useStore((s) => s.setLabCued);
   const promptSet = useStore((s) => s.labPrompt.trim().length > 0);
+  const promote = useStore((s) => s.promoteLabTake);
+  const keeping = useStore((s) => s.labKeeping);
+  const keepError = useStore((s) => (name ? s.labKeepError[name] : ""));
+
+  // Keep opens a name field rather than firing immediately. The name is what the
+  // adapter is called forever after, in a rack the producer reads at a glance —
+  // and promotion REFUSES to overwrite, so a silent default would just bounce off
+  // the second checkpoint they tried to keep from the same run.
+  const [naming, setNaming] = useState(false);
+  const [keptName, setKeptName] = useState("");
 
   const isCued = cued === name;
   const status = render?.status;
@@ -135,6 +145,23 @@ export function TakeRow({ take }: { take: TakeRowModel }) {
         onClick={() => setCued(isCued ? null : name)}
       >◑</button>
 
+      {/* Keep — the one non-disposable action in the Lab. Everything else here
+          can be undone by doing it again; this writes into the producer's
+          library, outside the edit, where undo does not reach. */}
+      {name !== null && (
+        <button
+          className="btn ghost lab-keep"
+          data-testid={`lab-keep-${name}`}
+          disabled={keeping === name}
+          title="Keep this take — copies it into your library so it survives deleting the run"
+          aria-label={`Keep ${label}`}
+          onClick={() => {
+            setKeptName(keptName || name.split("@")[0]);
+            setNaming(!naming);
+          }}
+        >{keeping === name ? "…" : "Keep"}</button>
+      )}
+
       {name !== null && (
         <button
           className="btn x"
@@ -143,6 +170,31 @@ export function TakeRow({ take }: { take: TakeRowModel }) {
           onClick={() => dismiss(name)}
         >✕</button>
       )}
+
+      {name !== null && naming && (
+        <form
+          className="lab-keep-name"
+          data-testid={`lab-keep-form-${name}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void promote(name, keptName).then((okd) => { if (okd) setNaming(false); });
+          }}
+        >
+          <input
+            value={keptName}
+            aria-label="Name for the kept adapter"
+            placeholder="name it"
+            autoFocus
+            onChange={(e) => setKeptName(e.target.value)}
+          />
+          <button className="btn primary" type="submit" disabled={keeping === name}>Keep</button>
+          <button className="btn ghost" type="button" onClick={() => setNaming(false)}>Cancel</button>
+        </form>
+      )}
+
+      {name !== null && keepError ? (
+        <div className="lab-take-note err" data-testid={`lab-keep-error-${name}`}>{keepError}</div>
+      ) : null}
     </div>
   );
 }

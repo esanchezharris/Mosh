@@ -4040,6 +4040,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "render_lora_take is transaction-safe (auditioning never blocks on, or opens, an edit txn)");
     }
 
+    // ── LoRA Lab: promote_lora_checkpoint ("Keep") argument surface ──────────
+    // Hermetic — every check here is a REFUSAL, reached before the service is
+    // consulted, so none of it needs a model or a trained adapter. The success
+    // path needs a real take and lives in scripts/verify-hardware.
+    section ("LoRA Lab: promote_lora_checkpoint argument surface");
+    {
+        auto noSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "name", "keeper" }}));
+        check (! ok (noSource), "promote_lora_checkpoint without a source fails");
+        check (noSource.getProperty ("error", var()).toString().contains ("source"),
+               "…naming the missing argument");
+
+        auto blankSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "source", "   " }}));
+        check (! ok (blankSource), "promote_lora_checkpoint with a blank source fails");
+
+        // Keeping is the one action in the Lab that writes outside the edit, into
+        // the producer's library — so it must not open an undo transaction, which
+        // would offer an undo that cannot actually take the file back.
+        check (mosh::txnsafe::isReadOnlyDuringTransaction ("promote_lora_checkpoint"),
+               "promote_lora_checkpoint is transaction-safe (it writes to the library, not the edit)");
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The

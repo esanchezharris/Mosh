@@ -186,6 +186,52 @@
 .v2-shell .lab-sheet-base { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--v2-line); }
 .v2-shell .lab-restore { align-self: flex-start; margin-top: 4px; font-size: var(--v2-fs-2xs); }
 
+/* ── Keep, and the kept rack ─────────────────────────────────────────────────
+   Keep is the Lab's only durable verb, so it reads as a quiet secondary control
+   rather than a primary one: the loud button on a row is PLAY, because the
+   decision is made by listening and the keeping is just what you do afterwards.
+   The naming form takes the whole next line — the name is permanent and the
+   producer should see it while typing it. */
+.v2-shell .lab-keep { flex: 0 0 auto; font-size: var(--v2-fs-2xs); }
+
+.v2-shell .lab-keep-name {
+  flex: 1 0 100%;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+.v2-shell .lab-keep-name input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--v2-sunk);
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-xs);
+  color: var(--v2-text);
+  font: inherit;
+  font-size: var(--v2-fs-xs);
+  padding: 3px 6px;
+}
+.v2-shell .lab-keep-name input:focus-visible { outline: 2px solid var(--v2-accent-soft); }
+
+.v2-shell .lab-kept {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--v2-line);
+}
+.v2-shell .lab-kept-head { display: flex; align-items: center; gap: 8px; }
+.v2-shell .lab-kept-toggle { font-size: var(--v2-fs-2xs); }
+.v2-shell .lab-kept-n { color: var(--v2-dim); }
+.v2-shell .lab-kept-sum { font-size: var(--v2-fs-2xs); color: var(--v2-dim); font-variant-numeric: tabular-nums; }
+.v2-shell .lab-kept-list { display: flex; flex-direction: column; gap: 2px; }
+/* A row at zero is present but recessive: the rack is the list of what you kept,
+   and hiding the unused ones would make adding one a search instead of a nudge. */
+.v2-shell .lab-kept-row .nlabel { color: var(--v2-dim); }
+.v2-shell .lab-kept-row.on .nlabel { color: var(--v2-text); }
+
 /* ── motion: exactly one moment ──────────────────────────────────────────────
    A landing checkpoint slides in while its waveform strokes once, left to right
    — the tape passing the head. Nothing else in the Lab animates, deliberately:

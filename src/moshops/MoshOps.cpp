@@ -752,6 +752,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "list_loras")        return cmdListLoras (args);
     if (name == "render_lora_take")  return cmdRenderLoraTake (args);
+    if (name == "promote_lora_checkpoint") return cmdPromoteLoraCheckpoint (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
     if (name == "list_rave_models")  return cmdListRaveModels (args);   // Lane B — non-gated fs scan
    #if MOSH_HAVE_ANIRA

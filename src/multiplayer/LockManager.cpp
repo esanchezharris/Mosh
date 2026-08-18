@@ -25,7 +25,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // session's lab/ dir and touches NO track, clip or render layer — it is
         // deliberately not clip-parented, which is exactly why it cannot contend.
         // `sourceClipId` only READS a clip's audio to stage an input.
-        "render_lora_take",
+        "render_lora_take", "promote_lora_checkpoint",
         // AGT-MEM (Phase-B memory lane, M1) — pure file I/O (no ValueTree mutation,
         // no track/clip target), same posture as get_rhymes/get_lyric_corpus_stats above.
         // M3 adds delete/clear (the memory drawer's per-item delete + per-tier

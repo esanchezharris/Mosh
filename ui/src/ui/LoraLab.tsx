@@ -23,6 +23,7 @@ import { useLoraLab } from "./dock/useLoraLab";
 import { FloatingWindow } from "./dock/FloatingWindow";
 import { RunHeader } from "./loraLab/RunHeader";
 import { TakeSheet } from "./loraLab/TakeSheet";
+import { KeptRack } from "./loraLab/KeptRack";
 import { trainingBlockers, trainingPreviewLabel } from "../capabilities";
 
 export function LoraLab() {
@@ -140,6 +141,7 @@ export function LoraLab() {
         </label>
 
         <TakeSheet />
+        <KeptRack />
       </div>
     </FloatingWindow>
   );

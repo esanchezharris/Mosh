@@ -228,7 +228,7 @@ inline const std::set<juce::String>& readOnlyDuringTransaction()
         // LoRA Lab audition — same reasoning as audition_note: it renders a candidate
         // adapter to a file and mutates no Edit state, so a producer must still be able
         // to listen to takes while an agent skill holds a transaction open.
-        "render_lora_take",
+        "render_lora_take", "promote_lora_checkpoint",
     };
     return reads;
 }

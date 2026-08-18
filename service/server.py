@@ -1151,6 +1151,29 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/loras/promote":
+            # "Keep" — copy an auditioned lab take into the real library so it
+            # outlives the run it came from. Fails closed (see loras/promote.py):
+            # an invalid take, a missing source, or a name already in use all
+            # raise rather than enrolling something the render path would refuse
+            # or overwriting a decision the producer already made.
+            try:
+                from loras import promote as LORA_P
+                rec = LORA_P.promote(
+                    str(data.get("source", "")),
+                    name=str(data.get("name", "")),
+                    trigger=str(data.get("trigger", "") or ""),
+                    hint=str(data.get("hint", "") or ""),
+                    notes=str(data.get("notes", "") or ""),
+                    display=(data.get("displayName") or None),
+                )
+                self._send(200, {"ok": True, "adapter": rec})
+            except ValueError as e:
+                # A rejected promotion is a normal outcome the UI shows inline,
+                # not a service fault: 400, with the reason intact.
+                self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"promote failed: {e}"})
         elif path == "/stitch_windows":
             # Render-ahead primitive (Lane A): overlap-add crossfade a set of already-rendered
             # window WAVs into ONE continuous file, reusing the exact owner-measured-gapless

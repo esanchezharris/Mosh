@@ -57,6 +57,9 @@ export type LabRun = {
   error?: string;
 };
 
+/** One entry in the kept-adapter stack being auditioned together. */
+export type LabStackEntry = { name: string; value: number };
+
 export type LoraLabSlice = {
   labRun: LabRun | null;
   labTakes: LabTake[];
@@ -71,6 +74,14 @@ export type LoraLabSlice = {
   labSourceClipId: string | null;
   labSeed: number;
 
+  /** Kept adapters currently stacked for audition, in merge ORDER (adapters
+   *  merge sequentially, so order is a real parameter, not presentation). */
+  labStack: LabStackEntry[];
+  /** Per-take message from a refused Keep, shown on the row that caused it. */
+  labKeepError: Record<string, string>;
+  /** The take name whose Keep is in flight (a copy + validation, ~a second). */
+  labKeeping: string | null;
+
   setLabPrompt: (s: string) => void;
   setLabSource: (clipId: string | null) => void;
   setLabSeed: (n: number) => void;
@@ -79,6 +90,13 @@ export type LoraLabSlice = {
   restoreLabTakes: () => void;
   /** Render (or replay) one take and start it playing. */
   auditionLabTake: (name: string | null) => Promise<void>;
+  /** Keep a take: copy it into the library under `keptName`. Resolves true on
+   *  success; a refusal lands in `labKeepError[take]` rather than throwing. */
+  promoteLabTake: (take: string, keptName: string) => Promise<boolean>;
+  /** Add / set / remove a kept adapter in the audition stack (0 = remove). */
+  setLabStackValue: (name: string, value: number) => void;
+  /** Audition the whole stack as one take. */
+  auditionLabStack: () => Promise<void>;
   stopLabAudition: () => void;
   pollLabRun: () => Promise<void>;
   onLabTakeEvent: (payload: unknown) => void;
@@ -94,6 +112,12 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 export const BASELINE_KEY = "__base__";
 export const renderKey = (takeName: string | null) => takeName ?? BASELINE_KEY;
 
+/** The render slot for an ad-hoc STACK of kept adapters. Includes each value and
+ *  the order, because both change the sound — a key of names alone would make
+ *  two audibly different stacks share one cached render. */
+export const stackKey = (stack: LabStackEntry[]) =>
+  `__stack__${stack.map((e) => `${e.name}@${e.value}`).join("+")}`;
+
 export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (set, get) => ({
   labRun: null,
   labTakes: [],
@@ -103,6 +127,9 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
   labPrompt: "",
   labSourceClipId: null,
   labSeed: 42,
+  labStack: [],
+  labKeepError: {},
+  labKeeping: null,
 
   setLabPrompt: (s) => set({ labPrompt: s }),
   setLabSource: (clipId) => set({ labSourceClipId: clipId }),
@@ -169,6 +196,113 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
 
     // A cache hit comes back ready in the same call — play it now. A miss plays
     // when its `lab_take` event lands (see onLabTakeEvent).
+    if (status === "ready" && outputWav)
+      void executeCommand({ command: "audition_file", args: { path: outputWav } });
+  },
+
+  promoteLabTake: async (take, keptName) => {
+    const name = keptName.trim();
+    if (!name) {
+      set((st) => ({ labKeepError: { ...st.labKeepError, [take]: "Give it a name first" } } as Partial<State>));
+      return false;
+    }
+    set((st) => ({
+      labKeeping: take,
+      labKeepError: { ...st.labKeepError, [take]: "" },
+    } as Partial<State>));
+
+    const res = await executeCommand<CommandResult<{ name: string }>>({
+      command: "promote_lora_checkpoint",
+      args: { source: take, name },
+    });
+
+    if (!res.ok) {
+      // A refusal is the producer's answer ("that name is taken"), not a fault —
+      // it belongs on the row they clicked, not in a global error bar where it
+      // reads as the app breaking.
+      set((st) => ({
+        labKeeping: null,
+        labKeepError: { ...st.labKeepError, [take]: res.error || "could not keep this take" },
+      } as Partial<State>));
+      return false;
+    }
+
+    set((st) => ({
+      labKeeping: null,
+      labKeepError: { ...st.labKeepError, [take]: "" },
+    } as Partial<State>));
+    // Re-read the library so the new adapter appears in the rack immediately;
+    // otherwise "Keep" looks like it did nothing until the next reload.
+    await get().loadLoras();
+    return true;
+  },
+
+  setLabStackValue: (name, value) => {
+    const v = Math.max(0, Math.round(value));
+    set((st) => {
+      const without = st.labStack.filter((e) => e.name !== name);
+      // 0 means removed, not "merged at zero strength" — the registry skips a
+      // zero-strength entry anyway, so keeping it would only make the Sigma
+      // readout lie about how many adapters are actually in play.
+      if (v === 0) return { labStack: without } as Partial<State>;
+      const existing = st.labStack.find((e) => e.name === name);
+      // Preserve position on a value change; append when newly added, because
+      // merge order is sequential and reordering under the producer's hand
+      // would silently change the sound.
+      return {
+        labStack: existing
+          ? st.labStack.map((e) => (e.name === name ? { ...e, value: v } : e))
+          : [...without, { name, value: v }],
+      } as Partial<State>;
+    });
+  },
+
+  auditionLabStack: async () => {
+    const s = get();
+    const prompt = s.labPrompt.trim();
+    if (!prompt || s.labStack.length === 0) return;
+    const key = stackKey(s.labStack);
+    const existing = s.labRenders[key];
+    if (existing?.status === "ready" && existing.outputWav) {
+      set({ labCued: key });
+      void executeCommand({ command: "audition_file", args: { path: existing.outputWav } });
+      return;
+    }
+    set((st) => ({
+      labCued: key,
+      labRenders: { ...st.labRenders, [key]: { takeId: "", status: "rendering", progress: 0 } },
+    } as Partial<State>));
+
+    const res = await executeCommand<CommandResult<{ takeId: string; status: string; outputWav?: string }>>({
+      command: "render_lora_take",
+      args: {
+        adapters: s.labStack,
+        prompt,
+        seed: s.labSeed,
+        ...(s.labSourceClipId ? { sourceClipId: s.labSourceClipId } : {}),
+      },
+    });
+    if (!res.ok || !res.data) {
+      set((st) => ({
+        labRenders: {
+          ...st.labRenders,
+          [key]: { takeId: "", status: "error", progress: 0, error: res.error || "render failed" },
+        },
+      } as Partial<State>));
+      return;
+    }
+    const { takeId, status, outputWav } = res.data;
+    set((st) => ({
+      labRenders: {
+        ...st.labRenders,
+        [key]: {
+          takeId,
+          status: status === "ready" ? "ready" : "rendering",
+          progress: status === "ready" ? 1 : 0,
+          outputWav,
+        },
+      },
+    } as Partial<State>));
     if (status === "ready" && outputWav)
       void executeCommand({ command: "audition_file", args: { path: outputWav } });
   },
@@ -269,5 +403,6 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
 
   resetLab: () => set({
     labRun: null, labTakes: [], labRenders: {}, labCued: null, labDismissed: [],
+    labStack: [], labKeepError: {}, labKeeping: null,
   }),
 });

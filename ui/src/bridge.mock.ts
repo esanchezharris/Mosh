@@ -533,7 +533,7 @@ const MOCK_TXN_READS = new Set([
   "audition_note", "all_notes_off",
   // LoRA Lab audition — renders a candidate adapter to a file and mutates no Edit
   // state, so listening to takes stays possible while an agent transaction is open.
-  "render_lora_take",
+  "render_lora_take", "promote_lora_checkpoint",
 ]);
 
 function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
@@ -573,7 +573,7 @@ const listeners = new Map<string, Set<Listener>>();
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number; txn: string }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes", "render_lora_take",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
@@ -1177,11 +1177,19 @@ const COLORS = [
   { name: "sustain", astd_max: 0.4, peak_layer: 17, more_sign: 1, verdict: "REAL", no_stack_with: ["sustain_swell"], group: "sustain", mode: "Gentle" },
   { name: "sustain_swell", astd_max: 0.4, peak_layer: 8, more_sign: 1, verdict: "REAL", no_stack_with: ["sustain"], group: "sustain", mode: "Swell" },
 ];
+// `family` is load-bearing, not decoration: the rack menu filters `family !== "lab"`
+// so a run's six checkpoints don't bury the producer's kept adapters. The lab rows
+// below exist so that filter is actually EXERCISED — a fixture with no lab entries
+// would let "lab takes stay out of the rack" pass while the filter did nothing,
+// which is precisely the suppression-guard-with-nothing-to-suppress trap.
 const LORAS = [
-  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa" },
-  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental", valid: true, sha12: "bbbbbbbbbbbb" },
-  { name: "mic-sa3", displayName: "Microphones", trigger: "micz", hint: "lo-fi indie texture", valid: true, sha12: "cccccccccccc" },
-  { name: "broken", displayName: "broken", trigger: "", hint: "", valid: false, reason: "unreadable safetensors", sha12: "" },
+  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa", family: "library" },
+  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental", valid: true, sha12: "bbbbbbbbbbbb", family: "library" },
+  { name: "mic-sa3", displayName: "Microphones", trigger: "micz", hint: "lo-fi indie texture", valid: true, sha12: "cccccccccccc", family: "library" },
+  { name: "broken", displayName: "broken", trigger: "", hint: "", valid: false, reason: "unreadable safetensors", sha12: "", family: "library" },
+  { name: "ken-01@200", displayName: "ken-01 · step 200", trigger: "", hint: "", valid: true, sha12: "d1d1d1d1d1d1", family: "lab", step: 200 },
+  { name: "ken-01@400", displayName: "ken-01 · step 400", trigger: "", hint: "", valid: true, sha12: "d2d2d2d2d2d2", family: "lab", step: 400 },
+  { name: "ken-01@final", displayName: "ken-01 · final", trigger: "", hint: "", valid: true, sha12: "d3d3d3d3d3d3", family: "lab", step: -1 },
 ];
 
 // Takes already "rendered" this session — the mock's stand-in for the on-disk
@@ -3996,6 +4004,27 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // the real async poll produces, rather than a take that is born finished.
       setTimeout(() => emit("lab_take", { takeId, status: "ready", outputWav }), 0);
       return ok(command, { takeId, status: "rendering", cache: "miss", jobId: `mock-${takeId}`, outputWav });
+    }
+    // "Keep" — promote an auditioned lab take into the library. Mirrors the real
+    // refusals (unknown source, invalid take, name already taken) because those are
+    // the paths the UI actually renders; a mock that always succeeds would leave
+    // every error branch untested.
+    case "promote_lora_checkpoint": {
+      const source = str(args.source);
+      if (!source) return err(command, "missing 'source' (the take to keep)");
+      const take = LORAS.find((l) => l.name === source);
+      if (!take) return err(command, `no adapter named '${source}'`);
+      if (!take.valid)
+        return err(command, `'${source}' is not a usable adapter: ${(take as { reason?: string }).reason ?? "invalid"}`);
+      const name = str(args.name) || source.split("@")[0];
+      if (LORAS.some((l) => l.name === name))
+        return err(command, `a kept adapter named '${name}' already exists — pick another name`);
+      const kept = {
+        name, displayName: str(args.displayName) || name, trigger: str(args.trigger),
+        hint: str(args.hint), valid: true, sha12: take.sha12, family: "library",
+      };
+      LORAS.push(kept);
+      return ok(command, { name, source, adapter: kept });
     }
     case "list_rave_models":   // Lane B — RAVE model browser fixture
       return ok(command, { models: [
