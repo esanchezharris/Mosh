@@ -518,9 +518,13 @@ def main() -> int:
             "note": (
                 "byte-identical to assist_demonstrations.jsonl row 0's system field "
                 "(same buildSystemPrompt(DEFAULT_RULES, fixture_snap.json) render). "
-                "KNOWN STALE vs current commands.ts HEAD — see "
-                "R6_COVERAGE_PREP_NOTE.md 'Prompt-shape drift found'. Regenerate "
-                "before any real training merge."
+                "Regenerated 2026-08-17 (r7 prep, RUN_NEXT.md §2.1: `cd ui && npx "
+                "tsx scripts/build_assist_sft.mts`) against current commands.ts/"
+                "musicalTime.ts HEAD; validate_system_prompt_drift.py reports OK "
+                "against this row. See R6_COVERAGE_PREP_NOTE.md 'Prompt-shape drift "
+                "found' for the earlier STALE finding this regeneration fixes, and "
+                "re-run the drift check before reusing this file if commands.ts "
+                "moves again."
             ),
         },
         "fixture_source": {

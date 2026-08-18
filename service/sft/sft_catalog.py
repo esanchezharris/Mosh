@@ -58,10 +58,24 @@ def _extract_args(segment: str) -> tuple[ArgSpec, ...]:
 
 _COMMAND_LINE_RE = re.compile(
     r'\{\s*command:\s*"([a-z_][a-z0-9_]*)"\s*,\s*desc:\s*"(?:[^"\\]|\\.)*"\s*,\s*args:\s*\[(.*?)\]\s*\}\s*,?\s*$',
-    re.M,
+    re.M | re.S,
 )
 # Commands with an empty args list render as `args: []` — no S/N/B calls to scan,
 # handled naturally (empty tuple).
+#
+# re.S (DOTALL) added 2026-08-17 (r7 prep): a handful of entries (e.g.
+# set_clip_fade, set_clip_loop) wrap their `args: [...]` list onto a second
+# source line for readability. Without DOTALL, `.` never matched the embedded
+# newline, so `(.*?)` failed to reach the closing `]` and the whole `{...}`
+# entry silently dropped out of the parsed catalog — load_catalog() returned
+# 155 of the real 157 AGENT_COMMANDS entries with no error. This surfaced as a
+# FALSE positive in validate_system_prompt_drift.py ("2 command(s) in the
+# embedded system prompt no longer exist in the current catalog") even though
+# both commands are very much still in commands.ts and in the real render.
+# `$` (line-end anchor) still works fine under re.M together with re.S: `.`
+# now also matches newlines, but `$` is unaffected by re.S and still anchors
+# to end-of-line, which every entry's closing `}` (optionally with a trailing
+# comma) is.
 
 
 def load_catalog(commands_ts: Path = COMMANDS_TS) -> dict[str, CommandSpec]:
