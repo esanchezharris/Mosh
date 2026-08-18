@@ -1102,6 +1102,14 @@ juce::var MoshOps::cmdRenameTrack (const juce::var& args)
 
 juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
 {
+    // A2 — pre-risky-op save (parity with cmdRemovePlugin/cmdLoadPlugin). deleteTrack()
+    // below destroys every plugin hosted on this track in-place; a hostile third-party
+    // VST3/AU can SIGSEGV the whole process on teardown (the same in-process-crash class
+    // remove_plugin already guards — see isHarnessHostablePlugin's root-cause note in
+    // SelfTest.cpp). Persisting first means a crash here recovers to the pre-removal
+    // state (the track + its plugins still present) instead of losing unrelated unsaved
+    // work made before this command.
+    eng.saveIfDirty();
     const auto id = args.getProperty ("trackId", var()).toString();
     auto* track = findTrack (id);
     if (track == nullptr) return errResult ("remove_track", "no track: " + id);
@@ -10348,7 +10356,16 @@ void MoshOps::appendRecoveryJournal (const juce::String& name, const juce::var& 
 }
 
 // Replace any top-level string arg whose VALUE is a journaled id with its freshly-assigned
-// id (value-based, since different commands carry the id under different keys).
+// id (value-based, since different commands carry the id under different keys). Also
+// rewrites string ELEMENTS inside array-valued args, one level deep (e.g.
+// delete_time_range's trackIds: [...]) — FIT-005's one genuine residual defect: without
+// this branch, an array-of-ids arg replayed its OLD (pre-crash, now-stale) ids verbatim,
+// so a session-fresh track created earlier in the SAME crashed tail silently failed to
+// resolve on replay (findTrack(oldId) misses) and the command no-op'd instead of halting —
+// a silent under-application of an otherwise-"ok" recovered command. depth-1 is sufficient:
+// delete_time_range.trackIds is the only allowlisted (isReplayableCommand) arg shaped this
+// way — create_group_track also takes trackIds but is NOT allowlisted, and paste_clip's
+// nested clip object carries content (not id references) with its own trackId top-level.
 juce::var MoshOps::substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap)
 {
     auto* in = args.getDynamicObject();
@@ -10357,7 +10374,22 @@ juce::var MoshOps::substituteRecoveryIds (const juce::var& args, const juce::Has
     for (auto& p : in->getProperties())
     {
         auto v = p.value;
-        if (v.isString()) { const auto s = v.toString(); if (idMap.contains (s)) v = idMap[s]; }
+        if (v.isString())
+        {
+            const auto s = v.toString();
+            if (idMap.contains (s)) v = idMap[s];
+        }
+        else if (auto* arr = v.getArray())
+        {
+            juce::Array<juce::var> rebound;
+            for (auto& e : *arr)
+            {
+                juce::var elem = e;
+                if (e.isString()) { const auto es = e.toString(); if (idMap.contains (es)) elem = idMap[es]; }
+                rebound.add (elem);
+            }
+            v = var (rebound);
+        }
         out->setProperty (p.name, v);
     }
     return var (out);

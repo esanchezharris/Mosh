@@ -986,6 +986,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     for (auto& p : *arr)
                         if (p.getProperty ("id", var()).toString() == blockTarget) stillPresent = true;
                 check (! stillPresent, "blocked VST3 removed from list_plugins immediately");
+
+                // block_plugin as a RELIABLE lever: not just "hidden from the browser" (above)
+                // but genuinely REFUSES TO LOAD. cmdLoadPlugin resolves pluginId via
+                // PluginHost::findDescription(), which is defined entirely in terms of
+                // available() (the same blocklist-filtered list list_plugins reads) — so this
+                // is a real black-box round-trip proof, not an inference from reading the two
+                // functions separately.
+                auto probeTrack = cmd (ops, "create_track", args1 ("name", "BlockLoadProbe"));
+                check (ok (probeTrack), "block_plugin/load: probe track created");
+                const auto probeTrackId = probeTrack["data"].getProperty ("trackId", var()).toString();
+                auto loadAttempt = cmd (ops, "load_plugin",
+                                         objN ({{ "trackId", probeTrackId }, { "pluginId", blockTarget }}));
+                check (! ok (loadAttempt), "block_plugin: a blocked plugin REFUSES to load via load_plugin");
+                check (loadAttempt.getProperty ("error", var()).toString().contains ("unknown plugin"),
+                       "block_plugin: refused load reports \"unknown plugin\", not a different failure");
+                cmd (ops, "remove_track", args1 ("trackId", probeTrackId));   // tidy
             }
         }
 
@@ -4280,6 +4296,40 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! sentinel.existsAsFile(), "A2: clearSessionRunning removes the sentinel (clean-quit path)");
     }
 
+    // ─── A2 — remove_track auto-saves the pre-teardown state first ───
+    // remove_track's deleteTrack() destroys every plugin hosted on the track in-place — the
+    // SAME in-process-crash class remove_plugin already guards with a pre-op saveIfDirty()
+    // (a hostile VST3/AU can SIGSEGV the whole process on teardown; see
+    // isHarnessHostablePlugin's root-cause note above). This proves remove_track carries the
+    // same guard, black-box, via the A3 recovery journal: a successful saveIfDirty() truncates
+    // recovery-journal.jsonl (MoshEngine::save() deletes it), so if the internal pre-save
+    // genuinely ran BEFORE deleteTrack, the create_track entry it flushed is gone by the time
+    // execute()'s own post-command journaling appends remove_track's entry — leaving exactly
+    // ONE line, not two. Without the guard, both entries would still be present.
+    section ("A2: remove_track auto-saves before teardown (parity with remove_plugin's guard)");
+    {
+        auto journal = eng.sessionDir().getChildFile ("recovery-journal.jsonl");
+        auto journalLines = [&] {
+            if (! journal.existsAsFile()) return 0;
+            int n = 0;
+            for (auto& l : juce::StringArray::fromLines (journal.loadFileAsString())) if (l.trim().isNotEmpty()) ++n;
+            return n;
+        };
+
+        check (ok (cmd (ops, "save")), "A2/remove_track: clean baseline save ok");
+        check (journalLines() == 0, "A2/remove_track: journal empty at baseline");
+
+        auto rt = cmd (ops, "create_track", args1 ("name", "TeardownProbe"));
+        check (ok (rt), "A2/remove_track: create probe track ok");
+        const auto rtId = rt["data"].getProperty ("trackId", var()).toString();
+        check (journalLines() == 1, "A2/remove_track: create_track journaled (one unsaved entry)");
+
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", rtId))), "A2/remove_track: remove ok");
+        check (journalLines() == 1,
+               "A2/remove_track: pre-teardown autosave truncated the create_track entry — only "
+               "remove_track's own post-command journal entry remains (would be 2 without the guard)");
+    }
+
     // ─── Scoped snapshot invalidation (D1-justified) ───
     // A track-local mutation (mixer volume/pan/mute, plugin param) emits snapshot_invalidated
     // carrying JUST that track's var, so the UI patches one track instead of re-pulling the
@@ -7026,9 +7076,14 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     // Captured variables: a command may "capture":{"VAR":"dataField"} a field of its
     // result.data, and any later string arg of the exact form "${VAR}" is replaced with
     // the captured value. This keeps scripts self-contained and robust to engine-assigned
-    // ids (trackId/clipId/index) without hard-coding them.
+    // ids (trackId/clipId/index) without hard-coding them. Also walks one level into
+    // array-valued args (e.g. delete_time_range's trackIds:["${B}"]) so a captured id can
+    // be referenced inside an array, not just as a bare top-level string — otherwise a
+    // script exercising an array-of-ids command would silently no-op on the LITERAL
+    // "${VAR}" string (never resolving to a real id), which would be indistinguishable
+    // from testing nothing at all.
     HashMap<String, var> vars;
-    auto subst = [&vars] (const var& v) -> var
+    std::function<var (const var&)> subst = [&vars, &subst] (const var& v) -> var
     {
         if (v.isString())
         {
@@ -7038,6 +7093,13 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
                 const auto key = s.substring (2, s.length() - 1);
                 if (vars.contains (key)) return vars[key];
             }
+            return v;
+        }
+        if (auto* arr = v.getArray())
+        {
+            Array<var> out;
+            for (auto& e : *arr) out.add (subst (e));
+            return var (out);
         }
         return v;
     };

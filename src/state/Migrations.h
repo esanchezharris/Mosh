@@ -92,43 +92,70 @@ namespace mosh
         node.setProperty (ids::moshFormatVersion, kMoshFormatVersion, nullptr);
     }
 
+    namespace detail
+    {
+        // Core chain-walk, parameterized over (targetVersion, steps) so it can be exercised
+        // with a SYNTHETIC registry in tests — proving the walk applies N>1 hops in order and
+        // refuses gracefully (not jassert-only) on a broken chain — without touching the REAL
+        // kMoshFormatVersion/migrations(), which must stay tied to the actual shipped schema.
+        // No stamping here (that's a migrateOrRefuse-only concern, tied to the real version).
+        inline MigrationResult migrateOrRefuseImpl (juce::ValueTree editState, int targetVersion,
+                                                     const std::vector<MigrationStep>& steps)
+        {
+            const int fileV = readFileVersion (editState);
+            MigrationResult r; r.fromVersion = fileV; r.toVersion = fileV;
+
+            if (fileV > targetVersion)
+            {
+                r.ok = false;
+                r.error = "This project (format v" + juce::String (fileV)
+                        + ") was made by a newer version of Mosh than this build (v"
+                        + juce::String (targetVersion) + "). Please update Mosh to open it.";
+                return r;
+            }
+
+            int cur = fileV;
+            while (cur < targetVersion)
+            {
+                const MigrationStep* step = nullptr;
+                for (auto& s : steps)
+                    if (s.from == cur) { step = &s; break; }
+
+                jassert (step != nullptr);   // contiguous-chain invariant (also unit-tested)
+                if (step == nullptr)
+                {
+                    r.ok = false;
+                    r.error = "Missing migration step from format v" + juce::String (cur);
+                    return r;
+                }
+                step->apply (editState);
+                cur = step->to;
+            }
+
+            r.toVersion = cur;
+            return r;
+        }
+    }
+
     // The load-time gate. Apply to a freshly-loaded Edit's `state` BEFORE the engine starts
     // using it (before wireEditResolvers / any snapshot or command). Migrations mutate
     // editState in place (persisted on the next save); a refusal does NOT mutate.
+    //
+    // Forward-compat for ADDITIVE changes (the case multiplayer's new state fields will hit):
+    // this gate does NOT need to widen. Per the kMoshFormatVersion contract above, a build
+    // only bumps the version on a BREAKING change; a new optional property/child with a safe
+    // absent-default is written WITHOUT a bump. So an older build opening a file with such an
+    // extra, unmodeled property sees fileV == kMoshFormatVersion (equal-version, no-op success,
+    // below) — the unknown data is never touched by this gate and survives untouched into the
+    // live ValueTree (proven by the "unknown-but-present property survives" test in
+    // test_migrations.cpp). "Newer but compatible" is thus not a THIRD branch to add here —
+    // it is architecturally the same case as "equal version" by construction, as long as that
+    // discipline (bump only on breaking changes) holds.
     inline MigrationResult migrateOrRefuse (juce::ValueTree editState)
     {
-        const int fileV = readFileVersion (editState);
-        MigrationResult r; r.fromVersion = fileV; r.toVersion = fileV;
-
-        if (fileV > kMoshFormatVersion)
-        {
-            r.ok = false;
-            r.error = "This project (format v" + juce::String (fileV)
-                    + ") was made by a newer version of Mosh than this build (v"
-                    + juce::String (kMoshFormatVersion) + "). Please update Mosh to open it.";
-            return r;
-        }
-
-        int cur = fileV;
-        while (cur < kMoshFormatVersion)
-        {
-            const MigrationStep* step = nullptr;
-            for (auto& s : migrations())
-                if (s.from == cur) { step = &s; break; }
-
-            jassert (step != nullptr);   // contiguous-chain invariant (also unit-tested)
-            if (step == nullptr)
-            {
-                r.ok = false;
-                r.error = "Missing migration step from format v" + juce::String (cur);
-                return r;
-            }
-            step->apply (editState);
-            cur = step->to;
-        }
-
-        stampFormatVersion (editState);  // now-current; persisted on the next save
-        r.toVersion = cur;
+        auto r = detail::migrateOrRefuseImpl (editState, kMoshFormatVersion, migrations());
+        if (r.ok)
+            stampFormatVersion (editState);  // now-current; persisted on the next save
         return r;
     }
 }

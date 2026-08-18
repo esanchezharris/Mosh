@@ -73,3 +73,76 @@ TEST_CASE ("illustrative v0->v1 step creates MOSH_PROJECT", "[migrations]")
     REQUIRE (r.ok);
     REQUIRE (projectNode (st).isValid());   // proves a step body executed, not just the stamp
 }
+
+// PRJ-FMT forward-compat — the case multiplayer's new state fields depend on: an
+// ADDITIVE property/child that a build never had to bump the version for (per the
+// kMoshFormatVersion contract: "adding a NEW optional property with a safe absent-default
+// does NOT require a bump"). Such a file reads at fileV == kMoshFormatVersion — the SAME
+// "equal version" branch as any ordinary current file — so migrateOrRefuse must never
+// refuse it, and (critically) must never strip data it doesn't itself model. This proves
+// the gate is a pure pass-through for unknown-but-present data, not just that it returns ok.
+TEST_CASE ("unknown-but-present property/child survive migrateOrRefuse untouched (additive forward-compat)", "[migrations]")
+{
+    auto st = makeEditState();
+    auto node = juce::ValueTree (ids::MOSH_PROJECT);
+    node.setProperty (ids::moshFormatVersion, kMoshFormatVersion, nullptr);   // current version — no refusal, no migration
+    node.setProperty ("futureMpField", "guest-cursor-color", nullptr);        // a property THIS build never wrote
+    auto futureChild = juce::ValueTree ("MOSH_FUTURE_MULTIPLAYER_THING");     // a child node THIS build doesn't model
+    futureChild.setProperty ("x", 7, nullptr);
+    node.appendChild (futureChild, nullptr);
+    st.appendChild (node, nullptr);
+
+    auto r = migrateOrRefuse (st);
+    REQUIRE (r.ok);
+    REQUIRE (r.fromVersion == kMoshFormatVersion);
+    REQUIRE (r.toVersion == kMoshFormatVersion);
+    REQUIRE (projectNode (st).getProperty ("futureMpField").toString() == "guest-cursor-color");
+    auto survivedChild = projectNode (st).getChildWithName ("MOSH_FUTURE_MULTIPLAYER_THING");
+    REQUIRE (survivedChild.isValid());
+    REQUIRE ((int) survivedChild.getProperty ("x") == 7);
+}
+
+// The chain-walk loop is proven at exactly ONE hop by the shipped v0->v1 step (kMoshFormatVersion
+// is currently 1). Exercise the SAME production algorithm (detail::migrateOrRefuseImpl, which
+// migrateOrRefuse is a thin wrapper over) at 3 hops via a synthetic registry, so a future
+// multi-bump migration chain (plausible once multiplayer needs a real breaking change) is
+// exercised BEFORE it ships, not discovered by it. Proves: steps apply IN ORDER, and each
+// step's mutation is visible to the NEXT step (threaded through the same evolving tree).
+TEST_CASE ("multi-hop chain applies 3 steps in order on the same evolving tree", "[migrations]")
+{
+    const std::vector<MigrationStep> steps = {
+        { 0, 1, "add x", [] (juce::ValueTree& t) { t.setProperty ("x", 1, nullptr); } },
+        { 1, 2, "add y from x", [] (juce::ValueTree& t)
+              { t.setProperty ("y", (int) t.getProperty ("x") + 1, nullptr); } },
+        { 2, 3, "add z from y", [] (juce::ValueTree& t)
+              { t.setProperty ("z", (int) t.getProperty ("y") + 1, nullptr); } },
+    };
+
+    auto st = juce::ValueTree ("PROBE");
+    auto r = detail::migrateOrRefuseImpl (st, 3, steps);
+    REQUIRE (r.ok);
+    REQUIRE (r.fromVersion == 0);
+    REQUIRE (r.toVersion == 3);
+    REQUIRE ((int) st.getProperty ("x") == 1);
+    REQUIRE ((int) st.getProperty ("y") == 2);   // proves step 2 saw step 1's mutation
+    REQUIRE ((int) st.getProperty ("z") == 3);   // proves step 3 saw step 2's mutation
+}
+
+// A broken (non-contiguous) chain must refuse GRACEFULLY at runtime — not merely trip the
+// debug-only jassert (a Release build has no assert to catch it). This is the defensive path
+// a genuinely-missing migration step would hit in production.
+TEST_CASE ("multi-hop chain with a gap refuses gracefully (not just via jassert)", "[migrations]")
+{
+    const std::vector<MigrationStep> steps = {
+        { 0, 1, "add x", [] (juce::ValueTree& t) { t.setProperty ("x", 1, nullptr); } },
+        // gap: no {1,2,...} step
+        { 2, 3, "add z", [] (juce::ValueTree& t) { t.setProperty ("z", 3, nullptr); } },
+    };
+
+    auto st = juce::ValueTree ("PROBE");
+    auto r = detail::migrateOrRefuseImpl (st, 3, steps);
+    REQUIRE_FALSE (r.ok);
+    REQUIRE (r.error.contains ("Missing migration step from format v1"));
+    REQUIRE ((int) st.getProperty ("x") == 1);      // step 0->1 DID apply before the gap was hit
+    REQUIRE_FALSE (st.hasProperty ("z"));           // step 2->3 never ran
+}
