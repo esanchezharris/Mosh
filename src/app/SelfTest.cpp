@@ -3983,6 +3983,84 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                  "LoRA overdrive (value > 100) survives unclamped"); }
     }
 
+    // ── LoRA Lab: render_lora_take's ARGUMENT surface (hermetic, no service).
+    //
+    // Scope, stated plainly so nobody later mistakes this for more than it is:
+    // these checks cover validation that runs BEFORE ensureServiceRunning(), which
+    // is the only part reachable without spawning the generative service. The
+    // render itself — cache HIT/MISS, adapter merge, the wav actually landing —
+    // belongs to verify-hardware, exactly like the SA3 merge path above.
+    //
+    // The ordering is the point. Every check below passes only because argument
+    // validation happens before the service call; if that order were reversed, a
+    // malformed take would block the message thread on a Python spawn first, and
+    // this section would hang or fail on a machine with no service instead of
+    // returning a clean error.
+    section ("LoRA Lab: render_lora_take argument surface");
+    {
+        // A take needs something to render. This is the FIRST thing checked, so it
+        // holds even with no service, no adapters and no session audio.
+        auto noPrompt = cmd (ops, "render_lora_take", objN ({{ "seed", 1 }}));
+        check (! ok (noPrompt), "render_lora_take without a prompt fails");
+        check (noPrompt.getProperty ("error", var()).toString().contains ("prompt"),
+               "…and says which argument is missing");
+
+        auto blankPrompt = cmd (ops, "render_lora_take", objN ({{ "prompt", "   " }}));
+        check (! ok (blankPrompt), "a whitespace-only prompt is rejected too (trimmed, not just non-empty)");
+
+        // An unknown source clip must fail on the CLIP, not on the service. If this
+        // ever starts reporting "generative service unavailable" instead, the
+        // validation order has regressed and a bad clipId now costs a process spawn.
+        auto badClip = cmd (ops, "render_lora_take",
+                            objN ({{ "prompt", "rage trap instrumental" }, { "sourceClipId", "clip-that-does-not-exist" }}));
+        check (! ok (badClip), "render_lora_take with an unknown source clip fails");
+        check (badClip.getProperty ("error", var()).toString().contains ("source clip not found"),
+               "…naming the clip problem, NOT the service (validation runs before the spawn)");
+
+        // A MIDI clip is a legitimate thing to point at and an illegitimate source:
+        // the model is audio→audio, and the Lab does not auto-bounce (render_layer
+        // does; an audition deliberately does not, because bouncing an instrument
+        // chain is a minute of work to answer a question about an adapter).
+        auto labT = cmd (ops, "create_track", args1 ("name", "LabSrc"))["data"].getProperty ("trackId", var()).toString();
+        auto labMidi = cmd (ops, "add_midi_clip", objN ({{ "trackId", labT }, { "length", 1.0 }}));
+        const auto labMidiId = labMidi["data"].getProperty ("clipId", var()).toString();
+        if (labMidiId.isNotEmpty())
+        {
+            auto midiSrc = cmd (ops, "render_lora_take",
+                                objN ({{ "prompt", "rage trap instrumental" }, { "sourceClipId", labMidiId }}));
+            check (! ok (midiSrc), "render_lora_take refuses a MIDI clip as an audition source");
+            check (midiSrc.getProperty ("error", var()).toString().contains ("audio clip"),
+                   "…explaining it needs audio, not just 'invalid'");
+        }
+
+        // It must never open an undo transaction: an audition is not an edit, and a
+        // producer auditioning twenty takes must not bury their actual work twenty
+        // steps deep in the undo stack.
+        check (mosh::txnsafe::isReadOnlyDuringTransaction ("render_lora_take"),
+               "render_lora_take is transaction-safe (auditioning never blocks on, or opens, an edit txn)");
+    }
+
+    // ── LoRA Lab: promote_lora_checkpoint ("Keep") argument surface ──────────
+    // Hermetic — every check here is a REFUSAL, reached before the service is
+    // consulted, so none of it needs a model or a trained adapter. The success
+    // path needs a real take and lives in scripts/verify-hardware.
+    section ("LoRA Lab: promote_lora_checkpoint argument surface");
+    {
+        auto noSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "name", "keeper" }}));
+        check (! ok (noSource), "promote_lora_checkpoint without a source fails");
+        check (noSource.getProperty ("error", var()).toString().contains ("source"),
+               "…naming the missing argument");
+
+        auto blankSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "source", "   " }}));
+        check (! ok (blankSource), "promote_lora_checkpoint with a blank source fails");
+
+        // Keeping is the one action in the Lab that writes outside the edit, into
+        // the producer's library — so it must not open an undo transaction, which
+        // would offer an undo that cannot actually take the file back.
+        check (mosh::txnsafe::isReadOnlyDuringTransaction ("promote_lora_checkpoint"),
+               "promote_lora_checkpoint is transaction-safe (it writes to the library, not the edit)");
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The

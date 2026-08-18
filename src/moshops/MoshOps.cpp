@@ -751,6 +751,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "list_loras")        return cmdListLoras (args);
+    if (name == "render_lora_take")  return cmdRenderLoraTake (args);
+    if (name == "promote_lora_checkpoint") return cmdPromoteLoraCheckpoint (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
     if (name == "list_rave_models")  return cmdListRaveModels (args);   // Lane B — non-gated fs scan
    #if MOSH_HAVE_ANIRA
@@ -822,8 +824,6 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "training_job_status")     return cmdTrainingJobStatus (args);
     if (name == "cancel_training_job")     return cmdCancelTrainingJob (args);
     if (name == "import_lora_adapter")     return cmdImportLoraAdapter (args);
-    if (name == "activate_lora_adapter")   return cmdActivateLoraAdapter (args);
-    if (name == "list_lora_adapters")      return cmdListLoraAdapters (args);
 
     return errResult (name, "unknown command: " + name);
 }

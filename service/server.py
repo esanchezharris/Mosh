@@ -205,6 +205,9 @@ def _guest_capability_summary() -> dict:
     change, which this pass avoids. `/capabilities` itself also carries the venv flags
     (for parity with /health) but nothing proxies it to the UI today."""
     from adapters import transform_adapter as _tx
+    # One call: the descriptor probes the filesystem for the trainer binary and
+    # the base checkpoint, and calling it twice doubles that for no reason.
+    training = _training_descriptor()
     return {
         "transcribe": _transcribe_available(),
         "skeleton": _skeleton_available(),
@@ -212,6 +215,15 @@ def _guest_capability_summary() -> dict:
         "phonology": _phonology_available(),
         "transformReal": _tx.available(),
         "trainingBackend": lora_trainer_adapter.backend_name(),
+        # Why a real backend still can't train here (missing binary/checkpoint).
+        # Empty for the stub, whose only honest signal is the "preview" label.
+        "trainingBlockers": training.get("blockers", []),
+        # The measured recipe defaults, carrying THIS machine's memory plan
+        # (batch size is chosen from physical RAM). Delivered rather than
+        # re-derived in TypeScript: the epoch curve was fit to real runs, and a
+        # second copy would drift invisibly the moment either side is
+        # re-measured. The UI recomputes only the clip-count-dependent part.
+        "trainingRecipe": training.get("recipe", {}),
     }
 
 
@@ -365,15 +377,41 @@ def _sa3_descriptor() -> dict:
 
 
 def _training_descriptor() -> dict:
+    """What the trainer can do on THIS machine, and what is missing if it can't.
+
+    `blockers` is the load-bearing field: it lets the UI say "the base
+    checkpoint is missing, run setup-trainer.sh" instead of offering a Train
+    button that fails on click. `output_formats` distinguishes a real
+    fine-tune ("safetensors") from the stub ("json_stub") — the artifact-shape
+    test keys on exactly that.
+    """
+    backend = lora_trainer_adapter.backend_name()
+    blockers: list[str] = []
+    recipe_defaults: dict = {}
+    if backend == "local_pmetal":
+        try:
+            from training import local_pmetal as _lp
+            _, blockers = _lp.readiness()
+        except Exception as exc:  # noqa: BLE001
+            blockers = [f"local trainer unavailable: {exc}"]
+    try:
+        from training import recipe as _recipe
+        # Clip count is per-corpus, so the UI recomputes; this is the shape +
+        # the machine-dependent memory plan.
+        recipe_defaults = _recipe.recommend_recipe(33)
+    except Exception:  # noqa: BLE001
+        recipe_defaults = {}
     return {
         "id": "lora_trainer",
-        "version": "0.1.0",
-        "available": TRAINING_ENABLED,
-        "output_formats": ["json_stub"],
-        "runtime_requirements": ["cpu"],
+        "version": "0.2.0",
+        "available": TRAINING_ENABLED and not blockers,
+        "output_formats": ["safetensors"] if backend == "local_pmetal" else ["json_stub"],
+        "runtime_requirements": ["metal", "sa3-base-checkpoint"] if backend == "local_pmetal" else ["cpu"],
         "packaging_mode": "python_service",
         "service_build": SERVICE_BUILD,
-        "backend": lora_trainer_adapter.backend_name(),
+        "backend": backend,
+        "blockers": blockers,
+        "recipe": recipe_defaults,
     }
 
 
@@ -432,6 +470,72 @@ _job_q: "queue.PriorityQueue" = queue.PriorityQueue()
 _seq = itertools.count()
 _training_jobs: dict[str, dict] = {}
 _training_lock = threading.Lock()
+# Serializes every in-process MLX/SA3 model call across BOTH worker threads.
+#
+# `sa3/engine.py` states it plainly in its own header: the loaded model is
+# process-global and mutated per call, so it must never be called
+# concurrently. Until training precompute existed that was guaranteed for
+# free — one worker thread owned every render. Precompute broke it: it runs
+# on the TRAINING worker, so a precompute overlapping a render is a corrupted
+# DiT or a crash, and intermittently so.
+#
+# The trainer SUBPROCESS deliberately does not hold this: it is a separate
+# process with its own Metal budget, and holding the lock for a 20-60 minute
+# run would freeze every render in the app.
+import memprobe          # noqa: E402 — cheap (~4ms) system-memory probe
+import sa3_release       # noqa: E402 — pure release-decision thresholds
+
+_mlx_lock = threading.RLock()
+
+
+# ── the ONE MLX thread ───────────────────────────────────────────────────────
+# MLX state is THREAD-AFFINE, not merely non-concurrent. Precompute used to run
+# on the training worker thread while renders run on `_worker_loop`'s; after any
+# training run, the next render died with
+#
+#     There is no Stream(gpu, 0) in current thread.
+#
+# and kept dying until the service was restarted — so "train once, then audition"
+# (the LoRA Lab's entire loop) was broken end to end, while a render on a
+# freshly-started service worked perfectly. A lock cannot fix that: serialising
+# two threads still leaves two threads.
+#
+# So every in-process MLX touch is funnelled onto the render worker thread as a
+# pseudo-job. The trainer SUBPROCESS is unaffected — separate process, own Metal
+# budget — and deliberately does NOT hold the lock, or a 20-minute run would
+# freeze every render in the app. (It previously did exactly that: the lock was
+# held across the whole train_lora call, subprocess included, contradicting the
+# comment right above it.)
+_MLX_TASK_ADAPTER = "__mlx_task__"
+
+
+def _run_on_mlx_thread(fn, timeout: float = 3600.0):
+    """Run `fn()` on the render worker thread; return its value or raise."""
+    box: dict = {}
+    done = threading.Event()
+
+    def _task():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller's thread
+            box["error"] = exc
+        finally:
+            done.set()
+
+    job_id = uuid.uuid4().hex[:12]
+    with _lock:
+        _jobs[job_id] = {"status": "queued", "progress": 0.0,
+                         "adapter": _MLX_TASK_ADAPTER, "fn": _task}
+    # Priority 0: ahead of queued renders. Precompute gates a job the producer
+    # has already committed twenty minutes to; a render is seconds and can wait.
+    _job_q.put((0, next(_seq), job_id))
+    if not done.wait(timeout):
+        raise RuntimeError("MLX task timed out")
+    with _lock:
+        _jobs.pop(job_id, None)
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 _training_q: "queue.PriorityQueue" = queue.PriorityQueue()
 _training_seq = itertools.count()
 
@@ -521,6 +625,13 @@ def _run_job(job_id: str) -> None:
             return
         job["status"] = "rendering"
         adapter_id = job.get("adapter", "fake")
+        mlx_task = job.get("fn") if adapter_id == _MLX_TASK_ADAPTER else None
+    if mlx_task is not None:
+        # An in-process MLX unit of work (today: training precompute), run HERE so
+        # it shares this thread — and therefore MLX's stream — with every render.
+        with _mlx_lock:
+            mlx_task()
+        return
     try:
         soulx_real = False
         if adapter_id == "soulx":
@@ -550,7 +661,8 @@ def _run_job(job_id: str) -> None:
             if _jobs[job_id].get("cancel"):
                 _jobs[job_id]["status"] = "cancelled"
                 return
-        manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+        with _mlx_lock:  # see _mlx_lock: the SA3 engine is not thread-safe
+            manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
         os.makedirs(os.path.dirname(os.path.abspath(job["manifest"])), exist_ok=True)
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
@@ -590,7 +702,56 @@ def _run_training_job(job_id: str) -> None:
                 _training_jobs[job_id]["progress"] = step / 6.0
             time.sleep(0.05)
 
-        result = train_lora(job["bundle_path"], job["output_dir"], job["config"])
+        # Real progress + cancellation for the local trainer. The stub path is
+        # seconds long and the fake progress above is fine for it; a real run is
+        # 20-60 minutes, so the UI needs the trainer's own step counter and a
+        # Stop that actually reaches the process group.
+        def _cancelled() -> bool:
+            with _training_lock:
+                return bool(_training_jobs.get(job_id, {}).get("cancel"))
+
+        def _on_progress(state: dict) -> None:
+            total = max(1, int(state.get("totalSteps") or 1))
+            done = int(state.get("step") or 0)
+            with _training_lock:
+                j = _training_jobs.get(job_id)
+                if j is None:
+                    return
+                # Reserve the top of the bar for export; training is the bulk.
+                j["progress"] = min(0.98, done / total)
+                j["detail"] = {
+                    "phase": state.get("phase"),
+                    "step": done,
+                    "totalSteps": total,
+                    "loss": state.get("loss"),
+                    "sPerStep": state.get("sPerStep"),
+                    "etaSeconds": state.get("etaSeconds"),
+                    "leg": state.get("leg"),
+                    "legs": state.get("legs"),
+                    "checkpoints": state.get("checkpoints") or [],
+                    # Facts about THIS run (see trainer_job's run_facts): the
+                    # corpus it actually trained on and the batch it used. The
+                    # UI must not re-derive these from live state — the registry
+                    # and the recommended recipe both move independently of a
+                    # run in flight.
+                    "clipCount": state.get("clipCount"),
+                    "batchSize": state.get("batchSize"),
+                    "gradAccum": state.get("gradAccum"),
+                    # Published takes, by registry name — the take sheet's rows.
+                    # Distinct from `checkpoints` (paths on disk): only a name the
+                    # render path can resolve is auditionable.
+                    "takes": state.get("takes") or [],
+                }
+
+        # The MLX lock covers PRECOMPUTE, which runs in THIS process and touches
+        # the same process-global SA3 engine renders use. It does not cover the
+        # trainer subprocess (see _mlx_lock).
+        # No blanket lock here: precompute takes it on the MLX thread (via
+        # run_on_mlx=_run_on_mlx_thread below), and the trainer subprocess must
+        # NOT hold it or every render blocks for the whole run.
+        result = train_lora(job["bundle_path"], job["output_dir"], job["config"],
+                            should_cancel=_cancelled, on_progress=_on_progress,
+                            run_on_mlx=_run_on_mlx_thread)
         with _training_lock:
             _training_jobs[job_id]["progress"] = 1.0
             _training_jobs[job_id]["status"] = "ready"
@@ -619,15 +780,54 @@ def _run_training_job(job_id: str) -> None:
         })
 
 
+def _training_active() -> bool:
+    with _training_lock:
+        return any(j.get("status") in ("queued", "running")
+                   for j in _training_jobs.values())
+
+
+def _maybe_release_sa3() -> None:
+    """Hand the render model's ~9.2 GB back when memory is genuinely tight.
+
+    Runs on the MLX-owning thread, between jobs, so no render is in flight.
+    Costs the next audition a measured +1.1 s (2.8 s -> 3.9 s steady state),
+    which is why it is gated rather than unconditional — see `sa3_release` for
+    the thresholds and the measurements behind them.
+    """
+    if _job_q.qsize():
+        return                      # more work queued: releasing now is pure loss
+    try:
+        from sa3 import engine as E
+    except Exception:               # noqa: BLE001 — FakeAdapter-only machine
+        return
+    if not E.loaded():
+        return
+    available = memprobe.available_fraction()
+    active = _training_active()
+    if not sa3_release.should_release(available, active):
+        return
+    if E.unload():
+        # Logged because an unexplained extra second on the next take is exactly
+        # the kind of thing that gets diagnosed as "the model got slower".
+        print(f"[sa3] released the render model — {sa3_release.explain(available, active)}",
+              flush=True)
+
+
 def _worker_loop() -> None:
     """The ONE thread that ever runs an adapter — serializes inference so the
-    process-global MLX model is never touched concurrently (05 §6 priority queue)."""
+    process-global MLX model is never touched concurrently (05 §6 priority queue).
+    Also the ONE thread that may touch MLX at all: the state is thread-affine
+    (see `_run_on_mlx_thread`), which is why the release check lives here too."""
     while True:
         _prio, _seq_n, job_id = _job_q.get()
         try:
             _run_job(job_id)
         finally:
             _job_q.task_done()
+            try:
+                _maybe_release_sa3()
+            except Exception as e:  # noqa: BLE001 — never let housekeeping kill the worker
+                print(f"[sa3] release check failed: {e}", flush=True)
 
 
 def _training_worker_loop() -> None:
@@ -876,6 +1076,13 @@ class Handler(BaseHTTPRequestHandler):
                     "jobId": jid,
                     "status": job["status"],
                     "progress": job.get("progress", 0.0),
+                    # `progress` is a coarse 0..1 float for a generic bar. `detail`
+                    # is what a producer actually reads: step, loss, s/step, ETA,
+                    # auto-chunk leg, and the takes published so far. It was
+                    # already being computed and stored on every callback and then
+                    # never sent, so the LoRA Lab's header had nothing to render
+                    # and sat at zero for the whole run while training was fine.
+                    "detail": job.get("detail") or {},
                     "outputDir": job.get("output_dir", ""),
                     "error": job.get("error"),
                     "result": job.get("result"),
@@ -892,6 +1099,13 @@ class Handler(BaseHTTPRequestHandler):
                     "jobId": jid,
                     "status": job["status"],
                     "progress": job.get("progress", 0.0),
+                    # `progress` is a coarse 0..1 float for a generic bar. `detail`
+                    # is what a producer actually reads: step, loss, s/step, ETA,
+                    # auto-chunk leg, and the takes published so far. It was
+                    # already being computed and stored on every callback and then
+                    # never sent, so the LoRA Lab's header had nothing to render
+                    # and sat at zero for the whole run while training was fine.
+                    "detail": job.get("detail") or {},
                     "outputDir": job.get("output_dir", ""),
                     "error": job.get("error"),
                     "result": job.get("result"),
@@ -912,7 +1126,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             input_wav = data.get("inputWav", "")
             output_wav = data.get("outputWav", "")
-            if not input_wav or not os.path.exists(input_wav):
+            # `generate` is text-to-audio: it has no source by definition, and the
+            # SA3 adapter already handles that (`has_src = input_wav and
+            # os.path.exists(...)`, then renders from the prompt alone). This gate
+            # used to demand the file unconditionally, which no caller noticed
+            # because every existing generate render is clip-parented and stages
+            # the clip's audio anyway — so the first genuinely source-free caller
+            # (the LoRA Lab auditioning a bare prompt, and its stock-model
+            # baseline) failed at submit with "inputWav missing" and surfaced as
+            # "job submit failed" two layers up.
+            #
+            # Deliberately narrow: every OTHER mode still requires a readable
+            # input, because for them a missing source is a real error that would
+            # otherwise turn into a silent re-imagine of nothing.
+            mode = str((data.get("params") or {}).get("mode", "") or "")
+            if mode != "generate" and (not input_wav or not os.path.exists(input_wav)):
                 self._send(400, {"ok": False, "error": "inputWav missing"})
                 return
             job_id = uuid.uuid4().hex[:12]
@@ -931,6 +1159,59 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/loras/install":
+            # Enroll an adapter that already exists ON DISK into the library.
+            # The sibling of /loras/promote: promote takes a lab take by NAME,
+            # this takes a PATH — the case a remote (rented-GPU) run produces,
+            # since `_remote_train` does not publish takes into sa3/lab/ the way
+            # a local run does, so its artifact has no other door into the rack.
+            #
+            # Both route through loras/install.py, which validates the STAGED
+            # copy before os.replace makes it visible. A stub run's
+            # adapter.lora.json is neither .safetensors nor .ckpt and is refused
+            # here rather than enrolled as a LoRA the render path would choke on.
+            try:
+                from loras import install as LORA_I
+                src = str(data.get("path", ""))
+                name = str(data.get("name", "")).strip()
+                if not src or not name:
+                    self._send(400, {"ok": False, "error": "path and name are required"})
+                    return
+                rec = LORA_I.install(
+                    src, name=name,
+                    trigger=str(data.get("trigger", "") or ""),
+                    hint=str(data.get("hint", "") or ""),
+                    notes=str(data.get("notes", "") or ""),
+                    display=(data.get("displayName") or None),
+                )
+                self._send(200, {"ok": True, "adapter": rec})
+            except ValueError as e:
+                self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"install failed: {e}"})
+        elif path == "/loras/promote":
+            # "Keep" — copy an auditioned lab take into the real library so it
+            # outlives the run it came from. Fails closed (see loras/promote.py):
+            # an invalid take, a missing source, or a name already in use all
+            # raise rather than enrolling something the render path would refuse
+            # or overwriting a decision the producer already made.
+            try:
+                from loras import promote as LORA_P
+                rec = LORA_P.promote(
+                    str(data.get("source", "")),
+                    name=str(data.get("name", "")),
+                    trigger=str(data.get("trigger", "") or ""),
+                    hint=str(data.get("hint", "") or ""),
+                    notes=str(data.get("notes", "") or ""),
+                    display=(data.get("displayName") or None),
+                )
+                self._send(200, {"ok": True, "adapter": rec})
+            except ValueError as e:
+                # A rejected promotion is a normal outcome the UI shows inline,
+                # not a service fault: 400, with the reason intact.
+                self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"promote failed: {e}"})
         elif path == "/stitch_windows":
             # Render-ahead primitive (Lane A): overlap-add crossfade a set of already-rendered
             # window WAVs into ONE continuous file, reusing the exact owner-measured-gapless

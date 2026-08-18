@@ -337,14 +337,20 @@ test.describe("L8 · overflow-menu containment", () => {
     expect(pop.x).toBeGreaterThanOrEqual(0);
     expect(pop.x + pop.width).toBeLessThanOrEqual(1280 + 1);
 
-    // Not `toBeVisible()` — that is exactly what let the clipped popover ship. Assert the
-    // badge's BOX is on screen.
-    const badge = await page.getByTestId("training-preview-badge").boundingBox();
-    if (!badge) throw new Error("missing preview badge bounds");
-    expect(badge.x).toBeGreaterThanOrEqual(0);
-    expect(badge.x + badge.width).toBeLessThanOrEqual(1280 + 1);
-    expect(badge.y).toBeGreaterThanOrEqual(0);
-    expect(badge.y + badge.height).toBeLessThanOrEqual(800 + 1);
+    // Not `toBeVisible()` — that is exactly what let the clipped popover ship. Assert a
+    // real element's BOX is on screen.
+    //
+    // Probes the popover HEAD, not the preview badge it used to use: that badge only
+    // renders under a stub trainer, and the mock's default backend is now a set-up Mac,
+    // so the old probe measured an element that no longer exists and failed with
+    // "missing preview badge bounds" — a containment test brought down by something
+    // that has nothing to do with containment. The head is always present.
+    const head = await page.getByTestId("training-tool-body").boundingBox();
+    if (!head) throw new Error("missing training popover head bounds");
+    expect(head.x).toBeGreaterThanOrEqual(0);
+    expect(head.x + head.width).toBeLessThanOrEqual(1280 + 1);
+    expect(head.y).toBeGreaterThanOrEqual(0);
+    expect(head.y + head.height).toBeLessThanOrEqual(800 + 1);
   });
 });
 

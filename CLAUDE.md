@@ -118,6 +118,31 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   must still use distinct harness leaves.
   `commandLine.contains("--selftest")` is also true for `--selftest-undo`; match undo FIRST.
   (SLF-CONC-001 — worklog `2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md`)
+- **`--run-script` state does NOT span invocations, and its session env is a RELATIVE
+  path.** Every harness mode (`--run-script` included, not just `--selftest`) WIPES its
+  session dir at startup — only the interactive GUI keeps the owner's session. So a
+  check that imports training sources in one invocation and approves them in the next
+  gets "source not found" for sources it just watched succeed. Do the whole stateful
+  sequence in ONE script, and copy any artifact you need afterwards (a corpus bundle
+  lives under the session dir; the next invocation's wipe deletes it out from under a
+  training run already reading it). Compounding this: `MOSH_SELFTEST_SESSION` is
+  resolved UNDER the Mosh data dir, so an absolute path is not a location — it is a
+  nonsense leaf, silently redirected to a unique safety session with no error. Pass
+  `_harness/<leaf>`. `lora_check.py`'s docstring has said "state does not span
+  invocations" since Stage 5; reading it would have saved three debugging rounds.
+- **A fixture written alongside the reader proves only that the code agrees with
+  itself.** `_clips_from_bundle` looked for `audio_path`/`path`/`file`; the real
+  manifest writer emits `copied_path`/`local_path` and never has emitted any of the
+  three. Its unit test passed throughout because the fixture was hand-written to match
+  the READER. The job died several layers later with "corpus bundle contains no usable
+  clips" — a message pointing at the corpus, not the parser. When testing a reader,
+  copy a real artifact from the writer, keys and all, and say so in the test so nobody
+  tidies it into something more convenient.
+- **A setup script that skips when the target exists can never UPDATE it.**
+  `setup-trainer.sh` said "OK trainer staged" and returned, so a rebuilt trainer kept
+  shipping the previous binary: clean build, clean stage, none of your changes, and
+  nothing anywhere saying so. Compare mtimes (`[ "$src" -nt "$dst" ]`) and re-copy;
+  only an explicit `--check` should be non-mutating.
 - **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`; changing
   `$HOME` is not a sandbox. Use a unique marker-owned `_harness` leaf or unit-test the
   pure helper instead.

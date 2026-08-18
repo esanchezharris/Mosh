@@ -524,13 +524,16 @@ const MOCK_TXN_READS = new Set([
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
   "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
-  "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
+  "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
   // Live note audition — transient sound, no mutation. Mirrors TransactionSafe.h so a
   // keypress still works while an agent transaction is open (asserted byte-equal by
   // txnSafeRegistry.test.ts).
   "audition_note", "all_notes_off",
+  // LoRA Lab audition — renders a candidate adapter to a file and mutates no Edit
+  // state, so listening to takes stays possible while an agent transaction is open.
+  "render_lora_take", "promote_lora_checkpoint",
 ]);
 
 function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
@@ -568,9 +571,9 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number; txn: string }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
@@ -1174,12 +1177,24 @@ const COLORS = [
   { name: "sustain", astd_max: 0.4, peak_layer: 17, more_sign: 1, verdict: "REAL", no_stack_with: ["sustain_swell"], group: "sustain", mode: "Gentle" },
   { name: "sustain_swell", astd_max: 0.4, peak_layer: 8, more_sign: 1, verdict: "REAL", no_stack_with: ["sustain"], group: "sustain", mode: "Swell" },
 ];
+// `family` is load-bearing, not decoration: the rack menu filters `family !== "lab"`
+// so a run's six checkpoints don't bury the producer's kept adapters. The lab rows
+// below exist so that filter is actually EXERCISED — a fixture with no lab entries
+// would let "lab takes stay out of the rack" pass while the filter did nothing,
+// which is precisely the suppression-guard-with-nothing-to-suppress trap.
 const LORAS = [
-  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa" },
-  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental", valid: true, sha12: "bbbbbbbbbbbb" },
-  { name: "mic-sa3", displayName: "Microphones", trigger: "micz", hint: "lo-fi indie texture", valid: true, sha12: "cccccccccccc" },
-  { name: "broken", displayName: "broken", trigger: "", hint: "", valid: false, reason: "unreadable safetensors", sha12: "" },
+  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa", family: "library" },
+  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental", valid: true, sha12: "bbbbbbbbbbbb", family: "library" },
+  { name: "mic-sa3", displayName: "Microphones", trigger: "micz", hint: "lo-fi indie texture", valid: true, sha12: "cccccccccccc", family: "library" },
+  { name: "broken", displayName: "broken", trigger: "", hint: "", valid: false, reason: "unreadable safetensors", sha12: "", family: "library" },
+  { name: "ken-01@200", displayName: "ken-01 · step 200", trigger: "", hint: "", valid: true, sha12: "d1d1d1d1d1d1", family: "lab", step: 200 },
+  { name: "ken-01@400", displayName: "ken-01 · step 400", trigger: "", hint: "", valid: true, sha12: "d2d2d2d2d2d2", family: "lab", step: 400 },
+  { name: "ken-01@final", displayName: "ken-01 · final", trigger: "", hint: "", valid: true, sha12: "d3d3d3d3d3d3", family: "lab", step: -1 },
 ];
+
+// Takes already "rendered" this session — the mock's stand-in for the on-disk
+// output.wav + manifest pair the native command treats as its cache.
+const LAB_TAKES = new Set<string>();
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
 const reindexNotes = (c: Clip) => c.notes!.forEach((n, i) => (n.i = i));
@@ -3963,6 +3978,54 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // list_loras keeps #343's no-cap shape (maxActive removed per the owner "no cap" directive;
     // the LorasResponse type no longer carries maxActive, so re-adding it would not typecheck).
     case "list_loras": return ok(command, { loras: LORAS });
+    // LoRA Lab audition. The take id must be DERIVED from the request the same way
+    // the native command derives it (stack + prompt + seed + source), or the mock
+    // would hand back a fresh id per call and every test of "re-auditioning the same
+    // take is instant" would pass against a cache that does not exist.
+    case "render_lora_take": {
+      const stack = (Array.isArray(args.adapters) ? args.adapters : []) as { name: string; value: number }[];
+      const key = [
+        str(args.prompt), String(args.seed ?? 42), String(args.seconds ?? 12), str(args.sourceClipId),
+        ...stack.map((a) => `${a.name}@${a.value}#${LORAS.find((l) => l.name === a.name)?.sha12 ?? ""}`),
+      ].join("|");
+      // djb2 — a stable, dependency-free stand-in for the native MD5. Identity is all
+      // that matters here; the digest never leaves the mock.
+      let h = 5381;
+      for (let i = 0; i < key.length; i++) h = ((h * 33) ^ key.charCodeAt(i)) >>> 0;
+      const takeId = h.toString(16).padStart(8, "0").repeat(2);
+      if (!str(args.prompt)) return err(command, "missing 'prompt'");
+      if (str(args.sourceClipId) && !findClip(str(args.sourceClipId)))
+        return err(command, `source clip not found: ${str(args.sourceClipId)}`);
+      const outputWav = `/mock/lab/${takeId}/output.wav`;
+      if (LAB_TAKES.has(takeId))
+        return ok(command, { takeId, status: "ready", cache: "hit", outputWav });
+      LAB_TAKES.add(takeId);
+      // Resolve on a later tick so a test can observe the rendering→ready transition
+      // the real async poll produces, rather than a take that is born finished.
+      setTimeout(() => emit("lab_take", { takeId, status: "ready", outputWav }), 0);
+      return ok(command, { takeId, status: "rendering", cache: "miss", jobId: `mock-${takeId}`, outputWav });
+    }
+    // "Keep" — promote an auditioned lab take into the library. Mirrors the real
+    // refusals (unknown source, invalid take, name already taken) because those are
+    // the paths the UI actually renders; a mock that always succeeds would leave
+    // every error branch untested.
+    case "promote_lora_checkpoint": {
+      const source = str(args.source);
+      if (!source) return err(command, "missing 'source' (the take to keep)");
+      const take = LORAS.find((l) => l.name === source);
+      if (!take) return err(command, `no adapter named '${source}'`);
+      if (!take.valid)
+        return err(command, `'${source}' is not a usable adapter: ${(take as { reason?: string }).reason ?? "invalid"}`);
+      const name = str(args.name) || source.split("@")[0];
+      if (LORAS.some((l) => l.name === name))
+        return err(command, `a kept adapter named '${name}' already exists — pick another name`);
+      const kept = {
+        name, displayName: str(args.displayName) || name, trigger: str(args.trigger),
+        hint: str(args.hint), valid: true, sha12: take.sha12, family: "library",
+      };
+      LORAS.push(kept);
+      return ok(command, { name, source, adapter: kept });
+    }
     case "list_rave_models":   // Lane B — RAVE model browser fixture
       return ok(command, { models: [
         { name: "guitar", sizeMB: 156 }, { name: "piano", sizeMB: 143 },
@@ -3976,7 +4039,20 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, {
         targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"],
         freeText: true,
-        capabilities: { transcribe: true, skeleton: true, whisper: true, phonology: true, transformReal: false, trainingBackend: "fake" },
+        // `trainingBackend` is "local_pmetal", NOT "fake". The fixture said "fake"
+        // from before local training existed, and the consequence was that every
+        // dev-browser session — and every screenshot and e2e run of the LoRA Lab —
+        // opened with "Local training isn't set up on this Mac", which on a machine
+        // where it plainly IS set up is a false alarm the UI states in bold. The
+        // mock's job is to model a fully-equipped dev Mac (see `transcribe` etc.
+        // above); a stub trainer is no longer part of that picture.
+        //
+        // Tests that need the DEGRADED posture set `capabilities` directly through
+        // the dev-only window.__moshStore handle rather than branching here — and
+        // the honest guest-Mac path is still covered where it belongs, against the
+        // real service, by service/scripts/guest_degradation_test.py.
+        capabilities: { transcribe: true, skeleton: true, whisper: true, phonology: true,
+                        transformReal: false, trainingBackend: "local_pmetal", trainingBlockers: [] },
       });
     case "create_render_layer": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
@@ -4657,43 +4733,29 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
+    // Import now ENROLLS into the library — the same place the render path reads
+    // — instead of copying into a training/adapters dir nothing renders from.
+    // Mirrors the real refusals: a stub run's adapter.lora.json is not a
+    // safetensors and must not become a rack entry.
     case "import_lora_adapter": {
       const state = trainingState();
       const job = str(args.jobId) ? state.jobs.find((j) => j.jobId === str(args.jobId)) : null;
-      const result = (job?.result ?? {}) as { adapter_id?: string; bundle_hash?: string; quality?: Record<string, unknown> };
+      const result = (job?.result ?? {}) as { adapter_id?: string };
       const artifactPath = str(args.artifactPath, job?.artifactPath ?? "");
-      const manifestPath = str(args.manifestPath, job?.manifestPath ?? "");
-      const adapterId = str(args.adapterId, result.adapter_id ?? `adapter-${state.adapters.length + 1}`);
+      if (!artifactPath)
+        return err(command, "no artifact to import (pass artifactPath, or a jobId whose run has finished)");
+      if (!/\.(safetensors|ckpt)$/.test(artifactPath))
+        return err(command, `unsupported source extension: ${artifactPath.split("/").pop()} (want .safetensors or .ckpt)`);
+      const name = str(args.name, result.adapter_id ?? "imported");
+      if (LORAS.some((l) => l.name === name))
+        return err(command, `a kept adapter named '${name}' already exists — pick another name`);
       const adapter = {
-        adapterId,
-        bundleHash: result.bundle_hash ?? `mock-${adapterId}`,
-        bundlePath: job?.bundlePath ?? "",
-        artifactPath,
-        manifestPath,
-        active: false,
-        quality: result.quality ?? { stub: true },
+        name, displayName: name, trigger: str(args.trigger), hint: str(args.hint),
+        valid: true, sha12: `im${name}`.slice(0, 12), family: "library",
       };
-      state.adapters = [...state.adapters.filter((a) => a.adapterId !== adapterId), adapter];
-      state.activeAdapterId = adapterId;
-      state.activeAdapterPath = artifactPath;
-      state.activeCorpusHash = adapter.bundleHash;
+      LORAS.push(adapter);
       invalidate();
-      return ok(command, adapter);
-    }
-    case "activate_lora_adapter": {
-      const state = trainingState();
-      const adapter = state.adapters.find((a) => a.adapterId === str(args.adapterId));
-      if (!adapter) return err(command, "adapter not found");
-      state.activeAdapterId = adapter.adapterId;
-      state.activeAdapterPath = adapter.artifactPath;
-      state.activeCorpusHash = adapter.bundleHash;
-      state.adapters = state.adapters.map((a) => ({ ...a, active: a.adapterId === adapter.adapterId }));
-      invalidate();
-      return ok(command, { adapterId: adapter.adapterId, adapterPath: adapter.artifactPath, corpusHash: adapter.bundleHash });
-    }
-    case "list_lora_adapters": {
-      const state = trainingState();
-      return ok(command, { activeAdapterId: state.activeAdapterId, activeAdapterPath: state.activeAdapterPath, activeCorpusHash: state.activeCorpusHash, adapters: state.adapters });
+      return ok(command, { name, adapter });
     }
 
     // MP-001 — multiplayer (mock peer harness). Simulates a 2-peer session where a
