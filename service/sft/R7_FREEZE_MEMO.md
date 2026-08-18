@@ -224,3 +224,42 @@ counts, not just rates.
 - Gate read date: ‹TBD›
 - Result: ‹TBD — PASS / MISS (name the leg) / HALT / incomplete-run›
 - Disposition: ‹TBD›
+
+---
+
+## Post-freeze deviation notes (dated; do not edit sections above)
+
+### 2026-08-18 — Lane deviation: local MLX, not the §2a 5090/NF4 cloud lane
+
+The frozen §2a lane (rented 5090, NF4 QLoRA via `sft_cuda_train.py`) was
+attempted and abandoned after provider failures on both Vast (ssh-proxy
+outage; born-stopped instances from `balance_threshold`) and RunPod (zero
+community GPUs materialized). Actual r7 training runs **locally on the M1
+via `mlx_lm lora`** against the exact 4-bit serve base
+(`Qwen3-30B-A3B-Instruct-2507-4bit`), rank 16 / scale 2.0 / attn-only keys —
+the same recipe class as r5. Note this is train/serve precision MATCHED
+(better than the NF4→4bit mismatch the frozen lane accepted). Data,
+iters (1 epoch = 13,113), and the §6 gate legs are unchanged.
+
+### 2026-08-18 — Incident: NaN at iter ~160, twice; root cause = the 119
+coverage rows exceed max_seq_length
+
+Both launch attempts died with `Train loss nan` at iter ~160 (fixed shuffle
+seed → same poison row position). Root cause, confirmed by tokenizing the
+mix exactly as `mlx_lm.tuner.datasets.ChatDataset` does: the 119
+`r7_coverage_demonstrations` rows (train rows 12994–13112) embed the
+REGENERATED full-catalog system prompt (~6,020 prompt tokens; total
+6,048–6,244), over the 4096 `max_seq_length` cap. Truncation to 4096 cuts
+off the entire completion; with `mask_prompt: true` every surviving token
+is masked → loss 0/0 = NaN → weights permanently poisoned. The v5-verbatim
+base rows (older, shorter embedded prompt, ≤~2.9k tokens) are unaffected;
+valid split max 2,907 unaffected.
+
+**Fix:** `max_seq_length: 6400` (tight bound over the 6,244 max; zero rows
+truncated). The coverage rows are the point of r7 and are NOT dropped.
+Fix RED-proven by a 20-iter smoke trained directly on the 119 poison rows
+before relaunch. First attempt additionally used the wrong recipe
+(`sft_cli.py` defaults: rank 8, attn+experts+router) — superseded by the
+direct `mlx_lm lora --config` launch with the registered recipe.
+Quarantined artifacts: `.adapters/a3b-r7-mlx-NANDEAD{,-2}`,
+`~/r7-train-nandead{,2}.log`.
