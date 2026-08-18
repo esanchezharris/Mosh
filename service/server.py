@@ -1159,6 +1159,36 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/loras/install":
+            # Enroll an adapter that already exists ON DISK into the library.
+            # The sibling of /loras/promote: promote takes a lab take by NAME,
+            # this takes a PATH — the case a remote (rented-GPU) run produces,
+            # since `_remote_train` does not publish takes into sa3/lab/ the way
+            # a local run does, so its artifact has no other door into the rack.
+            #
+            # Both route through loras/install.py, which validates the STAGED
+            # copy before os.replace makes it visible. A stub run's
+            # adapter.lora.json is neither .safetensors nor .ckpt and is refused
+            # here rather than enrolled as a LoRA the render path would choke on.
+            try:
+                from loras import install as LORA_I
+                src = str(data.get("path", ""))
+                name = str(data.get("name", "")).strip()
+                if not src or not name:
+                    self._send(400, {"ok": False, "error": "path and name are required"})
+                    return
+                rec = LORA_I.install(
+                    src, name=name,
+                    trigger=str(data.get("trigger", "") or ""),
+                    hint=str(data.get("hint", "") or ""),
+                    notes=str(data.get("notes", "") or ""),
+                    display=(data.get("displayName") or None),
+                )
+                self._send(200, {"ok": True, "adapter": rec})
+            except ValueError as e:
+                self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"install failed: {e}"})
         elif path == "/loras/promote":
             # "Keep" — copy an auditioned lab take into the real library so it
             # outlives the run it came from. Fails closed (see loras/promote.py):

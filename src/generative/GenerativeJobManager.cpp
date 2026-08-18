@@ -292,6 +292,11 @@ juce::var GenerativeJobManager::promoteLora (const juce::var& body)
     return httpPost ("/loras/promote", body);
 }
 
+juce::var GenerativeJobManager::installLora (const juce::var& body)
+{
+    return httpPost ("/loras/install", body);
+}
+
 juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
                                               const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)

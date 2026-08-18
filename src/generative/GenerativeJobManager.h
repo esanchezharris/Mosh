@@ -47,6 +47,11 @@ public:
         transport failure. */
     juce::var promoteLora (const juce::var& body);
 
+    /** Enroll an adapter that already exists on disk (POST /loras/install) — the
+        path-addressed sibling of promoteLora, for artifacts a remote run left in
+        its output dir. Same synchronous, message-thread-safe posture. */
+    juce::var installLora (const juce::var& body);
+
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();
 

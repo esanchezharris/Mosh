@@ -1,6 +1,5 @@
 accept_lyric_proposal	Track
 accept_render	Clip
-activate_lora_adapter	Unguarded
 add_automation_point	Track
 add_drum_pattern	Track
 add_midi_clip	Track
@@ -93,7 +92,6 @@ list_builtins	Unguarded
 list_colors	Unguarded
 list_directory	Unguarded
 list_drum_kits	Unguarded
-list_lora_adapters	Unguarded
 list_loras	Unguarded
 list_midi_inputs	Unguarded
 list_plugins	Unguarded

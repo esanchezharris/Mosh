@@ -110,9 +110,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
 
   // ── LoRA rack + training scaffold — UI knobs and rights-gated lanes ───────────
   list_loras: "the LoRA rack is a UI knob surface; the agent styles renders via compile_render/set_render_param",
-  list_lora_adapters: "the LoRA rack is a UI knob surface; the agent styles renders via compile_render/set_render_param",
   import_lora_adapter: "adapter installation is an owner action, never agent-driven",
-  activate_lora_adapter: "the LoRA rack is a UI knob surface; the agent styles renders via compile_render/set_render_param",
   import_training_source: "training scaffold is rights-gated — never agent-operable",
   approve_training_source: "training scaffold is rights-gated — never agent-operable",
   list_training_sources: "training scaffold is rights-gated — never agent-operable",

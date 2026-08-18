@@ -128,7 +128,7 @@ inline Class classify (const juce::String& command, juce::String& reason)
         "block_plugin", "clear_plugin_blocklist", "mark_take", "open_plugin_editor",
         "enable_track_meter", "disable_track_meter", "enable_all_meters",
         "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
-        "activate_lora_adapter", "import_lora_adapter",
+        "import_lora_adapter",
         // REC-001 — record options are a stored preference pushed into per-device engine
         // state; nothing about them is in the Edit's undo history, so an undo inside a
         // skill's transaction would not put them back.
@@ -216,7 +216,7 @@ inline const std::set<juce::String>& readOnlyDuringTransaction()
         "list_plugins", "list_builtins", "list_takes", "list_directory",
         "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
         "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
-        "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
+        "list_colors", "list_loras", "list_transform_targets",
         "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
         "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
         // Live note audition — transient sound, no Edit mutation and no beginTxn (the

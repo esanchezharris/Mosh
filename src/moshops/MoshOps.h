@@ -516,8 +516,6 @@ private:
     juce::var cmdTrainingJobStatus      (const juce::var& args);
     juce::var cmdCancelTrainingJob      (const juce::var& args);
     juce::var cmdImportLoraAdapter      (const juce::var& args);
-    juce::var cmdActivateLoraAdapter    (const juce::var& args);
-    juce::var cmdListLoraAdapters       (const juce::var& args);
 
     // The MOSH_PROJECT child of eng.edit().state, created (empty) on first read so
     // callers always get a valid tree. Pure storage accessor — no logging/transaction.

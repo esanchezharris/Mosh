@@ -524,7 +524,7 @@ const MOCK_TXN_READS = new Set([
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
   "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
-  "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
+  "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
   // Live note audition — transient sound, no mutation. Mirrors TransactionSafe.h so a
@@ -571,9 +571,9 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number; txn: string }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
@@ -4733,43 +4733,29 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
+    // Import now ENROLLS into the library — the same place the render path reads
+    // — instead of copying into a training/adapters dir nothing renders from.
+    // Mirrors the real refusals: a stub run's adapter.lora.json is not a
+    // safetensors and must not become a rack entry.
     case "import_lora_adapter": {
       const state = trainingState();
       const job = str(args.jobId) ? state.jobs.find((j) => j.jobId === str(args.jobId)) : null;
-      const result = (job?.result ?? {}) as { adapter_id?: string; bundle_hash?: string; quality?: Record<string, unknown> };
+      const result = (job?.result ?? {}) as { adapter_id?: string };
       const artifactPath = str(args.artifactPath, job?.artifactPath ?? "");
-      const manifestPath = str(args.manifestPath, job?.manifestPath ?? "");
-      const adapterId = str(args.adapterId, result.adapter_id ?? `adapter-${state.adapters.length + 1}`);
+      if (!artifactPath)
+        return err(command, "no artifact to import (pass artifactPath, or a jobId whose run has finished)");
+      if (!/\.(safetensors|ckpt)$/.test(artifactPath))
+        return err(command, `unsupported source extension: ${artifactPath.split("/").pop()} (want .safetensors or .ckpt)`);
+      const name = str(args.name, result.adapter_id ?? "imported");
+      if (LORAS.some((l) => l.name === name))
+        return err(command, `a kept adapter named '${name}' already exists — pick another name`);
       const adapter = {
-        adapterId,
-        bundleHash: result.bundle_hash ?? `mock-${adapterId}`,
-        bundlePath: job?.bundlePath ?? "",
-        artifactPath,
-        manifestPath,
-        active: false,
-        quality: result.quality ?? { stub: true },
+        name, displayName: name, trigger: str(args.trigger), hint: str(args.hint),
+        valid: true, sha12: `im${name}`.slice(0, 12), family: "library",
       };
-      state.adapters = [...state.adapters.filter((a) => a.adapterId !== adapterId), adapter];
-      state.activeAdapterId = adapterId;
-      state.activeAdapterPath = artifactPath;
-      state.activeCorpusHash = adapter.bundleHash;
+      LORAS.push(adapter);
       invalidate();
-      return ok(command, adapter);
-    }
-    case "activate_lora_adapter": {
-      const state = trainingState();
-      const adapter = state.adapters.find((a) => a.adapterId === str(args.adapterId));
-      if (!adapter) return err(command, "adapter not found");
-      state.activeAdapterId = adapter.adapterId;
-      state.activeAdapterPath = adapter.artifactPath;
-      state.activeCorpusHash = adapter.bundleHash;
-      state.adapters = state.adapters.map((a) => ({ ...a, active: a.adapterId === adapter.adapterId }));
-      invalidate();
-      return ok(command, { adapterId: adapter.adapterId, adapterPath: adapter.artifactPath, corpusHash: adapter.bundleHash });
-    }
-    case "list_lora_adapters": {
-      const state = trainingState();
-      return ok(command, { activeAdapterId: state.activeAdapterId, activeAdapterPath: state.activeAdapterPath, activeCorpusHash: state.activeCorpusHash, adapters: state.adapters });
+      return ok(command, { name, adapter });
     }
 
     // MP-001 — multiplayer (mock peer harness). Simulates a 2-peer session where a

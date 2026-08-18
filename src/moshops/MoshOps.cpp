@@ -824,8 +824,6 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "training_job_status")     return cmdTrainingJobStatus (args);
     if (name == "cancel_training_job")     return cmdCancelTrainingJob (args);
     if (name == "import_lora_adapter")     return cmdImportLoraAdapter (args);
-    if (name == "activate_lora_adapter")   return cmdActivateLoraAdapter (args);
-    if (name == "list_lora_adapters")      return cmdListLoraAdapters (args);
 
     return errResult (name, "unknown command: " + name);
 }
