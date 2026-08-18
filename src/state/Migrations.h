@@ -92,43 +92,91 @@ namespace mosh
         node.setProperty (ids::moshFormatVersion, kMoshFormatVersion, nullptr);
     }
 
+    namespace detail
+    {
+        // True when `steps` forms an unbroken 0..targetVersion chain. A gap is a programming
+        // error (a bumped kMoshFormatVersion whose migration step was never registered), so the
+        // real registry is jassert-ed against this at the call site; the walk itself still
+        // handles a gap gracefully, because Release builds have no assert to catch it.
+        inline bool hasContiguousChain (int targetVersion, const std::vector<MigrationStep>& steps)
+        {
+            for (int cur = 0; cur < targetVersion; )
+            {
+                const MigrationStep* step = nullptr;
+                for (auto& s : steps)
+                    if (s.from == cur) { step = &s; break; }
+
+                if (step == nullptr || step->to <= cur)
+                    return false;
+                cur = step->to;
+            }
+            return true;
+        }
+
+        // Core chain-walk, parameterized over (targetVersion, steps) so it can be exercised
+        // with a SYNTHETIC registry in tests — proving the walk applies N>1 hops in order and
+        // refuses gracefully (not jassert-only) on a broken chain — without touching the REAL
+        // kMoshFormatVersion/migrations(), which must stay tied to the actual shipped schema.
+        // No stamping here (that is a migrateOrRefuse-only concern, tied to the real version).
+        inline MigrationResult migrateOrRefuseImpl (juce::ValueTree editState, int targetVersion,
+                                                    const std::vector<MigrationStep>& steps)
+        {
+            const int fileV = readFileVersion (editState);
+            MigrationResult r; r.fromVersion = fileV; r.toVersion = fileV;
+
+            if (fileV > targetVersion)
+            {
+                r.ok = false;
+                r.error = "This project (format v" + juce::String (fileV)
+                        + ") was made by a newer version of Mosh than this build (v"
+                        + juce::String (targetVersion) + "). Please update Mosh to open it.";
+                return r;
+            }
+
+            int cur = fileV;
+            while (cur < targetVersion)
+            {
+                const MigrationStep* step = nullptr;
+                for (auto& s : steps)
+                    if (s.from == cur) { step = &s; break; }
+
+                if (step == nullptr)
+                {
+                    r.ok = false;
+                    r.error = "Missing migration step from format v" + juce::String (cur);
+                    return r;
+                }
+                step->apply (editState);
+                cur = step->to;
+            }
+
+            r.toVersion = cur;
+            return r;
+        }
+    }
+
     // The load-time gate. Apply to a freshly-loaded Edit's `state` BEFORE the engine starts
     // using it (before wireEditResolvers / any snapshot or command). Migrations mutate
     // editState in place (persisted on the next save); a refusal does NOT mutate.
+    //
+    // Forward-compat for ADDITIVE changes: this gate does NOT need to widen. Per the
+    // kMoshFormatVersion contract above, a build only bumps the version on a BREAKING change;
+    // a new optional property/child with a safe absent-default is written WITHOUT a bump. So an
+    // older build opening a file carrying such an extra, unmodeled property sees
+    // fileV == kMoshFormatVersion (the equal-version no-op success below) — the unknown data is
+    // never touched by this gate and survives into the live ValueTree (proven by the
+    // "unknown-but-present property/child survive" test in test_migrations.cpp). "Newer but
+    // compatible" is therefore not a THIRD branch to add here; it is architecturally the same
+    // case as "equal version", as long as that discipline holds.
     inline MigrationResult migrateOrRefuse (juce::ValueTree editState)
     {
-        const int fileV = readFileVersion (editState);
-        MigrationResult r; r.fromVersion = fileV; r.toVersion = fileV;
+        // Contiguous-chain invariant: a gap is a programming error, so keep the debug trap here
+        // (the impl itself must stay assert-free — its gap path is deliberately exercised).
+        jassert (detail::hasContiguousChain (kMoshFormatVersion, migrations()));
 
-        if (fileV > kMoshFormatVersion)
-        {
-            r.ok = false;
-            r.error = "This project (format v" + juce::String (fileV)
-                    + ") was made by a newer version of Mosh than this build (v"
-                    + juce::String (kMoshFormatVersion) + "). Please update Mosh to open it.";
-            return r;
-        }
-
-        int cur = fileV;
-        while (cur < kMoshFormatVersion)
-        {
-            const MigrationStep* step = nullptr;
-            for (auto& s : migrations())
-                if (s.from == cur) { step = &s; break; }
-
-            jassert (step != nullptr);   // contiguous-chain invariant (also unit-tested)
-            if (step == nullptr)
-            {
-                r.ok = false;
-                r.error = "Missing migration step from format v" + juce::String (cur);
-                return r;
-            }
-            step->apply (editState);
-            cur = step->to;
-        }
-
-        stampFormatVersion (editState);  // now-current; persisted on the next save
-        r.toVersion = cur;
+        auto r = detail::migrateOrRefuseImpl (editState, kMoshFormatVersion, migrations());
+        if (r.ok)
+            stampFormatVersion (editState);  // now-current; persisted on the next save
         return r;
     }
 }

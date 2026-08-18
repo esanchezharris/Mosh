@@ -1885,6 +1885,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     for (auto& p : *arr)
                         if (p.getProperty ("id", var()).toString() == blockTarget) stillPresent = true;
                 check (! stillPresent, "blocked VST3 removed from list_plugins immediately");
+
+                // block_plugin as a RELIABLE lever: not merely "hidden from the browser"
+                // (above) but genuinely REFUSES TO LOAD. cmdLoadPlugin resolves pluginId via
+                // PluginHost::findDescription(), which is defined entirely in terms of
+                // available() — the same blocklist-filtered list list_plugins reads — so this
+                // is a real black-box round-trip proof, not an inference from reading the two
+                // functions separately.
+                auto probeTrack = cmd (ops, "create_track", args1 ("name", "BlockLoadProbe"));
+                check (ok (probeTrack), "block_plugin/load: probe track created");
+                const auto probeTrackId = probeTrack["data"].getProperty ("trackId", var()).toString();
+                auto loadAttempt = cmd (ops, "load_plugin",
+                                        objN ({{ "trackId", probeTrackId }, { "pluginId", blockTarget }}));
+                check (! ok (loadAttempt),
+                       "block_plugin/load: a blocked plugin REFUSES to load via load_plugin");
+                check (loadAttempt.getProperty ("error", var()).toString().contains ("unknown plugin"),
+                       "block_plugin/load: refusal reports \"unknown plugin\", not a different failure");
+                cmd (ops, "remove_track", args1 ("trackId", probeTrackId));   // tidy
             }
 
             // A producer retry removes only the named quarantine; it must not use
@@ -9308,6 +9325,40 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (sentinel.existsAsFile(), "A2: markSessionRunning writes the sentinel");
         eng.clearSessionRunning();
         check (! sentinel.existsAsFile(), "A2: clearSessionRunning removes the sentinel (clean-quit path)");
+    }
+
+    // ─── A2 — remove_track auto-saves the pre-teardown state first ───
+    // remove_track's deleteTrack() destroys every plugin hosted on the track in-place — the
+    // SAME in-process-crash class remove_plugin already guards with a pre-op saveIfDirty()
+    // (a hostile VST3/AU can SIGSEGV the whole process on teardown). This proves remove_track
+    // carries the same guard, BLACK-BOX, via the A3 recovery journal: a successful
+    // saveIfDirty() truncates recovery-journal.jsonl (MoshEngine::save() deletes it), so if the
+    // internal pre-save genuinely ran BEFORE deleteTrack, the create_track entry it flushed is
+    // gone by the time execute()'s own post-command journaling appends remove_track's entry —
+    // leaving exactly ONE line. Without the guard both entries would still be present (2).
+    section ("A2: remove_track auto-saves before teardown (parity with remove_plugin's guard)");
+    {
+        auto journal = eng.sessionDir().getChildFile ("recovery-journal.jsonl");
+        auto journalLines = [&] {
+            if (! journal.existsAsFile()) return 0;
+            int n = 0;
+            for (auto& l : juce::StringArray::fromLines (journal.loadFileAsString()))
+                if (l.trim().isNotEmpty()) ++n;
+            return n;
+        };
+
+        check (ok (cmd (ops, "save")), "A2/remove_track: clean baseline save ok");
+        check (journalLines() == 0, "A2/remove_track: journal empty at baseline");
+
+        auto rt = cmd (ops, "create_track", args1 ("name", "TeardownProbe"));
+        check (ok (rt), "A2/remove_track: create probe track ok");
+        const auto rtId = rt["data"].getProperty ("trackId", var()).toString();
+        check (journalLines() == 1, "A2/remove_track: create_track journaled (one unsaved entry)");
+
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", rtId))), "A2/remove_track: remove ok");
+        check (journalLines() == 1,
+               "A2/remove_track: pre-teardown autosave truncated the create_track entry — only "
+               "remove_track's own journal entry remains (would be 2 without the guard)");
     }
 
     // ─── Scoped snapshot invalidation (D1-justified) ───
