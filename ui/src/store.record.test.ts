@@ -332,3 +332,100 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     executeSpy.mockRestore();
   });
 });
+
+// Skill Foundry Slice B, Task 2 — the observed RecordingStoreOutcomeV1 result and the
+// takeReview projection, exercised against the REAL mock (bridge.mock.ts), not an
+// exec() spy, so the stable ids these assertions read are the mock's actual Task 1
+// projection (bridge.mock.recording.test.ts already covers the mock's own guards).
+describe("enterRecord/stopRecord/navTake/keepTake — observed RecordingStoreOutcomeV1 (Skill Foundry Slice B)", () => {
+  beforeEach(async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const t = useStore.getState().snapshot?.tracks[0];
+    useStore.setState({ selectedTrackId: t?.id ?? null, lastError: null });
+  });
+
+  it("enterRecord() resolves started with a null baseline on a genuinely first recording", async () => {
+    const outcome = await useStore.getState().enterRecord();
+    expect(outcome).toMatchObject({ kind: "started" });
+    expect(useStore.getState().snapshot?.transport.recording).toBe(true);
+  });
+
+  it("stopRecord() resolves reviewing with the landed take's real observed ids, and takeReview matches", async () => {
+    await useStore.getState().enterRecord();
+    const outcome = await useStore.getState().stopRecord();
+    expect(outcome).toMatchObject({
+      kind: "reviewing",
+      review: { takeIds: expect.arrayContaining([expect.any(String)]), currentTakeId: expect.any(String) },
+    });
+    const review = (outcome as { review?: { clipId: string } }).review;
+    expect(useStore.getState().takeReview).toEqual(review);
+    expect(useStore.getState().takeDecisionPending).toBe(true);
+  });
+
+  it("a second start->stop cycle grows the SAME clip's take set by one and selects the new id", async () => {
+    await useStore.getState().enterRecord();
+    const first = await useStore.getState().stopRecord();
+    const firstReview = (first as unknown as { review: { clipId: string; takeIds: string[] } }).review;
+    await useStore.getState().enterRecord();
+    const second = await useStore.getState().stopRecord();
+    const secondReview = (second as unknown as { review: { clipId: string; takeIds: string[]; currentTakeId: string } }).review;
+
+    expect(secondReview.clipId).toBe(firstReview.clipId);
+    expect(secondReview.takeIds).toHaveLength(firstReview.takeIds.length + 1);
+    expect(secondReview.takeIds.slice(0, firstReview.takeIds.length)).toEqual(firstReview.takeIds);
+    expect(secondReview.currentTakeId).toBe(secondReview.takeIds.at(-1));
+  });
+
+  it("navTake(-1) after two takes selects the FIRST take's stable id and updates takeReview", async () => {
+    await useStore.getState().enterRecord();
+    await useStore.getState().stopRecord();
+    await useStore.getState().enterRecord();
+    const stopped = await useStore.getState().stopRecord();
+    const review = (stopped as unknown as { review: { takeIds: string[] } }).review;
+
+    const outcome = await useStore.getState().navTake(-1);
+    expect(outcome).toMatchObject({ kind: "reviewing", review: { currentTakeId: review.takeIds[0] } });
+    expect(useStore.getState().takeReview).toMatchObject({ currentTakeId: review.takeIds[0] });
+  });
+
+  it("keepTake() with an explicit stable id clears takeReview/lastTakeClipId/takeDecisionPending", async () => {
+    await useStore.getState().enterRecord();
+    await useStore.getState().stopRecord();
+    await useStore.getState().enterRecord();
+    const stopped = await useStore.getState().stopRecord();
+    const review = (stopped as unknown as { review: { takeIds: string[] } }).review;
+
+    const outcome = await useStore.getState().keepTake(review.takeIds[0]);
+    expect(outcome).toMatchObject({ kind: "kept" });
+    expect(useStore.getState().takeReview).toBeNull();
+    expect(useStore.getState().lastTakeClipId).toBeNull();
+    expect(useStore.getState().takeDecisionPending).toBe(false);
+  });
+
+  it("keepTake() with an unknown stable id is blocked and mutates no store review state", async () => {
+    await useStore.getState().enterRecord();
+    const stopped = await useStore.getState().stopRecord();
+    const reviewBefore = useStore.getState().takeReview;
+    expect(stopped).toMatchObject({ kind: "reviewing" });
+
+    const outcome = await useStore.getState().keepTake("ffffffff-0000-4000-8000-000000000000");
+    expect(outcome).toMatchObject({ kind: "blocked" });
+    expect(useStore.getState().takeReview).toEqual(reviewBefore);
+    expect(useStore.getState().takeDecisionPending).toBe(true);
+  });
+
+  it("stopRecord() while not recording resolves not_recording rather than a false error", async () => {
+    const outcome = await useStore.getState().stopRecord();
+    expect(outcome).toEqual({ kind: "not_recording" });
+  });
+
+  it("project replacement clears takeReview along with takeDecisionPending/lastTakeClipId", async () => {
+    await useStore.getState().enterRecord();
+    await useStore.getState().stopRecord();
+    expect(useStore.getState().takeReview).not.toBeNull();
+
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1, takeDecisionPending: false, lastTakeClipId: null, takeReview: null }));
+    expect(useStore.getState().takeReview).toBeNull();
+  });
+});

@@ -4,7 +4,7 @@
 // No Date/Math.random here — deterministic so vitest can assert exact payloads; the net layer
 // stamps issuedAtPhoneMs.
 
-import type { Button, Cmd, Snap } from "./types";
+import type { Button, Cmd, ControllerTake, Snap } from "./types";
 
 const SRC = "phone_controller";
 
@@ -34,6 +34,25 @@ function recordCmds(snap: Snap | null): Cmd[] {
   return cmds;
 }
 
+/**
+ * Lead-in kept in front of the next punch, in seconds — the port of DAWN's
+ * `buffer_zone` (see `KeepTake.lua`, which scoots the record cursor to
+ * `playhead - buffer_zone` rather than exactly to the take end). 0 means the next
+ * take starts flush against the one you just kept.
+ */
+export const LEAD_IN_SEC = 0;
+
+/** End of the pending take, or undefined when the snapshot has no measurable take. */
+function takeEndSec(take: ControllerTake | undefined): number | undefined {
+  if (!take?.exists) return undefined;
+  if (typeof take.start !== "number" || typeof take.length !== "number") return undefined;
+  return take.start + take.length;
+}
+
+function seekCmd(position: number): Cmd {
+  return { command: "set_transport", args: { position: Math.max(0, position), source: SRC } };
+}
+
 /** Button -> command plan. `blockedReason` set (with empty cmds) when the button can't act yet. */
 export function planFor(button: Button, snap: Snap | null): Plan {
   const take = snap?.controller?.take;
@@ -43,20 +62,39 @@ export function planFor(button: Button, snap: Snap | null): Plan {
     case "record": // PUT ME IN
       return { cmds: recordCmds(snap) };
 
-    case "keep": // KEEP — commit the current take lane, discard the rest (native keep_take)
-      if (!take?.exists || !take.clipId || take.canKeep === false)
-        return { cmds: [], blockedReason: "no take to keep yet" };
-      return {
-        cmds: [{ command: "keep_take", args: { clipId: take.clipId, source: SRC, controllerLabel: "kept" } }],
-      };
+    case "keep": {
+      // DAWN's KeepTake.lua does THREE things, and the last two are where the loop's
+      // forward momentum actually comes from: it commits the take, scoots the record
+      // cursor forward, and immediately punches back in. `keep_take` alone (which is
+      // all this used to send) moves nothing — it only collapses stacked take lanes.
+      if (!take?.exists || !take.clipId) return { cmds: [], blockedReason: "no take to keep yet" };
 
-    case "again": // AGAIN — drop the last take, roll again (undo + re-record)
-      return {
-        cmds: [
-          { command: "undo", args: { source: SRC, controllerLabel: "undone" } },
-          ...recordCmds(snap),
-        ],
-      };
+      const cmds: Cmd[] = [];
+      // Only meaningful once lanes exist (i.e. you re-recorded over the same span).
+      // A single pass has nothing to discard and the native command errors with
+      // "no takes to keep", so sending it unconditionally would fail the whole plan.
+      if (take.canKeep)
+        cmds.push({ command: "keep_take", args: { clipId: take.clipId, source: SRC, controllerLabel: "kept" } });
+
+      const end = takeEndSec(take);
+      if (end !== undefined) cmds.push(seekCmd(end - LEAD_IN_SEC));
+      cmds.push(...recordCmds(snap));
+      return { cmds };
+    }
+
+    case "again": {
+      // DAWN's RedoTake.lua deletes the take and re-records with an explicit
+      // "do NOT change time selection" — it can get away with that because REAPER
+      // leaves the edit cursor where recording STARTED. Mosh does the opposite: the
+      // playhead ends up at the end of the take, so re-recording without seeking
+      // back drops the retake a whole take-length late and leaves a silent hole
+      // where the line should be. The seek is the port of REAPER's cursor behaviour,
+      // not an embellishment.
+      const cmds: Cmd[] = [{ command: "undo", args: { source: SRC, controllerLabel: "undone" } }];
+      if (typeof take?.start === "number") cmds.push(seekCmd(take.start));
+      cmds.push(...recordCmds(snap));
+      return { cmds };
+    }
 
     case "hear": // HEAR IT — play from the take start (else the current playhead)
       return {

@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Snapshot } from "../types";
 
-// Mock ONLY the network boundary (bridge.brainChat). Best-of-n is gated OFF by default
-// (settings `bestOfNServing` !== true), so escalateCandidates/archivePair aren't reached.
+// Mock only the network boundary (bridge.brainChat).
 const { brainChatMock, demoBrainAvailableMock } = vi.hoisted(() => ({
   brainChatMock: vi.fn(),
   demoBrainAvailableMock: vi.fn(),
@@ -10,8 +9,6 @@ const { brainChatMock, demoBrainAvailableMock } = vi.hoisted(() => ({
 vi.mock("../bridge", () => ({
   brainChat: brainChatMock,
   demoBrainAvailable: demoBrainAvailableMock,
-  escalateCandidates: vi.fn(async () => null),
-  archivePair: vi.fn(async () => {}),
 }));
 
 import { createBrain } from "./brain";

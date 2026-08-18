@@ -32,7 +32,9 @@ import { ensureMemoryHydrated, poolsNonEmpty } from "../memory/hydrate";
 import { retrieveContext } from "../memory/retrieveContext";
 import { rememberPreferenceToolDoc } from "../memory/rememberPreference";
 
-export const agenticLoopOn = (): boolean => useSettings.getState().get("agenticLoop") === true;
+export const agenticLoopOn = (): boolean =>
+  (import.meta.env.DEV || import.meta.env.MODE === "e2e")
+  && import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP === "1";
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
 /** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext+
@@ -50,7 +52,7 @@ async function memorySectionFor(query: string): Promise<string | undefined> {
 
 /** The loop runs only when the flag is on AND we're not in a multiplayer
  *  session (v1: a long-lived open batch vs the MP lock table is unplaytested —
- *  gate it off; the legacy single-shot path stays available in MP). */
+ *  gate it off; bounded studio skills stay available in MP). */
 export const loopAllowed = (): boolean => agenticLoopOn() && !useStore.getState().mp.active;
 
 export type TaskUi = {

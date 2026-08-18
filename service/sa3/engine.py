@@ -17,6 +17,7 @@ contiguous-first path; the coverage stitch fallback only covers clips past the c
 """
 from __future__ import annotations
 
+import gc
 import math
 import os
 import sys
@@ -61,6 +62,57 @@ def get_engine():
         if _engine is None:
             _engine = _Engine()
         return _engine
+
+
+def loaded() -> bool:
+    """Is the model currently resident? (~9.2 GB when true.)"""
+    return _engine is not None
+
+
+def unload() -> bool:
+    """Drop the singleton and hand MLX's memory back. True if something was freed.
+
+    Measured on the reference Mac: the resident model is **9.2 GB** (service
+    footprint 30 MB -> 9,168 MB after one render), and this genuinely returns it
+    — a probe that built the engine, evaluated conditioning, then dropped it and
+    called `clear_cache()` went **5,935 MB -> 451 MB**. The next render pays a
+    reload measured at **+1.1 s** (steady state 2.8 s keeping the model vs 3.9 s
+    releasing between takes, 3 samples each in one process).
+
+    That +1.1 s replaces an earlier +3.6 s estimate, which was wrong: it compared
+    a cold PROCESS against a warm one and so charged this reload for Python
+    startup and a cold page cache as well. The weights stay in the OS page cache
+    across a release, which is most of why the real cost is small.
+
+    Both halves are required. Dropping the reference alone leaves MLX holding
+    the buffers in its own cache, so the memory does NOT come back and the only
+    thing achieved is a 3.6 s reload later — the worst of both.
+
+    MUST be called on the single MLX-owning thread (`server.py`'s render worker),
+    for the same reason everything else touching MLX must: the state is
+    thread-affine, not merely non-concurrent. Never call it with a render in
+    flight — the engine is process-global and mutated per call.
+    """
+    global _engine
+    with _engine_lock:
+        if _engine is None:
+            return False
+        _engine = None
+
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+    except AttributeError:
+        try:
+            import mlx.core as mx
+            mx.metal.clear_cache()   # older MLX
+        except Exception as e:  # noqa: BLE001
+            print(f"[sa3] clear_cache unavailable: {e}", flush=True)
+    except Exception as e:  # noqa: BLE001 — mlx absent (FakeAdapter-only machine)
+        print(f"[sa3] clear_cache skipped: {e}", flush=True)
+    gc.collect()
+    return True
 
 
 class _Engine:
@@ -240,6 +292,58 @@ class _Engine:
         patches = S.patch_audio(a[None], patch_size=256)
         lat = self._encoder(mx.array(patches)); mx.eval(lat)
         return lat.astype(self.DTYPE)                                 # (1, 256, T_LAT)
+
+    # ── training-precompute variants of encode_init/_cond ──────────────────
+    #
+    # These exist because LoRA training needs a DIFFERENT shape than rendering
+    # does, and getting the difference wrong fails SILENTLY — the adapter
+    # trains with a perfectly healthy loss curve and is simply wrong. Two
+    # traps, both of which the parity test guards:
+    #
+    #  1. T_lat is PER SAMPLE here (ceil of the clip's own length), not the
+    #     engine's fixed render grid. Training clips vary in length; padding
+    #     them all to one grid would train the adapter on silence.
+    #  2. `seconds_total` must be the clip's REAL pre-padding duration, not
+    #     the padded length. It is the conditioning the model learns to
+    #     answer, so a padded value teaches a wrong length↔content mapping.
+    #
+    # Both return RAW conditioning (pre-`to_cond_embed`) — the trainer applies
+    # the projection itself, exactly as the DiT does at inference.
+    def encode_for_training(self, path):
+        """Encode one training clip → ((256, T_lat) latent, real seconds).
+
+        Mirrors `encode_init` but sizes the latent grid to the clip instead of
+        the render grid, and reports the clip's true duration.
+        """
+        S, mx, np = self.S, self.mx, self.np
+        if self._encoder is None:
+            self._encoder = S.load_encoder("same-l", mx.float32)[0]
+        a = S.read_wav(path)                                          # (2, T)
+        n_orig = a.shape[-1]
+        seconds = n_orig / S.SAMPLE_RATE                              # REAL, pre-padding
+        t_lat = max(1, math.ceil(n_orig / self.SAMPLES_PER_LATENT))
+        tgt = t_lat * self.SAMPLES_PER_LATENT
+        a = a[:, :tgt] if n_orig >= tgt else np.pad(a, ((0, 0), (0, tgt - n_orig)))
+        patches = S.patch_audio(a[None], patch_size=256)              # (1, 512, t_lat*16)
+        if patches.shape[-1] % 16 != 0:
+            raise ValueError(f"SAME-L requires T_audio_patches % 16 == 0, got {patches.shape[-1]}")
+        lat = self._encoder(mx.array(patches)); mx.eval(lat)
+        return lat.astype(self.DTYPE)[0], seconds                     # (256, t_lat), float
+
+    def cond_for_training(self, prompt, seconds):
+        """Raw conditioning for one training clip → ((257,768), (768,)).
+
+        Mirrors `_cond` but takes the clip's own duration rather than the
+        engine's render length, and drops the batch dim for storage.
+        """
+        S, mx = self.S, self.mx
+        embeds, mask = self.enc.encode([prompt], max_len=256)
+        embeds = embeds.astype(self.DTYPE)
+        embeds_padded = S.apply_prompt_padding(embeds, mask, self.padding_emb.astype(self.DTYPE))
+        seconds_embed = self.secs_embedder(float(seconds)).astype(self.DTYPE)   # (1,1,768)
+        cross_attn = mx.concatenate([embeds_padded, seconds_embed], axis=1)     # (1,257,768)
+        mx.eval(cross_attn)
+        return cross_attn[0], seconds_embed[0, 0, :]                            # (257,768), (768,)
 
     # ── carved from mlx_inproc._cond ──
     def _cond(self, prompt):

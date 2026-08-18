@@ -29,6 +29,11 @@ public:
     juce::var status (bool includePairingSecrets = true) const;
     void pushEvent (const juce::var& event);
 
+    /** Host baked into the pairing URLs: the LAN IPv4 when the Mac is on a network,
+        falling back to the derived ".local" name only when it is not. Public so the
+        Catch2 suite can assert it never hands the phone a loopback address. */
+    static juce::String pairingUrlHost();
+
 #if MOSH_TESTING
     juce::var handleTestRequest (const juce::String& method,
                                  const juce::String& path,

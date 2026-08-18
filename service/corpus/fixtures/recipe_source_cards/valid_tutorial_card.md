@@ -55,3 +55,23 @@
 - `decision`: candidate
 - `recipe_authoring_next_step`: author one seed recipe for drums + 808 motion
 - `phase0_checks_to_run_after_authoring`: recipe schema, compile smoke, render smoke, audition notes
+
+## Skill Source
+
+- `source_version`: uploaded 2025-11-02
+- `rights`: official_public_documentation
+- `acquisition`: official_https_page
+- `platform_handling`: metadata_and_short_paraphrases_only
+- `evidence_sha256`: 9a7c1b2f0c7d4e17f49d2fdc56dd8c4bcf3d6dfef7b8c1d3fbcf4a4f05d9aa01
+- `reviewer`: mosh-owner
+- `reviewed_at`: 2026-06-30T00:00:00Z
+- `source_state`: current
+- `dependent_ids`:
+
+## Claims
+
+| Claim ID | Origin | Workflow Moment | Paraphrase | Boundary |
+| --- | --- | --- | --- | --- |
+| c1 | source_text | intro | kick and 808 lock together at the drop | vocabulary only, no parameter values |
+| c2 | source_text | hook | hats double up to add density in the hook | workflow order only |
+| c3 | owner_observation | bridge | the bridge strips down to just the pad | not a copied production move |

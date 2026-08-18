@@ -232,6 +232,74 @@ export async function pickSaveFile(opts?: {
   return (await native("pick_save_file")(opts ?? {})) as { ok: boolean; file: string };
 }
 
+// Skill Foundry Task 4 — three DEDICATED, non-MoshOps native reads for the certified
+// skill loader (src/agent/CertifiedSkillLoader.{h,cpp}). Each is its OWN top-level
+// `.withNativeFunction` on WebBridge (src/webview/WebBridge.cpp), threaded exactly like
+// brain_chat/escalate_candidates/archive_pair above — never dispatched through
+// commandHandler, never a MoshOps command, never reachable via executeCommand's
+// execute_command seam. See ui/src/agent/skillFoundry/nativeBridgeBoundary.test.ts for the
+// durable guard proving that boundary from both the TS and the native-source side.
+//
+// Outside the real WebView (Vite dev/test) there is no filesystem admission to run, and —
+// unlike escalateCandidates()/archivePair() above — a missing owner skill directory is the
+// ORDINARY case in dev, not an error, so the mock/test path returns an explicit, empty,
+// well-typed envelope (ok:true, zero packages) rather than throwing. It never touches disk.
+const EMPTY_CERTIFIED_SKILL_LOAD = Object.freeze({
+  schemaVersion: 1 as const,
+  ok: true as const,
+  activeIndex: null,
+  sourceStatusIndex: null,
+  packages: [] as const,
+  diagnostics: [] as const,
+  totalBytes: 0,
+});
+
+const EMPTY_SOURCE_STATUS_READ = Object.freeze({
+  schemaVersion: 1 as const,
+  ok: true as const,
+  statusIndex: null,
+  diagnostics: [] as const,
+});
+
+const DEV_BUILD_IDENTITY = Object.freeze({
+  appVersion: "0.0.0-dev",
+  gitCommit: "0".repeat(40),
+  gitState: "unknown" as const,
+  moshBuildIdentity: `git=${"0".repeat(40)}|version=0.0.0-dev|target=Mosh|configuration=Debug|architecture=dev`,
+});
+
+const EMPTY_CERTIFIED_NATIVE_SKILL_LOAD = Object.freeze({
+  schemaVersion: 1 as const,
+  ok: true as const,
+  build: DEV_BUILD_IDENTITY,
+  resourceIndex: null,
+  packages: [] as const,
+  diagnostics: [] as const,
+  totalBytes: 0,
+});
+
+/** Raw native/mock envelope for the owner-local certified-skill package tree. Callers use
+ *  the typed V1 wrapper in ui/src/agent/skillFoundry/nativeReads.ts, not this directly. */
+export async function readCertifiedSkillPackages(): Promise<unknown> {
+  if (realNative()) return await native("read_certified_skill_packages")();
+  return EMPTY_CERTIFIED_SKILL_LOAD;
+}
+
+/** Raw native/mock envelope for the source-status index alone (a cheap, per-invocation
+ *  staleness re-check — see nativeReads.ts / CertifiedSkillLoader.h for why this is a
+ *  separate call from readCertifiedSkillPackages() rather than reusing its result). */
+export async function readSkillSourceStatus(): Promise<unknown> {
+  if (realNative()) return await native("read_skill_source_status")();
+  return EMPTY_SOURCE_STATUS_READ;
+}
+
+/** Raw native/mock envelope for the bundled native-skill package tree (app resources —
+ *  never $MOSH_AGENT_DIR). */
+export async function readCertifiedNativeSkills(): Promise<unknown> {
+  if (realNative()) return await native("read_certified_native_skills")();
+  return EMPTY_CERTIFIED_NATIVE_SKILL_LOAD;
+}
+
 /** Subscribe to a typed backend event (snapshot+events feed, 02 §4).
  *  Returns an unsubscribe fn. No-op in pure-web dev. */
 export function onEvent(eventId: string, fn: (payload: unknown) => void): () => void {

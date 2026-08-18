@@ -7,6 +7,7 @@
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
+#include "state/TakeIdentity.h"
 #include "state/Migrations.h"
 #include "state/TrackIcons.h"
 #include "state/SafeMode.h"
@@ -3982,6 +3983,84 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                  "LoRA overdrive (value > 100) survives unclamped"); }
     }
 
+    // ── LoRA Lab: render_lora_take's ARGUMENT surface (hermetic, no service).
+    //
+    // Scope, stated plainly so nobody later mistakes this for more than it is:
+    // these checks cover validation that runs BEFORE ensureServiceRunning(), which
+    // is the only part reachable without spawning the generative service. The
+    // render itself — cache HIT/MISS, adapter merge, the wav actually landing —
+    // belongs to verify-hardware, exactly like the SA3 merge path above.
+    //
+    // The ordering is the point. Every check below passes only because argument
+    // validation happens before the service call; if that order were reversed, a
+    // malformed take would block the message thread on a Python spawn first, and
+    // this section would hang or fail on a machine with no service instead of
+    // returning a clean error.
+    section ("LoRA Lab: render_lora_take argument surface");
+    {
+        // A take needs something to render. This is the FIRST thing checked, so it
+        // holds even with no service, no adapters and no session audio.
+        auto noPrompt = cmd (ops, "render_lora_take", objN ({{ "seed", 1 }}));
+        check (! ok (noPrompt), "render_lora_take without a prompt fails");
+        check (noPrompt.getProperty ("error", var()).toString().contains ("prompt"),
+               "…and says which argument is missing");
+
+        auto blankPrompt = cmd (ops, "render_lora_take", objN ({{ "prompt", "   " }}));
+        check (! ok (blankPrompt), "a whitespace-only prompt is rejected too (trimmed, not just non-empty)");
+
+        // An unknown source clip must fail on the CLIP, not on the service. If this
+        // ever starts reporting "generative service unavailable" instead, the
+        // validation order has regressed and a bad clipId now costs a process spawn.
+        auto badClip = cmd (ops, "render_lora_take",
+                            objN ({{ "prompt", "rage trap instrumental" }, { "sourceClipId", "clip-that-does-not-exist" }}));
+        check (! ok (badClip), "render_lora_take with an unknown source clip fails");
+        check (badClip.getProperty ("error", var()).toString().contains ("source clip not found"),
+               "…naming the clip problem, NOT the service (validation runs before the spawn)");
+
+        // A MIDI clip is a legitimate thing to point at and an illegitimate source:
+        // the model is audio→audio, and the Lab does not auto-bounce (render_layer
+        // does; an audition deliberately does not, because bouncing an instrument
+        // chain is a minute of work to answer a question about an adapter).
+        auto labT = cmd (ops, "create_track", args1 ("name", "LabSrc"))["data"].getProperty ("trackId", var()).toString();
+        auto labMidi = cmd (ops, "add_midi_clip", objN ({{ "trackId", labT }, { "length", 1.0 }}));
+        const auto labMidiId = labMidi["data"].getProperty ("clipId", var()).toString();
+        if (labMidiId.isNotEmpty())
+        {
+            auto midiSrc = cmd (ops, "render_lora_take",
+                                objN ({{ "prompt", "rage trap instrumental" }, { "sourceClipId", labMidiId }}));
+            check (! ok (midiSrc), "render_lora_take refuses a MIDI clip as an audition source");
+            check (midiSrc.getProperty ("error", var()).toString().contains ("audio clip"),
+                   "…explaining it needs audio, not just 'invalid'");
+        }
+
+        // It must never open an undo transaction: an audition is not an edit, and a
+        // producer auditioning twenty takes must not bury their actual work twenty
+        // steps deep in the undo stack.
+        check (mosh::txnsafe::isReadOnlyDuringTransaction ("render_lora_take"),
+               "render_lora_take is transaction-safe (auditioning never blocks on, or opens, an edit txn)");
+    }
+
+    // ── LoRA Lab: promote_lora_checkpoint ("Keep") argument surface ──────────
+    // Hermetic — every check here is a REFUSAL, reached before the service is
+    // consulted, so none of it needs a model or a trained adapter. The success
+    // path needs a real take and lives in scripts/verify-hardware.
+    section ("LoRA Lab: promote_lora_checkpoint argument surface");
+    {
+        auto noSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "name", "keeper" }}));
+        check (! ok (noSource), "promote_lora_checkpoint without a source fails");
+        check (noSource.getProperty ("error", var()).toString().contains ("source"),
+               "…naming the missing argument");
+
+        auto blankSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "source", "   " }}));
+        check (! ok (blankSource), "promote_lora_checkpoint with a blank source fails");
+
+        // Keeping is the one action in the Lab that writes outside the edit, into
+        // the producer's library — so it must not open an undo transaction, which
+        // would offer an undo that cannot actually take the file back.
+        check (mosh::txnsafe::isReadOnlyDuringTransaction ("promote_lora_checkpoint"),
+               "promote_lora_checkpoint is transaction-safe (it writes to the library, not the edit)");
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The
@@ -7613,6 +7692,156 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                       peak = juce::jmax (peak, rbuf.getMagnitude (ch, 0, rbuf.getNumSamples()));
               }
               check (peak > 0.01f, "the switched take's source RENDERS non-silent (880 Hz tone)"); }
+        }
+
+        // ── Stable take identity (Skill Foundry Slice B, Task 1) ──
+        // A lane INDEX shifts under Keep/Undo; capture-review-choose-take needs a handle
+        // that survives all of that. Build a dedicated 2-take direct-file fixture (mirrors
+        // the take-peaks fixture above) and prove: list_takes / clipToVar / controllerToVar
+        // all agree on the same unique, persisted ids; keep_take accepts an explicit stable
+        // takeId and refuses a malformed/unknown one with ZERO mutation; keep_take-by-id
+        // switches AND collapses the lane set in one transaction; one Undo restores the
+        // full ordered id set (not fresh ids) and the prior selection; the legacy
+        // {clipId}-only Keep is unchanged; and ids survive save/reload.
+        {
+            section ("Stable take identity (Skill Foundry Slice B, Task 1)");
+            const auto idTrack = cmd (ops, "create_track", args1 ("name", "TakeIdFx"))["data"].getProperty ("trackId", var()).toString();
+            const auto idClipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", idTrack }, { "seconds", 1.0 }, { "freq", 220.0 }}))["data"].getProperty ("clipId", var()).toString();
+            const auto extraClipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", idTrack }, { "seconds", 1.0 }, { "freq", 880.0 }}))["data"].getProperty ("clipId", var()).toString();
+            te::WaveAudioClip* idWave = nullptr;
+            juce::File fA, fB;
+            for (auto* tr : te::getAllTracks (eng.edit()))
+                if (auto* at = dynamic_cast<te::AudioTrack*> (tr))
+                    for (auto* c : at->getClips())
+                        if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+                        {
+                            if (w->itemID.toString() == idClipId) { idWave = w; fA = w->getCurrentSourceFile(); }
+                            if (w->itemID.toString() == extraClipId) fB = w->getCurrentSourceFile();
+                        }
+            check (idWave != nullptr && fA.existsAsFile() && fB.existsAsFile(),
+                   "take-identity fixture: the clip and two source files resolved");
+            idWave->addTake (fA);
+            idWave->addTake (fB);
+            // This fixture builds its take tree directly (addTake), the same shortcut the
+            // take-peaks fixture above uses because headless has no audio input to actually
+            // record — so it never passes through cmdStopRecording's post-record backfill.
+            // A real recording lands through cmdStopRecording, which calls this same
+            // function; simulate that here so the fixture's ids exist exactly as a real
+            // landed take's would.
+            mosh::takeidentity::backfill (eng.edit().state);
+
+            auto ltA = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+            check (ok (ltA), "list_takes on the id fixture ok");
+            const auto ltTakes = ltA["data"].getProperty ("takes", var());
+            check (ltTakes.size() == 2, "list_takes reports two takes on the id fixture");
+            const auto lId0 = ltTakes[0].getProperty ("id", var()).toString();
+            const auto lId1 = ltTakes[1].getProperty ("id", var()).toString();
+            check (lId0.isNotEmpty() && lId1.isNotEmpty() && lId0 != lId1,
+                   "list_takes reports two unique, non-empty stable ids");
+            check (mosh::takeidentity::isValid (lId0) && mosh::takeidentity::isValid (lId1),
+                   "list_takes' ids are well-shaped (lowercase dashed uuid)");
+
+            auto idClipSnapshot = [&ops, &idClipId]() -> juce::var
+            {
+                auto snap = ops.snapshot();
+                auto tracksVar = snap.getProperty ("tracks", var());
+                if (auto* trackArr = tracksVar.getArray())
+                    for (auto& trackVar : *trackArr)
+                    {
+                        auto clipsVar = trackVar.getProperty ("clips", var());
+                        if (auto* clipArr = clipsVar.getArray())
+                            for (auto& clipVar : *clipArr)
+                                if (clipVar.getProperty ("id", var()).toString() == idClipId)
+                                    return clipVar;
+                    }
+                return {};
+            };
+            {
+                const auto clip = idClipSnapshot();
+                const auto takeIds = clip.getProperty ("takeIds", var());
+                check (takeIds.size() == 2
+                           && takeIds[0].toString() == lId0
+                           && takeIds[1].toString() == lId1,
+                       "clipToVar's takeIds matches list_takes exactly, in order");
+                check (clip.getProperty ("currentTakeId", var()).toString() == lId0,
+                       "clipToVar's currentTakeId names the take at the current index");
+            }
+            {
+                const auto controller = ops.snapshot().getProperty ("controller", var());
+                const auto take = controller.getProperty ("take", var());
+                if (take.getProperty ("clipId", var()).toString() == idClipId)
+                {
+                    const auto ctakeIds = take.getProperty ("takeIds", var());
+                    check (ctakeIds.size() == 2
+                               && ctakeIds[0].toString() == lId0
+                               && ctakeIds[1].toString() == lId1,
+                           "controllerToVar's takeIds matches list_takes exactly, in order");
+                    check (take.getProperty ("currentTakeId", var()).toString() == lId0,
+                           "controllerToVar's currentTakeId matches the current take");
+                }
+            }
+
+            // Guard: a malformed or unknown (but well-shaped) takeId is refused BEFORE
+            // any transaction opens — zero mutation, both takes remain exactly as they were.
+            check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", idClipId }, { "takeId", "not-a-real-id" }}))),
+                   "keep_take with a malformed takeId is refused");
+            check (! ok (cmd (ops, "keep_take", objN ({{ "clipId", idClipId }, { "takeId", mosh::takeidentity::newId() }}))),
+                   "keep_take with an unknown (but well-shaped) takeId is refused");
+            {
+                const auto clip = idClipSnapshot();
+                check (clip.getProperty ("takeIds", var()).size() == 2,
+                       "the refused Keep attempts mutated nothing — both takes remain");
+            }
+
+            // Keep the SECOND take by its stable id (current selection is still index 0 /
+            // fA) — one transaction both switches AND collapses the lane set to it.
+            auto kept = cmd (ops, "keep_take", objN ({{ "clipId", idClipId }, { "takeId", lId1 }}));
+            check (ok (kept), "keep_take with an explicit, valid stable id ok");
+            check (idWave->getCurrentSourceFile() == fB,
+                   "keep_take-by-id switches the playing source to the kept take");
+            {
+                auto lt2 = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+                check ((int) lt2["data"].getProperty ("numTakes", -1) == 1,
+                       "keep_take-by-id reduces the lane set to exactly one take");
+            }
+
+            // ONE Undo restores the FULL ordered id set (the exact prior ids, not fresh
+            // ones) and the prior selection.
+            check (ok (cmd (ops, "undo", objN ({}))), "undo after keep_take-by-id ok");
+            check (idWave->getCurrentSourceFile() == fA, "one undo restores the ORIGINAL playing source");
+            {
+                auto lt3 = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+                const auto takes3 = lt3["data"].getProperty ("takes", var());
+                check (takes3.size() == 2, "one undo restores both takes");
+                check (takes3[0].getProperty ("id", var()).toString() == lId0
+                           && takes3[1].getProperty ("id", var()).toString() == lId1,
+                       "one undo restores the EXACT prior ordered id set (not fresh ids)");
+            }
+
+            // Legacy {clipId}-only Keep is UNCHANGED: it keeps whichever take is already
+            // current, with no takeId argument at all.
+            check (ok (cmd (ops, "set_current_take", objN ({{ "clipId", idClipId }, { "takeIndex", 1 }}))),
+                   "re-switch to take 1 for the legacy-Keep check");
+            auto legacyKept = cmd (ops, "keep_take", objN ({{ "clipId", idClipId }}));
+            check (ok (legacyKept), "legacy {clipId}-only keep_take still ok");
+            check (idWave->getCurrentSourceFile() == fB,
+                   "legacy keep_take kept whichever take was already current (take 1)");
+            check (ok (cmd (ops, "undo", objN ({}))), "undo the legacy-Keep check");
+            check (ok (cmd (ops, "undo", objN ({}))), "undo the re-switch-to-take-1 for the legacy-Keep check");
+            check (idWave->getCurrentSourceFile() == fA, "the id fixture is restored to its original take-0 state");
+
+            // Save/reload survival: ids must not be regenerated across a round trip.
+            check (ok (cmd (ops, "save", objN ({}))), "save the take-identity fixture ok");
+            check (ok (cmd (ops, "reload", objN ({}))), "reload the take-identity fixture ok");
+            {
+                auto lt4 = cmd (ops, "list_takes", objN ({{ "clipId", idClipId }}));
+                check (ok (lt4), "list_takes after reload ok");
+                const auto takes4 = lt4["data"].getProperty ("takes", var());
+                check (takes4.size() == 2, "reload preserves both takes");
+                check (takes4[0].getProperty ("id", var()).toString() == lId0
+                           && takes4[1].getProperty ("id", var()).toString() == lId1,
+                       "reload preserves the EXACT same ids — no regeneration");
+            }
         }
 
         // ── CTL-001: live MIDI controller -> armed instrument track ──

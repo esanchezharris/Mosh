@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-08-18T00:44:52.225208Z",
+  "name": "r7-coverage-demonstrations",
+  "purpose": "Targeted SFT coverage rows for the r5 novice-jam bench misses (drum-kit flows, lyric multi-step follow-through, ambiguity defer, dosage). NOT r6 data \u2014 r6 (R6_TRAINING_PLAN.md) freezes s2-mix-v5 verbatim by design. This is candidate data for a FUTURE, separately pre-registered cycle (see R6_COVERAGE_PREP_NOTE.md).",
+  "file": "r7_coverage_demonstrations.jsonl",
+  "sha256": "c596ba5ee760559df79563dda0380a3e722453d78ed63ddddb9c1a0bf7407a8f",
+  "row_count": 119,
+  "domain_counts": {
+    "drum_beat_from_nothing": 20,
+    "drum_add_to_existing": 14,
+    "drum_track_only": 5,
+    "drum_kit_swap": 5,
+    "contrast_melodic_no_drums": 12,
+    "lyric_sheet_plus_line": 14,
+    "lyric_exact_opening_line": 10,
+    "lyric_full_followthrough": 8,
+    "lyric_sheet_only": 5,
+    "ambiguous_defer": 12,
+    "near_miss_should_act": 8,
+    "dosage_save_contrast": 6
+  },
+  "system_prompt_source": {
+    "path": "service/sft/assist_demonstrations.jsonl",
+    "note": "byte-identical to assist_demonstrations.jsonl row 0's system field (same buildSystemPrompt(DEFAULT_RULES, fixture_snap.json) render). KNOWN STALE vs current commands.ts HEAD \u2014 see R6_COVERAGE_PREP_NOTE.md 'Prompt-shape drift found'. Regenerate before any real training merge."
+  },
+  "fixture_source": {
+    "roles": "service/sft/assist_fixtures/fixture_roles.json",
+    "snapshot": "assist_fixtures/fixture_snap.json"
+  },
+  "validated_by": "validate_sft_rows.py (catalog + drum-pattern-DSL + reply-contract + real-id + dosage checks)",
+  "catalog_commands_checked_against": 155
+}

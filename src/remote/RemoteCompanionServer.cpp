@@ -116,7 +116,7 @@ juce::var RemoteCompanionServer::startPairing (const juce::var& args)
         startThread();
     }
 
-    const auto info = protocol.beginPairing (localBonjourHost(), port, juce::Time::currentTimeMillis());
+    const auto info = protocol.beginPairing (pairingUrlHost(), port, juce::Time::currentTimeMillis());
     auto* data = new juce::DynamicObject();
     data->setProperty ("running", true);
     data->setProperty ("pairing", toVar (info));
@@ -143,7 +143,7 @@ juce::var RemoteCompanionServer::startLabFeed (const juce::String& token)
         startThread();
     }
 
-    const auto info = protocol.beginPairing (localBonjourHost(), port,
+    const auto info = protocol.beginPairing (pairingUrlHost(), port,
                                              juce::Time::currentTimeMillis(),
                                              token,
                                              24 * 60 * 60 * 1000LL);
@@ -771,6 +771,26 @@ juce::var RemoteCompanionServer::toVar (const RemotePairingInfo& info, bool incl
         o->setProperty ("webUrl", info.webUrl);
     }
     return juce::var (o);
+}
+
+// The host baked into the pairing URLs (both the mosh:// deep link and the Safari
+// /web URL). It must be something the PHONE can reach, which the derived ".local"
+// name below is not: localBonjourHost() strips every non-alphanumeric character out
+// of ComputerName, so "Emilio's MacBook Pro" becomes "EmiliosMacBookPro.local" —
+// while the machine's real mDNS name comes from LocalHostName and would be
+// "Emilios-MacBook-Pro.local". The derived name resolves nowhere, which made every
+// pairing QR a dead end. Prefer the actual LAN IPv4: it needs no mDNS at all, and it
+// is what the phone uses to reach the server anyway. Fall back to the derived name
+// only when there is no non-loopback address (i.e. the Mac is off the network, where
+// no host would have worked regardless).
+juce::String RemoteCompanionServer::pairingUrlHost()
+{
+    const auto ip = juce::IPAddress::getLocalAddress (false);
+    const auto text = ip.toString();
+    if (! ip.isNull() && text.isNotEmpty() && ! text.startsWith ("127."))
+        return text;
+
+    return localBonjourHost();
 }
 
 juce::String RemoteCompanionServer::localBonjourHost()

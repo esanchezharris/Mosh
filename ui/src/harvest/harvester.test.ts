@@ -207,6 +207,41 @@ describe("FS-B2a — the ask is honest and unserved asks are separated", () => {
     expect(asks[0]).toMatchObject({ turnId: "n3", utterance: "make it sound purple", source: "brain_chat" });
   });
 
+  it("preserves studio-skill provenance for unsupported asks", () => {
+    const skillLog = [
+      seqLine("batch_begin", { turn_id: "skill", utterance: "load Serum 2", source: "studio_skill" }, true, false),
+      seqLine("load_plugin", { trackId: "t1", pluginId: "serum-2" }, true, true),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { turn_id: "blocked", utterance: "load Omnisphere", source: "studio_skill_blocked" }, true, false),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { turn_id: "missing", utterance: "master this", source: "studio_skill_unsupported" }, true, false),
+      seqLine("batch_end", {}, true, false),
+    ].join("\n");
+
+    expect(harvestUnservedAsks(skillLog)).toEqual([
+      expect.objectContaining({ turnId: "blocked", source: "studio_skill_blocked" }),
+      expect.objectContaining({ turnId: "missing", source: "studio_skill_unsupported" }),
+    ]);
+  });
+
+  it("preserves section and developer-loop provenance", async () => {
+    const routedLog = [
+      seqLine("batch_begin", { turn_id: "section", utterance: "make the chorus louder", source: "section_scope" }, true, false),
+      seqLine("set_track_volume", { trackId: "t1", volumeDb: 2 }, true, true),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { turn_id: "loop", utterance: "build a lofi beat", source: "agent_loop" }, true, false),
+      seqLine("batch_end", {}, true, false),
+    ].join("\n");
+
+    const tuples = await harvest(routedLog);
+    expect(tuples).toEqual([
+      expect.objectContaining({ turnId: "section", source: "section_scope" }),
+    ]);
+    expect(harvestUnservedAsks(routedLog)).toEqual([
+      expect.objectContaining({ turnId: "loop", source: "agent_loop" }),
+    ]);
+  });
+
   it("does not report a served turn, or an unserved one with no recorded ask, as unserved", () => {
     const noAsk =
       [

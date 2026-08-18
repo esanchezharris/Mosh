@@ -67,3 +67,44 @@ add_custom_target(MoshStageUI ALL
     COMMENT "Checking staged UI bundle (restage if dist is newer)"
     VERBATIM)
 add_dependencies(MoshStageUI Mosh MoshUI)
+
+# ── Skill Foundry identity/collision gate (Slice A, Task 5) ────────────────────
+# `resources/skills/native/index.json` and `resources/skills/declarative/index.json` are
+# NEVER created in the source tree and NEVER committed (Slice A ships zero bundled skills of
+# either origin — `git ls-files resources/skills/native/ resources/skills/declarative/` must
+# return empty). Both indexes below are generated as schema-valid EMPTY envelopes into the
+# BUILD tree only, at configure time — nothing here ever writes under CMAKE_SOURCE_DIR.
+set(MOSH_SKILL_FOUNDRY_STAGE_DIR "${CMAKE_BINARY_DIR}/skill-foundry")
+set(MOSH_SKILL_NATIVE_INDEX      "${MOSH_SKILL_FOUNDRY_STAGE_DIR}/resources/skills/native/index.json")
+set(MOSH_SKILL_DECLARATIVE_INDEX "${MOSH_SKILL_FOUNDRY_STAGE_DIR}/resources/skills/declarative/index.json")
+set(MOSH_SKILL_OWNER_ACTIVE_INDEX "${MOSH_SKILL_FOUNDRY_STAGE_DIR}/release-owner-active.json")
+
+file(MAKE_DIRECTORY "${MOSH_SKILL_FOUNDRY_STAGE_DIR}/resources/skills/native")
+file(MAKE_DIRECTORY "${MOSH_SKILL_FOUNDRY_STAGE_DIR}/resources/skills/declarative")
+file(WRITE "${MOSH_SKILL_NATIVE_INDEX}"      "{\"schemaVersion\":1,\"skills\":[]}\n")
+file(WRITE "${MOSH_SKILL_DECLARATIVE_INDEX}" "{\"schemaVersion\":1,\"skills\":[]}\n")
+
+# MOSH_RELEASE_OWNER_ACTIVE_INDEX is a test-only override (e.g.
+# tests/fixtures/skill-foundry/release-owner-active.json) — the gate itself NEVER reads the
+# real owner root ($MOSH_AGENT_DIR); the production default is the schema-valid empty map.
+if (MOSH_RELEASE_OWNER_ACTIVE_INDEX)
+    file(COPY_FILE "${MOSH_RELEASE_OWNER_ACTIVE_INDEX}" "${MOSH_SKILL_OWNER_ACTIVE_INDEX}")
+else()
+    file(WRITE "${MOSH_SKILL_OWNER_ACTIVE_INDEX}" "{\"schemaVersion\":1,\"generation\":0,\"skills\":{}}\n")
+endif()
+
+# ALWAYS-run (no OUTPUT — reruns every build) so a mid-tree edit is always re-checked, not
+# just at configure time. Runs BEFORE Mosh builds (add_dependencies below); the collision
+# check itself is cheap (empty indexes in Slice A) so this never meaningfully slows a build.
+add_custom_target(MoshSkillIdentityGate
+    COMMAND ${NPM_EXECUTABLE} run verify:skill-identities --prefix "${MOSH_UI_DIR}" --
+            --configuration $<CONFIG>
+            --app-version "${PROJECT_VERSION}"
+            --target Mosh
+            --architecture arm64
+            --native-index "${MOSH_SKILL_NATIVE_INDEX}"
+            --declarative-index "${MOSH_SKILL_DECLARATIVE_INDEX}"
+            --owner-active-index "${MOSH_SKILL_OWNER_ACTIVE_INDEX}"
+    COMMENT "Verifying skill identity/collision universe (native + declarative + owner)"
+    VERBATIM)
+add_dependencies(Mosh MoshSkillIdentityGate)

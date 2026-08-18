@@ -31,12 +31,27 @@ export function isTransformPreview(capabilities: ServiceCapabilities | null | un
   return capabilities.transformReal === false;
 }
 
-// The Type-beat Training popover always drives the deterministic fake trainer unless
-// the owner has pointed the service at a remote GPU box (MOSH_TRAINING_REMOTE_URL /
-// MOSH_TRAINING_BACKEND=remote). Returns a short label to show by the popover title, or
-// null when nothing should show (a real remote backend, or capabilities unresolved).
+// Whether the training popover is driving a STUB rather than something that
+// produces a real adapter. Two backends are real: "remote_http" (a rented GPU)
+// and "local_pmetal" (an actual fine-tune on this Mac, via the bundled trainer,
+// producing a .safetensors the render path loads unmodified). Only "fake" — the
+// deterministic JSON stub — earns the label.
+//
+// This comment used to say the popover "always drives the deterministic fake
+// trainer unless ... a remote GPU box", which was true until the local trainer
+// landed and is exactly the kind of stale claim-about-the-code worth correcting
+// rather than leaving to mislead the next reader.
+const REAL_TRAINING_BACKENDS = new Set(["remote_http", "local_pmetal"]);
+
 export function trainingPreviewLabel(capabilities: ServiceCapabilities | null | undefined): string | null {
   const backend = capabilities?.trainingBackend;
   if (!backend) return null;
-  return backend === "remote_http" ? null : "preview";
+  return REAL_TRAINING_BACKENDS.has(backend) ? null : "preview";
+}
+
+// Why a real backend still can't train right now — e.g. the SA3 base checkpoint
+// is missing. Empty when training is ready or the backend is the stub (whose
+// only honest signal is the "preview" label above).
+export function trainingBlockers(capabilities: ServiceCapabilities | null | undefined): string[] {
+  return capabilities?.trainingBlockers ?? [];
 }

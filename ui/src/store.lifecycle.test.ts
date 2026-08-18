@@ -171,4 +171,18 @@ describe("store lifecycle leaks (BH-store)", () => {
     expect(good.ok).toBe(true);
     expect(useStore.getState().lastError).toBe("This Mosh app is older than its engine. Please update the app.");
   });
+
+  it("clears agent undo affordances before replacing the project", async () => {
+    useStore.setState({
+      agentChangeSet: {
+        label: "load Serum 2",
+        applied: 1,
+        entries: [{ index: 0, command: "load_plugin", summary: "Added Serum 2", ok: true }],
+      },
+    });
+
+    await useStore.getState().exec("new_project", {});
+
+    expect(useStore.getState().agentChangeSet).toBeNull();
+  });
 });
