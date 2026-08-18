@@ -15,6 +15,23 @@ import type {
 // Type-only imports from the store module (erased at compile time — no runtime cycle).
 import type { State } from "../store";
 
+// GEN-WARMUP — cold-launch retry/backoff. ensureServiceRunning() (native) can take several
+// real seconds on a cold launch (spawn python3, import the interpreter, and under
+// MOSH_ENABLE_SA3=1 load the MLX model, ~1.7s+). A single failed response from that window
+// ("generative service unavailable") is NOT a terminal error — it's the service still
+// coming up. These fixed backoff delays (ms) bound how long loadColors/loadTransformTargets/
+// loadLoras keep retrying before giving up for real; they sum to ~18s, comfortably inside
+// the ticket's ~15-20s cold-SA3-load ceiling.
+const WARMUP_RETRY_DELAYS_MS = [400, 800, 1200, 1600, 2000, 2500, 3000, 3500, 3500];
+
+/** Overall generative-service reachability, as observed by the lazy list_* loaders below.
+ *  "warming" = at least one attempt has failed but retries remain (a cold-starting service
+ *  reads exactly like this); "error" = retries exhausted with no success — a genuine,
+ *  actionable failure (dead python3, broken venv); "ready" = at least one loader has landed
+ *  a real response. Shared across all three loaders because they all gate on the same
+ *  native ensureServiceRunning()/spawnLock, so in practice they rise and fall together. */
+export type GenServiceState = "idle" | "warming" | "ready" | "error";
+
 export type JobsSlice = {
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
@@ -43,6 +60,18 @@ export type JobsSlice = {
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
 
+  // GEN-WARMUP: overall service reachability + the last terminal error message (only
+  // meaningful when genServiceState === "error"). GenDrawer reads these to distinguish
+  // "still starting up" from "actually broken" instead of collapsing both into one state.
+  genServiceState: GenServiceState;
+  genServiceError: string | null;
+  // In-flight guards so a remount (or a second caller — e.g. ClipView's menu AND GenDrawer
+  // both touching loadTransformTargets) doesn't stack a duplicate retry loop on top of one
+  // already running.
+  colorsRetrying: boolean;
+  loraRetrying: boolean;
+  transformTargetsRetrying: boolean;
+
   loadColors: () => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
@@ -66,25 +95,82 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
   capabilities: null,
   labMode: false,
   qaByClip: {},
+  genServiceState: "idle",
+  genServiceError: null,
+  colorsRetrying: false,
+  loraRetrying: false,
+  transformTargetsRetrying: false,
 
+  // GEN-WARMUP: retry a still-cold-starting service instead of latching its first failure.
+  // `attempt` finishes one HTTP round trip and returns whether it landed real data; the
+  // caller schedules the next attempt through WARMUP_RETRY_DELAYS_MS until either it
+  // succeeds or the budget runs out. `retryingKey` gates re-entrancy (a remount that fires
+  // the same load* again while a loop is already in flight is a no-op, not a second loop),
+  // and `genServiceState` never regresses from "ready" — one loader landing data means the
+  // service IS up, even if a sibling loader's own retry loop hasn't caught up yet.
   loadColors: () => {
-    if (get().availableColors.length > 0) return;
-    void executeCommand<CommandResult<{ colors: AvailableColor[]; sa3?: boolean }>>({
-      command: "list_colors",
-      args: {},
-    }).then((res) => {
-      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors, sa3Available: res.data.sa3 });
-    });
+    if (get().availableColors.length > 0 || get().colorsRetrying) return;
+    set({ colorsRetrying: true });
+    let attemptIndex = 0;
+    const attempt = () => {
+      void executeCommand<CommandResult<{ colors: AvailableColor[]; sa3?: boolean }>>({
+        command: "list_colors",
+        args: {},
+      }).then((res) => {
+        if (res.ok && res.data?.colors) {
+          set({
+            availableColors: res.data.colors, sa3Available: res.data.sa3,
+            colorsRetrying: false, genServiceState: "ready", genServiceError: null,
+          });
+          return;
+        }
+        if (attemptIndex >= WARMUP_RETRY_DELAYS_MS.length) {
+          const ready = get().genServiceState === "ready";
+          set({
+            colorsRetrying: false,
+            genServiceState: ready ? "ready" : "error",
+            genServiceError: ready ? get().genServiceError : (res.error ?? "list_colors failed"),
+          });
+          return;
+        }
+        if (get().genServiceState !== "ready") set({ genServiceState: "warming" });
+        const delay = WARMUP_RETRY_DELAYS_MS[attemptIndex];
+        attemptIndex += 1;
+        setTimeout(attempt, delay);
+      });
+    };
+    attempt();
   },
 
   loadLoras: () => {
-    if (get().availableLoras.length > 0) return;
-    void executeCommand<CommandResult<{ loras: AvailableLora[] }>>({
-      command: "list_loras",
-      args: {},
-    }).then((res) => {
-      if (res.ok && res.data?.loras) set({ availableLoras: res.data.loras });
-    });
+    if (get().availableLoras.length > 0 || get().loraRetrying) return;
+    set({ loraRetrying: true });
+    let attemptIndex = 0;
+    const attempt = () => {
+      void executeCommand<CommandResult<{ loras: AvailableLora[] }>>({
+        command: "list_loras",
+        args: {},
+      }).then((res) => {
+        if (res.ok && res.data?.loras) {
+          set({ availableLoras: res.data.loras, loraRetrying: false, genServiceState: "ready", genServiceError: null });
+          return;
+        }
+        if (attemptIndex >= WARMUP_RETRY_DELAYS_MS.length) {
+          const ready = get().genServiceState === "ready";
+          set({
+            loraRetrying: false,
+            genServiceState: ready ? "ready" : "error",
+            genServiceError: ready ? get().genServiceError : (res.error ?? "list_loras failed"),
+          });
+          return;
+        }
+        if (get().genServiceState !== "ready") set({ genServiceState: "warming" });
+        const delay = WARMUP_RETRY_DELAYS_MS[attemptIndex];
+        attemptIndex += 1;
+        setTimeout(attempt, delay);
+      });
+    };
+    attempt();
   },
 
   loadRaveModels: () => {
@@ -98,20 +184,41 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
   },
 
   loadTransformTargets: () => {
-    if (get().availableTransformTargets.length > 0) return;
-    void executeCommand<CommandResult<{ targets: string[]; freeText: boolean; capabilities?: ServiceCapabilities }>>({
-      command: "list_transform_targets",
-      args: {},
-    }).then((res) => {
-      if (res.ok && res.data?.targets)
-        set({
-          availableTransformTargets: res.data.targets.map((name) => ({ name })),
-          transformFreeText: res.data.freeText !== false,
-        });
-      // Whichever caller (this or loadCapabilities) hits the service first lands the
-      // capability summary — both read the same GET, so this is a harmless overwrite.
-      if (res.ok && res.data?.capabilities) set({ capabilities: res.data.capabilities });
-    });
+    if (get().availableTransformTargets.length > 0 || get().transformTargetsRetrying) return;
+    set({ transformTargetsRetrying: true });
+    let attemptIndex = 0;
+    const attempt = () => {
+      void executeCommand<CommandResult<{ targets: string[]; freeText: boolean; capabilities?: ServiceCapabilities }>>({
+        command: "list_transform_targets",
+        args: {},
+      }).then((res) => {
+        if (res.ok && res.data?.targets) {
+          set({
+            availableTransformTargets: res.data.targets.map((name) => ({ name })),
+            transformFreeText: res.data.freeText !== false,
+            transformTargetsRetrying: false, genServiceState: "ready", genServiceError: null,
+          });
+          // Whichever caller (this or loadCapabilities) hits the service first lands the
+          // capability summary — both read the same GET, so this is a harmless overwrite.
+          if (res.data.capabilities) set({ capabilities: res.data.capabilities });
+          return;
+        }
+        if (attemptIndex >= WARMUP_RETRY_DELAYS_MS.length) {
+          const ready = get().genServiceState === "ready";
+          set({
+            transformTargetsRetrying: false,
+            genServiceState: ready ? "ready" : "error",
+            genServiceError: ready ? get().genServiceError : (res.error ?? "list_transform_targets failed"),
+          });
+          return;
+        }
+        if (get().genServiceState !== "ready") set({ genServiceState: "warming" });
+        const delay = WARMUP_RETRY_DELAYS_MS[attemptIndex];
+        attemptIndex += 1;
+        setTimeout(attempt, delay);
+      });
+    };
+    attempt();
   },
 
   // Guest-degradation: the frontend has no per-C++ session flag for "is transcribe /

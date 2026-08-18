@@ -327,11 +327,23 @@ juce::var GenerativeJobManager::jobStatus (const juce::String& jobId, int connec
     return httpGet ("/status?jobId=" + jobId, connectMs);
 }
 
-void GenerativeJobManager::cancelJob (const juce::String& jobId)
+bool GenerativeJobManager::cancelJob (const juce::String& jobId)
 {
-    auto* body = new DynamicObject();
-    body->setProperty ("jobId", jobId);
-    httpPost ("/cancel", var (body));
+    // Fire-and-forget used to mean exactly that: the POST result was never even read, so a
+    // /cancel that never reached a dead/killed service (see httpPost() — it returns an empty
+    // var when createInputStream() fails) looked identical to a real one from the caller's
+    // point of view. The service always answers {"ok": true} for a REACHED /cancel — even
+    // for an unknown jobId, see server.py — so `ok` here is purely a reachability signal, not
+    // proof the specific job was flagged; that's the honest limit of what a fire-and-forget
+    // protocol can confirm, and is enough to distinguish "acknowledged" from "never landed."
+    const auto post = [this, &jobId]
+    {
+        auto* body = new DynamicObject();
+        body->setProperty ("jobId", jobId);
+        return (bool) httpPost ("/cancel", var (body)).getProperty ("ok", false);
+    };
+    if (post()) return true;
+    return post();   // one retry — see the header doc for why
 }
 
 double GenerativeJobManager::stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,

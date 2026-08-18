@@ -165,3 +165,125 @@ TEST_CASE ("ensureServiceRunning bails fast when the spawned child dies immediat
     const int spawnCount = [&] { int n = 0; for (auto& l : spawns) if (l.trim().isNotEmpty()) ++n; return n; }();
     CHECK (spawnCount == 1);
 }
+
+// GEN-WARMUP — the dead-child test above proves the fast-bail path; this proves the OTHER
+// half of the same warmup loop still works: a child that stays alive and takes a real few
+// hundred ms before it can answer /health (spawn + interpreter import +, for SA3/MLX, model
+// load) must be waited out, not abandoned. Spawns a real python3 running a throwaway
+// http.server script that sleeps briefly (simulating that cold-start window) before it starts
+// answering GET /health — a "slow but eventually healthy" service, as distinct from both the
+// already-covered dead-child case and an instantly-healthy one.
+TEST_CASE ("ensureServiceRunning waits out a slow-but-alive cold start instead of giving up", "[generative][spawn]")
+{
+    juce::File tmpDir = juce::File::createTempFile ("mosh-slow-warmup");
+    tmpDir.deleteFile();
+    tmpDir.createDirectory();
+    struct Cleanup { juce::File d; ~Cleanup() { d.deleteRecursively(); } } cleanup { tmpDir };
+
+    auto script = tmpDir.getChildFile ("server.py");
+    script.replaceWithText (
+        "import http.server, os, time\n"
+        "time.sleep(0.6)\n"   // the simulated cold-start window (import + warmup)
+        "port = int(os.environ.get('MOSH_SERVICE_PORT', '0'))\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        "    def do_GET(self):\n"
+        "        if self.path == '/health':\n"
+        "            body = b'{\"ok\": true, \"build\": \"warmup-test\"}'\n"
+        "            self.send_response(200)\n"
+        "            self.send_header('Content-Type', 'application/json')\n"
+        "            self.send_header('Content-Length', str(len(body)))\n"
+        "            self.end_headers()\n"
+        "            self.wfile.write(body)\n"
+        "        else:\n"
+        "            self.send_response(404); self.end_headers()\n"
+        "    def log_message(self, *a): pass\n"
+        "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n");
+
+    ScopedEnv host ("MOSH_SERVICE_HOST", "127.0.0.1");
+    ScopedEnv port ("MOSH_SERVICE_PORT", "59994");
+    ScopedEnv svc  ("MOSH_SERVICE_SCRIPT", script.getFullPathName());
+
+    mosh::GenerativeJobManager mgr;
+
+    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+    const bool ok = mgr.ensureServiceRunning();
+    const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - t0;
+
+    CHECK (ok);
+    // Must have actually waited PAST the simulated cold-start sleep (proves the warmup loop
+    // didn't just get lucky on an instant retry) ...
+    CHECK (elapsedMs >= 500.0);
+    // ... but well under the ~30s ceiling — the 200ms poll granularity should catch the
+    // service within a second or so of it opening the port. Generous bound for slow CI.
+    CHECK (elapsedMs < 10000.0);
+    CHECK (mgr.serviceBuild() == "warmup-test");
+
+    // The manager's destructor kills the child it spawned (cancel-on-close, 05 §4) — no
+    // manual teardown needed here, matching the dead-child test above.
+}
+
+// GEN-WARMUP — cancelJob() used to be pure fire-and-forget: the POST result was never read,
+// so a /cancel that never reached a dead service looked identical to a real one. This proves
+// both new behaviours: (1) a totally unreachable service (nothing listening — the "service
+// was killed mid-cancel" case from the ticket's verify steps) makes cancelJob() report
+// failure rather than silently claiming success, and (2) a single dropped/malformed response
+// is retried once and a real acknowledgement on that retry is still reported as success.
+TEST_CASE ("cancelJob verifies the /cancel acknowledgement instead of firing-and-forgetting", "[generative][cancel]")
+{
+    SECTION ("unreachable service — both the initial attempt and the retry fail")
+    {
+        ScopedEnv host ("MOSH_SERVICE_HOST", "127.0.0.1");
+        ScopedEnv port ("MOSH_SERVICE_PORT", "59996");   // nothing listens here
+
+        mosh::GenerativeJobManager mgr;
+        CHECK_FALSE (mgr.cancelJob ("job-1"));
+    }
+
+    SECTION ("first response is malformed, second is a real acknowledgement — the retry saves it")
+    {
+        juce::File tmpDir = juce::File::createTempFile ("mosh-cancel-retry");
+        tmpDir.deleteFile();
+        tmpDir.createDirectory();
+        struct Cleanup { juce::File d; ~Cleanup() { d.deleteRecursively(); } } cleanup { tmpDir };
+
+        auto script = tmpDir.getChildFile ("server.py");
+        script.replaceWithText (
+            "import http.server, os\n"
+            "port = int(os.environ.get('MOSH_SERVICE_PORT', '0'))\n"
+            "count = {'n': 0}\n"
+            "class H(http.server.BaseHTTPRequestHandler):\n"
+            "    def do_POST(self):\n"
+            "        length = int(self.headers.get('Content-Length', 0))\n"
+            "        self.rfile.read(length)\n"
+            "        count['n'] += 1\n"
+            "        if count['n'] == 1:\n"
+            "            body = b'not json'\n"   // first attempt: reaches the service, but the
+                                                  // ack itself is bad — proves cancelJob() checks
+                                                  // the RESPONSE, not just reachability.
+            "        else:\n"
+            "            body = b'{\"ok\": true}'\n"
+            "        self.send_response(200)\n"
+            "        self.send_header('Content-Length', str(len(body)))\n"
+            "        self.end_headers()\n"
+            "        self.wfile.write(body)\n"
+            "    def log_message(self, *a): pass\n"
+            "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n");
+
+        ScopedEnv host ("MOSH_SERVICE_HOST", "127.0.0.1");
+        ScopedEnv port ("MOSH_SERVICE_PORT", "59997");
+        ScopedEnv svc  ("MOSH_SERVICE_SCRIPT", script.getFullPathName());
+
+        // cancelJob() doesn't spawn — it only POSTs — so bring the fake service up first via
+        // a plain child process start (no ensureServiceRunning() health handshake needed;
+        // the HTTP server is ready to accept as soon as the socket bind returns).
+        juce::ChildProcess proc;
+        const juce::String shell = "MOSH_SERVICE_PORT=59997 exec python3 " + script.getFullPathName().quoted();
+        REQUIRE (proc.start (juce::StringArray { "/bin/sh", "-c", shell }));
+        struct ProcCleanup { juce::ChildProcess& p; ~ProcCleanup() { if (p.isRunning()) p.kill(); } } procCleanup { proc };
+        // Give the interpreter a moment to import http.server and bind the socket.
+        juce::Thread::sleep (300);
+
+        mosh::GenerativeJobManager mgr;
+        CHECK (mgr.cancelJob ("job-1"));
+    }
+}

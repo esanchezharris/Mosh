@@ -63,7 +63,14 @@ public:
 
     /** Poll a job's status: { ok, status, progress, outputWav, manifest }. */
     juce::var jobStatus (const juce::String& jobId, int connectMs = 3000);
-    void cancelJob (const juce::String& jobId);
+    /** POST /cancel and verify the service actually acknowledged it (checks the response's
+        `ok` field — httpPost() returns an empty/void var when the request never reached a
+        live service at all, e.g. it was killed mid-render). Retries ONCE on a failed
+        acknowledgement — a single dropped request during a busy render shouldn't read as a
+        hard failure, but a genuinely dead service fails both attempts. Returns false when
+        neither attempt was acknowledged, so the caller (MoshOps::cmdCancelRender) can surface
+        an honest error instead of silently assuming the render actually stopped. */
+    bool cancelJob (const juce::String& jobId);
 
     /** Render-ahead primitive (Lane A): overlap-add crossfade already-rendered window WAVs into
         ONE continuous file (POST /stitch_windows; 1ms equal-power default — owner-tuned). Reuses
