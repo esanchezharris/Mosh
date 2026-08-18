@@ -401,8 +401,12 @@ def main() -> int:
 
     kept_file = lib / f"{kept_name}.safetensors"
     check(kept_file.is_file(), f"kept adapter on disk: {kept_file}")
+    # Phrased as the POSITIVE assertion on purpose: this helper prints every
+    # message with an ok/FAIL prefix, so "kept adapter is a SYMLINK" printed
+    # beside "ok" reads as though the bug shipped. State what is true when the
+    # check passes; the failure is legible from the FAIL prefix.
     check(not kept_file.is_symlink(),
-          "kept adapter is a SYMLINK — it will evaporate when the run is deleted")
+          "kept adapter is a real COPY, not a symlink (a link would evaporate with the run)")
     check(kept_file.stat().st_size > 1_000_000,
           f"kept adapter is real ({kept_file.stat().st_size/1e6:.1f}MB)")
 
@@ -411,15 +415,31 @@ def main() -> int:
           "kept adapter joins the LIBRARY family (so it shows in the rack, not the sheet)")
     check(rows.get(kept_name, {}).get("valid"), "kept adapter is valid to the registry")
 
-    # Drop the run's lab links, exactly as deleting the run would.
+    # Drop the run's lab links...
     sys.path.insert(0, str(HERE.parent.parent / "service" / "training"))
     import lab_publish as LP  # noqa: E402
     dropped = LP.forget("labcheck")
     check(dropped > 0, f"forget() removed {dropped} lab links")
     rows = {r["name"]: r for r in REG.list_loras()}
     check(final not in rows, "the take is gone after forget()")
-    check(rows.get(kept_name, {}).get("valid"),
-          "THE KEPT ADAPTER SURVIVED its run being forgotten")
+
+    # ...and then DELETE THE RUN ITSELF. forget() only unlinks files under
+    # sa3/lab/, so a kept adapter that was secretly a symlink into the run dir
+    # would survive it perfectly well — meaning a check that stopped here would
+    # pass with the exact bug this module exists to prevent still in place. The
+    # run directory is what has to disappear for the claim to mean anything.
+    run_root = Path(res.get("artifact_path", "")).parent.parent
+    if run_root.is_dir() and str(run_root).startswith(str(art)):
+        shutil.rmtree(run_root, ignore_errors=True)
+    check(not run_root.is_dir(), f"the run directory is gone: {run_root}")
+
+    rows = {r["name"]: r for r in REG.list_loras()}
+    kept_row = rows.get(kept_name, {})
+    check(kept_row.get("valid"),
+          "THE KEPT ADAPTER SURVIVED its entire run directory being deleted")
+    check(kept_row.get("tensors", 0) > 100 and kept_row.get("rank") == 16,
+          f"...and is still fully readable (rank {kept_row.get('rank')}, "
+          f"{kept_row.get('tensors')} tensors) — not just a surviving filename")
 
     print(f"\n    listen:  open {wav_base.parent.parent}")
     return report(checks)
