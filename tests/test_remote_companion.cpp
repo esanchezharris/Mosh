@@ -401,3 +401,24 @@ TEST_CASE ("monitoring endpoints require auth and persist reports", "[remote][mo
     REQUIRE (juce::File (reportFile).loadFileAsString().contains ("networkMedianMs"));
     server.stopServer();
 }
+
+// The pairing URLs are only useful if the PHONE can reach the host they name. The
+// original host was ComputerName with non-alphanumerics stripped ("Emilio's MacBook
+// Pro" -> "EmiliosMacBookPro.local"), which is NOT the machine's mDNS name and
+// resolved nowhere — every QR was a dead end. Guard the two ways that can regress:
+// a loopback address (phone cannot route to it) and an empty host.
+TEST_CASE ("pairing url host is routable from another device", "[remote][pairing][host]")
+{
+    const auto host = mosh::RemoteCompanionServer::pairingUrlHost();
+
+    REQUIRE (host.isNotEmpty());
+    REQUIRE_FALSE (host.startsWith ("127."));
+    REQUIRE (host != "localhost");
+    REQUIRE_FALSE (host.startsWith ("0."));
+
+    // Either a dotted IPv4 or the .local fallback — never a bare munged name, which
+    // is what the old ComputerName derivation produced.
+    const bool looksIpv4 = juce::StringArray::fromTokens (host, ".", {}).size() == 4
+                             && host.containsOnly ("0123456789.");
+    REQUIRE ((looksIpv4 || host.endsWith (".local")));
+}

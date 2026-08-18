@@ -545,3 +545,62 @@
 .v2-lhead-add:hover .v2-licon { border-color: var(--v2-accent); }
 .v2-lane.v2-lane-add { background: transparent; border-bottom: none; }
 .v2-lane.v2-lane-add:hover { background: var(--v2-accent-soft); }   /* hint: droppable */
+
+/* Track-header context menu ("Set up iPhone controller") + the iPhone pairing dialog.
+   The menu combines .v2-menu-panel-floating (skin only — that class deliberately carries
+   no positioning) with .v2-ctx-menu, which supplies the cursor anchoring the Base UI
+   Positioner would otherwise own. Fixed, not absolute: the coordinates come straight
+   from the pointer event, which is viewport-relative. */
+.v2-ctx-scrim { position: fixed; inset: 0; z-index: 60; }
+.v2-ctx-menu { position: fixed; min-width: 220px; }
+.v2-ctx-item {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--v2-radius-sm);
+  background: transparent;
+  color: var(--v2-ink);
+  font: inherit;
+  font-size: var(--v2-fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.v2-ctx-item:hover,
+.v2-ctx-item:focus-visible { background: var(--v2-accent-soft); }
+
+.v2-iphone-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: var(--v2-scrim, var(--v2-shadow-scrim, #00000088));
+}
+.v2-iphone-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 300px;
+  max-width: 92vw;
+  padding: 18px;
+  background: var(--v2-surface-2);
+  border: 1px solid var(--v2-line-strong);
+  border-radius: var(--v2-radius);
+  box-shadow: var(--v2-shadow);
+  color: var(--v2-ink);
+}
+.v2-iphone-head { font-size: var(--v2-fs-md); font-weight: 600; }
+.v2-iphone-qr { width: 240px; height: 240px; border-radius: var(--v2-radius-sm); image-rendering: pixelated; }
+/* Reserve the QR's box while it encodes, so the dialog does not jump on first paint. */
+.v2-iphone-qr-wait { width: 240px; height: 240px; border-radius: var(--v2-radius-sm); background: var(--v2-surface-1, var(--v2-bg)); }
+.v2-iphone-note { max-width: 320px; font-size: var(--v2-fs-sm); text-align: center; }
+.v2-iphone-dim { color: var(--v2-dim); font-size: var(--v2-fs-xs); }
+.v2-iphone-url {
+  max-width: 320px;
+  font-size: var(--v2-fs-2xs);
+  color: var(--v2-dim);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.v2-iphone-actions { display: flex; gap: 8px; margin-top: 4px; }
