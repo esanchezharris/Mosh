@@ -750,7 +750,10 @@ bool MoshOps::writeSilentStemFile (const juce::File& dest, juce::AudioFormat* fo
 // ── UPDATE: the upstream toBitSet bug described below is ROOT-FIXED by Mosh
 // dependency patch 0009 (patches/0009-tracktion-tobitset-respect-given-tracks.patch),
 // which also fixes bounce_track/freeze_track isolation. The allowedClips
-// workaround here is retained as belt-and-braces; the history stands:
+// workaround here is retained — and post-0009 it is the ONLY isolation this
+// command wants: tracksToDo must stay the FULL graph (see the inline comment at
+// the render params) so each stem keeps its send/return wet and the stems still
+// null against the mix. The history stands:
 //
 // ── CORRECTNESS FIX (found by adversarial review, empirically reproduced): the
 // original version of this command set ONLY `params.tracksToDo = te::toBitSet(one)`
@@ -958,8 +961,16 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
             params.sampleRateForAudio = sampleRate;
             params.blockSizeForAudio  = blockSize;
             params.time               = { tracktion::TimePosition(), edit.getLength() };   // COMMON zero point — every stem shares this window
-            juce::Array<te::Track*> one; one.add (t);
-            params.tracksToDo         = te::toBitSet (one);   // kept for the countNumberOfSetBits() gate below; NOT load-bearing for isolation (see the comment above cmdExportStems)
+            // ALL tracks in the graph, ONE track's clips as the source. allowedClips is
+            // the per-track isolation mechanism; the full-graph tracksToDo keeps aux
+            // return/submix tracks alive so a stem carries its track's send (reverb/bus)
+            // contribution — that's what makes the stems sum null against the mix.
+            // (Pre-patch-0009 this line passed `one` and got the same full graph only
+            // because the buggy toBitSet marked every track; with 0009 a single-track
+            // bitset became genuinely restrictive and silently dropped every stem's
+            // send/return wet — caught by the conformance "stems null against the mix"
+            // verdict on PR #662.)
+            params.tracksToDo         = te::toBitSet (te::getAllTracks (edit));
             params.allowedClips.addArray (trackClips);        // ← the ACTUAL per-track isolation mechanism
             params.usePlugins         = true;                 // instrument + insert FX = the track's own post-fader sound
             params.useMasterPlugins   = false;                // pre-master — sum of stems + master chain reproduces the mix
