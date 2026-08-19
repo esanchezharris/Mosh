@@ -199,16 +199,19 @@ but don't rip out the existing implementation either; nothing here is broken.
   "3226/3226, 0 failed" locally is NOT the same statement as a green `selftest_x3`, and you
   cannot reproduce a gate selftest red without exporting `MOSH_SERVICE_PORT` (plus a distinct
   `_harness/` `MOSH_SELFTEST_SESSION`) yourself.
-  The 3227th is `set_clip_loop — MIDI` → *"midi loop: the render REPEATS the notes
-  (last-quarter energy > 1.1× the unlooped baseline)"*, and it is **~25% flaky**: 3 failures in
-  12 runs (gate ×3 runs each: 0/3, 1/3, 1/3; direct repro 1/3), identical binary and identical
-  env each time. It is a rendered-audio energy heuristic, so it fails on a render that came out
-  quieter than the threshold, not on a logic change. `failed_max: 1` with `deterministic: true`
-  and all three `checks` equal is this signature — `deterministic` there means the three runs
-  agreed on the check COUNT, **not** that they agreed on pass/fail, which is easy to misread as
-  "consistently broken". Re-run before believing it; if it fails twice running, then suspect the
-  code. Fixing the threshold (or making the check seed the render deterministically) would be
-  worth more than another re-run loop.
+  The historical flaky 3227th check (`set_clip_loop — MIDI` → *"the render REPEATS the notes"*,
+  ~25% red, always cured by re-run) was **ROOT-FIXED 2026-08-18**: the "rendered-audio energy
+  heuristic came out quiet" theory was wrong. Tracktion's `toBitSet` (pinned 2877b621; upstream
+  develop still has it) sets a bit for EVERY track, so `Renderer::tracksToDo` never isolated and
+  every `bounce_track`/`freeze_track` rendered the WHOLE session mix — the check compared two
+  full-mix renders whose only difference was a note tail riding on clipping ambient audio with a
+  random 4OSC start phase. Dependency patch 0009 fixes `toBitSet`; the check's baseline is now
+  digital silence (looped tail 0.140 vs a 0.02 floor, values printed in the label), an in-section
+  ISOLATION guard (own neighbor-tone fixture) reds at ~0.16 if the patch regresses, and
+  `cmdExportStems`' earlier `allowedClips` workaround for the same bug is retained. If a
+  `failed_max: 1` selftest signature reappears, read the FAIL line — it now carries the measured
+  values — instead of re-running on faith. Remember `deterministic: true` in the gate tally means
+  the three runs agreed on the check COUNT, not on pass/fail.
 - **Vacuous verification is this repo's recurring failure mode.** A test that cannot fail looks
   exactly like one that passes. RED-prove every new guard, count assertions, and check the fixture
   isn't stubbed. `grep SABOTAGE` before landing anything that involved a RED-proof.
