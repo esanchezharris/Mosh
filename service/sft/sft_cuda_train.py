@@ -99,6 +99,7 @@ def main():
     ap.add_argument("--4bit", dest="bit4", action="store_true", help="QLoRA (fits a 40GB card); omit on 80GB for bf16 LoRA")
     ap.add_argument("--no-assistant-loss", action="store_true", help="train on the full sequence instead of assistant turns only")
     ap.add_argument("--no-grad-ckpt", action="store_true", help="disable gradient checkpointing (faster; fine on 80GB)")
+    ap.add_argument("--liger", action="store_true", help="use liger fused kernels (fused linear-CE skips materializing the ~152k-vocab logits — required to fit long rows on small cards; needs liger-kernel + triton)")
     ap.add_argument("--save-steps", type=int, default=0, help="checkpoint every N steps (0 = only at end; set >0 so SSH drops can't lose work)")
     ap.add_argument("--resume-from-checkpoint", default="", help="resume from a saved checkpoint dir under the adapter output")
     a = ap.parse_args()
@@ -215,6 +216,7 @@ def main():
         assistant_only_loss=not a.no_assistant_loss,
         packing=False,
         gradient_checkpointing=not a.no_grad_ckpt,
+        use_liger_kernel=a.liger,
         report_to=[],
     )
 
@@ -234,7 +236,7 @@ def main():
         "dataset_manifest_sha256": manifest_hash(a.data),
         "config": {"epochs": a.epochs, "max_steps": a.max_steps, "batch_size": a.batch_size, "grad_accum": a.grad_accum,
                    "lr": a.lr, "lora_r": a.lora_r, "max_seq_len": a.max_seq_len, "qlora_4bit": a.bit4,
-                   "assistant_only_loss": not a.no_assistant_loss, "last_layers": a.last_layers,
+                   "assistant_only_loss": not a.no_assistant_loss, "liger": a.liger, "last_layers": a.last_layers,
                    "layers_to_transform": layers_to_transform, "layers_pattern": a.layers_pattern,
                    "resume_from_checkpoint": resume_path},
         "seconds": dur,
