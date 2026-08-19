@@ -91,6 +91,20 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
 
 ## 7. Disposition (fill after reads; do not edit §1–§6)
 
+- **r8-4b lane swap, 2026-08-18 (pre-gate, owner-approved):** the PC CUDA lane is
+  DEAD for this recipe. The 4070 SUPER (12 GB) cannot reliably hold the 119
+  6,400-token rows: the poison-row smoke passed (20/20 steps, loss 1.766 finite,
+  liger fused-CE required to get even that far), but the full run hard-OOM'd at
+  optimizer step 24/1640 — a checkpoint-backward allocation of 4.45 GiB with the
+  allocator already spilled to 19.1 GiB via WDDM shared memory. Long-row steps on
+  this card are allocator roulette (survival depends on fragmentation and row
+  order), and the spill also made them ~7.5 min/step vs ~4.5 s for short rows.
+  Owner chose the §4 fallback over a split-phase or retry lane: **r8-4b trains on
+  the Mac in MLX on the 4-bit base after r7 completes** — precision-matched to the
+  serve target by construction, ~15–22h at 4B size. The NaN-safety half of the
+  smoke DID transfer: max-seq-len 6400 is finite-loss on the CUDA lane too.
+  Artifacts kept on the PC (C:\r8: venv, data, HF model cache) for possible
+  short-row-only uses; nothing is running there.
 - r8-4b: ‹TBD›
 - r8-8b: ‹TBD›
 - r8-14b: ‹TBD›
