@@ -109,3 +109,15 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
 - r8-8b: ‹TBD›
 - r8-14b: ‹TBD›
 - Shipping target decision: ‹TBD›
+
+## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
+
+Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
+~22/119 coverage rows seen) was paused via SIGSTOP, served matched-precision on
+the 4-bit base, and run through the full novice-jam suite: **7/25 acceptable
+(28%)** vs r5's 64% and frontier zero-shot's 52%. Both drum tasks and lyric
+follow-through failed (the unseen coverage tail, as predicted), plus broad
+mid-epoch immaturity (wrong-defers, dosage flails, one ambiguity violation).
+Training resumed at iter 2,490 with zero loss of state. Read: the epoch tail is
+load-bearing; early-stop rejected by the owner on this evidence. The final r7
+gate read is unaffected and still pending.
