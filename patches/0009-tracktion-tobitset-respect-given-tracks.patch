@@ -1,0 +1,20 @@
+diff --git a/modules/tracktion_engine/model/edit/tracktion_EditUtilities.cpp b/modules/tracktion_engine/model/edit/tracktion_EditUtilities.cpp
+index a192859a7b7..512e1038450 100644
+--- a/modules/tracktion_engine/model/edit/tracktion_EditUtilities.cpp
++++ b/modules/tracktion_engine/model/edit/tracktion_EditUtilities.cpp
+@@ -184,7 +184,14 @@ juce::BigInteger toBitSet (const juce::Array<Track*>& tracks)
+     {
+         auto allTracks = getAllTracks (first->edit);
+ 
+-        for (auto t : allTracks)
++        // MOSH PATCH 0009: iterate the GIVEN tracks, not allTracks. The upstream
++        // loop walks allTracks, where every track trivially finds its own index,
++        // so the returned bitset marks EVERY track in the edit regardless of the
++        // argument. Renderer::Parameters::tracksToDo built from toBitSet({one
++        // track}) therefore rendered the whole edit mix into every "solo track"
++        // bounce/freeze (observed as the midi-loop selftest flake: the energy
++        // check compared two whole-session mixes).
++        for (auto t : tracks)
+             if (int index = allTracks.indexOf (t); index >= 0)
+                 bitset.setBit (index);
+     }
