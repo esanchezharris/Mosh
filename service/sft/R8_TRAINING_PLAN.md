@@ -117,6 +117,16 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   median call latency `<=10s`. Full r7 evidence is in
   `GATE_READ_a3b-r7-mlx.md`; no r8 threshold or frozen recipe changed.
 
+- **r8-4b local MLX poison-row smoke, 2026-08-20 — PASS:** downloaded
+  `mlx-community/Qwen3-4B-Instruct-2507-4bit` (`model.safetensors` sha256
+  `2a73c6c248601ab904e035548abd8e6abb65ea27dcb5f342fb0a8910eb44173f`)
+  and trained 20/20 steps directly over all 119 coverage rows (each split
+  sha256 `392262600bc922b17fa863cdd5b26362f38fb24daa0b57ed3f57ac06ccb60150`).
+  Step 20 train loss `1.219`, validation loss `2.963`, peak memory 16.512 GB;
+  finite-loss scan passed and the final/step-20 adapter sha256 is
+  `ecfc46f3cebdbc32d04dba4b78f52374733c55a7e5f023ecd84b987f2fc04255`.
+  Repro configs: `R8_4B_MLX_SMOKE.yaml` and `R8_4B_MLX_FULL.yaml`.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
