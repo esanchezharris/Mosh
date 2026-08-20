@@ -176,7 +176,8 @@ function bassLine(bars: number): MidiNote[] {
 // set_transport record refuses with the engine's REC-NO-INPUT named error.
 // ?mockNoInput=armed additionally pre-arms the first track — the
 // stale-armed-after-device-switch case (arm skipped, the refusal does the talking).
-const MOCK_NO_INPUT = new URLSearchParams(window.location.search).get("mockNoInput");
+const MOCK_QUERY = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+const MOCK_NO_INPUT = MOCK_QUERY.get("mockNoInput");
 
 function seedSnapshot(): Snapshot {
   // Demo-accurate typed seed (dev/preview only): Drums = a drum step-grid (MIDI on a
@@ -237,7 +238,7 @@ function seedSnapshot(): Snapshot {
       // pickers + banner-clear flow are exercisable end-to-end. list_audio_devices
       // mirrors the engine while the error is set (enumerates regardless;
       // audioEnabled:false, empty selection); set_audio_device clears it.
-      ...(new URLSearchParams(window.location.search).get("mockAudioDead") === "1"
+      ...(MOCK_QUERY.get("mockAudioDead") === "1"
         ? { audioEnabled: false,
             audioDeviceError: 'Audio device "External Headphones" could not open. Running WITHOUT audio — playback and recording are off. Press Retry.' }
         : {}),
