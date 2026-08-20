@@ -219,11 +219,18 @@ counts, not just rates.
 
 ## Disposition (fill in after the read; do not edit §1–§6 above)
 
-- Adapter sha256: ‹TBD›
-- Training completion: ‹TBD› (steps / wall-clock actual vs §4 projection)
-- Gate read date: ‹TBD›
-- Result: ‹TBD — PASS / MISS (name the leg) / HALT / incomplete-run›
-- Disposition: ‹TBD›
+- Adapter sha256:
+  `3030789d438c1e42cf7352b3d3d54659d85989dcd59839c655e14736e9e2e146`
+- Training completion: `13113/13113`, final validation loss `0.225`; observed
+  log span `45h 40m 32s` (includes any machine idle/sleep time).
+- Gate read date: 2026-08-20
+- Result: **MISS — per-command floor and novice-jam legs.** Aggregate
+  `0.76602`, grounded §B `0.8919`, and 1.854s warm-median latency passed;
+  family floors and novice-jam `8/25` acceptable did not.
+- Disposition: r7 is complete and retained as a reproducible adapter, but it
+  does not replace r5 as the incumbent. Full evidence and named-case results:
+  `GATE_READ_a3b-r7-mlx.md` and
+  `docs/agent-bench/scoreboard.p3-novice-jam-a3b-r7-final-cal2.{json,md}`.
 
 ---
 

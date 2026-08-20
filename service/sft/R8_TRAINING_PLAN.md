@@ -110,6 +110,13 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
 - r8-14b: ‹TBD›
 - Shipping target decision: ‹TBD›
 
+- **Final r7 comparison read, 2026-08-20:** r7 completed all 13,113 steps,
+  but its one clean novice-jam read landed at `8/25` acceptable (`12/25` goal
+  success), below its own 16/25 gate. Therefore the r8 comparison-band clause
+  is non-limiting at 4B: the still-binding frontier floor is `>=13/25`, with
+  median call latency `<=10s`. Full r7 evidence is in
+  `GATE_READ_a3b-r7-mlx.md`; no r8 threshold or frozen recipe changed.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
