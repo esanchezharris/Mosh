@@ -127,6 +127,23 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   `ecfc46f3cebdbc32d04dba4b78f52374733c55a7e5f023ecd84b987f2fc04255`.
   Repro configs: `R8_4B_MLX_SMOKE.yaml` and `R8_4B_MLX_FULL.yaml`.
 
+- **r8-4b full MLX run interruption, 2026-08-21 — external launcher loss,
+  checkpoint preserved:** the healthy run reached iter 7,520/13,113 with finite
+  train loss `0.062` and 16.533 GB peak memory, then its MLX process and parent
+  shell disappeared without a traceback, NaN/Inf alert, logged training error,
+  crash report, disk-pressure event, or memory-pressure event. Runtime timing
+  identifies the blocker: `r8-4b-train.log` last changed at 15:29:55 -0700,
+  while the ChatGPT/Codex desktop host restarted at 15:29:59 -0700 (new host PID
+  89582); the trainer had been launched as a child of that app-owned shell, so
+  the host restart tore down the training process tree. This is an orchestration
+  interruption, not model/loss instability. The iter-7,500 checkpoint and live
+  adapter are byte-identical, sha256
+  `e82b0408c6ada65c4eff64c0e382012c673d3b68e021290bd4aa766b69294367`;
+  only 20 post-checkpoint steps are unpreserved. No continuation was launched
+  automatically: MLX adapter checkpoints do not by themselves prove exact
+  optimizer/data-loader-position recovery. Any continuation must be registered
+  explicitly and launched outside the desktop-app process tree.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
