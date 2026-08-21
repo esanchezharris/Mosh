@@ -79,7 +79,7 @@ env -u MOSH_NO_AUDIO \
     TEMP="$tmp_dir" \
     MOSH_AUDIO_OPEN_STALL_MS=60000 \
     MOSH_AUDIO_OPEN_TIMEOUT_MS=250 \
-    "$app" --audio-recovery-smoke > "$output" 2>&1
+    "$app" --audio-recovery-isolation-smoke > "$output" 2>&1
 app_rc=$?
 set -e
 after="$(snapshot_sentinel)"
@@ -93,7 +93,39 @@ if grep -F "$HOME/Library/Mosh" "$output" >/dev/null; then
   owner_path_leak=1
 fi
 pass_evidence_ok=0
-if grep -F '"pass": true' "$output" >/dev/null; then
+if python3 - "$output" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+decoder = json.JSONDecoder()
+payloads = []
+for offset, character in enumerate(text):
+    if character != "{":
+        continue
+    try:
+        value, _ = decoder.raw_decode(text[offset:])
+    except json.JSONDecodeError:
+        continue
+    if isinstance(value, dict) and value.get("mode") == "isolation":
+        payloads.append(value)
+
+if len(payloads) != 1:
+    raise SystemExit(1)
+
+evidence = payloads[0]
+required = (
+    evidence.get("isolationPass") is True,
+    evidence.get("retryOk") is False,
+    evidence.get("audioEnabled") is False,
+    evidence.get("invalidSetupRemoved") is True,
+    "did not open within" in str(evidence.get("startupAudioDeviceError", "")),
+    "did not open within" in str(evidence.get("audioDeviceError", "")),
+)
+raise SystemExit(0 if all(required) else 1)
+PY
+then
   pass_evidence_ok=1
 fi
 session_running_absent=0
