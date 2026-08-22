@@ -171,8 +171,22 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   local iter 10/global iter 7,510 reported finite train loss `0.103` at LR
   `1e-5`. Continuation outputs are isolated in `.adapters/r8-4b-mlx-cont7500`;
   the immutable source checkpoint remains untouched. The global-offset dashboard
-  is live at `http://127.0.0.1:8788`, and heartbeat
-  `monitor-r8-4b-mlx-continuation` owns the quiet failure/completion handoff.
+  is live at `http://127.0.0.1:8788`. The Codex desktop heartbeat (not a
+  launchd service) is registered at
+  `~/.codex/automations/monitor-r8-4b-mlx-continuation/automation.toml` and owns
+  the quiet failure/completion handoff. At local iter 40/global iter 7,540 the
+  trainer remained healthy with finite train loss `0.105`; the roughly
+  two-minute gaps between lines are the expected 10-step logging cadence at
+  about `0.08` iter/s, not a stall.
+
+- **Continuation guard correction, 2026-08-22:** review found that a plain
+  signal would allow launchd's inferred `keepalive` policy to restart a
+  non-finite trainer. The guard now boots the exact trainer job out of launchd
+  before it exits, then boots out its own keepalive job. A disposable submitted
+  job proved that `launchctl bootout gui/<uid>/<label>` removes this job type,
+  and fixture-driven tests cover finite Train/Val losses, NaN, Inf, and the
+  ordered trainer-then-guard bootout behavior. The live guard was replaced in
+  place without interrupting trainer PID 46248.
 
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
