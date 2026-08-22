@@ -144,6 +144,25 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   optimizer/data-loader-position recovery. Any continuation must be registered
   explicitly and launched outside the desktop-app process tree.
 
+- **r8-4b continuation registration, 2026-08-22 (pre-launch):** continue from
+  the immutable iter-7,500 adapter for exactly 5,613 additional optimizer steps
+  using `R8_4B_MLX_CONT_7500.yaml` and a distinct adapter/log namespace. MLX
+  0.31.3 restores LoRA weights only; Adam moments, MLX/NumPy RNG state, iterator
+  position, trained-token counters, and the displayed iteration number restart
+  at this seam. To avoid silently repeating rows, the continuation train split
+  is the exact unconsumed tail of the original seed-0 13,113-row permutation,
+  inverse-permuted so a fresh seed-0 MLX iterator consumes those 5,613 rows in
+  their original order. Derived train sha256
+  `a8a878191c57c97326d5bcf0911235cf30ffd6600f89a47c65d7705fc945ef3d`;
+  valid remains byte-identical at
+  `9047ab96fd7e8f7f2155d6acc9c9b391c7989ed6205d119c46be764dfa4f3638`;
+  derived manifest sha256
+  `fca65758e721879857383e679563792d6ca3e68d053752269912f24b56a7f2e2`.
+  This preserves one-pass row coverage and order, but not bitwise-equivalent
+  optimization because the missing Adam/dropout state cannot be reconstructed.
+  The trainer and finite-loss guard must be launchd-owned so desktop-app restarts
+  cannot terminate the continuation.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
