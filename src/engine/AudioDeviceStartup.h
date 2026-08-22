@@ -96,6 +96,24 @@ namespace mosh::audiostartup
              "press Retry.";
     }
 
+    struct RecoveryGateEvidence
+    {
+        bool degradedBeforeRetry = false;
+        bool retryOk = false;
+        bool audioEnabledAfterRetry = false;
+        int deviceTypeCountAfterRetry = 0;
+        int liveAudioFailures = 1;
+    };
+
+    inline bool physicalRecoveryPassed (const RecoveryGateEvidence& evidence)
+    {
+        return evidence.degradedBeforeRetry
+            && evidence.retryOk
+            && evidence.audioEnabledAfterRetry
+            && evidence.deviceTypeCountAfterRetry > 0
+            && evidence.liveAudioFailures == 0;
+    }
+
     struct ProbeRequest
     {
         bool valid = false;
