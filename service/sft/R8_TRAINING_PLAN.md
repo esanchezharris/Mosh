@@ -188,6 +188,13 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   ordered trainer-then-guard bootout behavior. The live guard was replaced in
   place without interrupting trainer PID 46248.
 
+- **First continuation checkpoint, 2026-08-22:** local iter 100/global iter
+  7,600 saved `0000100_adapters.safetensors` with finite train loss `0.053`.
+  SHA-256 is
+  `51814fcc0440703e31c54f56ad783bd6de11ed89c41e1e15dd66c21fb761e9b3`;
+  the rolling `adapters.safetensors` copy is byte-identical. Trainer and guard
+  remained launchd-owned and running after the save.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
