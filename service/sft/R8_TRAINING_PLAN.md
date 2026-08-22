@@ -177,7 +177,10 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   the quiet failure/completion handoff. At local iter 40/global iter 7,540 the
   trainer remained healthy with finite train loss `0.105`; the roughly
   two-minute gaps between lines are the expected 10-step logging cadence at
-  about `0.08` iter/s, not a stall.
+  about `0.08` iter/s, not a stall. The launchd dashboard wrapper at
+  `~/Library/Mosh/bin/r8-cont-dashboard.py` reads saved adapter filenames as
+  well as the log, so its checkpoint field correctly maps local 100 to global
+  7,600 even though MLX 0.31.3 does not emit a save line.
 
 - **Continuation guard correction, 2026-08-22:** review found that a plain
   signal would allow launchd's inferred `keepalive` policy to restart a
