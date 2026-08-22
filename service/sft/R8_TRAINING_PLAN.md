@@ -163,6 +163,17 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   The trainer and finite-loss guard must be launchd-owned so desktop-app restarts
   cannot terminate the continuation.
 
+- **r8-4b continuation launch, 2026-08-22 — RUNNING:** memory preflight passed
+  (409 GiB Data-volume free, 722 MiB swap used), all registered source/resume
+  hashes matched, and launchd jobs `com.mosh.r8-4b-cont7500` plus
+  `com.mosh.r8-4b-cont7500-guard` started with parent PID 1. The model loaded the
+  verified iter-7,500 adapter, initial continuation validation was `0.267`, and
+  local iter 10/global iter 7,510 reported finite train loss `0.103` at LR
+  `1e-5`. Continuation outputs are isolated in `.adapters/r8-4b-mlx-cont7500`;
+  the immutable source checkpoint remains untouched. The global-offset dashboard
+  is live at `http://127.0.0.1:8788`, and heartbeat
+  `monitor-r8-4b-mlx-continuation` owns the quiet failure/completion handoff.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
