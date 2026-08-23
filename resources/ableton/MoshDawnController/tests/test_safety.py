@@ -61,6 +61,32 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(response.error, "set_invalidated")
         self.assertFalse(replacement.record_mode)
 
+    def test_set_invalidation_does_not_dereference_dead_prior_song(self):
+        # Given
+        class InvalidSongProxy:
+            @property
+            def tracks(self):
+                raise InjectedLiveError("invalid Live Song proxy")
+
+        rig = Rig([FakeTrack("Lead", armed=True)])
+        rig.act(Seek(3.0))
+        rig.engine.state.song = InvalidSongProxy()
+        replacement = FakeSong([FakeTrack("Other", armed=True)])
+
+        # When
+        response = rig.engine.handle(replacement, Request("new-set", 1, Put()))
+
+        # Then
+        self.assertFalse(response.ok)
+        self.assertEqual(response.error, "set_invalidated")
+        self.assertEqual(response.revision, 1)
+        self.assertEqual(response.state["revision"], 1)
+        self.assertEqual(response.state["connection"], "disconnected")
+        self.assertEqual(response.state["blockedReason"], "set_invalidated")
+        self.assertTrue(response.state["ownershipUncertain"])
+        self.assertIsNone(response.state["activeSource"])
+        self.assertIsNone(response.state["pendingClip"])
+
     def test_source_track_invalidation_is_rejected_after_stop(self):
         # Given
         source = FakeTrack("Lead", armed=True)
@@ -163,8 +189,9 @@ class SafetyTests(unittest.TestCase):
         # Given
         source = FakeTrack("Lead", armed=True)
         rig = Rig([source, FakeTrack("Archive")])
+        rig.act(Seek(12.0))
         rig.act(Put())
-        rig.finish_pass(8.0)
+        rig.finish_pass(20.0)
         rig.song.fail_start = True
 
         # When
@@ -173,8 +200,11 @@ class SafetyTests(unittest.TestCase):
         # Then
         self.assertFalse(response.ok)
         self.assertEqual(response.error, "keep_compensated")
-        self.assertEqual(rig.engine.state.edit_marker, 0.0)
-        self.assertEqual(rig.song.current_song_time, 0.0)
+        self.assertEqual(rig.engine.state.edit_marker, 12.0)
+        self.assertEqual(rig.engine.state.pass_start, 12.0)
+        self.assertEqual(rig.song.current_song_time, 12.0)
+        self.assertEqual(response.state["editMarkerBeats"], 12.0)
+        self.assertEqual(response.state["passStartBeats"], 12.0)
         self.assertIsNone(rig.engine.state.active_source)
         self.assertIs(rig.engine.state.pending_source, rig.song.tracks[0])
         self.assertIs(rig.engine.state.pending_clip, rig.song.tracks[0].arrangement_clips[0])

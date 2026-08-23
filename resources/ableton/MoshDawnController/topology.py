@@ -85,6 +85,37 @@ def resolve_pending(song: LiveSong, fingerprint: PendingFingerprint) -> Optional
     return (source, matches[0]) if len(matches) == 1 else None
 
 
+def invalidate_set(state: SessionState, replacement: LiveSong) -> Dict[str, JsonValue]:
+    """Detach controller state without reading either Live Set proxy."""
+    state.song = replacement
+    state.connection = "disconnected"
+    state.transport = "stopped"
+    state.edit_marker = 0.0
+    state.active_source = None
+    state.pass_start = None
+    state.saved_stop = None
+    state.saved_bar = None
+    state.pending_source = None
+    state.pending_clip = None
+    state.clip_inventory = ()
+    state.archive_clips.clear()
+    state.blocked_reason = "set_invalidated"
+    state.ownership_uncertain = True
+    return {
+        "revision": state.revision,
+        "connection": state.connection,
+        "transport": state.transport,
+        "editMarkerBeats": state.edit_marker,
+        "activeSource": None,
+        "passStartBeats": None,
+        "savedStopBeats": None,
+        "pendingClip": None,
+        "archiveClips": [],
+        "blockedReason": state.blocked_reason,
+        "ownershipUncertain": state.ownership_uncertain,
+    }
+
+
 def session_snapshot(state: SessionState) -> Dict[str, JsonValue]:
     pending_source = state.pending_source
     pending_clip = state.pending_clip
