@@ -7476,8 +7476,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "enable_track_meter", args1 ("trackId", mt))), "enable_track_meter is idempotent");
         check (meterOn (mt), "still metered after idempotent enable");
 
+        eng.save();
+        check (! eng.isDirty(), "saved meter fixture starts clean");
         auto ea = cmd (ops, "enable_all_meters");
         check (ok (ea) && (int) ea["data"].getProperty ("count", 0) > 0, "enable_all_meters meters every track");
+        check (! eng.isDirty(), "idempotent enable_all_meters does not dirty an already-metered project");
 
         check (ok (cmd (ops, "disable_track_meter", args1 ("trackId", mt))), "disable_track_meter ok");
         check (! meterOn (mt), "meter removed after disable");
