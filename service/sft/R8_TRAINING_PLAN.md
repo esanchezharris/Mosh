@@ -286,9 +286,11 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   `b022b10c3477e0b58eff5a9d8ed465dbcb06df10ba6e2b3954286f0582310cea`.
   The stopped log sha256 is
   `7275efa4f22c3e22875fd8232ddf9608db5b0c304fcbad0b8619c49effedd830`.
-  Exactly 103 global steps (13,011--13,113) remain. Restart remained disabled,
-  so no row replay occurred; no further continuation was launched
-  automatically.
+  The 10 reported steps after that checkpoint are not durable, so a safe exact
+  continuation must resume at global 13,001 and run 113 steps through 13,113;
+  treating only the 103 never-observed steps as remaining would silently skip
+  rows 13,001--13,010. Restart remained disabled, so no row replay occurred;
+  no further continuation was launched automatically.
 
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
