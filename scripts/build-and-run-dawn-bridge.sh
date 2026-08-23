@@ -9,6 +9,21 @@ BUILD_DIR="${MOSH_DAWN_BUILD_DIR:-$WORK_ROOT/build-dawn-bridge-$SOURCE_KEY}"
 APP="$BUILD_DIR/src/dawn_bridge/MoshDawnBridge.app"
 BINARY="$APP/Contents/MacOS/MoshDawnBridge"
 DESCRIPTOR="${MOSH_DAWN_DESCRIPTOR:-$HOME/Library/Application Support/Mosh/DAWN Bridge/remote-script.json}"
+APP_PID=""
+
+stop_launched_app() {
+  if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" 2>/dev/null; then
+    kill -TERM "$APP_PID"
+    for _ in {1..50}; do
+      kill -0 "$APP_PID" 2>/dev/null || return 0
+      sleep 0.1
+    done
+    echo "MoshDawnBridge PID $APP_PID did not stop" >&2
+    return 1
+  fi
+}
+
+trap stop_launched_app INT TERM
 
 configure_and_build() {
   cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -G Ninja \
@@ -20,9 +35,32 @@ configure_and_build() {
   cmake --build "$BUILD_DIR" --target MoshDawnBridgeResources MoshDawnBridgeTests
 }
 
+ensure_no_active_bridge() {
+  local active
+  active="$(pgrep -x MoshDawnBridge || true)"
+  if [[ -n "$active" ]]; then
+    echo "MoshDawnBridge already active (PID(s): $active); refusing to interfere" >&2
+    return 1
+  fi
+}
+
 launch_app() {
-  pkill -x MoshDawnBridge >/dev/null 2>&1 || true
-  /usr/bin/open -n "$APP"
+  ensure_no_active_bridge
+  MOSH_DAWN_DESCRIPTOR="$DESCRIPTOR" "$BINARY" >/dev/null 2>&1 &
+  APP_PID=$!
+  for _ in {1..50}; do
+    kill -0 "$APP_PID" 2>/dev/null || {
+      echo "launched MoshDawnBridge exited before becoming ready" >&2
+      APP_PID=""
+      return 1
+    }
+    [[ -f "$DESCRIPTOR" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -f "$DESCRIPTOR" ]]; then
+    echo "MoshDawnBridge PID $APP_PID did not publish its descriptor" >&2
+    return 1
+  fi
 }
 
 configure_and_build
@@ -32,7 +70,8 @@ case "$MODE" in
     launch_app
     ;;
   debug|--debug)
-    lldb -- "$BINARY"
+    ensure_no_active_bridge
+    env MOSH_DAWN_DESCRIPTOR="$DESCRIPTOR" lldb -- "$BINARY"
     ;;
   logs|--logs)
     launch_app
@@ -47,19 +86,14 @@ case "$MODE" in
     test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$APP/Contents/Info.plist")" = true
     test -f "$APP/Contents/Resources/companion/index.html"
     test -f "$APP/Contents/Resources/MoshDawnController/__init__.py"
+    VERIFY_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mosh-dawn-verify.XXXXXX")"
+    DESCRIPTOR="$VERIFY_ROOT/remote-script.json"
     launch_app
-    sleep 1
-    pgrep -x MoshDawnBridge >/dev/null
-    /usr/bin/osascript -e 'tell application id "studio.mosh.dawn-bridge" to quit' >/dev/null 2>&1 \
-      || pkill -x MoshDawnBridge >/dev/null 2>&1 \
-      || true
-    for _ in {1..20}; do
-      pgrep -x MoshDawnBridge >/dev/null || break
-      sleep 0.1
-    done
-    if [[ -f "$DESCRIPTOR" ]]; then
-      rm -f -- "$DESCRIPTOR"
-    fi
+    test -f "$DESCRIPTOR"
+    stop_launched_app
+    APP_PID=""
+    test ! -e "$DESCRIPTOR"
+    rmdir "$VERIFY_ROOT"
     ;;
   *)
     echo "usage: $0 [run|debug|logs|telemetry|verify]" >&2

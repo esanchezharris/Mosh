@@ -33,16 +33,25 @@ public:
 
     bool start (NSError** error)
     {
+        if (running.exchange (true))
+            return false;
         secret = randomSecret();
         if (secret == nil)
-            return false;
-        listener = socketSupport::makeListener (INADDR_LOOPBACK, boundPort, error);
-        if (listener < 0 || !writeDescriptor (descriptorPath, boundPort, secret, error))
         {
-            socketSupport::closeSocket (listener);
+            running = false;
             return false;
         }
-        running = true;
+        {
+            std::lock_guard lock (listenerMutex);
+            listener = socketSupport::makeListener (INADDR_LOOPBACK, boundPort, error);
+        }
+        if (listener < 0 || !writeDescriptor (descriptorPath, boundPort, secret, error))
+        {
+            std::lock_guard lock (listenerMutex);
+            socketSupport::closeSocket (listener);
+            running = false;
+            return false;
+        }
         core.setActionSender ([this] (const std::string& line) { return sendAction (line); });
         worker = std::thread ([this] { run(); });
         return true;
@@ -50,23 +59,35 @@ public:
 
     void stop()
     {
-        running = false;
+        if (!running.exchange (false) && !worker.joinable())
+            return;
+        core.setActionSender ({});
+        core.setScriptConnected (false);
         {
             std::lock_guard lock (clientMutex);
             socketSupport::closeSocket (client);
         }
-        socketSupport::closeSocket (listener);
+        {
+            std::lock_guard lock (listenerMutex);
+            socketSupport::closeSocket (listener);
+        }
         if (worker.joinable())
             worker.join();
-        core.setScriptConnected (false);
-        [[NSFileManager defaultManager] removeItemAtPath:descriptorPath error:nil];
+        removeDescriptorIfOwned (descriptorPath, boundPort, secret);
     }
 
     void run()
     {
         while (running)
         {
-            int accepted = ::accept (listener, nullptr, nullptr);
+            @autoreleasepool
+            {
+            int socket = -1;
+            {
+                std::lock_guard lock (listenerMutex);
+                socket = listener;
+            }
+            int accepted = socket >= 0 ? ::accept (socket, nullptr, nullptr) : -1;
             if (accepted < 0)
                 continue;
             socketSupport::setTimeoutSeconds (accepted, 2);
@@ -102,6 +123,7 @@ public:
                     socketSupport::closeSocket (client);
             }
             core.setScriptConnected (false);
+            }
         }
     }
 
@@ -119,6 +141,7 @@ public:
     int listener = -1;
     int client = -1;
     std::mutex clientMutex;
+    std::mutex listenerMutex;
     std::thread worker;
 };
 
