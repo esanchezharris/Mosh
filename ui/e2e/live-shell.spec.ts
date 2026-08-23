@@ -328,14 +328,14 @@ async function emptyGridPoint(
   return pt;
 }
 
-test("clicking empty grid paints a floor-snapped, grid-step note", async ({ page }) => {
+test("double-clicking empty grid paints a floor-snapped, grid-step note", async ({ page }) => {
   await bootLive(page, { values: FIXED_GRID });
   await openDockedEditor(page);
   const before = await editedNotes(page);
 
   // aim inside step 4 (beat 4.2 floors to 4)
   const pt = await emptyGridPoint(page, 4.2, 4.3);
-  await page.mouse.click(pt.x, pt.y);
+  await page.mouse.dblclick(pt.x, pt.y);
 
   await expect.poll(async () => (await editedNotes(page)).length).toBe(before.length + 1);
   // beat 4 can already hold a drum 16th from the seed pattern — the added note is the
@@ -345,7 +345,7 @@ test("clicking empty grid paints a floor-snapped, grid-step note", async ({ page
   );
   expect(added, "no new note landed from the click").toBeDefined();
   expect(added!.start, "the start floors to the grid line below the click").toBe(4);
-  expect(added!.length, "a plain click paints one grid step").toBe(1);
+  expect(added!.length, "a double-click paints one grid step").toBe(1);
 });
 
 test("draw mode ON: a click-drag paints a note whose length follows the drag", async ({ page }) => {
