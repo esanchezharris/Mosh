@@ -8,8 +8,8 @@
   --line: rgba(255, 255, 255, 0.1);
   --line-strong: rgba(255, 255, 255, 0.2);
   --text: #f1efe8;
-  --dim: rgba(241, 239, 232, 0.58);
-  --faint: rgba(241, 239, 232, 0.34);
+  --dim: rgba(241, 239, 232, 0.66);
+  --faint: rgba(241, 239, 232, 0.46);
   --ground-text: #16130d;
   --ground-dim: rgba(22, 19, 13, 0.56);
   --accent: #caff2f;
@@ -18,6 +18,16 @@
   --rec: #ff3b5c;
   --warn: #ffb54d;
   --blue: #8fa0b8;
+  --region-archive-high: rgba(143, 160, 184, 0.95);
+  --region-archive-low: rgba(80, 88, 104, 0.9);
+  --region-pending-high: rgba(202, 255, 47, 0.96);
+  --region-pending-low: rgba(128, 169, 25, 0.92);
+  --region-pending-stripe: rgba(17, 24, 6, 0.18);
+  --region-pending-border: rgba(224, 255, 135, 0.58);
+  --disabled-chip: rgba(14, 14, 16, 0.88);
+  --rec-line: rgba(255, 59, 92, 0.72);
+  --warn-line: rgba(255, 181, 77, 0.72);
+  --blocked-ground: #7a4b00;
   --shadow: 0 22px 52px rgba(78, 61, 29, 0.2);
   color-scheme: light;
 }
@@ -134,10 +144,19 @@ body.editing #editBtn {
   position: absolute;
   top: 7px;
   bottom: 7px;
-  background: linear-gradient(180deg, rgba(143, 160, 184, 0.95), rgba(80, 88, 104, 0.9));
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 4px;
   opacity: 0.92;
+}
+.region-generic,
+.region-archive {
+  background: linear-gradient(180deg, var(--region-archive-high), var(--region-archive-low));
+}
+.region-pending {
+  background:
+    repeating-linear-gradient(135deg, transparent 0 6px, var(--region-pending-stripe) 6px 8px),
+    linear-gradient(180deg, var(--region-pending-high), var(--region-pending-low));
+  border-color: var(--region-pending-border);
 }
 
 .tick {
@@ -169,6 +188,29 @@ body.editing #editBtn {
   background: var(--accent);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
+
+#nav::after {
+  content: attr(data-disabled-label);
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  right: 5px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--disabled-chip);
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  opacity: 0;
+}
+#nav[aria-disabled="true"]::after { opacity: 1; }
+#nav[data-disabled-reason="recording"] { border-color: var(--rec-line); }
+#nav[data-disabled-reason="recording"]::after { color: var(--rec); }
+#nav[data-disabled-reason="blocked"] { border-color: var(--warn-line); }
+#nav[data-disabled-reason="blocked"]::after { color: var(--warn); }
+#nav[data-disabled-reason="disconnected"] { filter: saturate(0.55); }
 
 #pad {
   flex: 1 1 auto;
@@ -213,7 +255,7 @@ body.editing #editBtn {
   position: absolute;
   top: 12px;
   left: 14px;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -243,7 +285,7 @@ body.editing #editBtn {
   position: relative;
   z-index: 1;
   color: var(--tile-sub, var(--dim));
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   letter-spacing: 0.04em;
 }
@@ -251,8 +293,8 @@ body.editing #editBtn {
 .tile.keep {
   --tile-bg: linear-gradient(180deg, rgba(202, 255, 47, 0.94), rgba(163, 210, 34, 0.92));
   --tile-line: rgba(12, 18, 6, 0.38);
-  --tile-mark: rgba(12, 18, 6, 0.52);
-  --tile-sub: rgba(12, 18, 6, 0.66);
+  --tile-mark: rgba(12, 18, 6, 0.66);
+  --tile-sub: rgba(12, 18, 6, 0.76);
   color: var(--accent-ink);
   border-color: transparent;
 }
@@ -260,8 +302,8 @@ body.editing #editBtn {
 .tile.again {
   --tile-bg: linear-gradient(180deg, rgba(255, 181, 77, 0.92), rgba(214, 126, 41, 0.92));
   --tile-line: rgba(38, 22, 7, 0.36);
-  --tile-mark: rgba(38, 22, 7, 0.5);
-  --tile-sub: rgba(38, 22, 7, 0.66);
+  --tile-mark: rgba(38, 22, 7, 0.64);
+  --tile-sub: rgba(38, 22, 7, 0.76);
   color: #201306;
   border-color: transparent;
 }
@@ -300,8 +342,8 @@ body.editing #editBtn {
 .tile.stop::before {
   top: 9px;
   left: 12px;
-  font-size: 8px;
-  opacity: 0.7;
+  font-size: 9px;
+  opacity: 0.9;
 }
 
 .tile.rec::after,
@@ -317,7 +359,7 @@ body.editing #editBtn {
 
 .tile.rec .sub,
 .tile.stop .sub {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .tile:active {
@@ -375,6 +417,10 @@ body.editing #editbar { display: flex; }
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
 }
+#toast[data-persistent="true"] {
+  color: var(--blocked-ground);
+  font-weight: 750;
+}
 
 @media (max-height: 720px) {
   #app { gap: 8px; padding-left: 10px; padding-right: 10px; }
@@ -386,7 +432,7 @@ body.editing #editbar { display: flex; }
   }
   .tile { padding: 13px; border-radius: 12px; }
   .tile .lbl { font-size: 17px; }
-  .tile .sub { font-size: 10px; }
+  .tile .sub { font-size: 11px; }
   #nav { height: 36px; }
 }
 
