@@ -34,6 +34,20 @@ bool writeAll (int fd, const void* bytes, size_t length)
     }
     return true;
 }
+
+bool atomicActivate (NSString* staging, NSString* destination, NSError** error)
+{
+    struct stat existing {};
+    const int status = ::lstat (destination.fileSystemRepresentation, &existing);
+    const unsigned int flags = status == 0 ? RENAME_SWAP : RENAME_EXCL;
+    if (status != 0 && errno != ENOENT)
+    { setPosixError (error, errno); return false; }
+    if (::renamex_np (staging.fileSystemRepresentation,
+                      destination.fileSystemRepresentation, flags) == 0)
+        return true;
+    setPosixError (error, errno);
+    return false;
+}
 }
 
 NSString* defaultDescriptorPath()
@@ -154,7 +168,7 @@ bool installController (NSString* resourcesPath, NSString* userLibraryPath, NSEr
     NSFileManager* files = [NSFileManager defaultManager];
     InstallHooks hooks {
         [files] (NSString* a, NSString* b, NSError** e) { return [files copyItemAtPath:a toPath:b error:e]; },
-        [files] (NSString* a, NSString* b, NSError** e) { return [files moveItemAtPath:a toPath:b error:e]; }
+        [] (NSString* a, NSString* b, NSError** e) { return atomicActivate (a, b, e); }
     };
     return installControllerWithHooks (resourcesPath, userLibraryPath, hooks, error);
 }
@@ -196,28 +210,27 @@ bool installControllerWithHooks (NSString* resourcesPath, NSString* userLibraryP
     { setPosixError (error, ELOOP); return false; }
     NSString* staging = [parent stringByAppendingPathComponent:
         [@".MoshDawnController-" stringByAppendingString:NSUUID.UUID.UUIDString]];
-    NSString* backup = [parent stringByAppendingPathComponent:
-        [@".MoshDawnController-backup-" stringByAppendingString:NSUUID.UUID.UUIDString]];
     if (!hooks.copy || !hooks.copy (source, staging, error))
     {
         [files removeItemAtPath:staging error:nil];
         return false;
     }
-    const bool updating = [files fileExistsAtPath:destination];
-    if (updating && (!hooks.move || !hooks.move (destination, backup, error)))
+    struct stat staged {}, parentAfter {};
+    if (::lstat (staging.fileSystemRepresentation, &staged) != 0
+        || ::lstat (parent.fileSystemRepresentation, &parentAfter) != 0
+        || !S_ISDIR (staged.st_mode) || S_ISLNK (staged.st_mode)
+        || staged.st_dev != parentAfter.st_dev)
     {
         [files removeItemAtPath:staging error:nil];
+        setPosixError (error, EINVAL);
         return false;
     }
     if (!hooks.move || !hooks.move (staging, destination, error))
     {
         [files removeItemAtPath:staging error:nil];
-        if (updating)
-            hooks.move (backup, destination, nullptr);
         return false;
     }
-    if (updating)
-        [files removeItemAtPath:backup error:nil];
+    [files removeItemAtPath:staging error:nil];
     return true;
 }
 } // namespace mosh::dawn

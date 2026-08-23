@@ -80,6 +80,8 @@ add_dependencies(MoshDawnBridgeResources MoshDawnBridge MoshDawnCompanionUI)
 if (MOSH_BUILD_TESTS)
     add_executable(MoshDawnBridgeTests
         tests/test_protocol.mm
+        tests/test_http_pool.mm
+        tests/test_launcher_identity.mm
         tests/test_result_correlation.mm
         tests/test_resources.mm
         tests/test_servers.mm)
@@ -91,4 +93,8 @@ if (MOSH_BUILD_TESTS)
     add_test(NAME MoshDawnBridgeRunScriptSafety
         COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_run_script.sh"
                      "${CMAKE_SOURCE_DIR}/scripts/build-and-run-dawn-bridge.sh")
+    add_test(NAME MoshDawnBridgeRunScriptBehavior
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_run_script_behavior.sh"
+                     "${CMAKE_SOURCE_DIR}/scripts/build-and-run-dawn-bridge.sh"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/fake_bridge.py")
 endif()

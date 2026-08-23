@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -103,17 +105,65 @@ class HttpServer::Impl
 {
 public:
  Impl(BridgeCore& c,NSString* p):core(c),page([p copy]){}
- bool start(NSError** e) { std::lock_guard lock(mutex); if(running) return false;
-   listener=socketSupport::makeListener(INADDR_ANY,boundPort,e); if(listener<0)return false;
-   running=true; acceptThread=std::thread([this]{acceptLoop();}); return true; }
- void stop() { { std::lock_guard lock(mutex); if(!running && !acceptThread.joinable())return;
-   running=false; socketSupport::closeSocket(listener); for(int fd:clients)::shutdown(fd,SHUT_RDWR); }
-   core.cancelPendingWaits(); if(acceptThread.joinable())acceptThread.join();
-   for(auto& t:workers)if(t.joinable())t.join(); workers.clear(); }
- void acceptLoop() { while(running) { @autoreleasepool { int listening=-1; {std::lock_guard lock(mutex); listening=listener;}
-   int fd=listening>=0?::accept(listening,nullptr,nullptr):-1; if(fd<0)continue;
-   std::lock_guard lock(mutex); if(!running){::close(fd);continue;} if(clients.size()>=8){::close(fd);continue;}
-   clients.insert(fd); workers.emplace_back([this,fd]{serve(fd);}); }} }
+ bool start(NSError** e)
+ {
+   std::lock_guard lock(mutex);
+   if(running) return false;
+   listener=socketSupport::makeListener(INADDR_ANY,boundPort,e);
+   if(listener<0) return false;
+   running=true;
+   for(size_t index=0;index<workerLimit;++index)
+     workers.emplace_back([this]{workerLoop();});
+   acceptThread=std::thread([this]{acceptLoop();});
+   return true;
+ }
+ void stop()
+ {
+   {
+     std::lock_guard lock(mutex);
+     if(!running && !acceptThread.joinable()) return;
+     running=false;
+     socketSupport::closeSocket(listener);
+     for(int fd:clients) ::shutdown(fd,SHUT_RDWR);
+   }
+   ready.notify_all();
+   core.cancelPendingWaits();
+   if(acceptThread.joinable()) acceptThread.join();
+   for(auto& worker:workers) if(worker.joinable()) worker.join();
+   std::lock_guard lock(mutex);
+   workers.clear();
+   queue.clear();
+ }
+ void acceptLoop()
+ {
+   while(running) { @autoreleasepool {
+     int listening=-1;
+     {std::lock_guard lock(mutex); listening=listener;}
+     int fd=listening>=0?::accept(listening,nullptr,nullptr):-1;
+     if(fd<0) continue;
+     {
+       std::lock_guard lock(mutex);
+       if(!running || clients.size()>=workerLimit) {::close(fd); continue;}
+       clients.insert(fd);
+       queue.push_back(fd);
+     }
+     ready.notify_one();
+   }}
+ }
+ void workerLoop()
+ {
+   for(;;) { @autoreleasepool {
+     int fd=-1;
+     {
+       std::unique_lock lock(mutex);
+       ready.wait(lock,[this]{return !queue.empty()||!running;});
+       if(queue.empty()&&!running) return;
+       fd=queue.front();
+       queue.pop_front();
+     }
+     serve(fd);
+   }}
+ }
  void serve(int fd) { @autoreleasepool { const auto deadline=Clock::now()+std::chrono::seconds(2);
    std::string raw; Request request; size_t offset=0; HttpReply reply;
    if(!receiveUntil(fd,raw,16*1024,deadline)||!parseHeaders(raw,request,offset)) reply={400,@"application/json",[@"{\"error\":\"malformed_request\"}" dataUsingEncoding:NSUTF8StringEncoding]};
@@ -125,12 +175,16 @@ public:
      reply=core.handleHttpCancelable(request.method,request.path,request.auth,body,page,[fd]{return disconnected(fd);}); }
    writeReply(fd,reply); }
    {std::lock_guard lock(mutex); clients.erase(fd);} ::close(fd); }
+ size_t workerCount() const {std::lock_guard lock(mutex); return workers.size();}
+ static constexpr size_t workerLimit=8;
  BridgeCore& core; NSString* page; std::atomic<bool> running{false}; uint16_t boundPort=0; int listener=-1;
- std::mutex mutex; std::unordered_set<int> clients; std::thread acceptThread; std::vector<std::thread> workers;
+ mutable std::mutex mutex; std::condition_variable ready; std::deque<int> queue;
+ std::unordered_set<int> clients; std::thread acceptThread; std::vector<std::thread> workers;
 };
 HttpServer::HttpServer(BridgeCore& c,NSString* p):impl(std::make_unique<Impl>(c,p)){}
 HttpServer::~HttpServer(){stop();} bool HttpServer::start(NSError** e){return impl->start(e);}
 void HttpServer::stop(){if(impl)impl->stop();} uint16_t HttpServer::port()const{return impl->boundPort;}
+size_t HttpServer::workerThreadCount()const{return impl->workerCount();}
 
 NSString* preferredLanAddress() { ifaddrs* list=nullptr; if(::getifaddrs(&list)==0) { for(auto* i=list;i;i=i->ifa_next)
  { if(!i->ifa_addr||i->ifa_addr->sa_family!=AF_INET||(i->ifa_flags&IFF_LOOPBACK)||(i->ifa_flags&IFF_UP)==0)continue;
