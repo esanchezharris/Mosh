@@ -260,6 +260,16 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   disappeared without any Codex stop/kill action and without a new local log;
   it was not restarted so this tail run does not silently add a competing model.
 
+- **r8-4b tail first checkpoint, 2026-08-22 — HEALTHY:** local iter 100/global
+  iter 12,400 saved `0000100_adapters.safetensors` with finite train loss
+  `0.092`; sha256 is
+  `693f0da013b2408fa2ce053a5337043869e6b237f34139e5f21c86dd7b26151a`,
+  and the rolling adapter was byte-identical at verification time. Trainer and
+  guard still showed one launchd run each with restart disabled, no NaN or
+  early-exit alert existed, and the run continued finite through local iter
+  140/global iter 12,440. Headroom remained inside the unchanged gates at 70%
+  free memory, 674 MiB used swap, and 399 GiB Data-volume free.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
