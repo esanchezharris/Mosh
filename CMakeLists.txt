@@ -96,6 +96,7 @@ option(MOSH_BUILD_APP "Build the standalone JUCE app" ON)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for plugin-host smoke tests" OFF)
+option(MOSH_BUILD_REIMAGINE_PLUGIN "Build the owner-local Mosh Re-Imagine VST3" ${APPLE})
 # Linux audio backend: ALSA is JUCE's Linux default and is always on. JACK is opt-in
 # (needs libjack-dev); it is additive — the ALSA path is unchanged when this is OFF.
 option(MOSH_ENABLE_JACK "Also enable the JACK audio backend on Linux (needs libjack-dev)" OFF)
@@ -676,4 +677,8 @@ endif()
 if (MOSH_BUILD_PLUGIN_FIXTURES)
     set(MOSH_PLUGIN_FIXTURE_VST3_COPY_DIR "${CMAKE_BINARY_DIR}/PluginFixtures/VST3" CACHE PATH "Build-tree VST3 fixture copy dir")
     add_subdirectory(src/plugin_fixtures)
+endif()
+
+if (MOSH_BUILD_REIMAGINE_PLUGIN AND APPLE)
+    add_subdirectory(src/reimagine/plugin)
 endif()

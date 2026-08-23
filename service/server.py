@@ -54,7 +54,16 @@ from training.rights import load_registry, read_json_object, save_registry, writ
 from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
+PROTOCOL_VERSION = 1
+PROTOCOL_FEATURES = {
+    "reimagine": True,
+    "colors": True,
+    "loraStack": True,
+    "contentAddressedAudio": True,
+    "sharedService": True,
+}
 START_TIME = time.time()
+_LAST_REQUEST_MONOTONIC = time.monotonic()
 # Upper bound on a POST body — a defensive cap so a bogus or hostile
 # Content-Length can't drive an unbounded rfile.read() (hang / huge alloc).
 # POST payloads here are small JSON control messages (audio moves as file
@@ -953,6 +962,8 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self) -> None:  # noqa: N802
+        global _LAST_REQUEST_MONOTONIC
+        _LAST_REQUEST_MONOTONIC = time.monotonic()
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         query = {}
         if "?" in self.path:
@@ -965,6 +976,8 @@ class Handler(BaseHTTPRequestHandler):
             adapters = ["fake", "transform", "soulx"] + (["stable_audio3"] if SA3_ENABLED else [])
             self._send(200, {"ok": True, "service": "mosh-generative",
                              "version": SERVICE_VERSION, "build": SERVICE_BUILD,
+                             "protocolVersion": PROTOCOL_VERSION,
+                             "features": PROTOCOL_FEATURES,
                              "uptime_s": round(time.time() - START_TIME, 1),
                              "adapters": adapters, "transcribe": _transcribe_available(),
                              "sketch": _sketch_available(),
@@ -1114,6 +1127,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"ok": False, "error": f"unknown path: {path}"})
 
     def do_POST(self) -> None:  # noqa: N802
+        global _LAST_REQUEST_MONOTONIC
+        _LAST_REQUEST_MONOTONIC = time.monotonic()
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
         if data is None:  # a 400/413 was already sent for a bad/oversized Content-Length
@@ -1753,7 +1768,6 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
 
-
 def _write_quietly(path: str, text: str) -> None:
     if not path:
         return
@@ -1776,6 +1790,23 @@ def _bind_with_fallback(host: str, port: int, tries: int = 10):
     raise last
 
 
+def _render_active() -> bool:
+    """Return whether inference or an MLX maintenance task is queued/running."""
+    with _lock:
+        return any(job.get("status") in ("queued", "running", "rendering") for job in _jobs.values())
+
+
+def _idle_shutdown_loop(httpd: ThreadingHTTPServer, idle_seconds: float) -> None:
+    """Stop a shared helper only after bounded inactivity and no model work."""
+    while True:
+        time.sleep(min(5.0, max(0.25, idle_seconds / 4.0)))
+        inactive_for = time.monotonic() - _LAST_REQUEST_MONOTONIC
+        if inactive_for >= idle_seconds and not _render_active() and not _training_active():
+            sys.stderr.write(f"[service] idle for {inactive_for:.1f}s; stopping shared helper\n")
+            httpd.shutdown()
+            return
+
+
 def main() -> int:
     host = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
     port = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
@@ -1787,6 +1818,10 @@ def main() -> int:
         from sa3 import qa  # noqa: PLC0415
         threading.Thread(target=qa.warm, daemon=True).start()
     httpd, port = _bind_with_fallback(host, port)
+    idle_exit_seconds = float(os.environ.get("MOSH_SERVICE_IDLE_EXIT_SECONDS", "900"))
+    if idle_exit_seconds > 0.0:
+        threading.Thread(target=_idle_shutdown_loop,
+                         args=(httpd, idle_exit_seconds), daemon=True).start()
     # C3 — tell the host which port we actually bound (it may differ from the requested one
     # if a non-Mosh process held it). The host adopts this for its base URL.
     _write_quietly(os.environ.get("MOSH_SERVICE_PORTFILE", "").strip(), str(port))

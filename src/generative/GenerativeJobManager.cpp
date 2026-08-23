@@ -19,7 +19,17 @@ namespace
 
     // Stable, spawner-agnostic handshake locations in the Mosh app-data dir (matches
     // MoshEngine's session base) so a FRESH launch can find a PRIOR run's service.
-    File serviceStateDir()  { return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"); }
+    File serviceStateDir()
+    {
+       #if defined (MOSH_TESTING) && MOSH_TESTING
+        const auto testPort = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "default");
+        return File::getSpecialLocation (File::tempDirectory)
+            .getChildFile ("mosh-reimagine-service-test-" + testPort);
+       #else
+        return File::getSpecialLocation (File::userHomeDirectory)
+            .getChildFile ("Library/Application Support/Mosh/ReImagine");
+       #endif
+    }
     File servicePidFile()   { return serviceStateDir().getChildFile ("service.pid"); }
     File servicePortFile()  { return serviceStateDir().getChildFile ("service.port"); }
     int portFromBaseUrl (const String& baseUrl)
@@ -54,20 +64,15 @@ namespace
         return false;
     }
 
-    void killPid (int pid)
-    {
-        ChildProcess k;
-       #if JUCE_WINDOWS
-        k.start ("taskkill /F /PID " + String (pid));
-       #else
-        k.start (StringArray { "/bin/kill", "-9", String (pid) });
-       #endif
-    }
-
     File locateServiceScript()
     {
         if (auto env = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_SCRIPT", {}); env.isNotEmpty())
             if (File f (env); f.existsAsFile()) return f;
+
+        // Owner install: one helper shared by Mosh and every plug-in instance.
+        auto shared = File::getSpecialLocation (File::userHomeDirectory)
+                          .getChildFile ("Library/Application Support/Mosh/ReImagine/service/server.py");
+        if (shared.existsAsFile()) return shared;
 
         // dev: relative to the current working directory (harness runs from repo).
         auto cwd = File::getCurrentWorkingDirectory().getChildFile ("service/server.py");
@@ -96,13 +101,16 @@ GenerativeJobManager::GenerativeJobManager()
 GenerativeJobManager::~GenerativeJobManager()
 {
     const juce::ScopedLock sl (spawnLock);   // no worker may be mid-spawn as we tear down
-    if (spawnedByUs && serviceProcess.isRunning())
-        serviceProcess.kill();        // cancel-on-close (05 §4)
-    if (spawnedByUs)                  // C2 — clean shutdown clears the handshake files
-    {
-        servicePidFile().deleteFile();
-        servicePortFile().deleteFile();
-    }
+   #if defined (MOSH_TESTING) && MOSH_TESTING
+    // Hermetic fake helpers are owned by one test case and do not implement the
+    // production idle-exit loop. Do not leak them across the suite.
+    if (spawnedByUs)
+        serviceProcess.kill();
+    servicePidFile().deleteFile();
+    servicePortFile().deleteFile();
+   #endif
+    // The helper is shared with Ableton and exits under its own bounded-idle policy.
+    // ChildProcess does not terminate the child in its destructor.
 }
 
 void GenerativeJobManager::reapStaleService()
@@ -118,15 +126,12 @@ void GenerativeJobManager::reapStaleService()
     const int targetPort = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "8770").getIntValue();
     const int adoptedPort = portFromBaseUrl (currentBaseUrl());
 
-    if (pid > 0
-        && (stalePort == 0 || stalePort == targetPort || stalePort == adoptedPort)
-        && isLiveMoshService (pid))
+    juce::ignoreUnused (stalePort, targetPort, adoptedPort);
+    if (! isLiveMoshService (pid))
     {
-        killPid (pid);
-        Thread::sleep (300);          // let the OS release the squatted port
+        pf.deleteFile();
+        servicePortFile().deleteFile();
     }
-    pf.deleteFile();
-    servicePortFile().deleteFile();
 }
 
 void GenerativeJobManager::adoptPortFromHandshake()
@@ -192,6 +197,7 @@ bool GenerativeJobManager::ensureServiceRunning()
     // both spawn serviceProcess, orphaning one Python service. A second caller blocks here
     // until the first finishes warmup, then its isHealthy() check returns true immediately.
     const juce::ScopedLock sl (spawnLock);
+    adoptPortFromHandshake();
     if (isHealthy()) return true;
 
     // A recent attempt already failed to bring the service up (dead python3, broken venv,
@@ -202,8 +208,15 @@ bool GenerativeJobManager::ensureServiceRunning()
     if (lastFailedSpawnMs != 0 && (now - lastFailedSpawnMs) < kSpawnFailureBackoffMs)
         return false;
 
-    // C2 — health failed: a wedged/orphaned service from a crashed Mosh may be squatting the
-    // port. Reap it (PID handshake + identity check) before spawning a fresh one.
+    InterProcessLock processLock ("studio.mosh.reimagine.shared-service");
+    InterProcessLock::ScopedLockType processLockScope (processLock);
+    if (! processLockScope.isLocked())
+        return false;
+    adoptPortFromHandshake();
+    if (isHealthy()) { lastFailedSpawnMs = 0; return true; }
+
+    // Remove dead handshakes only. A live shared helper belongs to all clients and is
+    // never killed by Mosh or the plug-in.
     reapStaleService();
     if (isHealthy()) { lastFailedSpawnMs = 0; return true; }     // (another instance may have raced in)
 
@@ -236,7 +249,9 @@ bool GenerativeJobManager::ensureServiceRunning()
     // Launch via run.sh (it selects the MLX venv python when MOSH_ENABLE_SA3=1),
     // forwarding the SA3 env so the carved engine can find the model + colours
     // (App. B). Falls back to system python3 (FakeAdapter) when SA3 is off.
-    auto runSh = script.getParentDirectory().getChildFile ("run.sh");
+    auto runSh = script.getParentDirectory().getChildFile ("run-reimagine.sh");
+    if (! runSh.existsAsFile())
+        runSh = script.getParentDirectory().getChildFile ("run.sh");
     String env;
     for (auto* key : { "MOSH_ENABLE_SA3", "SA3_MLX_DIR", "COLORRACK_DATA", "SA3_SECONDS",
                        "SA3_STEPS", "MOSH_SA3_QA", "MOSH_JUDGES_PY", "MOSH_QA_TIMEOUT",
