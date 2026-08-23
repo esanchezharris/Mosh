@@ -292,6 +292,26 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   rows 13,001--13,010. Restart remained disabled, so no row replay occurred;
   no further continuation was launched automatically.
 
+- **r8-4b global-13,000 completion-tail registration, 2026-08-23
+  (pre-launch):** the owner explicitly requested completion for a fair model
+  comparison. The durable local-700/global-13,000 checkpoint and rolling
+  adapter remain byte-identical at sha256
+  `b022b10c3477e0b58eff5a9d8ed465dbcb06df10ba6e2b3954286f0582310cea`.
+  `R8_4B_MLX_CONT_13000.yaml` registers exactly 113 local steps, mapping to
+  global steps 13,001--13,113, in fresh data, adapter, log, and launchd
+  namespaces. The new seed-0 iterator was derived from the exact unconsumed
+  portion of the prior tail and replay-verified in full. Its train sha256 is
+  `aea90e3765128a1f63456b13b9b14ed73b2c478f8b3ffb34c1ddac25814b141d`,
+  valid sha256 remains
+  `9047ab96fd7e8f7f2155d6acc9c9b391c7989ed6205d119c46be764dfa4f3638`,
+  remaining-source-index sha256 is
+  `290d82b6fb4b2cb84fa4ad66b57c45a47e2a29b138a4f9ee085abeb66a0a3a66`,
+  and manifest sha256 is
+  `f425119f8bdfa842ca51c0241456d2c8f555e71efb2d8c0b0f287d71ff3bc14b`.
+  Both jobs again explicitly disable restart and the runner refuses any
+  existing output namespace. Only the direct-Codex-child preflight threshold
+  remains waived for this run; memory, swap, and disk gates are unchanged.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
