@@ -36,34 +36,214 @@ Ableton User Library.
 
 ## Build and install the owner app
 
-After `verify` succeeds, install that exact bundle in the owner's Applications
-folder and launch it manually:
+After `verify` succeeds, run this Bash transaction. It addresses the bridge by
+its exact bundle identifier, requests a normal app quit, refuses to replace a
+bundle while that exact app is still running, stages on the target volume, and
+keeps the prior bundle until the replacement passes its readiness check:
 
-```sh
+```bash
+set -Eeuo pipefail
+
+bundle_id="studio.mosh.dawn-bridge"
 install_root="$HOME/Applications"
+source_app="${MOSH_DAWN_BUILD_DIR:?set MOSH_DAWN_BUILD_DIR}/src/dawn_bridge/MoshDawnBridge.app"
 target_app="$install_root/MoshDawnBridge.app"
-mkdir -p "$install_root"
-staging_root="$(mktemp -d "$install_root/.MoshDawnBridge.install.XXXXXX")"
-ditto \
-  "$MOSH_DAWN_BUILD_DIR/src/dawn_bridge/MoshDawnBridge.app" \
-  "$staging_root/MoshDawnBridge.app"
-if [ -e "$target_app" ]; then
-  mv "$target_app" "$staging_root/MoshDawnBridge.previous.app"
-fi
-if ! mv "$staging_root/MoshDawnBridge.app" "$target_app"; then
-  if [ -e "$staging_root/MoshDawnBridge.previous.app" ]; then
-    mv "$staging_root/MoshDawnBridge.previous.app" "$target_app"
-  fi
+descriptor="$HOME/Library/Application Support/Mosh/DAWN Bridge/remote-script.json"
+staging_root=""
+staged_app=""
+previous_app=""
+failed_app=""
+previous_was_running=0
+previous_moved=0
+new_activated=0
+install_complete=0
+mutation_started=0
+
+fail() {
+  printf 'DAWN install failed: %s\n' "$1" >&2
   exit 1
+}
+
+running_bridge_pids() {
+  /usr/bin/osascript <<'APPLESCRIPT'
+tell application "System Events"
+  set bridgePids to unix id of every application process whose bundle identifier is "studio.mosh.dawn-bridge"
+end tell
+set AppleScript's text item delimiters to linefeed
+return bridgePids as text
+APPLESCRIPT
+}
+
+quit_exact_bridge() {
+  local pids count
+  pids="$(running_bridge_pids)" || return 1
+  count="$(printf '%s\n' "$pids" | /usr/bin/awk 'NF { count += 1 } END { print count + 0 }')" || return 1
+  if (( count == 0 )); then
+    return 0
+  fi
+  if (( count != 1 )); then
+    printf 'refusing to quit %s exact-bundle processes\n' "$count" >&2
+    return 1
+  fi
+  /usr/bin/osascript -e 'tell application id "studio.mosh.dawn-bridge" to quit' || return 1
+  for _ in {1..50}; do
+    pids="$(running_bridge_pids)" || return 1
+    [[ -z "$pids" ]] && return 0
+    /bin/sleep 0.1 || return 1
+  done
+  printf 'exact DAWN bridge did not quit; bundle was not replaced\n' >&2
+  return 1
+}
+
+ready_bridge_pid() {
+  local pids count pid port listeners listener_count
+  pids="$(running_bridge_pids)" || return 1
+  count="$(printf '%s\n' "$pids" | /usr/bin/awk 'NF { count += 1 } END { print count + 0 }')" || return 1
+  (( count == 1 )) || return 1
+  pid="$pids"
+  [[ -f "$descriptor" && ! -L "$descriptor" ]] || return 1
+  [[ "$(/usr/bin/stat -f '%Lp' "$descriptor")" == "600" ]] || return 1
+  port="$(/usr/bin/python3 - "$descriptor" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    value = json.load(handle)
+valid = (
+    set(value) == {"protocol", "host", "port", "secret"}
+    and value["protocol"] == 1
+    and value["host"] == "127.0.0.1"
+    and isinstance(value["port"], int)
+    and 0 < value["port"] < 65536
+    and isinstance(value["secret"], str)
+    and re.fullmatch(r"[0-9a-f]{64}", value["secret"])
+)
+if not valid:
+    raise SystemExit(1)
+print(value["port"])
+PY
+)" || return 1
+  listeners="$(/usr/sbin/lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null \
+    | /usr/bin/sed -n 's/^n//p')" || return 1
+  printf '%s\n' "$listeners" | /usr/bin/grep -Eq ":${port}$" || return 1
+  listener_count="$(printf '%s\n' "$listeners" | /usr/bin/awk 'NF { count += 1 } END { print count + 0 }')" || return 1
+  (( listener_count >= 2 )) || return 1
+  printf '%s\n' "$pid"
+}
+
+wait_until_ready() {
+  local ready_pid
+  for _ in {1..50}; do
+    if ready_pid="$(ready_bridge_pid)"; then
+      printf 'DAWN bridge ready (PID %s)\n' "$ready_pid"
+      return 0
+    fi
+    /bin/sleep 0.1 || return 1
+  done
+  return 1
+}
+
+rollback_install() {
+  local status=$?
+  local rollback_failed=0
+  local replacement_stopped=1
+  local restored_pids=""
+  trap - EXIT INT TERM
+  if (( status == 0 || install_complete == 1 || mutation_started == 0 )); then
+    exit "$status"
+  fi
+  set +e
+  if (( new_activated == 1 )); then
+    if ! quit_exact_bridge; then
+      rollback_failed=1
+      replacement_stopped=0
+    fi
+  fi
+  if (( replacement_stopped == 1 && previous_moved == 1 )); then
+    if [[ -e "$target_app" ]] && ! /bin/mv "$target_app" "$failed_app"; then
+      rollback_failed=1
+    fi
+    if [[ ! -e "$target_app" ]] && ! /bin/mv "$previous_app" "$target_app"; then
+      rollback_failed=1
+    fi
+  elif (( replacement_stopped == 1 && new_activated == 1 )) && [[ -e "$target_app" ]]; then
+    /bin/mv "$target_app" "$failed_app" || rollback_failed=1
+  fi
+  if (( previous_was_running == 1 )); then
+    restored_pids="$(running_bridge_pids)" || rollback_failed=1
+    if [[ -z "$restored_pids" ]]; then
+      /usr/bin/open -n "$target_app" || rollback_failed=1
+      wait_until_ready >/dev/null || rollback_failed=1
+    fi
+  fi
+  if (( rollback_failed == 0 )); then
+    printf 'Previous DAWN bundle and running state restored or unchanged.\n' >&2
+  else
+    printf 'ROLLBACK INCOMPLETE; preserved artifacts are under %s\n' "$staging_root" >&2
+  fi
+  exit "$status"
+}
+trap rollback_install EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+[[ -d "$source_app" && ! -L "$source_app" ]] || fail "source app is missing or linked"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist")" == "$bundle_id" ]] \
+  || fail "source bundle identifier mismatch"
+[[ -x "$source_app/Contents/MacOS/MoshDawnBridge" ]] || fail "source executable is missing"
+[[ ! -L "$target_app" ]] || fail "refusing linked target app"
+[[ ! -e "$target_app" || -d "$target_app" ]] || fail "target exists but is not an app directory"
+/bin/mkdir -p "$install_root" || fail "cannot create owner Applications directory"
+staging_root="$(/usr/bin/mktemp -d "$install_root/.MoshDawnBridge.install.XXXXXX")" \
+  || fail "cannot create same-volume staging directory"
+/bin/chmod 700 "$staging_root" || fail "cannot protect staging directory"
+staged_app="$staging_root/MoshDawnBridge.app"
+previous_app="$staging_root/MoshDawnBridge.previous.app"
+failed_app="$staging_root/MoshDawnBridge.failed.app"
+/usr/bin/ditto "$source_app" "$staged_app" || fail "cannot copy source bundle into staging"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$staged_app/Contents/Info.plist")" == "$bundle_id" ]] \
+  || fail "staged bundle identifier mismatch"
+[[ -x "$staged_app/Contents/MacOS/MoshDawnBridge" ]] || fail "staged executable is missing"
+
+existing_pids="$(running_bridge_pids)" || fail "cannot query exact running app identity"
+if [[ -n "$existing_pids" ]]; then
+  previous_was_running=1
+  mutation_started=1
+  quit_exact_bridge || fail "running exact DAWN bridge would not quit cleanly"
 fi
-rm -rf "$staging_root/MoshDawnBridge.previous.app"
-rmdir "$staging_root"
-open "$target_app"
+[[ ! -e "$descriptor" && ! -L "$descriptor" ]] || fail "descriptor remains after exact app quit"
+mutation_started=1
+if [[ -e "$target_app" ]]; then
+  /bin/mv "$target_app" "$previous_app" || fail "cannot retain prior bundle"
+  previous_moved=1
+fi
+/bin/mv "$staged_app" "$target_app" || fail "cannot activate staged bundle"
+new_activated=1
+/usr/bin/open -n "$target_app" || fail "launch request failed"
+wait_until_ready || fail "replacement did not reach dual-server readiness"
+
+if (( previous_moved == 1 )); then
+  printf 'Prior bundle retained at %s\n' "$previous_app"
+else
+  /bin/rmdir "$staging_root" || fail "cannot remove empty staging directory"
+  staging_root=""
+fi
+install_complete=1
+trap - EXIT INT TERM
 ```
 
-The new bundle is staged on the same volume, then renamed into place; it never
-merges files into an older app bundle. If activation fails, the commands restore
-the previous bundle before exiting.
+The readiness check requires one process with bundle identifier
+`studio.mosh.dawn-bridge`, a strict owner-only descriptor whose loopback port is
+owned by that process, and a second listening socket for HTTP. Those are the two
+server-start conditions that initially make the menu report `Bridge: Ready`; the
+menu may then say `Bridge: Waiting for Live script` until Live connects. A prior
+bundle is deliberately left at the printed staging path after success. Remove it
+only after the physical scratch-Set gates pass. Ordinary failures restore both
+the prior bundle and whether it was running. If macOS refuses the exact app's
+normal quit or a filesystem operation fails during rollback, the script does not
+use broad or forced process killing; it reports `ROLLBACK INCOMPLETE` and retains
+the recovery artifacts at the printed staging path.
 
 Do not enable launch-at-login. Only one bridge instance should run. A `DAWN`
 item appears in the macOS menu bar and should say `Bridge: Ready`.
