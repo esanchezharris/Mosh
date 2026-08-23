@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>MoshDawnBridge</string>
+  <key>CFBundleIdentifier</key><string>studio.mosh.dawn-bridge</string>
+  <key>CFBundleName</key><string>Mosh DAWN Bridge</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${PROJECT_VERSION}</string>
+  <key>CFBundleVersion</key><string>${PROJECT_VERSION}</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Mosh DAWN Bridge pairs this Mac with your controller on the local network.</string>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
