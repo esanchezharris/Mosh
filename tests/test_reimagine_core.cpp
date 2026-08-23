@@ -214,7 +214,7 @@ TEST_CASE ("Service request maps Mosh rack controls to the existing SA3 protocol
     const auto params = serviceParamsForRack (rack, true);
     CHECK (params.getProperty ("prompt", {}).toString() == "metallic drums");
     CHECK (static_cast<float> (params.getProperty ("nl", 0.0)) == Catch::Approx (0.42f));
-    CHECK (static_cast<int64_t> (params.getProperty ("seed", 0)) == 77);
+    CHECK (static_cast<juce::int64> (params.getProperty ("seed", 0)) == 77);
     CHECK (static_cast<bool> (params.getProperty ("lab", false)));
     const auto* colors = params.getProperty ("colors", {}).getArray();
     REQUIRE (colors != nullptr);
