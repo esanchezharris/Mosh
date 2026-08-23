@@ -355,10 +355,14 @@ export const loadNamedPluginV1: NativeSkillHandlerV1 = async ({ payload, environ
     return runAtomicLoadV1(payload, environment, before, trackId, entry, taken.payload.projectEpoch, sourceAtStart);
   }
 
+  // Certified matchers may prefill a broad `pluginName` slot for any leading
+  // "add" request. Revalidate the original utterance before trusting that slot,
+  // otherwise clip/note creation is stolen before the producer brain can see it.
+  const utteranceQuery = pluginQueryV1(utterance);
+  if (!utteranceQuery) return blocked(payload, "unsupported_intent", payload.responses.blocked);
   const query = typeof slots.pluginName === "string" && slots.pluginName.length > 0
     ? slots.pluginName
-    : pluginQueryV1(utterance);
-  if (!query) return blocked(payload, "unsupported_intent", payload.responses.blocked);
+    : utteranceQuery;
 
   const initial = environment.context();
   if (!initial.selectedTrackId) return blocked(payload, "missing_target", "Select the track you want me to load it on.");
