@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "redistributeReferencePixels": false,
+    "referenceRoot": ".omo/evidence/live11-parity-20260823/reference"
+  },
+  "references": [
+    {
+      "id": "live11-owner-arrangement-20260823",
+      "app": {
+        "name": "Ableton Live 11 Standard",
+        "version": "11.3.43 (2025-10-06_b466d4f56c)",
+        "bundleId": "com.ableton.live"
+      },
+      "viewport": {
+        "width": 1351,
+        "height": 768,
+        "scale": 1
+      },
+      "state": {
+        "view": "arrangement",
+        "theme": "default-light",
+        "fixture": "untitled four-track owner reference",
+        "detailPanel": "open",
+        "browser": "open"
+      },
+      "localPath": ".omo/evidence/live11-parity-20260823/reference/live11-arrangement-1351x768.png",
+      "sha256": "590dece1e32901396f7fcd61f61dbf8e9ce5abd8d02895f492817e32de326d84",
+      "capturedAt": "2026-08-23T00:00:00Z",
+      "mediaType": "image/png",
+      "provenance": "owner-local installed application capture; normalized from a JPEG-mislabeled source without changing dimensions",
+      "redistribution": "prohibited"
+    }
+  ],
+  "requiredCaptures": [
+    {
+      "surfaceId": "global-chrome-transport",
+      "status": "captured",
+      "referenceIds": ["live11-owner-arrangement-20260823"]
+    },
+    {
+      "surfaceId": "arrangement-grid-rulers",
+      "status": "captured",
+      "referenceIds": ["live11-owner-arrangement-20260823"]
+    },
+    {
+      "surfaceId": "track-headers-mixer",
+      "status": "captured",
+      "referenceIds": ["live11-owner-arrangement-20260823"]
+    },
+    {
+      "surfaceId": "clips-automation-take-lanes",
+      "status": "captured",
+      "referenceIds": ["live11-owner-arrangement-20260823"]
+    },
+    {
+      "surfaceId": "browser-devices-plugins",
+      "status": "captured",
+      "referenceIds": ["live11-owner-arrangement-20260823"]
+    },
+    {
+      "surfaceId": "midi-editor",
+      "status": "missing",
+      "reason": "No Live 11 MIDI editor reference has been captured at the canonical viewport."
+    },
+    {
+      "surfaceId": "audio-device-workflow",
+      "status": "missing",
+      "reason": "A static screenshot cannot prove device readiness, playback, recording, or monitoring."
+    },
+    {
+      "surfaceId": "core-producer-flows",
+      "status": "missing",
+      "reason": "The create-load-edit-play-save-reopen flows require paired state and audio evidence."
+    }
+  ]
+}

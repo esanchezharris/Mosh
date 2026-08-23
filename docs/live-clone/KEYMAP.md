@@ -1,5 +1,10 @@
 # Live 12 — complete menu + shortcut table (extracted 2026-08-06)
 
+Live 11 parity status: NOT PROVEN
+
+This Live 12 shortcut extraction does not establish Live 11 behavioral or visual
+parity. Current claims and gaps live in `LIVE11_PARITY.md`.
+
 Ground truth for the clone's keymap, extracted programmatically from Live 12.4.2's
 accessibility tree (`.cache/live-ref/extract_menus.py` → `menus.json`, 338 items,
 129 shortcuts). Enablement varies by context; this table is the no-selection

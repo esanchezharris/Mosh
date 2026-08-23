@@ -1,5 +1,12 @@
 # Mosh Live — interaction parity audit (Phase 3 + Wave 0)
 
+Live 11 parity status: NOT PROVEN
+
+This is a historical Live 12 interaction audit, not a whole-product parity
+claim. The current Live 11 status is `LIVE11_PARITY.md` and
+`live11-parity.json`; generic conformance or mock-backed wiring cannot promote a
+row to installed-app parity.
+
 Audit of the live shell (`ui/src/live`) against the SPEC's interaction inventory
 (§7 editor, §8 arrangement), plus the Wave-0 menu rollout against
 `.cache/live-ref/menus.json` (Live 12's complete menu tree, extracted from the real
@@ -41,7 +48,7 @@ materialized ableton.
 | ←/→ clip nudge | move by grid | **works** | shared core NUDGE_LEFT/RIGHT → grid-step `move_clip` |
 | ↑/↓ clip nudge | move to adjacent track | **wired** (keymap-audit wave) | NUDGE_UP/DOWN (ableton arrows) → cross-track `move_clip`; group/return excluded, boundary clips stay put |
 | ⌘1 / ⌘2 grid | narrow / widen arrangement grid | **wired** (Phase 3) | keymap GRID_NARROW/GRID_WIDEN → steps `snapDivision`; gated while the editor is open |
-| ⌘3 triplet grid | triplet arrangement grid | **wired** (Wave 0/2) | keymap GRID_TRIPLET → `snapTriplet` (every snap step × 2/3, tempo-map-aware via `snapTimeMap`). Caveat: snapping only — the lane grid paint has no triplet lines |
+| ⌘3 triplet grid | triplet arrangement grid | **wired** (grid repair candidate) | keymap GRID_TRIPLET → `snapTriplet`; `ArrangementGrid` now paints mapped triplet subdivisions through the same tempo/meter helpers, pinned by `ui/e2e/live-grid.spec.ts`. Installed Live 11 parity remains unproven. |
 | ⌘4 snap toggle | snap on/off | **wired** (Phase 3) | keymap SNAP_TOGGLE → `setSnap` |
 | ⌘R rename | rename clip | **wired** (Phase 3) | keymap RENAME → `live/useLiveKeys.ts` → inline input on the lane → `rename_clip` |
 | 0 / ⌘0 deactivate | deactivate clip/note | **wired** (Phase 3 + Wave 0) | keymap DEACTIVATE binds BOTH (`["0", "Mod+0"]`, like Live) → `set_clip_mute`. Notes: editor's own 0 |
@@ -80,7 +87,7 @@ materialized ableton.
 | Gesture | Live 12 behavior | Mosh status | Where wired |
 |---|---|---|---|
 | Draw mode ON: drag paints note of drag length | floor-snapped start, snapped length | **works** (Phase 2) | `liveState.drawMode` → `drawNoteSpan` (pure, unit-tested); ghost preview |
-| Draw OFF: dblclick creates grid note | — | **diverges** | single click paints a grid-step note (Mosh's existing, faster idiom); dblclick on a note deletes it |
+| Draw OFF: dblclick creates grid note | — | **works** (shared editor contract) | single-click empty ground moves the insertion point and clears selection; double-click creates a snapped note; double-click on a note deletes it. Pinned by `PianoRoll.audition.test.ts` and the Live-shell E2E. |
 | Note drag / edge drag / Delete / marquee | move / resize / remove / select | **works** | shared PianoRoll gestures (`pianoRollEdit.ts`) |
 | Velocity drag | marker height | **works** | shared velocity lane |
 | Velocity tool row | Randomize / Ramp / Deviation | **wired** (velocity-tools wave) | docked piano roll strip above the VEL lane (`PianoRoll.tsx` `pr-veltools`, docked mount only); one moshop `transform_velocities {clipId, mode, amount?, lo?, hi?, noteIndexes?}` — targets = selection else all notes (Live's rule), deterministic-seeded randomness (FNV-1a args hash → mt19937_64, replay-stable), ONE transaction/undo; mock mirrors via `midi/velocityTransform.ts` |
@@ -124,8 +131,6 @@ materialized ableton.
   continue-play wave), but a separate play-from-insert action isn't wired.
 - **Automation lane rendering** — A toggles the automation VIEW state (control-bar
   button); the per-track automation lanes themselves are a later wave.
-- **Triplet grid paint** — ⌘3 affects SNAPPING only; the lane grid still draws
-  straight divisions. A triplet line pattern is a LaneGrid/gradient change.
 - **Ruler scrub** — the live ruler spends its plain drag on zoom (Live's idiom);
   v2's hold-to-scrub is not in this shell. Click-to-seek is preserved.
 - **Region comping across takes** — Live assembles one comp from take REGIONS;
