@@ -44,6 +44,8 @@ public:
     /** A typed event sink (the app wires this to WebBridge::emitEvent). */
     using EventSink = std::function<void (const juce::var& event)>;
     void setEventSink (EventSink s) { eventSink = std::move (s); }
+    using StableAudioUnloadSink = std::function<void (const juce::var& metrics)>;
+    void setStableAudioUnloadSink (StableAudioUnloadSink s) { stableAudioUnloadSink_ = std::move (s); }
 
     /** MP-001 — the multiplayer lock guard's state (mirrors the relay lock table).
         The live poll path keeps this in sync; the guard in execute() reads it. */
@@ -161,6 +163,11 @@ private:
     // (logged, undoable:false — same posture as the write above).
     juce::var cmdAgentMemoryDelete (const juce::var& args);
     juce::var cmdAgentMemoryClear  (const juce::var& args);
+    juce::var cmdReportIssue       (const juce::var& args);
+    juce::var cmdListIssues        (const juce::var& args);
+    juce::var cmdUpdateIssue       (const juce::var& args);
+    juce::var cmdExportIssue       (const juce::var& args);
+    juce::var cmdAttachIssueFile   (const juce::var& args);
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);
@@ -393,6 +400,7 @@ private:
     juce::var cmdAddNote        (const juce::var& args);
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
+    juce::var cmdResolveNoteOverlaps (const juce::var& args);
     juce::var cmdQuantizeNotes  (const juce::var& args);
     juce::var cmdTransformVelocities (const juce::var& args);
     juce::var cmdTransformNotes  (const juce::var& args);
@@ -975,6 +983,7 @@ private:
     TrainerRegistry      trainerRegistry;
     TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
+    StableAudioUnloadSink stableAudioUnloadSink_;
     LockManager lockManager_;          // MP-001 — multiplayer lock guard state
     std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op

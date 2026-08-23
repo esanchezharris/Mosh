@@ -81,7 +81,7 @@ inline const std::set<juce::String>& registry()
         "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
         "stretch_clip", "set_clip_warp",
         // ── MIDI ──
-        "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
+        "add_midi_clip", "add_note", "set_note", "remove_note", "resolve_note_overlaps", "quantize_notes", "transform_velocities", "transform_notes",
         // ── drums ──
         "add_drum_pattern", "assign_sample", "set_drum_lane", "load_drum_kit",
         // ── plugins (per-track rack) ──

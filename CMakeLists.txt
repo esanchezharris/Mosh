@@ -275,6 +275,7 @@ if (MOSH_BUILD_APP)
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
         src/brain/BrainProxy.cpp
+        src/brain/OwnerRuntime.cpp
         # RT-safety tripwire (debug-only; compiles to nothing in Release — see MOSH_RT_GUARD)
         src/audio/RealtimeAudioGuard.cpp
         # CAP-EXP-001 — TPDF dither on the export's final requantisation (offline only;
@@ -567,6 +568,27 @@ if (MOSH_BUILD_APP)
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/drumkits"
             COMMENT "Staging drum kits into Mosh.app/Contents/Resources/drumkits"
             VERBATIM)
+
+        # Owner-only Finder runtime: this wrapper contains no key or machine path;
+        # owner-runtime.json supplies both outside the bundle. Stage it explicitly so
+        # a Finder/Dock launch never depends on the source checkout as its cwd.
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/service/sft"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_SOURCE_DIR}/service/sft/launch_local_brain.py"
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/service/sft/launch_local_brain.py"
+            COMMENT "Staging the owner local-brain launcher into Mosh.app"
+            VERBATIM)
+        add_custom_target(MoshStageOwnerRuntime ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/service/sft"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_SOURCE_DIR}/service/sft/launch_local_brain.py"
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/service/sft/launch_local_brain.py"
+            COMMENT "Staging owner runtime launcher (no-relink backstop)"
+            VERBATIM)
+        add_dependencies(MoshStageOwnerRuntime Mosh)
 
         # LoRA Lab — stage the local trainer (the `pmetal` CLI + mlx.metallib)
         # into Contents/Helpers/, which is where Apple expects nested Mach-O

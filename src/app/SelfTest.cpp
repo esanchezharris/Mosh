@@ -610,6 +610,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // touches the owner's real ~/Library/Mosh/agent, and two concurrent runs on this
     // host can't collide on the same JSONL files.
     mosh::setEnvVar ("MOSH_AGENT_DIR", eng.sessionDir().getChildFile ("agent").getFullPathName().toRawUTF8());
+    mosh::setEnvVar ("MOSH_FEEDBACK_DIR", eng.sessionDir().getChildFile ("feedback-test").getFullPathName().toRawUTF8());
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
     // The session dir is now per-process by default, so name it: this run's exports,
     // saved edit and mosh-log.jsonl live HERE, not in a shared fixed path.
@@ -6465,6 +6466,57 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "save"); cmd (ops, "reload");
         check (clipNotes (mClip).size() == before - 1, "notes persist across save/reload");
         check (! ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 999 }}))), "set_note rejects an out-of-range noteIndex");
+
+        // Same-pitch notes may never occupy the same time in one clip. Keep this
+        // fixture after the deterministic transform cases so its fresh clip ID
+        // cannot perturb their intentionally ID-seeded humanize sequence.
+        {
+            const auto ot = cmd (ops, "create_track", args1 ("name", "OverlapInvariant"))["data"].getProperty ("trackId", var()).toString();
+            auto* oc = new DynamicObject(); oc->setProperty ("trackId", ot);
+            const auto overlapClip = cmd (ops, "add_midi_clip", var (oc))["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "add_note", objN ({{ "clipId", overlapClip }, { "pitch", 60 }, { "start", 0.0 }, { "length", 4.0 }}))), "overlap fixture: long note added");
+            check (ok (cmd (ops, "add_note", objN ({{ "clipId", overlapClip }, { "pitch", 60 }, { "start", 1.0 }, { "length", 1.0 }}))), "overlap fixture: winning note added");
+            auto ns = clipNotes (overlapClip);
+            check (ns.size() == 3, "winner splits an enclosing same-pitch note into two fragments");
+            bool collisionFree = true;
+            if (auto* arr = ns.getArray())
+                for (int i = 0; i < arr->size(); ++i)
+                    for (int j = i + 1; j < arr->size(); ++j)
+                    {
+                        const auto a = (*arr)[i], b = (*arr)[j];
+                        if ((int) a.getProperty ("pitch", -1) != (int) b.getProperty ("pitch", -2)) continue;
+                        const double as = a.getProperty ("start", 0.0), ae = as + (double) a.getProperty ("length", 0.0);
+                        const double bs = b.getProperty ("start", 0.0), be = bs + (double) b.getProperty ("length", 0.0);
+                        collisionFree = collisionFree && (ae <= bs + 1.0e-9 || be <= as + 1.0e-9);
+                    }
+            check (collisionFree, "add_note enforces same-pitch non-overlap");
+            cmd (ops, "undo");
+            auto restored = clipNotes (overlapClip);
+            check (restored.size() == 1 && std::abs ((double) restored[0].getProperty ("length", 0.0) - 4.0) < 1.0e-6, "one undo restores the exact pre-collision note");
+
+            // Legacy material is never rewritten on load. Manufacture one old-style
+            // collision beneath the command seam, then prove the explicit repair is
+            // deterministic, chord-safe, and one-step undoable.
+            auto* legacy = new DynamicObject(); legacy->setProperty ("trackId", ot);
+            const auto legacyClip = cmd (ops, "add_midi_clip", var (legacy))["data"].getProperty ("clipId", var()).toString();
+            auto* legacyMidi = dynamic_cast<te::MidiClip*> (te::findClipForID (eng.edit(), te::EditItemID::fromString (legacyClip)));
+            check (legacyMidi != nullptr, "legacy overlap fixture resolves the MIDI clip");
+            if (legacyMidi != nullptr)
+            {
+                auto& seq = legacyMidi->getSequence();
+                seq.addNote (60, tracktion::BeatPosition::fromBeats (0.0), tracktion::BeatDuration::fromBeats (3.0), 90, 0, nullptr);
+                seq.addNote (64, tracktion::BeatPosition::fromBeats (0.5), tracktion::BeatDuration::fromBeats (2.0), 90, 0, nullptr);
+                seq.addNote (60, tracktion::BeatPosition::fromBeats (1.0), tracktion::BeatDuration::fromBeats (1.0), 100, 0, nullptr);
+                const auto repair = cmd (ops, "resolve_note_overlaps", args1 ("clipId", legacyClip));
+                check (ok (repair) && (int) repair["data"].getProperty ("resolved", 0) == 1,
+                       "resolve_note_overlaps repairs the legacy same-pitch collision");
+                check (clipNotes (legacyClip).size() == 4, "legacy repair split one note while leaving the chord tone intact");
+                check (ok (cmd (ops, "undo")) && clipNotes (legacyClip).size() == 3,
+                       "legacy overlap repair is exactly one undo step");
+                check (ok (cmd (ops, "redo")) && clipNotes (legacyClip).size() == 4,
+                       "legacy overlap repair redo is exact");
+            }
+        }
 
         // Phase 1: emptying a MIDI clip must NOT delete the clip. (The "clip vanishes
         // when you delete all its notes" bug was a UI keyboard-handler issue, never a
@@ -14391,6 +14443,50 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (clearLogged, "mosh-log.jsonl records agent_memory_clear");
             check (clearUndoableFalse, "agent_memory_clear logged undoable:false");
         }
+    }
+
+    // ── Owner issue inbox: private, structured, non-undoable, no upload ──
+    {
+        section ("Owner issue inbox");
+        auto* reportArgs = new DynamicObject();
+        reportArgs->setProperty ("description", "single click adds a MIDI note");
+        reportArgs->setProperty ("severity", "breaks flow");
+        reportArgs->setProperty ("source", "typed");
+        reportArgs->setProperty ("activeShell", "live");
+        reportArgs->setProperty ("selectedTrackId", "track-test");
+        Array<var> selected; selected.add ("clip-test");
+        reportArgs->setProperty ("selectedClipIds", selected);
+        reportArgs->setProperty ("runtimeModelIdentity", "/models/a3b-r5-4bit-hd");
+        const auto reported = cmd (ops, "report_issue", var (reportArgs));
+        check (ok (reported), "report_issue stores a private report");
+        const auto issueId = reported["data"].getProperty ("issueId", var()).toString();
+        const auto reportFile = eng.sessionDir().getChildFile ("feedback-test/inbox")
+                                    .getChildFile (issueId).getChildFile ("report.json");
+        check (reportFile.existsAsFile(), "report_issue writes inbox/<id>/report.json");
+        const auto stored = JSON::fromString (reportFile.loadFileAsString());
+        check (stored.getProperty ("project", var()).toString() == eng.editFile().getFileName(),
+               "issue context contains basename-only project identity");
+        check (! reportFile.loadFileAsString().contains (eng.editFile().getParentDirectory().getFullPathName()),
+               "issue report never stores the project directory path");
+        check ((int) cmd (ops, "list_issues", args1 ("status", "inbox"))["data"].getProperty ("issues", var()).size() == 1,
+               "list_issues returns the inbox report");
+        check (ok (cmd (ops, "update_issue", objN ({{ "issueId", issueId }, { "status", "triaged" }}))),
+               "update_issue moves a report to triaged");
+        const auto exported = cmd (ops, "export_issue", args1 ("issueId", issueId));
+        check (ok (exported) && File (exported["data"].getProperty ("file", var()).toString()).existsAsFile(),
+               "export_issue writes local GitHub-ready Markdown");
+        const auto screenshot = eng.sessionDir().getChildFile ("manual-screenshot.png");
+        const uint8 screenshotBytes[] { 0x89, 0x50, 0x4e, 0x47 };
+        check (screenshot.replaceWithData (screenshotBytes, sizeof (screenshotBytes)),
+               "manual screenshot fixture exists");
+        const auto attached = cmd (ops, "attach_issue_file",
+                                   objN ({{ "issueId", issueId }, { "file", screenshot.getFullPathName() }}));
+        check (ok (attached), "attach_issue_file copies a manually selected screenshot locally");
+        check (reportFile.getSiblingFile ("attachments")
+                    .getChildFile (attached["data"].getProperty ("file", var()).toString()).existsAsFile(),
+               "manual attachment is stored inside the private issue directory");
+        check (! ok (cmd (ops, "update_issue", objN ({{ "issueId", issueId }, { "status", "uploaded" }}))),
+               "issue status vocabulary rejects upload-like states");
     }
 
     // ── DAW-parity P6: table-driven undo + persist matrices ──────────────────────

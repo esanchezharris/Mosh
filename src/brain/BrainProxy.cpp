@@ -7,6 +7,8 @@ using namespace juce;
 
 namespace
 {
+    juce::CriticalSection localConfigLock;
+    juce::String localEndpoint, localModel;
     // A bundled brain config (key=value lines) read from Contents/Resources/brain.env,
     // used ONLY as a FALLBACK when the OS environment doesn't carry the value. The deploy
     // writes the user's key there so a Finder/Dock launch (which inherits no shell env, so
@@ -139,10 +141,21 @@ namespace
 Array<BrainProxy::Provider> BrainProxy::providers()
 {
     Array<Provider> all;
+    {
+        const ScopedLock sl (localConfigLock);
+        if (localEndpoint.isNotEmpty() && localModel.isNotEmpty())
+            all.add ({ "local", "LOCAL 30B", localEndpoint, "local", localModel });
+    }
     all.add ({ "deepseek", "DEEPSEEK", env ("DEEPSEEK_BASE_URL"), env ("DEEPSEEK_API_KEY"), env ("DEEPSEEK_MODEL") });
     all.add ({ "openai",   "OPENAI",   env ("OPENAI_BASE_URL"),   env ("OPENAI_API_KEY"),   env ("OPENAI_MODEL") });
     all.add ({ "xai",      "GROK",     env ("XAI_BASE_URL"),      env ("XAI_API_KEY"),      env ("XAI_MODEL") });
     return all;
+}
+
+void BrainProxy::configureLocal (const String& endpoint, const String& exactModel)
+{
+    const ScopedLock sl (localConfigLock);
+    localEndpoint = endpoint; localModel = exactModel;
 }
 
 BrainProxy::Provider BrainProxy::resolve (const String& requested)
@@ -156,6 +169,14 @@ BrainProxy::Provider BrainProxy::resolve (const String& requested)
 
     if (requested.isNotEmpty())
         if (auto p = find (requested); p.isComplete())
+            return p;
+
+    // owner-runtime.json is an explicit machine-local opt-in. Once its exact model
+    // has passed /v1/models verification, it outranks a shell-inherited or bundled
+    // cloud default for unqualified Moshi calls. An explicitly requested provider
+    // above still wins.
+    if (requested.isEmpty())
+        if (auto p = find ("local"); p.isComplete())
             return p;
 
     if (auto envDefault = env ("MOSHI_BRAIN_PROVIDER"); envDefault.isNotEmpty())

@@ -137,6 +137,20 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   return { content: String(j.content ?? "") };
 }
 
+export type BrainRuntimeStatus = {
+  state: "starting" | "ready" | "prewarming" | "unavailable";
+  model?: string;
+  endpoint?: string;
+  port?: number;
+  error?: string;
+  ms?: number;
+  preferredShell?: "live" | "protools" | "v2" | "classic";
+};
+export async function brainRuntimeStatus(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
+  return (await native("brain_runtime_status")()) as BrainRuntimeStatus;
+}
+
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service
 // through the app, never directly; same layering as brain_chat). In dev/mock there
 // is no service to escalate to: escalateCandidates throws (the hook degrades to the

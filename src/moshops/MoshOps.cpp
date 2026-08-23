@@ -37,6 +37,82 @@ using namespace juce;
 
 namespace
 {
+    constexpr double kMinMidiNoteBeats = 0.0625;
+
+    // Make `winner` the authoritative same-pitch interval. Existing notes are
+    // shortened, split, or removed inside the caller's already-open transaction.
+    // `futureWinners` are excluded so a batched set_note can apply winner order
+    // deterministically: later edits win over earlier edits, never vice versa.
+    int makeRoomForMidiNote (te::MidiList& seq, te::MidiNote* winner,
+                             const std::vector<te::MidiNote*>& futureWinners,
+                             juce::UndoManager& undo)
+    {
+        if (winner == nullptr) return 0;
+        const int pitch = winner->getNoteNumber();
+        const double ws = winner->getStartBeat().inBeats();
+        const double we = winner->getEndBeat().inBeats();
+        std::vector<te::MidiNote*> candidates;
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            candidates.push_back (seq.getNote (i));
+
+        int changed = 0;
+        for (auto* other : candidates)
+        {
+            if (other == nullptr || other == winner || other->getNoteNumber() != pitch
+                || std::find (futureWinners.begin(), futureWinners.end(), other) != futureWinners.end())
+                continue;
+            const double os = other->getStartBeat().inBeats();
+            const double oe = other->getEndBeat().inBeats();
+            if (oe <= ws + 1.0e-9 || os >= we - 1.0e-9) continue;
+
+            const int velocity = other->getVelocity();
+            const int colour = other->getColour();
+            const bool muted = other->isMute();
+            const double left = ws - os;
+            const double right = oe - we;
+
+            if (left >= kMinMidiNoteBeats)
+                other->setStartAndLength (tracktion::BeatPosition::fromBeats (os),
+                                          tracktion::BeatDuration::fromBeats (left), &undo);
+            else if (right >= kMinMidiNoteBeats)
+                other->setStartAndLength (tracktion::BeatPosition::fromBeats (we),
+                                          tracktion::BeatDuration::fromBeats (right), &undo);
+            else
+                seq.removeNote (*other, &undo);
+
+            // An enclosing note has audible material on both sides of the winner.
+            // Preserve the right side as a second fragment when it is long enough.
+            if (left >= kMinMidiNoteBeats && right >= kMinMidiNoteBeats)
+            {
+                if (auto* fragment = seq.addNote (pitch, tracktion::BeatPosition::fromBeats (we),
+                                                  tracktion::BeatDuration::fromBeats (right),
+                                                  velocity, colour, &undo))
+                    fragment->setMute (muted, &undo);
+            }
+            ++changed;
+        }
+        return changed;
+    }
+
+    int resolveAllMidiNoteOverlaps (te::MidiList& seq, juce::UndoManager& undo)
+    {
+        struct Ordered { te::MidiNote* note; double start; int originalIndex; };
+        std::vector<Ordered> ordered;
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            ordered.push_back ({ seq.getNote (i), seq.getNote (i)->getStartBeat().inBeats(), i });
+        std::stable_sort (ordered.begin(), ordered.end(), [] (const auto& a, const auto& b) {
+            return a.start == b.start ? a.originalIndex < b.originalIndex : a.start < b.start;
+        });
+        int resolved = 0;
+        for (size_t i = 0; i < ordered.size(); ++i)
+        {
+            std::vector<te::MidiNote*> future;
+            for (size_t j = i + 1; j < ordered.size(); ++j) future.push_back (ordered[j].note);
+            resolved += makeRoomForMidiNote (seq, ordered[i].note, future, undo);
+        }
+        return resolved;
+    }
+
     juce::var feedbackCandidatesToVar (const std::vector<moshfx::FeedbackCandidate>& candidates,
                                        bool includeDepth)
     {
@@ -524,7 +600,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     // duplicate / remove / rename), mixer, and project ops stay allowed (Live's rule).
     {
         static const juce::StringArray frozenLocked {
-            "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
+            "add_note", "set_note", "remove_note", "resolve_note_overlaps", "quantize_notes", "transform_velocities", "transform_notes",
             "consolidate_clips", "crop_clip", "split_clip", "trim_clip", "set_clip_loop",
             "promote_take_region",
             "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
@@ -606,6 +682,11 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     // AGT-MEM (M3) — the memory drawer's per-item delete + per-tier clear.
     if (name == "agent_memory_delete")  return cmdAgentMemoryDelete (args);
     if (name == "agent_memory_clear")   return cmdAgentMemoryClear (args);
+    if (name == "report_issue")         return cmdReportIssue (args);
+    if (name == "list_issues")          return cmdListIssues (args);
+    if (name == "update_issue")         return cmdUpdateIssue (args);
+    if (name == "export_issue")         return cmdExportIssue (args);
+    if (name == "attach_issue_file")    return cmdAttachIssueFile (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -738,6 +819,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "add_note")          return cmdAddNote (args);
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
+    if (name == "resolve_note_overlaps") return cmdResolveNoteOverlaps (args);
     if (name == "quantize_notes")    return cmdQuantizeNotes (args);
     if (name == "transform_velocities") return cmdTransformVelocities (args);
     if (name == "transform_notes")   return cmdTransformNotes (args);
@@ -2270,7 +2352,7 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
         for (auto& n : *arr)
             specs.push_back ({ juce::jlimit (0, 127, (int) n.getProperty ("pitch", 60)),
                                juce::jmax (0.0, (double) n.getProperty ("start", 0.0)),
-                               juce::jmax (0.0625, (double) n.getProperty ("length", 1.0)),
+                               juce::jmax (kMinMidiNoteBeats, (double) n.getProperty ("length", 1.0)),
                                juce::jlimit (1, 127, (int) n.getProperty ("velocity", 100)) });
         if (specs.empty()) return errResult ("add_note", "'notes' is empty");
     }
@@ -2278,21 +2360,25 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
     {
         specs.push_back ({ juce::jlimit (0, 127, (int) args.getProperty ("pitch", 60)),
                            juce::jmax (0.0, (double) args.getProperty ("start", 0.0)),
-                           juce::jmax (0.0625, (double) args.getProperty ("length", 1.0)),
+                           juce::jmax (kMinMidiNoteBeats, (double) args.getProperty ("length", 1.0)),
                            juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100)) });
     }
 
     beginTxn ("add_note");
     auto& seq = mc->getSequence();
-    Array<var> added;
+    std::vector<te::MidiNote*> winners;
     for (auto& s : specs)
     {
         auto* note = seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.start),
                                   tracktion::BeatDuration::fromBeats (s.length), s.vel, 0, &undoManager());
-        // The index of the note we just made. MidiList keeps its notes sorted, so a new
-        // note is NOT necessarily last — callers that need to address it (step record,
-        // duplicate, "select what I just drew") would otherwise have to re-fetch the whole
-        // snapshot and guess. Resolved by identity against the returned pointer.
+        makeRoomForMidiNote (seq, note, {}, undoManager());
+        winners.push_back (note);
+    }
+    // Resolve indices only after the whole batch: later winners may re-sort, trim,
+    // or remove an earlier same-pitch winner.
+    Array<var> added;
+    for (auto* note : winners)
+    {
         int idx = -1;
         for (int i = 0; i < seq.getNumNotes(); ++i)
             if (seq.getNote (i) == note) { idx = i; break; }
@@ -2370,7 +2456,7 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
         if (args.hasProperty ("start") || args.hasProperty ("length"))
         {
             const double start  = juce::jmax (0.0, (double) args.getProperty ("start",  note->getStartBeat().inBeats()));
-            const double length = juce::jmax (0.0625, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
+            const double length = juce::jmax (kMinMidiNoteBeats, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
             note->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
                                      tracktion::BeatDuration::fromBeats (length), &undoManager());
         }
@@ -2388,11 +2474,35 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
     beginTxn ("set_note");
     for (auto& ed : edits)
         applyOne (ed.note, ed.spec);
+    for (size_t i = 0; i < edits.size(); ++i)
+    {
+        std::vector<te::MidiNote*> future;
+        for (size_t j = i + 1; j < edits.size(); ++j) future.push_back (edits[j].note);
+        makeRoomForMidiNote (seq, edits[i].note, future, undoManager());
+    }
 
     logLine ("set_note", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     return okResult ("set_note");
+}
+
+juce::var MoshOps::cmdResolveNoteOverlaps (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* mc = dynamic_cast<te::MidiClip*> (findClip (clipId));
+    if (mc == nullptr) return errResult ("resolve_note_overlaps", "no midi clip");
+    auto& seq = mc->getSequence();
+
+    beginTxn ("resolve_note_overlaps");
+    const int resolved = resolveAllMidiNoteOverlaps (seq, undoManager());
+    logLine ("resolve_note_overlaps", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (clipId);
+    auto* data = new DynamicObject();
+    data->setProperty ("resolved", resolved);
+    data->setProperty ("noteCount", seq.getNumNotes());
+    return okResult ("resolve_note_overlaps", var (data));
 }
 
 juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
@@ -2451,12 +2561,14 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
             if (swingOffset > 0.0 && offbeat) ++swung;
         }
     }
+    const int resolved = resolveAllMidiNoteOverlaps (seq, undoManager());
     logLine ("quantize_notes", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
     auto* data = new DynamicObject();
     data->setProperty ("moved", moved);
     data->setProperty ("swung", swung);   // of `moved`, how many were off-beats pushed late
+    data->setProperty ("resolved", resolved);
     return okResult ("quantize_notes", var (data));
 }
 
@@ -2718,6 +2830,7 @@ juce::var MoshOps::cmdTransformNotes (const juce::var& args)
 
     beginTxn ("transform_notes");
     int changed = 0, added = 0;
+    std::vector<te::MidiNote*> mutationWinners;
     // addInterval's dupe set: every (start, pitch) already sounding in the clip
     // (the whole sequence, not just the targets) plus the tones this pass adds —
     // a chord tone that would stack on an existing note is SKIPPED, never doubled.
@@ -2734,8 +2847,9 @@ juce::var MoshOps::cmdTransformNotes (const juce::var& args)
             const int cand = juce::jlimit (0, 127, t.pitch + semitones);
             if (cand != t.pitch && sounding.insert ({ t.start, cand }).second)
             {
-                seq.addNote (cand, tracktion::BeatPosition::fromBeats (t.start),
-                             tracktion::BeatDuration::fromBeats (t.len), t.vel, 0, &undoManager());
+                auto* addedNote = seq.addNote (cand, tracktion::BeatPosition::fromBeats (t.start),
+                                               tracktion::BeatDuration::fromBeats (t.len), t.vel, 0, &undoManager());
+                mutationWinners.push_back (addedNote);
                 ++added;
             }
             continue;
@@ -2767,6 +2881,15 @@ juce::var MoshOps::cmdTransformNotes (const juce::var& args)
         }
         if (newPitch != t.pitch) { t.n->setNoteNumber (newPitch, &undoManager()); ++changed; }
         if (newVel != t.vel)     { t.n->setVelocity (newVel, &undoManager()); ++changed; }
+        mutationWinners.push_back (t.n);
+    }
+
+    int resolved = 0;
+    for (size_t i = 0; i < mutationWinners.size(); ++i)
+    {
+        std::vector<te::MidiNote*> future;
+        for (size_t j = i + 1; j < mutationWinners.size(); ++j) future.push_back (mutationWinners[j]);
+        resolved += makeRoomForMidiNote (seq, mutationWinners[i], future, undoManager());
     }
 
     logLine ("transform_notes", args, true, {}, true);
@@ -2776,6 +2899,7 @@ juce::var MoshOps::cmdTransformNotes (const juce::var& args)
     data->setProperty ("mode", mode);
     data->setProperty ("changed", changed);
     data->setProperty ("added", added);
+    data->setProperty ("resolved", resolved);
     return okResult ("transform_notes", var (data));
 }
 

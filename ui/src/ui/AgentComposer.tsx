@@ -25,6 +25,10 @@ import type { SkillOutcomeV1, StudioSkillEnvironmentV1 } from "../agent/skillFou
 import { readSkillSourceStatusV1 } from "../agent/skillFoundry/nativeReads";
 import { createRecordingLifecycleEnvironmentV1 } from "../recordingLifecycle";
 import { IconArrowUp, IconMic } from "./icons";
+import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge";
+import { activeShell } from "../v2/shellFlag";
+import { matchIssueReport } from "../agent/issueRoute";
+import { IssueInbox } from "./IssueInbox";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
 // engages when the `handsFreeOn` toggle is true (and the tab is visible), disengages
@@ -130,6 +134,13 @@ export function AgentComposer() {
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
+  const [brainRuntime, setBrainRuntime] = useState<BrainRuntimeStatus | null>(null);
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const runRef = useRef<(text: string, source: "typed" | "push_to_talk" | "always_on") => void>(() => {});
+  useEffect(() => {
+    void brainRuntimeStatus().then(setBrainRuntime).catch(() => setBrainRuntime({ state: "unavailable" }));
+    return onEvent("brain_runtime", (payload) => setBrainRuntime(payload as BrainRuntimeStatus));
+  }, []);
   // Skill Foundry Slice B, Task 7 — the composer stores ONLY the opaque continuation
   // token (a bare string); the runtime is the one thing that resolves it back to a
   // handler/payload. No typed continuation shape lives in React state any more.
@@ -148,7 +159,10 @@ export function AgentComposer() {
   const voiceSupported = isVoiceSupported();
   // undefined = not yet built; null = platform has no speech API.
   const voiceRef = useRef<VoiceInput | null | undefined>(undefined);
-  const handsFree = useHandsFree((heard) => flashSay(`“${heard}” (not a command)`));
+  const handsFree = useHandsFree((heard) => {
+    if (matchIssueReport(heard)) runRef.current(heard, "always_on");
+    else flashSay(`“${heard}” (not a command)`);
+  });
 
   // Skill Foundry Slice B, Task 7 — a project-epoch change (new/opened/reloaded project)
   // invalidates any pending continuation: clear the React token AND the runtime's own
@@ -228,11 +242,23 @@ export function AgentComposer() {
   };
 
   // The single funnel: typed text and final speech both arrive here.
-  const run = async (text: string) => {
+  const run = async (text: string, source: "typed" | "push_to_talk" | "always_on" = "typed") => {
     if (!text || useStore.getState().agentBusy) return;
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+
+      const issue = matchIssueReport(text);
+      if (issue) {
+        const result = await st.exec("report_issue", {
+          ...issue, source, activeShell: activeShell(), selectedTrackId: st.selectedTrackId,
+          selectedClipIds: Array.from(st.selection), runtimeModelIdentity: brainRuntime?.model ?? null,
+        }) as { ok: boolean; data?: { issueId?: string }; error?: string };
+        if (!result.ok) throw new Error(result.error ?? "issue report failed");
+        const reply = `logged ${result.data?.issueId ?? "that issue"} locally`;
+        setSay(reply); pushAgentUtter("DONE", reply); setInboxOpen(true);
+        return;
+      }
 
       // Skill Foundry Slice B, Task 7 — a continuation ALWAYS resumes before any new
       // matcher gets a look at the utterance: not section rework, not the fast path
@@ -331,6 +357,7 @@ export function AgentComposer() {
       setAgentBusy(false);
     }
   };
+  runRef.current = (text, source) => { void run(text, source); };
   const submit = () => void run(input.trim());
 
   // Build the speech controller lazily on first press (after a user gesture, which
@@ -342,7 +369,7 @@ export function AgentComposer() {
         onStart: () => { setListening(true); setAgentListening(true); setInput(""); },
         onInterim: (t) => setInput(t),
         onStop: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); },
-        onFinal: (t) => void run(t),
+        onFinal: (t) => void run(t, "push_to_talk"),
         onError: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); setSay("didn't catch that"); },
       });
     }
@@ -354,7 +381,13 @@ export function AgentComposer() {
 
   return (
     <div className="agent-composer">
+      {inboxOpen && <IssueInbox onClose={() => setInboxOpen(false)} />}
+      {brainRuntime && <div className={`agent-runtime ${brainRuntime.state}`} aria-live="polite"
+        title={brainRuntime.error || brainRuntime.model || "Local brain"}>
+        {brainRuntime.state}{brainRuntime.model ? ` · ${brainRuntime.model.split("/").pop()}` : ""}
+      </div>}
       {say && <div className="agent-say" role="status" aria-live="polite">{say}</div>}
+      <button className="issue-inbox-button" onClick={() => setInboxOpen((v) => !v)}>Issues</button>
       <div className={`agent-input${listening ? " listening" : ""}`}>
         <button
           className={`agent-mic${listening ? " on" : ""}`}

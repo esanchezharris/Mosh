@@ -70,6 +70,18 @@ def should_release(available: float | None, training_active: bool) -> bool:
     return available < (RELEASE_BELOW_TRAINING if training_active else RELEASE_BELOW_IDLE)
 
 
+def should_release_with_idle_override(available: float | None, training_active: bool,
+                                      idle_override: float | None) -> bool:
+    """Per-render owner policy, including when reconnecting to an older service.
+
+    Training keeps the conservative training threshold. The override is bounded by
+    the submit handler and applies only to the idle/unloaded-between-renders lane.
+    """
+    if training_active or idle_override is None:
+        return should_release(available, training_active)
+    return available is not None and available < max(0.0, min(1.0, idle_override))
+
+
 def explain(available: float | None, training_active: bool) -> str:
     """One line for the service log — a released model is otherwise an
     unexplained 3.6 s on the next take."""
