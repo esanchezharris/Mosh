@@ -217,6 +217,7 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
     int index = (int) args.getProperty ("index", -1);
     if (index < 0) index = track->pluginList.getPlugins().size();   // append
     track->pluginList.insertPlugin (plugin, index, nullptr);
+    synchronisePlaybackGraph();
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
@@ -668,6 +669,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
     if (swapOut != nullptr) index = swapIndex;   // the swap fills the slot the old one left
     if (index < 0) index = track->pluginList.getPlugins().size();   // append (−1 does not append)
     track->pluginList.insertPlugin (plugin, index, nullptr);
+    synchronisePlaybackGraph();
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
@@ -702,6 +704,7 @@ juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
     pluginHost.closeEditor (*plugin);
     beginTxn ("remove_plugin");
     plugin->deleteFromParent();
+    synchronisePlaybackGraph();
     logLine ("remove_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3
@@ -721,6 +724,7 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     beginTxn ("reorder_plugin");
     p->removeFromParent();
     track->pluginList.insertPlugin (p, to, nullptr);
+    synchronisePlaybackGraph();
     logLine ("reorder_plugin", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3
@@ -1727,7 +1731,10 @@ void MoshOps::ensureDefaultInstrument (te::AudioTrack& track, bool drum)
     }
 
     if (auto plugin = eng.edit().getPluginCache().createNewPlugin ("4osc", {}))
+    {
         track.pluginList.insertPlugin (plugin, 0, nullptr);   // front of chain (instrument)
+        synchronisePlaybackGraph();
+    }
 }
 
 } // namespace mosh

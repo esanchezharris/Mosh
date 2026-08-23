@@ -39,6 +39,21 @@ namespace
 {
     constexpr double kMinMidiNoteBeats = 0.0625;
 
+    juce::String pluginRackTopology (te::Edit& edit)
+    {
+        juce::String topology;
+        for (auto* track : te::getAudioTracks (edit))
+        {
+            if (track == nullptr) continue;
+            topology << track->itemID.toString() << ":";
+            for (auto* plugin : track->pluginList.getPlugins())
+                if (plugin != nullptr)
+                    topology << plugin->itemID.toString() << "@" << plugin->getName() << ";";
+            topology << "|";
+        }
+        return topology;
+    }
+
     // Make `winner` the authoritative same-pitch interval. Existing notes are
     // shortened, split, or removed inside the caller's already-open transaction.
     // `futureWinners` are excluded so a batched set_note can apply winner order
@@ -292,6 +307,20 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     // Live-note audition: we ARE the wasted-message listener, registered for our whole
     // lifetime and read around each individual injection (see MoshOps.Live.cpp).
     eng.edit().addWastedMidiMessagesListener (this);
+
+    // REC-002 startup ordering: publishing the virtual keyboard from the first 30 Hz
+    // timer tick schedules a MIDI-device rescan after Play may already have started.
+    // Tracktion rebuilds every active graph when that scan lands, which can replace the
+    // running playhead while leaving TransportState latched at `playing`. Publish and
+    // settle this one install-local device before accepting any MoshOps command.
+    if (eng.audioReady())
+    {
+        ensureKeyboardInputDevice();
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (50);
+        eng.engine().getDeviceManager().dispatchPendingUpdates();
+        eng.edit().dispatchPendingUpdatesSynchronously();
+    }
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 
     // MP-001 — the live session. Its background poll loop calls back here (on the
@@ -998,12 +1027,15 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope,
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
+    const auto rackBefore = pluginRackTopology (eng.edit());
     const bool did = undoManager().undo();
     // CAP-PRJ-005 — walk the mirror's cursor with the UndoManager's. Doing it HERE
     // (before logLine's syncUndoMirror) is what tells the mirror this was a move along
     // the existing timeline rather than a new transaction; see syncUndoMirror().
     if (did && txnCursor_ > 0) --txnCursor_;
     if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
+    if (did && rackBefore != pluginRackTopology (eng.edit()))
+        synchronisePlaybackGraph();
     logLine ("undo", args, did, did ? String() : String ("nothing to undo"), false);
     emitSnapshotInvalidated();
     return okResult ("undo", var (did));
@@ -1011,9 +1043,12 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
+    const auto rackBefore = pluginRackTopology (eng.edit());
     const bool did = undoManager().redo();
     if (did && txnCursor_ < (int) txnIds_.size()) ++txnCursor_;   // CAP-PRJ-005 (see cmdUndo)
     if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
+    if (did && rackBefore != pluginRackTopology (eng.edit()))
+        synchronisePlaybackGraph();
     logLine ("redo", args, did, did ? String() : String ("nothing to redo"), false);
     emitSnapshotInvalidated();
     return okResult ("redo", var (did));
@@ -1777,6 +1812,10 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     // surprised users with phantom notes. Callers wanting seed content pass `notes`.)
 
     ensureTrackMeter (*track);   // METER-001 — after the instrument load above so the tap stays post-fader
+
+    // The default-instrument path can allocate the first live graph before this
+    // clip exists. Rebuild once the clip and note sequence are complete.
+    synchronisePlaybackGraph();
 
     auto* data = new DynamicObject();
     data->setProperty ("clipId", clip->itemID.toString());
@@ -2924,6 +2963,20 @@ te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
     return track.get();
 }
 
+void MoshOps::synchronisePlaybackGraph()
+{
+    // Tracktion does not consistently schedule a playback restart for every plugin
+    // list mutation. This is strictly a live-device repair: forcing a synchronous
+    // playback rebuild in a headless edit walks Tracktion state that has no playback
+    // context and triggers JUCE assertions during otherwise-valid undo/redo work.
+    if (! eng.audioReady())
+        return;
+
+    eng.ensurePlaybackContext();
+    eng.edit().restartPlayback();
+    eng.edit().dispatchPendingUpdatesSynchronously();
+}
+
 te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
 {
     if (auto* existing = track.getVolumePlugin())
@@ -3178,6 +3231,7 @@ juce::var MoshOps::snapshot()
     // snapshot small).
     auto& dm = eng.engine().getDeviceManager();
     session->setProperty ("audioEnabled", eng.hasAudio());
+    session->setProperty ("audioReady", eng.audioReady());
     session->setProperty ("bitDepth", dm.getBitDepth());
     session->setProperty ("bufferSize", dm.getBlockSize());
     session->setProperty ("outputLatencyMs", dm.getOutputLatencySeconds() * 1000.0);

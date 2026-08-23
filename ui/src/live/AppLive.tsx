@@ -125,7 +125,7 @@ export function AppLive() {
         {snapshot && <ControlBar snapshot={snapshot} />}
         {displayError && <div className="live-errbar" role="alert" data-testid="live-error">⚠ {displayError}</div>}
         <RecoveryNotice />
-        <AudioDeviceNotice />
+        <AudioDeviceNotice onAudioSettings={() => useLive.getState().setSettingsOpen(true)} />
         {snapshot && <OverviewStrip snapshot={snapshot} />}
 
         <div className="live-body" style={{ gridTemplateColumns: `${browserW}px minmax(0, 1fr)` }}>

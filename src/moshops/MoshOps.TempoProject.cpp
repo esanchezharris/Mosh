@@ -56,6 +56,17 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
                         || (action == "continue" && transport.isPlaying());
     const bool wantsContinueStart = action == "continue" && ! transport.isPlaying();
 
+    // Interactive play/record must never report success when the device disappeared
+    // or failed to open. Intentional headless sessions keep their historic no-op
+    // posture because audioRequested() is false there.
+    const bool wantsInteractiveStart = wantsPlay || wantsContinueStart || action == "record";
+    if (wantsInteractiveStart && eng.audioRequested() && ! eng.audioReady())
+    {
+        const auto reason = eng.audioReadinessError();
+        logLine ("set_transport", args, false, reason, false);
+        return errResult ("set_transport", reason);
+    }
+
     if (wantsPlay || action == "record")
     {
         insertMarkerSec = args.hasProperty ("position") ? (double) args.getProperty ("position", 0.0) : posAtEntry;
@@ -87,7 +98,7 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     if (! finalizedRecording
         && (action == "play" || (action == "toggle" && ! transport.isPlaying())
             || (action == "continue" && ! transport.isPlaying()))
-        && eng.hasAudio())
+        && eng.audioReady())
     {
         eng.ensurePlaybackContext();
         transport.play (false);
@@ -101,7 +112,7 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
             transport.setPosition (tracktion::TimePosition::fromSeconds (insertMarkerSec));
         playStartedViaContinue = false;
     }
-    else if (! finalizedRecording && action == "record" && eng.hasAudio())
+    else if (! finalizedRecording && action == "record" && eng.audioReady())
     {
         // G2b — re-sync the live Edit's pre-roll to the stored project preference
         // right before every record start, so a save/reload that swapped in a
