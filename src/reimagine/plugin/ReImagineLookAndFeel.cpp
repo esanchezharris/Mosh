@@ -97,17 +97,18 @@ void ReImagineLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, in
     const auto cy = static_cast<float> (y + height / 2);
     const auto left = static_cast<float> (x + 5);
     const auto right = static_cast<float> (x + width - 5);
-    g.setColour (border());
+    const auto enabled = slider.isEnabled();
+    g.setColour (enabled ? border() : border().withAlpha (0.45f));
     g.fillRoundedRectangle (left, cy - 2.0f, right - left, 4.0f, 2.0f);
-    g.setColour (accent());
+    g.setColour (enabled ? accent() : muted().withAlpha (0.35f));
     g.fillRoundedRectangle (left, cy - 2.0f, juce::jmax (0.0f, sliderPos - left), 4.0f, 2.0f);
-    g.setColour (slider.isEnabled() ? text() : muted());
+    g.setColour (enabled ? text() : muted().withAlpha (0.65f));
     g.fillEllipse (sliderPos - 6.0f, cy - 6.0f, 12.0f, 12.0f);
 }
 
 void ReImagineLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
                                               float sliderPos, float startAngle, float endAngle,
-                                              juce::Slider&)
+                                              juce::Slider& slider)
 {
     auto bounds = juce::Rectangle<float> (static_cast<float> (x), static_cast<float> (y),
                                            static_cast<float> (width), static_cast<float> (height)).reduced (8.0f);
@@ -116,11 +117,12 @@ void ReImagineLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, in
     const auto angle = startAngle + sliderPos * (endAngle - startAngle);
     juce::Path track;
     track.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, startAngle, endAngle, true);
-    g.setColour (border());
+    const auto enabled = slider.isEnabled();
+    g.setColour (enabled ? border() : border().withAlpha (0.45f));
     g.strokePath (track, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved));
     juce::Path value;
     value.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, startAngle, angle, true);
-    g.setColour (accent());
+    g.setColour (enabled ? accent() : muted().withAlpha (0.35f));
     g.strokePath (value, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved));
 }
 

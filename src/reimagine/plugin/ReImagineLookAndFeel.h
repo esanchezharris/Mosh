@@ -33,10 +33,13 @@ public:
 
     static juce::Colour background() { return juce::Colour::fromRGB (15, 17, 22); }
     static juce::Colour panel() { return juce::Colour::fromRGB (25, 28, 36); }
+    static juce::Colour panelRaised() { return juce::Colour::fromRGB (29, 33, 43); }
+    static juce::Colour panelInset() { return juce::Colour::fromRGB (21, 24, 31); }
     static juce::Colour field() { return juce::Colour::fromRGB (34, 38, 49); }
     static juce::Colour border() { return juce::Colour::fromRGB (57, 63, 79); }
     static juce::Colour text() { return juce::Colour::fromRGB (241, 243, 248); }
     static juce::Colour muted() { return juce::Colour::fromRGB (160, 168, 185); }
     static juce::Colour accent() { return juce::Colour::fromRGB (137, 106, 255); }
+    static juce::Colour success() { return juce::Colour::fromRGB (91, 211, 154); }
 };
 }
