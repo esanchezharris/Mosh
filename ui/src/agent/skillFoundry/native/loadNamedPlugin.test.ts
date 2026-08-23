@@ -188,6 +188,12 @@ describe("pluginQueryV1 / parsePluginCatalogV1", () => {
     expect(pluginQueryV1("mute the drums")).toBeNull();
   });
 
+  it("does not steal clip and note creation requests from the producer brain", () => {
+    expect(pluginQueryV1("add a 3 second 220 hertz test tone clip to the selected Audio track")).toBeNull();
+    expect(pluginQueryV1("add a MIDI clip on the selected track")).toBeNull();
+    expect(pluginQueryV1("add four notes to this clip")).toBeNull();
+  });
+
   it("rejects a catalog over the 64-entry cap", () => {
     const oversized = { plugins: Array.from({ length: 65 }, (_, i) => plugin({ id: `p${i}` })) };
     expect(parsePluginCatalogV1(oversized)).toBeNull();
