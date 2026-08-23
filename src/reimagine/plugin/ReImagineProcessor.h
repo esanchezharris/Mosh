@@ -56,6 +56,8 @@ public:
     float progress() const noexcept { return renderProgress.load (std::memory_order_acquire); }
     bool transferActive() const noexcept;
     bool hasPendingOverlap() const;
+    void refreshLoraCatalog();
+    LoraCatalogSnapshot loraCatalogSnapshot() const;
 
     juce::AudioProcessorValueTreeState parameters;
 
@@ -110,14 +112,16 @@ private:
     std::atomic<int> captureAbortEvent { 0 };
     std::atomic<int> renderRequested { 0 };
     std::atomic<int> loadRequested { 0 };
+    std::atomic<int> loraCatalogRequested { 0 };
     std::atomic<int> compareDry { 0 };
     std::atomic<float> renderProgress { 0.0f };
     std::atomic<uint64_t> nextRevision { 1 };
     juce::WaitableEvent workerEvent;
     AssetStore assets;
     SharedServiceClient service;
+    LoraCatalogSnapshot loraCatalog;
     juce::String currentJobId;
-    juce::String uiStatus { "Ready — arm Transfer while stopped" };
+    juce::String uiStatus { "Ready - arm Transfer while stopped" };
     std::atomic<double> currentSampleRate { 48000.0 };
     std::atomic<int> currentChannels { 2 };
     std::atomic<float>* mixValue = nullptr;

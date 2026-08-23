@@ -229,12 +229,12 @@ void ReImagineProcessor::toggleTransfer()
         return;
     }
     if (finalizationPending.load (std::memory_order_acquire) != 0)
-        return setStatus ("Finishing the previous Transfer…");
+        return setStatus ("Finishing the previous Transfer...");
     if (lastHostPlaying.load (std::memory_order_acquire) != 0)
         return setStatus ("Stop Live before arming Transfer");
     armTransferRequested.store (1, std::memory_order_release);
     transferStateMirror.store (static_cast<int> (CaptureState::armed), std::memory_order_release);
-    setStatus ("Transfer armed — press Play in Live");
+    setStatus ("Transfer armed - press Play in Live");
 }
 
 void ReImagineProcessor::replacePendingOverlap()
@@ -316,7 +316,7 @@ void ReImagineProcessor::resetSelection()
     const juce::ScopedLock lock (stateLock);
     if (auto* region = selectedRegionUnsafe())
         region->selectedTakeId.clear();
-    uiStatus = "Dry — take history preserved";
+    uiStatus = "Dry - take history preserved";
     loadRequested.store (1, std::memory_order_release);
     workerEvent.signal();
 }
@@ -408,7 +408,7 @@ void ReImagineProcessor::setStateInformation (const void* data, int size)
         regionCollection = {};
         for (const auto& region : pluginState.regions)
             regionCollection.offer (region);
-        uiStatus = "Set restored — loading selected take";
+        uiStatus = "Set restored - loading selected take";
     }
     if (auto* mixParameter = parameters.getParameter ("mix"))
         mixParameter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, restoredMix));
@@ -436,6 +436,24 @@ void ReImagineProcessor::setStatus (juce::String text)
 {
     const juce::ScopedLock lock (stateLock);
     uiStatus = std::move (text);
+}
+
+void ReImagineProcessor::refreshLoraCatalog()
+{
+    {
+        const juce::ScopedLock lock (stateLock);
+        loraCatalog.status = LoraCatalogStatus::loading;
+        loraCatalog.error.clear();
+        ++loraCatalog.revision;
+    }
+    loraCatalogRequested.store (1, std::memory_order_release);
+    workerEvent.signal();
+}
+
+LoraCatalogSnapshot ReImagineProcessor::loraCatalogSnapshot() const
+{
+    const juce::ScopedLock lock (stateLock);
+    return loraCatalog;
 }
 
 void ReImagineProcessor::finalizeCapture()
@@ -480,12 +498,12 @@ void ReImagineProcessor::finalizeCapture()
     const auto offer = regionCollection.offer (region);
     if (offer == RegionOffer::needsOverlapDecision)
     {
-        uiStatus = "Overlap detected — choose Replace or Discard";
+        uiStatus = "Overlap detected - choose Replace or Discard";
         return;
     }
     pluginState.regions = regionCollection.regions();
     pluginState.selectedRegionId = region.id;
-    uiStatus = "Transfer ready — edit the rack to Re-Imagine";
+    uiStatus = "Transfer ready - edit the rack to Re-Imagine";
 }
 
 void ReImagineProcessor::performRender (const RenderRequest& request)
@@ -507,7 +525,7 @@ void ReImagineProcessor::performRender (const RenderRequest& request)
             return;
         }
         region = *target;
-        uiStatus = "Starting local SA3…";
+        uiStatus = "Starting local SA3...";
     }
     juce::String error;
     if (! service.ensureRunning (error))
@@ -521,7 +539,7 @@ void ReImagineProcessor::performRender (const RenderRequest& request)
     const auto input = assets.sourceFile (region.sourceHash);
     if (! assets.verify (input, region.sourceHash))
     {
-        setStatus ("Source asset missing or hash mismatch — Relink or Re-transfer");
+        setStatus ("Source asset missing or hash mismatch - Relink or Re-transfer");
         const juce::ScopedLock lock (stateLock);
         for (auto& candidate : pluginState.regions)
             if (candidate.id == region.id)
@@ -601,7 +619,7 @@ void ReImagineProcessor::performRender (const RenderRequest& request)
             }
         }
         else if (! completion.startRequest)
-            uiStatus = error.isNotEmpty() ? error : "Render failed — previous take remains audible";
+            uiStatus = error.isNotEmpty() ? error : "Render failed - previous take remains audible";
     }
     renderProgress.store (0.0f, std::memory_order_release);
     {
@@ -762,7 +780,7 @@ void ReImagineProcessor::run()
                 }
             }
             if (reported)
-                uiStatus = "Tempo map changed — region is stale; Re-transfer required";
+                uiStatus = "Tempo map changed - region is stale; Re-transfer required";
         }
         if (finalizeRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
@@ -771,6 +789,23 @@ void ReImagineProcessor::run()
         }
         if (loadRequested.exchange (0, std::memory_order_acq_rel) != 0)
             loadSelectedTake();
+        if (loraCatalogRequested.exchange (0, std::memory_order_acq_rel) != 0)
+        {
+            juce::String error;
+            juce::var response;
+            if (service.ensureRunning (error))
+                response = service.loras();
+            const auto items = loraCatalogFromResponse (response);
+            const auto ok = static_cast<bool> (response.getProperty ("ok", false));
+            const juce::ScopedLock lock (stateLock);
+            loraCatalog.items = items;
+            loraCatalog.status = ok ? LoraCatalogStatus::ready : LoraCatalogStatus::error;
+            loraCatalog.error = ok ? juce::String()
+                                   : response.getProperty ("error", error).toString();
+            if (loraCatalog.error.isEmpty() && ! ok)
+                loraCatalog.error = "Could not load LoRA library";
+            ++loraCatalog.revision;
+        }
         if (renderRequested.exchange (0, std::memory_order_acq_rel) != 0)
         {
             std::optional<RenderRequest> request;
