@@ -54,10 +54,10 @@ export function renderControllerStatus(current: ControllerView, busy: boolean): 
   }
   const status = element("toast");
   if (current.mode === "ableton" && current.blockedReason !== undefined) {
-    status.textContent = current.blockedReason;
-    status.dataset.persistent = "true";
+    if (status.textContent !== current.blockedReason) status.textContent = current.blockedReason;
+    if (status.dataset.persistent !== "true") status.dataset.persistent = "true";
   } else if (status.dataset.persistent === "true") {
-    status.textContent = "";
+    if (status.textContent !== "") status.textContent = "";
     delete status.dataset.persistent;
   }
 }
@@ -67,18 +67,30 @@ export function renderNavigator(
   placePlayhead: (playhead: HTMLElement, fallbackFraction: number) => void,
 ): void {
   const bar = element("nav");
+  const descriptions = element("navRegions");
   const rects = nav.regionRects(current.regions.map((region) => ({ s: region.start, e: region.end })), current.length);
   const regionNodes = current.regions.map((region, index) => {
     const node = document.createElement("div");
     const rect = rects[index];
     node.className = `region region-${region.kind}`;
     node.dataset.kind = region.kind;
-    node.setAttribute("role", "img");
-    node.setAttribute("aria-label", regionLabel(region, current.unit));
+    node.setAttribute("aria-hidden", "true");
     node.style.left = `${(rect?.left ?? 0) * 100}%`;
     node.style.width = `${(rect?.width ?? 0) * 100}%`;
     return node;
   });
+  const descriptionNodes = current.regions.map((region) => {
+    const node = document.createElement("span");
+    node.dataset.kind = region.kind;
+    node.textContent = regionLabel(region, current.unit);
+    return node;
+  });
+  const separatedDescriptions: Node[] = [];
+  descriptionNodes.forEach((node, index) => {
+    separatedDescriptions.push(node);
+    if (index < descriptionNodes.length - 1) separatedDescriptions.push(document.createTextNode("; "));
+  });
+  descriptions.replaceChildren(...separatedDescriptions);
   const tickNodes = tickFractions(current).map((fraction) => {
     const node = document.createElement("div");
     node.className = "tick";
@@ -94,6 +106,8 @@ export function renderNavigator(
   const locked = reason === null ? "" : `; seek locked ${reason === "recording" ? "while recording" : `— ${reason}`}`;
   bar.setAttribute("role", "slider");
   bar.setAttribute("aria-label", "Arrangement navigator");
+  bar.setAttribute("aria-describedby", "navRegions");
+  bar.tabIndex = 0;
   bar.setAttribute("aria-valuemin", "0");
   bar.setAttribute("aria-valuemax", String(current.length));
   bar.setAttribute("aria-valuenow", String(current.position));

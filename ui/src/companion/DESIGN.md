@@ -63,7 +63,8 @@ navigator must stay fully visible at 375x812, 768x1024, and 1280x900.
 - **Variants**: Mosh generic regions; Ableton pending and archive regions.
 - **States**: enabled, recording-disabled, blocked-disabled.
 - **Accessibility**: `role="slider"`, an explicit label, beat/second value text,
-  typed region labels, and visible disabled treatment.
+  typed region descriptions in an external `aria-describedby` sibling, visible
+  disabled treatment, and Arrow/Home/End keyboard seeking while enabled.
 
 ### Persistent status message
 - **Structure**: live status line below the controller.
@@ -74,8 +75,9 @@ navigator must stay fully visible at 375x812, 768x1024, and 1280x900.
 
 Pad press uses the existing 140-150ms transform/filter response; edit reordering
 uses the existing drag controller. The navigator playhead follows pointer input
-immediately. State styling is static. Reduced-motion disables nonessential pad
-and edit-button transitions.
+immediately; ArrowLeft/ArrowRight step one beat or second, while Home/End seek to
+the timeline boundaries. State styling is static. Reduced-motion disables
+nonessential pad and edit-button transitions.
 
 ## 7. Depth & Surface
 
@@ -87,7 +89,8 @@ existing recessed track and must not add floating-card depth.
 
 Target WCAG 2.2 AA for state text and controls, with visible focus and no
 color-only state distinctions. Pointer-disabled navigator state must also expose
-ARIA state and plain-language text.
+ARIA state and plain-language text. The disabled slider remains focusable so its
+lock reason is discoverable, but pointer and keyboard seek commands are ignored.
 
 | Item | Location | Why accepted | Owner / Exit |
 |---|---|---|---|

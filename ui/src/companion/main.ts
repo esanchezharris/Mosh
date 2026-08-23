@@ -5,6 +5,7 @@ import * as layoutModel from "./layout";
 import { CompanionNet } from "./net";
 import * as nav from "./navMath";
 import { NavigatorDragController } from "./navigatorDrag";
+import { NavigatorKeyboardController } from "./navigatorKeyboard";
 import { buttonLabel, mountPadTiles } from "./padView";
 import { TileDragController, type EditableTileLayout } from "./tileDrag";
 import type { Button } from "./types";
@@ -172,7 +173,7 @@ async function refresh(): Promise<void> {
 function buildDom(): void {
   element("app").innerHTML = `
     <div id="top"><div id="banner"><div id="stateTxt">DISCONNECTED</div><div id="sub">connecting…</div></div><button id="editBtn" title="arrange" aria-label="Arrange tiles"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16-.75 4.75L8 20l11-11-4-4L4 16Zm10-10 4 4m-9 9-4-4"/></svg></button></div>
-    <div id="navWrap"><div id="nav" aria-disabled="true"><div id="playhead"></div></div></div>
+    <div id="navWrap"><div id="nav" aria-disabled="true"><div id="playhead"></div></div><div id="navRegions" class="sr-only"></div></div>
     <div id="pad"></div>
     <div id="editbar"><button id="navPosBtn">nav: bottom</button><span class="hint">drag tiles to rearrange</span><button id="resetBtn">reset</button><button id="doneBtn">done</button></div>
     <div id="toast" role="status" aria-live="polite"></div>`;
@@ -198,6 +199,10 @@ function buildDom(): void {
     },
   });
   navigatorDrag.attach();
+  new NavigatorKeyboardController(bar, {
+    current: () => view,
+    seek: (fraction) => seekTo(fraction, true),
+  }).attach();
 }
 
 function boot(): void {
