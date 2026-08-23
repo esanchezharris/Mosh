@@ -244,6 +244,22 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   tests pass 9/9; both plists pass `plutil -lint`, both shell files pass
   `zsh -n`, and the runner's live verify-only path passed all registered hashes.
 
+- **r8-4b global-12,300 tail launch, 2026-08-22 — RUNNING, pre-checkpoint:**
+  commit `08a5512c` froze the registration before launch. Launchd jobs
+  `com.mosh.r8-4b-cont12300` and `com.mosh.r8-4b-cont12300-guard` each show one
+  run, parent PID 1, and no keepalive property. The model loaded the registered
+  global-12,300 checkpoint; initial validation was finite at `0.317`, and local
+  iter 10/global iter 12,310 reported finite train loss `0.108`, LR `1e-5`,
+  0.066 iter/s, and 6.637 GB peak memory. Machine headroom remained healthy at
+  78% free memory and 674 MiB used swap. This is positive launch evidence, not
+  final health acceptance: the completion monitor must first verify the new
+  local-100/global-12,400 numbered checkpoint. The global-offset dashboard is
+  restored at `http://127.0.0.1:8788`, and heartbeat
+  `monitor-r8-4b-exact-tail` owns the checkpoint/completion handoff. The r5 30B
+  server was live on port 8091 immediately before launch, but its process later
+  disappeared without any Codex stop/kill action and without a new local log;
+  it was not restarted so this tail run does not silently add a competing model.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
