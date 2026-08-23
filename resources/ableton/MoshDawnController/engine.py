@@ -9,8 +9,8 @@ from .model import (
     Request, Response, Seek, SessionState, Stop,
 )
 from .topology import (
-    clip_snapshot, record_target, track_index, track_present, track_snapshot,
-    valid_archives,
+    pending_fingerprint, record_target, resolve_pending, session_snapshot,
+    track_index, track_present,
 )
 
 
@@ -48,24 +48,14 @@ class DawnEngine:
         return response
 
     def snapshot(self) -> Dict[str, JsonValue]:
-        source = self.state.pending_source or self.state.active_source
-        return {
-            "revision": self.state.revision,
-            "connection": self.state.connection,
-            "transport": self.state.transport,
-            "editMarkerBeats": self.state.edit_marker,
-            "activeSource": track_snapshot(source),
-            "passStartBeats": self.state.pass_start,
-            "savedStopBeats": self.state.saved_stop,
-            "pendingClip": clip_snapshot(self.state.pending_clip),
-            "archiveClips": [clip_snapshot(clip) for clip in valid_archives(self.state.song, self.state.archive_clips)],
-            "blockedReason": self.state.blocked_reason,
-        }
+        return session_snapshot(self.state)
 
     def set_connection(self, connected: bool) -> None:
         self.state.connection = "connected" if connected else "disconnected"
 
     def _put(self, song: LiveSong, action: Action) -> Optional[str]:
+        if self.state.ownership_uncertain:
+            return "pending_ownership_uncertain"
         if self.state.transport == "recording":
             return "already_recording"
         if self.state.pending_clip is not None:
@@ -73,10 +63,14 @@ class DawnEngine:
         return self._start_recording(song)
 
     def _keep(self, song: LiveSong, action: Action) -> Optional[str]:
+        if self.state.ownership_uncertain:
+            return "pending_ownership_uncertain"
         end_error = self._end_active_pass(song)
         return end_error if end_error is not None else self._keep_pending(song)
 
     def _again(self, song: LiveSong, action: Action) -> Optional[str]:
+        if self.state.ownership_uncertain:
+            return "pending_ownership_uncertain"
         end_error = self._end_active_pass(song)
         if end_error is not None:
             return end_error
@@ -133,6 +127,7 @@ class DawnEngine:
         self.state.active_source = target
         self.state.pass_start = self.state.edit_marker
         self.state.clip_inventory = tuple(id(clip) for clip in target.arrangement_clips)
+        self.state.ownership_uncertain = False
         song.record_mode = True
         song.start_playing()
         self.state.transport = "recording"
@@ -140,6 +135,8 @@ class DawnEngine:
 
     def _end_active_pass(self, song: LiveSong) -> Optional[str]:
         if self.state.transport != "recording":
+            if self.state.ownership_uncertain:
+                return "pending_ownership_uncertain"
             return None if self.state.pending_clip is not None else "no_active_take"
         source = self.state.active_source
         stop = float(song.current_song_time)
@@ -152,12 +149,15 @@ class DawnEngine:
             song.current_song_time = self.state.pass_start
         self.state.active_source = None
         if source is None or not track_present(song, source):
+            self._lose_pending_ownership()
             return "source_track_invalidated"
         new_clips = [clip for clip in source.arrangement_clips if id(clip) not in self.state.clip_inventory]
         if len(new_clips) != 1 or not new_clips[0].is_audio_clip:
+            self._lose_pending_ownership()
             return "ambiguous_recorded_clip"
         self.state.pending_source = source
         self.state.pending_clip = new_clips[0]
+        self.state.ownership_uncertain = False
         return None
 
     def _keep_pending(self, song: LiveSong) -> Optional[str]:
@@ -171,6 +171,8 @@ class DawnEngine:
         clip = self.state.pending_clip
         source_index = track_index(song, source)
         destination, needs_clone = self._destination(song, next_target)
+        fingerprint = pending_fingerprint(song, source, clip)
+        archive_count = len(self.state.archive_clips)
         prior_marker = self.state.edit_marker
         song.begin_undo_step()
         try:
@@ -180,6 +182,9 @@ class DawnEngine:
                 destination.name = source.name
                 for copied_clip in list(destination.arrangement_clips):
                     destination.delete_clip(copied_clip)
+                for clip_slot in destination.clip_slots:
+                    if clip_slot.has_clip:
+                        clip_slot.delete_clip()
                 destination.arm = False
             before = tuple(id(existing) for existing in destination.arrangement_clips)
             destination.duplicate_clip_to_arrangement(clip, clip.start_time)
@@ -187,7 +192,6 @@ class DawnEngine:
             if len(created) != 1:
                 raise KeepMutationError("ambiguous destination clip")
             accepted = created[0]
-            destination.arm = False
             source.delete_clip(clip)
             self.state.archive_clips.append(accepted)
             self.state.pending_clip = None
@@ -202,10 +206,17 @@ class DawnEngine:
             song.record_mode = False
             song.stop_playing()
             self.state.transport = "stopped"
-            self.state.pending_clip = None
-            self.state.pending_source = None
+            self.state.active_source = None
+            self.state.clip_inventory = ()
+            del self.state.archive_clips[archive_count:]
             self.state.edit_marker = prior_marker
             song.current_song_time = prior_marker
+            recovered = resolve_pending(song, fingerprint)
+            if recovered is None:
+                self._lose_pending_ownership()
+                return "keep_compensation_unresolved"
+            self.state.pending_source, self.state.pending_clip = recovered
+            self.state.ownership_uncertain = False
             return "keep_compensated"
         song.end_undo_step()
         return None
@@ -218,12 +229,24 @@ class DawnEngine:
         song.current_song_time = self.state.edit_marker
 
     def _pending_error(self, song: LiveSong) -> Optional[str]:
+        if self.state.ownership_uncertain:
+            return "pending_ownership_uncertain"
         source = self.state.pending_source
         clip = self.state.pending_clip
         if source is None or not track_present(song, source):
+            self._lose_pending_ownership()
             return "source_track_invalidated"
         occurrences = sum(1 for item in source.arrangement_clips if item is clip)
-        return None if clip is not None and occurrences == 1 else "pending_clip_invalidated"
+        if clip is None or occurrences != 1:
+            self._lose_pending_ownership()
+            return "pending_clip_invalidated"
+        return None
+
+    def _lose_pending_ownership(self) -> None:
+        self.state.pending_source = None
+        self.state.pending_clip = None
+        self.state.active_source = None
+        self.state.ownership_uncertain = True
 
     def _destination(self, song: LiveSong, next_target: LiveTrack) -> Tuple[LiveTrack, bool]:
         source_index = track_index(song, self.state.pending_source)
@@ -243,6 +266,4 @@ class DawnEngine:
         return response
 
     def _remember(self, response: Response) -> None:
-        if len(self._results) >= 256:
-            self._results.pop(next(iter(self._results)))
         self._results[response.request_id] = response

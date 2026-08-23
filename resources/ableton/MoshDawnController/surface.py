@@ -46,7 +46,7 @@ class MoshDawnController(ControlSurface):
         for request in requests:
             response = self._engine.handle(self.song(), request)
             self._client.send_response(response)
-            self._client.send_snapshot(response.state)
+            self._client.send_snapshot(self._engine.snapshot())
 
     def disconnect(self) -> None:
         self._closed = True
