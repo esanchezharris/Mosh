@@ -428,13 +428,32 @@ juce::var MoshOps::cmdDisableTrackMeter (const juce::var& args)
 
 juce::var MoshOps::cmdEnableAllMeters (const juce::var& args)
 {
-    beginTxn ("enable_all_meters");
+    // The UI calls this once on every launch.  Most current projects are already
+    // metered, so opening a transaction unconditionally marks the Edit dirty even
+    // when ensureTrackMeter has nothing to do.  The GUI autosave would then rewrite
+    // an otherwise untouched owner project 30 seconds after Finder launch.  Inspect
+    // first and open a mutation transaction only when a legacy track genuinely needs
+    // either hidden runtime plugin.
+    bool changed = false;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && (findTrackMeter (*t) == nullptr || findTrackMuteGate (*t) == nullptr))
+        {
+            changed = true;
+            break;
+        }
+
+    if (changed)
+        beginTxn ("enable_all_meters");
+
     int n = 0;
     for (auto* t : te::getAudioTracks (eng.edit()))
         if (t != nullptr && ensureTrackMeter (*t) != nullptr) ++n;
-    logLine ("enable_all_meters", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject(); data->setProperty ("count", n);
+    logLine ("enable_all_meters", args, true, {}, changed);
+    if (changed)
+        emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("count", n);
+    data->setProperty ("changed", changed);
     return okResult ("enable_all_meters", var (data));
 }
 
