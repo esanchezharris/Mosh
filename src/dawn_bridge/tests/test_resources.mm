@@ -154,3 +154,30 @@ TEST_CASE ("controller copy and backup failures leave working install untouched"
         REQUIRE_FALSE([item hasPrefix:@".MoshDawnController-"]);
     [files removeItemAtPath:root error:nil];
 }
+
+TEST_CASE ("controller activation failure never removes working destination", "[dawn][resources]")
+{
+    NSFileManager* files=NSFileManager.defaultManager;
+    NSString* root=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString* resources=[root stringByAppendingPathComponent:@"Resources"], *source=bundledControllerPath(resources);
+    NSString* library=[root stringByAppendingPathComponent:@"User Library"], *destination=controllerInstallPath(library);
+    [files createDirectoryAtPath:source withIntermediateDirectories:YES attributes:nil error:nil];
+    [files createDirectoryAtPath:destination withIntermediateDirectories:YES attributes:nil error:nil];
+    [@"new" writeToFile:[source stringByAppendingPathComponent:@"version"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [@"old" writeToFile:[destination stringByAppendingPathComponent:@"version"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    bool observedMissing=false;
+    InstallHooks hooks {
+      [files](NSString* a,NSString* b,NSError** e){return [files copyItemAtPath:a toPath:b error:e];},
+      [files,destination,&observedMissing](NSString* a,NSString* b,NSError** e){
+        if (![files fileExistsAtPath:destination]) observedMissing=true;
+        if ([b isEqual:destination]) { if(e)*e=[NSError errorWithDomain:NSPOSIXErrorDomain code:EIO userInfo:nil]; return false; }
+        return [files moveItemAtPath:a toPath:b error:e];
+      }
+    };
+    NSError* error=nil;
+    REQUIRE_FALSE(installControllerWithHooks(resources,library,hooks,&error));
+    REQUIRE_FALSE(observedMissing);
+    REQUIRE([files fileExistsAtPath:destination]);
+    REQUIRE([[[NSString alloc] initWithContentsOfFile:[destination stringByAppendingPathComponent:@"version"] encoding:NSUTF8StringEncoding error:nil] isEqual:@"old"]);
+    [files removeItemAtPath:root error:nil];
+}

@@ -4,6 +4,7 @@
 #import "SocketSupport.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <mutex>
 #include <netinet/in.h>
 #include <thread>
@@ -23,6 +24,20 @@ bool validHello (const std::string& line, NSString* secret)
     return [object[@"protocol"] isEqual:@1] && [object[@"type"] isEqual:@"hello"]
         && [object[@"secret"] isEqual:secret] && object.count == 3;
 }
+
+NSString* launchSecret()
+{
+    const char* provided=std::getenv("MOSH_DAWN_SECRET");
+    if(provided!=nullptr)
+    {
+        NSString* value=[NSString stringWithUTF8String:provided];
+        NSCharacterSet* invalid=[[NSCharacterSet characterSetWithCharactersInString:
+            @"0123456789abcdef"] invertedSet];
+        if(value.length==64&&[value rangeOfCharacterFromSet:invalid].location==NSNotFound)
+            return value;
+    }
+    return randomSecret();
+}
 } // namespace
 
 class ScriptServer::Impl
@@ -35,7 +50,7 @@ public:
     {
         if (running.exchange (true))
             return false;
-        secret = randomSecret();
+        secret = launchSecret();
         if (secret == nil)
         {
             running = false;

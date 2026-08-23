@@ -30,6 +30,7 @@ public:
     bool start (NSError** error);
     void stop();
     uint16_t port() const;
+    size_t workerThreadCount() const;
 
 private:
     class Impl;
