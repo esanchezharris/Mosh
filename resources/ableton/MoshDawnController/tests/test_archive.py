@@ -27,10 +27,28 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(len(lower.arrangement_clips), 2)
         self.assertFalse(lower.arm)
 
+    def test_keep_preserves_arm_state_on_reused_lower_audio_track(self):
+        # Given
+        source = FakeTrack("Lead", armed=True)
+        lower = FakeTrack("Other Mic", armed=True)
+        rig = Rig([source, lower])
+        rig.act(Put())
+        rig.finish_pass(8.0)
+
+        # When
+        response = rig.act(Keep())
+
+        # Then
+        self.assertTrue(response.ok)
+        self.assertIs(rig.song.tracks[1], lower)
+        self.assertEqual([source.arm, lower.arm], [True, True])
+
     def test_overlap_inserts_clean_source_duplicate_directly_below(self):
         # Given
         source = FakeTrack("Lead", armed=True)
         source.add_clip(-8.0, -4.0, "Unrelated")
+        source.add_session_clip("Verse")
+        source.add_session_clip("Hook")
         lower = FakeTrack("Existing")
         lower.add_clip(4.0, 10.0, "Overlap")
         rig = Rig([source, lower])
@@ -46,6 +64,8 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(clone.name, "Lead")
         self.assertFalse(clone.arm)
         self.assertEqual([(clip.start_time, clip.end_time) for clip in clone.arrangement_clips], [(0.0, 8.0)])
+        self.assertTrue(all(not slot.has_clip for slot in clone.clip_slots))
+        self.assertEqual([slot.clip.name for slot in source.clip_slots], ["Verse", "Hook"])
         self.assertIs(rig.song.tracks[2], lower)
 
     def test_armed_lower_next_target_forces_archive_clone_and_stays_armed(self):

@@ -68,6 +68,7 @@ class SessionState:
     clip_inventory: Tuple[int, ...] = ()
     archive_clips: List["LiveClip"] = field(default_factory=list)
     blocked_reason: Optional[str] = None
+    ownership_uncertain: bool = False
 
 
 @dataclass(frozen=True)  # noqa: SLOTS_OK - Live 11 embeds Python 3.7.
@@ -97,11 +98,21 @@ class LiveTrack:
     can_be_armed: bool
     is_frozen: bool
     arrangement_clips: List[LiveClip]
+    clip_slots: List["LiveClipSlot"]
 
     def delete_clip(self, clip: LiveClip) -> None:
         raise NotImplementedError
 
     def duplicate_clip_to_arrangement(self, clip: LiveClip, position: float) -> None:
+        raise NotImplementedError
+
+
+class LiveClipSlot:
+    """Subset of a Session View clip slot copied by track duplication."""
+
+    has_clip: bool
+
+    def delete_clip(self) -> None:
         raise NotImplementedError
 
 

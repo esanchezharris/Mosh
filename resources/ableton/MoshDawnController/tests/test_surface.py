@@ -6,7 +6,7 @@ import sys
 import types
 import unittest
 
-from ..model import Put, Request
+from ..model import Put, Request, Stop
 from .fakes import FakeSong, FakeTrack
 
 
@@ -114,6 +114,31 @@ class SurfaceTests(unittest.TestCase):
         # Then
         self.assertTrue(client.closed)
         self.assertTrue(surface.base_disconnected)
+
+    def test_idempotent_replay_publishes_current_snapshot_not_historical_state(self):
+        # Given
+        source = FakeTrack("Lead", armed=True)
+        song = FakeSong([source])
+        surface = MoshDawnController(FakeCInstance(song))
+        client = FakeClient(Request("put", 0, Put()))
+        surface._client = client
+        surface._poll()
+        surface._drain_actions()
+        source.add_clip(0.0, 4.0)
+        song.current_song_time = 4.0
+        client.request = Request("stop", 1, Stop())
+        surface._poll()
+        surface._drain_actions()
+        client.request = Request("put", 999, Put())
+
+        # When
+        surface._poll()
+        surface._drain_actions()
+
+        # Then
+        self.assertEqual(client.responses[-1].revision, 1)
+        self.assertEqual(client.snapshots[-1]["revision"], 2)
+        self.assertEqual(client.snapshots[-1]["transport"], "stopped")
 
 
 if __name__ == "__main__":

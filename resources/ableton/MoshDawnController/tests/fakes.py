@@ -19,6 +19,23 @@ class FakeClip:
         self.owner.delete_clip(self)
 
 
+class FakeSessionClip:
+    def __init__(self, name):
+        self.name = name
+
+
+class FakeClipSlot:
+    def __init__(self, clip=None):
+        self.clip = clip
+
+    @property
+    def has_clip(self):
+        return self.clip is not None
+
+    def delete_clip(self):
+        self.clip = None
+
+
 class FakeTrack:
     def __init__(self, name, armed=False, audio=True, frozen=False):
         self.name = name
@@ -27,6 +44,7 @@ class FakeTrack:
         self.can_be_armed = True
         self.is_frozen = frozen
         self.arrangement_clips = []
+        self.clip_slots = []
         self.fail_duplicate = False
 
     def add_clip(self, start, end, name="Take"):
@@ -42,6 +60,9 @@ class FakeTrack:
 
     def delete_clip(self, clip):
         self.arrangement_clips.remove(clip)
+
+    def add_session_clip(self, name):
+        self.clip_slots.append(FakeClipSlot(FakeSessionClip(name)))
 
 
 class FakeSong:
@@ -81,6 +102,7 @@ class FakeSong:
                 track.has_audio_input,
                 track.is_frozen,
                 [(clip.start_time, clip.end_time, clip.name) for clip in track.arrangement_clips],
+                [slot.clip.name if slot.has_clip else None for slot in track.clip_slots],
             )
             for track in self.tracks
         ]
@@ -92,10 +114,15 @@ class FakeSong:
         self.undo_calls += 1
         if self._undo_snapshot is not None:
             restored = []
-            for name, arm, audio, frozen, clips in self._undo_snapshot:
+            for name, arm, audio, frozen, clips, session_clips in self._undo_snapshot:
                 track = FakeTrack(name, arm, audio, frozen)
                 for start, end, clip_name in clips:
                     track.add_clip(start, end, clip_name)
+                for clip_name in session_clips:
+                    slot = FakeClipSlot()
+                    if clip_name is not None:
+                        slot.clip = FakeSessionClip(clip_name)
+                    track.clip_slots.append(slot)
                 restored.append(track)
             self.tracks = restored
 
@@ -104,6 +131,11 @@ class FakeSong:
         clone = FakeTrack(source.name, source.arm, source.has_audio_input, source.is_frozen)
         for clip in source.arrangement_clips:
             clone.add_clip(clip.start_time, clip.end_time, clip.name)
+        for slot in source.clip_slots:
+            clone_slot = FakeClipSlot()
+            if slot.has_clip:
+                clone_slot.clip = FakeSessionClip(slot.clip.name)
+            clone.clip_slots.append(clone_slot)
         self.tracks.insert(index + 1, clone)
 
 

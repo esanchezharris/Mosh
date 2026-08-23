@@ -103,7 +103,7 @@ Observed each run: `Ran 35 tests`, `OK` (0.006s, 0.007s, 0.007s).
 
 - Python 3.7 grammar parse over all 15 Python files: `Python 3.7 grammar: OK (15 files)`.
 - Programming-skill no-excuse audit: `no violations in 15 file(s)`.
-- Pure source LOC: every file <=250. Largest is `engine.py` at 222 pure LOC; it is in the warning band, so the next substantive engine edit should extract either take lifecycle or archive mutation rather than grow the file.
+- Pure source LOC: every file <=250. After review fixes, the largest is `engine.py` at 242 pure LOC; it is in the warning band, so the next substantive engine edit must extract either take lifecycle or archive mutation rather than grow the file.
 - `git diff --check`: clean.
 - No `.pyc` or `__pycache__` artifacts retained.
 
@@ -119,3 +119,45 @@ Observed each run: `Ran 35 tests`, `OK` (0.006s, 0.007s, 0.007s).
 ## Remaining physical concern
 
 Repository tests cannot prove Live's real audio recording, arrangement proxy identity stability, device/routing preservation on duplicate, single-undo UX, or by-ear playback. Those remain explicit owner scratch-Set gates; Live was intentionally not launched for this task.
+
+## Review fix round 1/5
+
+All six blocking review findings were addressed:
+
+1. Reused lower tracks retain their pre-existing arm state; only controller-created duplicate archive tracks are disarmed.
+2. Keep captures the pending take's pre-action source/clip identity plus source-index/name and clip-time/name fingerprint. After a reversed undo step it re-resolves unique restored Live proxies and restores pending ownership. Ambiguous recovery clears all stale pointers, marks `ownershipUncertain:true`, returns `keep_compensation_unresolved`, and blocks later destructive actions with `pending_ownership_uncertain`.
+3. New duplicate archive tracks now delete every copied Arrangement clip and every populated Session View clip slot before creating the single accepted Arrangement clip.
+4. Snapshot construction validates pending and active identities before dereferencing proxies. Invalid pointers are cleared and represented as blocked/ownership-uncertain with no pending or active descriptor.
+5. The surface still returns a cached historical result for idempotency but now publishes `engine.snapshot()` as the separate global snapshot, so intervening state is never rolled back on the client.
+6. Request results are retained for the full Remote Script lifecycle; the 256-entry eviction was removed.
+
+### Fix RED
+
+Command:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest \
+  resources.ableton.MoshDawnController.tests.test_archive \
+  resources.ableton.MoshDawnController.tests.test_safety \
+  resources.ableton.MoshDawnController.tests.test_surface -v
+```
+
+Observed: `Ran 21 tests`; 8 failures and 1 error. The failures independently exposed destination disarming, retained Session clips, missing undo recovery, unsafe invalid-proxy snapshot dereference, 256-entry idempotency eviction, stale active-source state, ambiguous recovery incorrectly reported as compensated, and publication of a historical replay snapshot. Exit 1.
+
+### Fix GREEN and determinism
+
+Command, run three times:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover \
+  -s resources/ableton/MoshDawnController/tests -t . -q
+```
+
+Observed each run: `Ran 40 tests`, `OK` (0.010s, 0.011s, 0.012s).
+
+Post-fix checks:
+
+- Python 3.7 grammar: `OK (15 files)`.
+- No-excuse audit: `no violations in 15 file(s)`.
+- Pure LOC: every Python file <=250; `engine.py` is largest at 242.
+- `git diff --check`: clean.
