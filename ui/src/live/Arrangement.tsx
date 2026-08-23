@@ -18,10 +18,11 @@ import { useStore } from "../store";
 import { useShell } from "../v2/shellState";
 import { ClipView } from "../v2/lanes/ClipView";
 import { LiveRuler } from "./LiveRuler";
+import { ArrangementGrid } from "./ArrangementGrid";
 import { LoopBrace } from "./LoopBrace";
 import { meterOf, contentSeconds } from "../v2/timeline/geom";
 import { addTrackOfKind, TRACK_KINDS } from "../v2/lanes/TrackLaneList";
-import { barSeconds, beatSeconds } from "../time";
+import { barSeconds } from "../time";
 import { EditorAction as EA } from "../interaction/actions";
 import { resolveGesture } from "../interaction/gestures";
 import { liveGestureTable } from "../interaction/config";
@@ -70,8 +71,6 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
   // no clips and belong to the mixer surface, not the lane list.
   const tracks = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
   const contentW = contentSeconds(snapshot) * pxPerSec;
-  const beatPx = beatSeconds(meterOf(snapshot)) * pxPerSec;
-  const barPx = beatPx * meterOf(snapshot).num;
   // Take lanes (Live 12): per-track expand/collapse, UI-local (not a setting).
   // Default EXPANDED — Live shows the lanes the moment a comp exists; a track
   // without takes renders nothing at all (zero visual change). The layout is
@@ -281,6 +280,7 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
             onDoubleClick={onEmptyDblClick}
             onContextMenuCapture={onClipContextCapture}
           >
+            <ArrangementGrid snapshot={snapshot} />
             {tracks.length === 0 && (
               <div className="live-empty live-empty-arrangement" role="status" aria-live="polite">
                 <span>No tracks yet — add one to start.</span>
@@ -296,8 +296,6 @@ export function Arrangement({ snapshot, dragging }: { snapshot: Snapshot; draggi
                 data-frozen={t.frozen === true}
                 style={{
                   height: laneH(t.id),
-                  "--beat-px": `${beatPx}px`,
-                  "--bar-px": `${barPx}px`,
                   // Clip bodies + name strips read this (live.css); absent ⇒ per-kind defaults.
                   ...(t.color ? { "--track-col": t.color } : {}),
                 } as React.CSSProperties}
