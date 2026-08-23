@@ -9,7 +9,7 @@ import { buttonLabel, mountPadTiles } from "./padView";
 import { TileDragController, type EditableTileLayout } from "./tileDrag";
 import type { Button } from "./types";
 import { disconnectedView } from "./viewState";
-import { element, setSubtitle } from "./dom";
+import { element, renderControllerStatus, renderNavigator } from "./dom";
 
 class LaunchVariantError extends Error {
   readonly name = "LaunchVariantError";
@@ -96,59 +96,17 @@ function mountPad(): void {
   applyOrder();
 }
 
-function tickFractions(current: ControllerView): readonly number[] {
-  if (current.unit === "seconds") {
-    return nav.barTicks(current.length, current.tempo ?? 120, current.timeSigNumerator ?? 4);
-  }
-  const bars = Math.ceil(current.length / 4);
-  const step = bars > 48 ? 8 : bars > 16 ? 4 : 1;
-  return Array.from({ length: Math.max(0, Math.ceil(bars / step) - 1) }, (_, index) =>
-    nav.clamp01(((index + 1) * step * 4) / current.length));
-}
-
-function renderNavigator(current: ControllerView): void {
-  const bar = element("nav");
-  const regions = nav.regionRects(current.regions.map((region) => ({ s: region.start, e: region.end })), current.length);
-  const regionNodes = regions.map((region) => {
-    const node = document.createElement("div");
-    node.className = "region";
-    node.style.left = `${region.left * 100}%`;
-    node.style.width = `${region.width * 100}%`;
-    return node;
-  });
-  const tickNodes = tickFractions(current).map((fraction) => {
-    const node = document.createElement("div");
-    node.className = "tick";
-    node.style.left = `${fraction * 100}%`;
-    return node;
-  });
-  const playhead = document.createElement("div");
-  playhead.id = "playhead";
-  const fallbackFraction = nav.playheadFrac(current.position, current.length);
-  if (navigatorDrag === null) playhead.style.left = `${fallbackFraction * 100}%`;
-  else navigatorDrag.placePlayhead(playhead, fallbackFraction);
-  bar.replaceChildren(...regionNodes, ...tickNodes, playhead);
-  bar.setAttribute("aria-disabled", String(!current.seekEnabled));
-}
-
 function render(): void {
   const current = view;
   if (current === null) return;
-  const statuses = adapter?.isBusy() ? ["busy", ...current.statuses.filter((status) => status !== "busy")] : current.statuses;
-  const labels = statuses.map((status) => status.toUpperCase());
-  element("stateTxt").textContent = labels.join(" · ");
-  document.body.dataset.state = statuses.includes("recording")
-    ? "REC"
-    : statuses.includes("playing") ? "PLAY" : "PAUSED";
-  if (current.mode === "mosh") {
-    setSubtitle(`bar ${nav.secToBar(current.position, current.tempo ?? 120).toFixed(1)}`, "mosh live");
-  } else {
-    setSubtitle(`beat ${current.position.toFixed(1)}`, "ableton live");
-  }
+  renderControllerStatus(current, adapter?.isBusy() ?? false);
   for (const child of Array.from(element("pad").children)) {
     if (child instanceof HTMLButtonElement) child.disabled = adapter?.isBusy() ?? false;
   }
-  renderNavigator(current);
+  renderNavigator(current, (playhead, fallbackFraction) => {
+    if (navigatorDrag === null) playhead.style.left = `${fallbackFraction * 100}%`;
+    else navigatorDrag.placePlayhead(playhead, fallbackFraction);
+  });
 }
 
 function resultText(result: AdapterResult, success: string): string {
@@ -217,7 +175,7 @@ function buildDom(): void {
     <div id="navWrap"><div id="nav" aria-disabled="true"><div id="playhead"></div></div></div>
     <div id="pad"></div>
     <div id="editbar"><button id="navPosBtn">nav: bottom</button><span class="hint">drag tiles to rearrange</span><button id="resetBtn">reset</button><button id="doneBtn">done</button></div>
-    <div id="toast"></div>`;
+    <div id="toast" role="status" aria-live="polite"></div>`;
   element("editBtn").addEventListener("click", () => setEditing(!editing));
   element("doneBtn").addEventListener("click", () => setEditing(false));
   element("resetBtn").addEventListener("click", () => {

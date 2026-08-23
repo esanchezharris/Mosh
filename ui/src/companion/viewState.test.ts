@@ -26,7 +26,10 @@ describe("abletonView", () => {
 
     // Then
     expect(view.unit).toBe("beats");
-    expect(view.regions).toEqual([{ start: 4, end: 6 }, { start: 1, end: 3 }]);
+    expect(view.regions).toEqual([
+      { kind: "pending", start: 4, end: 6 },
+      { kind: "archive", start: 1, end: 3 },
+    ]);
   });
 
   it("maps a disconnected snapshot to visible disconnected state", () => {

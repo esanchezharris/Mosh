@@ -17,10 +17,17 @@ function abletonStatuses(snapshot: AbletonSnapshot, busy: boolean): readonly Con
 }
 
 export function abletonView(snapshot: AbletonSnapshot, busy: boolean): ControllerView {
-  const clips = snapshot.pendingClip === null
-    ? snapshot.archiveClips
-    : [snapshot.pendingClip, ...snapshot.archiveClips];
-  const regions: readonly TimelineRegion[] = clips.map((clip) => ({ start: clip.startBeats, end: clip.endBeats }));
+  const pendingRegions: readonly TimelineRegion[] = snapshot.pendingClip === null ? [] : [{
+    kind: "pending",
+    start: snapshot.pendingClip.startBeats,
+    end: snapshot.pendingClip.endBeats,
+  }];
+  const archiveRegions: readonly TimelineRegion[] = snapshot.archiveClips.map((clip) => ({
+    kind: "archive",
+    start: clip.startBeats,
+    end: clip.endBeats,
+  }));
+  const regions = [...pendingRegions, ...archiveRegions];
   const ends = regions.map((region) => region.end);
   const boundaries = [snapshot.editMarkerBeats, snapshot.passStartBeats ?? 0, snapshot.savedStopBeats ?? 0, ...ends];
   const blocked = snapshot.blockedReason !== null || snapshot.ownershipUncertain;
@@ -39,7 +46,11 @@ export function abletonView(snapshot: AbletonSnapshot, busy: boolean): Controlle
 
 export function moshView(snapshot: Snap): ControllerView {
   const trackId = targetTrackId(snapshot);
-  const regions = nav.regionsForTrack(snapshot, trackId).map((region) => ({ start: region.s, end: region.e }));
+  const regions = nav.regionsForTrack(snapshot, trackId).map((region) => ({
+    kind: "generic" as const,
+    start: region.s,
+    end: region.e,
+  }));
   const statuses: ControllerStatus[] = [];
   if (snapshot.transport?.recording) statuses.push("recording");
   else if (snapshot.transport?.playing) statuses.push("playing");

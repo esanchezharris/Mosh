@@ -14,7 +14,8 @@ import { abletonView, moshView } from "./viewState";
 export type ControllerMode = "mosh" | "ableton";
 export type ControllerStatus = "disconnected" | "busy" | "blocked" | "recording" | "pending" | "playing" | "paused";
 export type TimelineUnit = "seconds" | "beats";
-export type TimelineRegion = { readonly start: number; readonly end: number };
+export type TimelineRegionKind = "generic" | "pending" | "archive";
+export type TimelineRegion = { readonly kind: TimelineRegionKind; readonly start: number; readonly end: number };
 export type ControllerView = {
   readonly mode: ControllerMode;
   readonly unit: TimelineUnit;
