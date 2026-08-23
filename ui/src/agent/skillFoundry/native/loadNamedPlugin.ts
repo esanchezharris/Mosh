@@ -75,6 +75,12 @@ export function parsePluginCatalogV1(data: unknown): readonly PluginEntry[] | nu
 export function pluginQueryV1(utterance: string): string | null {
   const match = utterance.trim().match(LOAD_PLUGIN_UTTERANCE_V1);
   const query = match?.[1]?.trim();
+  // "add" is shared producer language. Do not claim obvious timeline/MIDI
+  // creation asks and then fail while reading the installed plug-in catalog.
+  // Actual plug-in names containing these words remain available through the
+  // explicit "load plugin <name>" form.
+  if (query && /\b(?:test\s+tone|midi\s+clip|audio\s+clip|clip|notes?)\b/i.test(query)
+    && !/\bplugin\b/i.test(utterance)) return null;
   return query ? query : null;
 }
 
