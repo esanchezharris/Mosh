@@ -40,12 +40,30 @@ After `verify` succeeds, install that exact bundle in the owner's Applications
 folder and launch it manually:
 
 ```sh
-mkdir -p "$HOME/Applications"
+install_root="$HOME/Applications"
+target_app="$install_root/MoshDawnBridge.app"
+mkdir -p "$install_root"
+staging_root="$(mktemp -d "$install_root/.MoshDawnBridge.install.XXXXXX")"
 ditto \
   "$MOSH_DAWN_BUILD_DIR/src/dawn_bridge/MoshDawnBridge.app" \
-  "$HOME/Applications/MoshDawnBridge.app"
-open "$HOME/Applications/MoshDawnBridge.app"
+  "$staging_root/MoshDawnBridge.app"
+if [ -e "$target_app" ]; then
+  mv "$target_app" "$staging_root/MoshDawnBridge.previous.app"
+fi
+if ! mv "$staging_root/MoshDawnBridge.app" "$target_app"; then
+  if [ -e "$staging_root/MoshDawnBridge.previous.app" ]; then
+    mv "$staging_root/MoshDawnBridge.previous.app" "$target_app"
+  fi
+  exit 1
+fi
+rm -rf "$staging_root/MoshDawnBridge.previous.app"
+rmdir "$staging_root"
+open "$target_app"
 ```
+
+The new bundle is staged on the same volume, then renamed into place; it never
+merges files into an older app bundle. If activation fails, the commands restore
+the previous bundle before exiting.
 
 Do not enable launch-at-login. Only one bridge instance should run. A `DAWN`
 item appears in the macOS menu bar and should say `Bridge: Ready`.

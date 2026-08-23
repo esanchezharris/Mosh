@@ -95,8 +95,11 @@ export class AbletonAdapter {
     this.#requestId = requestId;
   }
   async poll(): Promise<ControllerView> {
+    if (this.#busy && this.#snapshot !== null) return this.view(this.#snapshot);
     const envelope = AbletonEnvelopeSchema.parse(await this.#client.snapshot());
     if (!envelope.ok) return Promise.reject(new BridgeResponseError(envelope.error));
+    const previous = this.#snapshot;
+    if (previous !== null && envelope.state.revision < previous.revision) return this.view(previous);
     this.#snapshot = envelope.state;
     return this.view(envelope.state);
   }
@@ -145,8 +148,14 @@ export class AbletonAdapter {
       if (!envelope.ok) {
         this.#lastError = envelope.error;
         const parsedState = AbletonSnapshotSchema.safeParse(envelope.state);
-        if (parsedState.success) this.#snapshot = parsedState.data;
+        if (parsedState.success && (this.#snapshot === null || parsedState.data.revision >= this.#snapshot.revision)) {
+          this.#snapshot = parsedState.data;
+        }
         return { kind: "error", reason: envelope.error };
+      }
+      if (this.#snapshot !== null && envelope.state.revision < this.#snapshot.revision) {
+        this.#lastError = "stale_response";
+        return { kind: "error", reason: "stale_response" };
       }
       this.#lastError = null;
       this.#snapshot = envelope.state;

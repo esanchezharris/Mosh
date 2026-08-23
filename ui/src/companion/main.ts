@@ -4,6 +4,7 @@ import { consumeLaunch, type CompanionLaunch } from "./launch";
 import * as layoutModel from "./layout";
 import { CompanionNet } from "./net";
 import * as nav from "./navMath";
+import { NavigatorDragController } from "./navigatorDrag";
 import { buttonLabel, mountPadTiles } from "./padView";
 import { TileDragController, type EditableTileLayout } from "./tileDrag";
 import type { Button } from "./types";
@@ -32,7 +33,7 @@ let adapter: ControllerAdapter | null = null;
 let view: ControllerView | null = null;
 let layout = layoutModel.parse(null);
 let editing = false;
-let draggingNav = false;
+let navigatorDrag: NavigatorDragController | null = null;
 let lastSeekAt = 0;
 let polling = false;
 
@@ -77,7 +78,7 @@ function editorContract(): EditableTileLayout {
       layout = { ...layout, order };
     },
     applyOrder,
-    save: () => layoutModel.save(localStorage, layout),
+    save: () => layoutModel.save(localStorage, layout, adapter?.mode ?? "mosh"),
   };
 }
 
@@ -123,7 +124,9 @@ function renderNavigator(current: ControllerView): void {
   });
   const playhead = document.createElement("div");
   playhead.id = "playhead";
-  if (!draggingNav) playhead.style.left = `${nav.playheadFrac(current.position, current.length) * 100}%`;
+  const fallbackFraction = nav.playheadFrac(current.position, current.length);
+  if (navigatorDrag === null) playhead.style.left = `${fallbackFraction * 100}%`;
+  else navigatorDrag.placePlayhead(playhead, fallbackFraction);
   bar.replaceChildren(...regionNodes, ...tickNodes, playhead);
   bar.setAttribute("aria-disabled", String(!current.seekEnabled));
 }
@@ -177,12 +180,7 @@ async function press(button: Button): Promise<void> {
   await finishAction(current.press(button), buttonLabel(button).toLowerCase());
 }
 
-function navFraction(clientX: number): number {
-  const rect = element("nav").getBoundingClientRect();
-  return rect.width > 0 ? nav.clamp01((clientX - rect.left) / rect.width) : 0;
-}
-
-function seekTo(fraction: number): void {
+function seekTo(fraction: number, final = false): void {
   const currentAdapter = adapter;
   const currentView = view;
   if (currentAdapter === null || currentView === null) return;
@@ -191,6 +189,7 @@ function seekTo(fraction: number): void {
     return;
   }
   const now = Date.now();
+  if (final) lastSeekAt = 0;
   if (now - lastSeekAt < 110) return;
   lastSeekAt = now;
   void finishAction(currentAdapter.seek(nav.clamp01(fraction) * currentView.length), "seek");
@@ -225,28 +224,22 @@ function buildDom(): void {
     layout = layoutModel.parse(null);
     applyNavPosition();
     applyOrder();
-    layoutModel.save(localStorage, layout);
+    layoutModel.save(localStorage, layout, adapter?.mode ?? "mosh");
   });
   element("navPosBtn").addEventListener("click", () => {
     layout = { ...layout, navPos: layout.navPos === "bottom" ? "top" : "bottom" };
     applyNavPosition();
-    layoutModel.save(localStorage, layout);
+    layoutModel.save(localStorage, layout, adapter?.mode ?? "mosh");
   });
   const bar = element("nav");
-  bar.addEventListener("pointerdown", (event) => {
-    if (editing) return;
-    draggingNav = true;
-    seekTo(navFraction(event.clientX));
+  navigatorDrag = new NavigatorDragController(bar, {
+    enabled: () => !editing && (view?.seekEnabled ?? true),
+    seek: (fraction, final) => seekTo(fraction, final),
+    cancel: () => {
+      lastSeekAt = 0;
+    },
   });
-  bar.addEventListener("pointermove", (event) => {
-    if (draggingNav) seekTo(navFraction(event.clientX));
-  });
-  bar.addEventListener("pointerup", (event) => {
-    if (!draggingNav) return;
-    draggingNav = false;
-    lastSeekAt = 0;
-    seekTo(navFraction(event.clientX));
-  });
+  navigatorDrag.attach();
 }
 
 function boot(): void {
@@ -254,7 +247,7 @@ function boot(): void {
   try {
     const launch = consumeLaunch(location.href, (url) => history.replaceState(null, "", url));
     adapter = createAdapter(launch);
-    layout = layoutModel.load(localStorage);
+    layout = layoutModel.load(localStorage, adapter.mode);
     applyNavPosition();
     mountPad();
     void refresh();

@@ -33,4 +33,18 @@ describe("consumeLaunch", () => {
     // When / Then
     expect(() => consumeLaunch(href, () => undefined)).toThrow();
   });
+
+  it.each([
+    "http://studio.local/other#token=ableton-token",
+    "http://studio.local/web/#token=ableton-token",
+    "http://studio.local/web?token=mosh-token#token=ableton-token",
+    "http://studio.local/web#token=ableton-token&extra=value",
+  ])("rejects a non-exact Ableton launch route: %s", (href) => {
+    // Given
+    const cleared: string[] = [];
+
+    // When / Then
+    expect(() => consumeLaunch(href, (url) => cleared.push(url))).toThrow();
+    expect(cleared).toEqual([]);
+  });
 });
