@@ -661,6 +661,7 @@ void ReImagineProcessor::loadSelectedTake()
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
     bool missing = false;
+    bool loadedAny = false;
     for (const auto& region : state.regions)
     {
         if (region.selectedTakeId.isEmpty())
@@ -735,10 +736,17 @@ void ReImagineProcessor::loadSelectedTake()
             }
         }
         playback->regions.push_back (std::move (loaded));
+        loadedAny = true;
     }
     publishPlayback (std::move (playback));
-    setStatus (missing ? "Some selected assets are missing; available regions loaded"
-                       : "Selected takes loaded");
+    if (missing && loadedAny)
+        setStatus ("Some selected assets are missing; available regions loaded");
+    else if (missing)
+        setStatus ("Selected assets are missing; audio is dry");
+    else if (loadedAny)
+        setStatus ("Selected takes loaded");
+    else
+        setStatus ("No selected takes; audio is dry");
 }
 
 void ReImagineProcessor::run()
