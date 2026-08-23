@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mosh.r8-8b-smoke</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/emiliosanchez-harris/.codex/worktrees/r8-size-ladder-takeover/Mosh/service/sft/run-r8-8b-smoke.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/emiliosanchez-harris/.codex/worktrees/r8-size-ladder-takeover/Mosh</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>ThrottleInterval</key><integer>0</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/emiliosanchez-harris/r8-8b-smoke.log</string>
+  <key>StandardErrorPath</key><string>/Users/emiliosanchez-harris/r8-8b-smoke.log</string>
+</dict>
+</plist>

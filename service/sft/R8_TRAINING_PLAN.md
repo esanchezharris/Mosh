@@ -356,6 +356,24 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   run. No scored surface was rerun. Per the registered ladder, advance to 8B.
   Full evidence: `GATE_READ_r8-4b-mlx.md`.
 
+- **r8-8b local MLX registration, 2026-08-23 (pre-smoke):** the registered
+  ladder advances because r8-4b missed the independent `13/25` novice floor.
+  No Qwen3-8B Instruct-2507 artifact exists in the selected upstream family,
+  so this leg uses the pre-registered fallback `Qwen/Qwen3-8B`, converted by
+  `mlx-community/Qwen3-8B-4bit` at upstream revision
+  `545dc4251c05440727734bcd94334791f6ab0192`. The downloaded 4-bit model shard
+  sha256 is
+  `f2d29621aab300336ad645567ff38c42aac755513006ef4e8a579cf7ef5256d8`;
+  model config sha256 is
+  `e5485285fd7e289e76e9cffa112f6dc2e3426519082f7db9b69041589f81a218`.
+  `R8_8B_MLX_SMOKE.yaml` preserves the frozen recipe and points to the same 119
+  poison/coverage rows used for the 4B MLX smoke (train and valid sha256 both
+  `392262600bc922b17fa863cdd5b26362f38fb24daa0b57ed3f57ac06ccb60150`).
+  It must produce 20 finite steps and final smoke weights before the full
+  13,113-step config is launchable. The owner's direct-Codex-child waiver is
+  scoped to that preflight dimension only; memory, swap, disk, single-MLX-slot,
+  restart-disabled, finite-loss, and no-replay safeguards remain binding.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,

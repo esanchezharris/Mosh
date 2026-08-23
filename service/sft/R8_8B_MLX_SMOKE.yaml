@@ -1,0 +1,19 @@
+model: "/Users/emiliosanchez-harris/AI/models/mlx/Qwen3-8B-4bit"
+train: true
+data: "/Users/emiliosanchez-harris/Library/Mosh/work/sft/r8-4b-smoke"
+adapter_path: "/Users/emiliosanchez-harris/Mosh/service/sft/.adapters/r8-8b-smoke"
+iters: 20
+batch_size: 1
+learning_rate: 1.0e-5
+max_seq_length: 6400
+num_layers: 16
+save_every: 20
+steps_per_eval: 20
+val_batches: 1
+grad_checkpoint: true
+mask_prompt: true
+lora_parameters:
+  rank: 16
+  scale: 2.0
+  dropout: 0.05
+  keys: ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj"]
