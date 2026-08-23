@@ -105,7 +105,9 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   smoke DID transfer: max-seq-len 6400 is finite-loss on the CUDA lane too.
   Artifacts kept on the PC (C:\r8: venv, data, HF model cache) for possible
   short-row-only uses; nothing is running there.
-- r8-4b: ‹TBD›
+- r8-4b: **MISS** — 11/25 acceptable, 1.389s warm median; below the binding
+  13/25 viability floor. Proceed to r8-8b. Full read:
+  `GATE_READ_r8-4b-mlx.md`.
 - r8-8b: ‹TBD›
 - r8-14b: ‹TBD›
 - Shipping target decision: ‹TBD›
@@ -339,6 +341,20 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   The 13,113-step frozen epoch is now fully consumed in registered order. The
   completion monitor proceeds directly to fused serving and the one-clean-read
   r8-4b gate; no direct adapter-serving result is admissible.
+
+- **r8-4b size-ladder read, 2026-08-23 — MISS:** the standalone fused model
+  was weight-differentially verified and served with the same explicit
+  `3279/3279`-passing Mosh binary as final r7. Frozen300 scored `0.30458`
+  (141 deferrals) versus r7's `0.68958`. Latency passed at `1.389s` warm median
+  with 30/30 JSON-valid replies. The single clean novice-jam read scored
+  `11/25` acceptable and `12/25` goal success: three acceptable tasks better
+  than r7 and inside its comparison band, but below the independently binding
+  `13/25` frontier floor. Both drum tasks and both lyric tasks missed; all four
+  ambiguity tasks deferred correctly. The owner stopped the remaining broad
+  auxiliary surfaces after the frozen300 regression; the partially started
+  evalA process produced no result and is invalid, and diag/grounded were not
+  run. No scored surface was rerun. Per the registered ladder, advance to 8B.
+  Full evidence: `GATE_READ_r8-4b-mlx.md`.
 
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
