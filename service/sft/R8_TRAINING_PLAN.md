@@ -198,6 +198,25 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   the rolling `adapters.safetensors` copy is byte-identical. Trainer and guard
   remained launchd-owned and running after the save.
 
+- **r8-4b continuation interruption, 2026-08-22 16:44--16:49 PDT — STOPPED,
+  checkpoint preserved:** the first continuation remained finite through local
+  iter 4,850/global iter 12,350 (train loss `0.070` at the last heartbeat), then
+  exited with a Python `KeyboardInterrupt` while evaluating an MLX graph. No
+  NaN/Inf was logged and neither guard alert file was created. Because the
+  submitted launchd trainer had an inferred keepalive policy, launchd
+  immediately started run 2 from the immutable local-zero/global-7,500 source
+  checkpoint; the restarted process reached only local iter 20 before Codex
+  detected the replay and booted both exact launchd jobs out at 17:00 PDT. The
+  replay did not reach the 100-step save boundary, so it did not overwrite a
+  numbered or rolling adapter. The newest preserved continuation checkpoint is
+  local iter 4,800/global iter 12,300 (`0004800_adapters.safetensors`); local
+  iters 4,810--4,850 are unpreserved. Exact blocker: MLX records weights only,
+  so there is no exact optimizer/RNG continuation from global 12,300, and the
+  current launchd wrapper is unsafe for another attempt because an interrupt is
+  automatically replayed from global 7,500. Training and guard are deliberately
+  stopped pending a separately registered tail continuation from the verified
+  global-12,300 checkpoint with restart disabled.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
