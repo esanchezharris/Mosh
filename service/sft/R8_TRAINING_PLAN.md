@@ -312,6 +312,18 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   existing output namespace. Only the direct-Codex-child preflight threshold
   remains waived for this run; memory, swap, and disk gates are unchanged.
 
+- **r8-4b global-13,000 completion-tail launch, 2026-08-23 — RUNNING:**
+  commit `0e86deb9` froze the exact-tail registration before launch. Launchd
+  jobs `com.mosh.r8-4b-cont13000` and
+  `com.mosh.r8-4b-cont13000-guard` each showed one run with parent PID 1 and
+  restart disabled. Initial validation was finite at `0.283`; local iter 10,
+  mapping to global iter 13,010, then reported finite train loss `0.087`, LR
+  `1e-5`, 0.049 iter/s, and 6.939 GB peak memory. Preflight passed with 84%
+  free memory, 674 MiB used swap, and 393 GiB Data-volume free. The dashboard
+  now maps this namespace to global progress at `http://127.0.0.1:8788`, and
+  heartbeat `monitor-r8-4b-final-tail-and-eval` owns the completion-to-fused-
+  evaluation handoff. This is healthy launch evidence, not final completion.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
