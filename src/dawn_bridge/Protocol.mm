@@ -1,88 +1,15 @@
 #import "Protocol.h"
+#import "ProtocolJson.h"
 
 #import <Security/Security.h>
 
-#include <cmath>
 #include <condition_variable>
 #include <mutex>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace mosh::dawn
 {
-namespace
-{
-NSData* jsonData (NSDictionary* object)
-{
-    return [NSJSONSerialization dataWithJSONObject:object options:0 error:nil];
-}
-
-HttpReply jsonReply (NSInteger status, NSDictionary* object)
-{
-    return { status, @"application/json", jsonData (object) };
-}
-
-NSDictionary* envelope (bool ok, NSString* requestId, NSUInteger revision,
-                        NSDictionary* state, NSString* error = nil)
-{
-    NSMutableDictionary* value = [@{ @"ok": @(ok), @"requestId": requestId ?: @"",
-        @"revision": @(revision), @"state": state ?: @{} } mutableCopy];
-    if (error != nil)
-        value[@"error"] = error;
-    return value;
-}
-
-bool isInteger (id value)
-{
-    return [value isKindOfClass:[NSNumber class]]
-        && CFGetTypeID ((__bridge CFTypeRef) value) != CFBooleanGetTypeID()
-        && std::floor ([value doubleValue]) == [value doubleValue];
-}
-
-bool isBoolean (id value)
-{
-    return value != nil && CFGetTypeID ((__bridge CFTypeRef) value) == CFBooleanGetTypeID();
-}
-
-NSDictionary* parseObject (NSData* data)
-{
-    if (data == nil)
-        return nil;
-    id value = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    return [value isKindOfClass:[NSDictionary class]] ? value : nil;
-}
-
-bool validAction (NSDictionary* body, NSString** error)
-{
-    NSSet* common = [NSSet setWithArray:@[ @"requestId", @"expectedRevision", @"action" ]];
-    NSString* action = body[@"action"];
-    NSSet* actions = [NSSet setWithArray:@[ @"put", @"keep", @"again", @"hear", @"stop", @"seek" ]];
-    if (![action isKindOfClass:[NSString class]] || ![actions containsObject:action])
-    {
-        *error = @"unsupported_action";
-        return false;
-    }
-    NSMutableSet* allowed = [common mutableCopy];
-    if ([action isEqualToString:@"seek"])
-        [allowed addObject:@"positionBeats"];
-    for (NSString* key in body)
-        if (![allowed containsObject:key])
-        {
-            *error = @"malformed_request";
-            return false;
-        }
-    id position = body[@"positionBeats"];
-    if ([action isEqualToString:@"seek"]
-        && (![position isKindOfClass:[NSNumber class]] || isBoolean (position)
-            || !std::isfinite ([position doubleValue])
-            || [position doubleValue] < 0.0))
-    {
-        *error = @"invalid_position";
-        return false;
-    }
-    return true;
-}
-} // namespace
+using namespace protocol;
 
 bool isLoopbackPeer (NSString* address)
 {
@@ -113,7 +40,8 @@ public:
     bool connected = false;
     ActionSender sender;
     std::unordered_map<std::string, NSData*> results;
-    std::unordered_set<std::string> pending;
+    std::unordered_map<std::string, NSUInteger> pending;
+    uint64_t cancellation = 0;
 };
 
 BridgeCore::BridgeCore (NSString* token) : impl (std::make_unique<Impl> (token)) {}
@@ -134,6 +62,22 @@ void BridgeCore::setScriptConnected (bool connected)
             impl->pending.clear();
     }
     impl->changed.notify_all();
+}
+
+void BridgeCore::cancelPendingWaits()
+{
+    {
+        std::lock_guard lock (impl->mutex);
+        ++impl->cancellation;
+        impl->pending.clear();
+    }
+    impl->changed.notify_all();
+}
+
+bool BridgeCore::authorize (NSString* authorization) const
+{
+    NSString* expected = [@"Bearer " stringByAppendingString:impl->token ?: @""];
+    return [authorization isEqualToString:expected];
 }
 
 bool BridgeCore::ingestScriptLine (NSData* line)
@@ -171,12 +115,22 @@ bool BridgeCore::ingestScriptLine (NSData* line)
 
     {
         std::lock_guard lock (impl->mutex);
-        impl->state = [state copy];
-        impl->currentRevision = [state[@"revision"] unsignedIntegerValue];
+        const NSUInteger messageRevision = [state[@"revision"] unsignedIntegerValue];
         if (cached != nil)
         {
-            impl->results[requestId.UTF8String] = cached;
-            impl->pending.erase (requestId.UTF8String);
+            const auto key = std::string (requestId.UTF8String);
+            const auto pending = impl->pending.find (key);
+            if (pending == impl->pending.end() || messageRevision < pending->second)
+                return false;
+            impl->results[key] = cached;
+            impl->pending.erase (pending);
+        }
+        else
+        {
+            if (messageRevision < impl->currentRevision)
+                return false;
+            impl->state = [state copy];
+            impl->currentRevision = messageRevision;
         }
     }
     impl->changed.notify_all();
@@ -186,14 +140,20 @@ bool BridgeCore::ingestScriptLine (NSData* line)
 HttpReply BridgeCore::handleHttp (NSString* method, NSString* path,
                                   NSString* authorization, NSData* body, NSString* webPage)
 {
+    return handleHttpCancelable (method, path, authorization, body, webPage, {});
+}
+
+HttpReply BridgeCore::handleHttpCancelable (NSString* method, NSString* path,
+                                  NSString* authorization, NSData* body, NSString* webPage,
+                                  std::function<bool()> cancelled)
+{
     if ([method isEqualToString:@"GET"] && [path isEqualToString:@"/web"])
         return { 200, @"text/html; charset=utf-8", [webPage dataUsingEncoding:NSUTF8StringEncoding] };
     const bool snapshotRoute = [method isEqualToString:@"GET"] && [path isEqualToString:@"/v1/snapshot"];
     const bool actionRoute = [method isEqualToString:@"POST"] && [path isEqualToString:@"/v1/action"];
     if (!snapshotRoute && !actionRoute)
         return jsonReply (404, envelope (false, @"", revision(), @{}, @"not_found"));
-    NSString* expectedAuth = [@"Bearer " stringByAppendingString:impl->token ?: @""];
-    if (![authorization isEqualToString:expectedAuth])
+    if (!authorize (authorization))
         return jsonReply (401, envelope (false, @"", revision(), @{}, @"unauthorized"));
 
     if (snapshotRoute)
@@ -228,7 +188,7 @@ HttpReply BridgeCore::handleHttp (NSString* method, NSString* path,
                                               impl->state, @"script_disconnected"));
         sender = impl->sender;
         alreadyPending = impl->pending.contains (key);
-        impl->pending.insert (key);
+        impl->pending.emplace (key, [revisionValue unsignedIntegerValue]);
     }
 
     if (!alreadyPending)
@@ -249,13 +209,17 @@ HttpReply BridgeCore::handleHttp (NSString* method, NSString* path,
     }
 
     std::unique_lock lock (impl->mutex);
-    impl->changed.wait_for (lock, std::chrono::seconds (5), [&] {
-        return impl->results.contains (key) || !impl->connected;
-    });
+    const auto cancellation = impl->cancellation;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds (5);
+    while (!impl->results.contains (key) && impl->connected
+           && impl->cancellation == cancellation && !(cancelled && cancelled())
+           && std::chrono::steady_clock::now() < deadline)
+        impl->changed.wait_for (lock, std::chrono::milliseconds (50));
     if (auto found = impl->results.find (key); found != impl->results.end())
         return { 200, @"application/json", found->second };
     impl->pending.erase (key);
-    const auto status = impl->connected ? 504 : 503;
+    const auto status = impl->connected && impl->cancellation == cancellation
+        && !(cancelled && cancelled()) ? 504 : 503;
     return jsonReply (status, envelope (false, requestId, impl->currentRevision, impl->state,
                                         impl->connected ? @"action_timeout" : @"script_disconnected"));
 }

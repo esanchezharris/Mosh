@@ -31,10 +31,15 @@ public:
 
     void setActionSender (ActionSender sender);
     void setScriptConnected (bool connected);
+    void cancelPendingWaits();
+    bool authorize (NSString* authorization) const;
     bool ingestScriptLine (NSData* line);
     HttpReply handleHttp (NSString* method, NSString* path,
                           NSString* authorization, NSData* body,
                           NSString* webPage);
+    HttpReply handleHttpCancelable (NSString* method, NSString* path,
+                                    NSString* authorization, NSData* body,
+                                    NSString* webPage, std::function<bool()> cancelled);
     NSUInteger revision() const;
 
 private:

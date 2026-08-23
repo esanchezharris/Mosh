@@ -2,6 +2,8 @@
 
 #include <arpa/inet.h>
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
+#include <chrono>
 #include <future>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -33,7 +35,6 @@ std::string exchange (uint16_t port, const std::string& request)
     int fd = connectTo (port);
     REQUIRE (fd >= 0);
     REQUIRE (::send (fd, request.data(), request.size(), 0) == static_cast<ssize_t> (request.size()));
-    ::shutdown (fd, SHUT_WR);
     std::string response;
     char buffer[4096];
     while (const auto count = ::recv (fd, buffer, sizeof (buffer), 0))
@@ -142,6 +143,26 @@ TEST_CASE ("HTTP semantic action crosses authenticated script channel", "[dawn][
     [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
 }
 
+TEST_CASE ("script server preserves competitor and stops preauth client", "[dawn][server]")
+{
+    NSFileManager* files=NSFileManager.defaultManager;
+    NSString* root=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    [files createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString* descriptor=[root stringByAppendingPathComponent:@"remote-script.json"];
+    [@"competitor" writeToFile:descriptor atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    BridgeCore core(@"token"); ScriptServer blocked(core,descriptor); NSError* error=nil;
+    REQUIRE_FALSE(blocked.start(&error));
+    REQUIRE([[[NSString alloc] initWithContentsOfFile:descriptor encoding:NSUTF8StringEncoding error:nil] isEqual:@"competitor"]);
+    [files removeItemAtPath:descriptor error:nil];
+    ScriptServer server(core,descriptor); REQUIRE(server.start(&error));
+    int preauth=connectTo(server.port()); REQUIRE(preauth>=0); usleep(30'000);
+    auto began=std::chrono::steady_clock::now(); server.stop();
+    REQUIRE(std::chrono::steady_clock::now()-began<std::chrono::seconds(1)); ::close(preauth);
+    REQUIRE_FALSE([files fileExistsAtPath:descriptor]);
+    REQUIRE(server.start(&error)); server.stop();
+    [files removeItemAtPath:root error:nil];
+}
+
 TEST_CASE ("HTTP server exposes only bounded authenticated routes", "[dawn][server]")
 {
     BridgeCore core (@"launch-token");
@@ -167,4 +188,69 @@ TEST_CASE ("HTTP server exposes only bounded authenticated routes", "[dawn][serv
         "POST /v1/action HTTP/1.1\r\nHost: phone\r\nAuthorization: Bearer launch-token\r\nContent-Length: 65537\r\n\r\n");
     REQUIRE (oversized.find ("413 Payload Too Large") != std::string::npos);
     server.stop();
+}
+
+TEST_CASE ("slow unauthenticated client cannot monopolize HTTP", "[dawn][server]")
+{
+    BridgeCore core(@"token"); HttpServer server(core,@"page"); NSError* error=nil;
+    REQUIRE(server.start(&error));
+    int slow=connectTo(server.port()); REQUIRE(slow>=0);
+    const std::string partial="GET /v1/snapshot HTTP/1.1\r\nHost: slow";
+    REQUIRE(::send(slow,partial.data(),partial.size(),0)==static_cast<ssize_t>(partial.size()));
+    auto valid=std::async(std::launch::async,[&]{return exchange(server.port(),
+      "GET /v1/snapshot HTTP/1.1\r\nAuthorization: Bearer token\r\n\r\n");});
+    REQUIRE(valid.wait_for(std::chrono::seconds(1))==std::future_status::ready);
+    REQUIRE(valid.get().find("200 OK")!=std::string::npos);
+    ::close(slow); server.stop();
+}
+
+TEST_CASE ("HTTP rejects duplicate content length", "[dawn][server]")
+{
+    BridgeCore core(@"token"); HttpServer server(core,@"page"); NSError* error=nil; REQUIRE(server.start(&error));
+    auto response=exchange(server.port(),"POST /v1/action HTTP/1.1\r\nAuthorization: Bearer token\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n");
+    REQUIRE(response.find("400 Bad Request")!=std::string::npos); server.stop();
+}
+
+TEST_CASE ("simultaneous duplicate HTTP taps forward once", "[dawn][server]")
+{
+    BridgeCore core(@"token"); core.setScriptConnected(true); std::atomic<int> sends{0};
+    core.setActionSender([&](const std::string&){++sends;return true;});
+    HttpServer server(core,@"page"); NSError* error=nil; REQUIRE(server.start(&error));
+    std::string body=R"({"requestId":"duplicate","expectedRevision":0,"action":"put"})";
+    std::string request="POST /v1/action HTTP/1.1\r\nAuthorization: Bearer token\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body;
+    auto one=std::async(std::launch::async,[&]{return exchange(server.port(),request);});
+    auto two=std::async(std::launch::async,[&]{return exchange(server.port(),request);});
+    for(int i=0;i<100&&sends.load()!=1;++i) usleep(5'000);
+    REQUIRE(sends==1);
+    REQUIRE(core.ingestScriptLine([@R"({"protocol":1,"type":"result","ok":true,"requestId":"duplicate","revision":1,"state":{"revision":1}})" dataUsingEncoding:NSUTF8StringEncoding]));
+    REQUIRE(one.get().find("200 OK")!=std::string::npos); REQUIRE(two.get().find("200 OK")!=std::string::npos);
+    server.stop(); core.setScriptConnected(false);
+}
+
+TEST_CASE ("HTTP stop interrupts preauth and action wait and can restart", "[dawn][server]")
+{
+    BridgeCore core(@"token"); core.setScriptConnected(true); core.setActionSender([](const std::string&){return true;});
+    HttpServer server(core,@"page"); NSError* error=nil; REQUIRE(server.start(&error));
+    int slow=connectTo(server.port()); REQUIRE(slow>=0); REQUIRE(::send(slow,"G",1,0)==1);
+    std::string body=R"({"requestId":"waiting","expectedRevision":0,"action":"stop"})";
+    std::string request="POST /v1/action HTTP/1.1\r\nAuthorization: Bearer token\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body;
+    int waiting=connectTo(server.port()); REQUIRE(waiting>=0); REQUIRE(::send(waiting,request.data(),request.size(),0)==static_cast<ssize_t>(request.size()));
+    usleep(50'000); auto began=std::chrono::steady_clock::now(); server.stop();
+    REQUIRE(std::chrono::steady_clock::now()-began<std::chrono::seconds(1));
+    ::close(slow); ::close(waiting);
+    REQUIRE(server.start(&error)); REQUIRE(exchange(server.port(),"GET /web HTTP/1.1\r\n\r\n").find("200 OK")!=std::string::npos); server.stop();
+}
+
+TEST_CASE ("HTTP client disconnect cancels its action waiter", "[dawn][server]")
+{
+    BridgeCore core(@"token"); core.setScriptConnected(true); std::atomic<int> sends{0};
+    core.setActionSender([&](const std::string&){++sends;return true;});
+    HttpServer server(core,@"page"); NSError* error=nil; REQUIRE(server.start(&error));
+    std::string body=R"({"requestId":"gone","expectedRevision":0,"action":"stop"})";
+    std::string request="POST /v1/action HTTP/1.1\r\nAuthorization: Bearer token\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body;
+    int client=connectTo(server.port()); REQUIRE(client>=0);
+    REQUIRE(::send(client,request.data(),request.size(),0)==static_cast<ssize_t>(request.size()));
+    for(int i=0;i<100&&sends.load()!=1;++i) usleep(5'000); REQUIRE(sends==1); ::close(client); usleep(150'000);
+    REQUIRE_FALSE(core.ingestScriptLine([@R"({"protocol":1,"type":"result","ok":true,"requestId":"gone","revision":1,"state":{"revision":1}})" dataUsingEncoding:NSUTF8StringEncoding]));
+    server.stop(); core.setScriptConnected(false);
 }

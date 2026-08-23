@@ -5,6 +5,7 @@ find_library(SECURITY_FRAMEWORK Security REQUIRED)
 
 set(DAWN_CORE_SOURCES
     Protocol.mm
+    ProtocolJson.mm
     Resources.mm
     SocketSupport.mm
     ScriptServer.mm
@@ -79,6 +80,7 @@ add_dependencies(MoshDawnBridgeResources MoshDawnBridge MoshDawnCompanionUI)
 if (MOSH_BUILD_TESTS)
     add_executable(MoshDawnBridgeTests
         tests/test_protocol.mm
+        tests/test_result_correlation.mm
         tests/test_resources.mm
         tests/test_servers.mm)
     target_compile_options(MoshDawnBridgeTests PRIVATE -fobjc-arc)
@@ -86,4 +88,7 @@ if (MOSH_BUILD_TESTS)
         MoshDawnBridgeCore
         Catch2::Catch2WithMain)
     add_test(NAME MoshDawnBridgeTests COMMAND MoshDawnBridgeTests)
+    add_test(NAME MoshDawnBridgeRunScriptSafety
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_run_script.sh"
+                     "${CMAKE_SOURCE_DIR}/scripts/build-and-run-dawn-bridge.sh")
 endif()

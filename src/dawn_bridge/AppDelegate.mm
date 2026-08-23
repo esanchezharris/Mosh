@@ -62,10 +62,10 @@ using namespace mosh::dawn;
 {
     (void) notification;
     [self.refreshTimer invalidate];
-    if (_http)
-        _http->stop();
     if (_script)
         _script->stop();
+    if (_http)
+        _http->stop();
 }
 
 - (NSMenuItem*)statusLine:(NSString*)title menu:(NSMenu*)menu
