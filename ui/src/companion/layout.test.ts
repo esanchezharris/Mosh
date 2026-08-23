@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ORDER, load, moveInOrder, parse, sanitizeOrder, save, serialize, TILES } from "./layout";
+import { DEFAULT_ORDER, load, moveInOrder, orderForTiles, parse, sanitizeOrder, save, serialize, TILES } from "./layout";
 import type { Button } from "./types";
 
 describe("sanitizeOrder", () => {
@@ -16,6 +16,19 @@ describe("sanitizeOrder", () => {
   it("returns the full default set for junk input", () => {
     expect(sanitizeOrder(null)).toEqual(TILES);
     expect(sanitizeOrder("nope")).toEqual(TILES);
+  });
+});
+
+describe("orderForTiles", () => {
+  it("keeps a stored marker from reappearing in Ableton mode", () => {
+    // Given
+    const layout = parse('{"order":["marker","stop","keep","again","hear","record"],"navPos":"bottom"}');
+
+    // When
+    const order = orderForTiles(layout, ["keep", "again", "hear", "record", "stop"]);
+
+    // Then
+    expect(order).toEqual(["stop", "keep", "again", "hear", "record"]);
   });
 });
 

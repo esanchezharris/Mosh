@@ -30,6 +30,13 @@ export function sanitizeOrder(order: unknown): Button[] {
   return out;
 }
 
+/** Apply a saved layout to this mode's tiles. Hidden tiles are never appended. */
+export function orderForTiles(layout: Layout, available: readonly Button[]): Button[] {
+  const ordered = layout.order.filter((button) => available.includes(button));
+  for (const button of available) if (!ordered.includes(button)) ordered.push(button);
+  return ordered;
+}
+
 /** Move `id` to sit at `toIndex` in the order (clamped). Pure. */
 export function moveInOrder(order: Button[], id: Button, toIndex: number): Button[] {
   const from = order.indexOf(id);
