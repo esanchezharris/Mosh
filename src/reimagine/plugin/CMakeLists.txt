@@ -18,6 +18,8 @@ target_sources(MoshReImaginePlugin PRIVATE
   ReImagineProcessor.h
   ReImagineEditor.cpp
   ReImagineEditor.h
+  ReImagineLookAndFeel.cpp
+  ReImagineLookAndFeel.h
   ../ReImagineCore.cpp
   ../ReImagineCore.h
   ../ReImagineService.cpp
@@ -61,3 +63,18 @@ add_test(NAME MoshReImagineBundleSmoke
   COMMAND MoshReImagineBundleSmoke
     "$<TARGET_BUNDLE_DIR:MoshReImaginePlugin_VST3>")
 set_tests_properties(MoshReImagineBundleSmoke PROPERTIES TIMEOUT 30)
+
+add_executable(MoshReImagineEditorSmoke ReImagineEditorSmoke.cpp)
+target_compile_definitions(MoshReImagineEditorSmoke PRIVATE
+  JUCE_WEB_BROWSER=0
+  JUCE_USE_CURL=0
+)
+target_link_libraries(MoshReImagineEditorSmoke PRIVATE
+  MoshReImaginePlugin
+  juce::juce_audio_utils
+  juce::juce_recommended_config_flags
+)
+add_test(NAME MoshReImagineEditorSmoke
+  COMMAND MoshReImagineEditorSmoke
+    "${CMAKE_CURRENT_BINARY_DIR}/MoshReImagineEditorSmoke.png")
+set_tests_properties(MoshReImagineEditorSmoke PROPERTIES TIMEOUT 30)

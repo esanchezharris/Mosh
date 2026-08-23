@@ -228,6 +228,39 @@ TEST_CASE ("Service request maps Mosh rack controls to the existing SA3 protocol
     CHECK (static_cast<float> ((*loras)[0].getProperty ("value", 0.0)) == Catch::Approx (65.0f));
 }
 
+TEST_CASE ("LoRA catalog keeps valid service adapters and their human labels", "[reimagine][service][loras]")
+{
+    auto* response = new juce::DynamicObject();
+    juce::Array<juce::var> rows;
+    auto addRow = [&rows] (juce::String name, juce::String displayName,
+                           juce::String trigger, juce::String family, bool valid)
+    {
+        auto* row = new juce::DynamicObject();
+        row->setProperty ("name", std::move (name));
+        row->setProperty ("displayName", std::move (displayName));
+        row->setProperty ("trigger", std::move (trigger));
+        row->setProperty ("family", std::move (family));
+        row->setProperty ("valid", valid);
+        rows.add (juce::var (row));
+    };
+    addRow ("bro-sa3", "Brother (BWPOM era)", "brozr", "library", true);
+    addRow ("broken", "Broken adapter", {}, "library", false);
+    addRow ("lab-take", {}, "labz", "lab", true);
+    response->setProperty ("ok", true);
+    response->setProperty ("loras", rows);
+
+    const auto catalog = loraCatalogFromResponse (juce::var (response));
+
+    REQUIRE (catalog.size() == 2);
+    CHECK (catalog[0].id == "bro-sa3");
+    CHECK (catalog[0].displayName == "Brother (BWPOM era)");
+    CHECK (catalog[0].trigger == "brozr");
+    CHECK_FALSE (catalog[0].isLab);
+    CHECK (catalog[1].id == "lab-take");
+    CHECK (catalog[1].displayName == "lab-take");
+    CHECK (catalog[1].isLab);
+}
+
 TEST_CASE ("State migration defaults additive Mix and preserves unlimited take history", "[reimagine][state]")
 {
     PluginStateV1 state;

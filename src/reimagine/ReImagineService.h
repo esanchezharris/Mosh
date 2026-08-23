@@ -9,6 +9,34 @@ namespace mosh::reimagine
 {
 juce::var serviceParamsForRack (const RackSettings&, bool lab);
 
+struct LoraCatalogItem
+{
+    juce::String id;
+    juce::String displayName;
+    juce::String trigger;
+    juce::String hint;
+    juce::String notes;
+    bool isLab = false;
+};
+
+enum class LoraCatalogStatus
+{
+    idle,
+    loading,
+    ready,
+    error
+};
+
+struct LoraCatalogSnapshot
+{
+    LoraCatalogStatus status = LoraCatalogStatus::idle;
+    std::vector<LoraCatalogItem> items;
+    juce::String error;
+    uint64_t revision = 0;
+};
+
+std::vector<LoraCatalogItem> loraCatalogFromResponse (const juce::var&);
+
 class AssetStore
 {
 public:

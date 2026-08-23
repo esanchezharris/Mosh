@@ -18,6 +18,35 @@ void setEnvironment (const char* key, const juce::String& value)
 
 }
 
+std::vector<LoraCatalogItem> loraCatalogFromResponse (const juce::var& response)
+{
+    std::vector<LoraCatalogItem> result;
+    if (! static_cast<bool> (response.getProperty ("ok", false)))
+        return result;
+    const auto* rows = response.getProperty ("loras", {}).getArray();
+    if (rows == nullptr)
+        return result;
+    result.reserve (static_cast<size_t> (rows->size()));
+    for (const auto& row : *rows)
+    {
+        if (! static_cast<bool> (row.getProperty ("valid", false)))
+            continue;
+        LoraCatalogItem item;
+        item.id = row.getProperty ("name", {}).toString().trim();
+        if (item.id.isEmpty())
+            continue;
+        item.displayName = row.getProperty ("displayName", {}).toString().trim();
+        if (item.displayName.isEmpty())
+            item.displayName = item.id;
+        item.trigger = row.getProperty ("trigger", {}).toString().trim();
+        item.hint = row.getProperty ("hint", {}).toString().trim();
+        item.notes = row.getProperty ("notes", {}).toString().trim();
+        item.isLab = row.getProperty ("family", {}).toString() == "lab";
+        result.push_back (std::move (item));
+    }
+    return result;
+}
+
 juce::var serviceParamsForRack (const RackSettings& rack, bool lab)
 {
     auto* params = new juce::DynamicObject();

@@ -2,57 +2,145 @@
 
 namespace mosh::reimagine
 {
+namespace
+{
+constexpr int editorWidth = 780;
+constexpr int editorHeight = 690;
+}
+
 ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     : AudioProcessorEditor (&p), processorRef (p), progressBar (progressValue)
 {
-    setSize (720, 590);
-    std::array<juce::Component*, 17> components { &transfer, &newTake, &compare, &reset, &relink,
-                                                  &replace, &discard, &prompt, &reimagine, &mix,
-                                                  &loraStack, &seed, &takes, &regions, &lab, &status, &progressBar };
+    setLookAndFeel (&lookAndFeel);
+    setOpaque (true);
+    setSize (editorWidth, editorHeight);
+
+    std::array<juce::Component*, 19> components {
+        &transfer, &newTake, &compare, &reset, &relink, &replace, &discard, &refreshLoras,
+        &prompt, &reimagine, &mix, &seed, &takes, &regions, &lab, &status, &progressBar,
+        &loraInfo, &labHelp
+    };
     for (auto* component : components)
         addAndMakeVisible (component);
+    std::array<juce::Label*, 6> labels {
+        &promptLabel, &reimagineLabel, &colorsLabel, &lorasLabel, &seedLabel, &mixLabel
+    };
+    for (auto* label : labels)
+        addAndMakeVisible (label);
+
+    configureLabel (promptLabel, "PROMPT", 11.0f, true);
+    configureLabel (reimagineLabel, "KEEP / RE-IMAGINE", 11.0f, true);
+    configureLabel (colorsLabel, "COLORS", 11.0f, true);
+    configureLabel (lorasLabel, "LoRA STACK", 11.0f, true);
+    configureLabel (seedLabel, "SEED", 11.0f, true);
+    configureLabel (mixLabel, "MIX", 11.0f, true);
+    configureLabel (loraInfo, "Loading local adapters...", 11.5f);
+    configureLabel (labHelp, "Allows experimental strengths above the safe range.", 11.0f);
+    configureLabel (status, "Ready - arm Transfer while stopped", 12.5f);
+    status.setColour (juce::Label::textColourId, ReImagineLookAndFeel::text());
+
+    transfer.setComponentID ("primary");
+    transfer.setColour (juce::TextButton::buttonColourId, ReImagineLookAndFeel::accent());
+    transfer.setTooltip ("Arm while stopped, then start Live playback to capture a region.");
+    newTake.setTooltip ("Advance the seed and render a new immutable take.");
+    compare.setTooltip ("Temporarily monitor the original dry audio.");
+    reset.setTooltip ("Deselect the audible take without deleting history.");
+    relink.setTooltip ("Relink a missing source or render WAV by verified content hash.");
+    refreshLoras.setTooltip ("Refresh the local SA3 LoRA library.");
+    refreshLoras.setComponentID ("refresh-loras");
+    loraInfo.setComponentID ("lora-info");
+    regions.setTextWhenNothingSelected ("No regions");
+    regions.setTooltip ("Choose a transferred timeline region.");
+    takes.setTextWhenNothingSelected ("No takes");
+    takes.setTooltip ("Choose an immutable rendered take.");
+    replace.setVisible (false);
+    discard.setVisible (false);
+
     for (size_t i = 0; i < colorNames.size(); ++i)
     {
         addAndMakeVisible (colorNames[i]);
         addAndMakeVisible (colorAmounts[i]);
-        colorNames[i].setTextToShowWhenEmpty ("Color " + juce::String (i + 1), juce::Colours::grey);
+        colorNames[i].setComponentID ("color-name-" + juce::String (i + 1));
+        colorNames[i].setTextToShowWhenEmpty ("Color " + juce::String (i + 1),
+                                              ReImagineLookAndFeel::muted());
+        colorNames[i].setFont (juce::FontOptions (13.0f));
         colorAmounts[i].setRange (0.0, 100.0, 1.0);
         colorAmounts[i].setValue (65.0, juce::dontSendNotification);
         colorAmounts[i].setSliderStyle (juce::Slider::LinearHorizontal);
-        colorAmounts[i].setTextBoxStyle (juce::Slider::TextBoxRight, false, 54, 20);
+        colorAmounts[i].setTextBoxStyle (juce::Slider::TextBoxRight, false, 50, 24);
+        colorAmounts[i].setTextValueSuffix ("%");
         colorAmounts[i].onDragEnd = [this] { commit(); };
         colorNames[i].onReturnKey = [this] { commit(); };
         colorNames[i].onFocusLost = [this] { commit(); };
     }
+
+    for (size_t i = 0; i < loraSelectors.size(); ++i)
+    {
+        addAndMakeVisible (loraSelectors[i]);
+        addAndMakeVisible (loraAmounts[i]);
+        loraSelectors[i].setComponentID ("lora-slot-" + juce::String (i + 1));
+        loraAmounts[i].setComponentID ("lora-strength-" + juce::String (i + 1));
+        loraSelectors[i].addItem ("Loading adapters...", 1);
+        loraSelectors[i].setSelectedId (1, juce::dontSendNotification);
+        loraSelectors[i].setEnabled (false);
+        loraAmounts[i].setRange (0.0, 150.0, 1.0);
+        loraAmounts[i].setValue (100.0, juce::dontSendNotification);
+        loraAmounts[i].setSliderStyle (juce::Slider::LinearHorizontal);
+        loraAmounts[i].setTextBoxStyle (juce::Slider::TextBoxRight, false, 54, 24);
+        loraAmounts[i].setTextValueSuffix ("%");
+        loraAmounts[i].setEnabled (false);
+        loraAmounts[i].onDragEnd = [this] { commit(); };
+        loraSelectors[i].onChange = [this, i]
+        {
+            if (syncingLoras)
+                return;
+            const auto index = loraSelectors[i].getSelectedItemIndex();
+            loraSlotIds[i] = juce::isPositiveAndBelow (index,
+                static_cast<int> (loraMenuIds[i].size())) ? loraMenuIds[i][static_cast<size_t> (index)]
+                                                         : juce::String();
+            loraAmounts[i].setEnabled (loraSlotIds[i].isNotEmpty());
+            updateLoraInfo();
+            commit();
+        };
+    }
+
     prompt.setMultiLine (true);
     prompt.setReturnKeyStartsNewLine (false);
-    prompt.setTextToShowWhenEmpty ("Describe how to re-imagine this passage…", juce::Colours::grey);
+    prompt.setTextToShowWhenEmpty ("Describe the transformation", ReImagineLookAndFeel::muted());
+    prompt.setFont (juce::FontOptions (14.0f));
     prompt.onReturnKey = [this] { commit(); };
     prompt.onFocusLost = [this] { commit(); };
     reimagine.setRange (0.15, 0.5, 0.01);
     reimagine.setSliderStyle (juce::Slider::LinearHorizontal);
-    reimagine.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 20);
+    reimagine.setTextBoxStyle (juce::Slider::TextBoxRight, false, 54, 24);
     reimagine.onDragEnd = [this] { commit(); };
     mix.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    mix.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 60, 20);
+    mix.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 22);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processorRef.parameters, "mix", mix);
-    loraStack.setTextToShowWhenEmpty ("LoRA stack: id@scale, id@scale", juce::Colours::grey);
-    loraStack.onReturnKey = [this] { commit(); };
-    loraStack.onFocusLost = [this] { commit(); };
     seed.setInputRestrictions (12, "0123456789-");
+    seed.setFont (juce::FontOptions (13.0f));
     seed.onReturnKey = [this] { commit(); };
+    seed.onFocusLost = [this] { commit(); };
+
     transfer.onClick = [this] { processorRef.toggleTransfer(); };
     newTake.onClick = [this] { processorRef.newTake(); };
     compare.setClickingTogglesState (true);
     compare.onClick = [this]
     {
-        if (compare.getToggleState()) processorRef.setCompareDry (true); else processorRef.clearCompareDry();
+        if (compare.getToggleState()) processorRef.setCompareDry (true);
+        else processorRef.clearCompareDry();
     };
     reset.onClick = [this] { processorRef.resetSelection(); };
+    refreshLoras.onClick = [this]
+    {
+        showLoraLoadingState();
+        processorRef.refreshLoraCatalog();
+    };
     relink.onClick = [this]
     {
-        fileChooser = std::make_unique<juce::FileChooser> ("Relink hash-matching WAV", juce::File(), "*.wav");
+        fileChooser = std::make_unique<juce::FileChooser> ("Relink hash-matching WAV",
+                                                           juce::File(), "*.wav");
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode
                                   | juce::FileBrowserComponent::canSelectFiles,
                                   [this] (const juce::FileChooser& chooser)
@@ -76,15 +164,36 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
         processorRef.setSelectedRegion (regions.getSelectedItemIndex());
         knownTakeCount = -1;
     };
-    status.setColour (juce::Label::textColourId, juce::Colour::fromRGB (195, 202, 214));
-    status.setJustificationType (juce::Justification::centredLeft);
+
     const auto state = processorRef.stateSnapshot();
     prompt.setText (state.rack.prompt, false);
     reimagine.setRange (0.15, state.labEnabled ? 1.5 : 0.5, 0.01);
     reimagine.setValue (state.rack.reimagine, juce::dontSendNotification);
     seed.setText (juce::String (state.rack.seed), false);
     lab.setToggleState (state.labEnabled, juce::dontSendNotification);
+    for (size_t i = 0; i < loraSlotIds.size() && i < state.rack.loras.size(); ++i)
+    {
+        loraSlotIds[i] = state.rack.loras[i].id;
+        loraAmounts[i].setValue (state.rack.loras[i].scale * 100.0f,
+                                 juce::dontSendNotification);
+    }
+    processorRef.refreshLoraCatalog();
     startTimerHz (10);
+}
+
+ReImagineEditor::~ReImagineEditor()
+{
+    setLookAndFeel (nullptr);
+}
+
+void ReImagineEditor::configureLabel (juce::Label& label, const juce::String& textValue,
+                                      float size, bool heading)
+{
+    label.setText (textValue, juce::dontSendNotification);
+    label.setFont (juce::FontOptions (size, heading ? juce::Font::bold : juce::Font::plain));
+    label.setColour (juce::Label::textColourId, ReImagineLookAndFeel::muted());
+    label.setJustificationType (juce::Justification::centredLeft);
+    label.setInterceptsMouseClicks (false, false);
 }
 
 RackSettings ReImagineEditor::rackFromControls() const
@@ -97,16 +206,103 @@ RackSettings ReImagineEditor::rackFromControls() const
         if (colorNames[i].getText().trim().isNotEmpty())
             rack.colors.push_back ({ colorNames[i].getText().trim(),
                                      static_cast<float> (colorAmounts[i].getValue()) });
-    for (auto token : juce::StringArray::fromTokens (loraStack.getText(), ",", {}))
-    {
-        auto parts = juce::StringArray::fromTokens (token, "@", {});
-        if (! parts.isEmpty() && parts[0].trim().isNotEmpty())
-            rack.loras.push_back ({ parts[0].trim(), parts.size() > 1 ? parts[1].getFloatValue() : 1.0f });
-    }
+    for (size_t i = 0; i < loraSlotIds.size(); ++i)
+        if (loraSlotIds[i].isNotEmpty())
+            rack.loras.push_back ({ loraSlotIds[i],
+                                    static_cast<float> (loraAmounts[i].getValue() / 100.0) });
     return rack;
 }
 
-void ReImagineEditor::commit() { processorRef.commitRack (rackFromControls()); }
+void ReImagineEditor::commit()
+{
+    if (! syncingLoras)
+        processorRef.commitRack (rackFromControls());
+}
+
+void ReImagineEditor::showLoraLoadingState()
+{
+    for (size_t slot = 0; slot < loraSelectors.size(); ++slot)
+    {
+        auto& selector = loraSelectors[slot];
+        selector.clear (juce::dontSendNotification);
+        selector.addItem ("Loading adapters...", 1);
+        selector.setSelectedId (1, juce::dontSendNotification);
+        selector.setEnabled (false);
+        loraAmounts[slot].setEnabled (false);
+    }
+    loraInfo.setText ("Loading local adapters...", juce::dontSendNotification);
+}
+
+void ReImagineEditor::syncLoraCatalog (const LoraCatalogSnapshot& catalog)
+{
+    syncingLoras = true;
+    if (catalog.status == LoraCatalogStatus::loading)
+    {
+        showLoraLoadingState();
+        syncingLoras = false;
+        return;
+    }
+    for (size_t slot = 0; slot < loraSelectors.size(); ++slot)
+    {
+        auto& selector = loraSelectors[slot];
+        const auto desired = loraSlotIds[slot];
+        selector.clear (juce::dontSendNotification);
+        loraMenuIds[slot].clear();
+        selector.addItem ("None", 1);
+        loraMenuIds[slot].push_back ({});
+        int selectedIndex = desired.isEmpty() ? 0 : -1;
+        for (const auto& item : catalog.items)
+        {
+            auto menuText = item.displayName;
+            if (item.isLab) menuText << " [Lab]";
+            selector.addItem (menuText, selector.getNumItems() + 1);
+            loraMenuIds[slot].push_back (item.id);
+            if (item.id == desired)
+                selectedIndex = selector.getNumItems() - 1;
+        }
+        if (desired.isNotEmpty() && selectedIndex < 0)
+        {
+            selector.addItem ("Missing - " + desired, selector.getNumItems() + 1);
+            loraMenuIds[slot].push_back (desired);
+            selectedIndex = selector.getNumItems() - 1;
+        }
+        selector.setSelectedItemIndex (juce::jmax (0, selectedIndex), juce::dontSendNotification);
+        selector.setEnabled (catalog.status == LoraCatalogStatus::ready || desired.isNotEmpty());
+        loraAmounts[slot].setEnabled (desired.isNotEmpty());
+    }
+    syncingLoras = false;
+    if (catalog.status == LoraCatalogStatus::error)
+        loraInfo.setText (catalog.error + " - use Refresh to try again", juce::dontSendNotification);
+    else
+        updateLoraInfo();
+}
+
+void ReImagineEditor::updateLoraInfo()
+{
+    const auto catalog = processorRef.loraCatalogSnapshot();
+    juce::StringArray details;
+    for (const auto& selected : loraSlotIds)
+        if (selected.isNotEmpty())
+        {
+            bool found = false;
+            for (const auto& item : catalog.items)
+                if (item.id == selected)
+                {
+                    found = true;
+                    auto detail = item.displayName;
+                    if (item.trigger.isNotEmpty()) detail << " - trigger: " << item.trigger;
+                    details.add (detail);
+                }
+            if (! found)
+                details.add ("Missing - " + selected);
+        }
+    if (! details.isEmpty())
+        loraInfo.setText (details.joinIntoString ("  |  "), juce::dontSendNotification);
+    else if (catalog.status == LoraCatalogStatus::ready)
+        loraInfo.setText (catalog.items.empty() ? "No compatible SA3 adapters found"
+                                                : juce::String (catalog.items.size()) + " local adapters available",
+                          juce::dontSendNotification);
+}
 
 void ReImagineEditor::timerCallback()
 {
@@ -116,6 +312,12 @@ void ReImagineEditor::timerCallback()
     const auto overlap = processorRef.hasPendingOverlap();
     replace.setVisible (overlap);
     discard.setVisible (overlap);
+    const auto catalog = processorRef.loraCatalogSnapshot();
+    if (catalog.revision != knownLoraRevision)
+    {
+        knownLoraRevision = catalog.revision;
+        syncLoraCatalog (catalog);
+    }
     const auto state = processorRef.stateSnapshot();
     if (static_cast<int> (state.regions.size()) != knownRegionCount)
     {
@@ -124,8 +326,8 @@ void ReImagineEditor::timerCallback()
         for (int i = 0; i < knownRegionCount; ++i)
         {
             const auto& region = state.regions[static_cast<size_t> (i)];
-            regions.addItem ("Region " + juce::String (i + 1) + " · "
-                             + juce::String (region.ppqStart, 2) + "–"
+            regions.addItem ("Region " + juce::String (i + 1) + " - "
+                             + juce::String (region.ppqStart, 2) + " to "
                              + juce::String (region.ppqEnd, 2), i + 1);
         }
         knownTakeCount = -1;
@@ -151,7 +353,7 @@ void ReImagineEditor::timerCallback()
             for (int i = 0; i < takeCount; ++i)
             {
                 const auto& take = found->takes[static_cast<size_t> (i)];
-                takes.addItem ("Take " + juce::String (i + 1) + " · seed " + juce::String (take.seed), i + 1);
+                takes.addItem ("Take " + juce::String (i + 1) + " - seed " + juce::String (take.seed), i + 1);
                 if (take.id == found->selectedTakeId)
                     takes.setSelectedItemIndex (i, juce::dontSendNotification);
             }
@@ -160,48 +362,63 @@ void ReImagineEditor::timerCallback()
 
 void ReImagineEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour::fromRGB (14, 16, 21));
-    g.setColour (juce::Colour::fromRGB (124, 92, 255));
-    g.fillRect (0, 0, getWidth(), 7);
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (24.0f, juce::Font::bold));
-    g.drawText ("MOSH  RE-IMAGINE", 24, 18, 360, 34, juce::Justification::centredLeft);
-    g.setColour (juce::Colour::fromRGB (150, 157, 172));
-    g.setFont (juce::FontOptions (13.0f));
-    g.drawText ("Timeline-aware local Stable Audio transformation", 25, 49, 420, 22,
+    g.fillAll (ReImagineLookAndFeel::background());
+    g.setColour (ReImagineLookAndFeel::accent());
+    g.fillRect (0, 0, getWidth(), 5);
+    g.setColour (ReImagineLookAndFeel::text());
+    g.setFont (juce::FontOptions (23.0f, juce::Font::bold));
+    g.drawText ("MOSH RE-IMAGINE", 24, 17, 360, 32, juce::Justification::centredLeft);
+    g.setColour (ReImagineLookAndFeel::muted());
+    g.setFont (juce::FontOptions (12.5f));
+    g.drawText ("Timeline-aware local audio transformation", 25, 48, 430, 20,
                 juce::Justification::centredLeft);
-    g.setColour (juce::Colour::fromRGB (45, 49, 61));
-    g.drawRoundedRectangle (20.0f, 82.0f, 680.0f, 470.0f, 10.0f, 1.0f);
-    g.setColour (juce::Colour::fromRGB (188, 194, 208));
-    g.drawText ("KEEP", 36, 202, 70, 20, juce::Justification::left);
-    g.drawText ("RE-IMAGINE", 582, 202, 100, 20, juce::Justification::right);
-    g.drawText ("MIX", 607, 92, 70, 20, juce::Justification::centred);
+    g.setColour (ReImagineLookAndFeel::panel());
+    g.fillRoundedRectangle (20.0f, 84.0f, 740.0f, 548.0f, 10.0f);
+    g.setColour (ReImagineLookAndFeel::border());
+    g.drawRoundedRectangle (20.5f, 84.5f, 739.0f, 547.0f, 10.0f, 1.0f);
+    g.drawLine (552.0f, 146.0f, 552.0f, 616.0f, 1.0f);
 }
 
 void ReImagineEditor::resized()
 {
-    transfer.setBounds (36, 96, 120, 34);
-    newTake.setBounds (164, 96, 92, 34);
-    regions.setBounds (264, 96, 130, 34);
-    takes.setBounds (402, 96, 99, 34);
-    compare.setBounds (511, 96, 82, 34);
-    mix.setBounds (607, 112, 70, 80);
-    reset.setBounds (511, 140, 82, 28);
-    relink.setBounds (511, 174, 82, 28);
-    prompt.setBounds (36, 144, 455, 52);
-    reimagine.setBounds (100, 202, 475, 24);
+    transfer.setBounds (28, 96, 116, 34);
+    newTake.setBounds (152, 96, 88, 34);
+    regions.setBounds (248, 96, 136, 34);
+    takes.setBounds (392, 96, 104, 34);
+    compare.setBounds (504, 96, 86, 34);
+    reset.setBounds (598, 96, 72, 34);
+    relink.setBounds (678, 96, 70, 34);
+
+    promptLabel.setBounds (28, 148, 160, 18);
+    prompt.setBounds (28, 169, 510, 66);
+    reimagineLabel.setBounds (28, 244, 180, 18);
+    reimagine.setBounds (92, 261, 446, 28);
+    colorsLabel.setBounds (28, 298, 160, 18);
     for (size_t i = 0; i < colorNames.size(); ++i)
     {
-        const auto y = 244 + static_cast<int> (i) * 48;
-        colorNames[i].setBounds (36, y, 210, 30);
-        colorAmounts[i].setBounds (260, y, 300, 30);
+        const auto y = 321 + static_cast<int> (i) * 39;
+        colorNames[i].setBounds (28, y, 220, 30);
+        colorAmounts[i].setBounds (260, y, 278, 30);
     }
-    loraStack.setBounds (36, 394, 524, 32);
-    seed.setBounds (574, 394, 102, 32);
-    lab.setBounds (36, 438, 360, 26);
-    replace.setBounds (404, 438, 150, 28);
-    discard.setBounds (564, 438, 112, 28);
-    status.setBounds (36, 480, 520, 28);
-    progressBar.setBounds (36, 518, 640, 16);
+    lorasLabel.setBounds (28, 442, 160, 18);
+    refreshLoras.setBounds (458, 438, 80, 28);
+    for (size_t i = 0; i < loraSelectors.size(); ++i)
+    {
+        const auto y = 470 + static_cast<int> (i) * 39;
+        loraSelectors[i].setBounds (28, y, 292, 30);
+        loraAmounts[i].setBounds (332, y, 206, 30);
+    }
+    loraInfo.setBounds (28, 589, 510, 28);
+
+    mixLabel.setBounds (568, 154, 90, 18);
+    mix.setBounds (606, 176, 104, 116);
+    seedLabel.setBounds (568, 306, 100, 18);
+    seed.setBounds (568, 328, 164, 32);
+    lab.setBounds (568, 382, 164, 28);
+    labHelp.setBounds (568, 412, 164, 48);
+    replace.setBounds (568, 478, 164, 30);
+    discard.setBounds (568, 516, 164, 30);
+    status.setBounds (28, 642, 610, 26);
+    progressBar.setBounds (646, 649, 102, 10);
 }
 }
