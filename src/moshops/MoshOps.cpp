@@ -360,22 +360,9 @@ MoshOps::~MoshOps()
     // flush a late editor callback into the event sink. Ordinary editor close still does.
     pluginHost.closeAllEditors();
     stopTimer();
-    unregisterAllMeterClients();       // balances addClient() for track and send meter taps —
-                                        // masterClient is a separate registration (see below)
-    // masterClient (line ~736's ctx->masterLevels.addClient) is never balanced by the
-    // per-track path above. Main.cpp's shutdown() destroys MoshOps BEFORE the engine
-    // (moshOps.reset() precedes engine.reset()), so if a playback context is still
-    // live here (quit-while-playing), its master LevelMeasurer keeps a raw pointer to
-    // masterClient — which is about to be freed with the rest of `this`. The audio
-    // thread would then write through that dangling pointer on the next block. Mirror
-    // the addClient bookkeeping (lastSeenContext tracks exactly the context we last
-    // registered with, and is nulled out everywhere the context is freed) to remove it
-    // here while the context — and `this` — are both still valid.
-    if (lastSeenContext != nullptr)
-    {
-        lastSeenContext->masterLevels.removeClient (masterClient);
-        lastSeenContext = nullptr;
-    }
+    // Balances track, send, and playback-context master clients while their measurers
+    // are still alive. Main.cpp destroys MoshOps before the engine for this reason.
+    unregisterAllMeterClients();
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
     // Silence anything the keyboard/piano roll left sounding, then detach the listener.
