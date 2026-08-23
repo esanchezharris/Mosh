@@ -324,6 +324,22 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   heartbeat `monitor-r8-4b-final-tail-and-eval` owns the completion-to-fused-
   evaluation handoff. This is healthy launch evidence, not final completion.
 
+- **r8-4b training completion, 2026-08-23 — COMPLETE:** the exact final tail
+  reached local iter 113/global iter 13,113 and exited cleanly with status 0.
+  Final validation loss was `0.253`; final train loss was `0.038`; the log
+  contains `Saved final weights` and no NaN/Inf, traceback, or guard alert.
+  Final adapter sha256 is
+  `30c1f7f944d7ceb1047531e5ca003bac8d0e2f4fbd9f206c651d36c4404ff9f3`,
+  adapter config sha256 is
+  `5b6343816c30ed5051ddc77d060424a8ab4e060a0e59159509902125ff2dbd89`,
+  config sha256 is
+  `eb25b38b38ae0af41d63c10a9d92f7f00551aa4745c8c815bc51e3d6d9005853`,
+  and final-tail log sha256 is
+  `ab44c7c549d605f9b2ef758e546d4b68377a36c5a011074ede2292ae3fc76bab`.
+  The 13,113-step frozen epoch is now fully consumed in registered order. The
+  completion monitor proceeds directly to fused serving and the one-clean-read
+  r8-4b gate; no direct adapter-serving result is admissible.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
