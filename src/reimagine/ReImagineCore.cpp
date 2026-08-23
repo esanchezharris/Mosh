@@ -41,7 +41,7 @@ RackSettings rackFromVar (const juce::var& v)
     {
         result.prompt = o->getProperty ("prompt").toString();
         result.reimagine = static_cast<float> (o->getProperty ("reimagine"));
-        result.seed = static_cast<int64_t> (o->getProperty ("seed"));
+        result.seed = static_cast<juce::int64> (o->getProperty ("seed"));
         if (auto* colors = o->getProperty ("colors").getArray())
             for (const auto& item : *colors)
                 if (auto* c = item.getDynamicObject())
@@ -76,7 +76,7 @@ RenderTake takeFromVar (const juce::var& v)
         take.id = o->getProperty ("id").toString();
         take.assetHash = o->getProperty ("assetHash").toString();
         take.timestampIso8601 = o->getProperty ("timestamp").toString();
-        take.seed = static_cast<int64_t> (o->getProperty ("seed"));
+        take.seed = static_cast<juce::int64> (o->getProperty ("seed"));
         take.parameters = rackFromVar (o->getProperty ("parameters"));
         take.manifest = o->getProperty ("manifest");
     }
