@@ -358,12 +358,16 @@ void ReImagineEditor::timerCallback()
                     takes.setSelectedItemIndex (i, juce::dontSendNotification);
             }
     }
+    repaint();
 }
 
 void ReImagineEditor::paint (juce::Graphics& g)
 {
     g.fillAll (ReImagineLookAndFeel::background());
-    g.setColour (ReImagineLookAndFeel::accent());
+    juce::ColourGradient topRule (ReImagineLookAndFeel::accent(), 0.0f, 0.0f,
+                                  ReImagineLookAndFeel::accent().withAlpha (0.15f),
+                                  static_cast<float> (getWidth()), 0.0f, false);
+    g.setGradientFill (topRule);
     g.fillRect (0, 0, getWidth(), 5);
     g.setColour (ReImagineLookAndFeel::text());
     g.setFont (juce::FontOptions (23.0f, juce::Font::bold));
@@ -372,11 +376,36 @@ void ReImagineEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (12.5f));
     g.drawText ("Timeline-aware local audio transformation", 25, 48, 430, 20,
                 juce::Justification::centredLeft);
+    g.setColour (ReImagineLookAndFeel::panelRaised());
+    g.fillRoundedRectangle (642.0f, 18.0f, 112.0f, 24.0f, 7.0f);
+    g.setColour (ReImagineLookAndFeel::accent().withAlpha (0.7f));
+    g.drawRoundedRectangle (642.5f, 18.5f, 111.0f, 23.0f, 7.0f, 1.0f);
+    g.setColour (ReImagineLookAndFeel::text());
+    g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+    g.drawText ("LOCAL SA3", 650, 18, 96, 24, juce::Justification::centred);
+    g.setColour (ReImagineLookAndFeel::muted());
+    g.setFont (juce::FontOptions (10.0f));
+    g.drawText ("VST3 / AUDIO EFFECT", 25, 68, 220, 14, juce::Justification::centredLeft);
     g.setColour (ReImagineLookAndFeel::panel());
     g.fillRoundedRectangle (20.0f, 84.0f, 740.0f, 548.0f, 10.0f);
     g.setColour (ReImagineLookAndFeel::border());
     g.drawRoundedRectangle (20.5f, 84.5f, 739.0f, 547.0f, 10.0f, 1.0f);
+    g.setColour (ReImagineLookAndFeel::panelRaised());
+    g.fillRoundedRectangle (27.0f, 94.0f, 726.0f, 38.0f, 8.0f);
+    g.setColour (ReImagineLookAndFeel::panelInset());
+    g.fillRoundedRectangle (27.0f, 143.0f, 516.0f, 483.0f, 8.0f);
+    g.fillRoundedRectangle (560.0f, 143.0f, 193.0f, 483.0f, 8.0f);
+    g.setColour (ReImagineLookAndFeel::border().withAlpha (0.65f));
+    g.drawRoundedRectangle (27.5f, 143.5f, 515.0f, 482.0f, 8.0f, 1.0f);
+    g.drawRoundedRectangle (560.5f, 143.5f, 192.0f, 482.0f, 8.0f, 1.0f);
+    g.setColour (ReImagineLookAndFeel::muted());
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    g.drawText ("RACK / TRANSFORM", 34, 134, 200, 12, juce::Justification::centredLeft);
+    g.drawText ("OUTPUT / MONITOR", 568, 134, 180, 12, juce::Justification::centredLeft);
     g.drawLine (552.0f, 146.0f, 552.0f, 616.0f, 1.0f);
+    g.setColour (processorRef.transferActive() ? ReImagineLookAndFeel::accent()
+                                                : ReImagineLookAndFeel::success());
+    g.fillEllipse (31.0f, 651.0f, 8.0f, 8.0f);
 }
 
 void ReImagineEditor::resized()
@@ -389,26 +418,26 @@ void ReImagineEditor::resized()
     reset.setBounds (598, 96, 72, 34);
     relink.setBounds (678, 96, 70, 34);
 
-    promptLabel.setBounds (28, 148, 160, 18);
-    prompt.setBounds (28, 169, 510, 66);
-    reimagineLabel.setBounds (28, 244, 180, 18);
-    reimagine.setBounds (92, 261, 446, 28);
-    colorsLabel.setBounds (28, 298, 160, 18);
+    promptLabel.setBounds (28, 154, 160, 18);
+    prompt.setBounds (28, 175, 510, 66);
+    reimagineLabel.setBounds (28, 250, 180, 18);
+    reimagine.setBounds (92, 267, 446, 28);
+    colorsLabel.setBounds (28, 304, 160, 18);
     for (size_t i = 0; i < colorNames.size(); ++i)
     {
-        const auto y = 321 + static_cast<int> (i) * 39;
+        const auto y = 327 + static_cast<int> (i) * 39;
         colorNames[i].setBounds (28, y, 220, 30);
         colorAmounts[i].setBounds (260, y, 278, 30);
     }
-    lorasLabel.setBounds (28, 442, 160, 18);
-    refreshLoras.setBounds (458, 438, 80, 28);
+    lorasLabel.setBounds (28, 448, 160, 18);
+    refreshLoras.setBounds (458, 444, 80, 28);
     for (size_t i = 0; i < loraSelectors.size(); ++i)
     {
-        const auto y = 470 + static_cast<int> (i) * 39;
+        const auto y = 476 + static_cast<int> (i) * 39;
         loraSelectors[i].setBounds (28, y, 292, 30);
         loraAmounts[i].setBounds (332, y, 206, 30);
     }
-    loraInfo.setBounds (28, 589, 510, 28);
+    loraInfo.setBounds (28, 595, 510, 28);
 
     mixLabel.setBounds (568, 154, 90, 18);
     mix.setBounds (606, 176, 104, 116);
@@ -418,7 +447,7 @@ void ReImagineEditor::resized()
     labHelp.setBounds (568, 412, 164, 48);
     replace.setBounds (568, 478, 164, 30);
     discard.setBounds (568, 516, 164, 30);
-    status.setBounds (28, 642, 610, 26);
+    status.setBounds (46, 642, 592, 26);
     progressBar.setBounds (646, 649, 102, 10);
 }
 }
