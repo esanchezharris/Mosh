@@ -40,6 +40,12 @@ public:
     te::Engine& engine() { return *enginePtr; }
     te::Edit&   edit()   { return *editPtr; }            // always fetch fresh (survives reload)
     bool        hasAudio() const { return audioOpen; }
+    /** Actual current-device readiness, distinct from the latched audio-open intent.
+        A session is ready only when JUCE still owns an open device with at least one
+        active output channel. CoreAudio can disappear after startup, so hasAudio()
+        alone is not a truthful transport gate. */
+    bool        audioReady() const;
+    juce::String audioReadinessError() const;
     juce::String audioDeviceError() const { return audioError; }
 
     /** AUD-017 — was audio REQUESTED for this session? True for the GUI and the live

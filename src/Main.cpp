@@ -4,6 +4,7 @@
 #include "app/MacStateRestoration.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
+#include "app/LiveInstrumentSmoke.h"
 #include "engine/AudioDeviceStartup.h"
 #include "app/SparkleUpdater.h"
 #include "engine/MoshEngine.h"
@@ -140,6 +141,7 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool goldenSelfTest = commandLine.contains ("--golden-selftest");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        const bool liveInstrumentSmoke = commandLine.contains ("--live-instrument-smoke");
         // REC-002 — live MIDI capture end-to-end. Needs a REAL device (no device ⇒ no
         // input instances ⇒ the routing fork is never taken), so it joins liveAudio below.
         const bool midiRecordSmoke = commandLine.contains ("--midi-record-smoke");
@@ -153,7 +155,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke || midiRecordSmoke;   // opens the real device, fresh cold session
+        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke;
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest")
                            || audioRecoverySmoke || audioRecoveryIsolationSmoke;
@@ -197,7 +199,7 @@ public:
         modes.selfTest       = commandLine.contains ("--selftest");   // also true for --selftest-undo
         modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
         modes.goldenSelfTest = goldenSelfTest;
-        modes.liveAudioSmoke = liveAudioSmoke;
+        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke;
         modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
@@ -296,6 +298,19 @@ public:
             const auto firstTypes = firstData.getProperty ("types", juce::var());
             const auto timeoutDeviceError = engine->audioDeviceError();
 
+            auto* degradedPlayCommand = new juce::DynamicObject();
+            degradedPlayCommand->setProperty ("command", "set_transport");
+            auto* degradedPlayArgs = new juce::DynamicObject();
+            degradedPlayArgs->setProperty ("action", "play");
+            degradedPlayCommand->setProperty ("args", juce::var (degradedPlayArgs));
+            const auto degradedPlay = moshOps->execute (juce::var (degradedPlayCommand));
+            const auto degradedPlayError =
+                degradedPlay.getProperty ("error", juce::var()).toString();
+            const bool degradedPlayRejected =
+                ! (bool) degradedPlay.getProperty ("ok", true)
+                && degradedPlayError.isNotEmpty()
+                && ! engine->edit().getTransport().isPlaying();
+
             const auto countDeviceNames = [] (const juce::var& types)
             {
                 std::pair<int, int> counts;
@@ -371,6 +386,7 @@ public:
                                  && outputOnlyArgvRoundTrip
                                  && inputOnlyArgvRoundTrip
                                  && recoveryEvidence.degradedBeforeRetry
+                                 && degradedPlayRejected
                                  && firstListElapsedMs < 1000.0
                                  && invalidSetupWritten
                                  && ! (bool) invalidRetry.getProperty ("ok", true)
@@ -416,6 +432,8 @@ public:
             evidence->setProperty ("outputDeviceCount", secondDeviceCounts.first);
             evidence->setProperty ("inputDeviceCount", secondDeviceCounts.second);
             evidence->setProperty ("firstListElapsedMs", firstListElapsedMs);
+            evidence->setProperty ("degradedPlayRejected", degradedPlayRejected);
+            evidence->setProperty ("degradedPlayError", degradedPlayError);
             evidence->setProperty ("retryOk", retry.getProperty ("ok", false));
             evidence->setProperty ("retryElapsedMs", retryElapsedMs);
             evidence->setProperty ("retryError", retryError);
@@ -521,6 +539,14 @@ public:
         if (liveAudioSmoke)
         {
             const int fails = runLiveAudioSmoke (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (liveInstrumentSmoke)
+        {
+            const int fails = runLiveInstrumentSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;

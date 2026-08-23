@@ -1086,7 +1086,7 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
 // prior edit. All log undoable:false. list_audio_devices is read-only (no log).
 // ─────────────────────────────────────────────────────────────────────────────
 
-juce::var MoshOps::currentAudioSelection()
+juce::var MoshOps::currentAudioSelection (const juce::String& requestedOutput)
 {
     // Lightweight current-selection summary for the snapshot's audio{} block + the
     // set_audio_device result. NO full device lists here (those stay behind the
@@ -1099,6 +1099,12 @@ juce::var MoshOps::currentAudioSelection()
     o->setProperty ("inputDevice", setup.inputDeviceName);
     o->setProperty ("sampleRate", setup.sampleRate);
     o->setProperty ("bufferSize", setup.bufferSize);
+    o->setProperty ("requestedOutputDevice",
+                    requestedOutput.isNotEmpty() ? requestedOutput : setup.outputDeviceName);
+    o->setProperty ("activeOutputDevice",
+                    dm.getCurrentAudioDevice() != nullptr
+                        ? dm.getCurrentAudioDevice()->getName() : String());
+    o->setProperty ("audioReady", eng.audioReady());
     return var (o);
 }
 
@@ -1179,6 +1185,7 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     data->setProperty ("bufferSizes", bufferSizes);
     data->setProperty ("defaultBufferSize", defaultBufferSize);
     data->setProperty ("audioEnabled", eng.hasAudio());
+    data->setProperty ("audioReady", eng.audioReady());
     data->setProperty ("clickOutputs", clickOutputs);
     return okResult ("list_audio_devices", var (data));
 }
@@ -1316,6 +1323,9 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (50);
 
+    if (! eng.audioReady())
+        return eng.audioReadinessError();
+
     // PRE-001 — persist the chosen device setup to the session dir so it is restored
     // on the next launch (MoshEngine reads it before the MOSH_AUDIO_OUTPUT_DEVICE env
     // fallback). A machine/whole-app preference, written without the undo manager.
@@ -1349,12 +1359,12 @@ juce::var MoshOps::cmdSetAudioDevice (const juce::var& args)
         return errResult ("set_audio_device", err);
     }
 
-    if (! eng.hasAudio())
-        eng.adoptOpenedAudioDevice();   // a successful pick from the degraded state IS the recovery
+    eng.adoptOpenedAudioDevice();   // also clears a stale error after a healthy device switch
 
     logLine ("set_audio_device", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
-    return okResult ("set_audio_device", currentAudioSelection());
+    return okResult ("set_audio_device",
+                     currentAudioSelection (args.getProperty ("outputDevice", var()).toString()));
 }
 
 juce::var MoshOps::cmdRetryAudioDevice (const juce::var& args)

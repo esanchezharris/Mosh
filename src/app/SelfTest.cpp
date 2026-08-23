@@ -4726,7 +4726,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         if (serumId.isNotEmpty())
         {
             auto serumTrack = cmd (ops, "create_track", args1 ("name", "Serum Probe"))["data"].getProperty ("trackId", var()).toString();
-            check (ok (cmd (ops, "add_midi_clip", objN ({{ "trackId", serumTrack }, { "length", 1.0 }}))), "Serum probe MIDI clip added");
+            const auto serumClip = cmd (ops, "add_midi_clip", objN ({{ "trackId", serumTrack }, { "length", 1.0 }}));
+            check (ok (serumClip), "Serum probe MIDI clip added");
+            const auto serumClipId = serumClip["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "add_note", objN ({{ "clipId", serumClipId },
+                                                     { "pitch", 60 }, { "start", 0.0 },
+                                                     { "length", 1.0 }, { "velocity", 110 }}))),
+                   "Serum probe contains an audible MIDI note");
             auto loadSerum = cmd (ops, "load_plugin", objN ({{ "trackId", serumTrack }, { "pluginId", serumId }}));
             check (ok (loadSerum), "Serum 2 loaded by exact plugin id");
             const int serumIndex = (int) loadSerum["data"].getProperty ("index", -1);
@@ -4758,6 +4764,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "Serum auto export selects realtime render mode");
             check (autoExport["data"].getProperty ("renderModeReason", var()).toString().contains ("Serum"),
                    "Serum auto export reports the compatibility reason");
+
+            AudioFormatManager serumFormats;
+            serumFormats.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> serumReader (serumFormats.createReaderFor (autoFile));
+            float serumPeak = 0.0f;
+            if (serumReader != nullptr)
+            {
+                const int sampleCount = (int) jmin ((int64) 1 << 20,
+                                                    serumReader->lengthInSamples);
+                AudioBuffer<float> serumBuffer ((int) serumReader->numChannels, sampleCount);
+                serumReader->read (&serumBuffer, 0, sampleCount, 0, true, true);
+                for (int channel = 0; channel < serumBuffer.getNumChannels(); ++channel)
+                    serumPeak = jmax (serumPeak,
+                                      serumBuffer.getMagnitude (channel, 0, sampleCount));
+            }
+            check (serumPeak > 0.001f,
+                   "Serum auto export is NON-SILENT after receiving MIDI");
 
             auto fastExport = cmd (ops, "export_audio", objN ({{ "file", fastFile.getFullPathName() }, { "renderMode", "fast" }}));
             check (ok (fastExport), "explicit fast export remains available with Serum");

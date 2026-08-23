@@ -265,6 +265,7 @@ if (MOSH_BUILD_APP)
         src/app/MenuController.cpp
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
+        src/app/LiveInstrumentSmoke.cpp
         src/app/selftest/MultiplayerAudioRefSelfTest.cpp
         src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp

@@ -373,6 +373,39 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     wireEditResolvers();
 }
 
+bool MoshEngine::audioReady() const
+{
+    auto* device = enginePtr->getDeviceManager().deviceManager.getCurrentAudioDevice();
+    return device != nullptr
+        && device->isOpen()
+        && device->getActiveOutputChannels().countNumberOfSetBits() > 0;
+}
+
+juce::String MoshEngine::audioReadinessError() const
+{
+    if (! audioWanted)
+        return "no audio device in this session";
+    if (audioReady())
+        return {};
+
+    if (auto* device = enginePtr->getDeviceManager().deviceManager.getCurrentAudioDevice())
+    {
+        const auto deviceError = device->getLastError().trim();
+        if (deviceError.isNotEmpty())
+            return "Audio device \"" + device->getName() + "\" is unavailable: "
+                 + deviceError;
+        if (! device->isOpen())
+            return "Audio device \"" + device->getName() + "\" is not open";
+        if (device->getActiveOutputChannels().countNumberOfSetBits() == 0)
+            return "Audio device \"" + device->getName()
+                 + "\" has no active output channels";
+    }
+
+    if (audioError.isNotEmpty())
+        return audioError;
+    return "Audio unavailable — no open output device";
+}
+
 MoshEngine::~MoshEngine()
 {
     if (editPtr != nullptr)
@@ -386,6 +419,12 @@ void MoshEngine::ensurePlaybackContext()
     if (! audioOpen)
         return;
 
+    // DeviceManager opens CoreAudio before its wave-output list and prepare-to-start
+    // work are applied (both are AsyncUpdater tasks). Allocating an Edit context first
+    // can therefore bind it to an empty device list: transport says "playing" but the
+    // playhead never receives a block. Drain those device updates before allocating or
+    // rebuilding the playback context.
+    enginePtr->getDeviceManager().dispatchPendingUpdates();
     edit().getTransport().ensureContextAllocated();
 
     // One-time: enable the device manager's wave inputs so record-armed tracks
@@ -544,6 +583,21 @@ juce::String MoshEngine::openAudioDeviceBounded()
             te::SettingID::audio_device_setup, *setupXml);
     enginePtr->getDeviceManager().initialise (numIn, numOut);
 
+    // Tracktion schedules its first MIDI-device inventory a few milliseconds after
+    // initialise(). If an Edit starts before that inventory lands, the scan's global
+    // transport restart can replace a newly-playing graph and leave TransportState
+    // latched at `playing` while the playhead is stopped. Drain only this initial
+    // startup work before an Edit exists; periodic hot-plug scans remain enabled.
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (50);
+    enginePtr->getDeviceManager().dispatchPendingUpdates();
+
+    if (! audioReady())
+    {
+        audioOpen = false;
+        return audioReadinessError();
+    }
+
     return {};
 }
 
@@ -554,7 +608,7 @@ juce::String MoshEngine::retryAudioDevice()
     // never touch hardware here — that is what keeps --selftest hermetic.
     if (! audioWanted)
         return "no audio device in this session";
-    if (audioOpen)
+    if (audioReady())
         return {};   // already up; nothing to retry
 
     audioOpen = true;             // re-arm so openAudioDeviceBounded will run
@@ -571,7 +625,7 @@ juce::String MoshEngine::retryAudioDevice()
 
 void MoshEngine::adoptOpenedAudioDevice()
 {
-    if (audioOpen) return;          // already up; nothing to adopt
+    if (! audioReady()) return;
     audioOpen = true;
     audioError = {};                // the banner clears on the next snapshot
     ensurePlaybackContext();
