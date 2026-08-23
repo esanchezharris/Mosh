@@ -808,7 +808,7 @@ private:
     TrackMutePlugin* findTrackMuteGate (te::AudioTrack&);
 
     void reconcileMeterClients();           // sync client map to live taps (undo/redo-safe)
-    void unregisterAllMeterClients();       // removeClient on still-valid measurers, then clear
+    void unregisterAllMeterClients();       // detach track/send/master clients while measurers live
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
     std::map<SendMeterKey, std::unique_ptr<SendMeterTap>> sendMeterClients;
     te::LevelMeasurer::Client masterClient;

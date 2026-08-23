@@ -257,6 +257,17 @@ void MoshOps::unregisterAllMeterClients()
         if (tap != nullptr && tap->plugin != nullptr && liveSends.contains (tap->plugin))
             tap->plugin->measurer.removeClient (tap->client);
     sendMeterClients.clear();
+
+    // The master client belongs to the playback context rather than a plugin. Every
+    // caller invokes this helper while the current Edit/context is still alive and
+    // before an export, reload, project swap, or shutdown frees it. Detach here too so
+    // a newly allocated context that reuses the same address cannot be mistaken for the
+    // old registration (an ABA that leaves master levels pinned at -100 after reload).
+    if (lastSeenContext != nullptr)
+    {
+        lastSeenContext->masterLevels.removeClient (masterClient);
+        lastSeenContext = nullptr;
+    }
 }
 
 // ── master spectral feed (Moshi reactivity) ──────────────────────────────────
