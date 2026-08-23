@@ -1136,7 +1136,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
             </div>
           </div>
         </div>
-        <div className="pr-foot">click to add · drag to move · Option-drag to bypass snap · drag the right edge to resize · drag a velocity bar below · ⌘-scroll to zoom · Esc to close</div></>
+        <div className="pr-foot">double-click empty space to add · single-click to select or place the insert · drag to move · Option-drag to bypass snap · drag the right edge to resize · drag a velocity bar below · ⌘-scroll to zoom · Esc to close</div></>
         )}
     </>
   );
