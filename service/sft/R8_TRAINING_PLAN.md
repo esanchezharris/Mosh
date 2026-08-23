@@ -270,6 +270,26 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   140/global iter 12,440. Headroom remained inside the unchanged gates at 70%
   free memory, 674 MiB used swap, and 399 GiB Data-volume free.
 
+- **r8-4b tail interruption, 2026-08-22 23:18 PDT — STOPPED, checkpoint
+  preserved:** the restart-disabled tail remained finite through local iter
+  710/global iter 13,010 (train loss `0.084` at the last report), then both the
+  exact trainer and guard launchd jobs disappeared before final weights. The
+  log ends with Python multiprocessing's leaked-semaphore shutdown warning but
+  contains no traceback, NaN/Inf, `Saved final weights`, or validation error;
+  no crash report, sleep/reboot event, NaN alert, or early-exit alert exists.
+  Because both jobs were removed together, the guard could not record the
+  trainer's early exit. This is therefore an external simultaneous
+  termination/bootout of the two jobs, not evidence of loss instability. The
+  newest preserved checkpoint is local iter 700/global iter 13,000;
+  `0000700_adapters.safetensors` and the rolling adapter are byte-identical at
+  sha256
+  `b022b10c3477e0b58eff5a9d8ed465dbcb06df10ba6e2b3954286f0582310cea`.
+  The stopped log sha256 is
+  `7275efa4f22c3e22875fd8232ddf9608db5b0c304fcbad0b8619c49effedd830`.
+  Exactly 103 global steps (13,011--13,113) remain. Restart remained disabled,
+  so no row replay occurred; no further continuation was launched
+  automatically.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
