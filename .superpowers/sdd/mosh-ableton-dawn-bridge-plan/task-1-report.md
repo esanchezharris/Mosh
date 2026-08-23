@@ -161,3 +161,49 @@ Post-fix checks:
 - No-excuse audit: `no violations in 15 file(s)`.
 - Pure LOC: every Python file <=250; `engine.py` is largest at 242.
 - `git diff --check`: clean.
+
+## Review fix round 2/5
+
+Both remaining safety findings were addressed:
+
+1. KEEP compensation now captures and restores the pre-restart `pass_start` together with the edit marker and uniquely recovered pending take ownership. A failed automatic restart can no longer leave the controller advertising the failed next pass's start beat.
+2. Live Set replacement is handled before cached request replay and uses a detached invalidation transition that never reads either Song proxy. It clears Set-owned references, switches to a disconnected/stopped ownership-uncertain state, preserves the current revision, and returns an explicit `set_invalidated` snapshot.
+
+### Round 2 RED
+
+Command:
+
+```sh
+python3 -m unittest resources.ableton.MoshDawnController.tests.test_safety
+```
+
+Observed: `Ran 12 tests`; one failure and one error. The restart regression observed `pass_start == 16.0` instead of the pre-action `12.0`; the invalid-Song regression raised `InjectedLiveError: invalid Live Song proxy` from `valid_archives` while `_reject` built its snapshot. Exit 1.
+
+### Round 2 GREEN and determinism
+
+Focused command:
+
+```sh
+python3 -m unittest resources.ableton.MoshDawnController.tests.test_safety
+```
+
+Observed: `Ran 12 tests`, `OK` (0.005s).
+
+Full command, run three times:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover \
+  -s resources/ableton/MoshDawnController/tests -t . -q
+```
+
+Observed: `Ran 41 tests`, `OK` on all three runs (0.010s, 0.009s, 0.009s).
+
+Post-fix checks:
+
+- Python 3.7 grammar: `OK (15 files)`.
+- No-excuse audit: `no violations in 15 file(s)`.
+- Pure LOC: every Python file <=250; `engine.py` remains within the ceiling at 247 pure LOC.
+- `git diff --check`: clean.
+- Generated `__pycache__` / `.pyc` artifacts were removed after verification.
+
+Round 2 self-review confirmed that Set invalidation does not call the ordinary topology snapshot, does not mutate either Live Song, and cannot replay a cached action ahead of lifecycle invalidation. The blocked response is internally consistent: disconnected, stopped, no active/pending/archive pointers, explicit blocked reason, ownership uncertain, and unchanged revision. KEEP compensation restores the scalar pass boundary before its recovered pending take is exposed.

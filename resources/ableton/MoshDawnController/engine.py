@@ -9,8 +9,8 @@ from .model import (
     Request, Response, Seek, SessionState, Stop,
 )
 from .topology import (
-    pending_fingerprint, record_target, resolve_pending, session_snapshot,
-    track_index, track_present,
+    invalidate_set, pending_fingerprint, record_target, resolve_pending,
+    session_snapshot, track_index, track_present,
 )
 
 
@@ -30,11 +30,14 @@ class DawnEngine:
         }
 
     def handle(self, song: LiveSong, request: Request) -> Response:
+        if song is not self.state.song:
+            snapshot = invalidate_set(self.state, song)
+            response = Response(False, request.request_id, self.state.revision, "set_invalidated", snapshot)
+            self._remember(response)
+            return response
         cached = self._results.get(request.request_id)
         if cached is not None:
             return cached
-        if song is not self.state.song:
-            return self._reject(request, "set_invalidated", cache=True)
         if request.expected_revision != self.state.revision:
             return self._reject(request, "stale_revision", cache=False)
         handler = self._handlers.get(type(request.action))
@@ -174,6 +177,7 @@ class DawnEngine:
         fingerprint = pending_fingerprint(song, source, clip)
         archive_count = len(self.state.archive_clips)
         prior_marker = self.state.edit_marker
+        prior_pass_start = self.state.pass_start
         song.begin_undo_step()
         try:
             if needs_clone:
@@ -210,6 +214,7 @@ class DawnEngine:
             self.state.clip_inventory = ()
             del self.state.archive_clips[archive_count:]
             self.state.edit_marker = prior_marker
+            self.state.pass_start = prior_pass_start
             song.current_song_time = prior_marker
             recovered = resolve_pending(song, fingerprint)
             if recovered is None:
