@@ -20,9 +20,25 @@ The installer writes only:
 Source and render WAVs are content-addressed under
 `~/Library/Mosh/ReImagine/assets`. They are never automatically deleted.
 
+## Recorded owner host evidence
+
+On 2026-08-23 the owner installer completed successfully from the Debug arm64
+bundle. The installed VST3 retained bundle ID `studio.mosh.reimagine`, passed a
+strict deep code-signature verification, and the shared helper was staged at the
+path above. Ableton Live 11.3.43 discovered **Mosh Re-Imagine** during startup,
+showed it in the browser, and instantiated it in a fresh Untitled Set. Live's
+`Log.txt` recorded both `plugin processor successfully loaded` and
+`Created: Mosh Re-Imagine`.
+
+This proves installation, discovery, and processor instantiation. The audio-track
+Transfer and by-ear steps below remain open; the smoke instance was placed on a
+MIDI track and the audio engine was intentionally left off.
+
 ## Live 11 by-ear gate
 
 1. Rescan VST3 plug-ins and insert **Mosh Re-Imagine** on an audio track.
+   Installation, discovery, and processor instantiation are proven above; the
+   audio-track insertion remains part of the listening pass.
 2. While stopped, click **Transfer**, play a known passage, then stop Live.
 3. Enter a prompt or change the rack. Confirm the source remains dry until the
    render is ready, then the selected take replaces only the transferred range.

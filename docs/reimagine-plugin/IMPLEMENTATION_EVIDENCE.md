@@ -15,6 +15,10 @@ and by-ear acceptance gate.
   editor, processed dry stereo at 48 kHz and mono at 44.1 kHz, created two
   instances, and round-tripped state.
 - Bundle identity checks: `studio.mosh.reimagine`, arm64, valid ad-hoc signature.
+- Owner install/host discovery: the explicit installer copied the signed arm64
+  VST3 and staged the shared helper; Ableton Live 11.3.43 found the plug-in in
+  its browser and successfully instantiated its processor in a fresh Untitled
+  Set. Live's host log recorded the successful load and creation.
 - Fake-service HTTP integration: protocol health/features, colors,
   submit/status/manifest, cancel, restart compatibility, and idle shutdown all
   passed.
@@ -35,8 +39,7 @@ and by-ear acceptance gate.
   `AudioRecoverySmoke` and `SessionAllocationFailure`; the other four tests ran,
   and the full `MoshTests` target was rerun green after the service-test cleanup
   fix.
-- The explicit owner installer was not executed. Nothing was copied into Live's
-  VST3 directory and the shared helper was not staged into Application Support.
-- Live 11 rescan/load, real SA3 rendering, Colors/LoRAs by ear, physical A/B,
+- Audio-track Transfer, real SA3 rendering, Colors/LoRAs by ear, physical A/B,
   Set reopen, shared-process observation, and model release remain owner-machine
-  acceptance steps in `OWNER_ACCEPTANCE.md`.
+  acceptance steps in `OWNER_ACCEPTANCE.md`. The host smoke used a MIDI track
+  with Live's audio engine off, so it is not physical-audio evidence.
