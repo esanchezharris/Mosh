@@ -1,0 +1,20 @@
+model: "/Users/emiliosanchez-harris/AI/models/mlx/Qwen3-4B-Instruct-2507-4bit"
+train: true
+data: "/Users/emiliosanchez-harris/Mosh/service/sft/.sft-data/s2-mix-v6-prep-r8-cont12300"
+adapter_path: "/Users/emiliosanchez-harris/Mosh/service/sft/.adapters/r8-4b-mlx-cont12300"
+resume_adapter_file: "/Users/emiliosanchez-harris/Mosh/service/sft/.adapters/r8-4b-mlx-cont7500/0004800_adapters.safetensors"
+iters: 813
+batch_size: 1
+learning_rate: 1.0e-5
+max_seq_length: 6400
+num_layers: 16
+save_every: 100
+steps_per_eval: 2000
+grad_checkpoint: true
+mask_prompt: true
+seed: 0
+lora_parameters:
+  rank: 16
+  scale: 2.0
+  dropout: 0.05
+  keys: ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj"]

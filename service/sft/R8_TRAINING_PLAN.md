@@ -217,6 +217,33 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   stopped pending a separately registered tail continuation from the verified
   global-12,300 checkpoint with restart disabled.
 
+- **r8-4b global-12,300 tail registration, 2026-08-22 (pre-launch):** the owner
+  explicitly waived only the canonical direct-Codex-child threshold for this
+  run; the memory, swap, and Data-volume gates remain unchanged. With that
+  scoped override, preflight passed at 85% free memory, 674 MiB used swap,
+  398 GiB Data-volume free, and 66 direct Codex children. The live r5 30B server
+  on port 8091 remains untouched. The immutable global-12,300 checkpoint and
+  rolling adapter are byte-identical at sha256
+  `c3ddedb5cd79e4b21fe6c34ed02b4b6594c8b64be160c8f1ca7422063bf11216`.
+  `R8_4B_MLX_CONT_12300.yaml` registers exactly 813 local steps, mapping to
+  global steps 12,301--13,113, in new data, adapter, and log namespaces. The
+  train split is the exact unconsumed tail of the previous seed-0 iterator,
+  inverse-permuted for a fresh seed-0 iterator; a full replay check also proved
+  that the prior continuation iterator exactly matched original global rows
+  7,501--13,113. Tail train sha256 is
+  `48f252ee4c4a1f05eab13f4bf6dfb0cbaf69e6dc22c2791860243a621f2a9d98`,
+  valid sha256 remains
+  `9047ab96fd7e8f7f2155d6acc9c9b391c7989ed6205d119c46be764dfa4f3638`,
+  remaining-source-index sha256 is
+  `e8a9297e8908c3faab970784b351d4d6b0274c269b54d7655a1e51e8c3e0dba4`,
+  and manifest sha256 is
+  `2e9d4bc0e45409a22578bd152bf6ad0906f3d8d53a6282c6924e06bb1d997c3f`.
+  Both launchd plists explicitly set `KeepAlive=false`; the runner refuses an
+  existing adapter namespace, and the finite-loss/early-exit guard owns the
+  exact new job labels. Targeted derivation, guard, and prior-guard regression
+  tests pass 9/9; both plists pass `plutil -lint`, both shell files pass
+  `zsh -n`, and the runner's live verify-only path passed all registered hashes.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
