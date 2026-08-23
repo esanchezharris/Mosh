@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "revision": "2026-08-23.1",
+  "overallStatus": "not-parity",
+  "parityClaimed": false,
+  "testedSourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+  "referenceManifest": "docs/live-clone/live11-reference-manifest.json",
+  "policy": {
+    "maxActiveRepairs": 3,
+    "requiredNativeProof": true,
+    "genericConformanceIsParityProof": false,
+    "mergeAutomatically": false
+  },
+  "surfaces": [
+    {
+      "id": "global-chrome-transport",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "The reference and Mosh captures differ across essentially the whole frame; transport behavior has mock coverage but no Live 11 differential or installed timing proof.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-shell.spec.ts::boots the zone model: control bar, browser, lanes, RIGHT headers, status bar",
+        "ui/e2e/live-shell.spec.ts::Space stop returns to the insert marker; Shift-Space stop leaves the playhead"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "arrangement-grid-rulers",
+      "required": true,
+      "status": "candidate",
+      "gapReason": "Browser geometry and visual review pass, but exact-SHA installed-app and owner-project proof are still pending.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-grid.spec.ts::bug: arrangement grid vanishes across normal lanes, take rows, filler, and the zero-track viewport",
+        "ui/e2e/live-grid.spec.ts::mapped bars stay aligned with the ruler across fractional tempo, meter, and tempo-map changes",
+        "ui/e2e/live-grid.spec.ts::fixed, adaptive, triplet, zoom, far-scroll, and pointer states repaint the virtual grid",
+        "ui/src/live/arrangementGridModel.test.ts::arrangementGridLines"
+      ],
+      "artifacts": [
+        {
+          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C002-edge.json",
+          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+          "sha256": "bfcc2037429d0e3ed97f651f93d9655c3942b65dab4d3a3e34b1f2819566b4f2"
+        },
+        {
+          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C001-browser-after-1280x768.png",
+          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+          "sha256": "ba479c34dbf0b611bc47e28075381809ea6ba99fe1fba187bb8ce0847f489b5e"
+        },
+        {
+          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C001-browser-after-1351x768.png",
+          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+          "sha256": "70793a77510869b71adda5efd4b9e3e695dc619d0f144be0520c5f2897e4481c"
+        },
+        {
+          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C001-browser-after-1440x900.png",
+          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+          "sha256": "d5cc7aa6b724b60ace31aee80660e8436d4e293899a90a4a2a685d6fb15fd0bc"
+        },
+        {
+          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/G001-live-grid-pass-a-clone-fidelity.md",
+          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+          "sha256": "41924e1512aa9740b7680a3a9f3ab7e89285c57908d1b6f675a62f53761342c2"
+        },
+        {
+          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/visual-grid-fidelity-final.md",
+          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+          "sha256": "76282446b06ef165a7a0751dcd3e664a6cfc78291275c0e1a217a6ee28723d28"
+        }
+      ]
+    },
+    {
+      "id": "track-headers-mixer",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "Right-side placement is tested, but dimensions, compact states, I/O state matrix, scroll sync, and native outcomes have not been compared against Live 11.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-shell.spec.ts::track headers sit on the RIGHT of the lanes (Live's signature)",
+        "ui/e2e/live-shell.spec.ts::header I/O: monitoring trio routes set_input_monitor"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "clips-automation-take-lanes",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "Clips and whole-take switching have mock coverage; automation lanes and Live 11 whole-body drag/comp semantics remain unresolved.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-shell.spec.ts::take lanes: rows render for a comp clip, click switches current (undoable)",
+        "ui/e2e/live-shell.spec.ts::clip header-drag moves the clip (ableton gesture table, no hardcoding)"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "browser-devices-plugins",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "The browser is visibly unlike Live 11 and instrument loading lacks a paired installed-app reference workflow, despite mock hot-swap coverage.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-shell.spec.ts::browser: single-click selects, double-click loads — with feedback, and the device strip drives the plugin",
+        "ui/e2e/live-shell.spec.ts::hot-swap: a second instrument replaces the first; an effect still appends"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "midi-editor",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "The corrected single/double-click contract and overlap repair are tested, but no canonical Live 11 editor reference or installed note-array/audio comparison exists.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/src/ui/PianoRoll.audition.test.ts::does not create on a draw-off single click, but creates on double-click",
+        "ui/e2e/live-shell.spec.ts::double-clicking empty grid paints a floor-snapped, grid-step note"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "audio-device-workflow",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "Physical output is working again, but reference playback/recording/monitoring and exact-SHA rollback evidence are not attached to this parity ledger.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-shell.spec.ts::audio recovery: with NO device open the Settings pickers still enumerate; picking one clears the banner",
+        "ui/e2e/live-shell.spec.ts::record with NO usable input: the button shows a guided error and never records"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "core-producer-flows",
+      "required": true,
+      "status": "unproven",
+      "gapReason": "No paired Live 11 versus installed Mosh transcript yet proves create instrument, edit MIDI, play, save/reopen, render, and undo as one flow.",
+      "referenceIds": ["live11-owner-arrangement-20260823"],
+      "testIds": [
+        "ui/e2e/live-shell.spec.ts::Shift-Command-T inserts a MIDI track that lands playable",
+        "ui/e2e/live-shell.spec.ts::hot-swap: a second instrument replaces the first; an effect still appends"
+      ],
+      "artifacts": []
+    }
+  ],
+  "repairs": [
+    {
+      "id": "arrangement-grid-rulers",
+      "rank": 1,
+      "state": "active",
+      "scenario": "Compare the owner Live 11 arrangement grid to Mosh at origin, far scroll, zoom, fractional tempo, meter changes, take rows, filler, and zero tracks.",
+      "tolerance": "Grid and ruler x coordinates within 1 CSS px; no missing full-height region.",
+      "automatedQa": "ui/e2e/live-grid.spec.ts plus arrangementGridModel.test.ts",
+      "manualQa": "Exact-size side-by-side capture and installed-app owner project inspection.",
+      "ownerSafety": "Clean worktree, owner files hashed, exact-SHA install with rollback; never merge automatically."
+    },
+    {
+      "id": "global-layout-measurement",
+      "rank": 2,
+      "state": "queued",
+      "scenario": "Measure Live 11 control bar, browser, arrangement, right headers, lower panel, and status bar at the canonical viewport and reproduce their structural anchors.",
+      "tolerance": "Structural anchors within 2 px; no overall pixel target until state and fixture are matched.",
+      "automatedQa": "New Live visual fixture plus geometry assertions.",
+      "manualQa": "Same-size settled captures from both installed apps.",
+      "ownerSafety": "No owner setting or project mutation for measurement-only capture."
+    },
+    {
+      "id": "browser-device-instrument-flow",
+      "rank": 3,
+      "state": "queued",
+      "scenario": "Find an instrument, load Serum or Vital, create MIDI, hear playback, save/reopen, and undo in both Live 11 and Mosh.",
+      "tolerance": "Same user-visible outcome; Mosh command/result/event evidence exact; non-silent captured audio.",
+      "automatedQa": "Browser/device Playwright tests plus native instrument smoke.",
+      "manualQa": "Owner by-ear instrument confirmation and paired workflow transcript.",
+      "ownerSafety": "Use a copied project or isolated session; preserve plug-in state and audio settings."
+    }
+  ],
+  "continuationCommand": "node ~/.codex/plugins/cache/sisyphuslabs/omo/4.19.4/components/ulw-loop/dist/cli.js ulw-loop complete-goals --session-id live11-parity-20260823",
+  "documentation": [
+    "docs/live-clone/DESIGN.md",
+    "docs/live-clone/SPEC.md",
+    "docs/live-clone/WIDGETS.md",
+    "docs/live-clone/KEYMAP.md",
+    "docs/live-clone/PARITY.md",
+    "docs/live-clone/LIVE11_PARITY.md"
+  ]
+}

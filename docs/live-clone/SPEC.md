@@ -1,5 +1,10 @@
 # Mosh Live — Live 12 Arrangement-View clone SPEC (build contract)
 
+Live 11 parity status: NOT PROVEN
+
+This Live 12 measurement document is historical input. For current Live 11 work,
+`DESIGN.md`, `LIVE11_PARITY.md`, and the fail-closed JSON ledger take precedence.
+
 Measured 2026-08-06 from the owner's Live 12 Suite 12.4.2 on this machine (macOS,
 3024×1964 Retina screenshot = 1512×982 pt; all geometry below in **points**, halved from
 screenshot pixels). Reference screenshots live in `.cache/live-ref/` (gitignored):
