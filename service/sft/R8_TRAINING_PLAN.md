@@ -374,6 +374,21 @@ ambiguity) are tracked per-leg, same as r7's memo requires.
   scoped to that preflight dimension only; memory, swap, disk, single-MLX-slot,
   restart-disabled, finite-loss, and no-replay safeguards remain binding.
 
+- **r8-8b owner pause, 2026-08-23 — PAUSED BEFORE TRAIN STEP 1:** the owner
+  deprioritized consumer-hardware fit while Mosh's model contract is still
+  likely to change. Codex booted out only launchd jobs
+  `com.mosh.r8-8b-smoke` and `com.mosh.r8-8b-smoke-guard`; neither job remains
+  loaded and no 8B full run was launched. The smoke completed one finite
+  validation pass (`2.045`) but had not reported a training step, numbered
+  checkpoint, or final weights, so it is not a passed smoke and must never be
+  promoted as one. Its log is preserved at sha256
+  `05ca2f63379d76821b1420c657b0cb606b5052791f1b6422f41c5cc0d086ed3d`;
+  the output namespace contains only `adapter_config.json`, sha256
+  `485a61842199a739693ebaa602011b7c4109d2b9834783b4ab7d36def8a45bd7`.
+  The downloaded 8B base, frozen configs, data, and registration commit remain
+  intact for a later restart from scratch in a new smoke namespace after the
+  product/model contract stabilizes.
+
 ## Appendix: r7 interim peek (2026-08-18, owner-requested, recorded for gate honesty)
 
 Mid-run curiosity check, NOT a gate read: r7 checkpoint-2400 (19% of the epoch,
