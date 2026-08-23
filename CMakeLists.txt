@@ -50,7 +50,12 @@ endif()
 # (CFBundleVersion / CFBundleShortVersionString, both fed from here by JUCE). Editing this
 # line for every test build would put a version bump in the diff of unrelated work.
 set(MOSH_VERSION "0.1.1" CACHE STRING "Bundle version (CFBundleShortVersionString + CFBundleVersion)")
-project(Mosh VERSION ${MOSH_VERSION} LANGUAGES C CXX)
+option(MOSH_BUILD_DAWN_BRIDGE "Build the macOS-only Mosh DAWN Bridge menu-bar app" OFF)
+if (CMAKE_HOST_APPLE AND MOSH_BUILD_DAWN_BRIDGE)
+    project(Mosh VERSION ${MOSH_VERSION} LANGUAGES C CXX OBJCXX)
+else()
+    project(Mosh VERSION ${MOSH_VERSION} LANGUAGES C CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -704,4 +709,11 @@ endif()
 
 if (MOSH_BUILD_REIMAGINE_PLUGIN AND APPLE)
     add_subdirectory(src/reimagine/plugin)
+endif()
+
+if (MOSH_BUILD_DAWN_BRIDGE)
+    if (NOT APPLE)
+        message(FATAL_ERROR "MOSH_BUILD_DAWN_BRIDGE is supported only on macOS")
+    endif()
+    add_subdirectory(src/dawn_bridge)
 endif()
