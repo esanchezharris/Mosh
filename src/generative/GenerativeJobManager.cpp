@@ -318,6 +318,12 @@ juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
     body->setProperty ("outputWav", outputWav.getFullPathName());
     body->setProperty ("manifest", manifest.getFullPathName());
     body->setProperty ("params", params);
+    // Finder-launched Mosh may reconnect to a service that predates this process,
+    // so its environment cannot be the only carrier for the owner unload policy.
+    // Send the bounded machine-local threshold with every render as well.
+    const auto releaseIdle = SystemStats::getEnvironmentVariable ("MOSH_SA3_RELEASE_IDLE", {}).trim();
+    if (releaseIdle.isNotEmpty())
+        body->setProperty ("sa3ReleaseIdle", jlimit (0.0, 1.0, releaseIdle.getDoubleValue()));
     auto r = httpPost ("/submit", var (body));
     return r.getProperty ("jobId", var()).toString();
 }

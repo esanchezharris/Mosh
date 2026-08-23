@@ -32,6 +32,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // clear) — same posture: pure file I/O, no track/clip target, even though
         // (unlike read) they DO mutate a store file.
         "agent_memory_read", "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
+        "report_issue", "list_issues", "update_issue", "export_issue", "attach_issue_file",
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",
@@ -122,7 +123,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
         // CLP-LOOP — clip loop region; carries a clipId like gain/mute/fade.
         "set_clip_loop",
-        "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
+        "duplicate_clip", "add_note", "remove_note", "set_note", "resolve_note_overlaps", "quantize_notes",
         "consolidate_clips", "crop_clip", "transform_velocities", "transform_notes",
         "apply_choke",
         "transcribe_clip", "add_render_layer", "create_render_layer",

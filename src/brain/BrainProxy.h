@@ -68,6 +68,10 @@ struct BrainProxy
         boundary MoshEngine uses. MOSH_BRAIN_INSTALL_ID overrides without filesystem
         I/O; unsafe explicit sessions resolve to per-process safety storage. */
     static juce::String installId();
+
+    /** App-owned, loopback-only owner runtime. Activated only after /v1/models
+        reports the exact configured fused path. */
+    static void configureLocal (const juce::String& endpoint, const juce::String& exactModel);
 };
 
 } // namespace mosh

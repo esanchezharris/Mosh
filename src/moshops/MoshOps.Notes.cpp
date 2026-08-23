@@ -7,6 +7,7 @@
 
 #include "MoshOps.h"
 #include "AgentMemoryStore.h"
+#include "IssueInbox.h"
 #include "state/Ids.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
@@ -423,6 +424,148 @@ juce::var MoshOps::cmdAgentMemoryClear (const juce::var& args)
     logLine ("agent_memory_clear", args, true, {}, false);
     auto* d = new DynamicObject(); d->setProperty ("cleared", cleared);
     return okResult ("agent_memory_clear", var (d));
+}
+
+// Owner feedback is machine-local operational data, not song state: no Edit mutation,
+// no undo transaction, no media capture, and no network side effect. The UI supplies
+// selection/shell/runtime context; native code adds trustworthy build, executable,
+// project-basename, audio-device, and recent-failure evidence.
+juce::var MoshOps::cmdReportIssue (const juce::var& args)
+{
+    const auto description = args.getProperty ("description", var()).toString().trim();
+    if (description.isEmpty()) return errResult ("report_issue", "missing description");
+    const auto severity = args.getProperty ("severity", "annoyance").toString();
+    if (severity != "blocks music" && severity != "breaks flow" && severity != "annoyance")
+        return errResult ("report_issue", "invalid severity");
+    const auto source = args.getProperty ("source", "typed").toString();
+    if (source != "typed" && source != "push_to_talk" && source != "always_on")
+        return errResult ("report_issue", "invalid source");
+
+    const auto ts = Time::getCurrentTime().toMilliseconds();
+    const auto id = IssueInbox::makeId (description, ts);
+    auto* report = new DynamicObject();
+    report->setProperty ("id", id);
+    report->setProperty ("description", description.substring (0, 8000));
+    report->setProperty ("severity", severity);
+    report->setProperty ("source", source);
+    report->setProperty ("timestamp", ts);
+    report->setProperty ("status", "inbox");
+    report->setProperty ("activeShell", args.getProperty ("activeShell", "unknown"));
+    report->setProperty ("selectedTrackId", args.getProperty ("selectedTrackId", var()));
+    report->setProperty ("selectedClipIds", args.getProperty ("selectedClipIds", Array<var>()));
+    report->setProperty ("runtimeModelIdentity", args.getProperty ("runtimeModelIdentity", var()));
+    report->setProperty ("project", eng.editFile().getFileName());
+   #if defined (MOSH_GIT_COMMIT_STRING)
+    report->setProperty ("installedSourceSha", MOSH_GIT_COMMIT_STRING);
+   #else
+    report->setProperty ("installedSourceSha", "unknown");
+   #endif
+    const auto executable = File::getSpecialLocation (File::currentExecutableFile);
+    if (executable.existsAsFile())
+        report->setProperty ("executableSha256", SHA256 (executable).toHexString());
+    report->setProperty ("audioDevice", currentAudioSelection());
+
+    Array<var> recentFailures;
+    if (logFile.existsAsFile())
+    {
+        auto lines = StringArray::fromLines (logFile.loadFileAsString());
+        for (int i = lines.size() - 1; i >= 0 && recentFailures.size() < 10; --i)
+        {
+            const auto row = JSON::fromString (lines[i]);
+            if (! row.isObject() || (bool) row.getProperty ("ok", true)) continue;
+            auto* failure = new DynamicObject();
+            failure->setProperty ("ts", row.getProperty ("ts", var()));
+            failure->setProperty ("command", row.getProperty ("command", var()));
+            failure->setProperty ("error", IssueInbox::scrub (row.getProperty ("error", var()).toString()));
+            recentFailures.insert (0, var (failure));
+        }
+    }
+    report->setProperty ("recentMoshOpsFailures", recentFailures);
+    if (! IssueInbox::writeReport (IssueInbox::issueDir (id), var (report)))
+        return errResult ("report_issue", "failed to write private issue report");
+
+    // Log only the generated id and posture, never the user's report text.
+    auto* safeArgs = new DynamicObject(); safeArgs->setProperty ("issueId", id);
+    safeArgs->setProperty ("severity", severity); safeArgs->setProperty ("source", source);
+    logLine ("report_issue", var (safeArgs), true, {}, false);
+    auto* data = new DynamicObject(); data->setProperty ("issueId", id);
+    data->setProperty ("status", "inbox");
+    return okResult ("report_issue", var (data));
+}
+
+juce::var MoshOps::cmdListIssues (const juce::var& args)
+{
+    const auto wanted = args.getProperty ("status", var()).toString();
+    Array<var> filtered;
+    for (auto& issue : IssueInbox::readAll())
+        if (wanted.isEmpty() || issue.getProperty ("status", "inbox").toString() == wanted)
+            filtered.add (issue);
+    auto* data = new DynamicObject(); data->setProperty ("issues", filtered);
+    return okResult ("list_issues", var (data));
+}
+
+juce::var MoshOps::cmdUpdateIssue (const juce::var& args)
+{
+    const auto id = args.getProperty ("issueId", var()).toString();
+    const auto status = args.getProperty ("status", var()).toString();
+    if (! IssueInbox::validStatus (status)) return errResult ("update_issue", "invalid status");
+    const auto dir = IssueInbox::issueDir (id);
+    auto report = JSON::fromString (dir.getChildFile ("report.json").loadFileAsString());
+    if (! report.isObject()) return errResult ("update_issue", "issue not found");
+    report.getDynamicObject()->setProperty ("status", status);
+    report.getDynamicObject()->setProperty ("updatedAt", Time::getCurrentTime().toMilliseconds());
+    if (! IssueInbox::writeReport (dir, report)) return errResult ("update_issue", "failed to update issue");
+    logLine ("update_issue", args, true, {}, false);
+    return okResult ("update_issue", report);
+}
+
+juce::var MoshOps::cmdExportIssue (const juce::var& args)
+{
+    const auto id = args.getProperty ("issueId", var()).toString();
+    const auto dir = IssueInbox::issueDir (id);
+    const auto report = JSON::fromString (dir.getChildFile ("report.json").loadFileAsString());
+    if (! report.isObject()) return errResult ("export_issue", "issue not found");
+    String markdown;
+    markdown << "# " << report.getProperty ("description", "Mosh issue").toString() << "\n\n"
+             << "- Severity: " << report.getProperty ("severity", "annoyance").toString() << "\n"
+             << "- Status: " << report.getProperty ("status", "inbox").toString() << "\n"
+             << "- Source: " << report.getProperty ("source", "typed").toString() << "\n"
+             << "- Shell: " << report.getProperty ("activeShell", "unknown").toString() << "\n"
+             << "- Project: " << report.getProperty ("project", "unknown").toString() << "\n"
+             << "- Source SHA: " << report.getProperty ("installedSourceSha", "unknown").toString() << "\n"
+             << "- Model: " << report.getProperty ("runtimeModelIdentity", "unavailable").toString() << "\n\n"
+             << "## Reproduction\n\n" << report.getProperty ("description", var()).toString() << "\n";
+    const auto output = dir.getChildFile ("github.md");
+    if (! output.replaceWithText (markdown)) return errResult ("export_issue", "failed to export markdown");
+   #if JUCE_MAC || JUCE_LINUX
+    ::chmod (output.getFullPathName().toRawUTF8(), 0600);
+   #endif
+    logLine ("export_issue", args, true, {}, false);
+    auto* data = new DynamicObject(); data->setProperty ("file", output.getFullPathName());
+    return okResult ("export_issue", var (data));
+}
+
+juce::var MoshOps::cmdAttachIssueFile (const juce::var& args)
+{
+    const auto id = args.getProperty ("issueId", var()).toString();
+    const File source (args.getProperty ("file", var()).toString());
+    const auto dir = IssueInbox::issueDir (id);
+    if (! dir.getChildFile ("report.json").existsAsFile()) return errResult ("attach_issue_file", "issue not found");
+    if (! source.existsAsFile()) return errResult ("attach_issue_file", "attachment not found");
+    if (! source.hasFileExtension ("png;jpg;jpeg")) return errResult ("attach_issue_file", "only screenshots may be attached");
+    const auto attachments = dir.getChildFile ("attachments");
+    attachments.createDirectory();
+    auto target = attachments.getNonexistentChildFile (source.getFileNameWithoutExtension(), source.getFileExtension(), false);
+    if (! source.copyFileTo (target)) return errResult ("attach_issue_file", "failed to copy attachment");
+   #if JUCE_MAC || JUCE_LINUX
+    ::chmod (attachments.getFullPathName().toRawUTF8(), 0700);
+    ::chmod (target.getFullPathName().toRawUTF8(), 0600);
+   #endif
+    auto* safeArgs = new DynamicObject(); safeArgs->setProperty ("issueId", id);
+    safeArgs->setProperty ("file", source.getFileName());
+    logLine ("attach_issue_file", var (safeArgs), true, {}, false);
+    auto* data = new DynamicObject(); data->setProperty ("file", target.getFileName());
+    return okResult ("attach_issue_file", var (data));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

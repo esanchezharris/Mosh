@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PianoRoll } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { useLive } from "../live/liveState";
 import type { CommandResult, Snapshot, Track } from "../types";
 
 vi.mock("../bridge", async () => {
@@ -55,7 +56,7 @@ describe("piano-roll scale lock", () => {
 
   const mount = (key = { tonic: "A", mode: "minor" }) => {
     useStore.setState({ snapshot: snapshotFor(key), editingClipId: "c1", snap: false, snapDivision: "1/4", exec });
-    act(() => root.render(React.createElement(PianoRoll)));
+    act(() => root.render(React.createElement(PianoRoll, { docked: true })));
   };
 
   /** A click with no movement — the piano roll's "add a note here" gesture. */
@@ -95,12 +96,14 @@ describe("piano-roll scale lock", () => {
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useSettings.getState().set("scaleLock", false);
+    useLive.setState({ drawMode: true });
   });
 
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
     useSettings.getState().set("scaleLock", false);
+    useLive.setState({ drawMode: false });
     useStore.setState({ editingClipId: null, snapshot: null });
     vi.restoreAllMocks();
   });

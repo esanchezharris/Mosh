@@ -88,6 +88,15 @@ def main() -> None:
     check(not R.should_release(None, training_active=False),
           "unknown memory while idle should NOT release — nothing is at stake")
 
+    # Finder owner policy is carried per render as well as through the service's
+    # startup environment, so reconnecting to an older service still unloads.
+    check(R.should_release_with_idle_override(0.88, False, 0.99),
+          "owner 99% idle override should release at the measured healthy 88% state")
+    check(not R.should_release_with_idle_override(0.88, False, 0.80),
+          "idle override boundary must still point the right way")
+    check(not R.should_release_with_idle_override(0.88, True, 0.99),
+          "idle override must not replace the separate active-training policy")
+
     # ── explain() says which way and why (the only trace of the reload cost) ──
     for avail, active, want in ((0.19, True, "release"), (0.88, True, "keep"),
                                 (None, True, "release"), (None, False, "keep")):

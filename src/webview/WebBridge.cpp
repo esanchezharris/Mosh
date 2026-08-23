@@ -263,6 +263,13 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
+        .withNativeFunction (
+            juce::Identifier ("brain_runtime_status"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (brainRuntimeStatusProvider ? brainRuntimeStatusProvider() : juce::var());
+            })
         // WP-11 best-of-n relays (UI → generative service via native — the WebView
         // cannot reach the service port). Threaded like brain_chat: the escalation
         // blocks up to ~60s in GenerativeJobManager, so it must never run on the

@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PianoRoll } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { useLive } from "../live/liveState";
 import { FEEL_DEFAULTS } from "../interaction/feel";
 import type { CommandResult, Snapshot, Track } from "../types";
 
@@ -65,7 +66,7 @@ describe("piano-roll drag axis independence", () => {
     useSettings.getState().set("prGridAdaptive", false);
     useSettings.getState().set("prGridTriplet", false);
     useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, exec });
-    act(() => root.render(React.createElement(PianoRoll)));
+    act(() => root.render(React.createElement(PianoRoll, { docked: true })));
   };
 
   /**
@@ -130,12 +131,14 @@ describe("piano-roll drag axis independence", () => {
     root = createRoot(host);
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useSettings.getState().set("scaleLock", false);
+    useLive.setState({ drawMode: true });
   });
 
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
     useSettings.getState().set("scaleLock", false);
+    useLive.setState({ drawMode: false });
     useStore.setState({ editingClipId: null, snapshot: null });
     vi.restoreAllMocks();
   });
