@@ -192,8 +192,7 @@ private:
     juce::var httpGet (const juce::String& path, int connectMs = 3000);
     juce::var httpPost (const juce::String& path, const juce::var& body);
 
-    // C2 — reap an orphaned/wedged service (a crashed Mosh leaves a multi-GB MLX process
-    // squatting the port) via the PID handshake file before spawning a fresh one.
+    // Clean a dead helper's handshake. Clients never terminate a live shared helper.
     void reapStaleService();
     // C3 — adopt the actual bound port the service wrote (it may differ from the requested
     // one if a non-Mosh process held it).
@@ -217,7 +216,7 @@ private:
 
     juce::String baseUrl;                       // guarded by stateLock
     juce::ChildProcess serviceProcess;          // guarded by spawnLock
-    bool spawnedByUs = false;                   // guarded by spawnLock
+    bool spawnedByUs = false;                   // guarded by spawnLock; diagnostic only
     juce::String svcBuild;                      // guarded by stateLock
 
     // Failure-backoff clock (guarded by spawnLock): the millisecond-counter timestamp of the
