@@ -666,10 +666,13 @@ def _run_job(job_id: str) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(job["manifest"])), exist_ok=True)
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
+        release = _maybe_release_sa3(job.get("sa3_release_idle")) if adapter_id in ("stable_audio3", "sa3") else None
         with _lock:
             _jobs[job_id]["progress"] = 1.0
             _jobs[job_id]["status"] = "ready"
             _jobs[job_id]["result"] = manifest
+            if release:
+                _jobs[job_id]["sa3_release"] = release
     except Exception as e:  # noqa: BLE001
         with _lock:
             _jobs[job_id]["status"] = "error"
@@ -786,7 +789,18 @@ def _training_active() -> bool:
                    for j in _training_jobs.values())
 
 
-def _maybe_release_sa3() -> None:
+def _resident_mb() -> float | None:
+    """Fast current resident set measurement; best-effort, never policy."""
+    try:
+        out = subprocess.run(["/bin/ps", "-o", "rss=", "-p", str(os.getpid())],
+                             capture_output=True, text=True, timeout=2).stdout.strip()
+        return round(float(out) / 1024, 1) if out else None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _maybe_release_sa3(idle_threshold: float | None = None) -> dict | None:
     """Hand the render model's ~9.2 GB back when memory is genuinely tight.
 
     Runs on the MLX-owning thread, between jobs, so no render is in flight.
@@ -795,22 +809,33 @@ def _maybe_release_sa3() -> None:
     the thresholds and the measurements behind them.
     """
     if _job_q.qsize():
-        return                      # more work queued: releasing now is pure loss
+        return None                 # more work queued: releasing now is pure loss
     try:
         from sa3 import engine as E
     except Exception:               # noqa: BLE001 — FakeAdapter-only machine
-        return
+        return None
     if not E.loaded():
-        return
+        return None
     available = memprobe.available_fraction()
     active = _training_active()
-    if not sa3_release.should_release(available, active):
-        return
+    if not sa3_release.should_release_with_idle_override(available, active, idle_threshold):
+        return None
+    before_mb = _resident_mb()
+    started = time.perf_counter()
     if E.unload():
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        after_mb = _resident_mb()
+        recovered_mb = round(max(0.0, before_mb - after_mb), 1) if before_mb is not None and after_mb is not None else None
         # Logged because an unexplained extra second on the next take is exactly
         # the kind of thing that gets diagnosed as "the model got slower".
         print(f"[sa3] released the render model — {sa3_release.explain(available, active)}",
               flush=True)
+        return {"released": True, "unloadMs": elapsed_ms, "beforeMb": before_mb,
+                "afterMb": after_mb, "recoveredMb": recovered_mb,
+                "availableFraction": available, "trainingActive": active,
+                "idleThreshold": idle_threshold,
+                "atMs": round(time.time() * 1000)}
+    return None
 
 
 def _worker_loop() -> None:
@@ -1063,7 +1088,8 @@ class Handler(BaseHTTPRequestHandler):
                                  "progress": job.get("progress", 0.0),
                                  "outputWav": job["output_wav"],
                                  "error": job.get("error"),
-                                 "manifest": job.get("result")})
+                                 "manifest": job.get("result"),
+                                 "sa3Release": job.get("sa3_release")})
         elif path == "/training/status":
             jid = query.get("jobId", "")
             with _training_lock:
@@ -1144,12 +1170,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"ok": False, "error": "inputWav missing"})
                 return
             job_id = uuid.uuid4().hex[:12]
+            release_idle = data.get("sa3ReleaseIdle")
+            try:
+                release_idle = max(0.0, min(1.0, float(release_idle))) if release_idle is not None else None
+            except (TypeError, ValueError):
+                release_idle = None
             with _lock:
                 _jobs[job_id] = {
                     "status": "queued", "progress": 0.0, "adapter": adapter_id,
                     "input_wav": input_wav, "output_wav": output_wav,
                     "manifest": data.get("manifest", output_wav + ".manifest.json"),
                     "params": data.get("params", {}), "cancel": False,
+                    "sa3_release_idle": release_idle,
                 }
             _job_q.put((int(data.get("priority", 5)), next(_seq), job_id))
             self._send(200, {"ok": True, "jobId": job_id})

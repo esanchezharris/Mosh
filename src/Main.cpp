@@ -13,6 +13,7 @@
 #include "state/ProjectName.h"
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
+#include "brain/OwnerRuntime.h"
 #include "telemetry/CrashHandler.h"
 #include "util/Env.h"
 #include <exception>
@@ -162,6 +163,15 @@ public:
                               && ! audioRecoveryIsolationSmoke)
                           || scanDeep || runScript || voiceSmoke;
 
+        // Owner-only Finder runtime: loading this mode-600 JSON is opt-in and
+        // machine-local. startAsync sets the SA3 release policy immediately, then
+        // loads/verifies the exact local model without delaying engine/audio/UI startup.
+        if (! headless && ! liveAudio && ! scanDeep && ! runScript && ! voiceSmoke)
+        {
+            ownerRuntime = std::make_unique<LocalBrainManager> (OwnerRuntimeConfig::load());
+            ownerRuntime->startAsync();
+        }
+
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
         // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)
         // is constructed below, so a scan can never spawn/warm SA3. (MOSH_SCAN_AU opts
@@ -233,6 +243,11 @@ public:
             return;
         }
         moshOps = std::make_unique<MoshOps> (*engine);
+        if (ownerRuntime != nullptr)
+            moshOps->setStableAudioUnloadSink ([this] (const juce::var& metrics)
+            {
+                if (ownerRuntime != nullptr) ownerRuntime->prewarmAfterStableAudioUnload (metrics);
+            });
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
@@ -550,6 +565,16 @@ public:
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });
         bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
+        bridge.setBrainRuntimeStatusProvider ([this]
+        {
+            return ownerRuntime != nullptr ? ownerRuntime->status() : juce::var();
+        });
+        if (ownerRuntime != nullptr)
+            ownerRuntime->setStatusCallback ([this] (juce::var status)
+            {
+                if (mainWindow != nullptr)
+                    mainWindow->shell().bridge().emitEvent (juce::Identifier ("brain_runtime"), status);
+            });
         // WP-11 best-of-n relays (brain traffic is UI-domain — same layering as
         // brain_chat, NOT MoshOps commands; the bridge runs these off-thread).
         bridge.setEscalateHandler ([this] (const juce::var& p) { return moshOps->escalateCandidates (p); });
@@ -637,6 +662,8 @@ public:
             engine->clearSessionRunning();   // A2 — clean exit: drop the sentinel LAST (after the save)
         }
         menuController.reset();   // tears down the macOS main menu before the window
+        if (ownerRuntime != nullptr) ownerRuntime->setStatusCallback ({});
+        ownerRuntime.reset();
         mainWindow.reset();
         remoteServer.reset();
         moshOps.reset();
@@ -692,6 +719,7 @@ private:
     std::unique_ptr<MoshEngine> engine;
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
+    std::unique_ptr<LocalBrainManager> ownerRuntime;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
     // FS-K2. GUI-only, constructed before the menu so the menu knows whether an

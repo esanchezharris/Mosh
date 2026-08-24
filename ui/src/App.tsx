@@ -13,6 +13,7 @@ import { AppLegacy } from "./AppLegacy";
 import { AppV2 } from "./v2/AppV2";
 import { AppLive } from "./live/AppLive";
 import { AppProTools } from "./protools/AppProTools";
+import { brainRuntimeStatus } from "./bridge";
 
 // Dev-only Character Lab demo. The reference is gated on an explicit development mode so that in
 // the production build the ternary folds to a literal `null` and the lazy import() lands in
@@ -34,6 +35,11 @@ export function App() {
   const charLab = isCharacterLab();
 
   useEffect(() => { if (!charLab) init(); }, [init, charLab]);
+  useEffect(() => {
+    void brainRuntimeStatus().then((runtime) => {
+      if (runtime.preferredShell) useSettings.getState().set("uiShell", runtime.preferredShell);
+    }).catch(() => {});
+  }, []);
 
   if (charLab && CharacterLab) return (
     <Suspense fallback={null}>

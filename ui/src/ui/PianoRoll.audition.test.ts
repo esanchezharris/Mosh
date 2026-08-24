@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PianoRoll } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { useLive } from "../live/liveState";
 import type { CommandResult, Snapshot, Track } from "../types";
 
 vi.mock("../bridge", async () => {
@@ -47,7 +48,7 @@ describe("piano-roll note audition", () => {
 
   const mount = () => {
     useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, snapDivision: "1/4", exec });
-    act(() => root.render(React.createElement(PianoRoll)));
+    act(() => root.render(React.createElement(PianoRoll, { docked: true })));
   };
 
   const auditions = () =>
@@ -63,6 +64,7 @@ describe("piano-roll note audition", () => {
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useSettings.getState().set("notePreview", true);
     useSettings.getState().set("scaleLock", false);
+    useLive.setState({ drawMode: false });
   });
 
   afterEach(async () => {
@@ -83,6 +85,7 @@ describe("piano-roll note audition", () => {
   });
 
   it("drawing a note plays it", async () => {
+    useLive.setState({ drawMode: true });
     mount();
     const grid = host.querySelector(".pr-grid")!;
     act(() => {
@@ -92,6 +95,15 @@ describe("piano-roll note audition", () => {
     await flush();
     expect(auditions()).toHaveLength(1);
     expect(auditions()[0].action).toBe("blip");
+  });
+
+  it("offers explicit one-step repair for legacy same-pitch overlaps", async () => {
+    mount();
+    const repair = host.querySelector('[data-testid="pr-resolve-overlaps"]');
+    expect(repair).toBeTruthy();
+    act(() => { (repair as HTMLButtonElement).click(); });
+    await flush();
+    expect(exec).toHaveBeenCalledWith("resolve_note_overlaps", { clipId: "c1" });
   });
 
   it("dragging a note to a new pitch sounds it, and RELEASES it on pointerup", async () => {
@@ -124,6 +136,7 @@ describe("piano-roll note audition", () => {
 
   it("sends NOTHING when Preview is off", async () => {
     useSettings.getState().set("notePreview", false);
+    useLive.setState({ drawMode: true });
     mount();
     const key = host.querySelector('[data-testid="pr-key"][data-pitch="72"]');
     act(() => { key!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 5 })); });
@@ -135,6 +148,23 @@ describe("piano-roll note audition", () => {
     await flush();
     expect(auditions()).toEqual([]);
     // ...but the EDIT still happens. Preview governs sound, never whether work lands.
+    expect(exec.mock.calls.some((c) => c[0] === "add_note")).toBe(true);
+  });
+
+  it("does not create on a draw-off single click, but creates on double-click", async () => {
+    mount();
+    const grid = host.querySelector(".pr-grid")!;
+    act(() => {
+      grid.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 8, clientX: 100, clientY: 100 }));
+      grid.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 8, clientX: 100, clientY: 100 }));
+    });
+    await flush();
+    expect(exec.mock.calls.some((c) => c[0] === "add_note")).toBe(false);
+
+    act(() => {
+      grid.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: 100, clientY: 100 }));
+    });
+    await flush();
     expect(exec.mock.calls.some((c) => c[0] === "add_note")).toBe(true);
   });
 

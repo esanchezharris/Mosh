@@ -16,6 +16,7 @@ all_notes_off	Unguarded
 analyze_lyrics	Track
 apply_choke	Clip
 apply_remote_track	Unguarded
+attach_issue_file	Unguarded
 approve_training_source	Unguarded
 arm_track	Track
 assert_lyric_line	Track
@@ -67,6 +68,7 @@ edit_annotation	SessionGlobal
 enable_all_meters	Unguarded
 enable_track_meter	Unguarded
 export_audio	Unguarded
+export_issue	Unguarded
 export_stems	Unguarded
 file_peaks	Unguarded
 fill_lyric_gap	Track
@@ -92,6 +94,7 @@ list_builtins	Unguarded
 list_colors	Unguarded
 list_directory	Unguarded
 list_drum_kits	Unguarded
+list_issues	Unguarded
 list_loras	Unguarded
 list_midi_inputs	Unguarded
 list_plugins	Unguarded
@@ -152,6 +155,7 @@ remove_lyric_line	Track
 remove_lyric_sheet	Track
 remove_master_plugin	SessionGlobal
 remove_note	Clip
+report_issue	Unguarded
 remove_plugin	Track
 remove_render_layer	Clip
 remove_section	SessionGlobal
@@ -175,6 +179,7 @@ reorder_plugin	Track
 rescan_plugins	Unguarded
 reset_rave	Track
 reset_render_layer	Clip
+resolve_note_overlaps	Clip
 retry_audio_device	Unguarded
 save	Unguarded
 save_as	Unguarded
@@ -243,6 +248,7 @@ transform_velocities	Clip
 trim_clip	Clip
 unblock_plugin	Unguarded
 undo	Unguarded
+update_issue	Unguarded
 unfreeze_layer	Clip
 unfreeze_track	Track
 ungroup_clip_group	Clip

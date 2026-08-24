@@ -62,6 +62,16 @@ let sectionSeq = 3; // seed uses sec-1..3
 const nextSectionId = () => "sec-" + ++sectionSeq;
 let annotationSeq = 1; // seed uses ann-1
 const nextAnnotationId = () => "ann-" + ++annotationSeq;
+let issueSeq = 0;
+type MockIssue = {
+  id: string;
+  description: string;
+  severity: string;
+  source: string;
+  status: "inbox" | "triaged" | "fixed" | "dismissed";
+  timestamp: number;
+};
+let mockIssues: MockIssue[] = [];
 
 // G4b — fade curve name -> te::AudioFadeCurve::Type int (1..4), mirroring the native enum.
 const FADE_CURVE_TYPE: Record<string, number> = { linear: 1, convex: 2, concave: 3, sCurve: 4 };
@@ -481,7 +491,7 @@ const MOCK_TXN_SAFE = new Set([
   "duplicate_clip", "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade",
   "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
   "stretch_clip", "set_clip_warp",
-  "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes",
+  "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes", "transform_velocities", "transform_notes", "resolve_note_overlaps",
   "add_drum_pattern", "assign_sample", "set_drum_lane", "load_drum_kit",
   "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
   "set_plugin_param", "bypass_plugin",
@@ -576,7 +586,8 @@ const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audit
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
-  "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
+  "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
+  "report_issue", "list_issues", "update_issue", "export_issue", "attach_issue_file"]);  // accept_lyric_proposal IS undoable
 
 // AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
 // silently report success: for a MUTATING command that means the dev/e2e UI looks like
@@ -1198,6 +1209,33 @@ const LAB_TAKES = new Set<string>();
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
 const reindexNotes = (c: Clip) => c.notes!.forEach((n, i) => (n.i = i));
+const MIN_NOTE_BEATS = 0.0625;
+function makeRoomForMockNote(notes: MidiNote[], winner: MidiNote, future: readonly MidiNote[] = []): number {
+  let changed = 0;
+  for (const other of [...notes]) {
+    if (other === winner || other.pitch !== winner.pitch || future.includes(other)) continue;
+    const ws = winner.start, we = winner.start + winner.length;
+    const os = other.start, oe = other.start + other.length;
+    if (oe <= ws + 1e-9 || os >= we - 1e-9) continue;
+    const left = ws - os, right = oe - we;
+    if (left >= MIN_NOTE_BEATS) other.length = left;
+    else if (right >= MIN_NOTE_BEATS) { other.start = we; other.length = right; }
+    else notes.splice(notes.indexOf(other), 1);
+    if (left >= MIN_NOTE_BEATS && right >= MIN_NOTE_BEATS)
+      notes.push({ ...other, i: notes.length, start: we, length: right });
+    changed++;
+  }
+  return changed;
+}
+function resolveMockNoteOverlaps(notes: MidiNote[]): number {
+  const ordered = notes.map((note, index) => ({ note, index }))
+    .sort((a, b) => a.note.start - b.note.start || a.index - b.index);
+  let resolved = 0;
+  ordered.forEach(({ note }, i) => {
+    resolved += makeRoomForMockNote(notes, note, ordered.slice(i + 1).map((entry) => entry.note));
+  });
+  return resolved;
+}
 function findPlugin(trackId: string, index: number): { track: Track; idx: number } | null {
   const t = findTrack(trackId);
   if (!t || !t.plugins || index < 0 || index >= t.plugins.length) return null;
@@ -3556,6 +3594,43 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return err(command, "expected 'destTrackId', 'deviceID', or output:'default'");
     }
 
+    // ── owner issue inbox (local-only in native; in-memory in the dev mock) ──
+    case "report_issue": {
+      const description = str(args.description).trim();
+      if (!description) return err(command, "description is required");
+      const issue: MockIssue = {
+        id: `mock-issue-${String(++issueSeq).padStart(4, "0")}`,
+        description,
+        severity: str(args.severity) || "annoyance",
+        source: str(args.source) || "typed",
+        status: "inbox",
+        timestamp: Date.now(),
+      };
+      mockIssues.unshift(issue);
+      return ok(command, { issueId: issue.id, status: issue.status });
+    }
+    case "list_issues": {
+      const status = str(args.status);
+      const issues = status ? mockIssues.filter((issue) => issue.status === status) : mockIssues;
+      return ok(command, { issues: issues.map((issue) => ({ ...issue })) });
+    }
+    case "update_issue": {
+      const issue = mockIssues.find((candidate) => candidate.id === str(args.issueId));
+      const status = str(args.status) as MockIssue["status"];
+      if (!issue) return err(command, "issue not found");
+      if (!["inbox", "triaged", "fixed", "dismissed"].includes(status)) return err(command, "invalid issue status");
+      issue.status = status;
+      return ok(command, { issueId: issue.id, status });
+    }
+    case "export_issue": {
+      const issue = mockIssues.find((candidate) => candidate.id === str(args.issueId));
+      return issue ? ok(command, { file: `/mock/feedback/${issue.id}.md` }) : err(command, "issue not found");
+    }
+    case "attach_issue_file": {
+      const issue = mockIssues.find((candidate) => candidate.id === str(args.issueId));
+      return issue ? ok(command, { issueId: issue.id, attached: true }) : err(command, "issue not found");
+    }
+
     // ── settings / export / command log (topbar utilities) ───────────────────
     case "list_audio_devices": {
       // DEGRADED mirror (AUD-017 follow-up): a set audioDeviceError models the
@@ -4212,8 +4287,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "add_note": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       pushUndo();
-      f.clip.notes.push({ i: f.clip.notes.length, pitch: num(args.pitch, 60), start: num(args.start, 0), length: num(args.length, 0.5), velocity: num(args.velocity, 100) });
-      reindexNotes(f.clip); invalidate(); return ok(command);
+      const specs = Array.isArray(args.notes) ? args.notes as Record<string, unknown>[] : [args];
+      for (const spec of specs) {
+        const winner: MidiNote = { i: f.clip.notes.length, pitch: num(spec.pitch, 60), start: Math.max(0, num(spec.start, 0)), length: Math.max(MIN_NOTE_BEATS, num(spec.length, 0.5)), velocity: num(spec.velocity, 100) };
+        f.clip.notes.push(winner);
+        makeRoomForMockNote(f.clip.notes, winner);
+      }
+      reindexNotes(f.clip); invalidate(); return ok(command, { noteCount: f.clip.notes.length });
     }
     case "add_drum_pattern": {
       // DRM-002 — lay a whole drum grid in ONE undoable step (mirrors the native
@@ -4429,11 +4509,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         const n = targets[k];
         if ("start" in s) n.start = Math.max(0, num(s.start, n.start));
         if ("pitch" in s) n.pitch = Math.max(0, Math.min(127, num(s.pitch, n.pitch)));
-        if ("length" in s) n.length = Math.max(0.05, num(s.length, n.length));
+        if ("length" in s) n.length = Math.max(MIN_NOTE_BEATS, num(s.length, n.length));
         if ("velocity" in s) n.velocity = Math.max(1, Math.min(127, num(s.velocity, n.velocity)));
         if ("mute" in s) n.mute = Boolean(s.mute);
       });
-      invalidate(); return ok(command);
+      targets.forEach((winner, i) => makeRoomForMockNote(f.clip.notes!, winner, targets.slice(i + 1)));
+      reindexNotes(f.clip); invalidate(); return ok(command);
+    }
+    case "resolve_note_overlaps": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
+      pushUndo();
+      const resolved = resolveMockNoteOverlaps(f.clip.notes);
+      reindexNotes(f.clip); invalidate();
+      return ok(command, { resolved, noteCount: f.clip.notes.length });
     }
     // Drum-rack pads. The mock keeps its own pad list on the track so the grid, the
     // per-pad mixer and the choke picker all round-trip in the browser.
@@ -4510,8 +4598,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         const next = n.start + (target - n.start) * strength;
         if (Math.abs(next - n.start) > 1e-6) { n.start = Math.max(0, next); moved++; if (swingOffset > 0 && offbeat) swung++; }
       }
+      const resolved = resolveMockNoteOverlaps(f.clip.notes);
+      reindexNotes(f.clip);
       invalidate();
-      return ok(command, { moved, swung });
+      return ok(command, { moved, swung, resolved });
     }
     case "transform_velocities": {
       // Mirrors cmdTransformVelocities — Live 12's velocity tool row. Targets = an
@@ -4602,7 +4692,6 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           notes.push({ i: notes.length, pitch: t.pitch, start: t.start, length: t.length, velocity: t.velocity });
           added++;
         }
-        if (added > 0) reindexNotes(f.clip);
       } else {
         targets.forEach(({ i }, k) => {
           const n = notes[i], o = out[k];
@@ -4612,6 +4701,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           }
         });
       }
+      const winners = mode === "addInterval" ? notes.slice(-added) : targets.map(({ i }) => notes[i]);
+      winners.forEach((winner, i) => makeRoomForMockNote(notes, winner, winners.slice(i + 1)));
+      reindexNotes(f.clip);
       invalidate();
       return ok(command, { mode, changed, added });
     }
@@ -4964,6 +5056,8 @@ export function __resetMockForTests(): void {
   mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };
   mockAgentMemoryProject = [];
   mockAgentMemoryTs = 0;
+  issueSeq = 0;
+  mockIssues = [];
   history.length = 0;
   future.length = 0;
   mockTxnIds = [];            // CAP-PRJ-005 — the mirror follows the stacks it mirrors

@@ -908,6 +908,10 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 
             silentStatusPolls = 0;
             const auto status = st.getProperty ("status", var()).toString();
+            const auto release = st.getProperty ("sa3Release", var());
+            if (release.isObject() && (bool) release.getProperty ("released", false)
+                && stableAudioUnloadSink_)
+                stableAudioUnloadSink_ (release);
             if (const auto err = st.getProperty ("error", var()).toString(); err.isNotEmpty()) lastErr = err;
             emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
                 o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
@@ -962,12 +966,16 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             silentStatusPolls = 0;
             const auto status = st.getProperty ("status", juce::var()).toString();
             const auto progress = st.getProperty ("progress", 0.0);
+            const auto release = st.getProperty ("sa3Release", juce::var());
             if (const auto err = st.getProperty ("error", juce::var()).toString(); err.isNotEmpty()) lastErr = err;
-            juce::MessageManager::callAsync ([this, clipId, jobId, progress]
+            juce::MessageManager::callAsync ([this, clipId, jobId, progress, release]
             {
                 emit ("layer_render_progress", [&] { auto* o = new juce::DynamicObject();
                     o->setProperty ("clipId", clipId); o->setProperty ("jobId", jobId);
                     o->setProperty ("progress", progress); return juce::var (o); }());
+                if (release.isObject() && (bool) release.getProperty ("released", false)
+                    && stableAudioUnloadSink_)
+                    stableAudioUnloadSink_ (release);
             });
             if (status == "ready" || (output.existsAsFile() && manifest.existsAsFile())
                 || status == "error" || status == "cancelled")

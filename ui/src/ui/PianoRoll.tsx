@@ -631,6 +631,14 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     setLasso(null);
     setDrawGhost(null);
     if (!wasMoved) {
+      // Selection mode follows the shared editor contract: a single empty-ground
+      // click moves the insertion point and clears selection; it never creates a
+      // note. Pencil mode remains immediate (single click paints).
+      if (!drawActive) {
+        const beat = Math.max(0, e.altKey ? x / beatPx : snapDownBeat(x / beatPx, stepBeats));
+        setInsertBeat(beat); insertBeatRef.current = beat;
+        return;
+      }
       // Draw-start FLOORS to the grid line at/below the pointer (snapDownBeat — see
       // pianoRollGeom.ts for why round here drops the note half a step from the click).
       const start = Math.max(0, e.altKey ? x / beatPx : snapDownBeat(x / beatPx, stepBeats)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
@@ -653,6 +661,18 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     // build one selection up (Ableton behaves this way and it is muscle memory).
     const hit = marqueeHit(clip.notes ?? [], { x0: gd.x0, y0: gd.y0, x1: x, y1: y }, noteBox);
     applySelection(e.shiftKey ? new Set([...selectedNotes, ...hit]) : new Set(hit));
+  };
+  const onGridDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (drawActive || (e.target as HTMLElement).closest(".pr-note")) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, e.clientX - rect.left), y = Math.max(0, e.clientY - rect.top);
+    const start = Math.max(0, e.altKey ? x / beatPx : snapDownBeat(x / beatPx, stepBeats));
+    const pitch = lockPitch(pitchAt(y));
+    const length = stepBeats > 0 ? stepBeats : 1;
+    setInsertBeat(start); insertBeatRef.current = start;
+    if (auditionTrackId) notePreview.tap(auditionTrackId, pitch);
+    void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
   };
   // The single cancel funnel for pointercancel + lostpointercapture, which is why the
   // stuck-note release is one line rather than one per exit.
@@ -835,6 +855,12 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
             </MoshTip>
           )}
           {mode === "piano" && (
+            <MoshTip side="bottom" label="Repair legacy same-pitch overlaps in this clip. Later notes win; chords stay intact. This is one undoable step.">
+              <button className="btn" data-testid="pr-resolve-overlaps"
+                onClick={() => void exec("resolve_note_overlaps", { clipId: clip.id })}>Repair overlaps</button>
+            </MoshTip>
+          )}
+          {mode === "piano" && (
             <span className="seg pr-grid-ctl" role="group" aria-label="Grid">
               <MoshTip side="bottom" label="Adaptive grid — follow the zoom instead of a fixed division.">
                 <button className="btn" data-testid="pr-grid-adaptive" aria-pressed={grid.adaptive}
@@ -970,7 +996,8 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
               el.scrollLeft = next.scrollLeft;
             }}>
             <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: axis.height }}
-              onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}>
+              onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}
+              onDoubleClick={onGridDoubleClick}>
               {pitches.map((p) => {
                 // Only shade for the key while the lock is on, so the roll is
                 // pixel-identical to before when the feature is off.

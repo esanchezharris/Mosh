@@ -1454,6 +1454,19 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 
 /* ── agent composer (directly under Moshi in his rail) ────────────────────────*/
 .agent-composer { position: relative; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+.agent-runtime { font-size: 10px; color: var(--bone-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-runtime.ready { color: var(--lime); }
+.agent-runtime.prewarming, .agent-runtime.starting { color: var(--amber); }
+.issue-inbox-button { position:absolute; right:8px; top:6px; font-size:10px; }
+.issue-inbox { position:absolute; right:8px; bottom:52px; z-index:50; width:min(520px,calc(100vw - 24px)); max-height:65vh; overflow:auto; padding:12px; background:#17181b; border:1px solid #484b52; border-radius:8px; box-shadow:0 12px 40px #000b; color:#eee; }
+.issue-inbox-head,.issue-tabs,.issue-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.issue-inbox-head { justify-content:space-between; }
+.issue-tabs { margin:10px 0; }
+.issue-tabs button.active { color:#fff; border-color:#79a7ff; }
+.issue-card { border-top:1px solid #34363c; padding:10px 0; }
+.issue-card p { margin:6px 0; white-space:pre-wrap; }
+.issue-card small,.issue-message { color:#aaa; }
+.issue-actions { margin-top:8px; }
 /* his reply floats up as a speech bubble just above the composer (and over the
    creature's lower edge) — anchored to the composer so it's correct in both the
    short arrange dock and the tall mixer column. No layout shift. */

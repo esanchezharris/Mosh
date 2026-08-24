@@ -12,7 +12,7 @@
 //     attribute on .live-shell owns that), only control bar + editor + status bar
 //     remain. Sticky across close/reopen via the liveClipExpanded setting.
 //
-// Content priority: Moshi stub drawer (control-bar spark) → docked MIDI editor →
+// Content priority: shared Moshi drawer (control-bar spark) → docked MIDI editor →
 // wave clip editor → device panel. The MIDI editor's own header keeps the ONE close
 // (its ✕); the audio editor and the device panel have the dock's own ✕ (the device
 // panel's hides it until the selection changes).
@@ -20,8 +20,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { AgentComposer } from "../ui/AgentComposer";
 import { PianoRoll } from "../ui/PianoRoll";
-import { IconClose, IconSpark } from "../ui/icons";
+import { IconClose } from "../ui/icons";
+import { AgentDrawer } from "../v2/agent/AgentDrawer";
+import { ChangeToast } from "../v2/ChangeToast";
 import { useLive } from "./liveState";
 import { DeviceStrip } from "./DeviceStrip";
 import { AudioClipEditor } from "./AudioClipEditor";
@@ -163,14 +166,9 @@ export function DetailDock() {
             <DockClose label="Close the Moshi drawer" onClose={() => setMoshiOpen(false)} />
           </div>
           <div className="live-dock-moshi" data-testid="live-moshi-panel">
-            <span className="live-dock-stub-icon" aria-hidden="true"><IconSpark size={16} /></span>
-            <div>
-              <p className="live-dock-stub-title">Moshi</p>
-              <p className="live-dock-stub-copy">
-                The agent drawer is a stub in this shell — the full composer lives in the
-                Mosh (new) shell today and docks here later.
-              </p>
-            </div>
+            <AgentDrawer />
+            <ChangeToast />
+            <AgentComposer />
           </div>
         </>
       )}

@@ -75,6 +75,12 @@ export function parsePluginCatalogV1(data: unknown): readonly PluginEntry[] | nu
 export function pluginQueryV1(utterance: string): string | null {
   const match = utterance.trim().match(LOAD_PLUGIN_UTTERANCE_V1);
   const query = match?.[1]?.trim();
+  // "add" is shared producer language. Do not claim obvious timeline/MIDI
+  // creation asks and then fail while reading the installed plug-in catalog.
+  // Actual plug-in names containing these words remain available through the
+  // explicit "load plugin <name>" form.
+  if (query && /\b(?:test\s+tone|midi\s+clip|audio\s+clip|clip|notes?)\b/i.test(query)
+    && !/\bplugin\b/i.test(utterance)) return null;
   return query ? query : null;
 }
 
@@ -349,10 +355,14 @@ export const loadNamedPluginV1: NativeSkillHandlerV1 = async ({ payload, environ
     return runAtomicLoadV1(payload, environment, before, trackId, entry, taken.payload.projectEpoch, sourceAtStart);
   }
 
+  // Certified matchers may prefill a broad `pluginName` slot for any leading
+  // "add" request. Revalidate the original utterance before trusting that slot,
+  // otherwise clip/note creation is stolen before the producer brain can see it.
+  const utteranceQuery = pluginQueryV1(utterance);
+  if (!utteranceQuery) return blocked(payload, "unsupported_intent", payload.responses.blocked);
   const query = typeof slots.pluginName === "string" && slots.pluginName.length > 0
     ? slots.pluginName
-    : pluginQueryV1(utterance);
-  if (!query) return blocked(payload, "unsupported_intent", payload.responses.blocked);
+    : utteranceQuery;
 
   const initial = environment.context();
   if (!initial.selectedTrackId) return blocked(payload, "missing_target", "Select the track you want me to load it on.");
