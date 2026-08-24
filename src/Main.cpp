@@ -143,6 +143,8 @@ public:
         // input instances ⇒ the routing fork is never taken), so it joins liveAudio below.
         const bool midiRecordSmoke = commandLine.contains ("--midi-record-smoke");
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
+        const bool audioRecoveryIsolationSmoke =
+            commandLine.contains ("--audio-recovery-isolation-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
         const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
@@ -152,9 +154,12 @@ public:
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
         const bool liveAudio = liveAudioSmoke || midiRecordSmoke;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || goldenSelfTest
-                           || commandLine.contains ("--selftest") || audioRecoverySmoke;
+                           || commandLine.contains ("--selftest")
+                           || audioRecoverySmoke || audioRecoveryIsolationSmoke;
         const bool noAudio = envNoAudio
-                          || (headless && ! audioRecoverySmoke)
+                          || (headless
+                              && ! audioRecoverySmoke
+                              && ! audioRecoveryIsolationSmoke)
                           || scanDeep || runScript || voiceSmoke;
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
@@ -189,7 +194,8 @@ public:
         modes.voiceSmoke     = voiceSmoke;
         modes.demoGui        = demoGui;
         modes.envNoAudio     = envNoAudio;
-        const juce::String sessionBaseName = audioRecoverySmoke
+        const juce::String sessionBaseName =
+            (audioRecoverySmoke || audioRecoveryIsolationSmoke)
             ? "session-audio-recovery-smoke"
             : mosh::sessionpaths::harnessSessionBase (modes);
 
@@ -197,7 +203,8 @@ public:
         // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
         // pumps the run loop — otherwise a repeated-crash history makes NSPersistentUIRestorer
         // block the run forever (see MacStateRestoration.h). No-op off macOS.
-        if (noAudio || liveAudio || demoGui || audioRecoverySmoke)
+        if (noAudio || liveAudio || demoGui
+            || audioRecoverySmoke || audioRecoveryIsolationSmoke)
             disableAppKitStateRestoration();
 
         // Headless: no audio device, and an isolated cold session so the harness is
@@ -213,7 +220,9 @@ public:
         {
             engine = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
                                                    /*freshSession=*/ (noAudio || liveAudio || demoGui
-                                                                     || audioRecoverySmoke) && ! keepSession,
+                                                                     || audioRecoverySmoke
+                                                                     || audioRecoveryIsolationSmoke)
+                                                                     && ! keepSession,
                                                    sessionBaseName);
         }
         catch (const std::exception& error)
@@ -229,8 +238,9 @@ public:
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
 
-        if (audioRecoverySmoke)
+        if (audioRecoverySmoke || audioRecoveryIsolationSmoke)
         {
+            const bool physicalMode = audioRecoverySmoke;
             auto probeTransportSurvivesArgv = [] (const juce::XmlElement* setup)
             {
                 const auto result = audiostartup::runProbeProcess (
@@ -269,19 +279,6 @@ public:
                 juce::Time::getMillisecondCounterHiRes() - firstListStarted;
             const auto firstData = firstList.getProperty ("data", juce::var());
             const auto firstTypes = firstData.getProperty ("types", juce::var());
-
-            const auto retryStarted = juce::Time::getMillisecondCounterHiRes();
-            const auto retry = execute ("retry_audio_device");
-            const auto retryElapsedMs =
-                juce::Time::getMillisecondCounterHiRes() - retryStarted;
-
-            const auto secondListStarted = juce::Time::getMillisecondCounterHiRes();
-            const auto secondList = execute ("list_audio_devices");
-            const auto secondListElapsedMs =
-                juce::Time::getMillisecondCounterHiRes() - secondListStarted;
-            const auto secondData = secondList.getProperty ("data", juce::var());
-            const auto secondTypes = secondData.getProperty ("types", juce::var());
-            const auto retryError = retry.getProperty ("error", juce::var()).toString();
             const auto timeoutDeviceError = engine->audioDeviceError();
 
             const auto countDeviceNames = [] (const juce::var& types)
@@ -300,7 +297,6 @@ public:
                 return counts;
             };
             const auto firstDeviceCounts = countDeviceNames (firstTypes);
-            const auto secondDeviceCounts = countDeviceNames (secondTypes);
 
             const auto invalidSetupFile =
                 engine->sessionDir().getChildFile ("audio-device.xml");
@@ -313,48 +309,99 @@ public:
                 juce::Time::getMillisecondCounterHiRes() - invalidRetryStarted;
             const auto invalidRetryError =
                 invalidRetry.getProperty ("error", juce::var()).toString();
+            const bool invalidSetupRemoved = invalidSetupFile.deleteFile();
 
-            const bool pass = (bool) firstList.getProperty ("ok", false)
-                           && defaultArgvRoundTrip
-                           && outputOnlyArgvRoundTrip
-                           && inputOnlyArgvRoundTrip
-                           && ! (bool) firstData.getProperty ("audioEnabled", true)
-                           && firstTypes.isArray() && ! firstTypes.getArray()->isEmpty()
-                           && firstDeviceCounts.first + firstDeviceCounts.second > 0
-                           && firstListElapsedMs < 1000.0
-                           && ! (bool) retry.getProperty ("ok", true)
-                           && retryError.contains ("did not open within")
-                           && retryElapsedMs < 2000.0
-                           && (bool) secondList.getProperty ("ok", false)
-                           && ! (bool) secondData.getProperty ("audioEnabled", true)
-                           && secondTypes.isArray() && ! secondTypes.getArray()->isEmpty()
-                           && secondDeviceCounts.first + secondDeviceCounts.second > 0
-                           && secondListElapsedMs < 1000.0
-                           && timeoutDeviceError.contains ("did not open within")
-                           && invalidSetupWritten
-                           && ! (bool) invalidRetry.getProperty ("ok", true)
-                           && invalidRetryElapsedMs < audiostartup::kMinTimeoutMs
-                           && invalidRetryError.contains ("invalid or too large")
-                           && engine->audioDeviceError().contains ("invalid or too large")
-                           && ! engine->hasAudio();
+            if (physicalMode)
+            {
+                // The initial stall is a one-shot fault injection. The physical
+                // retry must exercise a real device open rather than the injected
+                // timeout a second time.
+                mosh::unsetEnvVar ("MOSH_AUDIO_OPEN_STALL_MS");
+                mosh::unsetEnvVar ("MOSH_AUDIO_OPEN_TIMEOUT_MS");
+            }
+
+            const auto retryStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto retry = execute ("retry_audio_device");
+            const auto retryElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - retryStarted;
+            const auto retryError = retry.getProperty ("error", juce::var()).toString();
+
+            const auto secondListStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto secondList = execute ("list_audio_devices");
+            const auto secondListElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - secondListStarted;
+            const auto secondData = secondList.getProperty ("data", juce::var());
+            const auto secondTypes = secondData.getProperty ("types", juce::var());
+            const auto secondDeviceCounts = countDeviceNames (secondTypes);
+            const int deviceTypeCount =
+                secondTypes.isArray() ? secondTypes.getArray()->size() : 0;
+            const int liveAudioFailures =
+                physicalMode && (bool) retry.getProperty ("ok", false)
+                    ? runLiveAudioSmoke (*engine, *moshOps) : 1;
+
+            audiostartup::RecoveryGateEvidence recoveryEvidence;
+            recoveryEvidence.degradedBeforeRetry =
+                (bool) firstList.getProperty ("ok", false)
+                && ! (bool) firstData.getProperty ("audioEnabled", true)
+                && firstTypes.isArray() && ! firstTypes.getArray()->isEmpty()
+                && firstDeviceCounts.first + firstDeviceCounts.second > 0
+                && timeoutDeviceError.contains ("did not open within");
+            recoveryEvidence.retryOk = (bool) retry.getProperty ("ok", false);
+            recoveryEvidence.audioEnabledAfterRetry =
+                (bool) secondData.getProperty ("audioEnabled", false);
+            recoveryEvidence.deviceTypeCountAfterRetry = deviceTypeCount;
+            recoveryEvidence.liveAudioFailures = liveAudioFailures;
+
+            const bool commonPass = defaultArgvRoundTrip
+                                 && outputOnlyArgvRoundTrip
+                                 && inputOnlyArgvRoundTrip
+                                 && recoveryEvidence.degradedBeforeRetry
+                                 && firstListElapsedMs < 1000.0
+                                 && invalidSetupWritten
+                                 && ! (bool) invalidRetry.getProperty ("ok", true)
+                                 && invalidRetryElapsedMs < audiostartup::kMinTimeoutMs
+                                 && invalidRetryError.contains ("invalid or too large")
+                                 && invalidSetupRemoved
+                                 && (bool) secondList.getProperty ("ok", false)
+                                 && secondTypes.isArray() && ! secondTypes.getArray()->isEmpty()
+                                 && secondDeviceCounts.first + secondDeviceCounts.second > 0
+                                 && secondListElapsedMs < 1000.0;
+            const bool isolationPass = commonPass
+                                    && ! (bool) retry.getProperty ("ok", true)
+                                    && retryError.contains ("did not open within")
+                                    && retryElapsedMs < 2000.0
+                                    && ! (bool) secondData.getProperty ("audioEnabled", true)
+                                    && engine->audioDeviceError().contains ("did not open within")
+                                    && ! engine->hasAudio();
+            const bool physicalPass = commonPass
+                                   && retryElapsedMs
+                                          < audiostartup::kDefaultTimeoutMs + 1000.0
+                                   && audiostartup::physicalRecoveryPassed (recoveryEvidence)
+                                   && engine->audioDeviceError().isEmpty()
+                                   && engine->hasAudio();
+            const bool pass = physicalMode ? physicalPass : isolationPass;
 
             auto* evidence = new juce::DynamicObject();
-            evidence->setProperty ("pass", pass);
+            evidence->setProperty ("mode",
+                                   physicalMode ? "physical_recovery" : "isolation");
+            if (physicalMode)
+                evidence->setProperty ("pass", physicalPass);
+            else
+                evidence->setProperty ("isolationPass", isolationPass);
             evidence->setProperty ("defaultArgvRoundTrip", defaultArgvRoundTrip);
             evidence->setProperty ("outputOnlyArgvRoundTrip", outputOnlyArgvRoundTrip);
             evidence->setProperty ("inputOnlyArgvRoundTrip", inputOnlyArgvRoundTrip);
             evidence->setProperty ("audioEnabled",
-                                   secondData.getProperty ("audioEnabled", true));
+                                   secondData.getProperty ("audioEnabled", false));
             evidence->setProperty ("firstDeviceTypeCount",
                                    firstTypes.isArray() ? firstTypes.getArray()->size() : -1);
             evidence->setProperty ("firstOutputDeviceCount", firstDeviceCounts.first);
             evidence->setProperty ("firstInputDeviceCount", firstDeviceCounts.second);
-            evidence->setProperty ("deviceTypeCount",
-                                   secondTypes.isArray() ? secondTypes.getArray()->size() : -1);
+            evidence->setProperty ("deviceTypeCount", deviceTypeCount);
             evidence->setProperty ("outputDeviceCount", secondDeviceCounts.first);
             evidence->setProperty ("inputDeviceCount", secondDeviceCounts.second);
             evidence->setProperty ("firstListElapsedMs", firstListElapsedMs);
-            evidence->setProperty ("retryOk", retry.getProperty ("ok", true));
+            evidence->setProperty ("retryOk", retry.getProperty ("ok", false));
             evidence->setProperty ("retryElapsedMs", retryElapsedMs);
             evidence->setProperty ("retryError", retryError);
             evidence->setProperty ("secondListElapsedMs", secondListElapsedMs);
@@ -363,6 +410,10 @@ public:
             evidence->setProperty ("invalidSetupRetryElapsedMs",
                                    invalidRetryElapsedMs);
             evidence->setProperty ("invalidSetupRetryError", invalidRetryError);
+            evidence->setProperty ("invalidSetupRemoved", invalidSetupRemoved);
+            evidence->setProperty ("startupAudioDeviceError", timeoutDeviceError);
+            if (physicalMode)
+                evidence->setProperty ("liveAudioFailures", liveAudioFailures);
             evidence->setProperty ("audioDeviceError", engine->audioDeviceError());
             std::cout << juce::JSON::toString (juce::var (evidence), false).toStdString()
                       << std::endl;
