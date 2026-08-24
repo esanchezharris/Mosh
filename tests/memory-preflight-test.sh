@@ -48,7 +48,12 @@ run_subject() {
   shift 2
   local output rc
   set +e
-  output="$(env PATH="$BIN:$HOST_PATH" "$@" "$SUBJECT" 2>&1)"
+  output="$(env \
+    -u MOSH_MIN_MEMORY_FREE_PERCENT \
+    -u MOSH_MAX_SWAP_USED_MIB \
+    -u MOSH_MIN_DATA_FREE_GIB \
+    -u MOSH_MAX_CODEX_CHILDREN \
+    PATH="$BIN:$HOST_PATH" "$@" "$SUBJECT" 2>&1)"
   rc=$?
   set -e
   if [ "$rc" -ne "$expected_rc" ]; then
@@ -82,6 +87,14 @@ run_subject 0 'codex_children=8' \
 run_subject 1 'free memory 20% is below 25%' env FAKE_MEMORY_FREE_PERCENT=20
 run_subject 1 'swap used 5000 MiB exceeds 4096 MiB' env FAKE_SWAP_USED_MB=5000
 run_subject 1 'Data volume free 20 GiB is below 32 GiB' env FAKE_DATA_FREE_KB=20971520
+
+# Given the test process inherits the owner's one-time elevated child ceiling.
+# When the default-threshold fixture runs.
+# Then it still verifies the standard 64-child policy.
+export MOSH_MAX_CODEX_CHILDREN=1000
+run_subject 1 'Codex child process count 65 exceeds 64' env FAKE_CODEX_CHILDREN=65
+unset MOSH_MAX_CODEX_CHILDREN
+
 run_subject 1 'Codex child process count 65 exceeds 64' env FAKE_CODEX_CHILDREN=65
 
 # Given the canonical gate sees unsafe memory.
@@ -100,4 +113,4 @@ printf '%s' "$gate_output" | jq -e \
   '.pass == false and (.steps | length) == 1 and .steps[0].name == "memory_preflight"' \
   >/dev/null
 
-printf 'memory preflight: 8/8 scenarios passed\n'
+printf 'memory preflight: 9/9 scenarios passed\n'
