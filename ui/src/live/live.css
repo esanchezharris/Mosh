@@ -299,7 +299,10 @@
 .live-ruler-corner { background: var(--live-bg-deep); border-left: 1px solid var(--live-line); border-bottom: 1px solid var(--live-line); }
 .live-arr-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
 .live-lanes-scroll { flex: 1 1 auto; min-width: 0; overflow: auto; }
-.live-lanes { position: relative; min-height: 100%; }
+.live-lanes {
+  position: relative; min-width: 100%; min-height: 100%;
+  background: var(--live-lane-bg);
+}
 .live-time-ruler-row {
   flex: 0 0 var(--live-time-ruler-h);
   display: grid; grid-template-columns: minmax(0, 1fr) var(--live-head-w);
@@ -313,24 +316,28 @@
   font-size: 9.5px;
 }
 
-/* the bar/beat grid: bar lines one step stronger than beat lines (SPEC §7's grid rule) */
+/* One mapped canvas grid: bars > beats > subdivisions; content remains above it. */
+.live-arrangement-grid {
+  position: absolute; top: 0; left: 0; z-index: 0;
+  pointer-events: none; overflow: hidden;
+}
+.live-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; pointer-events: none; }
+.live-grid-line.subdivision { background: color-mix(in srgb, var(--live-line) 48%, transparent); }
+.live-grid-line.beat { background: var(--live-line); }
+.live-grid-line.bar { background: var(--live-line-strong); }
 .live-lane {
-  position: relative; height: var(--live-lane-h);
+  position: relative; z-index: 1; height: var(--live-lane-h);
   border-bottom: 1px solid var(--live-line);
-  background-color: var(--live-lane-bg);
-  background-image:
-    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--bar-px, 160px) - 1px), var(--live-line-strong) calc(var(--bar-px, 160px) - 1px), var(--live-line-strong) var(--bar-px, 160px)),
-    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--beat-px, 40px) - 1px), var(--live-line) calc(var(--beat-px, 40px) - 1px), var(--live-line) var(--beat-px, 40px));
+  background: transparent;
 }
 
-/* take lanes (Live 12) — sub-lane rows under a track's lane, one row per take
-   index. Labeled bars this wave: list_takes carries no per-take source/peaks,
-   so there is nothing honest to draw a waveform FROM (PARITY.md). */
-.live-takelanes { position: relative; border-bottom: 1px solid var(--live-line); }
+/* Take rows stay translucent so the shared musical grid remains continuous below
+   each track while their waveform bars retain the stronger foreground layer. */
+.live-takelanes { position: relative; z-index: 1; border-bottom: 1px solid var(--live-line); }
 .live-takerow {
   position: relative; box-sizing: border-box;
   border-bottom: 1px solid var(--live-line);
-  background: var(--live-bg-inset);
+  background: color-mix(in srgb, var(--live-bg-inset) 84%, transparent);
 }
 .live-takebar {
   position: absolute; top: 1px; bottom: 1px; box-sizing: border-box;

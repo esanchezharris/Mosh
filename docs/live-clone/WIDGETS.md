@@ -1,5 +1,10 @@
 # Mosh Live — Live 12 widget/AX extraction (build reference)
 
+Live 11 parity status: NOT PROVEN
+
+These Live 12 observations are historical reference material, not evidence that
+the current shell matches Live 11. See `LIVE11_PARITY.md` for current status.
+
 Extracted 2026-08-06 from Live 12 Suite 12.4.2 on this machine with
 `.cache/live-ref/dump_ax.py` (pyobjc AX tree dump), `mouse.py` (CGEvent driver —
 `dblclick` fixed to set `kCGMouseEventClickState` before posting), and
