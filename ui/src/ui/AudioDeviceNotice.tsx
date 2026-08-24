@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
 
-/** Pure visibility rule (testable without a DOM): show whenever the backend reported an
- *  audio-device problem and the user hasn't dismissed it this session. */
-export function shouldShowAudioDeviceNotice(snapshot: Snapshot | null, dismissed: boolean): boolean {
-  return Boolean(snapshot?.session.audioDeviceError) && !dismissed;
+/** Pure visibility rule (testable without a DOM): a latched device error or an
+ *  explicitly unready current device must remain visible until recovery succeeds. */
+export function shouldShowAudioDeviceNotice(snapshot: Snapshot | null): boolean {
+  return Boolean(snapshot?.session.audioDeviceError) || snapshot?.session.audioReady === false;
 }
 
 /** AUD-017 — the visible half of the bounded audio-device startup.
@@ -16,14 +16,17 @@ export function shouldShowAudioDeviceNotice(snapshot: Snapshot | null, dismissed
  *  audio and says so here. Retry re-runs the same bounded open, so the fix is
  *  "unplug the bad interface, press Retry", not "find Activity Monitor and restart
  *  coreaudiod as root". */
-export function AudioDeviceNotice() {
+type AudioDeviceNoticeProps = {
+  readonly onAudioSettings?: () => void;
+};
+
+export function AudioDeviceNotice({ onAudioSettings }: AudioDeviceNoticeProps = {}) {
   const snapshot = useStore((s) => s.snapshot);
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
-  const [dismissed, setDismissed] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
-  if (!shouldShowAudioDeviceNotice(snapshot, dismissed)) return null;
+  if (!shouldShowAudioDeviceNotice(snapshot)) return null;
 
   const onRetry = async () => {
     setRetrying(true);
@@ -37,7 +40,7 @@ export function AudioDeviceNotice() {
 
   return (
     <div className="error-bar" role="alert" data-testid="audio-device-notice">
-      🔇 {snapshot?.session.audioDeviceError}
+      🔇 {snapshot?.session.audioDeviceError || "Audio unavailable — choose an output device or retry."}
       <button
         type="button"
         onClick={onRetry}
@@ -47,9 +50,16 @@ export function AudioDeviceNotice() {
       >
         {retrying ? "Retrying…" : "Retry"}
       </button>
-      <button type="button" onClick={() => setDismissed(true)} style={{ marginLeft: 8 }}>
-        Dismiss
-      </button>
+      {onAudioSettings && (
+        <button
+          type="button"
+          onClick={onAudioSettings}
+          style={{ marginLeft: 8 }}
+          data-testid="audio-device-settings"
+        >
+          Audio Settings
+        </button>
+      )}
     </div>
   );
 }

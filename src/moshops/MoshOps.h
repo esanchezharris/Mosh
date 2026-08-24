@@ -766,6 +766,7 @@ private:
     // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
     // audible immediately. No-op when an instrument is already present.
     void                 ensureDefaultInstrument (te::AudioTrack&, bool drum);
+    void                 synchronisePlaybackGraph();
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
     // G10 — takes the 3 keys explicitly (not the whole `args` var) so every caller reads
     // them inline via args.getProperty(...), matching findPlugin's calling convention —
@@ -807,7 +808,7 @@ private:
     TrackMutePlugin* findTrackMuteGate (te::AudioTrack&);
 
     void reconcileMeterClients();           // sync client map to live taps (undo/redo-safe)
-    void unregisterAllMeterClients();       // removeClient on still-valid measurers, then clear
+    void unregisterAllMeterClients();       // detach track/send/master clients while measurers live
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
     std::map<SendMeterKey, std::unique_ptr<SendMeterTap>> sendMeterClients;
     te::LevelMeasurer::Client masterClient;
@@ -892,7 +893,7 @@ private:
 
     /** The JUCE device manager under Tracktion's wrapper that the device picker drives. */
     juce::AudioDeviceManager& adm() { return eng.engine().getDeviceManager().deviceManager; }
-    juce::var currentAudioSelection();   // small {type,outputDevice,...} summary block
+    juce::var currentAudioSelection (const juce::String& requestedOutput = {});
     // Applies a device-setup patch; returns the error string (empty == success). No
     // logging — callers log once under their own command name (one JSONL line / action).
     juce::String applyAudioDeviceSetup (const juce::var& args);

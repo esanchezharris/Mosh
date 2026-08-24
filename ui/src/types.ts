@@ -588,6 +588,9 @@ export type AudioSelection = {
   inputDevice: string;
   sampleRate: number;
   bufferSize: number;
+  requestedOutputDevice?: string;
+  activeOutputDevice?: string;
+  audioReady?: boolean;
 };
 
 // Full device enumeration from list_audio_devices (on-demand, NOT in the snapshot).
@@ -598,6 +601,7 @@ export type AudioDevices = {
   bufferSizes: number[];
   defaultBufferSize: number;
   audioEnabled: boolean;
+  audioReady?: boolean;
   /** CAP-TRN-005 — where the CLICK can be routed. A separate list from `types` above on
    *  purpose: tracktion routes the click by te::OutputDevice name across wave AND MIDI
    *  outs, which is a different vocabulary from the JUCE device-type enumeration. Absent
@@ -891,6 +895,9 @@ export type Snapshot = {
      *  system. Empty when nothing has enumerated devices yet (an honest unknown). */
     audioDeviceSystemDefault?: string;
     audioDeviceError?: string;
+    /** Actual current CoreAudio readiness. Unlike audioEnabled, this detects a
+     *  device that disappeared after startup. Absent on older native builds. */
+    audioReady?: boolean;
     // PRJ-008 — per-project format / time-base intent (the export/format default +
     // timeline display base). Generic media-format values, persisted with the project;
     // each field falls back to the live device readout when unset.
