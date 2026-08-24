@@ -1,250 +1,92 @@
-# Mosh current status and ownership handoff
+# Mosh pre-pivot baseline
 
-Last refreshed: **2026-08-04** (PR-backlog alignment pass)
+## Snapshot identity
 
-Canonical trunk: `origin/main` at `4e6eaeb1` — #599 (this file) and #606 (`.mosh`
-projects) landed on top of `221cefd7`.
+This is a documentation-only ownership snapshot, not a new roadmap. The
+selected product baseline is origin/main through **7eb0d617** (PR #668, DAWN
+Bridge and Ableton Live 11 controller). The annotated tag
+**pre-pivot-baseline-2026-08-23** identifies the resulting docs-only baseline
+after it lands on main and passes final verification. It is not a release or
+product-acceptance claim.
 
-This is the rolling engineering handoff. GitHub remains the source of truth for
-state that can change after the timestamp above. Refresh PR and issue metadata
-before acting; do not infer merge readiness from the word “ready” in GitHub's
-draft-state field.
+The upcoming product direction is deliberately undefined here.
 
-## Executive state
+## What is on the selected baseline
 
-- Production v2 is the default product surface.
-- The production-v2 usability campaign is **time-boxed, not release-certified**.
-  Its durable evidence ledger is
-  [`playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`](playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md).
-- The latest exact merged-SHA showcase/audit evidence was collected at
-  `0b32091eb0d559f63ebbeb543a0d0c0f635efea5`. PR #596 subsequently moved trunk
-  to `01adca36`, so that evidence is useful history, not final certification.
-- The showcase produced a portable 66.98-second project, full 24-bit WAV,
-  aligned stems, loop/section/custom exports, Moshi/generative exercises, and
-  save/reload proof. Raw media and machine-specific evidence remain outside the
-  repository under `~/Library/Mosh/audits/production-v2-20260730/`.
-- The raw Release bundle still had a strict codesign resource-seal mismatch in
-  the audit build. Do not describe the current source tree as distribution-ready
-  solely because the released v0.1.0 artifact is signed and notarized.
-- The owner checkout contains unrelated untracked work and was intentionally
-  preserved. Resume engineering in a fresh worktree from `origin/main`.
-- The owner ended the audit loop to prioritize repository transfer and a job
-  application. No additional long-running gates are requested by this handoff.
+The following product work was rebased, gated, and merged serially into main:
 
-## Safe resume rules
-
-1. Fetch `origin/main` and create an isolated worktree. Do not clean, reset, or
-   repurpose the owner's checkout.
-2. Re-read this file, the live GitHub PR/issue lists, and the plan for the lane
-   being resumed.
-3. Keep user-visible mutations on the MoshOps seam and snapshot/event changes
-   additive.
-4. Do not merge protected owner-gated drafts #524 or #581 as part of routine
-   cleanup. (#523 and #575 were named here too and were closed on 2026-08-04 by
-   explicit owner decision — see the closure table below.)
-5. Treat physical audio, signing, permissions, repair, and rollback as owner
-   gates. Hosted checks or screenshots cannot substitute for them.
-6. The generated First-Stranger board is dated 2026-07-28. Regenerate it from
-   `docs/first-stranger-program/backlog.jsonl` before selecting a lane.
-
-## Open PR catalog
-
-Complete as of the refresh timestamp: **2 open PRs**, down from 28. The
-2026-08-04 alignment pass merged seven and closed eleven. Both survivors are
-owner-gated drafts that were deliberately preserved, not leftovers.
-
-| PR | GitHub state | Relationship | Transfer disposition |
-|---|---|---|---|
-| [#524](https://github.com/esanchezharris/Mosh/pull/524) Moshi + Codex owner cockpit | Draft | Base for #581 | **Protected owner work. Parked, not closed.** Review the stack together. |
-| [#581](https://github.com/esanchezharris/Mosh/pull/581) bounded startup recovery | Draft | Stacked on #524; issue #578 | **Protected owner gate. Parked, not closed.** Needs physical-device review; hosted checks cannot substitute. |
-
-### Merged in the 2026-08-04 alignment pass
-
-Landed in this order — serially, because all seven touch `src/app/SelfTest.cpp`
-and each merge invalidated the next one's rebase.
-
-| PR | Merge SHA | Result |
+| PR | Selected work | Evidence posture |
 |---|---|---|
-| #599 | `ab902921` | This handoff catalog |
-| #606 | `4e6eaeb1` | `.mosh` projects, Finder icon, `untitled - bearcat` naming |
-| #617 | `776dc780` | `jump_to_history` — undo-history jump by transaction identity |
-| #623 | `9a4c972c` | `set_metronome` — metronome level, sound and route |
-| #619 | `842a9664` | `quantize` + swing (closes #552) |
-| #618 | `b7d075a7` | Track-mute automation (CAP-AUT-006) |
-| #471 | `7c3a45ee` | FS-T2 plugin-crash safe mode |
+| #663 | Owner-Mac recovery | Native/source validation is distinct from real physical recovery. |
+| #664 | Owner Music Night recovery | Automated evidence does not prove physical audio. |
+| #665 | Serum Live playback recovery | Real BlackHole/Serum-family playback remains manual. |
+| #667 | Live 11 grid parity | Browser/native evidence does not establish hands-on Live parity. |
+| #666 | Mosh Re-Imagine VST3 | Bundle/host evidence is retained; real audio-track and by-ear acceptance remain pending. |
+| #668 | DAWN Bridge and Ableton Live 11 controller | Controller/bridge automation is retained; physical Live/iPhone/audio/Undo acceptance remains pending. |
 
-T0 daily-driver parity moved **21 → 24 of 28 engine-shipped** (75% → 86%) and
-**18 → 21 UI-reachable** across the batch; command-surface coverage went
-**195/223 → 197/225**. Those figures are regenerated by `scoreboard.py`, not
-hand-written — see the hazard note below.
+Fresh settings default to the **Pro Tools** shell. Live, v2, and classic stay
+selectable, and existing explicit preferences are retained. This is a UI
+configuration default, not a claim that any shell has completed physical
+producer acceptance.
 
-### Closed in the 2026-08-04 alignment pass
+## Archive and pause posture
 
-Closed, not deleted — every branch is preserved and recoverable by name.
+- **First-Stranger** is paused and archived. Its former
+  [first-stranger-program/README.md](first-stranger-program/README.md)
+  entrypoint is a tombstone; do not select old lanes, regenerate its board, or
+  use its old lane/worktree helpers.
+- **R8**, the legacy owner cockpit, and the closed physical-repair lineage are
+  archive-only. Their source/evaluation/repair evidence must remain preserved;
+  they are not forced into this baseline.
+- **Session Foundry** is source-and-plan archive material only. Its Swift
+  .build output is intentionally excluded and it is not merged into main.
+- Pre-rebase candidates are retained as immutable
+  archive/pre-pivot-2026-08-23/* tags. Keep the existing
+  rescue/codex-voice-to-midi-salvage tag.
+- design-lab is protected and outside this cleanup.
 
-| PR | Branch | Why |
-|---|---|---|
-| #507, #508, #510 | `claude/auto-wave2-selftest-*` | Selftest chapter split, 154 commits behind. Main took 22 commits to `src/app/SelfTest.cpp` alone since the fork (9,248 lines there vs 12,385 on main), and every feature PR appends to that file — the stack re-conflicted on each merge. Mechanical and re-derivable; intent recorded in `docs/rfc/002-selftest-chapter-split.md`. |
-| #322, #358, #363 | `claude/used2-*`, `claude/fms-*` | Used2/FMS research stack: drafts, 395 commits behind, not app code. |
-| #515 | `claude/fms-lyric-pilot-harness-e1820f` | **Shares no commit history with main** — its own root commit, no merge base. Mergeable only via `--allow-unrelated-histories`, which would graft a foreign root into the repo permanently. |
-| #523 | `codex/vocal-map-program-control` | Draft, 50 commits behind, conflicting in shared infrastructure (`AGENTS.md`, `CLAUDE.md`, `gate.sh`). |
-| #575 | `codex/playtest-574-…` | Superseded by #581, which carries the same fix plus a main merge and #577. |
-| #478 | `claude/ai-agent-mosh-integration-077b2f` | Ship kit, 216 commits behind. Its signing/BOM/licence half landed independently and evolved past it (#405, #475, #626). What survives — **Sparkle 2 auto-update** (`3b2da0c5`) and **FS-B2 agent skills** (`2b30832f`, `037e9fe9`) — is being re-landed fresh off current main. |
-| #462 | `claude/mosh-intel-mac-compat-033c91` | Universal 2. Closed on **product scope, not quality**, per this file's own prior disposition: scope stays arm64-only. MLX is Apple-Silicon-only, so an x86_64 slice would ship an app with no SA3 generative tier. |
+## Manual acceptance still pending
 
-Rule 4 above named #523 and #575 as protected. Both were closed in this pass on
-an explicit owner decision, which supersedes that rule; #524 and #581 remain
-protected and parked.
-
-## Recent production-v2 campaign merges
-
-These are already on `main`; keep them as regression history rather than
-reopening them during PR cleanup.
-
-| PR | Merge SHA | Result |
-|---|---|---|
-| #519 | `364cb6fe` | Continuous ruler/navigator scrubbing |
-| #520 | `f3e68992` | Clear stale clip context when selecting a track |
-| #522 | `6c3687db` | Fail visibly when the Moshi brain is unavailable |
-| #526 | `379bd6a1` | Keep agent-drawer pixels visible with its AX surface |
-| #528 | `e520550b` | Recover Settings after a bounded CoreAudio timeout |
-| #560 | `06dea1c1` | Isolate audit storage from owner state |
-| #558 | `317220ef` | Land recording takes from v2 stop controls |
-| #566 | `bbe3069c` | Initialize a cold audio graph from Record |
-| #569 | `1d2bb1e9` | Public cleanup |
-| #571 | `95ab6ea7` | Restore parity gate after public cleanup |
-| #567 | `1e9dcb85` | Prevent silent export after disabling a clip loop |
-| #573 | `ddc2e543` | Adopt AGPL-3.0 licensing |
-| #572 | `e50912c0` | Reject empty export source windows |
-| #576 | `5e8b81d5` | Repair entitlements plist parsing |
-| #577 | `1e07ff35` | Strip resource-fork/xattr signing detritus |
-| #580 | `86936716` | Bound browser scans off the UI thread |
-| #582 | `83889d58` | Synchronize Browser first-open width |
-| #583 | `fc1ffb8a` | Expire silent collaboration peers |
-| #584 | `7253c47e` | Record collaboration session controls in JSONL |
-| #585 | `0576f3da` | Keep Normalize inside the inspector rail |
-| #586 | `9dfe8256` | Invalidate stale lyric-flow analysis |
-| #587 | `2466aa89` | Stop slider arrow keys from nudging clips |
-| #588 | `68c613e7` | Make arrangement clips keyboard accessible |
-| #589 | `7156739a` | Record native plugin-editor mutations |
-| #590 | `c49a9459` | Keep section timing in beats |
-| #591 | `000e8be9` | Expose snap controls and drag bypass |
-| #592 | `926cbd8c` | Publish the v0.1.0 release link |
-| #593 | `0b32091e` | Make Moshi undo restore the last saved edit |
-| #596 | `01adca36` | Isolate accessible track selection from nested controls |
-
-## Open issue and future-work catalog
-
-Complete as of the refresh timestamp: **18 open issues**.
-
-| Issue(s) | Class | Recommended disposition |
-|---|---|---|
-| [#516](https://github.com/EmilioSzH/Mosh/issues/516) | Production-v2 campaign tracker | Keep open while the audit is explicitly time-boxed. Close only with a written waiver or a completed final exact-SHA certification. |
-| [#597](https://github.com/EmilioSzH/Mosh/issues/597) | MAJOR rapid keyboard/AX slider regression | Draft fix is #598. Decide whether to supply native proof or accept the documented waiver. |
-| [#561](https://github.com/EmilioSzH/Mosh/issues/561), [#562](https://github.com/EmilioSzH/Mosh/issues/562), [#574](https://github.com/EmilioSzH/Mosh/issues/574), [#578](https://github.com/EmilioSzH/Mosh/issues/578) | Physical audio recovery, repair, and rollback | Owner-gated. Preserve evidence and do not claim completion without a signed candidate, real device recovery, checkpoint restoration, single-process ownership, and rollback. Related protected drafts: #575 and #581. |
-| [#563](https://github.com/EmilioSzH/Mosh/issues/563) | Release workflow invalid on every push | Resolve before relying on automated release publication. This is higher priority than cosmetic audit findings. |
-| [#564](https://github.com/EmilioSzH/Mosh/issues/564) | MAJOR multi-input partial capture | Preserve surviving takes and add per-input diagnostics; independent of the merged recording-stop fix. |
-| [#529](https://github.com/EmilioSzH/Mosh/issues/529) | MINOR duplicate degraded-audio banner | Presentation/accessibility cleanup after the physical recovery path is settled. |
-| [#543](https://github.com/EmilioSzH/Mosh/issues/543) | MINOR silent camera-permission denial | Add visible recovery guidance if camera collaboration is promoted into the demo. |
-| [#544](https://github.com/EmilioSzH/Mosh/issues/544) | MINOR narrow-window clipping | Reproduce and fix only if the target demo/window size requires it. |
-| [#547](https://github.com/EmilioSzH/Mosh/issues/547) | MINOR Browser ignores Escape | Small interaction follow-up; safe to schedule after release/physical gates. |
-| [#550](https://github.com/EmilioSzH/Mosh/issues/550), [#551](https://github.com/EmilioSzH/Mosh/issues/551), [#552](https://github.com/EmilioSzH/Mosh/issues/552), [#553](https://github.com/EmilioSzH/Mosh/issues/553), [#554](https://github.com/EmilioSzH/Mosh/issues/554) | T0 feature gaps | Roadmap issues, not automatic audit-scope expansion. Promote only when they block the chosen showcase or product promise. |
-| [#559](https://github.com/EmilioSzH/Mosh/issues/559) | Reset-quarantine retention policy | Define bounded retention and recovery before automated cleanup is enabled. |
-
-## Recommended transfer order
-
-Steps 1–3 of the previous list are **done**; what remains is renumbered here.
-
-- ~~Decide #598~~ — merged 2026-08-03.
-- ~~Fix or retire the invalid release workflow (#563)~~ — fixed and closed. The
-  workflow now parses; its `push: tags: v*` trigger is deliberately commented
-  out and only `workflow_dispatch` is armed, so pushes correctly produce no
-  release run. (The 0-second `event=push` failures in the Actions history are
-  all dated on or before 2026-08-03 19:48 — pre-fix. Nothing since.)
-- ~~Triage the older open PRs by stack~~ — done in the 2026-08-04 alignment
-  pass: ten closed, two merged, 28 open → 7.
-
-Remaining:
-
-1. ~~Land the feature PRs~~ — done; all seven merged. Follow-up #627 fixes the
-   two cross-PR check interactions the batch's native gate caught.
-2. Re-land the two salvaged halves of the closed #478: **Sparkle 2 auto-update**
-   (cherry-pick `3b2da0c5`) and **FS-B2 agent skills** (`2b30832f`, `037e9fe9`),
-   each as its own PR off current main.
-3. Resolve the physical audio/recovery cluster (#524 + #581) with the owner on
-   real hardware. Still owner-gated; hosted checks cannot substitute.
-4. Choose one demo/product slice. Pull in only the minor issues or T0 gaps that
-   block that slice.
-5. Run a final exact-SHA production audit only if release certification is still
-   a goal. Do not rerun the entire campaign merely to clean up the queue.
-
-### Standing hazard: the cheap gate does not run the selftest or verify.py
-
-The batch above used "cheap gate per PR, one native gate at the end". It worked,
-but it deferred a real class of failure: the cheap gate runs typecheck, vitest,
-e2e, the Python suite and the parity checks — **not** `--selftest`, **not**
-`verify.py`, and **not** Catch2. Two cross-PR interactions therefore reached
-`main` before anything caught them (fixed in #627):
-
-- #623 added `session.click`, which re-exposed the `clickTrackEnabled` flag that
-  #617's history-jump fixture deliberately masks as `session.metronome`.
-- #471's safe-mode check looked in `~/Library/Mosh/<session>` instead of
-  `~/Library/Mosh/_harness/<session>`, so it returned false before reaching a
-  single assertion — and #606's `.mosh` rename would have broken the next line
-  too.
-
-  **Correction (this file previously called that check "vacuous since the day it
-  was written" — that was wrong, and the truth is more useful.)** The check was
-  correct and PASSING when written: #471's own native gate is green on its
-  pre-rebase head `f19376f1`, verify.py included. It forked 2026-07-27 and then
-  *two* main-side changes moved the ground under it — `e274cafa` "own isolated
-  audit session storage" (2026-08-01) introduced the `_harness/` session prefix,
-  and #606 (2026-08-04) renamed projects to `.mosh`. Neither could have been
-  known to the branch.
-
-Neither PR was wrong alone. The real hazard is **a long-lived branch's correct
-tests decaying as main moves under them** — the branch keeps passing its own
-gate against a world that no longer exists. If a batch touches shared state,
-either run the native gate per PR *after rebasing* or expect to fix
-interactions afterwards. And when a check pins a *file path*, a *directory
-layout*, or a *snapshot shape*, assume main can move it: prefer the shared
-helper (`_session_dir()`) and resolve by extension or glob, never by a literal
-name.
-
-Related: a new MoshOps command needs FOUR registrations, and the golden
-lock-scope ledger (`tests/golden/lock_scopes.tsv`) is enforced by **Catch2** —
-also invisible to the cheap gate. #471 forked before that ledger existed, so its
-`open_without_plugins` row was missing; it was caught by hand during the rebase
-and added before merge, but no cheap gate would have stopped it.
-
-### Standing hazard: the shared append-only files
-
-The alignment pass found the structural cause of the backlog. Every parallel
-feature branch edits the same registration surfaces, so N branches in flight
-means N-way conflicts on all of them:
-
-| File | nature |
+| Boundary | What has not been converted into a pass |
 |---|---|
-| `src/app/SelfTest.cpp` | append-only check registration |
-| `ui/src/bridge.mock.ts` | append-only mock surface |
-| `src/moshops/MoshOps.cpp` | dispatch table |
-| `scripts/verify-hardware/verify.py` | append-only check list |
-| `docs/FEATURE_AUDIT.md` | **generated** — `scripts/daw-conformance/scoreboard.py` |
-| `docs/reality-pack/daw_capability_matrix.csv` | **generated** |
+| Physical audio and recovery | Real device routing, playback, input monitoring, repair/rollback, and any release/install claim. |
+| Serum | BlackHole/Serum-family audible playback on the owner machine. |
+| Re-Imagine | Ableton audio-track Transfer, real SA3 rendering, Colours/LoRA by-ear comparison, physical A/B, Set reopen, shared-process observation, and model-release behavior. |
+| DAWN | Real Ableton Live 11 + iPhone reachability, recording behavior, routing preservation, audible playback, and Live Undo. |
+| UI/DAW parity | Manual producer workflows beyond screenshots, browser checks, or host smoke. |
 
-**Never hand-merge the last two.** Take main's side, then run
-`python3 scripts/daw-conformance/scoreboard.py` and commit the result;
-`scoreboard.py` is deterministic for a given `report.json`, and the cheap gate's
-`parity_scoreboard` step fails on a stale or hand-edited file.
+Native gates, selftests, CTest, generated conformance reports, CI, dashboards,
+and screenshots remain valuable evidence. None of them makes one of the manual
+boundaries above pass by implication.
 
-## Status sources
+## Safe continuation
 
-- Production-v2 evidence:
-  [`docs/playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`](playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md)
-- First-Stranger program:
-  [`docs/first-stranger-program/README.md`](first-stranger-program/README.md),
-  [`SPEC.md`](first-stranger-program/SPEC.md), and
-  [`backlog.jsonl`](first-stranger-program/backlog.jsonl)
-- Verification policy: [`docs/VERIFICATION.md`](VERIFICATION.md)
-- Feature/conformance inventory: [`docs/FEATURE_AUDIT.md`](FEATURE_AUDIT.md)
-- Release material: [`docs/release/`](release/)
+main remains the only development trunk. Preserve a pushed immutable archive or
+rescue tag before deleting a divergent branch or linked worktree. Keep
+/Users/emiliosanchez-harris/Mosh as the sole primary checkout and never remove
+its shared Git directory at
+/Users/emiliosanchez-harris/Library/Mosh/repo/ClaudeMosh.git. Do not terminate
+the owner router or active Codex/ChatGPT processes as part of cleanup.
+
+Before a merge, require a clean candidate, the correct base, a preserved archive
+tip where applicable, and:
+
+~~~sh
+scripts/auto-loop/gate.sh native <candidate-worktree> origin/main
+~~~
+
+For final-baseline verification, also run the built app's --selftest three
+times, --selftest-undo, the generated-scoreboard check, and documentation
+link/reference checks. The temporary MOSH_MAX_CODEX_CHILDREN=1000 value was a
+one-time documented pre-pivot maintenance override, not a standing policy.
+
+## Living references
+
+- [FEATURE_AUDIT.md](FEATURE_AUDIT.md) is generated by
+  scripts/daw-conformance/scoreboard.py; regenerate it and use --check.
+- [VERIFICATION.md](VERIFICATION.md) defines hardware/physical verification
+  policy.
+- Re-Imagine and DAWN subsystem evidence records state the detailed automated
+  evidence and owner acceptance limits.
+- [../ARCHITECTURE.md](../ARCHITECTURE.md) and [../CLAUDE.md](../CLAUDE.md)
+  describe the current source map and engineering invariants.

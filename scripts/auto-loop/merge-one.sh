@@ -22,6 +22,11 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib.sh"
 set +e   # we record failures, never abort mid-sequence
 
+SUB="${1:?usage: merge-one.sh <prepare|finalize|reject> ...}"; shift
+if [ "$SUB" = "route-owner" ]; then
+  al_die "First-Stranger route-owner is archived; no PR was changed."
+fi
+
 MAIN="$(al_main_worktree)"; [ -n "$MAIN" ] || al_die "no main worktree"
 LOCK="$AL_DOCS_DIR/.merge-queue.lock"; mkdir -p "$AL_DOCS_DIR"
 
@@ -112,13 +117,9 @@ cmd_prepare() {
     jq -nc --arg b "$base_sha" '{ready:false,phase:"prepare",reason:"empty diff vs main (already merged/subsumed)",baseSha:$b}'
     return
   fi
-  # Classic auto-loop: an excluded diff is auto-rejected before it is ever gated.
-  # STRANGER MODE (MOSH_STRANGER_MODE=1): the First-Stranger loop expects most lanes to
-  # touch exclusion paths (engine, state, auth, packaging, relay). It does NOT auto-merge
-  # them — it gates + reviews them and routes the PR to the owner (route-owner). So in
-  # stranger mode we do NOT bail here; we fall through to push + gate and report the
-  # excluded flag so the caller can route. Default behavior is byte-identical.
-  if [ "$excluded" = true ] && [ "${MOSH_STRANGER_MODE:-0}" != "1" ]; then
+  # Excluded diffs are rejected before they are gated. No automatic mode bypasses this
+  # hard safety boundary.
+  if [ "$excluded" = true ]; then
     jq -nc --argjson c "$cj" --arg b "$base_sha" \
       '{ready:false,phase:"prepare",reason:"touches hard-exclusion list",excluded:true,classify:$c,baseSha:$b}'
     return
@@ -226,48 +227,9 @@ cmd_reject() {
   jq -nc --arg s "$sublabel" --arg r "$reason" '{rejected:true,sublabel:$s,reason:$r}'
 }
 
-# ── route-owner (stranger-loop) ────────────────────────────────────────────────────
-# A high-stakes lane PASSED its gate but the loop must NEVER auto-merge it. Undraft the
-# PR (so the owner can merge it), label it needs-owner-merge + program:<lane>, comment the
-# gate + review evidence, ledger an AWAITING-OWNER entry. Leaves the branch + worktree in
-# place (the owner merges via GitHub; cleanup happens on their merge). Never merges.
-#   route-owner <slug> <pr> <lane> <gate_summary> <review_note> [flagged]
-cmd_route_owner() {
-  local slug="$1" pr="$2" lane="$3" gsum="$4" note="${5:-APPROVE (adversarial self-review)}" flagged="${6:-0}"
-  local br; br="$(branch_of "$slug")"
-  ensure_label "needs-owner-merge" "5319E7"
-  ensure_label "program:$lane" "0E8A16"
-  gh pr ready "$pr" >/dev/null 2>&1 || true   # undraft → the owner can merge it
-  local labels=(--add-label "needs-owner-merge" --add-label "program:$lane")
-  local caution=""
-  if [ "$flagged" = "1" ]; then
-    ensure_label "review-flagged" "D93F0B"
-    labels+=(--add-label "review-flagged")
-    caution="⚠️ **The hostile review flagged concerns — read them before merging.**
-"
-  fi
-  gh pr edit "$pr" "${labels[@]}" >/dev/null 2>&1 || al_warn "label failed (pr #$pr)"
-  gh pr comment "$pr" --body "${caution}**Ready for owner merge** — high-stakes lane (\`$lane\`); the stranger-loop never auto-merges these.
-- **Gate:** $gsum
-- **Review:** $note
-
-This PR is gated + reviewed. Merge it when you're satisfied." >/dev/null 2>&1 || true
-
-  ledger_append "### $(al_now) — PR #$pr: $br  [AWAITING-OWNER 🔒 program:$lane]
-- **Branch:** $br → PR #$pr
-- **Gate:** $gsum
-- **Review:** $note$( [ "$flagged" = "1" ] && printf ' (REVIEW-FLAGGED)' )
-- **Outcome:** undrafted + labeled [needs-owner-merge, program:$lane]; owner merges. Loop does NOT auto-merge high-stakes lanes.
-"
-  jq -nc --arg l "$lane" --argjson f "$( [ "$flagged" = "1" ] && echo true || echo false )" \
-    '{routed:true, bucket:"owner-merge", lane:$l, flagged:$f}'
-}
-
-SUB="${1:?usage: merge-one.sh <prepare|finalize|reject|route-owner> ...}"; shift
 case "$SUB" in
   prepare)     cmd_prepare      "$@" ;;
   finalize)    cmd_finalize     "$@" ;;
   reject)      cmd_reject       "$@" ;;
-  route-owner) cmd_route_owner  "$@" ;;
   *) al_die "unknown subcommand: $SUB" ;;
 esac

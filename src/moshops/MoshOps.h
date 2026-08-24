@@ -249,7 +249,7 @@ private:
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdBatchBegin     (const juce::var& args);   // group N agent edits into ONE undo step
     juce::var cmdBatchEnd       (const juce::var& args);
-    // FS-B2a — the agent batch-TRANSACTION contract (docs/first-stranger-program/lanes/
+    // FS-B2a — the agent batch-TRANSACTION contract (docs/archive/first-stranger-program-2026-08-23/lanes/
     // fs-b2.md). batch_status is the authoritative read after any ambiguous outcome;
     // batch_rollback is the ONLY automatic skill rollback (never a generic undo).
     juce::var cmdBatchStatus    (const juce::var& args);

@@ -120,7 +120,7 @@ namespace
 
     // ── FS-B2a helpers: the agent batch-TRANSACTION envelope ─────────────────────
     // Transaction metadata rides BESIDE the handler's args (never mixed into them), which
-    // is the shape docs/first-stranger-program/lanes/fs-b2.md specifies and the shape the
+    // is the shape docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md specifies and the shape the
     // WebView sends (WebBridge passes args[0] whole, so the sibling field survives).
     juce::var txnCmd (MoshOps& ops, const juce::String& name, juce::var args,
                       const juce::String& txnId, const juce::String& requestId, int index)
@@ -14716,7 +14716,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // FS-B2a — the agent batch-TRANSACTION contract, against a REAL engine.
-    // Spec: docs/first-stranger-program/lanes/fs-b2.md, one section per acceptance
+    // Spec: docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md, one section per acceptance
     // bullet. Runs after the undo matrix, so the fixture is a richly-mutated project —
     // a fingerprint over an empty session would prove very little.
     //

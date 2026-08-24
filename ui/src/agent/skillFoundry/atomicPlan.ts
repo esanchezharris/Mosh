@@ -4,7 +4,7 @@
 // preconditions, and templates are validated — that stays in skillHarness.ts's `runSkill`,
 // the static-catalog adapter. `runAtomicSkillPlanV1` only knows how to drive one
 // already-planned, already-preconditioned engine transaction through the six-step FS-B2a
-// protocol (docs/first-stranger-program/lanes/fs-b2.md), with two guard checkpoints a caller
+// protocol (docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md), with two guard checkpoints a caller
 // can use to re-validate context: `before_begin`, immediately before the transaction opens,
 // and `before_commit`, immediately after the postcondition passes and before `batch_end`.
 //

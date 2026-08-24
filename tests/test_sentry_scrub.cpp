@@ -24,7 +24,7 @@ using namespace mosh::telemetry;
 //       sends nothing.
 //
 // Both are RED-provable: neuter scrubEvent() and (a) fails; drop the isOptedIn()
-// term from wouldInitialise() and (b) fails. See docs/first-stranger-program/
+// term from wouldInitialise() and (b) fails. See docs/archive/first-stranger-program-2026-08-23/
 // lanes/fs-k3.md (gates G2/G3) for the recorded RED output.
 // ─────────────────────────────────────────────────────────────────────────────
 

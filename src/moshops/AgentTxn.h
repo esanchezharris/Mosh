@@ -5,7 +5,7 @@
 #include <vector>
 
 // FS-B2a — the PURE half of the agent batch-transaction contract
-// (docs/first-stranger-program/lanes/fs-b2.md "Required native contract").
+// (docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md "Required native contract").
 //
 // Everything here is engine-free (juce_core/_data_structures/_cryptography only) so
 // MoshTests can unit-test it with no Tracktion engine and no real session on disk. That

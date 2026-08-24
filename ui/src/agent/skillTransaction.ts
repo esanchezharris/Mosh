@@ -1,6 +1,6 @@
 // FS-B2a — the PURE planner for a skill's engine transaction.
 //
-// The contract is docs/first-stranger-program/lanes/fs-b2.md. This module turns a skill +
+// The contract is docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md. This module turns a skill +
 // filled slots into the exact bridge traffic the 6-step harness protocol sends: a
 // transaction id, a manifest, and one envelope per manifested command. It performs no
 // I/O, so the same plan drives the browser mock, the vitest suite, AND the committed

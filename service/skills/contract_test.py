@@ -3,7 +3,7 @@
 
 `service/skills/` and `ui/src/agent/skills.ts` are two DIFFERENT artifacts
 (hand-written executable workflow DAGs vs a mined retrieval corpus — see
-`docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md`). The one thing they
+`docs/archive/first-stranger-program-2026-08-23/SKILL_CATALOG_BOUNDARY.md`). The one thing they
 share is the MoshOps command surface, and that is single-sourced: this package
 PARSES `ui/src/agent/commands.ts` rather than restating it.
 

@@ -1,7 +1,7 @@
 // DURABLE cross-catalog boundary guard (TS half).
 //
 // Mosh has two skill catalogs. They are NOT duplicates of each other and are
-// deliberately not merged — see docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md:
+// deliberately not merged — see docs/archive/first-stranger-program-2026-08-23/SKILL_CATALOG_BOUNDARY.md:
 //
 //   • ui/src/agent/skills.ts  — 8 hand-written, EXECUTABLE workflow DAGs with
 //     numeric bounds and TS predicate pre/postconditions, run in-app through

@@ -1,6 +1,6 @@
 // FS-B2a — the skill harness, on the engine's batch-TRANSACTION contract.
 //
-// Spec: docs/first-stranger-program/lanes/fs-b2.md "Harness protocol". The six steps below
+// Spec: docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md "Harness protocol". The six steps below
 // are that list, in that order, and the ordering is load-bearing: the transaction stays
 // OPEN through postcondition evaluation, which removes the race FS-B1 had to live with
 // (attempting a generic undo AFTER batch_end, when the batch it wanted no longer existed).

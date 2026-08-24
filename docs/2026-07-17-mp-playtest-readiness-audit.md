@@ -4,12 +4,17 @@
 `claude/burn-mp-audit`, forked from `origin/main` at `1044a51b`. No MP code, relay, RPCs, or
 parked branches were modified — this doc is the deliverable.*
 
+> **Historical context (superseded 2026-08-23):** The First-Stranger Program is paused and its
+> record lives at `docs/archive/first-stranger-program-2026-08-23/`. Any lanes, owner tasks, or
+> proposed scale work cited below describe this July audit's context only; they are not active
+> commitments or a current serving policy.
+
 ## TL;DR verdict
 
 | # | Question | Verdict | One-liner |
 |---|---|---|---|
 | 1 | True gap to a reliable 2-Mac session | **READY** | Full round trip traced + reproduced live over the real cloud relay this session (PASS). Remaining friction is known, documented, and guidance-mitigated, not code-broken. |
-| 2 | Content-addressed storage: Supabase Storage vs R2 | **DECISION** | Supabase Storage is done, self-healing, and proven live. R2 is the plan for a *different, unstarted* future program — defer it. |
+| 2 | Content-addressed storage: Supabase Storage vs R2 | **DECISION** | Supabase Storage is done, self-healing, and proven live. R2 appeared only in a different program record that is now archived — defer it for this audit. |
 | 3 | `mp_events` long-poll vs Supabase Realtime | **DECISION** | Current 250ms short-poll is sufficient for a 2-peer session. Defer Realtime. |
 | 4 | bounce-on-commit correctness + the relative-ref export hang | **READY** | No literal "bounce" happens (MIDI syncs as data, not audio — a scope correction, not a bug). The historical export hang is confirmed fixed and shared across all 3 source-repoint call sites on current `main`. |
 | 5 | Schema versioning covers MP fields | **READY** | One global format version (`kMoshFormatVersion=1`) covers MP's only persisted field (`moshLogicalId`); everything else (locks/presence) is relay-side and never touches the file. |
@@ -154,22 +159,22 @@ it is proven working live** — see the fresh two-process cloud PASS in §Q6 bel
 own run, today).
 
 **Where the "R2" ask actually comes from:** it is **not** a documented gap in *this* MP system
-— it's the storage plan for a **different, larger, not-yet-started program**:
-`docs/first-stranger-program/SPEC.md:46-49` ("Take storage = Cloudflare R2, content-addressed
-... Supabase Storage is not used for takes"), staged as lane **FS-S1**, gated on
-`FS-T3, FS-S0, O4` — and `O4` ("Cloudflare account + R2 bucket") is an **account/infra
-prerequisite that has not been provisioned** (`docs/first-stranger-program/STATUS.md:37,51`).
-That program's own stated reasoning for R2 (`docs/first-stranger-program/SPEC.md:324-326`) is
+— it was the storage plan for a **different, larger program that was then unstarted and is now
+archived**: `docs/archive/first-stranger-program-2026-08-23/SPEC.md:46-49` ("Take storage =
+Cloudflare R2, content-addressed ... Supabase Storage is not used for takes"), staged at the time
+as former lane **FS-S1**, gated on `FS-T3, FS-S0, O4` — with `O4` ("Cloudflare account + R2 bucket")
+then an **unprovisioned account/infra prerequisite**
+(`docs/archive/first-stranger-program-2026-08-23/STATUS.md:37,51`). That archived program's
+stated reasoning for R2 (`docs/archive/first-stranger-program-2026-08-23/SPEC.md:324-326`) is
 **egress cost at fan-out scale** ("Supabase Storage egress ($0.09/GB) makes it wrong for
 fan-out") — a concern that doesn't bite at n=2 peers and a handful of takes.
 
 **Decision:** adopting R2 now would mean standing up brand-new, unprovisioned infrastructure to
 solve a cost/scale problem this playtest doesn't have, in place of a storage path that already
-passes a live cross-process cloud test today. **Defer R2** to whenever the First-Stranger
-Program's own S1/S2 lanes actually start (4-player sessions, cost-at-scale). One real,
-worth-tracking risk that *is* specific to the current mechanism (not a reason to jump to R2,
-but worth a cheap owner check) — see blocker #2 in §3: large-stem upload reliability is
-untested at realistic take sizes.
+passes a live cross-process cloud test today. **Defer R2 for this audit; no successor work is
+implied by the archived lanes.** One real, worth-tracking risk that *is* specific to the current
+mechanism (not a reason to jump to R2, but worth a cheap owner check) — see blocker #2 in §3:
+large-stem upload reliability is untested at realistic take sizes.
 
 ### Q3 — `mp_events` long-poll vs Supabase Realtime — **DECISION: current short-poll is sufficient for a 2-peer playtest; defer Realtime**
 
@@ -188,10 +193,10 @@ separate voice channel"). Confirming this isn't the actual risk surface: `docs/M
 own "Known limits" section (`:200-204`) lists stale lock badges, buses-don't-replicate, and
 tempo last-writer-wins — **nothing about polling latency**.
 
-The First-Stranger Program's plan again supplies the "why Realtime" reasoning
-(`docs/first-stranger-program/SPEC.md:47-48`: "Supabase Realtime broadcasts *references only*")
-— for the same future-scale reasons as R2 above (4-player sessions, FS-S2), not a 2-peer
-reliability fix. **Defer.**
+The archived First-Stranger record supplies the historical "why Realtime" reasoning
+(`docs/archive/first-stranger-program-2026-08-23/SPEC.md:47-48`: "Supabase Realtime broadcasts
+*references only*") — for the same then-proposed scale reasons as R2 above (4-player sessions,
+former FS-S2), not a 2-peer reliability fix. **Defer.**
 
 ### Q4 — bounce-on-commit + the relative-ref export hang — **READY (with a scope correction)**
 
@@ -322,7 +327,7 @@ two testers up front.
 | # | Severity | Effort (to code-fix) | Finding | Evidence (file:line) | Disposition |
 |---|---|---|---|---|---|
 | 1 | **Medium** | Medium (deferred by team choice) | The documented "idle checkpoint (~5s)" that would publish edits without a track switch **does not exist in code**; combined with a **90s lock lease that is never renewed** while parked on one track, this means (a) your peer sees nothing from a long single-track session until you move off it, and (b) a peer who merely clicks the same track after ~90s can silently steal your lock. | Claim: `docs/MULTIPLAYER.md:51`. Absence: exhaustive grep found no interval/timer anywhere that publishes an MP commit without a track change — native Timers (`MoshOps.h:422-443`) are telemetry/scan/reactive-render only; the only related native timer is a 30s **local-disk-only** autosave (`src/Main.cpp:333-334`, never publishes to a peer); UI has no `setInterval` tied to MP commit (`ui/src/store.ts`, `ui/src/multiplayer/sync.ts`). Lock mechanics: `supabase/migrations/0001_mp_relay.sql:143-160` (90s lease, granted only via `mp_try_lock`), `:182-198` (`mp_events` never touches `lease_expires_at`), `ui/src/store.ts:737-776` (`claim` fires only on a track change). | **Already known and triaged** by the team's own same-day bug sweep (`docs/playtest-prep/SWEEP_2026-07-17.md` rows 3 &amp; 6) with an explicit guidance-only mitigation: `docs/playtest-prep/KNOWN_LIMITS_v0.md:35-39` ("one person per track... if you park somewhere for a while, say so out loud"). This audit independently re-derived and confirmed the same root cause. Recommend: relay that specific guidance verbatim to both testers before the session. |
-| 2 | **Medium** | Low (to *verify*; higher to fix if real) | Large audio-stem upload reliability is **untested at realistic sizes**. Every stem-transfer test that exists (hermetic + the live cloud smoke test, including this audit's own run) uses 1–2 **second** tones — tiny. `uploadBlob` does one non-resumable PUT with no automatic retry (only a manual UI "Retry" post-#354). The project's own research for a *different* future system flags that this exact upload mechanism (a raw PUT to a Supabase Storage signed URL) "degrades past ~6MB (TUS required)." | Test sizes: `src/app/SelfTest.cpp` (`add_test_tone_clip` calls, `seconds: 1.0`–`2.0` throughout), `scripts/playtest/mp-live-smoke.sh:39` (`seconds:2.0`). Upload mechanism: `src/multiplayer/MultiplayerClient.cpp:238-311` (single PUT, no retry loop). Size caution: `docs/first-stranger-program/SPEC.md:325`. Bucket ceiling: `supabase/migrations/0002_mp_blob.sql:5` (50MB). | Not verified true or false by this audit (did not want to leave a persistent, un-cleanable large test artifact in the owner's production Storage bucket without being asked — see §5). **Recommend:** owner does one ~5-minute real test (import/record a 1–3 minute take, commit it, confirm the peer receives it) before relying on longer real takes/SA3 renders in the live session. Cheap insurance either way. |
+| 2 | **Medium** | Low (to *verify*; higher to fix if real) | Large audio-stem upload reliability is **untested at realistic sizes**. Every stem-transfer test that exists (hermetic + the live cloud smoke test, including this audit's own run) uses 1–2 **second** tones — tiny. `uploadBlob` does one non-resumable PUT with no automatic retry (only a manual UI "Retry" post-#354). The project's archived research for a *different* system flags that this exact upload mechanism (a raw PUT to a Supabase Storage signed URL) "degrades past ~6MB (TUS required)." | Test sizes: `src/app/SelfTest.cpp` (`add_test_tone_clip` calls, `seconds: 1.0`–`2.0` throughout), `scripts/playtest/mp-live-smoke.sh:39` (`seconds:2.0`). Upload mechanism: `src/multiplayer/MultiplayerClient.cpp:238-311` (single PUT, no retry loop). Size caution: `docs/archive/first-stranger-program-2026-08-23/SPEC.md:325`. Bucket ceiling: `supabase/migrations/0002_mp_blob.sql:5` (50MB). | Not verified true or false by this audit (did not want to leave a persistent, un-cleanable large test artifact in the owner's production Storage bucket without being asked — see §5). **Recommend:** owner does one ~5-minute real test (import/record a 1–3 minute take, commit it, confirm the peer receives it) before relying on longer real takes/SA3 renders in the live session. Cheap insurance either way. |
 | 3 | **Low** | — (already fixed) | `uploadBlob` not checking HTTP PUT status (a rejected upload could read back as a false success) — flagged as still-open by the team's own sweep ledger with an explicit "verify #354 has actually merged" action item. | `docs/playtest-prep/SWEEP_2026-07-17.md` row 29. Fix: `MultiplayerClient.cpp:265-271,300-307` (`outStatus` checked at every step). | **Confirmed fixed** — this is exactly the "verify #354 merged" task the ledger asked for; §Q7 confirms it. No action needed. |
 | 4 | **Low** | Low (out of primary scope) | The in-app WebRTC video-room feature only configures public STUN (no TURN) — peers behind a symmetric NAT/restrictive CGNAT could fail to connect a video call. | `ui/src/webrtc/signal.ts:19-21` (`DEFAULT_RTC_CONFIG`, Google STUN only). | Not a blocker: the documented/recommended voice channel is Discord (`docs/MULTIPLAYER.md:5-10`), and the camera is off by default (`ui/src/webrtc/useVideo.ts:3-4`). Mention only if the testers plan to use the in-app video instead of Discord. |
 | 5 | **Informational** | — | "Bounce-on-commit" doesn't literally bounce anything — MIDI/plugin state syncs as data, not audio (a scope clarification against the task brief's framing, not a bug). A guest lacking a host's exact non-built-in VST3 gets whatever substitute resolves, silently. | `MoshOps.cpp:2946-3005` (only iterates `te::WaveAudioClip*`); `docs/MULTIPLAYER.md:61-63`. | Already steered around by existing guidance ("start with MIDI + the built-in kit/instruments," `docs/playtest-prep/HOST_CHECKLIST.md:116-117`). No action needed beyond awareness. |
@@ -331,8 +336,8 @@ two testers up front.
 
 ## 4. R2 / Realtime recommendation
 
-**Do not build either for this playtest. Defer both, explicitly, to whenever (if ever) the
-First-Stranger Program's own S1/S2 lanes actually start.**
+**Do not build either for this playtest. The First-Stranger Program that named S1/S2 is now
+paused and archived; this audit does not assign a successor.**
 
 Reasoning, stated plainly:
 1. **Neither is a response to a gap in the shipped system.** The current Supabase
@@ -340,20 +345,19 @@ Reasoning, stated plainly:
    correctness twice (PR #354's own two adversarial passes), and — as of this audit, today — has
    passed a **fresh, first-party, live two-OS-process round trip over the real production cloud
    relay** (§Q6). There is no known failure mode that switching to R2 or Realtime would fix.
-2. **Both are literally someone else's planned infrastructure for a different, larger, later
-   product** (`docs/first-stranger-program/`), whose own stated motivation is **cost and
+2. **Both were planned infrastructure for a different, larger, later product**, preserved at
+   `docs/archive/first-stranger-program-2026-08-23/`, whose stated motivation was **cost and
    fan-out at higher player counts** (`SPEC.md:324-326`), not reliability at n=2. Adopting them
-   now means standing up unprovisioned accounts (Cloudflare + R2 bucket, `STATUS.md:51`) and
-   rearchitecting a tested, working transport, for a problem this playtest doesn't have.
+   then would have meant standing up unprovisioned accounts (Cloudflare + R2 bucket,
+   `STATUS.md:51`) and rearchitecting a tested, working transport, for a problem this playtest
+   didn't have.
 3. **The actual, real risks found in this audit (§3) are orthogonal to the transport choice** —
    they're about lock-lease renewal and untested large-file reliability, both of which exist
    *identically* whether the blob store is Supabase Storage or R2, and whether the event feed is
    a 250ms poll or a Realtime push. Swapping infrastructure would not touch either.
 
-If/when the team does pick this up for the First-Stranger Program's own reasons (4-player
-sessions, cost at scale), that's a clean, separately-scoped migration behind the same adapter
-shape already established — nothing here argues against building it *eventually*, only against
-treating it as a *playtest* blocker.
+Any later decision about R2 or Realtime is outside this historical audit. Its conclusion is only
+that neither was a playtest blocker for the two-peer system it examined.
 
 ---
 

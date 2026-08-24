@@ -1,4 +1,4 @@
-// FS-B2a — the failure table of docs/first-stranger-program/lanes/fs-b2.md, row by row,
+// FS-B2a — the failure table of docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md, row by row,
 // against the transactional mock. Every row asserts BOTH the reported outcome and the
 // resulting session state, because a `rolledBack: true` that left the edit dirty is the
 // exact lie this contract exists to prevent.

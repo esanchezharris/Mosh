@@ -12,7 +12,7 @@
 # an unsigned build is a BROKEN artifact that must never ship silently, whereas a
 # build with no symbols uploaded is a perfectly good artifact that is merely harder
 # to debug later. Sentry is also OPTIONAL and currently BLOCKED-ON-OWNER (no project
-# exists yet — see docs/first-stranger-program/lanes/fs-k3.md), so making `release`
+# exists yet — see docs/archive/first-stranger-program-2026-08-23/lanes/fs-k3.md), so making `release`
 # hard-depend on Sentry credentials would break the release path for the exact
 # situation the repo is in today. Absent credentials => print why, exit 0.
 #
