@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "revision": "2026-08-23.1",
+  "revision": "2026-08-23.2",
   "overallStatus": "not-parity",
   "parityClaimed": false,
-  "testedSourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
+  "testedSourceSha": "61b0511a4fcd996628afda281f06e4993a805bad",
   "referenceManifest": "docs/live-clone/live11-reference-manifest.json",
   "policy": {
     "maxActiveRepairs": 3,
@@ -28,7 +28,7 @@
       "id": "arrangement-grid-rulers",
       "required": true,
       "status": "candidate",
-      "gapReason": "Browser geometry and visual review pass, but exact-SHA installed-app and owner-project proof are still pending.",
+      "gapReason": "Fresh rebased-candidate browser geometry and captures pass, but installed-app and owner-project Live 11 proof remain pending.",
       "referenceIds": ["live11-owner-arrangement-20260823"],
       "testIds": [
         "ui/e2e/live-grid.spec.ts::bug: arrangement grid vanishes across normal lanes, take rows, filler, and the zero-track viewport",
@@ -38,34 +38,24 @@
       ],
       "artifacts": [
         {
-          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C002-edge.json",
-          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
-          "sha256": "bfcc2037429d0e3ed97f651f93d9655c3942b65dab4d3a3e34b1f2819566b4f2"
+          "path": "/Users/emiliosanchez-harris/Library/Mosh/archives/pre-pivot-2026-08-23/grid-dawn-ignored-evidence-20260824T023234Z/grid-post-rebase-candidate-evidence/ulw/live11-parity-20260823/G001-rebase-candidate-20260824/b1/C002-edge.json",
+          "sourceSha": "61b0511a4fcd996628afda281f06e4993a805bad",
+          "sha256": "9d8ebddbcb74dfdca3e9523d7437482172229bf6c3bb527bf5bdac4aa3313c11"
         },
         {
-          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C001-browser-after-1280x768.png",
-          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
-          "sha256": "ba479c34dbf0b611bc47e28075381809ea6ba99fe1fba187bb8ce0847f489b5e"
+          "path": "/Users/emiliosanchez-harris/Library/Mosh/archives/pre-pivot-2026-08-23/grid-dawn-ignored-evidence-20260824T023234Z/grid-post-rebase-candidate-evidence/ulw/live11-parity-20260823/G001-rebase-candidate-20260824/b1/C001-browser-after-1280x768.png",
+          "sourceSha": "61b0511a4fcd996628afda281f06e4993a805bad",
+          "sha256": "d187c5086efdd2c103d4977379629cf54973013e6686374254a49209463abb3e"
         },
         {
-          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C001-browser-after-1351x768.png",
-          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
-          "sha256": "70793a77510869b71adda5efd4b9e3e695dc619d0f144be0520c5f2897e4481c"
+          "path": "/Users/emiliosanchez-harris/Library/Mosh/archives/pre-pivot-2026-08-23/grid-dawn-ignored-evidence-20260824T023234Z/grid-post-rebase-candidate-evidence/ulw/live11-parity-20260823/G001-rebase-candidate-20260824/b1/C001-browser-after-1351x768.png",
+          "sourceSha": "61b0511a4fcd996628afda281f06e4993a805bad",
+          "sha256": "d0901ef6f300780ae5cbfb921ba2c191d5694cb8499ea6b95cf8b5f9a52a4be5"
         },
         {
-          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/C001-browser-after-1440x900.png",
-          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
-          "sha256": "d5cc7aa6b724b60ace31aee80660e8436d4e293899a90a4a2a685d6fb15fd0bc"
-        },
-        {
-          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/G001-live-grid-pass-a-clone-fidelity.md",
-          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
-          "sha256": "41924e1512aa9740b7680a3a9f3ab7e89285c57908d1b6f675a62f53761342c2"
-        },
-        {
-          "path": ".omo/evidence/ulw/live11-parity-20260823/G001-repair-the-visibly-broken-arrangemen/a1/visual-grid-fidelity-final.md",
-          "sourceSha": "d3bbe3ad314af02d38bdeffc297101043a71d019",
-          "sha256": "76282446b06ef165a7a0751dcd3e664a6cfc78291275c0e1a217a6ee28723d28"
+          "path": "/Users/emiliosanchez-harris/Library/Mosh/archives/pre-pivot-2026-08-23/grid-dawn-ignored-evidence-20260824T023234Z/grid-post-rebase-candidate-evidence/ulw/live11-parity-20260823/G001-rebase-candidate-20260824/b1/C001-browser-after-1440x900.png",
+          "sourceSha": "61b0511a4fcd996628afda281f06e4993a805bad",
+          "sha256": "d7baba9ca9a684b34079565a0c7de05839060a88d9a3c1d78b53d95a9fbb5f4f"
         }
       ]
     },
