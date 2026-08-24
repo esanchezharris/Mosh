@@ -29,7 +29,7 @@ mkdir -p "$(dirname "$MOSH_SERVICE_LOG")" 2>/dev/null || true
 # correctness-critical, so skipping it in this rare race is the safe call. A missing or
 # stale (dead-PID) handshake file means no one else is alive, so rotating is safe.
 _other_instance_alive() {
-  local pidfile="$HOME/Library/Mosh/service.pid" live_pid
+  local pidfile="$HOME/Library/Application Support/Mosh/ReImagine/service.pid" live_pid
   [[ -f "$pidfile" ]] || return 1
   live_pid="$(awk '{print $1}' "$pidfile" 2>/dev/null)"
   [[ -n "$live_pid" ]] && kill -0 "$live_pid" 2>/dev/null
@@ -53,6 +53,10 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # absent means the defaults below apply and SA3 stays off unless the venv happens to
 # exist. Sourced first so its exports seed the ${:-default} fallbacks.
 [[ -f .sa3.env ]] && source ./.sa3.env
+# Owner-local release policy is deliberately separate from Mosh's shared,
+# secret-bearing environment. The Ableton helper reads this one narrow file and
+# never sources ~/.config/mosh/env.
+[[ -f "$HOME/.config/mosh/owner-sa3.env" ]] && source "$HOME/.config/mosh/owner-sa3.env"
 [[ -n "$REQUESTED_MOSH_ENABLE_SA3" ]] && export MOSH_ENABLE_SA3="$REQUESTED_MOSH_ENABLE_SA3"
 # Audio->MIDI (Basic Pitch) lives in its own venv; .transcribe.env (written by
 # transcribe/setup-transcribe.sh) exports BASIC_PITCH_PY. Absent → /transcribe

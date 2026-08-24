@@ -102,6 +102,11 @@ def main():
     try:
         health = get_json(base, "/health")
         check("/health ok, fake advertised", health.get("ok") and "fake" in health.get("adapters", []), str(health.get("adapters")))
+        check("/health advertises additive Re-Imagine protocol",
+              health.get("protocolVersion") == 1
+              and health.get("features", {}).get("reimagine") is True
+              and health.get("features", {}).get("sharedService") is True,
+              str(health))
 
         caps = get_json(base, "/capabilities")
         check("/capabilities lists fake adapter", any(a.get("id") == "fake" for a in caps.get("adapters", [])))
@@ -143,8 +148,37 @@ def main():
 
             missing = get_json(base, "/status?jobId=deadbeef")
             check("unknown jobId -> not-ok", missing.get("ok") is False)
+            cancelled = post_json(base, "/cancel", {"jobId": "deadbeef"})
+            check("/cancel remains backward-compatible", cancelled.get("ok") is True, str(cancelled))
     finally:
         httpd.shutdown()
+
+    # A fresh listener can adopt the same protocol after a service restart.
+    restarted = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    restarted_port = restarted.server_address[1]
+    threading.Thread(target=restarted.serve_forever, daemon=True).start()
+    try:
+        restart_health = get_json(f"http://127.0.0.1:{restarted_port}", "/health")
+        check("service restart preserves protocol compatibility",
+              restart_health.get("protocolVersion") == server.PROTOCOL_VERSION,
+              str(restart_health.get("protocolVersion")))
+    finally:
+        restarted.shutdown()
+
+    class ShutdownProbe:
+        def __init__(self):
+            self.called = threading.Event()
+
+        def shutdown(self):
+            self.called.set()
+
+    probe = ShutdownProbe()
+    server._LAST_REQUEST_MONOTONIC = time.monotonic() - 1.0
+    server._jobs["idle-guard-test"] = {"status": "rendering"}
+    threading.Thread(target=server._idle_shutdown_loop, args=(probe, 0.1), daemon=True).start()
+    check("shared helper stays alive during active render", not probe.called.wait(0.35))
+    server._jobs.clear()
+    check("shared helper exits after bounded idle with no model work", probe.called.wait(1.0))
 
     print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
     return 1 if fails else 0

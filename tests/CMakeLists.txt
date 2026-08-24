@@ -53,6 +53,7 @@ target_sources(MoshTests PRIVATE
     test_directory_listing.cpp
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
+    test_reimagine_core.cpp
     test_rave_engine.cpp
     test_stem_export.cpp
     test_telemetry.cpp
@@ -73,6 +74,8 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/brain/BrainProxy.cpp
     ${CMAKE_SOURCE_DIR}/src/brain/OwnerRuntime.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
+    ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineService.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/AudioRefValidation.cpp

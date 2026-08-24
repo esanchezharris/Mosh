@@ -280,8 +280,21 @@ TEST_CASE ("cancelJob verifies the /cancel acknowledgement instead of firing-and
         const juce::String shell = "MOSH_SERVICE_PORT=59997 exec python3 " + script.getFullPathName().quoted();
         REQUIRE (proc.start (juce::StringArray { "/bin/sh", "-c", shell }));
         struct ProcCleanup { juce::ChildProcess& p; ~ProcCleanup() { if (p.isRunning()) p.kill(); } } procCleanup { proc };
-        // Give the interpreter a moment to import http.server and bind the socket.
-        juce::Thread::sleep (300);
+        // Wait for the socket rather than assuming a fixed interpreter startup time; the
+        // owner machine may be deliberately busy while this hermetic suite runs.
+        bool ready = false;
+        for (int attempt = 0; attempt < 40 && proc.isRunning(); ++attempt)
+        {
+            juce::StreamingSocket probe;
+            if (probe.connect ("127.0.0.1", 59997, 100))
+            {
+                ready = true;
+                probe.close();
+                break;
+            }
+            juce::Thread::sleep (50);
+        }
+        REQUIRE (ready);
 
         mosh::GenerativeJobManager mgr;
         CHECK (mgr.cancelJob ("job-1"));

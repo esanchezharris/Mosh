@@ -145,7 +145,9 @@
       "displayName": "Build macOS Apple Silicon tests",
       "configurePreset": "macos-arm64-debug",
       "targets": [
-        "MoshTests"
+        "MoshTests",
+        "MoshReImagineBundleSmoke",
+        "MoshReImagineEditorSmoke"
       ]
     },
     {
@@ -173,7 +175,9 @@
       "displayName": "Build macOS Apple Silicon tests (Release)",
       "configurePreset": "macos-arm64-release",
       "targets": [
-        "MoshTests"
+        "MoshTests",
+        "MoshReImagineBundleSmoke",
+        "MoshReImagineEditorSmoke"
       ]
     },
     {
