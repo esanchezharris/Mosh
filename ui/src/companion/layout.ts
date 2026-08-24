@@ -12,6 +12,7 @@ export const SPAN: Record<Button, number> = { record: 1, keep: 1, again: 1, hear
 export const DEFAULT_ORDER: Button[] = ["keep", "again", "hear", "marker", "record", "stop"];
 
 export type Layout = { order: Button[]; navPos: "top" | "bottom" };
+export type LayoutMode = "mosh" | "ableton";
 
 export const DEFAULT_LAYOUT: Layout = { order: [...DEFAULT_ORDER], navPos: "bottom" };
 
@@ -28,6 +29,13 @@ export function sanitizeOrder(order: unknown): Button[] {
       }
   for (const t of TILES) if (!seen.has(t)) out.push(t);
   return out;
+}
+
+/** Apply a saved layout to this mode's tiles. Hidden tiles are never appended. */
+export function orderForTiles(layout: Layout, available: readonly Button[]): Button[] {
+  const ordered = layout.order.filter((button) => available.includes(button));
+  for (const button of available) if (!ordered.includes(button)) ordered.push(button);
+  return ordered;
 }
 
 /** Move `id` to sit at `toIndex` in the order (clamped). Pure. */
@@ -60,10 +68,14 @@ export function parse(raw: string | null): Layout {
 
 const KEY = "moshCompanionLayout";
 
-export function load(storage: Pick<Storage, "getItem">): Layout {
-  return parse(storage.getItem(KEY));
+function keyForMode(mode: LayoutMode): string {
+  return mode === "mosh" ? KEY : `${KEY}.ableton`;
 }
 
-export function save(storage: Pick<Storage, "setItem">, layout: Layout): void {
-  storage.setItem(KEY, serialize(layout));
+export function load(storage: Pick<Storage, "getItem">, mode: LayoutMode = "mosh"): Layout {
+  return parse(storage.getItem(keyForMode(mode)));
+}
+
+export function save(storage: Pick<Storage, "setItem">, layout: Layout, mode: LayoutMode = "mosh"): void {
+  storage.setItem(keyForMode(mode), serialize(layout));
 }

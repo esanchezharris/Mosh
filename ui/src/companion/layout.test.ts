@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ORDER, load, moveInOrder, parse, sanitizeOrder, save, serialize, TILES } from "./layout";
+import { DEFAULT_ORDER, load, moveInOrder, orderForTiles, parse, sanitizeOrder, save, serialize, TILES } from "./layout";
 import type { Button } from "./types";
 
 describe("sanitizeOrder", () => {
@@ -16,6 +16,19 @@ describe("sanitizeOrder", () => {
   it("returns the full default set for junk input", () => {
     expect(sanitizeOrder(null)).toEqual(TILES);
     expect(sanitizeOrder("nope")).toEqual(TILES);
+  });
+});
+
+describe("orderForTiles", () => {
+  it("keeps a stored marker from reappearing in Ableton mode", () => {
+    // Given
+    const layout = parse('{"order":["marker","stop","keep","again","hear","record"],"navPos":"bottom"}');
+
+    // When
+    const order = orderForTiles(layout, ["keep", "again", "hear", "record", "stop"]);
+
+    // Then
+    expect(order).toEqual(["stop", "keep", "again", "hear", "record"]);
   });
 });
 
@@ -64,5 +77,26 @@ describe("load / save", () => {
     };
     save(storage, { order: ["hear", "record", "keep", "again", "marker", "stop"], navPos: "top" });
     expect(load(storage)).toEqual({ order: ["hear", "record", "keep", "again", "marker", "stop"], navPos: "top" });
+  });
+
+  it("preserves the Mosh marker slot after an Ableton edit and Mosh reload", () => {
+    // Given
+    const mem: Record<string, string> = {};
+    const storage = {
+      getItem: (key: string) => mem[key] ?? null,
+      setItem: (key: string, value: string) => {
+        mem[key] = value;
+      },
+    };
+    const moshLayout = parse('{"order":["stop","marker","keep","again","hear","record"],"navPos":"top"}');
+    save(storage, moshLayout, "mosh");
+
+    // When
+    save(storage, { order: ["record", "keep", "again", "hear", "stop"], navPos: "bottom" }, "ableton");
+    const reloadedMosh = load(storage, "mosh");
+
+    // Then
+    expect(reloadedMosh).toEqual(moshLayout);
+    expect(reloadedMosh.order.indexOf("marker")).toBe(1);
   });
 });
