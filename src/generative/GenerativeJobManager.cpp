@@ -1,5 +1,6 @@
 #include "GenerativeJobManager.h"
 #include <cstdlib>
+#include <juce_cryptography/juce_cryptography.h>
 
 namespace mosh
 {
@@ -26,6 +27,19 @@ namespace
         return File::getSpecialLocation (File::tempDirectory)
             .getChildFile ("mosh-reimagine-service-test-" + testPort);
        #else
+        // A named harness deliberately asks for an isolated service. Keep its
+        // handshake alongside its selected port so a stale owner service.port
+        // cannot redirect another gate or verify.py run.
+        const auto harnessSession = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+        if (harnessSession.isNotEmpty())
+        {
+            const auto targetPort = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "default").trim();
+            const auto identity = harnessSession + ":" + targetPort;
+            const auto tag = juce::MD5 (identity.toUTF8()).toHexString().substring (0, 16);
+            return File::getSpecialLocation (File::tempDirectory)
+                .getChildFile ("mosh-reimagine-service-harness-" + tag);
+        }
+
         return File::getSpecialLocation (File::userHomeDirectory)
             .getChildFile ("Library/Application Support/Mosh/ReImagine");
        #endif
