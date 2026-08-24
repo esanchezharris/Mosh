@@ -240,6 +240,11 @@ bool tempoMatches (const TempoMap& map, double ppq, double hostBpm, double toler
     return std::abs (expected.bpm - hostBpm) <= tolerance;
 }
 
+bool shouldRenderSelected (const HostPosition& host, bool offline) noexcept
+{
+    return offline || host.isPlaying;
+}
+
 CrossfadeGains substitutionGainsForPosition (double ppq, double start, double end, double fadePpq,
                                              float mix, bool compareDry) noexcept
 {

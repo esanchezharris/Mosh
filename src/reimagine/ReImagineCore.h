@@ -182,6 +182,7 @@ struct PluginStateV1
 };
 
 bool tempoMatches (const TempoMap&, double ppq, double hostBpm, double tolerance = 0.01) noexcept;
+bool shouldRenderSelected (const HostPosition&, bool offline) noexcept;
 CrossfadeGains substitutionGainsForPosition (double ppq, double start, double end, double fadePpq,
                                              float mix, bool compareDry) noexcept;
 juce::String serializeState (const PluginStateV1&);

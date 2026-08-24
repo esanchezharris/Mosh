@@ -165,6 +165,15 @@ TEST_CASE ("Equal-power substitution is dry outside the region and honors A B an
            == Catch::Approx (1.0f).margin (0.0001));
 }
 
+TEST_CASE ("Paused transport does not substitute a rendered take", "[reimagine][playback]")
+{
+    const HostPosition paused { false, false, 48000, 1.0, 120.0, 4.0 };
+    const HostPosition playing { true, false, 48000, 1.0, 120.0, 4.0 };
+    CHECK_FALSE (shouldRenderSelected (paused, false));
+    CHECK (shouldRenderSelected (playing, false));
+    CHECK (shouldRenderSelected (paused, true));
+}
+
 TEST_CASE ("Plugin state round-trips metadata without embedding audio", "[reimagine][state]")
 {
     PluginStateV1 state;

@@ -215,7 +215,7 @@ void ReImagineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             || event == CaptureEvent::abortedTempoMapCapacity)
             captureAbortEvent.store (static_cast<int> (event), std::memory_order_release);
     }
-    if (position)
+    if (position && shouldRenderSelected (*position, offline))
         renderSelected (buffer, *position);
     transferStateMirror.store (static_cast<int> (transfer.state()), std::memory_order_release);
 }
