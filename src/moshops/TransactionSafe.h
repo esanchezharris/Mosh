@@ -4,7 +4,7 @@
 #include <set>
 
 // FS-B2a — the ENGINE-OWNED transactionSafe registry
-// (docs/first-stranger-program/lanes/fs-b2.md: "There is no engine-owned allowlist
+// (docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md: "There is no engine-owned allowlist
 // proving that every command admitted to an agent transaction is synchronous and wholly
 // undoable. The TypeScript command catalog is not authoritative for engine rollback
 // safety.")

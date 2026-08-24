@@ -236,7 +236,7 @@ namespace
         // (SIGSEGV/SIGBUS/SIGILL/SIGFPE) crashpad takes the crash and the local
         // report above may not be written; software-raised signals (abort(), an
         // uncaught C++ exception) still travel the BSD path and produce both. This
-        // is measured, not assumed — see docs/first-stranger-program/lanes/fs-k3.md
+        // is measured, not assumed — see docs/archive/first-stranger-program-2026-08-23/lanes/fs-k3.md
         // gate G5, which asserts on both artifacts. It only ever applies to a
         // Sentry-ON build; the shipped default build is unaffected.
         initSentryReporter();

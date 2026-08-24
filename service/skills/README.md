@@ -247,7 +247,7 @@ command the real agent-catalog validator would reject.
 - Not a replacement for `ui/src/agent/commands.ts`/`skills.ts` — this reads
   the former as ground truth and doesn't touch either. That separation is now
   a tested invariant, not a convention: see
-  [`docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md`](../../docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md)
+  [`docs/archive/first-stranger-program-2026-08-23/SKILL_CATALOG_BOUNDARY.md`](../../docs/archive/first-stranger-program-2026-08-23/SKILL_CATALOG_BOUNDARY.md)
   for why the mined library and `skills.ts` are deliberately NOT merged (zero
   skill-name overlap; 5 of 40 shared commands; different artifact kinds), and
   `contract_test.py` + `ui/src/agent/skillCatalogBoundary.test.ts` for the

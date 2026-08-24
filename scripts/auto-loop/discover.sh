@@ -20,7 +20,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set +e
 
 # Machine source of truth. Defaults to docs/auto-loop/backlog.jsonl, but honors an
-# AL_BACKLOG_JSONL override (set by the stranger-loop to point at its own backlog).
+# AL_BACKLOG_JSONL override for callers that keep an isolated backlog.
 BL="$AL_BACKLOG_JSONL"
 mkdir -p "$(dirname "$BL")"; [ -f "$BL" ] || : > "$BL"
 

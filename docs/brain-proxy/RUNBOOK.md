@@ -125,9 +125,9 @@ per-process safety/ephemeral identity and never mutate the real
 `~/Library/Mosh/session/identity.json`.
 
 `identity.json` already existed on this machine with a `uuid` field (pre-dating this
-change — apparently seeded ahead of the still-unbuilt FS-K3 crash-reporting consent
-lane, see `docs/first-stranger-program/lanes/fs-k3.md`). The brain proxy is simply the
-first consumer to actually READ that field; it only ever reads/adds `"uuid"` and never
+change — apparently seeded ahead of the now-archived FS-K3 crash-reporting consent
+lane; see `docs/archive/first-stranger-program-2026-08-23/lanes/fs-k3.md`). The brain proxy is
+simply the first consumer to actually READ that field; it only ever reads/adds `"uuid"` and never
 touches `"consent"` or any other key that file may carry.
 
 The Edge Function does a **shape check only** (`/^[a-zA-Z0-9_-]{8,128}$/`) — it rejects

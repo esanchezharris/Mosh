@@ -18,10 +18,9 @@ AL_ROOT_DEFAULT="$(cd "$AL_LIB_DIR/../.." && pwd)"
 AL_ROOT="${AL_ROOT:-$AL_ROOT_DEFAULT}"
 
 AL_DOCS_DIR="$AL_ROOT/docs/auto-loop"
-# AL_LEDGER + AL_BACKLOG_JSONL accept an environment override so a SIBLING loop (the
-# First-Stranger "stranger-loop") can keep its own audit trail + backlog while sharing
-# the same scripts, STOP switch, and merge-queue lock. Unset ⇒ the classic auto-loop
-# paths, byte-identical to before.
+# AL_LEDGER + AL_BACKLOG_JSONL accept environment overrides so independent callers can
+# keep an isolated audit trail + backlog while sharing the same safety primitives.
+# Unset keeps the standard auto-loop paths unchanged.
 AL_LEDGER="${AL_LEDGER:-$AL_DOCS_DIR/LEDGER.md}"
 AL_BACKLOG="$AL_DOCS_DIR/BACKLOG.md"                 # human-readable companion (classic)
 AL_BACKLOG_JSONL="${AL_BACKLOG_JSONL:-$AL_DOCS_DIR/backlog.jsonl}"   # machine source of truth
@@ -46,6 +45,13 @@ al_load_cache_env() { [ -f "$AL_ENV" ] && . "$AL_ENV" || true; }
 al_log()  { printf '[auto-loop] %s\n' "$*" >&2; }
 al_warn() { printf '[auto-loop][warn] %s\n' "$*" >&2; }
 al_die()  { printf '[auto-loop][die] %s\n' "$*" >&2; exit 1; }
+
+# The retired First-Stranger mode must not create state, gate changes, or mutate a PR.
+# Treat every nonzero setting as an archived invocation rather than guessing intent.
+case "${MOSH_STRANGER_MODE:-0}" in
+  0|'') ;;
+  *) al_die "First-Stranger auto-loop mode is archived; unset MOSH_STRANGER_MODE." ;;
+esac
 
 # ── kill switch ─────────────────────────────────────────────────────────────────
 # Returns 0 (true) if the loop must stop. Checked at every iteration boundary AND

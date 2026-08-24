@@ -418,7 +418,7 @@ const mockRestorableTxns = () => [
 let inBatch = false;
 
 // ── FS-B2a — the agent batch-TRANSACTION contract, mirrored ──────────────────
-// docs/first-stranger-program/lanes/fs-b2.md. The mock implements the SAME semantics as
+// docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md. The mock implements the SAME semantics as
 // MoshOps so `runSkill` runs unchanged against both, which is what makes "one B2 reference
 // skill passes the same harness against both the mock and a real engine" literally true of
 // one code path rather than two lookalike ones.

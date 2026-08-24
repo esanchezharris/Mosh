@@ -1350,7 +1350,7 @@ def _replay_txn_golden(ctx, name, session):
 def check_skill_transaction_real_engine(ctx):
     """FS-B2a — the lane's real gate: a first REAL-ENGINE skill run proving exact commit AND
     exact rollback, plus a lost response resolving through batch_status without
-    double-applying (docs/first-stranger-program/lanes/fs-b2.md items 3–5).
+    double-applying (docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md items 3–5).
 
     Every assertion reads the ENGINE's own fingerprints out of batch_status, so there is no
     second implementation here to disagree with MoshOps. The anti-vacuity leg is explicit:

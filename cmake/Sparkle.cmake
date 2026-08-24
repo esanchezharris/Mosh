@@ -25,7 +25,7 @@ option(MOSH_ENABLE_SPARKLE "Bundle the Sparkle 2 auto-updater (macOS only)" ON)
 # the app embeds Sparkle but never starts an updater, and the "Check for Updates…"
 # menu item is present-but-disabled rather than silently doing nothing. Publishing a
 # feed means publishing signed builds at a public URL, which is a distribution
-# decision the owner makes — see docs/first-stranger-program/lanes/fs-k2.md.
+# decision the owner makes — see docs/archive/first-stranger-program-2026-08-23/lanes/fs-k2.md.
 set(MOSH_SPARKLE_FEED_URL "" CACHE STRING
     "Sparkle appcast URL baked into Info.plist as SUFeedURL (empty = no updater)")
 

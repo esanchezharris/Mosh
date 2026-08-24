@@ -942,7 +942,7 @@ export const AUTOMATE_PARAMETER_SKILL: SkillDefinition = {
 //
 // The evidence is `service/skills/library.jsonl`: 36 micro-skills mined from the SFT
 // demonstration corpus, each carrying `provenance` (the exact corpus rows that produced
-// it). Per docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md that library is a mined
+// it). Per docs/archive/first-stranger-program-2026-08-23/SKILL_CATALOG_BOUNDARY.md that library is a mined
 // retrieval corpus for the offline router and is NOT hand-authored — so it is read here
 // as a source of *which workflows are real*, never copied from.
 //

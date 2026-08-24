@@ -1,7 +1,10 @@
 # Fundraise notes — licensing actions at raise close
 
-*Owner-facing. Created by FS-K4 so the funding-triggered licensing obligations are recorded
-**where you will actually look at raise time**, not only inside a dependency inventory.*
+*Historical compliance handoff, originally created by FS-K4 so the funding-triggered licensing
+obligations were recorded **where you would actually look at raise time**, not only inside a
+dependency inventory. The First-Stranger Program was paused and archived on 2026-08-23 at
+`docs/archive/first-stranger-program-2026-08-23/`; FS-K4 and O4 below are historical identifiers,
+not current owner assignments or policy.*
 
 **The numbers live in [`DEPENDENCY_BOM.md`](DEPENDENCY_BOM.md) §1–§2 and are not duplicated here** —
 duplicated thresholds drift, and the BOM is the verified, source-read document. This file is the
@@ -46,24 +49,25 @@ the raise math.
 - [ ] **Stable Audio 3 is revenue-triggered, not funding-triggered** (§1/§2). A large raise does not
       trip it; crossing the revenue cap does, and at that point the licence *terminates* — so
       negotiate Enterprise **before** crossing rather than after.
-- [ ] **Register SA3 commercial use** at stability.ai (free, minutes) — this is owner task **O4** in
-      the First-Stranger SPEC §3, and it is what makes the shipped *"Powered by Stability AI"* notice
-      legally true. The packaging check can only assert the string is **present**; it cannot assert
-      you registered.
+- [ ] **Register SA3 commercial use** at stability.ai (free, minutes) — this was former owner task
+      **O4** in the [archived First-Stranger SPEC](archive/first-stranger-program-2026-08-23/SPEC.md)
+      §3. The packaging check can only assert the *"Powered by Stability AI"* string is **present**;
+      it cannot assert registration. Re-confirm the vendor obligation before relying on this
+      historical note.
 
 ---
 
 ## What is already automated
 
-FS-K4 wired the compliance half into the deploy path, so the parts a script *can* own are not on this
-list:
+The historical FS-K4 work wired the compliance half into the deploy path, so the parts a script
+*could* own were not on this list:
 
 - `docs/DEPENDENCY_BOM.md` §1 is the single source of truth for shipped dependencies.
 - `service/scripts/packaging_check.py --emit-notices` generates `Contents/Resources/NOTICES.txt`
   from that table during `bundle_service`, so acknowledgements cannot drift from the inventory.
 - `packaging_check.py --bundle` then blocks `deploy` and `release` if a shipping row is
-  unacknowledged, a mandatory attribution is missing, RAVE/anira artifacts are present (SPEC §1.11),
-  or third-party payload ships with no BOM row.
+  unacknowledged, a mandatory attribution is missing, RAVE/anira artifacts are present (archived
+  SPEC §1.11), or third-party payload ships with no BOM row.
 
 **Licensing tiers are the part that cannot be automated** — they depend on a number only you know at
 close. Hence this file.

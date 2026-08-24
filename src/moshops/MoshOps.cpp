@@ -1143,7 +1143,7 @@ juce::var MoshOps::cmdJumpToHistory (const juce::var& args)
 //     Every existing caller (runAgentBatch, cmdSketchBeatbox and cmdGenerateBeatRecipe's
 //     ownBatch pattern, the existing --selftest batch section) keeps working untouched.
 //   • WITH transactionId ⇒ the identified, manifest-validated, exactly-rollbackable
-//     transaction defined by docs/first-stranger-program/lanes/fs-b2.md.
+//     transaction defined by docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md.
 juce::var MoshOps::cmdBatchBegin (const juce::var& args)
 {
     const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
