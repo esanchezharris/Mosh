@@ -316,6 +316,9 @@ present = bundled | _referenced_dirs(body)
 check("parsed a non-empty bundle whitelist", bool(bundled_files) and bool(bundled_dirs),
       f"files={sorted(bundled_files)} dirs={sorted(bundled_dirs)}")
 
+check("macOS deploy preserves the owner local-brain launcher",
+      "service/sft/launch_local_brain.py" in body and "sft" in _referenced_dirs(body))
+
 # The heart: no bundled module may import a top-level service module — a top-level
 # `service/X.py` FILE *or* a `service/X/` PACKAGE dir — that is absent from the bundle.
 py_files = list(_bundled_py_files(bundled_files, bundled_dirs))
