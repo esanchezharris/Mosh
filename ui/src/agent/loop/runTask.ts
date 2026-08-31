@@ -101,7 +101,7 @@ export function compactMelodySpec(text: string, snap: Snapshot): CompactMelodySp
   const key = resolveKey(snap.session.key);
   if (key.mode === "chromatic") return null;
   const mask = scaleMask(key);
-  const allowedPitches = Array.from({ length: 25 }, (_, index) => index + 57)
+  const allowedPitches = Array.from({ length: 13 }, (_, index) => index + 69)
     .filter((pitch) => inScale(pitch, mask));
   return {
     clipId: clip.id,
@@ -171,7 +171,7 @@ async function runCompactMelodyTask(
       { role: "user", content: text },
     ])).content;
   } catch (error) {
-    if (demoBrainAvailable()) content = '{"p":[60,62,64,65,64,62,60,57]}';
+    if (demoBrainAvailable()) content = '{"p":[69,71,72,74,76,77,79,81]}';
     else return {
       finalSnapshot: initialSnapshot,
       transcript: [],

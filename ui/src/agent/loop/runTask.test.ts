@@ -113,9 +113,10 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
 
     expect(spec.clipId).toBe(clipId);
     expect(spec.prompt.length).toBeLessThan(300);
-    expect(compactMelodyCommand('{"p":[60,62,64,65,64,62,60,57]}', spec)?.args).toMatchObject({ clipId });
-    expect(compactMelodyCommand('{"p":[60,61,64,65,64,62,60,57]}', spec)).toBeNull();
-    expect(compactMelodyCommand('{"p":[60,60,60,60,60,60,60,60]}', spec)).toBeNull();
+    expect(Math.min(...spec.allowedPitches)).toBeGreaterThanOrEqual(69);
+    expect(compactMelodyCommand('{"p":[69,71,72,74,76,77,79,81]}', spec)?.args).toMatchObject({ clipId });
+    expect(compactMelodyCommand('{"p":[69,70,72,74,76,77,79,81]}', spec)).toBeNull();
+    expect(compactMelodyCommand('{"p":[69,69,69,69,69,69,69,69]}', spec)).toBeNull();
   });
 
   it("leaves compound melody requests to the full agent loop", async () => {
