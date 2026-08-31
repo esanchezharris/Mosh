@@ -263,3 +263,25 @@ before relaunch. First attempt additionally used the wrong recipe
 direct `mlx_lm lora --config` launch with the registered recipe.
 Quarantined artifacts: `.adapters/a3b-r7-mlx-NANDEAD{,-2}`,
 `~/r7-train-nandead{,2}.log`.
+
+## Post-freeze: r7.1 pre-registration (2026-08-31, owner-approved scope)
+
+Owner chose the coverage-row rewrite over full-mix prompt regeneration (the
+fragmentation hypothesis was WEAKENED post-gate: r5 trained on the same 944
+fragmented prompt vintages with clean dosage, so fragmentation cannot explain
+the r5→r7 delta; recipe shapes are identical — rank 16 attn q/k/v/o, 16 layers).
+Evidence-backed diagnosis: the 12 vague→defer coverage demos had ZERO
+act-with-defaults counterexamples in the same phrasing space (bench wrong-defers
+landed exactly there), and one defer ask was the VERBATIM nj-amb-empty-middle
+bench string (test contamination — now paraphrased).
+
+r7.1 data (s2-mix-v7-prep): v5 train verbatim (12,994) + 131 regenerated
+coverage rows (current prompt render incl. resolve_note_overlaps; 12 new
+VIBE_TARGET_ACTS rows: named-target + qualitative-direction → single
+default-dose act, incl. undo-regret and no-mute repair families; asks are
+paraphrases, never bench strings). valid.jsonl = v5 verbatim (1,650).
+max row 6,293 tokens — the 6400 cap holds. Recipe unchanged from r7.
+Gate: same-stack novice-jam with a FRESH r5 control in the same hour;
+r7.1 must beat r5's same-hour number to promote.
+    956ef81f0fcbdbbd0288050ebdb3764ddb3614eb728b6f84e7a16be44fe0a088  .sft-data/s2-mix-v7-prep/train.jsonl
+    9047ab96fd7e8f7f2155d6acc9c9b391c7989ed6205d119c46be764dfa4f3638  .sft-data/s2-mix-v7-prep/valid.jsonl
