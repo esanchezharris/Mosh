@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateCommand, AGENT_COMMAND_MAP } from "./commands";
+import { describeCommand, validateCommand, AGENT_COMMAND_MAP } from "./commands";
 
 describe("catalog — performer-mode commands exposed", () => {
   for (const c of ["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "list_takes", "set_current_take", "promote_take_region", "keep_take"])
@@ -28,6 +28,26 @@ describe("catalog — performer-mode commands exposed", () => {
     })).toBeNull();
     expect(validateCommand("promote_take_region", { clipId: "c1", takeIndex: 1, start: 2.5 })).not.toBeNull();
     expect(validateCommand("keep_take", { clipId: "c1" })).toBeNull();
+  });
+});
+
+describe("add_note — native batch shape", () => {
+  const note = { pitch: 69, start: 0, length: 0.5, velocity: 88 };
+
+  it("accepts a non-empty notes array instead of the scalar note fields", () => {
+    expect(validateCommand("add_note", { clipId: "c1", notes: [note] })).toBeNull();
+    expect(describeCommand("add_note", { clipId: "c1", notes: [note, note] })).toBe("Added 2 melody notes");
+  });
+
+  it("rejects malformed or empty note batches before they reach native code", () => {
+    expect(validateCommand("add_note", { clipId: "c1", notes: [] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: [{ ...note, pitch: "69" }] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: [{ ...note, velocity: false }] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: [{ ...note, pitch: Number.NaN }] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: [{ ...note, start: -0.5 }] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: [{ ...note, length: 0 }] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: [{ ...note, velocity: 128 }] })).not.toBeNull();
+    expect(validateCommand("add_note", { clipId: "c1", notes: Array.from({ length: 65 }, () => note) })).not.toBeNull();
   });
 });
 

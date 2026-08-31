@@ -30,6 +30,7 @@ add_custom_target(MoshUI
             "-DMOSH_UI_DIR=${MOSH_UI_DIR}"
             "-DMOSH_UI_DIST=${MOSH_UI_DIST}"
             "-DNPM_EXECUTABLE=${NPM_EXECUTABLE}"
+            "-DMOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=${MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP}"
             -P "${CMAKE_CURRENT_LIST_DIR}/BuildUIFresh.cmake"
     COMMENT "Checking UI bundle freshness (Vite build if ui/src is newer)"
     VERBATIM)

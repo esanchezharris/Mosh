@@ -124,6 +124,10 @@ namespace
             return makeError ("brain proxy error: " + detail);
         }
 
+        const auto content = j.getProperty ("content", var()).toString();
+        if (content.trim().isEmpty())
+            return makeError ("brain proxy error: malformed completion response");
+
         // Normalize to the SAME shape the direct-provider path returns so callers
         // (WebBridge's brain_chat, the --brain-smoke CLI) don't need to know which
         // path served the request. The proxy deliberately never discloses which
@@ -131,7 +135,7 @@ namespace
         // a fixed "proxy" identity rather than echoing anything from the response.
         auto* o = new DynamicObject();
         o->setProperty ("ok", true);
-        o->setProperty ("content", j.getProperty ("content", var()).toString());
+        o->setProperty ("content", content);
         o->setProperty ("provider", "proxy");
         o->setProperty ("label", "MOSH BRAIN PROXY");
         return var (o);
@@ -188,6 +192,68 @@ BrainProxy::Provider BrainProxy::resolve (const String& requested)
             return p;
 
     return {};
+}
+
+var BrainProxy::requestPayload (const Provider& p, const var& messages)
+{
+    auto* payload = new DynamicObject();
+    payload->setProperty ("model", p.model);
+    payload->setProperty ("messages", messages);
+    auto* rf = new DynamicObject();
+    rf->setProperty ("type", "json_object");
+    payload->setProperty ("response_format", var (rf));
+    if (p.id == "openai" && isReasoningModel (p.model))
+    {
+        payload->setProperty ("max_completion_tokens", 800);
+    }
+    else
+    {
+        payload->setProperty ("max_tokens", 800);
+        payload->setProperty ("temperature", 0.6);
+    }
+    if (p.id == "local")
+    {
+        auto* kwargs = new DynamicObject();
+        kwargs->setProperty ("enable_thinking", false);
+        payload->setProperty ("chat_template_kwargs", var (kwargs));
+    }
+    return var (payload);
+}
+
+int BrainProxy::requestTimeoutMs (const Provider& p)
+{
+    return p.id == "local" ? 120000 : 30000;
+}
+
+var BrainProxy::parseDirectResponse (const String& body, int statusCode,
+                                     const Provider& p, int elapsedMs)
+{
+    const auto parsed = JSON::parse (body);
+    if (statusCode < 200 || statusCode >= 300)
+    {
+        const auto errVar = parsed.getProperty ("error", var());
+        const auto detail = errVar.isVoid() ? ("upstream HTTP " + String (statusCode))
+                                            : JSON::toString (errVar);
+        return makeError ("brain provider error (" + p.label + "): " + detail);
+    }
+
+    String content;
+    if (auto* choices = parsed.getProperty ("choices", var()).getArray(); choices != nullptr && choices->size() > 0)
+    {
+        const auto message = (*choices)[0].getProperty ("message", var());
+        content = message.getProperty ("content", var()).toString();
+    }
+    if (content.trim().isEmpty())
+        return makeError ("brain provider error (" + p.label + "): malformed completion response");
+
+    auto* result = new DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("content", content);
+    result->setProperty ("provider", p.id);
+    result->setProperty ("label", p.label);
+    result->setProperty ("model", p.model);
+    result->setProperty ("ms", elapsedMs);
+    return var (result);
 }
 
 bool BrainProxy::proxyEnabled()
@@ -263,28 +329,14 @@ var BrainProxy::chat (const var& messages, const String& requested)
         return makeError ("brain: messages must be an array of {role,content}");
 
     // Build the OpenAI-compatible chat payload (json_object response, capped tokens).
-    auto* payload = new DynamicObject();
-    payload->setProperty ("model", p.model);
-    payload->setProperty ("messages", messages);
-    auto* rf = new DynamicObject();
-    rf->setProperty ("type", "json_object");
-    payload->setProperty ("response_format", var (rf));
-    if (p.id == "openai" && isReasoningModel (p.model))
-    {
-        payload->setProperty ("max_completion_tokens", 800);
-    }
-    else
-    {
-        payload->setProperty ("max_tokens", 800);
-        payload->setProperty ("temperature", 0.6);
-    }
+    const auto payload = requestPayload (p, messages);
 
     const auto headers = "Content-Type: application/json\r\nAuthorization: Bearer " + p.key;
-    URL url = URL (p.url + "/chat/completions").withPOSTData (JSON::toString (var (payload)));
+    URL url = URL (p.url + "/chat/completions").withPOSTData (JSON::toString (payload));
 
     int statusCode = 0;
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
-                    .withConnectionTimeoutMs (30000)
+                    .withConnectionTimeoutMs (requestTimeoutMs (p))
                     .withExtraHeaders (headers)
                     .withStatusCode (&statusCode);
 
@@ -295,32 +347,7 @@ var BrainProxy::chat (const var& messages, const String& requested)
 
     const auto bodyStr = stream->readEntireStreamAsString();
     const auto ms = (int) (Time::getMillisecondCounter() - t0);
-    const auto j = JSON::parse (bodyStr);
-
-    if (statusCode < 200 || statusCode >= 300)
-    {
-        auto errVar = j.getProperty ("error", var());
-        const auto detail = errVar.isVoid() ? ("upstream HTTP " + String (statusCode))
-                                            : JSON::toString (errVar);
-        return makeError ("brain provider error (" + p.label + "): " + detail);
-    }
-
-    // Pull choices[0].message.content defensively (var indexing, no exceptions).
-    String content;
-    if (auto* choices = j.getProperty ("choices", var()).getArray(); choices != nullptr && choices->size() > 0)
-    {
-        const auto message = (*choices)[0].getProperty ("message", var());
-        content = message.getProperty ("content", var()).toString();
-    }
-
-    auto* o = new DynamicObject();
-    o->setProperty ("ok", true);
-    o->setProperty ("content", content);
-    o->setProperty ("provider", p.id);
-    o->setProperty ("label", p.label);
-    o->setProperty ("model", p.model);
-    o->setProperty ("ms", ms);
-    return var (o);
+    return parseDirectResponse (bodyStr, statusCode, p, ms);
 }
 
 var BrainProxy::providersInfo()

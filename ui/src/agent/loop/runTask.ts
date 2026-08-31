@@ -22,19 +22,26 @@
 // pre-M2 shape.
 
 import { archivePair, brainChat, demoBrainAvailable } from "../../bridge";
+import { inScale, resolveKey, scaleMask } from "../../musicalKey";
 import { useSettings } from "../../settings/store";
 import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
 import { createTaskExecutor, undoAgentTask } from "./taskExec";
 import { mockLoopChat } from "./loopBrainMock";
+import { hasSequentialMarkers } from "./router";
 import { useTaskStore } from "./taskStore";
+import type { AgentCommandCall } from "../destructiveScreen";
+import type { AgentEnv } from "../loopSeam";
 import { ensureMemoryHydrated, poolsNonEmpty } from "../memory/hydrate";
 import { retrieveContext } from "../memory/retrieveContext";
 import { rememberPreferenceToolDoc } from "../memory/rememberPreference";
+import type { Snapshot } from "../../types";
 
+export const agenticLoopEnabled = (flag: string | undefined): boolean => flag === "1";
+export const loopAllowedFor = (flag: string | undefined, multiplayerActive: boolean): boolean =>
+  agenticLoopEnabled(flag) && !multiplayerActive;
 export const agenticLoopOn = (): boolean =>
-  (import.meta.env.DEV || import.meta.env.MODE === "e2e")
-  && import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP === "1";
+  agenticLoopEnabled(import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP);
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
 /** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext+
@@ -53,7 +60,8 @@ async function memorySectionFor(query: string): Promise<string | undefined> {
 /** The loop runs only when the flag is on AND we're not in a multiplayer
  *  session (v1: a long-lived open batch vs the MP lock table is unplaytested —
  *  gate it off; bounded studio skills stay available in MP). */
-export const loopAllowed = (): boolean => agenticLoopOn() && !useStore.getState().mp.active;
+export const loopAllowed = (): boolean =>
+  loopAllowedFor(import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP, useStore.getState().mp.active);
 
 export type TaskUi = {
   say(text: string | null): void;
@@ -68,6 +76,69 @@ const END_UTTER: Record<LoopRun["outcome"], { intent: string; fallback?: string 
   aborted: { intent: "IDLE_MURMUR", fallback: "stopped — kept what's done" },
 };
 const BRAIN_UNAVAILABLE_SAY = "can't reach my brain — check setup and try again";
+const COMPACT_MELODY_ASK = /\b(?:melody|melodic)\b/i;
+const COMPACT_IN_KEY_ASK = /\b(?:in (?:the )?key|(?:keep|stay|remain)[^.!?]{0,24}in (?:the )?key)\b/i;
+const COMPACT_ADDITIONAL_ACTION = /\b(?:and|also)\s+(?!(?:keep|stay|remain)\b)/i;
+const COMPACT_MELODY_VELOCITIES = [88, 82, 86, 80, 85, 81, 87, 83] as const;
+
+export type CompactMelodySpec = {
+  clipId: string;
+  trackName: string;
+  allowedPitches: readonly number[];
+  prompt: string;
+};
+
+export function compactMelodySpec(text: string, snap: Snapshot): CompactMelodySpec | null {
+  if (!COMPACT_MELODY_ASK.test(text)
+      || !COMPACT_IN_KEY_ASK.test(text)
+      || hasSequentialMarkers(text)
+      || COMPACT_ADDITIONAL_ACTION.test(text)) return null;
+  const query = text.toLowerCase();
+  const track = snap.tracks.find((candidate) =>
+    candidate.name.trim() !== "" && query.includes(candidate.name.toLowerCase()));
+  const clip = track?.clips.find((candidate) => candidate.type === "midi");
+  if (!track || !clip) return null;
+  const key = resolveKey(snap.session.key);
+  if (key.mode === "chromatic") return null;
+  const mask = scaleMask(key);
+  const allowedPitches = Array.from({ length: 25 }, (_, index) => index + 57)
+    .filter((pitch) => inScale(pitch, mask));
+  return {
+    clipId: clip.id,
+    trackName: track.name,
+    allowedPitches,
+    prompt: `Reply only as compact JSON {"p":[n,n,n,n,n,n,n,n]}. Choose exactly 8 varied MIDI pitches for a simple melody. Every n must be one of ${allowedPitches.join(",")}. No words or other keys.`,
+  };
+}
+
+export function compactMelodyCommand(content: string, spec: CompactMelodySpec): AgentCommandCall | null {
+  let source = String(content ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+  const first = source.indexOf("{");
+  const last = source.lastIndexOf("}");
+  if (first >= 0 && last > first) source = source.slice(first, last + 1);
+  try {
+    const parsed = JSON.parse(source) as Record<string, unknown>;
+    if (!Array.isArray(parsed.p) || parsed.p.length !== 8) return null;
+    const allowed = new Set(spec.allowedPitches);
+    const pitches = parsed.p.filter((pitch): pitch is number =>
+      typeof pitch === "number" && Number.isInteger(pitch) && allowed.has(pitch));
+    if (pitches.length !== 8 || new Set(pitches).size < 3) return null;
+    return {
+      command: "add_note",
+      args: {
+        clipId: spec.clipId,
+        notes: pitches.map((pitch, index) => ({
+          pitch,
+          start: index * 0.5,
+          length: 0.5,
+          velocity: COMPACT_MELODY_VELOCITIES[index],
+        })),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
   try {
@@ -78,6 +149,69 @@ async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: str
   }
 }
 
+async function runCompactMelodyTask(
+  text: string,
+  env: AgentEnv,
+  signal: { aborted: boolean },
+): Promise<LoopRun | null> {
+  const initialSnapshot = await env.getSnapshot();
+  const spec = compactMelodySpec(text, initialSnapshot);
+  if (!spec) return null;
+  const progress = (event: Parameters<ReturnType<typeof useTaskStore.getState>["progress"]>[0]) =>
+    useTaskStore.getState().progress(event);
+  progress({ kind: "phase", phase: "planning" });
+  if (signal.aborted)
+    return { finalSnapshot: initialSnapshot, transcript: [], stepCount: 0, deferred: true, outcome: "aborted" };
+
+  const startedAt = Date.now();
+  let content: string;
+  try {
+    content = (await brainChat([
+      { role: "system", content: spec.prompt },
+      { role: "user", content: text },
+    ])).content;
+  } catch (error) {
+    if (demoBrainAvailable()) content = '{"p":[60,62,64,65,64,62,60,57]}';
+    else return {
+      finalSnapshot: initialSnapshot,
+      transcript: [],
+      stepCount: 0,
+      deferred: true,
+      outcome: "error",
+      error: `${BRAIN_UNAVAILABLE_SAY}: ${String(error).slice(0, 120)}`,
+    };
+  }
+  if (signal.aborted)
+    return { finalSnapshot: initialSnapshot, transcript: [], stepCount: 0, deferred: true, outcome: "aborted" };
+
+  const command = compactMelodyCommand(content, spec);
+  if (!command)
+    return {
+      finalSnapshot: initialSnapshot,
+      transcript: [],
+      stepCount: 0,
+      deferred: true,
+      outcome: "need_user",
+      say: "I couldn't shape a clean in-key phrase yet.",
+    };
+
+  const goal = `Add a simple in-key melody to ${spec.trackName}`;
+  progress({ kind: "plan", plan: [{ goal, commands: [command] }] });
+  progress({ kind: "step-start", index: 0, goal, commands: [command] });
+  const step = await env.runBatch(goal, [command]);
+  progress({ kind: "step-result", index: 0, results: step.results });
+  const ok = step.results.length === 1 && step.results[0]?.ok === true;
+  return {
+    finalSnapshot: step.snapshot,
+    transcript: [{ commands: [command], results: step.results, invalidCount: 0, ms: Date.now() - startedAt }],
+    stepCount: 1,
+    deferred: false,
+    outcome: ok ? "done" : "error",
+    say: ok ? `a little in-key melody for ${spec.trackName}` : undefined,
+    error: ok ? undefined : step.results[0]?.error,
+  };
+}
+
 /** Run one agentic task end-to-end. Resolves when the task finishes (any outcome). */
 export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   const store = useTaskStore.getState();
@@ -85,16 +219,20 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   ui.utter("ACK_WORKING");
 
   const exec = createTaskExecutor(text.slice(0, 48), { utterance: text, source: "agent_loop" }, { signal });
-  const memory = await memorySectionFor(text);
   let run: LoopRun;
   try {
-    run = await runAgentLoop({ ask: text }, {
-      chat: chatWithFallback,
-      env: exec.env,
-      signal,
-      onProgress: (ev) => useTaskStore.getState().progress(ev),
-      memory,
-    });
+    const compactMelody = await runCompactMelodyTask(text, exec.env, signal);
+    if (compactMelody) run = compactMelody;
+    else {
+      const memory = await memorySectionFor(text);
+      run = await runAgentLoop({ ask: text }, {
+        chat: chatWithFallback,
+        env: exec.env,
+        signal,
+        onProgress: (ev) => useTaskStore.getState().progress(ev),
+        memory,
+      });
+    }
   } finally {
     await exec.close(); // the task's undo transaction closes on EVERY exit path
   }

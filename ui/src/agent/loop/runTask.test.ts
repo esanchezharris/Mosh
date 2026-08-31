@@ -4,7 +4,14 @@
 // real two-step task, the store view fills in, and ONE undo reverts everything.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { runLoopTask, agenticLoopOn } from "./runTask";
+import {
+  compactMelodyCommand,
+  compactMelodySpec,
+  runLoopTask,
+  agenticLoopEnabled,
+  loopAllowedFor,
+  agenticLoopOn,
+} from "./runTask";
 import { useTaskStore } from "./taskStore";
 import { useStore } from "../../store";
 import { __resetMockForTests } from "../../bridge.mock";
@@ -73,7 +80,68 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
     expect(JSON.stringify(snap())).toBe(before);
   });
 
+  it("runs the exact in-key melody ask through the compact local-model contract", async () => {
+    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
+    const clipId = (clip.data as { clipId: string }).clipId;
+    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
+    await useStore.getState().refresh();
+
+    const run = await runLoopTask("give the keys a little melody idea, nothing fancy, keep it in key", noopUi);
+
+    expect(run.outcome).toBe("done");
+    expect(run.stepCount).toBe(1);
+    const keys = snap().tracks.find((candidate) => candidate.id === trackId)!;
+    expect(keys.clips.find((candidate) => candidate.id === clipId)?.notes).toHaveLength(8);
+    expect(useTaskStore.getState().last?.steps[0]?.commands[0]?.args).toMatchObject({ clipId });
+
+    await useStore.getState().exec("undo");
+    await useStore.getState().refresh();
+    expect(snap().tracks.find((candidate) => candidate.id === trackId)!
+      .clips.find((candidate) => candidate.id === clipId)?.notes ?? []).toHaveLength(0);
+  });
+
+  it("accepts only a varied, in-scale pitch sequence from the compact contract", async () => {
+    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
+    const clipId = (clip.data as { clipId: string }).clipId;
+    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
+    await useStore.getState().refresh();
+    const spec = compactMelodySpec("give the keys a melody, keep it in key", snap())!;
+
+    expect(spec.clipId).toBe(clipId);
+    expect(spec.prompt.length).toBeLessThan(300);
+    expect(compactMelodyCommand('{"p":[60,62,64,65,64,62,60,57]}', spec)?.args).toMatchObject({ clipId });
+    expect(compactMelodyCommand('{"p":[60,61,64,65,64,62,60,57]}', spec)).toBeNull();
+    expect(compactMelodyCommand('{"p":[60,60,60,60,60,60,60,60]}', spec)).toBeNull();
+  });
+
+  it("leaves compound melody requests to the full agent loop", async () => {
+    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
+    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
+    await useStore.getState().refresh();
+
+    for (const ask of [
+      "give Keys a melody, keep it in key, and make it faster",
+      "give Keys a melody, keep it in key; make it faster",
+      "give Keys a melody, keep it in key, after that make it faster",
+      "give Keys a melody, keep it in key, next make it faster",
+      "give Keys a melody, keep it in key, finally make it faster",
+    ]) expect(compactMelodySpec(ask, snap())).toBeNull();
+  });
+
   it("agenticLoopOn stays off without the developer build flag", () => {
     expect(agenticLoopOn()).toBe(false);
+  });
+
+  it("the explicit build flag enables the loop in a packaged build", () => {
+    expect(agenticLoopEnabled("1")).toBe(true);
+    expect(agenticLoopEnabled(undefined)).toBe(false);
+    expect(loopAllowedFor("1", false)).toBe(true);
+    expect(loopAllowedFor("1", true)).toBe(false);
   });
 });
