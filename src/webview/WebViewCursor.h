@@ -25,6 +25,11 @@ inline std::optional<EditorCursorKind> parseEditorCursorKind (const juce::String
     return std::nullopt;
 }
 
+inline bool editorCursorNeedsNativeRefresh (EditorCursorKind kind)
+{
+    return kind != EditorCursorKind::defaultCursor;
+}
+
 #if JUCE_MAC
 void setMacEditorCursor (EditorCursorKind kind);
 #endif

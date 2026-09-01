@@ -23,18 +23,29 @@ NSCursor* cursorForKind (mosh::EditorCursorKind kind)
 mosh::EditorCursorKind desiredCursor = mosh::EditorCursorKind::defaultCursor;
 id cursorEventMonitor = nil;
 bool cursorRefreshPending = false;
+bool cursorOverrideActive = false;
 
 void applyDesiredCursorAfterWebKit()
 {
-    if (cursorRefreshPending)
+    if (! cursorOverrideActive || cursorRefreshPending)
         return;
 
     cursorRefreshPending = true;
     dispatch_after (dispatch_time (DISPATCH_TIME_NOW, 16 * NSEC_PER_MSEC),
                     dispatch_get_main_queue(), ^{
         cursorRefreshPending = false;
-        [cursorForKind (desiredCursor) set];
+        if (cursorOverrideActive)
+            [cursorForKind (desiredCursor) set];
     });
+}
+
+void removeCursorEventMonitor()
+{
+    if (cursorEventMonitor == nil)
+        return;
+
+    [NSEvent removeMonitor:cursorEventMonitor];
+    cursorEventMonitor = nil;
 }
 
 void installCursorEventMonitor()
@@ -60,8 +71,18 @@ namespace mosh
 void setMacEditorCursor (EditorCursorKind kind)
 {
     jassert ([NSThread isMainThread]);
-    installCursorEventMonitor();
     desiredCursor = kind;
+
+    if (! editorCursorNeedsNativeRefresh (kind))
+    {
+        cursorOverrideActive = false;
+        removeCursorEventMonitor();
+        [cursorForKind (kind) set];
+        return;
+    }
+
+    cursorOverrideActive = true;
+    installCursorEventMonitor();
     [cursorForKind (kind) set];
     applyDesiredCursorAfterWebKit();
 }
