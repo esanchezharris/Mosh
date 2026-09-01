@@ -6491,13 +6491,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 10 }}))),
                    "humanize ok");
             const auto run1 = notesOf (nc);
-            { bool inRange = run1.size() == fixture.size();
-              for (size_t i = 0; i < run1.size() && inRange; ++i)
-                  inRange = std::abs (std::get<0> (run1[i]) - std::get<0> (fixture[i])) <= 0.025 + 1.0e-9
-                         && std::abs (std::get<2> (run1[i]) - std::get<2> (fixture[i])) < 1.0e-9
-                         && std::get<1> (run1[i]) == std::get<1> (fixture[i])
-                         && std::abs (std::get<3> (run1[i]) - std::get<3> (fixture[i])) <= 11
-                         && std::get<3> (run1[i]) >= 1 && std::get<3> (run1[i]) <= 127;
+            // Pair notes BY PITCH (unique in this fixture), not by sorted position:
+            // two fixture notes tie at start 2.0, so ±jitter can flip their sort
+            // order depending on the humanize seed — which is seeded per command
+            // and therefore shifts whenever ANY earlier section adds a command.
+            // Position-pairing made this check fail on unrelated selftest growth.
+            { auto byPitch = [] (auto v) {
+                  std::sort (v.begin(), v.end(), [] (const auto& a, const auto& b)
+                             { return std::get<1> (a) < std::get<1> (b); });
+                  return v; };
+              const auto r1 = byPitch (run1);
+              const auto fx = byPitch (fixture);
+              bool inRange = r1.size() == fx.size();
+              for (size_t i = 0; i < r1.size() && inRange; ++i)
+                  inRange = std::abs (std::get<0> (r1[i]) - std::get<0> (fx[i])) <= 0.025 + 1.0e-9
+                         && std::abs (std::get<2> (r1[i]) - std::get<2> (fx[i])) < 1.0e-9
+                         && std::get<1> (r1[i]) == std::get<1> (fx[i])
+                         && std::abs (std::get<3> (r1[i]) - std::get<3> (fx[i])) <= 11
+                         && std::get<3> (r1[i]) >= 1 && std::get<3> (r1[i]) <= 127;
               check (inRange, "humanize: timing within ±(amount% of a 16th), velocity within ±amount, pitches/lengths untouched"); }
             check (! matchNotes (run1, fixture), "humanize actually moved something");
             undoRestores ("undo after humanize ok");
