@@ -622,7 +622,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
             "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
             "normalize_clip", "set_clip_warp", "stretch_clip",
             "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
-            "set_plugin_param", "bypass_plugin", "open_plugin_editor",
+            "set_plugin_param", "bypass_plugin", "open_plugin_editor", "load_preset",
             "set_track_automation_mode", "write_automation_curve",
             "add_automation_point", "set_automation_point", "remove_automation_point",
             "clear_automation", "replace_instrument", "hot_swap_instrument",
@@ -805,6 +805,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "load_builtin")      return cmdLoadBuiltin (args);
     if (name == "set_track_type")    return cmdSetTrackType (args);
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
+    if (name == "list_presets")      return cmdListPresets (args);
+    if (name == "load_preset")       return cmdLoadPreset (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
     if (name == "set_drum_pad")      return cmdSetDrumPad (args);

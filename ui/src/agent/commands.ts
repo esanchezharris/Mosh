@@ -216,6 +216,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash) — omit kit for the bundled default", args: [S("trackId"), S("kit", false, "kit id from list_drum_kits")] },
   { command: "assign_sample", desc: "Map an audio file to a track's sampler: mode 'drum' (default, one-shot pad at one note) or 'melodic' (a pitched 808/bass played across the keyboard, note-length gated)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127: the pad (drum) or the sample's root note (melodic)"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false), S("mode", false, "'drum' (default) or 'melodic'")] },
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins). An INSTRUMENT is refused on a track holding audio clips (silent-by-construction) — use an instrument track. replaceInstrument:true hot-swaps an incoming instrument for the track's current one (same slot, one undo step) instead of stacking", args: [S("trackId"), S("pluginId"), N("index", false, "chain position"), B("replaceInstrument", false, "incoming instrument replaces the track's existing one instead of appending")] },
+  { command: "list_presets", desc: "List the instrument preset library (read-only): bundled + user presets under presets/<plugin>/ — the 'file' paths load_preset takes. Plugin keys today: 'vital' (.vital patches) and '4osc' (built-in synth patches)", args: [S("plugin", false, "filter to one plugin key, e.g. 'vital' or '4osc'")] },
+  { command: "load_preset", desc: "Load a preset onto a track's instrument as one undo step (file from list_presets). A .vital targets the track's hosted Vital only (never another synth); a .json targets the built-in 4OSC. This is how a melodic track gets a REAL sound instead of the default patch", args: [S("trackId"), S("file", true, "preset file path from list_presets"), N("index", false, "target a specific plugin chain position; omit to auto-find the instrument")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
   { command: "reorder_plugin", desc: "Move a plugin to a new chain position", args: [S("trackId"), N("index"), N("toIndex")] },
@@ -441,6 +443,8 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "load_drum_kit": return `Loaded the drum kit`;
     case "assign_sample": return `Assigned a sample to a pad`;
     case "load_plugin": return `Added a plugin`;
+    case "list_presets": return `Listed the preset library`;
+    case "load_preset": return `Loaded an instrument preset`;
     case "set_plugin_param": return `Tweaked a plugin parameter`;
     case "bypass_plugin": return a.bypassed ? `Bypassed a plugin` : `Enabled a plugin`;
     case "reorder_plugin": return `Reordered a plugin`;

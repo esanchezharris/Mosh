@@ -534,6 +534,7 @@ const MOCK_TXN_READS = new Set([
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
   "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
+  "list_presets",
   "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
@@ -4558,6 +4559,39 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         ],
         defaultKit: "mosh-kit",
       });
+    // P1 preset seam. Mirrors native cmdListPresets/cmdLoadPreset CONTRACTS: a fixed
+    // library here (bundled 4osc bank + one fake user .vital), and load_preset finds
+    // the track's instrument and reports what it applied — no real plugin state in
+    // the mock, but the same result shape and the same failure modes.
+    case "list_presets": {
+      const lib = [
+        { plugin: "4osc", name: "mosh-bass", file: "/presets/4osc/mosh-bass.json", source: "bundled" },
+        { plugin: "4osc", name: "mosh-lead", file: "/presets/4osc/mosh-lead.json", source: "bundled" },
+        { plugin: "4osc", name: "mosh-pad", file: "/presets/4osc/mosh-pad.json", source: "bundled" },
+        { plugin: "vital", name: "user-patch", file: "/presets/vital/user-patch.vital", source: "user" },
+      ];
+      const filter = str(args.plugin, "").toLowerCase();
+      return ok(command, { presets: filter ? lib.filter((p) => p.plugin === filter) : lib });
+    }
+    case "load_preset": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const file = str(args.file, "");
+      if (!file) return err(command, "preset file not found: ");
+      const isVital = file.endsWith(".vital");
+      const inst = (t.plugins ?? []).find((p) =>
+        isVital ? p.isInstrument && /vital/i.test(p.name) : p.isInstrument && !!p.builtin);
+      if (!inst)
+        return err(command, isVital
+          ? "no Vital instrument on this track (a .vital preset only targets Vital)"
+          : "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
+      pushUndo();
+      invalidate();
+      const preset = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
+      return ok(command, isVital
+        ? { plugin: inst.name, preset, note: "state sent; verify audibly (Vital applies patches asynchronously)" }
+        : { plugin: "4osc", preset, paramsApplied: 8 });
+    }
     case "apply_choke": {
       const f = findClip(str(args.clipId));
       if (!f?.clip.notes) return err(command, "not a midi clip");

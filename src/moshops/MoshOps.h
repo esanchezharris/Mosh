@@ -371,6 +371,8 @@ private:
     // and the track-type flag a drum track binds to (see Ids.h trackType).
     juce::var cmdSetTrackType   (const juce::var& args);
     juce::var cmdLoadDrumKit    (const juce::var& args);
+    juce::var cmdListPresets    (const juce::var& args);   // read-only preset library scan
+    juce::var cmdLoadPreset     (const juce::var& args);   // apply a preset to a track's instrument
     juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdSetDrumLane    (const juce::var& args);
     // Drum-rack pads: per-pad mixer/identity/choke, and the inverse of assign_sample.
@@ -752,6 +754,11 @@ private:
     // The library root (one folder per kit) and a named kit inside it.
     juce::File           drumKitsRoot() const;
     juce::File           drumKitDir (const juce::String& kitId) const;
+    // Preset library roots (P1 preset seam). Bundled mirrors drumKitsRoot's resolution
+    // (env MOSH_PRESETS_DIR → app bundle Resources/presets → exe-sibling presets);
+    // user is ~/Library/Mosh/presets/<pluginKey>/ and wins on name collisions.
+    juce::File           presetsBundledRoot() const;
+    juce::File           presetsUserRoot() const;
     // True when at least one bundled pad is resolvable — guard mutations that load
     // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
     bool                 drumKitAvailable (const juce::String& kitId = {}) const;

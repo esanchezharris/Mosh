@@ -1529,6 +1529,265 @@ juce::File MoshOps::drumKitDir (const juce::String& kitId) const
 
 juce::File MoshOps::drumKitDir() const { return drumKitDir (kDefaultKitId); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P1 preset seam — list_presets / load_preset (flywheel pillar 1: real sounds).
+//
+// Library layout: <root>/<pluginKey>/<preset file>, pluginKey ∈ {"vital","4osc",…}.
+// Two roots: the bundled bank (resolution mirrors drumKitsRoot) and the user's
+// ~/Library/Mosh/presets. `.vital` files target a hosted Vital VST3; `.json`
+// files are 4OSC patches ({"params": {"<display name>": normalized 0..1},
+// "waveShapes": [perOscInt…]}).
+// ─────────────────────────────────────────────────────────────────────────────
+
+juce::File MoshOps::presetsBundledRoot() const
+{
+    using juce::File;
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_PRESETS_DIR", {});
+    if (env.isNotEmpty())
+    {
+        File d (env);
+        if (d.isDirectory()) return d;
+    }
+    auto appFile = File::getSpecialLocation (File::currentApplicationFile);
+    auto bundled = appFile.getChildFile ("Contents/Resources/presets");
+    if (bundled.isDirectory()) return bundled;
+    auto exeDir = File::getSpecialLocation (File::currentExecutableFile)
+                      .getParentDirectory().getChildFile ("presets");
+    if (exeDir.isDirectory()) return exeDir;
+    return bundled;   // best-effort; callers guard on isDirectory()
+}
+
+juce::File MoshOps::presetsUserRoot() const
+{
+    return juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+        .getChildFile ("Library/Mosh/presets");
+}
+
+namespace
+{
+    // Wrap a raw `.vital` (plain JSON) into the blob a JUCE VST3 HOST accepts via
+    // AudioPluginInstance::setStateInformation. The host wrapper first runs
+    // AudioProcessor::getXmlFromBinary, which demands the copyXmlToBinary framing:
+    // juce::magicXmlNumber ("VC2!", LE) + LE uint32 xml length + single-line
+    // <VST3PluginState><IComponent>MemoryBlock-base64</IComponent></VST3PluginState>
+    // + trailing NUL — anything else makes setStateInformation a silent no-op (the
+    // 2026-05-11 MonsterDAWW diagnosis; its Python port, vital_state_wrap.py, is the
+    // byte-verified reference for this framing). Here MemoryBlock::toBase64Encoding
+    // is the real JUCE call, so only the framing is reproduced (copyXmlToBinary
+    // itself is protected inside AudioProcessor).
+    juce::MemoryBlock wrapVitalStateForJuceVst3Host (const juce::MemoryBlock& rawVitalJson)
+    {
+        juce::XmlElement root ("VST3PluginState");
+        root.createNewChildElement ("IComponent")->addTextElement (rawVitalJson.toBase64Encoding());
+        const auto xmlText = root.toString (juce::XmlElement::TextFormat().singleLine());
+        juce::MemoryBlock out;
+        juce::MemoryOutputStream mo (out, false);
+        mo.writeInt (0x21324356);                       // juce::magicXmlNumber, "VC2!" LE
+        const auto utf8 = xmlText.toRawUTF8();
+        const auto len = (int) strlen (utf8);
+        mo.writeInt (len);
+        mo.write (utf8, (size_t) len);
+        mo.writeByte (0);
+        mo.flush();
+        return out;
+    }
+
+    bool looksLikeWrappedState (const juce::MemoryBlock& b)
+    {
+        return b.getSize() >= 8 && juce::ByteOrder::littleEndianInt (b.getData()) == 0x21324356u;
+    }
+
+    // Apply/undo a whole external-plugin state blob. Same UAF-safe shape as
+    // SetPluginParamValueAction above: never holds the plugin across perform/undo —
+    // re-resolves by stable EditItemID every call, no-ops if unresolvable.
+    struct LoadPresetStateAction final : public juce::UndoableAction
+    {
+        LoadPresetStateAction (te::Edit& e, te::EditItemID id,
+                               juce::MemoryBlock before, juce::MemoryBlock after)
+            : edit (e), pluginItemId (id),
+              stateBefore (std::move (before)), stateAfter (std::move (after)) {}
+
+        bool perform() override        { apply (stateAfter);  return true; }
+        bool undo() override           { apply (stateBefore); return true; }
+        int  getSizeInUnits() override { return (int) (sizeof (*this) + stateBefore.getSize() + stateAfter.getSize()); }
+
+        void apply (const juce::MemoryBlock& blob)
+        {
+            if (blob.getSize() == 0) return;
+            auto plugin = edit.getPluginCache().getPluginFor (pluginItemId);
+            if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
+                if (auto* inst = ext->getAudioPluginInstance())
+                {
+                    inst->setStateInformation (blob.getData(), (int) blob.getSize());
+                    // Persist into the Edit's ValueTree so save/reload carries the patch.
+                    ext->flushPluginStateToValueTree();
+                }
+        }
+
+        te::Edit& edit;
+        const te::EditItemID pluginItemId;
+        const juce::MemoryBlock stateBefore, stateAfter;
+    };
+}
+
+juce::var MoshOps::cmdListPresets (const juce::var& args)
+{
+    const auto filter = args.getProperty ("plugin", var()).toString().toLowerCase();
+    juce::Array<var> out;
+    auto scanRoot = [&] (const juce::File& root, const char* source)
+    {
+        if (! root.isDirectory()) return;
+        for (const auto& pluginDir : root.findChildFiles (juce::File::findDirectories, false))
+        {
+            const auto key = pluginDir.getFileName().toLowerCase();
+            if (filter.isNotEmpty() && key != filter) continue;
+            for (const auto& f : pluginDir.findChildFiles (juce::File::findFiles, false))
+            {
+                const auto ext = f.getFileExtension().toLowerCase();
+                if (ext != ".vital" && ext != ".json") continue;
+                auto* o = new DynamicObject();
+                o->setProperty ("plugin", key);
+                o->setProperty ("name", f.getFileNameWithoutExtension());
+                o->setProperty ("file", f.getFullPathName());
+                o->setProperty ("source", source);
+                out.add (var (o));
+            }
+        }
+    };
+    scanRoot (presetsBundledRoot(), "bundled");
+    scanRoot (presetsUserRoot(), "user");
+    auto* data = new DynamicObject();
+    data->setProperty ("presets", var (out));
+    return okResult ("list_presets", var (data));
+}
+
+juce::var MoshOps::cmdLoadPreset (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const auto fileArg = args.getProperty ("file", var()).toString();
+    const int  index   = (int) args.getProperty ("index", -1);
+
+    auto* track = findTrack (trackId);
+    if (track == nullptr) return errResult ("load_preset", "no track");
+    juce::File file (fileArg);
+    if (! file.existsAsFile()) return errResult ("load_preset", "preset file not found: " + fileArg);
+    if (file.getSize() > 16 * 1024 * 1024) return errResult ("load_preset", "preset file too large");
+    const auto ext = file.getFileExtension().toLowerCase();
+    const auto presetName = file.getFileNameWithoutExtension();
+
+    // ── .vital → a hosted Vital VST3 on this track ───────────────────────────
+    if (ext == ".vital")
+    {
+        // Resolve the target BEFORE any transaction (G14: never open a txn that
+        // might stay empty). An explicit index wins; otherwise the first external
+        // synth whose name says Vital — deliberately NEVER any other synth, so a
+        // .vital can't blast Serum's state.
+        te::ExternalPlugin* target = nullptr;
+        if (index >= 0)
+            target = dynamic_cast<te::ExternalPlugin*> (findPlugin (trackId, index));
+        else
+            for (auto p : track->pluginList)
+                if (auto* e = dynamic_cast<te::ExternalPlugin*> (p))
+                    if (e->isSynth() && e->getName().containsIgnoreCase ("vital")) { target = e; break; }
+        if (target == nullptr || ! target->getName().containsIgnoreCase ("vital"))
+            return errResult ("load_preset", "no Vital instrument on this track (a .vital preset only targets Vital)");
+        auto* inst = target->getAudioPluginInstance();
+        if (inst == nullptr) return errResult ("load_preset", "Vital instance not available (plugin still loading?)");
+
+        juce::MemoryBlock raw;
+        if (! file.loadFileAsData (raw) || raw.getSize() == 0)
+            return errResult ("load_preset", "could not read preset file");
+        const auto blob = looksLikeWrappedState (raw) ? raw : wrapVitalStateForJuceVst3Host (raw);
+
+        juce::MemoryBlock before;
+        inst->getStateInformation (before);
+
+        beginTxn ("load_preset");
+        undoManager().perform (new LoadPresetStateAction (eng.edit(), target->itemID, std::move (before), blob));
+        logLine ("load_preset", args, true, {}, true);
+        emitTrackPatch (*track);
+        reactiveTouchTrack (trackId);
+        auto* data = new DynamicObject();
+        data->setProperty ("plugin", target->getName());
+        data->setProperty ("preset", presetName);
+        // HONESTY: the state blob reached the plugin, but Vital applies patches on
+        // its message-loop machinery — whether the PATCH audibly landed is proven
+        // by ear / a state round-trip in the running app, not by this return.
+        data->setProperty ("note", "state sent; verify audibly (Vital applies patches asynchronously)");
+        return okResult ("load_preset", var (data));
+    }
+
+    // ── .json → the built-in 4OSC on this track ──────────────────────────────
+    if (ext == ".json")
+    {
+        te::Plugin* target = index >= 0 ? findPlugin (trackId, index) : nullptr;
+        if (target == nullptr)
+            for (auto p : track->pluginList)
+                if (dynamic_cast<te::FourOscPlugin*> (p) != nullptr) { target = p; break; }
+        auto* fourOsc = dynamic_cast<te::FourOscPlugin*> (target);
+        if (fourOsc == nullptr)
+            return errResult ("load_preset", "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
+
+        const auto parsed = juce::JSON::parse (file.loadFileAsString());
+        const auto params = parsed.getProperty ("params", var());
+        auto* paramsObj = params.getDynamicObject();
+        const auto waveShapes = parsed.getProperty ("waveShapes", var());
+
+        // Resolve every named param BEFORE the txn (G14 again): apply-all-or-error.
+        struct Pending { te::AutomatableParameter* p; int index; float raw; };
+        juce::Array<Pending> pending;
+        juce::StringArray unknown;
+        if (paramsObj != nullptr)
+            for (const auto& prop : paramsObj->getProperties())
+            {
+                te::AutomatableParameter* found = nullptr; int fi = -1;
+                for (int i = 0; i < fourOsc->getNumAutomatableParameters(); ++i)
+                {
+                    auto ap = fourOsc->getAutomatableParameter (i);
+                    if (ap != nullptr && ap->paramName.equalsIgnoreCase (prop.name.toString())) { found = ap.get(); fi = i; break; }
+                }
+                if (found == nullptr) { unknown.add (prop.name.toString()); continue; }
+                const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) prop.value);
+                pending.add ({ found, fi, found->valueRange.convertFrom0to1 (norm) });
+            }
+        const bool hasShapes = waveShapes.isArray() && waveShapes.size() > 0;
+        if (pending.isEmpty() && ! hasShapes)
+            return errResult ("load_preset", "preset matched no 4OSC parameters"
+                              + juce::String (unknown.isEmpty() ? "" : " (unknown: " + unknown.joinIntoString (", ") + ")"));
+
+        beginTxn ("load_preset");
+        for (const auto& pe : pending)
+            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
+        if (hasShapes)
+        {
+            // Wave shape is a per-oscillator ValueTree property (not automatable).
+            // Find the oscillator child trees in order and set their waveShape with
+            // the undo manager, so the whole preset stays one undo step.
+            int osc = 0;
+            for (int i = 0; i < fourOsc->state.getNumChildren() && osc < waveShapes.size(); ++i)
+            {
+                auto child = fourOsc->state.getChild (i);
+                if (child.hasProperty (te::IDs::waveShape) || child.getType().toString().containsIgnoreCase ("osc"))
+                {
+                    child.setProperty (te::IDs::waveShape, (int) waveShapes[osc], &undoManager());
+                    ++osc;
+                }
+            }
+        }
+        logLine ("load_preset", args, true, {}, true);
+        emitTrackPatch (*track);
+        reactiveTouchTrack (trackId);
+        auto* data = new DynamicObject();
+        data->setProperty ("plugin", "4osc");
+        data->setProperty ("preset", presetName);
+        data->setProperty ("paramsApplied", pending.size());
+        if (! unknown.isEmpty()) data->setProperty ("unknownParams", unknown.joinIntoString (", "));
+        return okResult ("load_preset", var (data));
+    }
+
+    return errResult ("load_preset", "unsupported preset type: " + ext);
+}
+
 bool MoshOps::drumKitAvailable (const juce::String& kitId) const
 {
     const auto dir = drumKitDir();
