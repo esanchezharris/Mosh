@@ -20,7 +20,15 @@ namespace mosh
 using Resource = juce::WebBrowserComponent::Resource;
 
 WebBridge::WebBridge() = default;
-WebBridge::~WebBridge() = default;   // NativeSpeech is complete here → unique_ptr can destroy it
+WebBridge::~WebBridge()
+{
+   #if JUCE_MAC
+    setMacEditorCursor (EditorCursorKind::defaultCursor);
+   #else
+    if (webView != nullptr)
+        webView->setMouseCursor (juce::MouseCursor::NormalCursor);
+   #endif
+}
 
 namespace
 {

@@ -87,7 +87,13 @@ func notes(pid: Int32) -> [NoteState] {
     }
 }
 
-func postMouse(_ type: CGEventType, at point: CGPoint, flags: CGEventFlags = []) {
+func postMouse(
+    _ type: CGEventType,
+    at point: CGPoint,
+    app: NSRunningApplication,
+    flags: CGEventFlags = []
+) {
+    requireMoshFrontmost(app, phase: "mouse event")
     let source = CGEventSource(stateID: .hidSystemState)
     let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
     event?.flags = flags
@@ -106,9 +112,9 @@ func requireMoshFrontmost(_ app: NSRunningApplication, phase: String) {
 func click(_ note: NoteState, app: NSRunningApplication, flags: CGEventFlags = []) {
     requireMoshFrontmost(app, phase: "click")
     let point = CGPoint(x: note.x + note.width / 2, y: note.y + note.height / 2)
-    postMouse(.mouseMoved, at: point, flags: flags)
-    postMouse(.leftMouseDown, at: point, flags: flags)
-    postMouse(.leftMouseUp, at: point, flags: flags)
+    postMouse(.mouseMoved, at: point, app: app, flags: flags)
+    postMouse(.leftMouseDown, at: point, app: app, flags: flags)
+    postMouse(.leftMouseUp, at: point, app: app, flags: flags)
     RunLoop.current.run(until: Date().addingTimeInterval(0.25))
 }
 
@@ -116,14 +122,14 @@ func drag(_ note: NoteState, deltaX: Double, app: NSRunningApplication) {
     requireMoshFrontmost(app, phase: "drag")
     let start = CGPoint(x: note.x + note.width / 2, y: note.y + note.height / 2)
     let end = CGPoint(x: start.x + deltaX, y: start.y)
-    postMouse(.mouseMoved, at: start)
-    postMouse(.leftMouseDown, at: start)
+    postMouse(.mouseMoved, at: start, app: app)
+    postMouse(.leftMouseDown, at: start, app: app)
     for step in 1...10 {
         let t = Double(step) / 10
-        postMouse(.leftMouseDragged, at: CGPoint(x: start.x + deltaX * t, y: start.y))
+        postMouse(.leftMouseDragged, at: CGPoint(x: start.x + deltaX * t, y: start.y), app: app)
         RunLoop.current.run(until: Date().addingTimeInterval(0.015))
     }
-    postMouse(.leftMouseUp, at: end)
+    postMouse(.leftMouseUp, at: end, app: app)
     RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 }
 
@@ -134,7 +140,9 @@ func commandZ(app: NSRunningApplication) {
     let up = CGEvent(keyboardEventSource: source, virtualKey: 6, keyDown: false)
     down?.flags = .maskCommand
     up?.flags = .maskCommand
+    requireMoshFrontmost(app, phase: "Undo key down")
     down?.post(tap: .cghidEventTap)
+    requireMoshFrontmost(app, phase: "Undo key up")
     up?.post(tap: .cghidEventTap)
     RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 }

@@ -164,6 +164,7 @@ func focusWindow(pid: Int32, app: NSRunningApplication) {
     let titleBarPoint = CGPoint(x: point.x + size.width / 2, y: point.y + 12)
     let source = CGEventSource(stateID: .hidSystemState)
     for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        requireMoshFrontmost(app, phase: "window focus event")
         CGEvent(
             mouseEventSource: source,
             mouseType: type,
