@@ -172,6 +172,12 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 browserReadyForEvents = true;
+               #if JUCE_MAC
+                setMacEditorCursor (EditorCursorKind::defaultCursor);
+               #else
+                if (webView != nullptr)
+                    webView->setMouseCursor (juce::MouseCursor::NormalCursor);
+               #endif
                 // A page (re)load orphans any note the previous page was holding: its
                 // keyup handlers are gone, so nothing will ever send the note-off. Fire a
                 // panic through the ordinary command seam — this is the one moment we know

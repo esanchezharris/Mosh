@@ -4,7 +4,7 @@ import { bootLive, bootProTools } from "./helpers";
 
 type CommandTrace = { command: string; args: Record<string, unknown> };
 type EditorWindow = Window & {
-  __moshStore: {
+  __moshStore?: {
     getState: () => {
       snapshot: Snapshot;
       editingClipId: string | null;
@@ -44,7 +44,7 @@ for (const shell of shells) {
     if (!before) throw new Error("marquee target has no browser geometry");
     const normalBackground = await note.evaluate((element) => getComputedStyle(element).backgroundColor);
     const original = await page.evaluate((noteOrdinal) => {
-      const state = (window as unknown as EditorWindow).__moshStore.getState();
+      const state = (window as EditorWindow).__moshStore!.getState();
       const clip = state.snapshot.tracks.flatMap((track) => track.clips)
         .find((candidate) => candidate.id === state.editingClipId);
       const target = clip?.notes?.[noteOrdinal];
@@ -76,14 +76,14 @@ for (const shell of shells) {
     expect(colorDistance).toBeGreaterThan(80);
     expect(selectedCue).toMatchObject({ outlineStyle: "solid", outlineWidth: "2px" });
 
-    const traceStart = await page.evaluate(() => (window as unknown as EditorWindow).__moshCmdTrace?.length ?? 0);
+    const traceStart = await page.evaluate(() => (window as EditorWindow).__moshCmdTrace?.length ?? 0);
     await page.keyboard.press("Shift+ArrowRight");
     await expect.poll(() => page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).find((entry) => entry.command === "set_note")?.args ?? null;
     }, traceStart)).not.toBeNull();
     const command = await page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).find((entry) => entry.command === "set_note")?.args;
     }, traceStart);
     expect(Number(command?.start ?? original.start)).toBe(original.start);
@@ -103,13 +103,13 @@ for (const shell of shells) {
     const [barBox, halfBox, beatPx] = await Promise.all([
       barLine.boundingBox(),
       halfBeatLine.boundingBox(),
-      page.evaluate(() => (window as unknown as EditorWindow).__moshStore.getState().pianoRollBeatPx),
+      page.evaluate(() => (window as EditorWindow).__moshStore!.getState().pianoRollBeatPx),
     ]);
     if (!barBox || !halfBox) throw new Error("adaptive grid lines have no browser geometry");
     expect(halfBox.x - barBox.x).toBeCloseTo(beatPx / 2, 1);
 
     const target = await page.evaluate(() => {
-      const state = (window as unknown as EditorWindow).__moshStore.getState();
+      const state = (window as EditorWindow).__moshStore!.getState();
       const clip = state.snapshot.tracks.flatMap((track) => track.clips)
         .find((candidate) => candidate.id === state.editingClipId);
       const notes = clip?.notes ?? [];
@@ -135,7 +135,7 @@ for (const shell of shells) {
     await expect(grid).toHaveCSS("cursor", "ew-resize");
     expect(await endGrip.evaluate((element) => getComputedStyle(element).cursor)).toBe("ew-resize");
 
-    const traceStart = await page.evaluate(() => (window as unknown as EditorWindow).__moshCmdTrace?.length ?? 0);
+    const traceStart = await page.evaluate(() => (window as EditorWindow).__moshCmdTrace?.length ?? 0);
     await startGrip.hover();
     const gripBox = await startGrip.boundingBox();
     if (!gripBox) throw new Error("left resize grip has no browser geometry");
@@ -147,11 +147,11 @@ for (const shell of shells) {
     await page.mouse.up();
 
     await expect.poll(() => page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).find((entry) => entry.command === "set_note")?.args ?? null;
     }, traceStart)).not.toBeNull();
     const args = await page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).find((entry) => entry.command === "set_note")?.args;
     }, traceStart);
     expect(Number(args?.start)).toBeCloseTo(target.start - 0.5, 6);
@@ -163,7 +163,7 @@ for (const shell of shells) {
     await shell.open(page);
 
     const target = await page.evaluate(() => {
-      const state = (window as unknown as EditorWindow).__moshStore.getState();
+      const state = (window as EditorWindow).__moshStore!.getState();
       const clip = state.snapshot.tracks.flatMap((track) => track.clips)
         .find((candidate) => candidate.id === state.editingClipId);
       const notes = clip?.notes ?? [];
@@ -183,7 +183,7 @@ for (const shell of shells) {
     const hitClass = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.className ?? "", pointer);
     expect(hitClass).toContain("pr-note");
     expect(hitClass).not.toContain("pr-note-grip");
-    const traceStart = await page.evaluate(() => (window as unknown as EditorWindow).__moshCmdTrace?.length ?? 0);
+    const traceStart = await page.evaluate(() => (window as EditorWindow).__moshCmdTrace?.length ?? 0);
 
     await page.mouse.move(pointer.x, pointer.y);
     await page.mouse.down();
@@ -202,11 +202,11 @@ for (const shell of shells) {
     await page.mouse.up();
 
     await expect.poll(() => page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).find((entry) => entry.command === "set_note")?.args ?? null;
     }, traceStart)).not.toBeNull();
     const args = await page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).find((entry) => entry.command === "set_note")?.args;
     }, traceStart);
     expect(Number(args?.pitch)).toBe(target.pitch - Math.round(scrollDelta / 15));
@@ -217,7 +217,7 @@ for (const shell of shells) {
     await shell.open(page);
 
     const original = await page.evaluate(() => {
-      const state = (window as unknown as EditorWindow).__moshStore.getState();
+      const state = (window as EditorWindow).__moshStore!.getState();
       const clip = state.snapshot.tracks.flatMap((track) => track.clips)
         .find((candidate) => candidate.id === state.editingClipId);
       const notes = (clip?.notes ?? []).map((note) => ({ ...note }));
@@ -256,24 +256,24 @@ for (const shell of shells) {
     const before = await notes.nth(original.targetOrdinal).boundingBox();
     if (!before) throw new Error("reindex drag target has no browser geometry");
     const beatPx = await page.evaluate(() =>
-      (window as unknown as EditorWindow).__moshStore.getState().pianoRollBeatPx);
+      (window as EditorWindow).__moshStore!.getState().pianoRollBeatPx);
     const target = original.notes[original.targetOrdinal];
     const deltaBeats = original.destination - target.start;
     const x = before.x + before.width / 2;
     const y = before.y + before.height / 2;
     const traceStart = await page.evaluate(() =>
-      (window as unknown as EditorWindow).__moshCmdTrace?.length ?? 0);
+      (window as EditorWindow).__moshCmdTrace?.length ?? 0);
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x + deltaBeats * beatPx, y, { steps: 10 });
     await page.mouse.up();
 
     await expect.poll(() => page.evaluate((from) => {
-      const trace = (window as unknown as EditorWindow).__moshCmdTrace ?? [];
+      const trace = (window as EditorWindow).__moshCmdTrace ?? [];
       return trace.slice(from).filter((entry) => entry.command === "set_note").length;
     }, traceStart)).toBe(1);
     const moved = await page.evaluate(() => {
-      const state = (window as unknown as EditorWindow).__moshStore.getState();
+      const state = (window as EditorWindow).__moshStore!.getState();
       const clip = state.snapshot.tracks.flatMap((track) => track.clips)
         .find((candidate) => candidate.id === state.editingClipId);
       return clip?.notes ?? [];
@@ -301,7 +301,7 @@ for (const shell of shells) {
 
     await page.keyboard.press("Meta+z");
     await expect.poll(() => page.evaluate(({ pitch, start }) => {
-      const state = (window as unknown as EditorWindow).__moshStore.getState();
+      const state = (window as EditorWindow).__moshStore!.getState();
       const clip = state.snapshot.tracks.flatMap((track) => track.clips)
         .find((candidate) => candidate.id === state.editingClipId);
       return clip?.notes?.find((note) => note.pitch === pitch)?.start === start;
