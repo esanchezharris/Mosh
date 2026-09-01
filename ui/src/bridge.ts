@@ -45,6 +45,15 @@ export const isRealNative = (): boolean => realNative();
 /** Deterministic brain substitutes are limited to Vite development and explicit browser e2e. */
 export const demoBrainAvailable = (): boolean => MOCK_ENABLED && !realNative();
 
+export const EDITOR_CURSOR_KINDS = [
+  "default",
+  "crosshair",
+  "open-hand",
+  "closed-hand",
+  "resize-left-right",
+] as const;
+export type EditorCursorKind = (typeof EDITOR_CURSOR_KINDS)[number];
+
 // Lazily-bound native functions (created once the backend has registered them).
 const nativeCache = new Map<string, (...a: unknown[]) => Promise<unknown>>();
 function native(name: string) {
@@ -54,6 +63,11 @@ function native(name: string) {
     nativeCache.set(name, f);
   }
   return f;
+}
+
+export async function setEditorCursor(kind: EditorCursorKind): Promise<void> {
+  if (!realNative()) return;
+  await native("set_editor_cursor")({ kind });
 }
 
 // ── The public seam ─────────────────────────────────────────────────────────

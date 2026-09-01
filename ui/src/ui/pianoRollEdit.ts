@@ -106,6 +106,17 @@ export function nudgeEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>,
               .map((n) => ({ i: n.i, start: Math.max(0, n.start + deltaBeats) }));
 }
 
+export function lengthEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>,
+                            deltaBeats: number, minLengthBeats: number): NoteEdit[] {
+  if (deltaBeats === 0 || minLengthBeats <= 0) return [];
+  return notes.flatMap((n) => {
+    if (!sel.has(n.i)) return [];
+    const minimumLength = Math.min(n.length, minLengthBeats);
+    const length = Math.max(minimumLength, n.length + deltaBeats);
+    return length === n.length ? [] : [{ i: n.i, length }];
+  });
+}
+
 /** Keyboard velocity change (Cmd+Up/Down), clamped to the engine's 1..127. */
 export function velocityEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>, delta: number): NoteEdit[] {
   if (delta === 0) return [];

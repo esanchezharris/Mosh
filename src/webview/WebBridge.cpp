@@ -1,5 +1,6 @@
 #include "WebBridge.h"
 #include "UiResourcePathGuard.h"
+#include "WebViewCursor.h"
 #include "../agent/CertifiedSkillLoader.h"
 #include "../brain/BrainProxy.h"
 #include "../voice/NativeSpeech.h"
@@ -23,6 +24,23 @@ WebBridge::~WebBridge() = default;   // NativeSpeech is complete here → unique
 
 namespace
 {
+   #if ! JUCE_MAC
+    juce::MouseCursor juceCursorForKind (EditorCursorKind kind)
+    {
+        switch (kind)
+        {
+            case EditorCursorKind::defaultCursor:   return juce::MouseCursor::NormalCursor;
+            case EditorCursorKind::crosshair:       return juce::MouseCursor::CrosshairCursor;
+            case EditorCursorKind::openHand:        return juce::MouseCursor::DraggingHandCursor;
+            case EditorCursorKind::closedHand:      return juce::MouseCursor::DraggingHandCursor;
+            case EditorCursorKind::resizeLeftRight: return juce::MouseCursor::LeftRightResizeCursor;
+        }
+
+        jassertfalse;
+        return juce::MouseCursor::NormalCursor;
+    }
+   #endif
+
     juce::String mimeForExtension (const juce::String& ext)
     {
         static const std::map<juce::String, juce::String> types {
@@ -167,6 +185,37 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 auto* ok = new juce::DynamicObject();
                 ok->setProperty ("ok", true);
                 completion (juce::var (ok));
+            })
+        .withNativeFunction (
+            juce::Identifier ("set_editor_cursor"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                auto* result = new juce::DynamicObject();
+                const auto rawKind = args.size() == 1
+                    ? args[0].getProperty ("kind", juce::var()).toString()
+                    : juce::String();
+                const auto kind = parseEditorCursorKind (rawKind);
+
+                if (! kind.has_value())
+                {
+                    result->setProperty ("ok", false);
+                    result->setProperty ("error", "invalid editor cursor kind");
+                    completion (juce::var (result));
+                    return;
+                }
+
+               #if JUCE_MAC
+                juce::ignoreUnused (this);
+                setMacEditorCursor (*kind);
+               #else
+                if (webView != nullptr)
+                    webView->setMouseCursor (juceCursorForKind (*kind));
+               #endif
+
+                result->setProperty ("ok", true);
+                result->setProperty ("kind", rawKind);
+                completion (juce::var (result));
             })
         // The single mutation entry point (MoshOps, 02). Wired in Stage 1.
         .withNativeFunction (

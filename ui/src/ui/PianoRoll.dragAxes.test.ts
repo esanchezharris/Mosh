@@ -14,16 +14,24 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PianoRoll } from "./PianoRoll";
+import { PianoRoll, pianoRollNoteGripWidth, pianoRollNoteHitAtX } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { useLive } from "../live/liveState";
 import { FEEL_DEFAULTS } from "../interaction/feel";
 import type { CommandResult, Snapshot, Track } from "../types";
 
+const setEditorCursor = vi.hoisted(() => vi.fn());
+
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
-  return { ...actual, onEvent: vi.fn(() => () => {}), pickFiles: vi.fn(), pickSaveFile: vi.fn() };
+  return {
+    ...actual,
+    onEvent: vi.fn(() => () => {}),
+    pickFiles: vi.fn(),
+    pickSaveFile: vi.fn(),
+    setEditorCursor,
+  };
 });
 
 const ROW_H = 15, BEAT_PX = 42;
@@ -58,15 +66,42 @@ describe("piano-roll drag axis independence", () => {
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
 
-  const mount = (adaptive = false) => {
+  const mount = (adaptive = false, noteLength = OFF_GRID_LENGTH) => {
     // snap ON — this is the whole point: snapBeat must have teeth for the guard to matter.
     // The editor keeps its OWN grid now — the arrangement's snapDivision no longer reaches
     // it — so pin the division here. Adaptive off, or the step would follow the zoom.
     useSettings.getState().set("prGridDivision", "1/4");
     useSettings.getState().set("prGridAdaptive", adaptive);
     useSettings.getState().set("prGridTriplet", false);
-    useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, exec });
+    const snapshot: Snapshot = {
+      ...SNAPSHOT,
+      tracks: SNAPSHOT.tracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => ({
+          ...clip,
+          notes: (clip.notes ?? []).map((note) => ({ ...note, length: noteLength })),
+        })),
+      })),
+    };
+    useStore.setState({ snapshot, editingClipId: "c1", snap: true, exec });
     act(() => root.render(React.createElement(PianoRoll, { docked: true })));
+  };
+
+  const selectNote = () => {
+    const editor = host.querySelector<HTMLElement>('[data-testid="piano-roll"]');
+    if (!editor) throw new Error("piano-roll editor did not render");
+    editor.focus();
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "a", bubbles: true, metaKey: true,
+    })));
+    exec.mockClear();
+  };
+
+  const pressEditorKey = (key: string, options: KeyboardEventInit = {}) => {
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...options })));
+    return exec.mock.calls.find((call) => call[0] === "set_note")?.[1] as
+      | { start?: number; pitch?: number; length?: number }
+      | undefined;
   };
 
   /**
@@ -133,6 +168,7 @@ describe("piano-roll drag axis independence", () => {
     exec = vi.fn(async (command: string): Promise<CommandResult> => ({ ok: true, command }));
     useSettings.getState().set("scaleLock", false);
     useLive.setState({ drawMode: true });
+    setEditorCursor.mockClear();
   });
 
   afterEach(() => {
@@ -167,6 +203,35 @@ describe("piano-roll drag axis independence", () => {
     expect(dragNote(BEAT_PX, 0)?.start).toBe(2);
   });
 
+  it("Shift+Right lengthens the selected note by one grid step without moving its start", () => {
+    mount(false, 2);
+    selectNote();
+
+    const sent = pressEditorKey("ArrowRight", { shiftKey: true });
+
+    expect(sent?.length).toBe(3);
+    expect(sent?.start).toBeUndefined();
+  });
+
+  it("Shift+Left shortens the selected note by one grid step without moving its start", () => {
+    mount(false, 2);
+    selectNote();
+
+    const sent = pressEditorKey("ArrowLeft", { shiftKey: true });
+
+    expect(sent?.length).toBe(1);
+    expect(sent?.start).toBeUndefined();
+  });
+
+  it("Shift+Up and Shift+Down transpose selected notes by octaves", () => {
+    mount(false, 2);
+    selectNote();
+    expect(pressEditorKey("ArrowUp", { shiftKey: true })?.pitch).toBe(72);
+
+    exec.mockClear();
+    expect(pressEditorKey("ArrowDown", { shiftKey: true })?.pitch).toBe(48);
+  });
+
   it("Option-drag moves a note off-grid without disabling snap", () => {
     mount();
     expect(dragNote(BEAT_PX, 0, true)?.start).toBeCloseTo(OFF_GRID_START + 1, 6);
@@ -193,6 +258,94 @@ describe("piano-roll drag axis independence", () => {
     expect(end?.getAttribute("aria-label")).toMatch(/^Resize end/);
     expect(start?.classList.contains("pr-note-grip")).toBe(true);
     expect(end?.classList.contains("pr-note-grip")).toBe(true);
+    expect(start?.style.width).toBe("10px");
+    expect(end?.style.width).toBe("10px");
+  });
+
+  it("advertises note-body and resize-edge gestures before pointer-down", () => {
+    mount();
+    const grid = host.querySelector<HTMLElement>(".pr-grid");
+    const note = host.querySelector<HTMLElement>(".pr-note");
+    const start = host.querySelector<HTMLElement>(".pr-note-grip-start");
+    const end = host.querySelector<HTMLElement>(".pr-note-grip-end");
+    if (!grid || !note || !start || !end) throw new Error("piano-roll cursor targets did not render");
+
+    act(() => note.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerId: 31 })));
+    expect(grid.style.cursor).toBe("grab");
+    expect(setEditorCursor).toHaveBeenLastCalledWith("open-hand");
+
+    act(() => start.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerId: 31 })));
+    expect(grid.style.cursor).toBe("ew-resize");
+    expect(setEditorCursor).toHaveBeenLastCalledWith("resize-left-right");
+
+    act(() => end.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerId: 31 })));
+    expect(grid.style.cursor).toBe("ew-resize");
+    expect(setEditorCursor).toHaveBeenLastCalledWith("resize-left-right");
+
+    act(() => grid.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 31 })));
+    expect(grid.style.cursor).toBe("crosshair");
+    expect(setEditorCursor).toHaveBeenLastCalledWith("crosshair");
+
+    act(() => note.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, pointerId: 31, clientX: 20, clientY: 200,
+    })));
+    expect(grid.style.cursor).toBe("grabbing");
+    expect(setEditorCursor).toHaveBeenLastCalledWith("closed-hand");
+
+    act(() => note.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true, pointerId: 31, clientX: 20, clientY: 200,
+    })));
+    expect(grid.style.cursor).toBe("grab");
+    expect(setEditorCursor).toHaveBeenLastCalledWith("open-hand");
+  });
+
+  it("resolves each note pixel through one stable body-or-edge hit target", () => {
+    expect(pianoRollNoteGripWidth(62)).toBe(10);
+    expect(pianoRollNoteHitAtX(62, 10)).toBe("resize-start");
+    expect(pianoRollNoteHitAtX(62, 10.01)).toBe("move");
+    expect(pianoRollNoteHitAtX(62, 51.99)).toBe("move");
+    expect(pianoRollNoteHitAtX(62, 52)).toBe("resize-end");
+    expect(pianoRollNoteHitAtX(6, 1)).toBe("resize-start");
+    expect(pianoRollNoteHitAtX(6, 3)).toBe("move");
+    expect(pianoRollNoteHitAtX(6, 5)).toBe("resize-end");
+  });
+
+  it("keeps a dragged note attached to a stationary pointer while the editor scrolls", () => {
+    mount();
+    const note = host.querySelector<HTMLElement>(".pr-note");
+    const scroller = host.querySelector<HTMLElement>(".pr-scroll");
+    if (!note || !scroller) throw new Error("piano-roll note or scroller did not render");
+
+    scroller.scrollTop = 90;
+    act(() => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+    const topAtDown = Number.parseFloat(note.style.top);
+
+    act(() => note.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, pointerId: 21, clientX: 20, clientY: 200,
+    })));
+    scroller.scrollTop += 2 * ROW_H;
+    act(() => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+
+    const preview = host.querySelector<HTMLElement>(".pr-note");
+    expect(Number.parseFloat(preview?.style.top ?? "NaN") - topAtDown).toBe(2 * ROW_H);
+  });
+
+  it("keeps an end resize attached to a stationary pointer while the editor scrolls horizontally", () => {
+    mount();
+    const grip = host.querySelector<HTMLElement>(".pr-note-grip-end");
+    const note = host.querySelector<HTMLElement>(".pr-note");
+    const scroller = host.querySelector<HTMLElement>(".pr-scroll");
+    if (!grip || !note || !scroller) throw new Error("piano-roll resize grip or scroller did not render");
+
+    const widthAtDown = Number.parseFloat(note.style.width);
+    act(() => grip.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, pointerId: 22, clientX: 20, clientY: 200,
+    })));
+    scroller.scrollLeft = BEAT_PX;
+    act(() => scroller.dispatchEvent(new Event("scroll", { bubbles: true })));
+
+    const preview = host.querySelector<HTMLElement>(".pr-note");
+    expect(Number.parseFloat(preview?.style.width ?? "NaN")).toBeGreaterThan(widthAtDown);
   });
 
   it("renders every active adaptive snap subdivision", () => {

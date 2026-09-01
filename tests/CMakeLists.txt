@@ -50,6 +50,7 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
     test_webbridge_resource_guard.cpp
+    test_webview_cursor.cpp
     test_directory_listing.cpp
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
