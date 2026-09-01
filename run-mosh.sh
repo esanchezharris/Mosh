@@ -175,7 +175,7 @@ fi
 bundle_service() {                              # $1 = installed app
   local DEST="$1" SVC="$1/Contents/Resources/service"
   echo "bundling service → ${SVC#$ROOT/}"
-  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform" "$SVC/teardown/render"
+  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform" "$SVC/teardown/render" "$SVC/sft"
   # Top-level modules imported (transitively) by the bundled dirs below. brain_client
   # is needed by lyrics/core.py + bestofn/runtime.py; coverage (→ stitch) by the
   # generative adapters; memprobe + sa3_release by server.py's render worker, which
@@ -210,6 +210,7 @@ bundle_service() {                              # $1 = installed app
   # Route C transform (RAVE): the CLI + setup only — NEVER the .venv (torch, GBs).
   cp "$ROOT/service/transform/transform_cli.py" \
      "$ROOT/service/transform/setup-transform.sh" "$SVC/transform/" 2>/dev/null || true
+  cp "$ROOT/service/sft/launch_local_brain.py" "$SVC/sft/"
   # Machine-local venv pointers (gitignored). Absent ones fall back to run.sh defaults.
   [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
   [ -f "$ROOT/service/.recipe.env" ] && cp "$ROOT/service/.recipe.env" "$SVC/.recipe.env"
