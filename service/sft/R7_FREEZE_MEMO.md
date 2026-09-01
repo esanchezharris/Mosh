@@ -263,3 +263,29 @@ before relaunch. First attempt additionally used the wrong recipe
 direct `mlx_lm lora --config` launch with the registered recipe.
 Quarantined artifacts: `.adapters/a3b-r7-mlx-NANDEAD{,-2}`,
 `~/r7-train-nandead{,2}.log`.
+
+## Post-freeze: gate read and disposition (2026-08-20)
+
+Training completed cleanly 2026-08-20 09:53 (13,113/13,113 iters, final val 0.225,
+no NaN; ~45.5h wall incl. one owner-approved interim pause). Gate bench (novice-jam,
+final adapter matched-precision on the 4-bit base): **8/25 acceptable (32%)**.
+Same-hour control: r5 hd-fuse on the identical stack read **13/25 (52%)** — NOT the
+recorded 16/25, so ~3 tasks of apparent regression are bench drift/variance; the
+recorded baselines are stale as absolute numbers and same-stack controls are now
+mandatory for every read. Net same-stack verdict: **r7 MISSES by 5 tasks. The v6
+mix regressed the model.**
+
+What moved: ambiguity handling improved (4/4 correct defers incl. create_section —
+r5 got 3/4); add_drum_pattern now appears in drum flows (coverage rows landed).
+What broke: dosage discipline collapsed — six tasks passed goals but flunked
+acceptability on 11–14-command sprees; wrong-defers persist on drums-slap/undo;
+lyric follow-through still fails. Leading hypothesis: 98% of rows embed the OLD
+drifted system prompt while 119 coverage rows embed the regenerated one — the mix
+teaches inconsistent prompt-conditional behavior, and the multi-step coverage
+demos leak verbosity into single-command asks. r5 (single consistent old prompt)
+never had the split.
+
+Disposition: r7 adapter is NOT promoted; r5 hd-fuse remains champion. r8-4b stays
+HELD (training a 4B on a recipe that regressed at 30B is not informative). Next
+cycle (r7.1, pre-registration required): regenerate ALL rows against the current
+serve prompt (kill the split), review coverage demos for dosage bleed.
