@@ -62,6 +62,12 @@ export type LoopDeps = {
    *  FSM stays pure/deps-injected (no bridge call inside the loop itself). Omitted ⇒
    *  every step's prompt is byte-identical to the pre-M2 shape. */
   memory?: string;
+  /** P1 produce lane — an optional system-prompt builder replacing
+   *  buildLoopSystemPrompt (same signature). Omitted ⇒ every step's prompt is
+   *  byte-identical to the default lane; the produce lane passes
+   *  buildProduceSystemPrompt (producePrompt.ts), which wraps the default rather
+   *  than forking it. */
+  systemPrompt?: (snap: Snapshot | null, query?: string, memory?: string) => string;
 };
 
 export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string };
@@ -90,7 +96,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
   const repliesLeft = () => Math.max(0, b.maxPlannerCalls - plannerCalls) + Math.max(0, b.maxStepCalls - stepCalls);
   const callModel = async (mode: TaskContextMode, goal?: string): Promise<LoopReply | null> => {
     const messages: ChatMessage[] = [
-      { role: "system", content: buildLoopSystemPrompt(snap, task.ask, deps.memory) },
+      { role: "system", content: (deps.systemPrompt ?? buildLoopSystemPrompt) (snap, task.ask, deps.memory) },
       { role: "user", content: renderTaskContext({
           ask: task.ask, plan, planIdx, history: transcript,
           stepsLeft: Math.max(0, b.maxSteps - transcript.length), repliesLeft: repliesLeft(),

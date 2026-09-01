@@ -26,6 +26,7 @@ import { inScale, resolveKey, scaleMask } from "../../musicalKey";
 import { useSettings } from "../../settings/store";
 import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
+import { buildProduceSystemPrompt, isProduceAsk, PRODUCE_BUDGETS } from "./producePrompt";
 import { createTaskExecutor, undoAgentTask } from "./taskExec";
 import { mockLoopChat } from "./loopBrainMock";
 import { hasSequentialMarkers } from "./router";
@@ -225,12 +226,17 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
     if (compactMelody) run = compactMelody;
     else {
       const memory = await memorySectionFor(text);
+      // P1 produce lane (flag `produceLane`, default OFF): an explicit produce ask
+      // gets the genre-rule prompt and full-pass budgets; everything else keeps the
+      // DOSAGE lane byte-identically (systemPrompt/budgets omitted).
+      const produce = useSettings.getState().get("produceLane") === true && isProduceAsk(text);
       run = await runAgentLoop({ ask: text }, {
         chat: chatWithFallback,
         env: exec.env,
         signal,
         onProgress: (ev) => useTaskStore.getState().progress(ev),
         memory,
+        ...(produce ? { systemPrompt: buildProduceSystemPrompt, budgets: PRODUCE_BUDGETS } : {}),
       });
     }
   } finally {
