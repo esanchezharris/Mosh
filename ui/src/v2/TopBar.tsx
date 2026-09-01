@@ -1,9 +1,3 @@
-// v2 top bar (concept layout): the chrome floats on the cream page — a brand mark +
-// project meta on the left, a dark transport PILL and a light time CARD in the center,
-// and an AI pill + collaborator avatar cluster + invite + overflow on the right. The bar
-// itself is transparent; each cluster is its own floating surface. Transport reads the
-// live 30Hz store field; every mutation is an existing command through store.exec.
-
 import { useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
@@ -17,6 +11,7 @@ import { RecordOptionsChip, CaptureButton } from "./RecordPanel";
 import { AudioOutputChip } from "./AudioOutputChip";
 import { MetronomeControls } from "./MetronomePanel";
 import { AvatarCluster } from "./AvatarCluster";
+import { LocalAiToggle } from "./LocalAiToggle";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { projectLabel } from "../projectFile";
@@ -147,9 +142,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
                   it, because that is what put it out of alignment before: as a sibling of
                   .v2-proj it was centred against BOTH rows and sat 11px above the chips it
                   reads as belonging to. As a flex item here it is simply in line.
-                  This row can hold it now — the count-in and record options moved right
-                  when the AI pill was deleted, which took the row from 415px to 395px in a
-                  ~526px track. Its list opens fixed-position (see AudioOutputChip), so the
+                  Its list opens fixed-position (see AudioOutputChip), so the
                   row's overflow safety net cannot clip it. */}
               <AudioOutputChip />
           </div>
@@ -227,12 +220,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
               </select>
         </div>
 
-        {/* The "AI ACTIVE" pill was here. Removed at the owner's call — it was a status
-            light that spent ~107px of a full bar to say "active", which is what it read
-            almost all of the time. The busy state it carried is not lost: the composer
-            swaps its placeholder to "thinking…" and disables send, and the Moshi card in
-            the right rail narrates what the agent is actually doing. Its space paid for
-            the count-in and record options moving back beside the metronome. */}
+        <LocalAiToggle />
         <AvatarCluster />
 
         <MultiplayerLauncher

@@ -282,6 +282,8 @@ if (MOSH_BUILD_APP)
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
         src/brain/BrainProxy.cpp
+        src/brain/LocalBrainProcessRegistry.cpp
+        src/brain/OwnerRuntimeConfig.cpp
         src/brain/OwnerRuntime.cpp
         # RT-safety tripwire (debug-only; compiles to nothing in Release — see MOSH_RT_GUARD)
         src/audio/RealtimeAudioGuard.cpp

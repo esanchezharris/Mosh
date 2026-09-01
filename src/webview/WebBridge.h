@@ -36,6 +36,7 @@ public:
     using RemoteHandler = std::function<juce::var (const juce::var& args)>;
     using RemoteStatusProvider = std::function<juce::var()>;
     using RuntimeStatusProvider = std::function<juce::var()>;
+    using RuntimeControlHandler = std::function<juce::var()>;
 
     void setCommandHandler (CommandHandler h)   { commandHandler = std::move (h); }
     void setAsyncCommandHandler (AsyncCommandHandler h) { asyncCommandHandler = std::move (h); }
@@ -44,6 +45,8 @@ public:
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
     void setRemoteStatusProvider (RemoteStatusProvider p) { remoteStatusProvider = std::move (p); }
     void setBrainRuntimeStatusProvider (RuntimeStatusProvider p) { brainRuntimeStatusProvider = std::move (p); }
+    void setBrainRuntimeStartHandler (RuntimeControlHandler h) { brainRuntimeStartHandler = std::move (h); }
+    void setBrainRuntimeStopHandler (RuntimeControlHandler h) { brainRuntimeStopHandler = std::move (h); }
 
     /** WP-11 best-of-n relays: UI → generative service, via native (the WebView
         cannot reach the service port itself). Same layering as brain_chat — brain
@@ -91,6 +94,8 @@ private:
     RemoteHandler     remoteStopHandler;
     RemoteStatusProvider remoteStatusProvider;
     RuntimeStatusProvider brainRuntimeStatusProvider;
+    RuntimeControlHandler brainRuntimeStartHandler;
+    RuntimeControlHandler brainRuntimeStopHandler;
     ServiceRelay      escalateHandler;
     ServiceRelay      archivePairHandler;
     juce::WebBrowserComponent* webView = nullptr;

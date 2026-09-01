@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include "brain/LocalBrainProcessRegistry.h"
 #include "brain/OwnerRuntime.h"
 #include "util/Env.h"
 #if JUCE_MAC || JUCE_LINUX
  #include <csignal>
+ #include <fcntl.h>
  #include <sys/stat.h>
  #include <sys/wait.h>
  #include <unistd.h>
@@ -22,10 +24,24 @@ TEST_CASE ("owner runtime config accepts an exact local-only model", "[owner-run
     o->setProperty ("preferredShell", "live");
     const auto cfg = OwnerRuntimeConfig::fromVar (juce::var (o));
     REQUIRE (cfg.enabled);
+    REQUIRE_FALSE (cfg.autoStart);
     REQUIRE (cfg.preferredPort == 8091);
     REQUIRE (cfg.prewarmAfterUnload);
     REQUIRE (cfg.preferredShell == "live");
     REQUIRE (cfg.validationError().isEmpty());
+}
+
+TEST_CASE ("owner runtime starts every app session off by default", "[owner-runtime]")
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("enabled", true);
+    o->setProperty ("modelPath", "/tmp/a3b-r5-4bit-hd");
+    o->setProperty ("pythonRuntime", "/tmp/python3");
+    const auto cfg = OwnerRuntimeConfig::fromVar (juce::var (o));
+    LocalBrainManager manager (cfg);
+    const auto status = manager.status();
+    REQUIRE ((bool) status.getProperty ("configured", false));
+    REQUIRE (status.getProperty ("state", juce::var()).toString() == "off");
 }
 
 TEST_CASE ("owner runtime config fails closed for remote or missing model paths", "[owner-runtime]")
@@ -74,31 +90,173 @@ TEST_CASE ("Finder owner config fails closed unless it is mode 600", "[owner-run
 }
 
 #if JUCE_MAC || JUCE_LINUX
-TEST_CASE ("owned-process shutdown refuses strangers and terminates only verified children", "[owner-runtime]")
+namespace
 {
-    int readyPipe[2] = { -1, -1 };
-    REQUIRE (::pipe (readyPipe) == 0);
+juce::File writeOwnershipRecord (const juce::File& directory,
+                                 int pid,
+                                 const juce::File& pythonRuntime,
+                                 const juce::File& modelPath,
+                                 int port,
+                                 mode_t mode = 0600)
+{
+    const auto created = directory.createDirectory();
+    REQUIRE ((created.wasOk() || directory.isDirectory()));
+    REQUIRE (::chmod (directory.getFullPathName().toRawUTF8(), 0700) == 0);
+    auto* record = new juce::DynamicObject();
+    record->setProperty ("owner", "Mosh");
+    record->setProperty ("user", juce::SystemStats::getLogonName());
+    record->setProperty ("pythonRuntime", pythonRuntime.getFullPathName());
+    record->setProperty ("modelPath", modelPath.getFullPathName());
+    record->setProperty ("host", "127.0.0.1");
+    record->setProperty ("port", port);
+    record->setProperty ("pid", pid);
+    const auto file = directory.getChildFile (juce::String (pid) + ".json");
+    REQUIRE (file.replaceWithText (juce::JSON::toString (juce::var (record), true)));
+    REQUIRE (::chmod (file.getFullPathName().toRawUTF8(), mode) == 0);
+    return file;
+}
+
+pid_t spawnModelFixture (const juce::File& pythonRuntime,
+                         const juce::File& modelPath,
+                         int port,
+                         bool exactModel)
+{
     const auto pid = ::fork();
     REQUIRE (pid >= 0);
     if (pid == 0)
     {
-        ::close (readyPipe[0]);
-        ::signal (SIGTERM, SIG_DFL);
-        const char ready = '1';
-        (void) ::write (readyPipe[1], &ready, 1);
-        ::close (readyPipe[1]);
-        for (;;) ::pause();
+        const int nullFd = ::open ("/dev/null", O_WRONLY);
+        if (nullFd >= 0)
+        {
+            (void) ::dup2 (nullFd, STDOUT_FILENO);
+            (void) ::dup2 (nullFd, STDERR_FILENO);
+            ::close (nullFd);
+        }
+        const auto commandModel = exactModel
+            ? modelPath.getFullPathName()
+            : modelPath.getSiblingFile ("different-model").getFullPathName();
+        ::execl (MOSH_LOCAL_BRAIN_FIXTURE_PATH,
+                 pythonRuntime.getFullPathName().toRawUTF8(),
+                 "-m", "mlx_lm.server",
+                 "--model", commandModel.toRawUTF8(),
+                 "--host", "127.0.0.1",
+                 "--port", juce::String (port).toRawUTF8(),
+                 static_cast<char*> (nullptr));
+        _exit (127);
     }
-    ::close (readyPipe[1]);
-    char ready = 0;
-    REQUIRE (::read (readyPipe[0], &ready, 1) == 1);
-    ::close (readyPipe[0]);
-    REQUIRE (ready == '1');
-    REQUIRE_FALSE (LocalBrainManager::terminateOwnedProcess ((int) pid, false, 20));
-    REQUIRE (::kill (pid, 0) == 0);
-    REQUIRE (LocalBrainManager::terminateOwnedProcess ((int) pid, true, 500));
+    juce::Thread::sleep (100);
+    return pid;
+}
+}
+
+TEST_CASE ("owned process records require private exact Mosh identity", "[owner-runtime]")
+{
+    auto root = juce::File::createTempFile ("mosh-owned-record");
+    root.deleteFile();
+    const auto records = root.getChildFile ("records");
+    const juce::File pythonRuntime (MOSH_LOCAL_BRAIN_FIXTURE_PATH);
+    const auto modelPath = root.getChildFile ("model");
+    REQUIRE (modelPath.createDirectory().wasOk());
+    const LocalBrainExpectedProcess expected { pythonRuntime, modelPath, "127.0.0.1", 8091 };
+
+    const auto valid = writeOwnershipRecord (records, 991001, pythonRuntime, modelPath, 8091);
+    REQUIRE (LocalBrainProcessRegistry::recordMatchesExpected (valid, expected));
+    REQUIRE (::chmod (valid.getFullPathName().toRawUTF8(), 0644) == 0);
+    REQUIRE_FALSE (LocalBrainProcessRegistry::recordMatchesExpected (valid, expected));
+
+    root.deleteRecursively();
+}
+
+TEST_CASE ("startup reaping removes stale records and recovers exact crash orphans", "[owner-runtime]")
+{
+    auto root = juce::File::createTempFile ("mosh-orphan-recovery");
+    root.deleteFile();
+    const auto records = root.getChildFile ("records");
+    const juce::File pythonRuntime (MOSH_LOCAL_BRAIN_FIXTURE_PATH);
+    const auto modelPath = root.getChildFile ("model");
+    REQUIRE (modelPath.createDirectory().wasOk());
+    const auto stale = writeOwnershipRecord (records, 991002, pythonRuntime, modelPath, 8091);
+    const auto orphanPid = spawnModelFixture (pythonRuntime, modelPath, 8091, true);
+    const auto orphanRecord = writeOwnershipRecord (records, (int) orphanPid, pythonRuntime, modelPath, 8091);
+    const auto result = LocalBrainProcessRegistry::reapOwnedProcesses (records, 500);
+
+    REQUIRE (result.terminated == 1);
+    REQUIRE (result.staleRemoved == 1);
+    REQUIRE_FALSE (stale.existsAsFile());
+    REQUIRE_FALSE (orphanRecord.existsAsFile());
     int status = 0;
-    REQUIRE (::waitpid (pid, &status, 0) == pid);
+    REQUIRE (::waitpid (orphanPid, &status, 0) == orphanPid);
     REQUIRE (WIFSIGNALED (status));
+    root.deleteRecursively();
+}
+
+TEST_CASE ("startup reaping refuses to kill a process whose live command mismatches its record", "[owner-runtime]")
+{
+    auto root = juce::File::createTempFile ("mosh-mismatched-process");
+    root.deleteFile();
+    const auto records = root.getChildFile ("records");
+    const juce::File pythonRuntime (MOSH_LOCAL_BRAIN_FIXTURE_PATH);
+    const auto modelPath = root.getChildFile ("model");
+    REQUIRE (modelPath.createDirectory().wasOk());
+    const auto strangerPid = spawnModelFixture (pythonRuntime, modelPath, 8091, false);
+    const auto record = writeOwnershipRecord (records, (int) strangerPid, pythonRuntime, modelPath, 8091);
+    const auto result = LocalBrainProcessRegistry::reapOwnedProcesses (records, 500);
+
+    REQUIRE (result.terminated == 0);
+    REQUIRE (result.ignored == 1);
+    REQUIRE (::kill (strangerPid, 0) == 0);
+    REQUIRE (record.existsAsFile());
+    REQUIRE (::kill (strangerPid, SIGKILL) == 0);
+    int status = 0;
+    REQUIRE (::waitpid (strangerPid, &status, 0) == strangerPid);
+    root.deleteRecursively();
+}
+
+TEST_CASE ("manual start is idempotent and a busy preferred port fails without fallback", "[owner-runtime]")
+{
+    auto root = juce::File::createTempFile ("mosh-fixed-port");
+    root.deleteFile();
+    REQUIRE (root.createDirectory().wasOk());
+    const auto modelPath = root.getChildFile ("model");
+    REQUIRE (modelPath.createDirectory().wasOk());
+    const auto configFile = root.getChildFile ("owner-runtime.json");
+    REQUIRE (configFile.replaceWithText ("{}"));
+    REQUIRE (::chmod (configFile.getFullPathName().toRawUTF8(), 0600) == 0);
+    juce::StreamingSocket occupied;
+    REQUIRE (occupied.createListener (18091, "127.0.0.1") >= 0);
+
+    OwnerRuntimeConfig config;
+    config.enabled = true;
+    config.sourceFile = configFile;
+    config.modelPath = modelPath;
+    config.modelPathRaw = modelPath.getFullPathName();
+    config.pythonRuntime = juce::File ("/usr/bin/yes");
+    config.pythonRuntimeRaw = "/usr/bin/yes";
+    config.preferredPort = 18091;
+    const auto runtime = root.getChildFile ("runtime");
+    mosh::setEnvVar ("MOSH_LOCAL_BRAIN_RUNTIME_DIR", runtime.getFullPathName().toRawUTF8());
+    {
+        LocalBrainManager manager (config);
+        REQUIRE (manager.startAsync());
+        REQUIRE_FALSE (manager.startAsync());
+
+        for (int tries = 0; tries < 100; ++tries)
+        {
+            if (manager.status().getProperty ("state", juce::var()).toString() == "error") break;
+            juce::Thread::sleep (20);
+        }
+        const auto status = manager.status();
+        REQUIRE (status.getProperty ("state", juce::var()).toString() == "error");
+        REQUIRE (status.getProperty ("error", juce::var()).toString().contains ("18091"));
+        REQUIRE (manager.stopAsync());
+        for (int tries = 0; tries < 100; ++tries)
+        {
+            if (manager.status().getProperty ("state", juce::var()).toString() == "off") break;
+            juce::Thread::sleep (20);
+        }
+        REQUIRE (manager.status().getProperty ("state", juce::var()).toString() == "off");
+    }
+    mosh::unsetEnvVar ("MOSH_LOCAL_BRAIN_RUNTIME_DIR");
+    root.deleteRecursively();
 }
 #endif

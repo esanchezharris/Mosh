@@ -25,7 +25,7 @@ import type { SkillOutcomeV1, StudioSkillEnvironmentV1 } from "../agent/skillFou
 import { readSkillSourceStatusV1 } from "../agent/skillFoundry/nativeReads";
 import { createRecordingLifecycleEnvironmentV1 } from "../recordingLifecycle";
 import { IconArrowUp, IconMic } from "./icons";
-import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge";
+import { useBrainRuntime } from "../hooks/useBrainRuntime";
 import { activeShell } from "../v2/shellFlag";
 import { matchIssueReport } from "../agent/issueRoute";
 import { IssueInbox } from "./IssueInbox";
@@ -134,13 +134,9 @@ export function AgentComposer() {
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-  const [brainRuntime, setBrainRuntime] = useState<BrainRuntimeStatus | null>(null);
+  const { status: brainRuntime } = useBrainRuntime();
   const [inboxOpen, setInboxOpen] = useState(false);
   const runRef = useRef<(text: string, source: "typed" | "push_to_talk" | "always_on") => void>(() => {});
-  useEffect(() => {
-    void brainRuntimeStatus().then(setBrainRuntime).catch(() => setBrainRuntime({ state: "unavailable" }));
-    return onEvent("brain_runtime", (payload) => setBrainRuntime(payload as BrainRuntimeStatus));
-  }, []);
   // Skill Foundry Slice B, Task 7 — the composer stores ONLY the opaque continuation
   // token (a bare string); the runtime is the one thing that resolves it back to a
   // handler/payload. No typed continuation shape lives in React state any more.
@@ -382,10 +378,10 @@ export function AgentComposer() {
   return (
     <div className="agent-composer">
       {inboxOpen && <IssueInbox onClose={() => setInboxOpen(false)} />}
-      {brainRuntime && <div className={`agent-runtime ${brainRuntime.state}`} aria-live="polite"
+      <div className={`agent-runtime ${brainRuntime.state}`} aria-live="polite"
         title={brainRuntime.error || brainRuntime.model || "Local brain"}>
         {brainRuntime.state}{brainRuntime.model ? ` · ${brainRuntime.model.split("/").pop()}` : ""}
-      </div>}
+      </div>
       {say && <div className="agent-say" role="status" aria-live="polite">{say}</div>}
       <button className="issue-inbox-button" onClick={() => setInboxOpen((v) => !v)}>Issues</button>
       <div className={`agent-input${listening ? " listening" : ""}`}>

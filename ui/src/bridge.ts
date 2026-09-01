@@ -137,8 +137,10 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   return { content: String(j.content ?? "") };
 }
 
+export type BrainRuntimeState = "off" | "cleaning" | "starting" | "ready" | "prewarming" | "stopping" | "error" | "unavailable";
 export type BrainRuntimeStatus = {
-  state: "starting" | "ready" | "prewarming" | "unavailable";
+  configured: boolean;
+  state: BrainRuntimeState;
   model?: string;
   endpoint?: string;
   port?: number;
@@ -146,9 +148,56 @@ export type BrainRuntimeStatus = {
   ms?: number;
   preferredShell?: "live" | "protools" | "v2" | "classic";
 };
+function brainRuntimeState(value: unknown): BrainRuntimeState {
+  switch (value) {
+    case "off":
+    case "cleaning":
+    case "starting":
+    case "ready":
+    case "prewarming":
+    case "stopping":
+    case "error":
+    case "unavailable":
+      return value;
+    default:
+      return "unavailable";
+  }
+}
+export function parseBrainRuntimeStatus(value: unknown): BrainRuntimeStatus {
+  if (typeof value !== "object" || value === null) {
+    return { configured: false, state: "unavailable", error: "owner runtime is unavailable" };
+  }
+  const result: BrainRuntimeStatus = {
+    configured: "configured" in value && value.configured === true,
+    state: brainRuntimeState("state" in value ? value.state : undefined),
+  };
+  if ("model" in value && typeof value.model === "string") result.model = value.model;
+  if ("endpoint" in value && typeof value.endpoint === "string") result.endpoint = value.endpoint;
+  if ("port" in value && typeof value.port === "number") result.port = value.port;
+  if ("error" in value && typeof value.error === "string") result.error = value.error;
+  if ("ms" in value && typeof value.ms === "number") result.ms = value.ms;
+  if ("preferredShell" in value) {
+    switch (value.preferredShell) {
+      case "live":
+      case "protools":
+      case "v2":
+      case "classic":
+        result.preferredShell = value.preferredShell;
+    }
+  }
+  return result;
+}
 export async function brainRuntimeStatus(): Promise<BrainRuntimeStatus> {
-  if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
-  return (await native("brain_runtime_status")()) as BrainRuntimeStatus;
+  if (!realNative()) return { configured: false, state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_status")());
+}
+export async function brainRuntimeStart(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { configured: false, state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_start")());
+}
+export async function brainRuntimeStop(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { configured: false, state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_stop")());
 }
 
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service

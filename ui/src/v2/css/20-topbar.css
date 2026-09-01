@@ -118,13 +118,6 @@
 .v2-loop-on { color: var(--v2-accent); }
 
 .v2-spacer { flex: 1 1 auto; }
-/* `.v2-pill` — the topbar "AI ACTIVE" status light — was deleted at the owner's call. It
-   spent ~107px of a full bar to report a state that read "active" almost all the time,
-   and the busy half is already carried where the work is: the composer swaps to
-   "thinking…" and disables send, and the Moshi card narrates the task. Its space bought
-   the count-in and record options a place beside the metronome again.
-   v2-blink stays — the in-flight clip badge and the sample browser's "sketching…" pill
-   both drive it (see 70-notices.css, which freezes them under reduced-motion). */
 @keyframes v2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .v2-btn {
@@ -138,6 +131,15 @@
 .v2-btn:disabled { opacity: 0.38; cursor: default; }
 .v2-btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
 .v2-btn.icon { padding: 8px 10px; }
+.v2-local-ai { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 8px; font-size: var(--v2-fs-xs); font-weight: 760; letter-spacing: 0.045em; }
+.v2-local-ai-dot { width: 6px; height: 6px; border-radius: var(--v2-radius-pill); background: currentColor; opacity: 0.3; }
+.v2-local-ai[data-on="true"] { --v2-accent: var(--v2-accent-agentic); color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-local-ai[data-on="true"] .v2-local-ai-dot { opacity: 1; }
+.v2-local-ai[data-state="cleaning"] .v2-local-ai-dot,
+.v2-local-ai[data-state="starting"] .v2-local-ai-dot,
+.v2-local-ai[data-state="stopping"] .v2-local-ai-dot { opacity: 0.65; }
+.v2-local-ai[data-state="error"] { color: var(--v2-rec); border-color: currentColor; }
 
 /* The classic tool popovers used to live in a `.v2-tools` cluster in the topbar, and this
    block styled them. When they moved into the overflow menu that class stopped being
@@ -332,16 +334,6 @@
    cases an intervening div would take over the layout slot. */
 .v2-addtrack { display: contents; }
 
-/* CAP-TB-001 / #633 #634 — the TIMING cluster, right of the transport: tempo, metre and
-   the metronome, sitting with the bars/loop readout they describe.
-   Scope is deliberately narrow, and it took two passes to land there. The first moved ALL
-   nine song controls right and merely swapped the problem — the right cluster overlapped
-   the transport while the left sat half-empty. The second moved them all back and put the
-   left row into overflow again. What actually fits at 1440 is a ~526px track per side, and
-   the right already owes 237px of it to the AI pill, Invite and the overflow button; three
-   timing controls (196px) is what the remainder holds without scrolling.
-   Still allowed to scroll rather than crush its neighbours — same honest-scrollbar posture
-   as .v2-proj-meta. Adding a fourth control here means taking one off, not hoping. */
 .v2-song-meta {
   display: flex; align-items: center; gap: 8px;
   flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;

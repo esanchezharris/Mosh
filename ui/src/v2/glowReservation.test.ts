@@ -23,10 +23,6 @@ const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
 // selector -> why this one may still glow.
 const GLOW_ALLOWED: Record<string, string> = {
-  // ".v2-pill .led" — the topbar AI ACTIVE indicator, and the sheet's last real glow. It
-  // left with the pill on 2026-08-05 (owner's call: ~107px of a full bar to say "active").
-  // The shell now has ZERO blurred coloured shadows, which is the end state this pass was
-  // aiming at — so the allowlist below is a standing permission, not a description.
   ".v2-shell .agent-input.listening": "the push-to-talk ring while the recognizer is live (a 1px ring, kept for completeness)",
 };
 
@@ -74,15 +70,6 @@ describe("glow reservation — the scan is real", () => {
     expect(rules.length, "rule scan collapsed — every assertion below would pass on nothing").toBeGreaterThan(200);
   });
 
-  // The detector is proven against FIXTURES, not against the live sheet.
-  //
-  // It used to assert `rules.filter(isGlow).length > 0` — "the detector still matches
-  // something" — which was a fine vacuity guard only while the sheet was guaranteed to
-  // contain a glow. It no longer is: deleting the topbar AI pill removed the last blurred
-  // coloured shadow in the shell, and that assertion would now fail for the RIGHT outcome.
-  // Worse, it conflated two claims: "the regex works" and "the CSS still glows somewhere".
-  // Only the first keeps "no unauthorised glow" from passing on nothing, and a fixture
-  // proves it without hostage-taking the stylesheet. Zero glow is a legal end state.
   it("the glow detector recognises a glow", () => {
     expect(isGlow("box-shadow: 0 0 8px var(--v2-accent);"), "missed a plainly blurred coloured shadow").toBe(true);
     expect(isGlow("box-shadow: inset 0 0 38px color-mix(in srgb, var(--accent) 40%, transparent);"), "missed an inset coloured blur").toBe(true);

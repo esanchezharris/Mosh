@@ -1,11 +1,10 @@
 #include "OwnerRuntime.h"
 #include "BrainProxy.h"
+#include "LocalBrainProcessRegistry.h"
 #include "util/Env.h"
 #include <juce_events/juce_events.h>
 #include <sys/stat.h>
 #if JUCE_MAC || JUCE_LINUX
- #include <cerrno>
- #include <csignal>
  #include <unistd.h>
 #endif
 
@@ -13,122 +12,73 @@ namespace mosh
 {
 using namespace juce;
 
-OwnerRuntimeConfig OwnerRuntimeConfig::fromVar (const var& root)
-{
-    OwnerRuntimeConfig c;
-    c.enabled = (bool) root.getProperty ("enabled", false);
-    c.modelPathRaw = root.getProperty ("modelPath", var()).toString().trim();
-    c.pythonRuntimeRaw = root.getProperty ("pythonRuntime", var()).toString().trim();
-    if (File::isAbsolutePath (c.modelPathRaw)) c.modelPath = File (c.modelPathRaw);
-    if (File::isAbsolutePath (c.pythonRuntimeRaw)) c.pythonRuntime = File (c.pythonRuntimeRaw);
-    c.preferredPort = jlimit (1024, 65500, (int) root.getProperty ("preferredPort", 8091));
-    c.stableAudioReleaseIdle = jlimit (0.0, 1.0, (double) root.getProperty ("stableAudioReleaseIdle", 0.99));
-    c.prewarmAfterUnload = (bool) root.getProperty ("prewarmAfterUnload", true);
-    c.preferredShell = root.getProperty ("preferredShell", var()).toString().trim();
-    return c;
-}
-
-OwnerRuntimeConfig OwnerRuntimeConfig::load()
-{
-    const auto overridePath = SystemStats::getEnvironmentVariable ("MOSH_OWNER_RUNTIME_CONFIG", {}).trim();
-    auto file = overridePath.isNotEmpty()
-        ? File (overridePath)
-        : File::getSpecialLocation (File::userHomeDirectory).getChildFile (".config/mosh/owner-runtime.json");
-    if (! file.existsAsFile()) return {};
-
-   #if JUCE_MAC || JUCE_LINUX
-    struct stat info {};
-    if (::stat (file.getFullPathName().toRawUTF8(), &info) != 0 || (info.st_mode & 077) != 0)
-    {
-        OwnerRuntimeConfig bad; bad.enabled = true; bad.sourceFile = file;
-        return bad;
-    }
-   #endif
-    auto c = fromVar (JSON::parse (file.loadFileAsString()));
-    c.sourceFile = file;
-    return c;
-}
-
-String OwnerRuntimeConfig::validationError() const
-{
-    if (! enabled) return {};
-    if (sourceFile.existsAsFile())
-    {
-       #if JUCE_MAC || JUCE_LINUX
-        struct stat info {};
-        if (::stat (sourceFile.getFullPathName().toRawUTF8(), &info) != 0 || (info.st_mode & 077) != 0)
-            return "owner runtime config must have mode 600";
-       #endif
-    }
-    if (modelPathRaw.contains ("://"))
-        return "owner runtime refuses remote model paths";
-    if (modelPathRaw.isEmpty() || ! File::isAbsolutePath (modelPathRaw))
-        return "owner runtime modelPath must be an absolute local path";
-    if (pythonRuntimeRaw.isEmpty() || ! File::isAbsolutePath (pythonRuntimeRaw))
-        return "owner runtime pythonRuntime must be an absolute local path";
-    if (preferredShell.isNotEmpty() && preferredShell != "live" && preferredShell != "protools"
-        && preferredShell != "v2" && preferredShell != "classic")
-        return "owner runtime preferredShell is invalid";
-    return {};
-}
-
 LocalBrainManager::LocalBrainManager (OwnerRuntimeConfig c) : config (std::move (c))
 {
-    publish (config.enabled ? "starting" : "unavailable",
-             config.enabled ? config.validationError() : "owner runtime disabled");
+    const auto error = config.validationError();
+    if (! config.enabled) publish ("unavailable", "owner runtime disabled");
+    else if (error.isNotEmpty()) publish ("unavailable", error);
+    else publish ("off");
 }
 
 LocalBrainManager::~LocalBrainManager()
 {
-    stopping = true;
-    if (startupThread.joinable()) startupThread.join();
-    if (prewarmThread.joinable()) prewarmThread.join();
-    terminateSpawnedChild();
-    BrainProxy::configureLocal ({}, {});
-    if (spawnedByUs)
+    if (stopAsync())
     {
-        const auto hs = JSON::parse (handshakeFile().loadFileAsString());
-        if ((int) hs.getProperty ("pid", -1) == spawnedPid)
-            handshakeFile().deleteFile();
+        if (stopThread.joinable()) stopThread.join();
+        return;
     }
-}
 
-bool LocalBrainManager::terminateOwnedProcess (int pid, bool verifiedOwner, int graceMs)
-{
-    if (! verifiedOwner || pid <= 1) return false;
-   #if JUCE_MAC || JUCE_LINUX
-    if (::kill (pid, SIGTERM) != 0 && errno != ESRCH) return false;
-    const auto deadline = Time::getMillisecondCounter() + (uint32) jmax (0, graceMs);
-    while ((int32) (deadline - Time::getMillisecondCounter()) > 0)
+    stopRequested = true;
+    BrainProxy::configureLocal ({}, {});
+    if (stopThread.joinable()) stopThread.join();
+    else
     {
-        if (::kill (pid, 0) != 0 && errno == ESRCH) return true;
-        Thread::sleep (20);
+        if (startupThread.joinable()) startupThread.join();
+        if (prewarmThread.joinable()) prewarmThread.join();
     }
-    if (::kill (pid, SIGKILL) != 0 && errno != ESRCH) return false;
-    return true;
-   #else
-    ignoreUnused (graceMs);
-    return false;
-   #endif
+    terminateSpawnedChild();
+    removeHandshakeForSpawnedProcess();
 }
 
 void LocalBrainManager::terminateSpawnedChild()
 {
-    if (! spawnedByUs) return;
-    if (spawnedPid > 1)
-        terminateOwnedProcess (spawnedPid, true);
+    if (spawnedPid <= 1) return;
+    const LocalBrainExpectedProcess expected {
+        config.pythonRuntime, config.modelPath, "127.0.0.1", config.preferredPort
+    };
+    (void) LocalBrainProcessRegistry::terminateOwnedProcess (processRecordFile(), expected);
     if (child.isRunning())
-    {
         child.waitForProcessToFinish (500);
-        if (child.isRunning()) child.kill();
-    }
-    spawnedByUs = false;
+}
+
+File LocalBrainManager::runtimeDirectory() const
+{
+    return LocalBrainProcessRegistry::defaultDirectory().getParentDirectory();
 }
 
 File LocalBrainManager::handshakeFile() const
 {
-    return File::getSpecialLocation (File::userApplicationDataDirectory)
-        .getChildFile ("Mosh/runtime/local-brain.json");
+    return runtimeDirectory().getChildFile ("local-brain.json");
+}
+
+File LocalBrainManager::pidFile() const
+{
+    return runtimeDirectory().getChildFile ("local-brain.pid");
+}
+
+File LocalBrainManager::processRecordFile() const
+{
+    return LocalBrainProcessRegistry::defaultDirectory().getChildFile (String (spawnedPid) + ".json");
+}
+
+void LocalBrainManager::removeHandshakeForSpawnedProcess()
+{
+    const auto handshake = JSON::parse (handshakeFile().loadFileAsString());
+    if ((int) handshake.getProperty ("pid", -1) == spawnedPid)
+        handshakeFile().deleteFile();
+    if (pidFile().loadFileAsString().getIntValue() == spawnedPid)
+        pidFile().deleteFile();
+    spawnedPid = 0;
 }
 
 void LocalBrainManager::logRuntimeEvent (const String& event, const var& data) const
@@ -168,27 +118,11 @@ bool LocalBrainManager::portIsOccupied (int port) const
     return s.connect ("127.0.0.1", port, 120);
 }
 
-bool LocalBrainManager::canAdopt (int port) const
-{
-    const auto hs = JSON::parse (handshakeFile().loadFileAsString());
-    if (hs.getProperty ("owner", var()).toString() != "Mosh"
-        || (int) hs.getProperty ("port", -1) != port
-        || hs.getProperty ("modelPath", var()).toString() != config.modelPath.getFullPathName()
-        || hs.getProperty ("pythonRuntime", var()).toString() != config.pythonRuntime.getFullPathName())
-        return false;
-    const int pid = (int) hs.getProperty ("pid", -1);
-    if (pid <= 1) return false;
-    ChildProcess ps;
-    if (! ps.start ({ "/bin/ps", "-p", String (pid), "-o", "command=" })) return false;
-    ps.waitForProcessToFinish (1000);
-    const auto command = ps.readAllProcessOutput();
-    return command.contains ("mlx_lm") && command.contains (config.modelPath.getFullPathName());
-}
-
 void LocalBrainManager::publish (String state, String error, double ms)
 {
     auto* o = new DynamicObject();
     o->setProperty ("state", state);
+    o->setProperty ("configured", config.enabled && config.validationError().isEmpty());
     o->setProperty ("model", config.modelPath.getFullPathName());
     const auto port = activePort.load();
     o->setProperty ("port", port);
@@ -202,6 +136,12 @@ void LocalBrainManager::publish (String state, String error, double ms)
     if (cb) MessageManager::callAsync ([cb, next] { cb (next); });
 }
 
+String LocalBrainManager::state() const
+{
+    const ScopedLock sl (lock);
+    return currentStatus.getProperty ("state", var()).toString();
+}
+
 var LocalBrainManager::status() const
 {
     const ScopedLock sl (lock);
@@ -213,76 +153,153 @@ void LocalBrainManager::setStatusCallback (std::function<void (var)> cb)
     const ScopedLock sl (lock); statusCallback = std::move (cb);
 }
 
-void LocalBrainManager::startAsync()
+bool LocalBrainManager::initializeAsync()
 {
-    if (! config.enabled || config.validationError().isNotEmpty() || startupThread.joinable()) return;
+    if (! config.enabled || config.validationError().isNotEmpty()) return false;
+    const ScopedLock lifecycle (lifecycleLock);
+    if (state() != "off") return false;
+    if (stopThread.joinable()) stopThread.join();
+    if (startupThread.joinable()) startupThread.join();
+    stopRequested = false;
+    publish ("cleaning");
+    startupThread = std::thread ([this] { runInitialization(); });
+    return true;
+}
+
+void LocalBrainManager::runInitialization()
+{
+    (void) LocalBrainProcessRegistry::reapOwnedProcesses (
+        LocalBrainProcessRegistry::defaultDirectory());
+    handshakeFile().deleteFile();
+    pidFile().deleteFile();
+    if (stopRequested) return;
+    if (config.autoStart)
+    {
+        publish ("starting");
+        runStartup();
+    }
+    else publish ("off");
+}
+
+bool LocalBrainManager::startAsync()
+{
+    if (! config.enabled || config.validationError().isNotEmpty()) return false;
+    const ScopedLock lifecycle (lifecycleLock);
+    const auto current = state();
+    if (current != "off" && current != "error") return false;
+    if (stopThread.joinable()) stopThread.join();
+    if (startupThread.joinable()) startupThread.join();
     const auto release = String (config.stableAudioReleaseIdle, 3);
     mosh::setEnvVar ("MOSH_SA3_RELEASE_IDLE", release.toRawUTF8());
-    startupThread = std::thread ([this] { runStartup(); });
+    stopRequested = false;
+    publish ("starting");
+    startupThread = std::thread ([this]
+    {
+        (void) LocalBrainProcessRegistry::reapOwnedProcesses (
+            LocalBrainProcessRegistry::defaultDirectory());
+        if (! stopRequested) runStartup();
+    });
+    return true;
+}
+
+bool LocalBrainManager::stopAsync()
+{
+    if (! config.enabled || config.validationError().isNotEmpty()) return false;
+    const ScopedLock lifecycle (lifecycleLock);
+    const auto current = state();
+    if (current == "stopping" || current == "unavailable") return false;
+    if (stopThread.joinable()) stopThread.join();
+    stopRequested = true;
+    BrainProxy::configureLocal ({}, {});
+    activePort = 0;
+    publish ("stopping");
+    stopThread = std::thread ([this]
+    {
+        if (startupThread.joinable()) startupThread.join();
+        if (prewarmThread.joinable()) prewarmThread.join();
+        terminateSpawnedChild();
+        removeHandshakeForSpawnedProcess();
+        publish ("off");
+    });
+    return true;
 }
 
 void LocalBrainManager::runStartup()
 {
     if (! config.modelPath.isDirectory() || ! config.pythonRuntime.existsAsFile())
     {
-        publish ("unavailable", "configured model or Python runtime is missing"); return;
+        publish ("error", "configured model or Python runtime is missing"); return;
     }
-    publish ("starting");
-    for (int port = config.preferredPort; port < config.preferredPort + 20 && ! stopping; ++port)
+    const int port = config.preferredPort;
+    if (portIsOccupied (port))
     {
-        if (portIsOccupied (port))
-        {
-            if (probeExactModel (port) && canAdopt (port))
-            {
-                activePort = port;
-                BrainProxy::configureLocal ("http://127.0.0.1:" + String (port) + "/v1",
-                                            config.modelPath.getFullPathName());
-                publish ("ready"); return;
-            }
-            continue;
-        }
-
-        auto script = File::getSpecialLocation (File::currentExecutableFile)
-                          .getParentDirectory().getParentDirectory().getChildFile ("Resources/service/sft/launch_local_brain.py");
-        if (! script.existsAsFile())
-            script = File::getCurrentWorkingDirectory().getChildFile ("service/sft/launch_local_brain.py");
-        const auto pidFile = handshakeFile().getSiblingFile ("local-brain.pid");
-        pidFile.deleteFile();
-        StringArray args { config.pythonRuntime.getFullPathName(), script.getFullPathName(),
-                           pidFile.getFullPathName(), config.pythonRuntime.getFullPathName(),
-                           config.modelPath.getFullPathName(), String (port) };
-        if (! child.start (args)) continue;
-        spawnedByUs = true;
-        for (int tries = 0; tries < 20 && ! pidFile.existsAsFile(); ++tries) Thread::sleep (25);
-        spawnedPid = pidFile.loadFileAsString().getIntValue();
-        activePort = port;
-        const auto deadline = Time::getMillisecondCounter() + 120000u;
-        while (! stopping && child.isRunning()
-               && (int32) (deadline - Time::getMillisecondCounter()) > 0)
-        {
-            if (probeExactModel (port, 700))
-            {
-                handshakeFile().getParentDirectory().createDirectory();
-                auto* h = new DynamicObject();
-                h->setProperty ("owner", "Mosh"); h->setProperty ("pid", spawnedPid);
-                h->setProperty ("port", port); h->setProperty ("modelPath", config.modelPath.getFullPathName());
-                h->setProperty ("pythonRuntime", config.pythonRuntime.getFullPathName());
-                handshakeFile().replaceWithText (JSON::toString (var (h), true));
-                BrainProxy::configureLocal ("http://127.0.0.1:" + String (port) + "/v1",
-                                            config.modelPath.getFullPathName());
-                publish ("ready"); return;
-            }
-            Thread::sleep (250);
-        }
-        terminateSpawnedChild();
-        activePort = 0;
+        publish ("error", "preferred local AI port " + String (port) + " is already in use");
+        return;
     }
-    if (! stopping) publish ("unavailable", "no verified local-brain endpoint available");
+
+    auto script = File::getSpecialLocation (File::currentExecutableFile)
+                      .getParentDirectory().getParentDirectory().getChildFile ("Resources/service/sft/launch_local_brain.py");
+    if (! script.existsAsFile())
+        script = File::getCurrentWorkingDirectory().getChildFile ("service/sft/launch_local_brain.py");
+    runtimeDirectory().createDirectory();
+    LocalBrainProcessRegistry::defaultDirectory().createDirectory();
+   #if JUCE_MAC || JUCE_LINUX
+    (void) ::chmod (runtimeDirectory().getFullPathName().toRawUTF8(), 0700);
+    (void) ::chmod (LocalBrainProcessRegistry::defaultDirectory().getFullPathName().toRawUTF8(), 0700);
+   #endif
+    pidFile().deleteFile();
+    StringArray args { config.pythonRuntime.getFullPathName(), script.getFullPathName(),
+                       pidFile().getFullPathName(),
+                       LocalBrainProcessRegistry::defaultDirectory().getFullPathName(),
+                       config.pythonRuntime.getFullPathName(), config.modelPath.getFullPathName(),
+                       String (port) };
+    if (! child.start (args))
+    {
+        publish ("error", "could not launch the configured local AI runtime");
+        return;
+    }
+    for (int tries = 0; tries < 40 && ! pidFile().existsAsFile() && child.isRunning(); ++tries)
+        Thread::sleep (25);
+    spawnedPid = pidFile().loadFileAsString().getIntValue();
+    if (spawnedPid <= 1 || ! processRecordFile().existsAsFile())
+    {
+        publish ("error", "local AI launcher did not create a valid ownership record");
+        return;
+    }
+    activePort = port;
+    const auto deadline = Time::getMillisecondCounter() + 120000u;
+    while (! stopRequested && child.isRunning()
+           && (int32) (deadline - Time::getMillisecondCounter()) > 0)
+    {
+        if (probeExactModel (port, 700))
+        {
+            handshakeFile().getParentDirectory().createDirectory();
+            auto* h = new DynamicObject();
+            h->setProperty ("owner", "Mosh"); h->setProperty ("pid", spawnedPid);
+            h->setProperty ("port", port); h->setProperty ("modelPath", config.modelPath.getFullPathName());
+            h->setProperty ("pythonRuntime", config.pythonRuntime.getFullPathName());
+            handshakeFile().replaceWithText (JSON::toString (var (h), true));
+           #if JUCE_MAC || JUCE_LINUX
+            (void) ::chmod (handshakeFile().getFullPathName().toRawUTF8(), 0600);
+           #endif
+            BrainProxy::configureLocal ("http://127.0.0.1:" + String (port) + "/v1",
+                                        config.modelPath.getFullPathName());
+            publish ("ready");
+            return;
+        }
+        Thread::sleep (250);
+    }
+    if (stopRequested) return;
+    terminateSpawnedChild();
+    removeHandshakeForSpawnedProcess();
+    activePort = 0;
+    publish ("error", "local AI did not become ready on port " + String (port));
 }
 
 void LocalBrainManager::prewarmAfterStableAudioUnload (const var& unloadMetrics)
 {
-    if (! config.prewarmAfterUnload || activePort.load() <= 0 || prewarmInFlight.exchange (true)) return;
+    if (! config.prewarmAfterUnload || stopRequested || activePort.load() <= 0
+        || prewarmInFlight.exchange (true)) return;
     logRuntimeEvent ("stable_audio_unloaded", unloadMetrics);
     if (prewarmThread.joinable()) prewarmThread.join();
     prewarmThread = std::thread ([this] { runPrewarm(); prewarmInFlight = false; });
@@ -307,6 +324,7 @@ void LocalBrainManager::runPrewarm()
     logRuntimeEvent ("brain_prewarm", var (log));
     // A failed optimization never demotes an already-verified server: the render is
     // complete and normal inference remains available, merely without a warm cache.
-    publish ("ready", ok ? String() : "local-brain prewarm failed", ms);
+    if (! stopRequested)
+        publish ("ready", ok ? String() : "local-brain prewarm failed", ms);
 }
 }

@@ -6,6 +6,9 @@
 
 juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
+add_executable(MoshLocalBrainFixture fixtures/local_brain_fixture.cpp)
+add_dependencies(MoshTests MoshLocalBrainFixture)
+
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_session_paths.cpp
@@ -72,6 +75,8 @@ target_sources(MoshTests PRIVATE
     test_brain_proxy.cpp
     test_owner_runtime.cpp
     ${CMAKE_SOURCE_DIR}/src/brain/BrainProxy.cpp
+    ${CMAKE_SOURCE_DIR}/src/brain/LocalBrainProcessRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/brain/OwnerRuntimeConfig.cpp
     ${CMAKE_SOURCE_DIR}/src/brain/OwnerRuntime.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
@@ -116,6 +121,9 @@ target_compile_definitions(MoshTests PRIVATE
     MOSH_GIT_STATE_STRING="${MOSH_GIT_STATE}"
     MOSH_BUILD_ARCHITECTURE_STRING="${MOSH_BUILD_ARCHITECTURE}"
     MOSH_BUILD_CONFIGURATION_STRING="$<CONFIG>")
+
+target_compile_definitions(MoshTests PRIVATE
+    MOSH_LOCAL_BRAIN_FIXTURE_PATH="$<TARGET_FILE:MoshLocalBrainFixture>")
 
 target_link_libraries(MoshTests PRIVATE
     Catch2::Catch2WithMain

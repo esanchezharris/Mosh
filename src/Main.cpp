@@ -165,13 +165,10 @@ public:
                               && ! audioRecoveryIsolationSmoke)
                           || scanDeep || runScript || voiceSmoke;
 
-        // Owner-only Finder runtime: loading this mode-600 JSON is opt-in and
-        // machine-local. startAsync sets the SA3 release policy immediately, then
-        // loads/verifies the exact local model without delaying engine/audio/UI startup.
         if (! headless && ! liveAudio && ! scanDeep && ! runScript && ! voiceSmoke)
         {
             ownerRuntime = std::make_unique<LocalBrainManager> (OwnerRuntimeConfig::load());
-            ownerRuntime->startAsync();
+            ownerRuntime->initializeAsync();
         }
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
@@ -593,6 +590,16 @@ public:
         bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
         bridge.setBrainRuntimeStatusProvider ([this]
         {
+            return ownerRuntime != nullptr ? ownerRuntime->status() : juce::var();
+        });
+        bridge.setBrainRuntimeStartHandler ([this]
+        {
+            if (ownerRuntime != nullptr) ownerRuntime->startAsync();
+            return ownerRuntime != nullptr ? ownerRuntime->status() : juce::var();
+        });
+        bridge.setBrainRuntimeStopHandler ([this]
+        {
+            if (ownerRuntime != nullptr) ownerRuntime->stopAsync();
             return ownerRuntime != nullptr ? ownerRuntime->status() : juce::var();
         });
         if (ownerRuntime != nullptr)

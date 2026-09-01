@@ -10,6 +10,7 @@ namespace mosh
 struct OwnerRuntimeConfig
 {
     bool enabled = false;
+    bool autoStart = false;
     juce::File sourceFile;
     juce::File modelPath;
     juce::File pythonRuntime;
@@ -31,35 +32,42 @@ public:
     explicit LocalBrainManager (OwnerRuntimeConfig);
     ~LocalBrainManager();
 
-    void startAsync();
+    bool initializeAsync();
+    bool startAsync();
+    bool stopAsync();
     void prewarmAfterStableAudioUnload (const juce::var& unloadMetrics = {});
     juce::var status() const;
     void setStatusCallback (std::function<void (juce::var)> cb);
 
     static bool modelsResponseMatches (const juce::var&, const juce::String& exactModelPath);
-    static bool terminateOwnedProcess (int pid, bool verifiedOwner, int graceMs = 2000);
 
 private:
     void runStartup();
+    void runInitialization();
     void runPrewarm();
     bool probeExactModel (int port, int timeoutMs = 1000) const;
     bool portIsOccupied (int port) const;
-    bool canAdopt (int port) const;
     void publish (juce::String state, juce::String error = {}, double ms = 0.0);
+    juce::String state() const;
+    juce::File runtimeDirectory() const;
     juce::File handshakeFile() const;
+    juce::File pidFile() const;
+    juce::File processRecordFile() const;
     void logRuntimeEvent (const juce::String& event, const juce::var& data = {}) const;
     void terminateSpawnedChild();
+    void removeHandshakeForSpawnedProcess();
 
     OwnerRuntimeConfig config;
     mutable juce::CriticalSection lock;
+    juce::CriticalSection lifecycleLock;
     juce::var currentStatus;
     std::function<void (juce::var)> statusCallback;
     juce::ChildProcess child;
     std::thread startupThread;
+    std::thread stopThread;
     std::thread prewarmThread;
-    std::atomic<bool> stopping { false };
+    std::atomic<bool> stopRequested { false };
     std::atomic<bool> prewarmInFlight { false };
-    bool spawnedByUs = false;
     std::atomic<int> activePort { 0 };
     int spawnedPid = 0;
 
