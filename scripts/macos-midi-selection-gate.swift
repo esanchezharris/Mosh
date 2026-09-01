@@ -94,7 +94,17 @@ func postMouse(_ type: CGEventType, at point: CGPoint, flags: CGEventFlags = [])
     event?.post(tap: .cghidEventTap)
 }
 
-func click(_ note: NoteState, flags: CGEventFlags = []) {
+func requireMoshFrontmost(_ app: NSRunningApplication, phase: String) {
+    guard !app.isTerminated,
+          app.bundleIdentifier == "studio.mosh.app",
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+        fputs("target Mosh process lost focus before \(phase)\n", stderr)
+        exit(6)
+    }
+}
+
+func click(_ note: NoteState, app: NSRunningApplication, flags: CGEventFlags = []) {
+    requireMoshFrontmost(app, phase: "click")
     let point = CGPoint(x: note.x + note.width / 2, y: note.y + note.height / 2)
     postMouse(.mouseMoved, at: point, flags: flags)
     postMouse(.leftMouseDown, at: point, flags: flags)
@@ -102,7 +112,8 @@ func click(_ note: NoteState, flags: CGEventFlags = []) {
     RunLoop.current.run(until: Date().addingTimeInterval(0.25))
 }
 
-func drag(_ note: NoteState, deltaX: Double) {
+func drag(_ note: NoteState, deltaX: Double, app: NSRunningApplication) {
+    requireMoshFrontmost(app, phase: "drag")
     let start = CGPoint(x: note.x + note.width / 2, y: note.y + note.height / 2)
     let end = CGPoint(x: start.x + deltaX, y: start.y)
     postMouse(.mouseMoved, at: start)
@@ -116,7 +127,8 @@ func drag(_ note: NoteState, deltaX: Double) {
     RunLoop.current.run(until: Date().addingTimeInterval(0.6))
 }
 
-func commandZ() {
+func commandZ(app: NSRunningApplication) {
+    requireMoshFrontmost(app, phase: "Undo")
     let source = CGEventSource(stateID: .hidSystemState)
     let down = CGEvent(keyboardEventSource: source, virtualKey: 6, keyDown: true)
     let up = CGEvent(keyboardEventSource: source, virtualKey: 6, keyDown: false)
@@ -158,7 +170,8 @@ func changedCount(_ before: [NoteState], _ after: [NoteState]) -> Int {
 
 guard CommandLine.arguments.count >= 2,
       let pid = Int32(CommandLine.arguments[1]),
-      let app = NSRunningApplication(processIdentifier: pid) else {
+      let app = NSRunningApplication(processIdentifier: pid),
+      app.bundleIdentifier == "studio.mosh.app" else {
     fputs("usage: macos-midi-selection-gate.swift PID [OUTPUT_JSON]\n", stderr)
     exit(2)
 }
@@ -166,6 +179,7 @@ guard CommandLine.arguments.count >= 2,
 let outputPath = CommandLine.arguments.count >= 3 ? CommandLine.arguments[2] : nil
 _ = app.activate(options: [.activateAllWindows])
 RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+requireMoshFrontmost(app, phase: "initial selection")
 let before = notes(pid: pid)
 guard before.count >= 3 else {
     fputs("no three visible MIDI note accessibility frames found\n", stderr)
@@ -177,10 +191,10 @@ let laterX = before.filter { $0.x > target.x + 4 }.map(\.x).min()
 let deltaX = laterX.map { max(24, $0 - target.x + max(12, target.width)) }
     ?? max(36, target.width + 24)
 let beforeFingerprint = fingerprint(pid: pid)
-click(target)
-companions.forEach { click($0, flags: .maskShift) }
+click(target, app: app)
+companions.forEach { click($0, app: app, flags: .maskShift) }
 let selectedAfterGroup = notes(pid: pid).filter(\.selected).count
-click(target)
+click(target, app: app)
 let collapsed = notes(pid: pid)
 let selectedAfterCollapse = collapsed.filter(\.selected).count
 guard let currentTarget = collapsed.first(where: { $0.title == target.title }) else {
@@ -188,11 +202,11 @@ guard let currentTarget = collapsed.first(where: { $0.title == target.title }) e
     exit(5)
 }
 let selectedFingerprint = fingerprint(pid: pid)
-drag(currentTarget, deltaX: deltaX)
+drag(currentTarget, deltaX: deltaX, app: app)
 let moved = notes(pid: pid)
 let selectedAfterMove = moved.filter(\.selected).count
 let changedNotes = changedCount(before, moved)
-commandZ()
+commandZ(app: app)
 let restored = notes(pid: pid)
 let undoRestored = restored.map(\.title).sorted() == before.map(\.title).sorted()
 let report = SelectionReport(
