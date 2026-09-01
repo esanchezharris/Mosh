@@ -20,7 +20,7 @@
 #                signature refresh stays cheap).
 #
 # Args: MOSH_UI_DIR, MOSH_UI_DIST, MOSH_UI_STAGE_DIR (stage mode), NPM_EXECUTABLE,
-#       MODE.
+#       MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP (build mode), MODE.
 # ─────────────────────────────────────────────────────────────────────────────
 
 if (NOT DEFINED MODE)
@@ -42,6 +42,17 @@ function (newest_mtime outVar)
 endfunction()
 
 if (MODE STREQUAL "build")
+    if (MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP)
+        set(agentLoopFlag "1")
+    else()
+        set(agentLoopFlag "0")
+    endif()
+    set(buildModeStamp "${MOSH_UI_DIST}/.mosh-build-mode")
+    set(previousAgentLoopFlag "")
+    if (EXISTS "${buildModeStamp}")
+        file(READ "${buildModeStamp}" previousAgentLoopFlag)
+        string(STRIP "${previousAgentLoopFlag}" previousAgentLoopFlag)
+    endif()
     file(GLOB_RECURSE uiSources
          "${MOSH_UI_DIR}/src/*.ts"
          "${MOSH_UI_DIR}/src/*.tsx"
@@ -55,14 +66,17 @@ if (MODE STREQUAL "build")
     if (EXISTS "${MOSH_UI_DIST}/index.html")
         file(TIMESTAMP "${MOSH_UI_DIST}/index.html" distMt "%s" UTC)
     endif()
-    if (distMt STREQUAL "" OR (NOT srcMt STREQUAL "" AND srcMt GREATER distMt))
-        message(STATUS "UI sources newer than ui/dist (or dist missing) — building Mosh UI (Vite)")
+    if (distMt STREQUAL "" OR (NOT srcMt STREQUAL "" AND srcMt GREATER distMt)
+        OR NOT previousAgentLoopFlag STREQUAL agentLoopFlag)
+        message(STATUS "UI sources or packaged build mode changed — building Mosh UI (Vite, free-form Moshi=${agentLoopFlag})")
         execute_process(COMMAND "${NPM_EXECUTABLE}" install --no-audit --no-fund
                         WORKING_DIRECTORY "${MOSH_UI_DIR}" RESULT_VARIABLE rc)
         if (NOT rc EQUAL 0)
             message(FATAL_ERROR "npm install failed (${rc})")
         endif()
-        execute_process(COMMAND "${NPM_EXECUTABLE}" run build
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E env
+                                "VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=${agentLoopFlag}"
+                                "${NPM_EXECUTABLE}" run build
                         WORKING_DIRECTORY "${MOSH_UI_DIR}" RESULT_VARIABLE rc)
         if (NOT rc EQUAL 0)
             message(FATAL_ERROR "npm run build failed (${rc})")
@@ -70,8 +84,9 @@ if (MODE STREQUAL "build")
         if (NOT EXISTS "${MOSH_UI_DIST}/index.html")
             message(FATAL_ERROR "Vite build finished but ${MOSH_UI_DIST}/index.html is missing")
         endif()
+        file(WRITE "${buildModeStamp}" "${agentLoopFlag}\n")
     else()
-        message(STATUS "ui/dist is fresher than ui/src — UI bundle up to date")
+        message(STATUS "ui/dist is fresher than ui/src and packaged build mode matches — UI bundle up to date")
     endif()
 elseif (MODE STREQUAL "stage")
     set(distMt "")

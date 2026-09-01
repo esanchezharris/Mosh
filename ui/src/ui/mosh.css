@@ -1457,7 +1457,7 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .agent-runtime { font-size: 10px; color: var(--bone-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-runtime.ready { color: var(--lime); }
 .agent-runtime.prewarming, .agent-runtime.starting { color: var(--amber); }
-.issue-inbox-button { position:absolute; right:8px; top:6px; font-size:10px; }
+.issue-inbox-button { position:absolute; right:8px; top:6px; font-size:10px; background:transparent; border:none; color:var(--bone-dim); cursor:pointer; }
 .issue-inbox { position:absolute; right:8px; bottom:52px; z-index:50; width:min(520px,calc(100vw - 24px)); max-height:65vh; overflow:auto; padding:12px; background:#17181b; border:1px solid #484b52; border-radius:8px; box-shadow:0 12px 40px #000b; color:#eee; }
 .issue-inbox-head,.issue-tabs,.issue-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 .issue-inbox-head { justify-content:space-between; }

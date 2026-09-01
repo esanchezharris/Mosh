@@ -8,6 +8,7 @@ import { retrieveCards, knowledgePromptSection } from "../knowledge";
 import { INTENTS } from "../brainCore";
 import { MUSICAL_TIME_RULE } from "../musicalTime";
 import { renderSession } from "../sessionRender";
+import { TONICS, inScale, noteName, resolveKey, scaleMask } from "../../musicalKey";
 import type { Snapshot } from "../../types";
 import type { StepRecord } from "../loopSeam";
 import type { PlanStep } from "./parse";
@@ -36,6 +37,28 @@ export const LOOP_RULES = [
   "- Stay in character. Never mention JSON, models, commands, or that you're an AI.",
 ].join("\n");
 
+const IN_KEY_ASK = /\b(?:in|within)\s+(?:the\s+)?key\b/i;
+const MELODY_ASK = /\b(?:melody|melodic)\b/i;
+function inKeyTaskGuidance(snap: Snapshot | null, query?: string): string {
+  if (!snap || !query || !IN_KEY_ASK.test(query)) return "";
+  const key = resolveKey(snap.session.key);
+  const mask = scaleMask(key);
+  const notes = Array.from({ length: 25 }, (_, index) => index + 57)
+    .filter((pitch) => inScale(pitch, mask))
+    .map((pitch) => `${noteName(pitch)}=${pitch}`)
+    .join(", ");
+  return `For this in-key note task, every add_note and set_note pitch must use one of these actual middle-register MIDI note numbers for ${TONICS[key.tonic]} ${key.mode}: ${notes}. Do not use pitch-class numbers 0-11 as MIDI pitches.`;
+}
+
+function melodyTaskGuidance(snap: Snapshot | null, query?: string): string {
+  if (!snap || !query || !MELODY_ASK.test(query)) return "";
+  const normalizedQuery = query.toLowerCase();
+  const track = snap.tracks.find((candidate) => normalizedQuery.includes(candidate.name.toLowerCase()));
+  const clip = track?.clips.find((candidate) => candidate.type === "midi");
+  if (!track || !clip) return "";
+  return `For this melody task, use one add_note command with a non-empty notes array on the existing MIDI clip "${clip.id}" on track "${track.id}" "${track.name}", instead of one command per note. Use 4-8 notes with varied in-key pitches and a simple rhythm. Shape: {"clipId":"${clip.id}","notes":[{"pitch":69,"start":0,"length":0.5,"velocity":88}]}. Do not rename or create tracks or clips.`;
+}
+
 /** System prompt for every loop call: loop preamble + full catalog +
  *  [knowledge for the ask] + [memory] + loop rules + the RICH session. Rebuilt fresh
  *  each step (the session block is the observation) — `memory` is computed ONCE per
@@ -44,9 +67,13 @@ export const LOOP_RULES = [
  *  byte-identical to the pre-M2 shape (same guarantee as buildSystemPrompt). */
 export function buildLoopSystemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
+  const keyGuidance = inKeyTaskGuidance(snap, query);
+  const melodyGuidance = melodyTaskGuidance(snap, query);
   const parts = [LOOP_PREAMBLE, commandCatalogPrompt()];
   if (knowledge) parts.push(knowledge);
   if (memory) parts.push(memory);
+  if (keyGuidance) parts.push(keyGuidance);
+  if (melodyGuidance) parts.push(melodyGuidance);
   parts.push(LOOP_RULES, "Current session:", snap ? renderSession(snap) : "(empty session)");
   return parts.join("\n");
 }

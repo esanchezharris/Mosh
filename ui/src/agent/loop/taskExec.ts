@@ -16,6 +16,7 @@
 //   budget (destructiveScreen weights).
 
 import { useStore } from "../../store";
+import { SCALES, TONICS, inScale, keyLabel, resolveKey, scaleMask } from "../../musicalKey";
 import { validateCommand } from "../commands";
 import {
   destructiveWeight, isDestructiveCommand,
@@ -24,7 +25,7 @@ import {
 import { MEMORY_COMMANDS, handleRememberPreference } from "../memory/rememberPreference";
 import { bumpPatternUsesIfMatched } from "../memory/usesTracking";
 import type { AgentEnv, StepCommandResult } from "../loopSeam";
-import type { Snapshot } from "../../types";
+import type { SessionKey, Snapshot } from "../../types";
 import { awaitRendersSettled, RENDER_JOB_COMMANDS } from "./jobWait";
 
 export type TaskMeta = { utterance?: string; source?: string };
@@ -45,6 +46,31 @@ const READ_ONLY = new Set([
   "list_builtins", "list_plugins", "list_takes", "list_track_outputs",
   "detect_clip_bpm", "get_rhymes", "analyze_lyrics",
 ]);
+
+const IN_KEY_REQUEST = /\b(?:in (?:the )?key|(?:keep|stay|remain)[^.!?]{0,24}in (?:the )?key)\b/i;
+const MELODY_REQUEST = /\b(?:melody|melodic)\b/i;
+
+function noteKeyError(command: string, args: Record<string, unknown>, key: SessionKey, melody: boolean): string | null {
+  if (command !== "add_note" && command !== "set_note") return null;
+  const resolved = resolveKey(key);
+  const pitches = Array.isArray(args.notes)
+    ? args.notes.map((note, index) => ({
+        label: `notes[${index}]`,
+        pitch: (note as Record<string, unknown>).pitch,
+      }))
+    : [{ label: "", pitch: args.pitch }];
+  for (const candidate of pitches) {
+    const pitch = candidate.pitch;
+    if (typeof pitch !== "number" || !Number.isFinite(pitch)) continue;
+    const prefix = candidate.label ? `${candidate.label} ` : "";
+    if (melody && (pitch < 48 || pitch > 84))
+      return `${command} ${prefix}pitch ${Math.round(pitch)} is outside the practical melody register; use an actual MIDI note from 48 to 84`;
+    if (resolved.mode === "chromatic" || inScale(pitch, scaleMask(resolved))) continue;
+    const allowed = SCALES[resolved.mode].map((offset) => TONICS[(resolved.tonic + offset) % 12]).join(" ");
+    return `${command} ${prefix}pitch ${Math.round(pitch)} is outside ${keyLabel(key)}; use one of ${allowed}`;
+  }
+  return null;
+}
 
 function newTurnId(): string {
   try {
@@ -101,6 +127,11 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       type Entry = StepCommandResult & { index: number };
       const entries: Entry[] = [];
       const valid: Array<{ index: number; command: string; args: Record<string, unknown> }> = [];
+      let constrainedKey: SessionKey | undefined;
+      const melodyRequest = MELODY_REQUEST.test(meta.utterance ?? "");
+      if (IN_KEY_REQUEST.test(meta.utterance ?? "")
+          && calls.some((c) => c.command === "add_note" || c.command === "set_note" || c.command === "set_key"))
+        constrainedKey = (await getSnapshot()).session.key;
       const memoryCalls = calls
         .map((c, index) => ({ c, index }))
         .filter(({ c }) => MEMORY_COMMANDS.has(c.command));
@@ -114,9 +145,13 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       }
       calls.forEach((c, index) => {
         if (MEMORY_COMMANDS.has(c.command)) return;   // already handled above
-        const err = validateCommand(c.command, (c.args ?? {}) as Record<string, unknown>);
+        const args = (c.args ?? {}) as Record<string, unknown>;
+        let err = validateCommand(c.command, args);
+        if (!err && constrainedKey && c.command === "set_key")
+          constrainedKey = { tonic: String(args.tonic), mode: String(args.mode) };
+        if (!err && constrainedKey) err = noteKeyError(c.command, args, constrainedKey, melodyRequest);
         if (err) entries.push({ index, command: c.command, ok: false, error: err });
-        else valid.push({ index, command: c.command, args: (c.args ?? {}) as Record<string, unknown> });
+        else valid.push({ index, command: c.command, args });
       });
 
       // Task-cumulative destructive screen (same reporting shape as runAgentBatch).

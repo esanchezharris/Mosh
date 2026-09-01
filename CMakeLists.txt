@@ -99,6 +99,7 @@ message(STATUS "Mosh deps: FETCHCONTENT_BASE_DIR=${FETCHCONTENT_BASE_DIR}")
 
 option(MOSH_BUILD_APP "Build the standalone JUCE app" ON)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
+option(MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP "Enable free-form Moshi in packaged UI builds" ON)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for plugin-host smoke tests" OFF)
 option(MOSH_BUILD_REIMAGINE_PLUGIN "Build the owner-local Mosh Re-Imagine VST3" ${APPLE})

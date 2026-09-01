@@ -88,6 +88,58 @@ describe("createTaskExecutor — one undo unit per agent task", () => {
     await t.close();
   });
 
+  it("rejects an out-of-key note when the task explicitly says to keep it in key", async () => {
+    const track = await useStore.getState().exec("create_track", { name: "Melody" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 4 });
+    const clipId = (clip.data as { clipId: string }).clipId;
+    await useStore.getState().refresh();
+
+    const t = createTaskExecutor("melody", {
+      utterance: "give the keys a melody and keep it in key",
+    });
+    const s = await t.env.runBatch("step 1", [
+      { command: "add_note", args: { clipId, pitch: 11, start: 0, length: 0.5, velocity: 100 } },
+      { command: "add_note", args: { clipId, pitch: 70, start: 0, length: 0.5, velocity: 100 } },
+      { command: "add_note", args: { clipId, pitch: 69, start: 0.5, length: 0.5, velocity: 100 } },
+    ]);
+
+    expect(s.results[0]).toMatchObject({ command: "add_note", ok: false });
+    expect(s.results[0]!.error).toContain("outside the practical melody register");
+    expect(s.results[1]).toMatchObject({ command: "add_note", ok: false });
+    expect(s.results[1]!.error).toContain("outside A minor");
+    expect(s.results[2]).toMatchObject({ command: "add_note", ok: true });
+    await t.close();
+  });
+
+  it("rejects an out-of-key note inside a native note batch", async () => {
+    const track = await useStore.getState().exec("create_track", { name: "Keys" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 4 });
+    const clipId = (clip.data as { clipId: string }).clipId;
+    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
+    await useStore.getState().refresh();
+
+    const t = createTaskExecutor("melody", {
+      utterance: "give the keys a melody and keep it in key",
+    });
+    const s = await t.env.runBatch("step 1", [{
+      command: "add_note",
+      args: {
+        clipId,
+        notes: [
+          { pitch: 69, start: 0, length: 0.5, velocity: 88 },
+          { pitch: 70, start: 0.5, length: 0.5, velocity: 82 },
+        ],
+      },
+    }]);
+
+    expect(s.results[0]).toMatchObject({ command: "add_note", ok: false });
+    expect(s.results[0]!.error).toContain("notes[1]");
+    expect(s.results[0]!.error).toContain("outside A minor");
+    await t.close();
+  });
+
   it("close() is idempotent and the env refuses work after close", async () => {
     const t = createTaskExecutor("done", {});
     await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "X" } }]);

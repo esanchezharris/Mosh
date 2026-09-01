@@ -539,6 +539,10 @@
 .v2-lhead-add {
   cursor: pointer; color: var(--v2-faint); background: var(--v2-surface-2);
   border-bottom-color: transparent; gap: 10px;
+  /* The four .v2-corner rows are sticky at the top of .v2-tl-scroll, so scrolling this
+     trailing row into view parks it UNDER them and its centre stops being clickable.
+     Reserve the frozen band so scrollIntoView always lands it clear. */
+  scroll-margin-top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h));
 }
 .v2-lhead-add:hover { color: var(--v2-accent); }
 .v2-lhead-add .v2-licon { background: transparent; border-style: dashed; color: inherit; }
