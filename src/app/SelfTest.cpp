@@ -9973,6 +9973,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "metronome restored to the engine defaults");
     }
 
+    // ─── LAT-001 — measured round-trip latency calibration (headless surface) ───
+    // The sweep itself needs an output, a room and a mic, so a headless run proves only
+    // the SURFACE: `start` refuses honestly with no device (never a silent ok), status /
+    // apply / clear are always answerable, an unknown action is refused, and the snapshot
+    // carries a stable-keyed block the UI can render cold. The maths (detector, residual,
+    // honour rule, lifecycle) is pinned engine-free in tests/test_latency_calibration.cpp.
+    section ("LAT-001: latency calibration surface (calibrate_latency)");
+    {
+        auto cal = [&] { return ops.snapshot().getProperty ("session", var()).getProperty ("latencyCalibration", var()); };
+        check (cal().isObject(), "snapshot session.latencyCalibration present");
+        check (cal().getProperty ("state", var()).toString() == "idle", "latencyCalibration.state is idle headless");
+        check (! (bool) cal().getProperty ("applied", true), "latencyCalibration.applied is false headless");
+        check (! (bool) cal().getProperty ("stale", true), "latencyCalibration.stale is false with no record");
+        for (auto* k : { "frames", "sampleRate", "ms", "confidence", "measuredAt", "inputDevice", "outputDevice",
+                         "method", "deviceReportedSamples", "appliedMs", "applied", "stale", "error" })
+            check (cal().hasProperty (k), juce::String ("latencyCalibration always carries ") + k);
+
+        auto startR = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+        check (! ok (startR), "calibrate_latency start refuses headless (no audio device)");
+        check (startR["error"].toString().contains ("no audio device"),
+               "calibrate_latency start names the missing device");
+        check (cal().getProperty ("state", var()).toString() == "idle", "a refused start leaves the state idle");
+
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "status"))), "calibrate_latency status ok headless");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "apply"))),  "calibrate_latency apply ok headless (nothing to push)");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "cancel"))), "calibrate_latency cancel ok with nothing running");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))),  "calibrate_latency clear ok headless");
+        check (! ok (cmd (ops, "calibrate_latency", args1 ("action", "bogus"))), "calibrate_latency refuses an unknown action");
+        check (cal().getProperty ("state", var()).toString() == "idle", "state still idle after the headless round");
+
+        // NON-undoable machine action, same posture (and same check) as set_record_options.
+        {
+            auto calLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool calPref = false;
+            for (auto& ln : juce::StringArray::fromLines (calLog))
+                if (ln.contains ("\"command\": \"calibrate_latency\"") && ln.contains ("\"undoable\": false")) calPref = true;
+            check (calPref, "calibrate_latency logged undoable:false (machine action)");
+        }
+    }
+
     // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
     // WHAT THIS CANNOT PROVE, stated up front so nothing below reads as more than it is:
     // a headless run has no audio device, so no te::MidiInputDevice exists, so
@@ -15989,6 +16029,148 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
 // notes reach the recorder and land in a clip. Whether they reach a speaker is
 // --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
 // sound it never measured.
+// ── LAT-001 — measured latency, end to end through a loopback device ─────────────────
+//
+// What this proves that --selftest structurally cannot: the sweep really goes out the
+// device and comes back in, the detector finds it, the residual really reaches
+// Tracktion's record path, and a take then LANDS where it was played. With a digital
+// loopback (BlackHole) the round trip is exactly the device's own buffering, so the
+// residual is small and the landed click must sit within 1 ms of the click that
+// produced it. Nothing here needs a human: no speakers, no mic, no listening.
+int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh latency-calibration smoke (LAT-001) =====\n";
+    section ("LAT-001 live: calibrate through a loopback, then land a click within 1 ms");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples()
+              << " reportedIn=" << device->getInputLatencyInSamples()
+              << " reportedOut=" << device->getOutputLatencyInSamples() << "\n";
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
+    const double rate = device->getCurrentSampleRate();
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (20);
+            else Thread::sleep (20);
+        }
+    };
+    auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
+
+    // ── 1. calibrate ──
+    check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
+    auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+    check (ok (start), "calibrate_latency start ok with a live device");
+    check (calState().getProperty ("state", var()).toString() == "running", "calibration reports running");
+    const auto deadline = Time::getMillisecondCounter() + 12000;
+    while (Time::getMillisecondCounter() < deadline
+           && calState().getProperty ("state", var()).toString() == "running")
+        pump (100);
+    auto cal = calState();
+    const auto state = cal.getProperty ("state", var()).toString();
+    std::cerr << "  ..   calibration: state=" << state
+              << " frames=" << (int64) cal.getProperty ("frames", 0)
+              << " ms=" << (double) cal.getProperty ("ms", 0.0)
+              << " confidence=" << (double) cal.getProperty ("confidence", 0.0)
+              << " deviceReported=" << (int64) cal.getProperty ("deviceReportedSamples", 0)
+              << " appliedMs=" << (double) cal.getProperty ("appliedMs", 0.0)
+              << " error=" << cal.getProperty ("error", var()).toString() << "\n";
+    check (state == "measured", "calibration produced a measurement (not a refusal, not a hang)");
+    check ((bool) cal.getProperty ("applied", false), "measured residual is applied to the record path");
+    check (! (bool) cal.getProperty ("stale", true), "record is honoured at this rate/device");
+    check ((double) cal.getProperty ("confidence", 0.0) > 0.0, "detector confidence is positive");
+    const double measuredMs = (double) cal.getProperty ("ms", 0.0);
+    check (measuredMs >= 0.0 && measuredMs < 200.0, "loopback round trip is a sane number (< 200 ms)");
+    check (std::abs ((double) cal.getProperty ("sampleRate", 0.0) - rate) < 0.5, "record carries the device rate");
+
+    // ── 2. the click: play at 1.0 s on one track, record the loopback on another ──
+    auto clickTrack = cmd (ops, "create_track", args1 ("name", "Click"));
+    check (ok (clickTrack), "create_track Click ok");
+    const auto clickTrackId = clickTrack["data"].getProperty ("trackId", var()).toString();
+    auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", clickTrackId }, { "seconds", 0.25 }, { "freq", 1000.0 }}));
+    check (ok (tone), "add_test_tone_clip ok");
+    const auto clickId = tone["data"].getProperty ("clipId", var()).toString();
+    check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
+
+    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
+    check (ok (takeTrack), "create_track Take ok");
+    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
+           "input monitoring OFF on the take (so the loopback carries only the click)");
+
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
+    auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+    check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
+    pump (2500);
+    auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+    check (ok (stop), "recording stopped");
+
+    // ── 3. where did it land? ──
+    var landed;
+    {
+        auto snap = ops.snapshot();
+        auto tracksVar = snap.getProperty ("tracks", var());
+        if (auto* tracks = tracksVar.getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == takeTrackId)
+                    landed = t.getProperty ("clips", var());
+    }
+    const int nLanded = landed.isArray() ? landed.size() : 0;
+    check (nLanded > 0, "a take landed on the armed track");
+    if (nLanded > 0)
+    {
+        const auto clip = landed[0];
+        const double clipStart  = (double) clip.getProperty ("start", 0.0);
+        const double clipOffset = (double) clip.getProperty ("offset", 0.0);
+        const File src (clip.getProperty ("sourceFile", var()).toString());
+        check (src.existsAsFile(), "landed take has a source WAV on disk");
+        AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (src));
+        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable");
+        if (reader != nullptr && reader->lengthInSamples > 0)
+        {
+            AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+            reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+            // First sample above a floor well under the tone's 10 ms fade-in slope: at 0.25
+            // peak the fade crosses 0.003 about 0.12 ms in, so the threshold itself costs
+            // far less than the 1 ms budget. The loopback is digital, so the floor is zero.
+            int onset = -1;
+            for (int i = 0; i < buf.getNumSamples() && onset < 0; ++i)
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    if (std::abs (buf.getSample (ch, i)) > 0.003f) { onset = i; break; }
+            check (onset >= 0, "the click is present in the recorded take");
+            if (onset >= 0)
+            {
+                const double onsetEditSeconds = clipStart + ((double) onset / reader->sampleRate - clipOffset);
+                const double errorMs = (onsetEditSeconds - 1.0) * 1000.0;
+                std::cerr << "  ..   landed: clipStart=" << clipStart << " offset=" << clipOffset
+                          << " onsetSample=" << onset << " onset=" << onsetEditSeconds
+                          << " s error=" << errorMs << " ms\n";
+                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)");
+            }
+        }
+    }
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;

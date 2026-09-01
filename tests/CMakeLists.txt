@@ -10,6 +10,10 @@ target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_session_paths.cpp
     test_audio_device_startup.cpp
+    # Measured round-trip latency calibration (ported from Moshpit M005/M006):
+    # detector, session lifecycle, and record maths. Engine-free; needs
+    # juce_audio_devices only for the AudioIODeviceCallback interface.
+    test_latency_calibration.cpp
     test_drum_pattern.cpp
     test_automation_mode.cpp
     test_automation_curve_write.cpp
@@ -123,6 +127,7 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_data_structures
     juce::juce_events
     juce::juce_cryptography
+    juce::juce_audio_devices
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)

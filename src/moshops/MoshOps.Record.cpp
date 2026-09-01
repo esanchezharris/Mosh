@@ -284,4 +284,186 @@ juce::var MoshOps::cmdCaptureMidi (const juce::var& args)
     return okResult ("capture_midi", var (data));
 }
 
+
+// ── calibrate_latency (LAT-001) ──────────────────────────────────────────────────────
+//
+// Ported from Moshpit M005-13/M005-29/M006-04. The measurement is a half-second log
+// sweep played through the device output and captured from its input inside ONE
+// juce::AudioIODeviceCallback, so the detected offset IS the output→room→input round
+// trip in that device's own clock — no graph, no PDC, no monitoring path in the way.
+// That is exactly why the Edit is DETACHED for the two seconds it runs (the same
+// exclusivity dance export uses): Tracktion's own callback then emits silence, and the
+// only thing in the room is the sweep.
+//
+// What Tracktion is told afterwards is NOT the measured value. It already subtracts the
+// device-reported input+output latency and the graph PDC when it lands a take; pushing
+// the whole measurement would double-compensate. MoshEngine pushes only the residual,
+// and only while the record is honoured (same rate, same device pair) — see
+// engine/LatencyCalibrationRecord.h for the maths and the tests that pin it.
+juce::var MoshOps::cmdCalibrateLatency (const juce::var& args)
+{
+    static const char* const kName = "calibrate_latency";
+    const auto action = args.getProperty ("action", "status").toString();
+
+    auto reattach = [&]
+    {
+        if (! calibrationDetachedContext_) return;
+        calibrationDetachedContext_ = false;
+        eng.ensurePlaybackContext();
+    };
+
+    if (action == "status")
+        return okResult (kName, latencyCalibrationToVar());   // read-only: no log line
+
+    if (action == "cancel")
+    {
+        if (calibrationSession_ != nullptr)
+            calibrationSession_->cancel();
+        reattach();
+        logLine (kName, args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult (kName, latencyCalibrationToVar());
+    }
+
+    if (action == "clear")
+    {
+        eng.clearLatencyCalibration();
+        calibrationError_.clear();
+        logLine (kName, args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult (kName, latencyCalibrationToVar());
+    }
+
+    if (action == "apply")
+    {
+        // Re-decide against whatever device/rate is live (a no-op headless: nothing to
+        // push, and the record stays wherever it was).
+        eng.applyLatencyCalibrationToDevices();
+        logLine (kName, args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult (kName, latencyCalibrationToVar());
+    }
+
+    if (action == "start")
+    {
+        // Honest refusals first, in the order a producer can act on them.
+        if (! eng.hasAudio() || ! eng.audioReady())
+        {
+            logLine (kName, args, false, "no audio device in this session", false);
+            return errResult (kName, "no audio device in this session");
+        }
+        auto& transport = eng.edit().getTransport();
+        if (transport.isRecording())
+            return errResult (kName, "stop recording before calibrating");
+        if (calibrationSession_ != nullptr && calibrationSession_->running())
+            return errResult (kName, "a calibration is already running");
+        auto* device = adm().getCurrentAudioDevice();
+        if (device == nullptr)
+            return errResult (kName, "no audio device in this session");
+        if (device->getActiveInputChannels().countNumberOfSetBits() == 0)
+            return errResult (kName, "the audio device has no active input channel — pick an input in Settings first");
+
+        // Detach the Edit (export's exclusivity dance, MoshOps.ProjectIo.cpp): meter taps
+        // live on the context being freed, and lastSeenContext must not ABA-match the next.
+        unregisterAllMeterClients();
+        transport.stop (false, false);
+        transport.freePlaybackContext();
+        lastSeenContext = nullptr;
+        calibrationDetachedContext_ = true;
+
+        if (calibrationRegistrar_ == nullptr)
+            calibrationRegistrar_ = std::make_unique<latency::DeviceManagerRegistrar> (adm());
+        if (calibrationSession_ == nullptr)
+            calibrationSession_ = std::make_unique<latency::CalibrationSession> (*calibrationRegistrar_);
+
+        calibrationError_.clear();
+        calibrationRate_ = device->getCurrentSampleRate();
+        if (! calibrationSession_->start (calibrationRate_,
+                                          eng.sessionDir().getChildFile ("latency-calibration-capture.f32")))
+        {
+            reattach();
+            return errResult (kName, "a calibration is already running");
+        }
+
+        logLine (kName, args, true, {}, false);   // machine action — not undoable
+        emitSnapshotInvalidated();                // state: running
+        auto* d = new DynamicObject();
+        d->setProperty ("started", true);
+        // preroll 0.25 s + sweep 0.5 s + 1.0 s search window + 0.2 s tail (CalibrationRunner::begin)
+        d->setProperty ("expectedSeconds", 1.95);
+        return okResult (kName, var (d));
+    }
+
+    return errResult (kName, "action must be start, status, apply, cancel, or clear");
+}
+
+void MoshOps::pollLatencyCalibration()
+{
+    if (calibrationSession_ == nullptr || ! calibrationSession_->running())
+        return;
+    auto outcome = calibrationSession_->pollFinished();   // deregisters FIRST, then measures
+    if (! outcome.has_value())
+        return;
+
+    if (outcome->succeeded())
+    {
+        latency::CalibrationRecord record;
+        record.frames     = outcome->value->frames;
+        record.sampleRate = calibrationRate_;
+        record.confidence = outcome->value->confidence;
+        record.measuredAt = Time::getCurrentTime().toISO8601 (true);
+        const auto setup  = adm().getAudioDeviceSetup();
+        record.inputDevice  = setup.inputDeviceName;
+        record.outputDevice = setup.outputDeviceName;
+        // fromVar's own band check, applied to a fresh measurement too: a >500 ms
+        // "round trip" is a room echo or a routing loop, not a calibration.
+        if (latency::CalibrationRecord::fromVar (record.toVar()).has_value())
+        {
+            calibrationError_.clear();
+            eng.setLatencyCalibration (record);
+        }
+        else
+        {
+            calibrationError_ = "the measured round trip is outside the 500 ms band — check routing and retry";
+        }
+    }
+    else
+    {
+        calibrationError_ = outcome->error;
+    }
+
+    if (calibrationDetachedContext_)
+    {
+        calibrationDetachedContext_ = false;
+        eng.ensurePlaybackContext();      // also re-applies the residual for this device
+    }
+    emit ("latency_calibration", latencyCalibrationToVar());
+    emitSnapshotInvalidated();
+}
+
+juce::var MoshOps::latencyCalibrationToVar()
+{
+    const bool running = calibrationSession_ != nullptr && calibrationSession_->running();
+    const auto record  = eng.latencyCalibration();
+
+    auto* o = new DynamicObject();
+    o->setProperty ("state", running          ? "running"
+                           : record.has_value() ? "measured"
+                           : calibrationError_.isNotEmpty() ? "failed" : "idle");
+    o->setProperty ("frames",       (juce::int64) (record ? record->frames : 0));
+    o->setProperty ("sampleRate",   record ? record->sampleRate : 0.0);
+    o->setProperty ("ms",           record ? record->milliseconds() : 0.0);
+    o->setProperty ("confidence",   record ? record->confidence : 0.0);
+    o->setProperty ("measuredAt",   record ? record->measuredAt : String());
+    o->setProperty ("inputDevice",  record ? record->inputDevice : String());
+    o->setProperty ("outputDevice", record ? record->outputDevice : String());
+    o->setProperty ("method",       record ? record->method : String ("farina-sweep-v1"));
+    o->setProperty ("deviceReportedSamples", (juce::int64) eng.deviceReportedLatencySamples());
+    o->setProperty ("appliedMs",    eng.latencyCalibrationAppliedMs());
+    o->setProperty ("applied",      eng.latencyCalibrationApplied());
+    o->setProperty ("stale",        eng.latencyCalibrationStale());
+    o->setProperty ("error",        calibrationError_);
+    return var (o);
+}
+
 } // namespace mosh
