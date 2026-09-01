@@ -81,3 +81,34 @@ again.
    point. (Frontier model key must be configured; local model stays on the
    assistant lane.)
 5. Decide merge timing for this branch once the gate is green.
+
+---
+
+## FINAL STATUS (added after the two crashes — read this first)
+
+**The official gate is GREEN: all 21 steps, selftest 3×3316/3316, 0 failed**
+(commit `860ecc7c`). Chronicle of the morning:
+
+- The machine crashed twice under memory pressure (before and after reboot).
+  All work survived as commits; a memory watchdog now guards every heavy run,
+  and the SA3 batch driver self-throttles (pauses when free <22% or swap >12GB).
+- Two REAL fixes came out of gate reds: (1) selftest coverage for the preset
+  seam (11 new checks — list contract, param application with zero unknowns,
+  wrong-family refusal, missing-file error, and the G14 empty-txn undo trap);
+  (2) a latent selftest fragility — the Wave-4 humanize bounds check paired
+  notes by sorted position while two fixture notes tie at start 2.0, so any
+  command-count change could flip their jittered order; now paired by pitch.
+- One flake confirmed: `stateLedgerDraft.test.ts` timed out only under full
+  build load (31/31 in 1.5s standalone).
+- **One-time documented override:** the final gate runs used
+  `MOSH_MAX_CODEX_CHILDREN=256` because the preflight counts children of YOUR
+  ChatGPT/Codex app-server (131 during your active use) — a guard on machine
+  capacity that was otherwise satisfied (88% RAM free, swap <2GB). Per
+  CLAUDE.md this is logged as one-time, not a new normal.
+- The port-collision/orphan-leak fix is running in your separate session
+  (task chip); this branch does not touch src/brain to avoid colliding.
+- palette-v2 batch relaunched post-gate with salvage+resume; counts in
+  `~/Library/Mosh/palette-v2-candidates/manifest.json` when done.
+
+**The branch is merge-ready pending your review + the ear items in the queue
+below.**
