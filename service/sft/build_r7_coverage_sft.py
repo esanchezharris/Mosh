@@ -305,7 +305,10 @@ LYRIC_SHEET_ONLY: list[tuple[str, str, str, str]] = [
 # asking). Gold: intent HUH, `say` a short clarifying question, NO commands key.
 # ─────────────────────────────────────────────────────────────────────────────
 AMBIGUOUS_DEFER: list[tuple[str, str]] = [
-    ("it feels empty in the middle", "empty how — a new part, or more energy overall?"),
+    # NOTE (r7.1): this ask was previously the VERBATIM bench string for
+    # nj-amb-empty-middle (test contamination — r7's 4/4 ambiguity read included
+    # a memorized test item). Paraphrased; never mirror bench asks verbatim.
+    ("the middle of the track feels kind of bare", "bare how — a new part, or more energy overall?"),
     ("something's missing in the middle section", "missing how — an instrument, or a whole new part?"),
     ("the chorus needs something", "needs what — more energy, a new sound, or something else?"),
     ("this part feels a little flat", "flat how — the mix, the arrangement, or the performance?"),
@@ -349,6 +352,50 @@ NEAR_MISS_ACTS: list[dict] = [
     ]),
     row("lower the melody track a couple dB, it's poking out", "ACK_GOT_IT", [
         cmd("set_track_volume", trackId=MEL_T, db=-2),
+    ]),
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VIBE-TARGET ACTS (r7.1) — the calibration band the r7 defer bucket missed:
+# a NAMED, mixable target + a qualitative direction but NO numbers. Doctrine
+# (loopPrompt LOOP_RULES act-with-defaults): act once with a sensible default
+# dose, don't ask. r7's gate wrong-defers ("drums slap harder" -> HUH) came
+# from 12 vague->defer demos with ZERO act counterexamples in this phrasing
+# space. Asks are paraphrases — NEVER verbatim bench strings.
+# ─────────────────────────────────────────────────────────────────────────────
+VIBE_TARGET_ACTS: list[dict] = [
+    row("these drums are hitting too soft, beef them up", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=DRUM_T, db=3),
+    ]),
+    row("the beat feels weak under the chorus, push it", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=DRUM_T, db=2),
+    ]),
+    row("the vocals feel buried, lift them", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=VOX_T, db=2),
+    ]),
+    row("give the hook vocal a little more presence", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=VOX_T, db=2),
+    ]),
+    row("the bass is swallowing everything, rein it in", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=BASS_T, db=-3),
+    ]),
+    row("the lead line is drowning out the singer, tuck it back", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=MEL_T, db=-2),
+    ]),
+    row("melody could stand out a touch more", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=MEL_T, db=2),
+    ]),
+    # regret family: named action (revert), no numbers -> undo, never a defer
+    row("ugh no, that was a mistake — take it back", "ACK_GOT_IT", [cmd("undo")]),
+    row("scrap that last change", "ACK_GOT_IT", [cmd("undo")]),
+    row("nope, put it back how it was", "ACK_GOT_IT", [cmd("undo")]),
+    # repair family: decisive single-target correction, no mute-as-fix
+    row("the bass clip is blowing out the speakers, tame it", "ACK_GOT_IT", [
+        cmd("set_clip_gain", clipId=BASS_C, gainDb=-6),
+        cmd("set_track_volume", trackId=BASS_T, db=-3),
+    ]),
+    row("drums are distorting, pull them down before it clips", "ACK_GOT_IT", [
+        cmd("set_track_volume", trackId=DRUM_T, db=-4),
     ]),
 ]
 
@@ -444,6 +491,7 @@ def build_rows() -> list[dict]:
         rows.append(row(ask, "HUH", commands=None, say=say))
 
     rows.extend(NEAR_MISS_ACTS)
+    rows.extend(VIBE_TARGET_ACTS)
     rows.extend(DOSAGE_SAVE)
 
     return rows
@@ -493,6 +541,7 @@ def main() -> int:
         "lyric_full_followthrough": len(LYRIC_FULL_FOLLOWTHROUGH),
         "lyric_sheet_only": len(LYRIC_SHEET_ONLY),
         "ambiguous_defer": len(AMBIGUOUS_DEFER),
+        "vibe_target_acts": len(VIBE_TARGET_ACTS),
         "near_miss_should_act": len(NEAR_MISS_ACTS),
         "dosage_save_contrast": len(DOSAGE_SAVE),
     }
