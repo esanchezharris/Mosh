@@ -5501,6 +5501,73 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             cmd (ops, "remove_track", args1 ("trackId", pt));
         }
 
+        // ── preset seam (P1-A2): list_presets / load_preset ──
+        // The 4OSC arm is fully provable headless; the Vital arm needs a hosted
+        // plugin and an ear, so here it is exercised only to its REFUSAL edge
+        // (a .vital must never touch a track without Vital).
+        {
+            auto lp = cmd (ops, "list_presets");
+            check (ok (lp), "list_presets ok");
+            juce::Array<juce::var> foscBundled;
+            if (auto* a = lp["data"].getProperty ("presets", var()).getArray())
+                for (auto& p : *a)
+                    if (p.getProperty ("plugin", var()).toString() == "4osc"
+                        && p.getProperty ("source", var()).toString() == "bundled")
+                        foscBundled.add (p);
+            check (foscBundled.size() >= 5, "the bundled 4OSC bank lists at least its 5 starter patches");
+
+            // A melodic track: add_midi_clip's default-instrument policy loads 4OSC.
+            auto mt = cmd (ops, "create_track", args1 ("name", "PresetTarget"))["data"]
+                          .getProperty ("trackId", var()).toString();
+            cmd (ops, "add_midi_clip", args1 ("trackId", mt));
+            check ((bool) trackById (mt).getProperty ("isInstrument", false),
+                   "preset target track carries the 4OSC instrument");
+
+            if (foscBundled.size() > 0)
+            {
+                const auto file0 = foscBundled[0].getProperty ("file", var()).toString();
+                auto ld = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", file0 }}));
+                check (ok (ld), "load_preset applies a bundled 4OSC patch");
+                check (ld["data"].getProperty ("plugin", var()).toString() == "4osc",
+                       "load_preset reports the 4OSC target");
+                check ((int) ld["data"].getProperty ("paramsApplied", 0) >= 6,
+                       "the patch actually drove a real number of 4OSC params");
+                // Zero tolerance for display-name drift: an 'unknownParams' field means
+                // the bundled bank and the 4OSC param table disagree.
+                check (! ld["data"].hasProperty ("unknownParams"),
+                       "every bundled patch param resolves against 4OSC (no unknownParams)");
+                // A SECOND, different patch also lands (the bank is not one lucky file).
+                if (foscBundled.size() > 1)
+                {
+                    const auto file1 = foscBundled[1].getProperty ("file", var()).toString();
+                    check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", file1 }}))),
+                           "a second bundled patch loads on the same track");
+                }
+            }
+
+            // Wrong-family refusal: a .vital preset must never touch a 4OSC-only track.
+            auto tmpVital = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("selftest-refusal.vital");
+            tmpVital.replaceWithText ("{}");
+            check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", tmpVital.getFullPathName() }}))),
+                   "a .vital preset is refused on a track without Vital");
+            tmpVital.deleteFile();
+
+            // G14 guard: a FAILED load must not have opened an empty transaction —
+            // otherwise the next undo destroys the PREVIOUS edit's neighbour instead
+            // of the edit itself. Sequence: real edit → failed load → undo must
+            // revert exactly the real edit.
+            cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "volumeDb", -6.0 }}));
+            check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", "/nonexistent/nope.json" }}))),
+                   "load_preset errors on a missing file");
+            cmd (ops, "undo");
+            check ([&] { const double v = (double) trackById (mt).getProperty ("volumeDb", -999.0);
+                         return v > -0.01 && v < 0.01; }(),
+                   "undo after a FAILED preset load reverts the prior edit (no empty-txn G14 trap)");
+
+            cmd (ops, "remove_track", args1 ("trackId", mt));
+        }
+
         // At this point the reload happened while lane 38 was SOLOED, so every other pad
         // is silenced and carrying a parked gain. That parked gain is a new property on
         // the sampler's SOUND tree, so this proves it actually SERIALISES: clearing the
