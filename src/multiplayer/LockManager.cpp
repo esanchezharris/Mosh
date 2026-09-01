@@ -40,7 +40,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // playing notes on the same track can never conflict (nor can a peer's keypress
         // be blocked by someone else's lock on the track they are auditioning).
         "audition_note", "all_notes_off",
-        "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
+        "stop_audition", "export_audio", "export_stems", "export_clip_consolidated", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         // CAP-PRJ-005 — jump_to_history is repeated undo/redo over the local Edit's own
         // UndoManager. Same posture as undo/redo directly above: it targets no single

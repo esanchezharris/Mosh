@@ -868,6 +868,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
    #endif
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "export_stems")      return cmdExportStems (args);
+    if (name == "export_clip_consolidated") return cmdExportClipConsolidated (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
