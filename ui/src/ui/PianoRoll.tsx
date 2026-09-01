@@ -240,7 +240,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   const dragRef = useRef<Drag | null>(null);
   const gridDragRef = useRef<GridDrag | null>(null);
   const previewRef = useRef<Map<number, MidiNote>>(new Map());
-  const applyNativeCursor = useNativeEditorCursor();
+  const applyNativeCursor = useNativeEditorCursor(Boolean(editingClipId && clip));
   // Declared UP HERE, above the `if (!clip) return null` guard further down, because the
   // effects below call it — and an effect closes over the render that scheduled it. On a
   // render where the clip is momentarily absent (a refresh landing mid-gesture) the guard

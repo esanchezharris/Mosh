@@ -14,13 +14,24 @@ const NATIVE_CURSOR: Readonly<Record<PianoRollCursor, EditorCursorKind>> = Objec
   "ew-resize": "resize-left-right",
 });
 
-export function useNativeEditorCursor(): (
+export function useNativeEditorCursor(active = true): (
   cursor: PianoRollCursor,
   refresh?: boolean,
 ) => void {
   const currentKind = useRef<EditorCursorKind>("default");
   const pendingKind = useRef<EditorCursorKind>("default");
   const pendingFrame = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (active) return;
+    if (pendingFrame.current != null) {
+      cancelAnimationFrame(pendingFrame.current);
+      pendingFrame.current = null;
+    }
+    currentKind.current = "default";
+    pendingKind.current = "default";
+    void setEditorCursor("default");
+  }, [active]);
 
   useEffect(() => () => {
     if (pendingFrame.current != null) cancelAnimationFrame(pendingFrame.current);
@@ -32,6 +43,10 @@ export function useNativeEditorCursor(): (
     pendingKind.current = kind;
 
     if (!refresh || kind !== currentKind.current) {
+      if (pendingFrame.current != null) {
+        cancelAnimationFrame(pendingFrame.current);
+        pendingFrame.current = null;
+      }
       currentKind.current = kind;
       void setEditorCursor(kind);
       return;
