@@ -93,6 +93,16 @@ public:
     juce::var escalateCandidates (const juce::var& payload) { return jobManager.escalateCandidates (payload); }
     bool archiveDpoPair (const juce::var& row)              { return jobManager.archivePair (row); }
 
+    /** The engine-free half of generate_beat_recipe: builds the request body and
+        fetches the generated program from the local service (spawn + HTTP — the
+        slow leg, up to ~30s on a cold spawn). Safe off the message thread; the
+        WebBridge two-phase hop calls this on a worker so the fetch can't freeze
+        the UI mid-turn, then re-enters the ordinary command seam with the result
+        as args.__prefetchedProgram so undo/logging/telemetry behave exactly like
+        the sync path. Serialized against itself (not against unrelated
+        message-thread jobManager reads, whose posture is unchanged). */
+    juce::var fetchBeatRecipeProgram (const juce::var& cmdArgs);
+
 private:
     // ── command handlers ──
     void applyMultiplayerCommitMessage (const juce::var& msg);

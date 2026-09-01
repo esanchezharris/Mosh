@@ -4488,6 +4488,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }, 400);
       return ok(command, { status: "started" });
     }
+    case "generate_beat_recipe": {
+      // Mirrors native cmdGenerateBeatRecipe's CONTRACT (fetch a generated program
+      // from the recipe service, apply it as one undoable batch) without a service:
+      // the mock applies a fixed tiny program — optional tempo + one drum track with
+      // a four-on-the-floor kick — and returns the native result shape.
+      pushUndo();
+      if (typeof args.tempo === "number") snapshot.session.tempo = Math.max(20, num(args.tempo, 120));
+      const bpm = snapshot.session.tempo;
+      const t: Track = {
+        id: nextTrackId(), index: snapshot.tracks.length, name: "Recipe Drums",
+        type: "drum", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+      };
+      ensureInstrument(t, true);
+      t.clips.push({
+        id: nextClipId(), name: "Recipe groove", type: "midi",
+        start: 0, length: 4 * 60 / Math.max(20, bpm), offset: 0, hasRenderLayer: false,
+        notes: [0, 4, 8, 12].map((s, k) => ({ i: k, pitch: 36, start: s / 4, length: 0.25, velocity: 100 })),
+      });
+      snapshot.tracks.push(t);
+      invalidate();
+      return ok(command, {
+        status: "done", recipeId: "mock-recipe",
+        commandCount: 3, appliedCount: 3, unresolved: [], applied: [],
+      });
+    }
     case "remove_note": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);

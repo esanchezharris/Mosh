@@ -116,6 +116,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
   { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
 
+  // ── curated recipe generation (owner groove library + palette one-shots) ──
+  { command: "generate_beat_recipe", desc: "Generate a full multi-element beat from the curated recipe library: retrieves real grooves, recombines per-element motifs (drums/808/chords/lead), binds a real one-shot sound per role from the palette, and applies it all as ONE undoable batch — the strongest 'lay down a real-sounding beat' move; slow (the local service may cold-start), so call it once, not in a loop", args: [S("mood", false, "vibe words steering retrieval, e.g. 'dark bounce'"), N("tempo", false, "BPM; omit to let the recipe choose"), S("key", false, "e.g. 'F minor'; omit to let the recipe choose"), N("seed", false, "set for a reproducible pick"), B("lead", false, "include a lead line (default yes)")] },
+
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
@@ -382,6 +385,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_clip_warp": return a.autoTempo ? `Warped a clip to follow the tempo${a.detect ? " (detected its BPM)" : ""}` : `Turned off a clip's warp`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
+    case "generate_beat_recipe": return `Generated a beat from the recipe library`;
     case "add_note": {
       const noteCount = Array.isArray(args.notes) ? args.notes.length : 1;
       return noteCount > 1 ? `Added ${noteCount} melody notes` : `Added a note`;

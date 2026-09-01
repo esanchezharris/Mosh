@@ -587,6 +587,13 @@ public:
         {
             return MoshOps::executeFileBrowserReadOnly (browserSessionDir, cmd);
         });
+        // The engine-free fetch leg of generate_beat_recipe (worker thread); the
+        // bridge re-enters executeFromUi on the message thread with the program
+        // attached, so the apply leg keeps ordinary undo/logging semantics.
+        bridge.setBeatRecipeFetchHandler ([this] (const juce::var& cmd)
+        {
+            return moshOps->fetchBeatRecipeProgram (cmd.getProperty ("args", juce::var()));
+        });
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });

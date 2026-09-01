@@ -2244,16 +2244,13 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
 
 juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
 {
-    auto* body = new DynamicObject();
-    if (args.hasProperty ("mood")) body->setProperty ("mood", args.getProperty ("mood", var()));
-    if (args.hasProperty ("tempo")) body->setProperty ("tempo", args.getProperty ("tempo", var()));
-    if (args.hasProperty ("key")) body->setProperty ("key", args.getProperty ("key", var()));
-    if (args.hasProperty ("seed")) body->setProperty ("seed", args.getProperty ("seed", var()));
-    if (args.hasProperty ("lead")) body->setProperty ("lead", args.getProperty ("lead", var()));
-    if (args.hasProperty ("libraryDir")) body->setProperty ("libraryDir", args.getProperty ("libraryDir", var()));
-    if (args.hasProperty ("paletteManifest")) body->setProperty ("paletteManifest", args.getProperty ("paletteManifest", var()));
-
-    auto generated = jobManager.generateBeatRecipe (var (body));
+    // The WebBridge two-phase hop pre-fetches the program on a worker thread and
+    // re-dispatches with it attached, so THIS message-thread leg never blocks on
+    // the service. A plain synchronous call (UI drawer flow, remote path, tests)
+    // takes the fetch inline exactly as before.
+    auto generated = args.hasProperty ("__prefetchedProgram")
+                         ? args.getProperty ("__prefetchedProgram", var())
+                         : fetchBeatRecipeProgram (args);
     if (! generated.isObject() || ! (bool) generated.getProperty ("ok", false))
     {
         const auto msg = generated.isObject()
@@ -2352,6 +2349,33 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     data->setProperty ("provenance", generated.getProperty ("provenance", var()));
     data->setProperty ("applied", var (applied));
     return okResult ("generate_beat_recipe", var (data));
+}
+
+// The request-body mapping for generate_beat_recipe. A static free function kept
+// textually BETWEEN cmdGenerateBeatRecipe and the next MoshOps:: definition on
+// purpose: the agent-catalog contract test (commands.contract.test.ts) slices a
+// handler's span to the next `juce::var MoshOps::` signature, so the catalog args
+// this consumes on the handler's behalf attribute to cmdGenerateBeatRecipe.
+static juce::var beatRecipeRequestBody (const juce::var& args)
+{
+    auto* body = new juce::DynamicObject();
+    if (args.hasProperty ("mood")) body->setProperty ("mood", args.getProperty ("mood", juce::var()));
+    if (args.hasProperty ("tempo")) body->setProperty ("tempo", args.getProperty ("tempo", juce::var()));
+    if (args.hasProperty ("key")) body->setProperty ("key", args.getProperty ("key", juce::var()));
+    if (args.hasProperty ("seed")) body->setProperty ("seed", args.getProperty ("seed", juce::var()));
+    if (args.hasProperty ("lead")) body->setProperty ("lead", args.getProperty ("lead", juce::var()));
+    if (args.hasProperty ("libraryDir")) body->setProperty ("libraryDir", args.getProperty ("libraryDir", juce::var()));
+    if (args.hasProperty ("paletteManifest")) body->setProperty ("paletteManifest", args.getProperty ("paletteManifest", juce::var()));
+    return juce::var (body);
+}
+
+juce::var MoshOps::fetchBeatRecipeProgram (const juce::var& cmdArgs)
+{
+    // One recipe fetch at a time: the worker-thread leg must not interleave two
+    // service spawns; unrelated jobManager calls keep their existing posture.
+    static juce::CriticalSection fetchLock;
+    const juce::ScopedLock sl (fetchLock);
+    return jobManager.generateBeatRecipe (beatRecipeRequestBody (cmdArgs));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
