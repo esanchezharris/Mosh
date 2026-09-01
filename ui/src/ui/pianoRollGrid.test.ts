@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adaptiveDivision, effectiveStepBeats, gridLabel, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
+import { adaptiveDivision, editorGridProjection, effectiveStepBeats, gridLabel, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
 import type { Meter } from "../time";
 
 const M: Meter = { tempo: 120, num: 4, den: 4 };
@@ -57,5 +57,35 @@ describe("gridLabel", () => {
     const label = gridLabel(M, { ...GRID_DEFAULT, adaptive: true }, 42);
     expect(label).toMatch(/\(auto\)$/);
     expect(label).toMatch(/^(bar|1\/\d+)/);
+  });
+});
+
+describe("editorGridProjection", () => {
+  it("renders every adaptive snap point at the default zoom", () => {
+    const projection = editorGridProjection(M, GRID_DEFAULT, 42, 4);
+
+    expect(projection.stepBeats).toBe(0.5);
+    expect(projection.lines.map(({ beat, kind }) => [beat, kind])).toEqual([
+      [0, "bar"],
+      [0.5, "subdivision"],
+      [1, "beat"],
+      [1.5, "subdivision"],
+      [2, "beat"],
+      [2.5, "subdivision"],
+      [3, "beat"],
+      [3.5, "subdivision"],
+      [4, "bar"],
+    ]);
+  });
+
+  it("projects triplet snap points without losing the bar and beat hierarchy", () => {
+    const projection = editorGridProjection(M, fixed("1/8", true), 42, 4);
+
+    expect(projection.stepBeats).toBeCloseTo(1 / 3, 8);
+    expect(projection.lines).toHaveLength(13);
+    expect(projection.lines[0]).toEqual({ beat: 0, kind: "bar" });
+    expect(projection.lines[1]).toMatchObject({ kind: "subdivision" });
+    expect(projection.lines[3]).toEqual({ beat: 1, kind: "beat" });
+    expect(projection.lines[12]).toEqual({ beat: 4, kind: "bar" });
   });
 });

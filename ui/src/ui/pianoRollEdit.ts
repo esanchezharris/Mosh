@@ -77,6 +77,20 @@ export function resizeEdits(input: DragInput, g: GestureGeom): NoteEdit[] {
   return edits;
 }
 
+export function resizeStartEdits(input: DragInput, g: GestureGeom): NoteEdit[] {
+  if (Math.abs(input.dxPx) <= g.dragThreshold) return [];
+  const db = input.dxPx / g.beatPx;
+  const edits: NoteEdit[] = [];
+  for (const [i, n] of input.orig) {
+    const end = n.start + n.length;
+    const proposed = g.snapBeat(n.start + db, input.bypassSnap);
+    const start = Math.max(0, Math.min(end - g.minLengthBeats, proposed));
+    if (start === n.start) continue;
+    edits.push({ i, start, length: end - start });
+  }
+  return edits;
+}
+
 /** Keyboard transpose (Up/Down = ±1, Shift+Up/Down = ±12). */
 export function transposeEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>,
                                semitones: number, lockPitch: (p: number) => number): NoteEdit[] {

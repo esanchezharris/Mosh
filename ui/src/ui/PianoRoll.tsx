@@ -19,7 +19,7 @@ import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
 import { editorKeyFocused } from "../hooks/editorFocus";
 import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
-import { moveEdits, resizeEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
+import { moveEdits, resizeEdits, resizeStartEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
 import { expandLoopedNotes } from "../midi/midiLoop";
 import { ClipLoopBar } from "../live/ClipLoopBar";
 import { marqueeHit, toggleSelection, selectAtPitch, selectAll, invertSelection, stepSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
@@ -31,7 +31,7 @@ import type { QwertyState } from "../interaction/qwertyMidi";
 import { stepReduce, STEP_INITIAL, type StepState } from "./stepRecord";
 import { visiblePitches, pitchAxis, PITCH_MIN, PITCH_MAX, type FoldMode } from "./pianoRollView";
 import { copyNotes, pasteAt, duplicateAfter, setClipboard, getClipboard } from "./pianoRollClipboard";
-import { effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
+import { editorGridProjection, effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
 import { PianoRollContextNotes, type PianoRollContextNote } from "./PianoRollContextNotes";
 // Live shell's draw mode (the control-bar pencil, live/liveState.ts). Read here
 // rather than passed as a prop so the docked editor and the control bar can't drift;
@@ -49,7 +49,7 @@ const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
 // "copy" is a move that leaves the originals behind — Ableton's Option-drag. It is latched
 // at POINTERDOWN, not read live during the drag, because Option during a move already means
 // "bypass snap" and the two must not fight over the same key mid-gesture.
-type DragKind = "move" | "resize" | "copy";
+type DragKind = "move" | "resize-start" | "resize-end" | "copy";
 type Drag = {
   kind: DragKind;
   anchorI: number;                    // the note actually grabbed
@@ -459,18 +459,19 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   if (!editingClipId || !clip) return null;
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
-  // The editor's OWN grid. `snap` (the global on/off) still applies, but the DIVISION is
-  // local — changing it here never re-grids the arrangement, and vice versa.
-  const stepBeats = snap ? effectiveStepBeats(m, grid, beatPx) : 0;
-  // The step-record listener reads this at event time (see the refs above).
-  stepBeatsRef.current = stepBeats > 0 ? stepBeats : 1;
-  const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const gridBeats = gridBeatsFor({
     clipBeats: clip.length / beatSeconds(m),
     beatsPerBar: m.num,
     beatPx,
     viewportW,
   });
+  const gridProjection = editorGridProjection(m, grid, beatPx, gridBeats);
+  // The editor's OWN grid. `snap` (the global on/off) still applies, but the DIVISION is
+  // local — changing it here never re-grids the arrangement, and vice versa.
+  const stepBeats = snap ? gridProjection.stepBeats : 0;
+  // The step-record listener reads this at event time (see the refs above).
+  stepBeatsRef.current = stepBeats > 0 ? stepBeats : 1;
+  const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const gridW = gridBeats * beatPx;
   // Feed the playhead loop this render's geometry (see the rAF effect above).
   geomRef.current = { start: clip.start, beatSec: beatSeconds(m), beatPx, len: clip.length };
@@ -526,7 +527,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
     setSelectedNotes(new Set());
   };
-  const onNoteDown = (kind: "move" | "resize", n: MidiNote) => (e: React.PointerEvent) => {
+  const onNoteDown = (kind: "move" | "resize-start" | "resize-end", n: MidiNote) => (e: React.PointerEvent) => {
     e.stopPropagation();
     // Shift-click edits the SELECTION and starts no drag — otherwise the same gesture
     // would both extend the selection and immediately begin moving it.
@@ -562,12 +563,13 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
       // bypass — reading it as both would make an Option-drag silently off-grid too.
       const bypassSnap = d.kind !== "copy" && e.altKey;
       const input = { orig: d.orig, dxPx: e.clientX - d.startX, dyPx: e.clientY - d.startY, bypassSnap };
-      const edits = d.kind === "resize" ? resizeEdits(input, gestureGeom(bypassSnap))
-                                        : moveEdits (input, gestureGeom(bypassSnap));
+      const edits = d.kind === "resize-start" ? resizeStartEdits(input, gestureGeom(bypassSnap))
+                  : d.kind === "resize-end" ? resizeEdits(input, gestureGeom(bypassSnap))
+                  : moveEdits(input, gestureGeom(bypassSnap));
       // AUDITION 1/4 — hear the pitch as you drag up the scale. Driven off the ANCHOR's
       // previewed pitch, and notePreview itself collapses this to at most one command per
       // crossed semitone, so a fast octave drag is a handful of notes rather than a flood.
-      if (d.kind !== "resize" && auditionTrackId) {
+      if (d.kind !== "resize-start" && d.kind !== "resize-end" && auditionTrackId) {
         const anchor = previewFrom(d.orig, edits).get(d.anchorI);
         if (anchor) notePreview.hold("pr-drag", auditionTrackId, anchor.pitch, anchor.velocity);
       }
@@ -618,7 +620,9 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
       }
 
       const edits = [...final.values()].map((n) =>
-        d.kind === "resize" ? { i: n.i, length: n.length } : { i: n.i, start: n.start, pitch: n.pitch });
+        d.kind === "resize-start" ? { i: n.i, start: n.start, length: n.length }
+        : d.kind === "resize-end" ? { i: n.i, length: n.length }
+        : { i: n.i, start: n.start, pitch: n.pitch });
       void applyNoteEdits(exec, clip.id, edits);
       return;
     }
@@ -1009,7 +1013,11 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
                 const root = shade && pitchClass(p) === songKey.tonic;
                 return <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}${off ? " off-key" : ""}${root ? " root" : ""}`} style={{ top: yOf(p), height: ROW_H }} />;
               })}
-              {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * beatPx }} />)}
+              {gridProjection.lines.map((line) => (
+                <div key={`c${line.beat}`} className={`pr-gl ${line.kind}`}
+                  data-grid-kind={line.kind} data-grid-beat={line.beat}
+                  style={{ left: line.beat * beatPx }} />
+              ))}
               {/* MIDI clip loop ghosts — the loop region's repeats painted dimmer and
                   DISARMED (Live's editor ghosts): display-only, never selectable —
                   editing stays indexed into the real notes. */}
@@ -1035,7 +1043,8 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
                     onPointerDown={onNoteDown("move", n)}
                     onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); void exec("remove_note", { clipId: clip.id, noteIndex: n.i }); }}
                     title={`${noteName(n.pitch)} · vel ${n.velocity} · dbl-click to delete`}>
-                    <span className="pr-note-grip" role="separator" aria-label={`Resize ${noteName(n.pitch)} note`} onPointerDown={onNoteDown("resize", n)} />
+                    <span className="pr-note-grip pr-note-grip-start" role="separator" aria-label={`Resize start of ${noteName(n.pitch)} note`} onPointerDown={onNoteDown("resize-start", n)} />
+                    <span className="pr-note-grip pr-note-grip-end" role="separator" aria-label={`Resize end of ${noteName(n.pitch)} note`} onPointerDown={onNoteDown("resize-end", n)} />
                   </div>
                 );
               })}

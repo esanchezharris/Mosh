@@ -58,12 +58,12 @@ describe("piano-roll drag axis independence", () => {
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
 
-  const mount = () => {
+  const mount = (adaptive = false) => {
     // snap ON — this is the whole point: snapBeat must have teeth for the guard to matter.
     // The editor keeps its OWN grid now — the arrangement's snapDivision no longer reaches
     // it — so pin the division here. Adaptive off, or the step would follow the zoom.
     useSettings.getState().set("prGridDivision", "1/4");
-    useSettings.getState().set("prGridAdaptive", false);
+    useSettings.getState().set("prGridAdaptive", adaptive);
     useSettings.getState().set("prGridTriplet", false);
     useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, exec });
     act(() => root.render(React.createElement(PianoRoll, { docked: true })));
@@ -89,7 +89,8 @@ describe("piano-roll drag axis independence", () => {
   };
 
   const dragNote = (dxPx: number, semitones: number, altKey = false) => drag(".pr-note", dxPx, semitones, altKey);
-  const dragGrip = (dxPx: number, semitones: number, altKey = false) => drag(".pr-note-grip", dxPx, semitones, altKey);
+  const dragGrip = (dxPx: number, semitones: number, altKey = false) => drag(".pr-note-grip-end", dxPx, semitones, altKey);
+  const dragStartGrip = (dxPx: number, altKey = false) => drag(".pr-note-grip-start", dxPx, 0, altKey);
 
   const clickGrid = (beat: number, altKey = false) => {
     const grid = host.querySelector(".pr-grid");
@@ -177,6 +178,30 @@ describe("piano-roll drag axis independence", () => {
     expect(dragGrip(BEAT_PX, 0, true)?.length).toBeCloseTo(OFF_GRID_LENGTH + 1, 6);
   });
 
+  it("resizes from the left edge while keeping the note end fixed", () => {
+    mount();
+    const sent = dragStartGrip(-BEAT_PX / 2, true);
+    expect(sent?.start).toBeCloseTo(OFF_GRID_START - 0.5, 6);
+    expect(sent?.length).toBeCloseTo(OFF_GRID_LENGTH + 0.5, 6);
+  });
+
+  it("renders a hit target and resize cursor on both note edges", () => {
+    mount();
+    const start = host.querySelector<HTMLElement>(".pr-note-grip-start");
+    const end = host.querySelector<HTMLElement>(".pr-note-grip-end");
+    expect(start?.getAttribute("aria-label")).toMatch(/^Resize start/);
+    expect(end?.getAttribute("aria-label")).toMatch(/^Resize end/);
+    expect(start?.classList.contains("pr-note-grip")).toBe(true);
+    expect(end?.classList.contains("pr-note-grip")).toBe(true);
+  });
+
+  it("renders every active adaptive snap subdivision", () => {
+    mount(true);
+    const halfBeat = [...host.querySelectorAll<HTMLElement>('.pr-gl[data-grid-kind="subdivision"]')]
+      .find((line) => line.dataset.gridBeat === "0.5");
+    expect(halfBeat?.style.left).toBe(`${BEAT_PX / 2}px`);
+  });
+
   it("snaps a drawn note normally but Option-click can place it off-grid", () => {
     mount();
     expect(clickGrid(1.3)?.start).toBe(1);
@@ -206,7 +231,7 @@ describe("piano-roll drag axis independence", () => {
     mount();
     // Skipping the preview while inside the deadzone is not enough: the far-out
     // one must be cleared, or releasing at the origin commits the abandoned trip.
-    expect(dragOutAndBack(".pr-note-grip", 3 * BEAT_PX, 0)).toBeUndefined();
+    expect(dragOutAndBack(".pr-note-grip-end", 3 * BEAT_PX, 0)).toBeUndefined();
   });
 
   it("dragging a note out and back commits nothing", () => {
