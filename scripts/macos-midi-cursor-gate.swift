@@ -141,7 +141,6 @@ func requireMoshFrontmost(_ app: NSRunningApplication, phase: String) {
 }
 
 func moveMouse(to point: CGPoint, app: NSRunningApplication) {
-    requireMoshFrontmost(app, phase: "cursor move")
     let source = CGEventSource(stateID: .hidSystemState)
     let event = CGEvent(
         mouseEventSource: source,
@@ -149,6 +148,7 @@ func moveMouse(to point: CGPoint, app: NSRunningApplication) {
         mouseCursorPosition: point,
         mouseButton: .left
     )
+    requireMoshFrontmost(app, phase: "cursor move")
     event?.post(tap: .cghidEventTap)
 }
 
@@ -157,26 +157,28 @@ func focusWindow(pid: Int32, app: NSRunningApplication) {
     guard let window = (axAttribute(root, kAXWindowsAttribute as CFString) as? [AXUIElement])?.first,
           let point = axPoint(axAttribute(window, kAXPositionAttribute as CFString)),
           let size = axSize(axAttribute(window, kAXSizeAttribute as CFString)) else { return }
+    requireMoshFrontmost(app, phase: "window raise")
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    requireMoshFrontmost(app, phase: "main window focus")
     AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+    requireMoshFrontmost(app, phase: "keyboard focus")
     AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    requireMoshFrontmost(app, phase: "window focus")
     let titleBarPoint = CGPoint(x: point.x + size.width / 2, y: point.y + 12)
     let source = CGEventSource(stateID: .hidSystemState)
     for type in [CGEventType.leftMouseDown, .leftMouseUp] {
-        requireMoshFrontmost(app, phase: "window focus event")
-        CGEvent(
+        let event = CGEvent(
             mouseEventSource: source,
             mouseType: type,
             mouseCursorPosition: titleBarPoint,
             mouseButton: .left
-        )?.post(tap: .cghidEventTap)
+        )
+        requireMoshFrontmost(app, phase: "window focus event")
+        event?.post(tap: .cghidEventTap)
     }
     RunLoop.current.run(until: Date().addingTimeInterval(0.15))
 }
 
 func commandScroll(at point: CGPoint, delta: Int32, app: NSRunningApplication) {
-    requireMoshFrontmost(app, phase: "zoom")
     let source = CGEventSource(stateID: .hidSystemState)
     let event = CGEvent(
         scrollWheelEvent2Source: source,
@@ -188,6 +190,7 @@ func commandScroll(at point: CGPoint, delta: Int32, app: NSRunningApplication) {
     )
     event?.flags = .maskControl
     event?.location = point
+    requireMoshFrontmost(app, phase: "zoom")
     event?.post(tap: .cghidEventTap)
     RunLoop.current.run(until: Date().addingTimeInterval(0.35))
 }
