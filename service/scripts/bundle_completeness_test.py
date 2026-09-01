@@ -51,6 +51,29 @@ def _bundle_service_body() -> str:
     return src[start:start + (end.end() if end else len(src) - start)]
 
 
+def _bundle_preserves_local_brain_launcher() -> bool:
+    with tempfile.TemporaryDirectory() as tmp:
+        app = os.path.join(tmp, "Mosh.app")
+        os.makedirs(os.path.join(app, "Contents", "Resources"))
+        script = "\n".join((
+            "set -euo pipefail",
+            _bundle_service_body(),
+            "emit_notices() { :; }",
+            'ROOT="$1"',
+            'bundle_service "$2"',
+        ))
+        result = subprocess.run(
+            ["bash", "-c", script, "bundle-launcher-check", REPO, app],
+            check=False, capture_output=True, text=True)
+        source = os.path.join(SERVICE, "sft", "launch_local_brain.py")
+        staged = os.path.join(
+            app, "Contents", "Resources", "service", "sft", "launch_local_brain.py")
+        if result.returncode != 0 or not os.path.isfile(staged):
+            return False
+        with open(source, "rb") as source_file, open(staged, "rb") as staged_file:
+            return source_file.read() == staged_file.read()
+
+
 def _bundled(body: str):
     """(top-level file stems, whitelisted dir names) that bundle_service ships."""
     # Top-level files: `$ROOT/service/<name>.py` with no further slash (subdir files
@@ -316,8 +339,8 @@ present = bundled | _referenced_dirs(body)
 check("parsed a non-empty bundle whitelist", bool(bundled_files) and bool(bundled_dirs),
       f"files={sorted(bundled_files)} dirs={sorted(bundled_dirs)}")
 check("deploy preserves the staged local-brain launcher",
-      "service/sft/launch_local_brain.py" in body,
-      "bundle_service replaces Contents/Resources/service and must restore the launcher")
+      _bundle_preserves_local_brain_launcher(),
+      "bundle_service replaces Contents/Resources/service and must restore the exact launcher")
 
 # The heart: no bundled module may import a top-level service module — a top-level
 # `service/X.py` FILE *or* a `service/X/` PACKAGE dir — that is absent from the bundle.

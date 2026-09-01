@@ -15,6 +15,7 @@ let currentStatus: BrainRuntimeStatus = {
   state: "unavailable",
   error: "owner runtime is native-only",
 };
+let revision = 0;
 let stopEvents: (() => void) | undefined;
 const listeners = new Set<Listener>();
 
@@ -28,19 +29,26 @@ function publish(status: BrainRuntimeStatus): void {
       && currentStatus.ms === status.ms
       && currentStatus.preferredShell === status.preferredShell) return;
   currentStatus = status;
+  revision += 1;
   for (const listener of listeners) listener();
 }
 
 function startSubscription(): void {
   if (stopEvents) return;
   stopEvents = onEvent("brain_runtime", (payload) => publish(parseBrainRuntimeStatus(payload)));
+  const bootstrapRevision = revision;
   void brainRuntimeStatus()
-    .then(publish)
-    .catch((error: unknown) => publish({
-      configured: false,
-      state: "unavailable",
-      error: error instanceof Error ? error.message : "Local AI status is unavailable",
-    }));
+    .then((status) => {
+      if (revision === bootstrapRevision) publish(status);
+    })
+    .catch((error: unknown) => {
+      if (revision !== bootstrapRevision) return;
+      publish({
+        configured: false,
+        state: "unavailable",
+        error: error instanceof Error ? error.message : "Local AI status is unavailable",
+      });
+    });
 }
 
 function subscribe(listener: Listener): () => void {

@@ -97,6 +97,7 @@ juce::File writeOwnershipRecord (const juce::File& directory,
                                  const juce::File& pythonRuntime,
                                  const juce::File& modelPath,
                                  int port,
+                                 int appPid = 991000,
                                  mode_t mode = 0600)
 {
     const auto created = directory.createDirectory();
@@ -105,6 +106,7 @@ juce::File writeOwnershipRecord (const juce::File& directory,
     auto* record = new juce::DynamicObject();
     record->setProperty ("owner", "Mosh");
     record->setProperty ("user", juce::SystemStats::getLogonName());
+    record->setProperty ("appPid", appPid);
     record->setProperty ("pythonRuntime", pythonRuntime.getFullPathName());
     record->setProperty ("modelPath", modelPath.getFullPathName());
     record->setProperty ("host", "127.0.0.1");
@@ -209,6 +211,30 @@ TEST_CASE ("startup reaping refuses to kill a process whose live command mismatc
     REQUIRE (::kill (strangerPid, SIGKILL) == 0);
     int status = 0;
     REQUIRE (::waitpid (strangerPid, &status, 0) == strangerPid);
+    root.deleteRecursively();
+}
+
+TEST_CASE ("startup reaping leaves a model owned by a live Mosh process alone", "[owner-runtime]")
+{
+    auto root = juce::File::createTempFile ("mosh-live-owner");
+    root.deleteFile();
+    const auto records = root.getChildFile ("records");
+    const juce::File pythonRuntime (MOSH_LOCAL_BRAIN_FIXTURE_PATH);
+    const auto modelPath = root.getChildFile ("model");
+    REQUIRE (modelPath.createDirectory().wasOk());
+    const auto modelPid = spawnModelFixture (pythonRuntime, modelPath, 8091, true);
+    const auto record = writeOwnershipRecord (
+        records, (int) modelPid, pythonRuntime, modelPath, 8091, (int) ::getpid());
+
+    const auto result = LocalBrainProcessRegistry::reapOwnedProcesses (records, 500);
+
+    REQUIRE (result.terminated == 0);
+    REQUIRE (result.ignored == 1);
+    REQUIRE (::kill (modelPid, 0) == 0);
+    REQUIRE (record.existsAsFile());
+    REQUIRE (::kill (modelPid, SIGKILL) == 0);
+    int status = 0;
+    REQUIRE (::waitpid (modelPid, &status, 0) == modelPid);
     root.deleteRecursively();
 }
 

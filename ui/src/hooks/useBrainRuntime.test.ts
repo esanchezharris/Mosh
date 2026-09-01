@@ -69,4 +69,18 @@ describe("shared local brain runtime hook", () => {
     expect(bridgeMock.stopCall).toHaveBeenCalledTimes(1);
     expect(host.querySelector("output")?.dataset.state).toBe("stopping");
   });
+
+  it("does not let a delayed initial status overwrite a newer runtime event", async () => {
+    let resolveStatus: ((status: BrainRuntimeStatus) => void) | undefined;
+    bridgeMock.statusCall.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveStatus = resolve;
+    }));
+
+    await act(async () => root.render(React.createElement(Harness)));
+    await act(async () => bridgeMock.state.eventHandler?.({ configured: true, state: "ready" }));
+    expect(host.querySelector("output")?.dataset.state).toBe("ready");
+
+    await act(async () => resolveStatus?.({ configured: true, state: "off" }));
+    expect(host.querySelector("output")?.dataset.state).toBe("ready");
+  });
 });

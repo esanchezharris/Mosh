@@ -29,6 +29,7 @@ def main() -> None:
     record = {
         "owner": "Mosh",
         "user": pwd.getpwuid(os.getuid()).pw_name,
+        "appPid": os.getppid(),
         "pythonRuntime": python,
         "modelPath": model,
         "host": "127.0.0.1",

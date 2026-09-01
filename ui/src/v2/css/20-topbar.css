@@ -131,14 +131,18 @@
 .v2-btn:disabled { opacity: 0.38; cursor: default; }
 .v2-btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
 .v2-btn.icon { padding: 8px 10px; }
-.v2-local-ai { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 8px; font-size: var(--v2-fs-xs); font-weight: 760; letter-spacing: 0.045em; }
-.v2-local-ai-dot { width: 6px; height: 6px; border-radius: var(--v2-radius-pill); background: currentColor; opacity: 0.3; }
+.v2-local-ai { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--v2-space-2);
+  padding: var(--v2-space-3) var(--v2-space-4); font-size: var(--v2-fs-xs); font-weight: 700; letter-spacing: var(--v2-tracking-caps); }
+.v2-local-ai:disabled { opacity: 0.72; }
+.v2-local-ai-dot { width: var(--v2-space-3); height: var(--v2-space-3); border-radius: var(--v2-radius-pill); background: currentColor; opacity: 0.3; }
 .v2-local-ai[data-on="true"] { --v2-accent: var(--v2-accent-agentic); color: var(--v2-accent); border-color: var(--v2-accent); }
 .v2-local-ai[data-on="true"] .v2-local-ai-dot { opacity: 1; }
 .v2-local-ai[data-state="cleaning"] .v2-local-ai-dot,
-.v2-local-ai[data-state="starting"] .v2-local-ai-dot,
-.v2-local-ai[data-state="stopping"] .v2-local-ai-dot { opacity: 0.65; }
+.v2-local-ai[data-state="starting"] .v2-local-ai-dot { opacity: 1; }
+.v2-local-ai[data-state="cleaning"],
+.v2-local-ai[data-state="starting"] { color: var(--status-warn); border-color: currentColor; }
+.v2-local-ai[data-state="stopping"] { color: var(--status-off); border-color: currentColor; }
+.v2-local-ai[data-state="stopping"] .v2-local-ai-dot { opacity: 0.45; }
 .v2-local-ai[data-state="error"] { color: var(--v2-rec); border-color: currentColor; }
 
 /* The classic tool popovers used to live in a `.v2-tools` cluster in the topbar, and this

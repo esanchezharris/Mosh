@@ -25,6 +25,7 @@ namespace
 struct ProcessRecord
 {
     int pid = 0;
+    int appPid = 0;
     String user;
     File pythonRuntime;
     File modelPath;
@@ -68,12 +69,14 @@ bool readPrivateRecord (const File& file, ProcessRecord& record)
     if (! root.isObject() || root.getProperty ("owner", var()).toString() != "Mosh")
         return false;
     record.pid = (int) root.getProperty ("pid", 0);
+    record.appPid = (int) root.getProperty ("appPid", 0);
     record.user = root.getProperty ("user", var()).toString();
     record.pythonRuntime = File (root.getProperty ("pythonRuntime", var()).toString());
     record.modelPath = File (root.getProperty ("modelPath", var()).toString());
     record.host = root.getProperty ("host", var()).toString();
     record.port = (int) root.getProperty ("port", 0);
     return record.pid > 1
+        && record.appPid > 1
         && file.getFileNameWithoutExtension() == String (record.pid)
         && record.user == SystemStats::getLogonName()
         && File::isAbsolutePath (record.pythonRuntime.getFullPathName())
@@ -229,6 +232,11 @@ LocalBrainReapResult LocalBrainProcessRegistry::reapOwnedProcesses (
         {
             if (file.deleteFile()) ++result.staleRemoved;
             else ++result.ignored;
+            continue;
+        }
+        if (processExists (record.appPid))
+        {
+            ++result.ignored;
             continue;
         }
         if (! liveCommandMatches (record) || ! terminatePid (record.pid, graceMs))
