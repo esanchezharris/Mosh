@@ -273,12 +273,42 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
 export const AGENT_COMMAND_MAP = new Map(AGENT_COMMANDS.map((c) => [c.command, c]));
 
+function validateAddNoteBatch(args: Record<string, unknown>): string | null | undefined {
+  if (args.notes === undefined) return undefined;
+  if (typeof args.clipId !== "string") return 'add_note: "clipId" must be a string';
+  if (!Array.isArray(args.notes) || args.notes.length === 0) return 'add_note: "notes" must be a non-empty array';
+  if (args.notes.length > 64) return 'add_note: "notes" must contain at most 64 notes';
+  for (const [index, note] of args.notes.entries()) {
+    if (typeof note !== "object" || note === null || Array.isArray(note))
+      return `add_note: "notes[${index}]" must be an object`;
+    const fields = note as Record<string, unknown>;
+    const pitch = fields.pitch;
+    const start = fields.start;
+    const length = fields.length;
+    const velocity = fields.velocity;
+    if (typeof pitch !== "number" || !Number.isInteger(pitch) || pitch < 0 || pitch > 127)
+      return `add_note: "notes[${index}].pitch" must be an integer from 0 to 127`;
+    if (typeof start !== "number" || !Number.isFinite(start) || start < 0)
+      return `add_note: "notes[${index}].start" must be a finite non-negative number`;
+    if (typeof length !== "number" || !Number.isFinite(length) || length <= 0)
+      return `add_note: "notes[${index}].length" must be a finite positive number`;
+    if (velocity !== undefined
+        && (typeof velocity !== "number" || !Number.isInteger(velocity) || velocity < 1 || velocity > 127))
+      return `add_note: "notes[${index}].velocity" must be an integer from 1 to 127`;
+  }
+  return null;
+}
+
 /** Validate a planned command against the curated catalog. Returns an error
  *  string, or null if valid. Unknown commands and bad arg types are rejected
  *  here, before anything reaches the command seam. */
 export function validateCommand(command: string, args: Record<string, unknown>): string | null {
   const spec = AGENT_COMMAND_MAP.get(command);
   if (!spec) return `not an allowed command: "${command}"`;
+  if (command === "add_note") {
+    const batchError = validateAddNoteBatch(args);
+    if (batchError !== undefined) return batchError;
+  }
   for (const a of spec.args) {
     const v = args[a.name];
     if (v === undefined || v === null) {
@@ -352,7 +382,10 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_clip_warp": return a.autoTempo ? `Warped a clip to follow the tempo${a.detect ? " (detected its BPM)" : ""}` : `Turned off a clip's warp`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
-    case "add_note": return `Added a note`;
+    case "add_note": {
+      const noteCount = Array.isArray(args.notes) ? args.notes.length : 1;
+      return noteCount > 1 ? `Added ${noteCount} melody notes` : `Added a note`;
+    }
     case "add_drum_pattern": return `Laid a drum pattern`;
     case "remove_note": return `Removed a note`;
     case "set_note": return `Edited a note`;

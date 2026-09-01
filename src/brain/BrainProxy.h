@@ -37,6 +37,16 @@ struct BrainProxy
         Provider with empty fields (isComplete()==false) when none is configured. */
     static Provider resolve (const juce::String& requested = {});
 
+    /** Build the direct OpenAI-compatible request body for a resolved provider.
+        Kept as a pure seam so provider-specific payload policy is unit-testable
+        without making a network request. */
+    static juce::var requestPayload (const Provider&, const juce::var& messages);
+
+    static int requestTimeoutMs (const Provider&);
+
+    static juce::var parseDirectResponse (const juce::String& body, int statusCode,
+                                          const Provider&, int elapsedMs);
+
     /** Blocking chat round-trip. `messages` is a JSON array of {role,content}.
         Returns { ok:true, content, provider, model, ms } on success, or
         { ok:false, error } on any failure (no provider / network / upstream). Call

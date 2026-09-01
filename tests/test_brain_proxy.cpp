@@ -153,3 +153,34 @@ TEST_CASE ("BrainProxy default path (proxy unset) is unchanged: no provider conf
     CHECK_FALSE ((bool) r.getProperty ("ok", true));
     CHECK (r.getProperty ("error", var()).toString().contains ("no brain provider configured"));
 }
+
+TEST_CASE ("BrainProxy local MLX payload disables hidden thinking for interactive latency", "[brain][local]")
+{
+    const BrainProxy::Provider local { "local", "LOCAL 30B", "http://127.0.0.1:8091/v1", "local", "/models/r5" };
+    const auto payload = BrainProxy::requestPayload (local, var (Array<var>{}));
+    const auto kwargs = payload.getProperty ("chat_template_kwargs", var());
+
+    REQUIRE (kwargs.isObject());
+    CHECK_FALSE ((bool) kwargs.getProperty ("enable_thinking", true));
+    CHECK (BrainProxy::requestTimeoutMs (local) == 120000);
+
+    const BrainProxy::Provider cloud { "openai", "OPENAI", "https://example.invalid/v1", "test", "gpt-5" };
+    CHECK (BrainProxy::requestTimeoutMs (cloud) == 30000);
+}
+
+TEST_CASE ("BrainProxy direct response rejects malformed successful envelopes", "[brain][response]")
+{
+    const BrainProxy::Provider local { "local", "LOCAL 30B", "http://127.0.0.1:8091/v1", "local", "/models/r5" };
+
+    for (const auto& body : { "not-json", "{}", R"({"choices":[]})", R"({"choices":[{"message":{"content":""}}]})" })
+    {
+        const auto result = BrainProxy::parseDirectResponse (body, 200, local, 12);
+        CHECK_FALSE ((bool) result.getProperty ("ok", true));
+        CHECK (result.getProperty ("error", var()).toString().contains ("malformed completion"));
+    }
+
+    const auto good = BrainProxy::parseDirectResponse (
+        R"({"choices":[{"message":{"content":"{\"p\":[60,62,64,65,64,62,60,57]}"}}]})", 200, local, 12);
+    CHECK ((bool) good.getProperty ("ok", false));
+    CHECK (good.getProperty ("content", var()).toString().contains ("p"));
+}

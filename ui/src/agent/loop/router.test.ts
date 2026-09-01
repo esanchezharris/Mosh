@@ -18,9 +18,11 @@ const CASES: Array<[string, "single" | "loop"]> = [
   ["build me a lofi sketch", "loop"],
   ["make a beat", "loop"],
   ["write a bassline", "loop"], // composing needs a clip + notes + the key — multi-step by nature
+  ["give the keys a little melody idea, nothing fancy, keep it in key", "loop"],
   // vague taste → loop
   ["give the whole thing a better vibe", "loop"],
   ["make the mix feel wider", "loop"],
+  ["make it faster", "loop"],
   // conjunction pileup → loop
   ["mute the vocal and solo the drums and pan the keys left", "loop"],
 ];

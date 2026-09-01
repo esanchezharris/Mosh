@@ -15,6 +15,8 @@ const SNAP: Snapshot = {
     { id: "17", index: 0, name: "Drums", type: "audio", volumeDb: -2, pan: 0.2, mute: false, solo: false,
       sends: [{ bus: 1, db: -12 }],
       clips: [{ id: "101", name: "beat", type: "midi", start: 0, length: 4, offset: 0, hasRenderLayer: false }] },
+    { id: "18", index: 1, name: "Keys", type: "midi", volumeDb: -1, pan: 0, mute: false, solo: false,
+      clips: [{ id: "102", name: "chords", type: "midi", start: 0, length: 8, offset: 0, hasRenderLayer: false }] },
   ],
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
   // a real snapshot's master plugins always carry `type` + `builtin` (MoshOps
@@ -60,6 +62,31 @@ describe("buildLoopSystemPrompt", () => {
   it("injects producer knowledge for the ask, like the single-shot path", () => {
     expect(buildLoopSystemPrompt(SNAP, "put a compressor on the master bus")).toContain("Producer knowledge");
     expect(buildLoopSystemPrompt(SNAP)).not.toContain("Producer knowledge");
+  });
+
+  it("spells out the session scale for an explicit in-key note task", () => {
+    const p = buildLoopSystemPrompt(SNAP, "give the keys a little melody idea, nothing fancy, keep it in key");
+    expect(p).toContain("actual middle-register MIDI note numbers for A minor");
+    expect(p).toContain("A3=57, B3=59, C4=60, D4=62, E4=64, F4=65, G4=67");
+    expect(p).toContain("Do not use pitch-class numbers 0-11 as MIDI pitches.");
+    expect(p).toContain('on the existing MIDI clip "102" on track "18" "Keys"');
+    expect(p).toContain('one add_note command with a non-empty notes array');
+    expect(p).toContain('"notes":[{"pitch":69,"start":0,"length":0.5,"velocity":88}]');
+    expect(p).toContain("Do not rename or create tracks or clips.");
+    expect(p).toContain("- export_audio(");
+  });
+
+  it("does not add scale-specific guidance to unrelated tasks", () => {
+    const p = buildLoopSystemPrompt(SNAP, "make it faster");
+    expect(p).not.toContain("Every add_note and set_note");
+    expect(p).toContain("- export_audio(");
+  });
+
+  it("keeps the full command catalog for compound melody requests", () => {
+    const p = buildLoopSystemPrompt(SNAP, "give Keys a melody, keep it in key, and make it faster");
+    expect(p).toContain("- set_tempo(");
+    expect(p).toContain("- export_audio(");
+    expect(p).toContain("one add_note command with a non-empty notes array");
   });
 });
 
