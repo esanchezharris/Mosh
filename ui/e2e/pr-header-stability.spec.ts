@@ -31,8 +31,10 @@ test("the header does not reflow when a note is selected or deleted", async ({ p
 
   const before = await canary();
 
-  // draw a note, select it (velocity control appears), then delete it (disappears)
-  await page.mouse.click(vp.x + 4 * beatPx, vp.y + vp.height / 2);
+  // draw a note, select it (velocity control appears), then delete it (disappears).
+  // Adding is a DOUBLE-click on empty grid; a single click only selects / places the
+  // insert (PianoRoll onGridDoubleClick, and the pr-foot legend).
+  await page.mouse.dblclick(vp.x + 4 * beatPx, vp.y + vp.height / 2);
   await page.waitForTimeout(250);
   const afterDraw = await canary();
   await page.mouse.click(vp.x + 4 * beatPx + 4, vp.y + vp.height / 2);

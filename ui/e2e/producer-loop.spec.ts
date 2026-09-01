@@ -29,7 +29,7 @@ test("full producer loop: new → program → drums → plugin → mix → expor
   await midiClip.dblclick();
   const pr = page.getByTestId("piano-roll");
   await expect(pr).toBeVisible();
-  await pr.locator(".pr-grid").click({ position: { x: 120, y: 200 } });
+  await pr.locator(".pr-grid").dblclick({ position: { x: 120, y: 200 } });
   await expect(pr.getByTestId("pr-note")).toHaveCount(1);
   await page.keyboard.press("Escape");
   await expect(pr).toBeHidden();

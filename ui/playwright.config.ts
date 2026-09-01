@@ -39,10 +39,16 @@ export default defineConfig({
       launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
     },
   }],
+  // The dev lane serves through Vite with import.meta.env.DEV true, which arms the
+  // react-scan / react-grab devtools that main.tsx imports. react-scan mounts a
+  // full-viewport #react-scan-root that swallows pointer events, so every
+  // locator.click() times out (7 specs, PR #667). Disable them for e2e through the
+  // VITE_DISABLE_REACT_DEVTOOLS escape hatch main.tsx already honours. The preview
+  // lane builds with --mode e2e, where DEV is false and they never load.
   webServer: {
     command: preview
       ? "MOSH_E2E_HERMETIC_BRAIN=1 npm run build:e2e && MOSH_E2E_HERMETIC_BRAIN=1 npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port 5173"
-      : "MOSH_E2E_HERMETIC_BRAIN=1 VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=1 npm run dev -- --host 127.0.0.1",
+      : "MOSH_E2E_HERMETIC_BRAIN=1 VITE_DISABLE_REACT_DEVTOOLS=1 VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=1 npm run dev -- --host 127.0.0.1",
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI && !preview,
     timeout: 120_000,
