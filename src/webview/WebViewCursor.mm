@@ -70,6 +70,14 @@ namespace mosh
 {
 void setMacEditorCursor (EditorCursorKind kind)
 {
+    if (! [NSThread isMainThread])
+    {
+        dispatch_async (dispatch_get_main_queue(), ^{
+            setMacEditorCursor (kind);
+        });
+        return;
+    }
+
     jassert ([NSThread isMainThread]);
     desiredCursor = kind;
 

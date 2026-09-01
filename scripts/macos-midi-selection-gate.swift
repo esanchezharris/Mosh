@@ -93,10 +93,10 @@ func postMouse(
     app: NSRunningApplication,
     flags: CGEventFlags = []
 ) {
-    requireMoshFrontmost(app, phase: "mouse event")
     let source = CGEventSource(stateID: .hidSystemState)
     let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
     event?.flags = flags
+    requireMoshFrontmost(app, phase: "mouse event")
     event?.post(tap: .cghidEventTap)
 }
 
