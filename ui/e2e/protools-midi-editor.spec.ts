@@ -72,7 +72,9 @@ test("MIDI Track List superimposes context and keeps note commands on one explic
   const scroll = page.locator(".pt-midi-editor-main .pr-scroll");
   const bounds = await scroll.boundingBox();
   if (!bounds) throw new Error("MIDI grid viewport is unavailable");
-  await page.mouse.click(bounds.x + Math.min(96, bounds.width / 3), bounds.y + Math.min(24, bounds.height / 3));
+  // Adding a note is a DOUBLE-click on empty grid; a single click only selects /
+  // places the insert (PianoRoll onGridDoubleClick).
+  await page.mouse.dblclick(bounds.x + Math.min(96, bounds.width / 3), bounds.y + Math.min(24, bounds.height / 3));
 
   await expect.poll(() => page.evaluate(({ start, clipId }) => {
     const trace = (window as MidiEditorWindow).__moshCmdTrace ?? [];
