@@ -131,7 +131,17 @@ func stableCurrentCursor(timeout: TimeInterval = 1.0) -> CursorFingerprint {
     return cursorFingerprint(NSCursor.currentSystem ?? NSCursor.arrow)
 }
 
-func moveMouse(to point: CGPoint) {
+func requireMoshFrontmost(_ app: NSRunningApplication, phase: String) {
+    guard !app.isTerminated,
+          app.bundleIdentifier == "studio.mosh.app",
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+        fputs("target Mosh process lost focus before \(phase)\n", stderr)
+        exit(5)
+    }
+}
+
+func moveMouse(to point: CGPoint, app: NSRunningApplication) {
+    requireMoshFrontmost(app, phase: "cursor move")
     let source = CGEventSource(stateID: .hidSystemState)
     let event = CGEvent(
         mouseEventSource: source,
@@ -142,7 +152,7 @@ func moveMouse(to point: CGPoint) {
     event?.post(tap: .cghidEventTap)
 }
 
-func focusWindow(pid: Int32) {
+func focusWindow(pid: Int32, app: NSRunningApplication) {
     let root = AXUIElementCreateApplication(pid)
     guard let window = (axAttribute(root, kAXWindowsAttribute as CFString) as? [AXUIElement])?.first,
           let point = axPoint(axAttribute(window, kAXPositionAttribute as CFString)),
@@ -150,6 +160,7 @@ func focusWindow(pid: Int32) {
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
     AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    requireMoshFrontmost(app, phase: "window focus")
     let titleBarPoint = CGPoint(x: point.x + size.width / 2, y: point.y + 12)
     let source = CGEventSource(stateID: .hidSystemState)
     for type in [CGEventType.leftMouseDown, .leftMouseUp] {
@@ -163,7 +174,8 @@ func focusWindow(pid: Int32) {
     RunLoop.current.run(until: Date().addingTimeInterval(0.15))
 }
 
-func commandScroll(at point: CGPoint, delta: Int32) {
+func commandScroll(at point: CGPoint, delta: Int32, app: NSRunningApplication) {
+    requireMoshFrontmost(app, phase: "zoom")
     let source = CGEventSource(stateID: .hidSystemState)
     let event = CGEvent(
         scrollWheelEvent2Source: source,
@@ -181,7 +193,8 @@ func commandScroll(at point: CGPoint, delta: Int32) {
 
 guard CommandLine.arguments.count >= 2,
       let pid = Int32(CommandLine.arguments[1]),
-      let app = NSRunningApplication(processIdentifier: pid) else {
+      let app = NSRunningApplication(processIdentifier: pid),
+      app.bundleIdentifier == "studio.mosh.app" else {
     fputs("usage: macos-midi-cursor-gate.swift PID [OUTPUT_JSON]\n", stderr)
     exit(2)
 }
@@ -189,11 +202,9 @@ guard CommandLine.arguments.count >= 2,
 let outputPath = CommandLine.arguments.count >= 3 ? CommandLine.arguments[2] : nil
 _ = app.activate(options: [.activateAllWindows])
 RunLoop.current.run(until: Date().addingTimeInterval(0.35))
-focusWindow(pid: pid)
-guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
-    fputs("target Mosh process is not frontmost\n", stderr)
-    exit(5)
-}
+requireMoshFrontmost(app, phase: "initial focus")
+focusWindow(pid: pid, app: app)
+requireMoshFrontmost(app, phase: "initial cursor check")
 
 let expected: [String: CursorFingerprint] = [
     "center": cursorFingerprint(NSCursor.openHand),
@@ -208,7 +219,7 @@ var noteTitle = ""
 var lastPoint = CGPoint.zero
 
 for (zoomLevel, delta) in zoomDeltas.enumerated() {
-    if delta != 0 { commandScroll(at: lastPoint, delta: delta) }
+    if delta != 0 { commandScroll(at: lastPoint, delta: delta, app: app) }
     let snapshot = axSnapshot(pid: pid)
     gridFrames.append(contentsOf: snapshot.grids.map { rect in
         NoteFrame(
@@ -242,9 +253,9 @@ for (zoomLevel, delta) in zoomDeltas.enumerated() {
 
     for repetition in 1...3 {
         for (target, point) in points {
-            moveMouse(to: blank)
+            moveMouse(to: blank, app: app)
             _ = stableCurrentCursor()
-            moveMouse(to: point)
+            moveMouse(to: point, app: app)
             let actual = stableCurrentCursor()
             guard let targetExpected = expected[target] else { exit(4) }
             samples.append(CursorSample(
@@ -259,7 +270,7 @@ for (zoomLevel, delta) in zoomDeltas.enumerated() {
     }
 }
 
-commandScroll(at: lastPoint, delta: -120)
+commandScroll(at: lastPoint, delta: -120, app: app)
 let report = CursorReport(
     ok: samples.allSatisfy(\.ok),
     pid: pid,
