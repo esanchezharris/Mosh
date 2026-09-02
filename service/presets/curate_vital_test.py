@@ -79,6 +79,19 @@ def _build_synthetic_library(root: Path):
     # into some default bucket.
     _touch(root, "User/Presets/PackG/Mystery Sound.vital")
 
+    # R2.2: a sequence/arp patch that would otherwise classify as "lead" by its own
+    # filename token must be excluded everywhere except the arp role — this is the
+    # "arp-lucy-blake-dpo-broken-wings-sq-1" shape (an SQ patch outside arp).
+    _touch(root, "User/Presets/PackH/Lead/LD Sequence Riser.vital")
+
+    # R2.2: "keys-10924-cowbell-trap-6" shape — a COWBELL one-shot that only lands in
+    # "keys" because its PACK folder is named Keys, not because of its own sound.
+    _touch(root, "User/Presets/PackI/Keys/10924 Cowbell Trap.vital")
+
+    # R2.2: bells belong only in the dedicated bell role — a "Bell" filename inside a
+    # Lead folder must be excluded from lead even though LEAD matches first.
+    _touch(root, "User/Presets/PackJ/Lead/Dark Bell Lead.vital")
+
 
 def test_role_classification():
     with tempfile.TemporaryDirectory() as td:
@@ -114,9 +127,68 @@ def test_disqualify_and_placeholder_scoring():
 
         init_path = root / "User/Presets/PackD/Lead/Init.vital"
         named_path = root / "User/Presets/PackD/Lead/LD Lead 0.vital"
-        init_score = cv.score_candidate(init_path, root)
-        named_score = cv.score_candidate(named_path, root)
+        init_score, init_reasons = cv.score_candidate(init_path, root)
+        named_score, named_reasons = cv.score_candidate(named_path, root)
         check(init_score < named_score, "a placeholder-named preset ('Init') scores below a normally-named one")
+        check(any("placeholder" in r for r in init_reasons), "the placeholder penalty is recorded in reasons")
+        check(len(named_reasons) >= 1, "a normally-named preset still carries a reasons trail (at least the base score)")
+
+
+def test_sequence_patches_excluded_outside_arp():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _build_synthetic_library(root)
+
+        seq_lead = root / "User/Presets/PackH/Lead/LD Sequence Riser.vital"
+        check(cv.classify_role(seq_lead, root) == "lead", "classify_role still buckets it as 'lead' by its own token (sanity)")
+        check(cv.is_sequence_patch(seq_lead, root), "is_sequence_patch detects the SEQUENCE marker")
+
+        cands = dict(cv.find_candidates(root))
+        check(seq_lead not in cands, "a sequence/arp-marked preset is excluded from find_candidates even though it would classify as 'lead'")
+
+        # An arp-bucketed SEQ preset is NOT excluded — the veto is role-blind, not a
+        # blanket ban on sequence patches.
+        seq_arp = root / "User/Presets/PackE/Arp/SEQ Arp 0.vital"
+        check(seq_arp in cands, "a sequence patch that legitimately classifies as 'arp' is kept")
+        check(cands[seq_arp] == "arp", "the kept sequence patch is bucketed as arp")
+
+
+def test_percussive_presets_excluded_from_melodic_roles():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _build_synthetic_library(root)
+
+        cowbell_in_keys = root / "User/Presets/PackI/Keys/10924 Cowbell Trap.vital"
+        check(cv.classify_role(cowbell_in_keys, root) == "keys", "classify_role still buckets it as 'keys' via the folder (sanity)")
+        check(cv.is_offrole_percussive(cowbell_in_keys, root, "keys"), "is_offrole_percussive flags the cowbell-in-keys shape")
+
+        bell_in_lead = root / "User/Presets/PackJ/Lead/Dark Bell Lead.vital"
+        check(cv.classify_role(bell_in_lead, root) == "lead", "classify_role still buckets it as 'lead' (sanity)")
+
+        cands = dict(cv.find_candidates(root))
+        check(cowbell_in_keys not in cands, "a cowbell one-shot is excluded from the keys role even though its pack folder says Keys")
+        check(bell_in_lead not in cands, "a bell one-shot is excluded from the lead role — bells only belong in the bell role")
+
+        # Bells in their OWN role are untouched.
+        bell_native = root / "User/Presets/PackE/Bell/Bell 0.vital"
+        check(bell_native in cands and cands[bell_native] == "bell", "a bell preset in the bell role is unaffected")
+
+
+def test_review_md_written_and_grouped_by_role():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "vital-src"
+        out = Path(td) / "curated-out"
+        _build_synthetic_library(root)
+
+        cv.curate(root, out, cv.QUOTAS, dry_run=True)
+
+        review_path = out / "REVIEW.md"
+        check(review_path.exists(), "REVIEW.md is written even in dry-run")
+        text = review_path.read_text(encoding="utf-8")
+        for role in cv.QUOTAS:
+            check(f"## {role} (" in text, f"REVIEW.md has a section header for role '{role}'")
+        check("cowbell" not in text.lower() and "sequence riser" not in text.lower(),
+              "REVIEW.md never lists an excluded (off-role) preset")
 
 
 def test_quota_capping_and_output():
@@ -152,8 +224,12 @@ def test_quota_capping_and_output():
         check(data.get("count") == 60, "provenance.json's count matches the actual pick count")
         check(len(data.get("presets", [])) == 60, "provenance.json lists all 60 picks")
         row0 = data["presets"][0]
-        for key in ("dest", "role", "source_path", "author", "style", "score"):
+        for key in ("dest", "role", "source_path", "author", "style", "score", "reasons"):
             check(key in row0, f"provenance row carries '{key}'")
+        check(isinstance(row0["reasons"], list) and len(row0["reasons"]) >= 1, "'reasons' is a non-empty list")
+
+        review_path = out / "REVIEW.md"
+        check(review_path.exists(), "REVIEW.md was written alongside provenance.json")
 
 
 def test_dry_run_copies_nothing():
@@ -164,7 +240,14 @@ def test_dry_run_copies_nothing():
 
         provenance = cv.curate(root, out, cv.QUOTAS, dry_run=True)
         check(len(provenance) == 60, "dry-run still scores and reports the same 60 picks")
-        check(not out.exists(), "dry-run creates no output directory at all")
+        # dry-run DOES write the owner-facing review artifacts (REVIEW.md,
+        # provenance.json) — the whole point of a preview run is being able to read
+        # them without committing 60 file copies — but copies no .vital binaries.
+        check(out.exists(), "dry-run creates the output dir for its review artifacts")
+        check((out / "REVIEW.md").exists(), "dry-run writes REVIEW.md")
+        check((out / "provenance.json").exists(), "dry-run writes provenance.json")
+        copied = list(out.glob("*.vital"))
+        check(len(copied) == 0, "dry-run copies zero .vital files")
 
 
 def test_limit_and_roles_filters():
@@ -203,8 +286,11 @@ def test_author_diversity_prefers_spreading_picks():
 def main() -> int:
     test_role_classification()
     test_disqualify_and_placeholder_scoring()
+    test_sequence_patches_excluded_outside_arp()
+    test_percussive_presets_excluded_from_melodic_roles()
     test_quota_capping_and_output()
     test_dry_run_copies_nothing()
+    test_review_md_written_and_grouped_by_role()
     test_limit_and_roles_filters()
     test_author_diversity_prefers_spreading_picks()
 

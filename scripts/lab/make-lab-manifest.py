@@ -29,6 +29,14 @@ machine; when they are not, this script falls back to the pre-measured constant 
 tags the row root_source:"measured-2026-09-02" so a later re-run on a fuller machine can
 tell a REAL measurement from this fallback.
 
+808 sub energy (R2.6, correction note 6 — "808 / low end weak or wrong"): each 808 also
+gets `sub_energy_db`/`rms_db` from service/presets/measure_sub.py's 30-120 Hz band-RMS
+measurement, the SAME field drumPalette.ts's pickDrumPalette (W2.3) reads to prefer the
+loudest-sub 808 over the pre-round-2 nearest-root-to-60 fallback. measure_sub is
+stdlib(+numpy)-only — no soundfile/librosa dependency chain to fail — but the call is
+still wrapped defensively: a lab manifest must never fail to generate over a
+measurement hiccup, same as the pitch fallback above.
+
 Run: `python3 scripts/lab/make-lab-manifest.py` (writes
 ~/Library/Mosh/lab-manifests/15drtt-jerk-r0.json). `--dry-run` prints without writing;
 `--out` overrides the destination (tests use a tempdir).
@@ -41,9 +49,11 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MEASURE_MODULE_DIR = REPO_ROOT / "service" / "recipes"
+MEASURE_SUB_MODULE_DIR = REPO_ROOT / "service" / "presets"
 
 KIT_ROOT = (
     Path.home()
@@ -121,8 +131,41 @@ def measure_808_root(path: Path, measure_f0) -> tuple[int, str]:
     return int(round(midi_float)), "measured"
 
 
+def _try_import_measure_sub():
+    """Return measure_sub.measure_band_energy if service/presets/measure_sub.py imports
+    cleanly on this machine, else None. Unlike measure_palette_pitch, measure_sub has no
+    soundfile/librosa dependency chain to fail on (stdlib, numpy optional) — but the
+    import is still guarded the same defensive way as _try_import_measure_f0 above, so
+    a broken/missing module can never crash manifest generation."""
+    sys.path.insert(0, str(MEASURE_SUB_MODULE_DIR))
+    try:
+        import measure_sub  # type: ignore
+
+        return measure_sub.measure_band_energy
+    except Exception:
+        return None
+    finally:
+        if str(MEASURE_SUB_MODULE_DIR) in sys.path:
+            sys.path.remove(str(MEASURE_SUB_MODULE_DIR))
+
+
+def measure_808_sub_energy(path: Path, measure_band_energy) -> Optional[dict]:
+    """{"sub_energy_db": ..., "rms_db": ...} for one 808 one-shot, or None on any
+    failure (module unavailable, unreadable/corrupt audio) — R2.6 (correction note 6),
+    consumed by drumPalette.ts's pickDrumPalette to prefer the loudest-sub 808 over the
+    pre-round-2 nearest-root-to-60 fallback. Never raises."""
+    if measure_band_energy is None:
+        return None
+    try:
+        result = measure_band_energy(path)
+    except Exception:
+        return None
+    return {"sub_energy_db": result["sub_energy_db"], "rms_db": result["rms_db"]}
+
+
 def build_manifest(kit_root: Path = KIT_ROOT, items: list[tuple[str, str]] = LAB_ITEMS) -> dict:
     measure_f0 = _try_import_measure_f0()
+    measure_band_energy = _try_import_measure_sub()
     bass_seen = 0
     out_items = []
     for role, rel in items:
@@ -140,6 +183,10 @@ def build_manifest(kit_root: Path = KIT_ROOT, items: list[tuple[str, str]] = LAB
             root_note, root_source = measure_808_root(path, measure_f0)
             entry["root_note"] = root_note
             entry["root_source"] = root_source
+            sub_energy = measure_808_sub_energy(path, measure_band_energy)
+            if sub_energy is not None:
+                entry["sub_energy_db"] = sub_energy["sub_energy_db"]
+                entry["rms_db"] = sub_energy["rms_db"]
         out_items.append(entry)
 
     if bass_seen != 2:
@@ -191,7 +238,12 @@ def main(argv=None) -> int:
         print(f"  {role}: {by_role[role]}")
     for row in manifest["items"]:
         if row["role_guess"] == BASS_ROLE:
-            print(f"  bass root_note={row['root_note']} root_source={row['root_source']} <- {row['path']}")
+            sub_desc = (
+                f"sub_energy_db={row['sub_energy_db']} rms_db={row['rms_db']}"
+                if "sub_energy_db" in row
+                else "sub_energy_db=<unmeasured>"
+            )
+            print(f"  bass root_note={row['root_note']} root_source={row['root_source']} {sub_desc} <- {row['path']}")
     return 0
 
 
