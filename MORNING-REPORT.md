@@ -1,114 +1,135 @@
-# Overnight report — 2026-09-01 (branch `claude/music-generation-workflow-19ca09`)
+# Morning report — overnight run 2 (2026-09-02, 02:45 → ~07:30)
 
-Everything landed as commits on this branch for your review; nothing merged, nothing
-pushed. Verification status at the bottom. Deliberately uncommitted file (per plan).
+Run 1's report (palette-v2, preset seam, produce lane v1) is in git history at
+`f18c18ee`. This one covers the produce lane actually producing.
 
-## What shipped (4 commits on top of yesterday's un-fence)
+## TL;DR
 
-1. **`55d37b30` — Template-aware session render** (flywheel pillar 2). The agent's
-   prompt now shows every track's instrument, fx chain, and `[drum]` type
-   (`ui/src/agent/sessionRender.ts`) — it can finally see WHAT it writes for.
-   All segments conditional → Python SFT mirror stays byte-parity without change.
-2. **`7efd68d6` — Preset seam** (P1-A2). New MoshOps commands `list_presets` /
-   `load_preset` with the full five-registration checklist. `.vital` presets load
-   into a hosted Vital via the byte-verified VC2!/IComponent envelope through a
-   UAF-safe whole-state UndoableAction (Vital-only targeting — a .vital can never
-   hit Serum); `.json` presets drive the built-in 4OSC (params by display name +
-   per-osc waveShapes, one undo step, G14-safe). Rack instrument cards got a
-   **Presets… picker** (mouse path, both shells; reachability ratchet stays 0).
-   Bundled bank: 5 starter 4OSC patches (`resources/presets/4osc/`, staged into
-   the app bundle) — **UN-AUDITIONED, your ear pass needed.**
-3. **`40f36765` — Produce lane v1** (P1-B2/B3), behind settings flag **`produceLane`
-   (default OFF)**. Explicit asks ("produce me a beat", "full beat", "production
-   pass") get PROMPT-trap-v4's genre rules translated to MoshOps idioms (lane-map
-   drums from the gen001 reference, sustained 808s in MIDI 62-70, presets-before-
-   judging, recipe-first foundation, your r1 lessons) + raised budgets (24 steps /
-   480s). Default lane stays byte-identical (pinned by test).
-4. Plus yesterday evening's **`203b5fdb` — generate_beat_recipe un-fenced**
-   (two-phase WebBridge hop; agent-callable; v2 add-track "Recipe beat" entry).
+**The Mosh produce lane completed its first full beat.** Run `live3-sonnet`:
+"produce me a dark jerk trap beat at 148 in D minor" → 9 tracks, 9 clips,
+all 9 planned steps, 5.3 min, rendered to a 14 s 8-bar loop. The 808 obeys
+every flywheel rule (6 pitches in 62-70, zero gaps, A≠B), every synth stays in
+its register; the drums used only 4 of the 10 pads (prompt lesson already
+promoted, see below). Everything is packaged for your ear at
+`~/Library/Mosh/produce-ab/2026-09-02/audition.html`.
 
-## Verification
+Your morning jobs (only you can do these):
+1. **Export the corrected Live set** (`cATHARDIC_trap_r0_gen001.als`) as
+   `A-flywheel.wav` into `~/Library/Mosh/produce-ab/2026-09-02/` — no bounce of
+   it exists anywhere; the package ships the older `release-f0a3f525-final.wav`
+   as a provisional A.
+2. Open `audition.html`, listen (N next / K keep / Space swaps A↔B at the same
+   position), type notes, "Copy verdict" → paste into `verdict.json`.
+3. `python3 scripts/produce/capture-correction.py --verdict <path>` writes the
+   produce lane's first `docs/produce-corrections/<id>.meta.json` — the
+   correction round the contract demands.
+4. Veto list: `runs/live3-sonnet/template.json` names the 7 Vital presets and
+   10 samples the run used.
 
-- **vitest: 4348 passed / 0 failed** (contract, classification, txn pairs,
-  reachability-ratchet-at-0, new produce/preset/trackKinds specs). `tsc` clean.
-- **Built app selftest: 3 × 3305/3305, 0 failed; `--selftest-undo` 18/18.**
-  Full app build clean.
-- **Official `gate.sh` did NOT run** — its memory preflight tripped twice on
-  machine state, never on code: first ~70GB swap (the leaked servers, below),
-  then the Codex-children guard (79 children of YOUR ChatGPT/Codex app-server vs
-  cap 64 — owner territory per CLAUDE.md, untouched). **Re-run the gate when
-  you're up**; code-level equivalents above are all green:
-  `scripts/auto-loop/gate.sh native <this worktree> origin/main`
-- Not yet covered: selftest checks for list_presets/load_preset (count still
-  3305 = baseline); Vital preset audibility (state round-trip is in, but Vital
-  applies patches asynchronously — needs the running app + your ear).
+## What you will hear (all 148 BPM, 8 bars, same ask)
 
-## The 3 AM memory incident (root-caused)
+| File | What it is |
+|---|---|
+| `B-mosh-live3-sonnet.wav` | Mosh produce lane, Sonnet via `claude -p`, palette-v2 drums + 808, 7 Vital tracks with curated presets |
+| `B-labkit-live3-sonnet.wav` | the SAME notes replayed on your Live set's exact samples (jers kick, light/mem/omg snares, law + igdk claps, hatime hat, tred open hat, bestsnap perc, scratch fx, *spice* 808) — isolates arrangement from sound |
+| `B-reference-notes-moshsounds.wav` | your corrected reference beat's own notes (MDSL → Mosh converter) on Mosh's palette + Vital sounds — isolates sound from arrangement |
+| `B-mosh-live4-opus.wav` | Opus candidate (see status below) |
+| `A-release-release-f0a3f525-final.wav` | provisional A (the earlier Mosh release), until you export A-flywheel.wav |
 
-You spotted 5×17GB pythons: four were **orphaned Mosh local-brain servers**
-(fused-model `mlx_lm.server`, ports 8091-8094) spawned by Mosh app launches at
-03:13-03:52 and never cleaned up — together ≈ the 70GB of swap. Killed; swap fell
-70GB→2.4GB. Root cause: your launch agent `com.emilio.mlx-qwen3-4b` holds port
-8091 (RunAtLoad+KeepAlive) — the exact port Mosh's owner runtime prefers — so
-every app launch cascaded to a fresh spawn on the next port, and app exit
-orphaned them. **Task chip filed** ("Fix owner-runtime brain-server port
-collision and orphan leak"). Also: your 8321 Qwen3.5 server is supervised
-(`com.emilio.mlx-qwen36-35b-abliterated`, KeepAlive) — it respawned itself after
-the stop you approved, so no restart needed; it's running.
+Partial/diagnostic runs (`partial-runs/`): smoke1/2 (mock brain), live1/live2
+(stopped after 1 and 3 steps — the compile-reply bug, fixed).
 
-## palette-v2 candidates (your morning by-ear pass)
+## Why run 1 died, and what landed (14 commits, `92cb6c88..`)
 
-SA3 one-shot batch at `~/Library/Mosh/palette-v2-candidates/` —
-`CURATION-CHECKLIST.md` + `manifest.json` there have the final counts (batch was
-still rendering at report time; 18 first-wave renders salvaged + the rest
-resumed on the clean machine). Detour worth knowing: the SA3 MLX weights
-(`stabilityai/stable-audio-3-optimized`) had been DELETED from the HF cache
-(the load-bearing entry from the Aug-18 cleanup memo) — all four `.npz` were
-re-downloaded at the pinned revision and the `~/AI/stable-audio-3` symlinks work
-again.
+Root causes of the 02:36 failure, all verified from logs/code, all fixed:
 
-## Your queue (owner-gated, in rough order)
+1. **Stale service, wrong venv** — the app runs the owner-install service copy
+   under the SA3 MLX venv (no pydantic). pydantic installed there; the copy
+   restaged additively (its `--delete` would have removed 187 SFT/adapter
+   evidence files — skipped on purpose); `/generate_recipe` now also
+   dispatches to the teardown venv (`542ea065`).
+2. **Recipe path had two more blockers** — `set_track_volume` not in the native
+   allowlist, and palette-v2's 808s are role `bass`, never looked up. Fixed;
+   live curl shows an `assign_sample` from `palette-v2/808/`.
+3. **Brain ceiling** — BrainProxy hard-coded 800 tokens / 30 s. `brain_chat`
+   now takes per-call options (produce: 8192 / 180 s), DOSAGE byte-identical;
+   `openrouter` is a 4th provider; companion `/command` honours `timeoutMs`
+   (`c00b8f97`, `2df8c538`).
+4. **`claude -p` shim** (`fe6aa4fd`) — OpenAI-compatible, MCP stripped
+   (65k → ~300 input tokens/call), 429/5xx → BrainProxy fallback, sizes-only
+   ledger. Live: Sonnet round-trip 2.3 s; a dense drum step ~2 min.
+5. **Produce lane v2** (`1bfc2dfc`, `1c35629f`) — the loop model never sees
+   command result data, so a deterministic **preflight** lays the template
+   before the first model turn: one drum track with 10 pads from
+   `list_palette` (new read-only command), a chromatic 808 rooted at
+   `rootNote + 36` (so MIDI 62-70 sounds in the sub octave like your Simpler),
+   7 Vital tracks with presets from a **curated 60** picked out of your 12,911
+   `.vital` files (`~/Library/Mosh/presets/vital/`, provenance.json). The
+   prompt is PROMPT-trap-v4 in MoshOps idioms with `// lesson:` provenance;
+   your corrected beat is the few-shot (MDSL → Mosh converter + fixture).
+6. **Headless driver** (`12d5d6bf`) — runs the *real* loop against the *live*
+   engine over the companion lab feed; renders, saves, packages.
 
-1. Rerun the gate (command above) — should be green now that the machine is clean;
-   the Codex-children guard may still need your Codex app quit or your explicit
-   `MOSH_MAX_CODEX_CHILDREN` call.
-2. Curate palette-v2 candidates by ear (checklist in the folder) — keepers become
-   the rights-clean library seed.
-3. Audition the 5 bundled 4OSC patches + one Vital `.vital` load in the running
-   app (drop any of your .vital files in `~/Library/Mosh/presets/vital/`).
-4. First produce-lane live run: flip `produceLane` ON in settings, say
-   "produce me a beat", judge by ear — that's the first Mosh-vs-flywheel data
-   point. (Frontier model key must be configured; local model stays on the
-   assistant lane.)
-5. Decide merge timing for this branch once the gate is green.
+Live-run lessons already promoted tonight:
+- Sonnet answered 2/4 compile requests with the plan shape (commands nested in
+  `plan[i].commands`) → loop accepts exactly-one-carrier; prompt says
+  top-level `commands` (`95112b52`, with tests).
+- `load_plugin` name match is case-sensitive → `"Vital"` (`7674b4f9`).
+- Drums used 4/10 pads → anti-pattern line (`0cc249d0`); not yet re-run on
+  Sonnet — the Opus run is the first with it.
 
----
+## Status of the checks
 
-## FINAL STATUS (added after the two crashes — read this first)
+- MoshTests 424 cases green (new brain/companion cases); `npm run typecheck`
+  clean; vitest `src/agent` 1457/1457 (+2 loop tests after).
+- Python suites: shim 14/14, generate_cli, recipe_dispatch, venv_locations,
+  generate (808 binds), curate_vital 33, mdsl_to_moshops 56 — all pass.
+- Full native gate: RUNNING at report time (see "Gate" below for the result
+  once it lands). Its memory preflight refused on **your ChatGPT.app Codex
+  child count (129 > 64)** — machine state, not resource pressure (86% free,
+  no orphans) — so it runs with the same documented one-time
+  `MOSH_MAX_CODEX_CHILDREN=256` override as run 1.
 
-**The official gate is GREEN: all 21 steps, selftest 3×3316/3316, 0 failed**
-(commit `860ecc7c`). Chronicle of the morning:
+<!-- GATE_RESULT -->
 
-- The machine crashed twice under memory pressure (before and after reboot).
-  All work survived as commits; a memory watchdog now guards every heavy run,
-  and the SA3 batch driver self-throttles (pauses when free <22% or swap >12GB).
-- Two REAL fixes came out of gate reds: (1) selftest coverage for the preset
-  seam (11 new checks — list contract, param application with zero unknowns,
-  wrong-family refusal, missing-file error, and the G14 empty-txn undo trap);
-  (2) a latent selftest fragility — the Wave-4 humanize bounds check paired
-  notes by sorted position while two fixture notes tie at start 2.0, so any
-  command-count change could flip their jittered order; now paired by pitch.
-- One flake confirmed: `stateLedgerDraft.test.ts` timed out only under full
-  build load (31/31 in 1.5s standalone).
-- **One-time documented override:** the final gate runs used
-  `MOSH_MAX_CODEX_CHILDREN=256` because the preflight counts children of YOUR
-  ChatGPT/Codex app-server (131 during your active use) — a guard on machine
-  capacity that was otherwise satisfied (88% RAM free, swap <2GB). Per
-  CLAUDE.md this is logged as one-time, not a new normal.
-- The port-collision/orphan-leak fix is running in your separate session
-  (task chip); this branch does not touch src/brain to avoid colliding.
-- palette-v2 batch relaunched post-gate with salvage+resume; counts in
-  `~/Library/Mosh/palette-v2-candidates/manifest.json` when done.
+## Honest limits
 
-**The branch is merge-ready pending your review + the ear items in the queue
-below.**
+- Nobody has HEARD any of this. RMS says non-silent (−6 to −7 dBFS); Vital
+  patch audibility per track is unverified by ear.
+- The A/B is incomplete until you export A-flywheel.wav (Live off-limits).
+- Only Sonnet has finished a full run at report time; Opus status below.
+- The sound-matched replay's picker put *igdk* on the main clap and *law* on
+  the layer (reference is the reverse) and used *omg snare* as snare2 /
+  *mem snare* as roll — a deterministic-pick ordering detail, not a bug in
+  the notes.
+- Not tonight: Serum 2 preset loading, velocity layers/envelopes, merges.
+
+## The three complete runs, structurally
+
+| Run | Brain | Wall | Drums | 808 | Synth registers |
+|---|---|---|---|---|---|
+| `live3-sonnet` | Sonnet (shim) | 5.3 min | 119 notes, **4/10 pads**, 15 hits/bar, all 8 bars | 24 notes, 6 pitches, 0 gaps, A≠B | all in range |
+| `live4-opus` | Opus (shim) | 3.9 min | 81 notes, **10/10 pads**, but **bars 5-8 EMPTY** | 24 notes, 5 pitches, 0 gaps | all in range |
+| `live5-sonnet` | Sonnet, prompt with both lessons | 4.7 min | 164 notes, 10/10 pads, 18-25 hits in every bar | 40 notes, 5 pitches, 0 gaps | all in range |
+
+Each has a `swap/` twin on your Live-set samples (`B-labkit-<run>.wav`).
+`live5` is the one I'd play first; `live4` is the Opus reference point with
+its known B-section hole (the lesson it taught is what made `live5` full).
+Structure is not taste — the ear verdict is yours; these tables only say the
+flywheel rules were obeyed, which is the bar run 1 could not reach.
+
+Costs: all brain calls went through your Claude subscription (`claude -p`);
+OpenRouter was never needed (0 calls, $0). Shim ledger:
+`~/Library/Mosh/logs/brain-shim.jsonl`.
+
+## Where things are
+
+- Package: `~/Library/Mosh/produce-ab/2026-09-02/` (audition.html,
+  verdict.json, MORNING-REPORT-produce.md, runs/<id>/{run.json, template.json,
+  brain-replies.jsonl, program.jsonl, *.mosh, mix.wav, swap/}).
+- App instance from this worktree is left RUNNING (lab feed on 47873, pid in
+  `runs/app.pid`) so you can type the same ask in-app; quit it with
+  `kill -TERM $(cat ~/Library/Mosh/produce-ab/2026-09-02/runs/app.pid)`.
+  The shim is running too (`~/Library/Mosh/brain-shim/shim.pid`).
+- Branch `claude/music-generation-workflow-19ca09` (PR #680) carries all
+  commits; no merges, no pushes to shared branches.
