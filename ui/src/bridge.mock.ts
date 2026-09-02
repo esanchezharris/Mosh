@@ -3756,6 +3756,33 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
+      // TPL-001 — mirror the native recipe with the mock's own commands (synchronous
+      // dispatch, exactly as native composes through execute()) so the UI sees the same
+      // shape: two audio tracks, Vocal armed, count-in 1, overdub, a four-bar loop.
+      if (str(args.template) === "vocal") {
+        const t1 = dispatch("create_track", { name: "Backing", type: "audio" });
+        const t2 = dispatch("create_track", { name: "Vocal", type: "audio" });
+        const vocalId = (t2.data as { trackId?: string } | undefined)?.trackId ?? "";
+        if (vocalId) {
+          dispatch("arm_track", { trackId: vocalId, armed: true });
+          dispatch("set_input_monitor", { trackId: vocalId, mode: "automatic" });
+        }
+        dispatch("set_count_in", { bars: 1 });
+        dispatch("set_record_options", { overdub: true });
+        const bpm = snapshot.session.tempo ?? 120;
+        const loopEnd = (16 * 60) / bpm;
+        dispatch("set_transport", { loop: true, loopStart: 0, loopEnd });
+        invalidate();
+        return ok(command, {
+          editFile: snapshot.session.editFile, template: "vocal",
+          backingTrackId: (t1.data as { trackId?: string } | undefined)?.trackId ?? "",
+          vocalTrackId: vocalId, loopEnd,
+        });
+      }
+      if (str(args.template)) {
+        invalidate();
+        return ok(command, { editFile: snapshot.session.editFile, template: "", templateError: `unknown template: ${str(args.template)} (known: vocal)` });
+      }
       return ok(command);
     }
     case "relink_clip": return ok(command);   // gap 3 — re-point a missing wave source (mock no-op)
