@@ -701,8 +701,12 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     // did not take effect until the next arm_track; and switching from controller A to
     // controller B never released A, leaving both driving the track.
     auto& dm = eng.engine().getDeviceManager();
-    const bool wantMidi = dm.findMidiInputDeviceForID (deviceID) != nullptr;
-    track->state.setProperty (ids::moshInputDeviceKind, wantMidi ? "midi" : "wave", nullptr);
+    auto* selectedDevice = dm.findInputDeviceForID (deviceID);
+    const bool wantMidi = selectedDevice != nullptr && selectedDevice->isMidi();
+    track->state.setProperty (
+        ids::moshInputDeviceKind,
+        audiostartup::explicitInputKind (selectedDevice != nullptr, wantMidi),
+        nullptr);
 
     bool applied = false;
     bool wasArmed = false;
@@ -1006,12 +1010,18 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     if (armed && eng.hasAudio())
     {
         const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
-        const auto chosenKind = track->state.getProperty (
+        const auto storedKind = track->state.getProperty (
             ids::moshInputDeviceKind, var()).toString();
+        auto* selectedDevice = eng.engine().getDeviceManager().findInputDeviceForID (chosenID);
+        const bool currentlyMidi = selectedDevice != nullptr && selectedDevice->isMidi();
+        const auto chosenKind = audiostartup::effectiveExplicitInputKind (
+            storedKind, selectedDevice != nullptr, currentlyMidi);
+        if (storedKind.isEmpty() && selectedDevice != nullptr)
+            track->state.setProperty (ids::moshInputDeviceKind, chosenKind, nullptr);
         const bool explicitInputBlocksAudio = audiostartup::explicitInputBlocksAudioActivation (
             chosenID,
             chosenKind,
-            eng.engine().getDeviceManager().findMidiInputDeviceForID (chosenID) != nullptr);
+            currentlyMidi);
         if (audiostartup::shouldActivateAudioInputForArm (
                 armed, trackHasInstrument (*track), explicitInputBlocksAudio))
             if (const auto error = eng.activateAudioInput(); error.isNotEmpty())

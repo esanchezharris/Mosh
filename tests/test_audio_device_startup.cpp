@@ -145,6 +145,30 @@ TEST_CASE ("explicit non-audio inputs fail closed before microphone activation",
     CHECK (explicitInputBlocksAudioActivation ("keyboard", "wave", true));
 }
 
+TEST_CASE ("an unknown setter route remains microphone cold when armed",
+           "[audiostartup][privacy]")
+{
+    const auto storedKind = explicitInputKind (false, false);
+
+    CHECK (storedKind == "unknown");
+    CHECK (explicitInputBlocksAudioActivation ("not-a-real-device", storedKind, false));
+    CHECK (explicitInputKind (true, false) == "wave");
+    CHECK (explicitInputKind (true, true) == "midi");
+}
+
+TEST_CASE ("legacy wave selections are classified when the device is available",
+           "[audiostartup][privacy]")
+{
+    const auto availableWave = effectiveExplicitInputKind ({}, true, false);
+    const auto unavailableLegacy = effectiveExplicitInputKind ({}, false, false);
+
+    CHECK (availableWave == "wave");
+    CHECK_FALSE (explicitInputBlocksAudioActivation ("legacy-wave", availableWave, false));
+    CHECK (unavailableLegacy == "unknown");
+    CHECK (explicitInputBlocksAudioActivation (
+        "missing-legacy-input", unavailableLegacy, false));
+}
+
 TEST_CASE ("the probed input channel mask is reused for the live open",
            "[audiostartup][privacy]")
 {
