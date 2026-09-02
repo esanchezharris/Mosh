@@ -20,6 +20,23 @@ namespace mosh
     The bridge calls chat() OFF the message thread (it blocks on HTTP) and resolves
     the WebView promise with the returned var.
 */
+/** Per-call overrides for a chat request, layered on top of the DOSAGE defaults
+    (max_tokens 800 / temperature 0.6 / provider-default timeout). Default-
+    constructed options are BYTE-IDENTICAL to the previously hardcoded payload —
+    every existing caller that doesn't pass options keeps producing the exact same
+    wire request. timeoutMs==0 is the sentinel for "use requestTimeoutMs's existing
+    local/cloud split"; a positive value (after optionsFromVar's clamp) overrides it —
+    the produce lane needs this to raise the ~30s JUCE-side wait so an 8k-token
+    completion isn't cut off mid-flight.
+    Namespace-scope (not nested) because clang refuses a nested struct's default
+    member initialisers as a `= {}` default argument inside the enclosing class. */
+struct BrainChatOptions
+{
+    int maxTokens = 800;
+    double temperature = 0.6;
+    int timeoutMs = 0;
+};
+
 struct BrainProxy
 {
     struct Provider
@@ -28,20 +45,7 @@ struct BrainProxy
         bool isComplete() const { return key.isNotEmpty() && url.isNotEmpty() && model.isNotEmpty(); }
     };
 
-    /** Per-call overrides for a chat request, layered on top of the DOSAGE defaults
-        (max_tokens 800 / temperature 0.6 / provider-default timeout). Default-
-        constructed ChatOptions is BYTE-IDENTICAL to the pre-W1.1 hardcoded payload —
-        every existing caller that doesn't pass options keeps producing the exact same
-        wire request. timeoutMs==0 is the sentinel for "use requestTimeoutMs's existing
-        local/cloud split"; a positive value (after optionsFromVar's clamp) overrides it —
-        the produce lane needs this to raise the ~30s JUCE-side wait so an 8k-token
-        completion isn't cut off mid-flight. */
-    struct ChatOptions
-    {
-        int maxTokens = 800;
-        double temperature = 0.6;
-        int timeoutMs = 0;
-    };
+    using ChatOptions = BrainChatOptions;
 
     /** Parses a `{maxTokens?, temperature?, timeoutMs?}` var (the shape bridge.ts's
         BrainChatOptions sends as brain_chat's `options` argument) into a clamped
