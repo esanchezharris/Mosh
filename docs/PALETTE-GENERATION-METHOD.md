@@ -72,10 +72,17 @@ is on `sys.path`, which breaks `numba` (and thus librosa.feature) with
 modules via `importlib.util.spec_from_file_location` (registering in
 `sys.modules` before exec), or rename the module.
 
+## Round-3 validation (openhat top-up, 2026-09-01)
+
+The method's first fully-automated run: 20 openhat candidates (big SA3, fresh
+seeds, QC gate, gap-validated trim). Owner kept 10/20 (50% — above the lane's
+round-1 rate of 42%), and **9 of the 10 keeps were renders the original
+lane-blind flatness gate had rejected** — the per-lane QC correction paid for
+itself in one round. Lane now holds 15 keepers; palette-v2 total 127.
+
 ## Open items
 
 - Licensing review of SA3 output terms before any palette ships to strangers.
-- palette-v2 openhat lane is thin (5 keepers) — top up next batch via big SA3.
 - Wire the QC gate + model routing into an agent-callable `generate_kit`
   flow (produce-lane P2) so a new user's first kit runs this method
   autonomously, with their LoRAs/colours as the taste dials.
