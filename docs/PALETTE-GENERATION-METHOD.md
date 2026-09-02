@@ -22,12 +22,16 @@ engineered-v1 feature index) and `~/Library/Mosh/palette-v2-candidates/`
    - **small-sfx ONLY for fx / kick / perc** (50% / 33% / 40% keep). It is
      **banned for clap, snare, hat, openhat, 808: 0/42 kept** — its failures
      are not taste misses but hard glitches (see QC gate).
-3. **Auto-QC gate before any human hears anything**: reject when
-   `clip_pct > 5%` of samples at |x|>0.985 OR mean spectral flatness > 0.05.
-   Measured separation: owner-kept renders averaged 0.4% clip / 0.004
-   flatness; the glitched small-sfx stretch averaged **25% clip / 0.105
-   flatness** (worst claps ~50% clipping — a noise wall). This one gate would
-   have auto-removed essentially every render the owner skipped as broken.
+3. **Auto-QC gate before any human hears anything** — PER-LANE, learned the
+   hard way: `clip_pct > 5%` of samples at |x|>0.985 rejects in EVERY lane
+   (glitched renders: 25% avg, worst claps ~50%; owner keeps: 0.4%). The
+   spectral-flatness bound (> 0.05) applies ONLY to tonal lanes (kick, 808,
+   melodic — owner keeps measure ≤0.004 there). Noise-based lanes must NOT be
+   flatness-gated: the owner's KEPT openhats have median flatness 0.098 (max
+   0.185), hats to 0.428, snares to 0.461 — a lane-blind flatness gate's first
+   live run rejected 16/20 legitimate openhats before this correction, and
+   flatness cannot separate glitch from good there (kept and glitched ranges
+   overlap). Clip% is the universal discriminator; flatness is tonal-only.
 4. **First-hit trim, gap-validated** (the recalibrated cutter): librosa
    spectral-flux onsets; a candidate second onset is a REAL second hit only if
    the RMS envelope dips below **-30 dB rel peak** between onsets. Measured:
