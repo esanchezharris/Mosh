@@ -745,7 +745,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("deviceID", deviceID);
-    data->setProperty ("kind", selectedKind);
+    if (selectedKind != "unknown") data->setProperty ("kind", selectedKind);
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", "no live input instance (choice stored)");
     logLine ("set_track_input", args, true, {}, false);   // preference — not undoable

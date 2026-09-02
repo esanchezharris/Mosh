@@ -11085,16 +11085,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
         check (ok (sti), "routing: set_track_input ok (graceful headless)");
         check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
-        // The chosen device's FAMILY. Only the wave side is provable here: headless the
-        // engine enumerates no MIDI devices at all (see the CTL-001 note above), so a
-        // MIDI deviceID cannot be resolved and the midi branch is HARDWARE-GATED — do
-        // not read this check as proof that MIDI routing works. What it does pin is that
-        // family resolution happens and defaults to wave for an unknown id, which is the
-        // contract the (previously MIDI-blind) retarget loop now depends on.
-        check (sti["data"].getProperty ("kind", var()).toString() == "wave",
-               "routing: a non-MIDI deviceID resolves to the wave family");
+        // Headless cannot resolve a hardware family, so the public result omits kind
+        // while the persisted internal classification remains fail-closed.
+        check (! sti["data"].hasProperty ("kind"),
+               "routing: unresolved input omits its public family");
         check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
+        check (! trackById (ra)["input"].hasProperty ("kind"),
+               "routing: unresolved snapshot input omits its public family");
         // Explicit clear (Live's "No Input"): present-but-empty deviceID removes the
         // choice — the snapshot omits `input` — and it stays undoable:false (a
         // preference like the set). An ABSENT deviceID remains a malformed call.
