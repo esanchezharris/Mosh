@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildLoopSystemPrompt } from "./loopPrompt";
 import {
-  buildProduceSystemPrompt, isProduceAsk, PRODUCE_BUDGETS, PRODUCE_FEWSHOT, PRODUCE_RULES, PRODUCE_VERSION,
+  buildProduceSystemPrompt, isProduceAsk, PRODUCE_BUDGETS, PRODUCE_RULES, PRODUCE_VERSION,
   renderProduceTemplate,
 } from "./producePrompt";
 import type { ProduceTemplate } from "./produceTemplate";
@@ -30,6 +30,7 @@ const SNAP = {
 const TEMPLATE: ProduceTemplate = {
   bpm: 148,
   key: { tonic: "D", mode: "minor" },
+  seed: 0,
   drums: {
     trackId: "20",
     pads: [
@@ -42,6 +43,11 @@ const TEMPLATE: ProduceTemplate = {
     { trackId: "22", role: "lead", preset: "Dark Lead", file: "/presets/vital/lead-dark.vital" },
     { trackId: "23", role: "stab", preset: "", file: "/presets/vital/keys-rhodes.vital", presetError: "instance not available" },
   ],
+  mix: {
+    gainsDb: {},
+    padGainsDb: {},
+    master: { requested: "limiter", loaded: "limiter" },
+  },
   constants: { eightBarsSeconds: (32 * 60) / 148 },
 };
 
@@ -65,13 +71,13 @@ describe("produce prompt composition (v2)", () => {
     const base = buildLoopSystemPrompt(SNAP, "produce me a beat", undefined);
     const produce = buildProduceSystemPrompt(SNAP, "produce me a beat", undefined);
     expect(produce.startsWith(base)).toBe(true);
-    expect(produce).toBe([base, PRODUCE_RULES, PRODUCE_FEWSHOT].join("\n"));
+    expect(produce).toBe([base, PRODUCE_RULES].join("\n"));
   });
 
-  it("with a template, composition is [base, PRODUCE_RULES, renderProduceTemplate(template), PRODUCE_FEWSHOT]", () => {
+  it("with a template, composition is [base, PRODUCE_RULES, renderProduceTemplate(template)]", () => {
     const base = buildLoopSystemPrompt(SNAP, "produce me a beat", undefined);
     const produce = buildProduceSystemPrompt(SNAP, "produce me a beat", undefined, TEMPLATE);
-    expect(produce).toBe([base, PRODUCE_RULES, renderProduceTemplate(TEMPLATE), PRODUCE_FEWSHOT].join("\n"));
+    expect(produce).toBe([base, PRODUCE_RULES, renderProduceTemplate(TEMPLATE)].join("\n"));
     expect(produce).toContain("REQUIRED TRACKS");
   });
 
@@ -115,14 +121,61 @@ describe("produce prompt composition (v2)", () => {
     expect(PRODUCE_BUDGETS.softWallMs).toBe(900_000);
   });
 
-  it("stays well under the 12kB budget (PRODUCE_RULES + PRODUCE_FEWSHOT)", () => {
-    const bytes = Buffer.byteLength(PRODUCE_RULES) + Buffer.byteLength(PRODUCE_FEWSHOT);
+  it("stays well under the 12kB budget (PRODUCE_RULES)", () => {
+    const bytes = Buffer.byteLength(PRODUCE_RULES);
     expect(bytes).toBeLessThan(12_000);
   });
 
   it("PRODUCE_VERSION is a plain bumpable number", () => {
     expect(typeof PRODUCE_VERSION).toBe("number");
-    expect(PRODUCE_VERSION).toBeGreaterThanOrEqual(2);
+    expect(PRODUCE_VERSION).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("produce prompt v3 (docs/produce-corrections/produce-r1-2026-09-02 correction round)", () => {
+  it("drops the concrete-note few-shot — no literal notes-array JSON left in the prompt", () => {
+    expect(PRODUCE_RULES).not.toContain('"notes":[');
+    expect(PRODUCE_RULES).not.toContain("EXAMPLE (shape only");
+    expect(PRODUCE_RULES).not.toMatch(/"pitch":\d+,"start":/); // a literal note object
+  });
+
+  it("never instructs the model to reproduce an example — states the opposite instead", () => {
+    expect(PRODUCE_RULES).toMatch(/NEVER reproduce an example/i);
+  });
+
+  it("pins the harmony rule (note 1 — 'timing / wrong notes')", () => {
+    expect(PRODUCE_RULES).toContain("HARMONY");
+    expect(PRODUCE_RULES).toContain("consonant with whichever 808 pitch is SOUNDING");
+    expect(PRODUCE_RULES).toContain("diatonic triad (7th allowed)");
+    expect(PRODUCE_RULES).toContain("key.tonic");
+    expect(PRODUCE_RULES).toContain("key.mode");
+    expect(PRODUCE_RULES).toContain("CHORD RE-VOICING");
+    expect(PRODUCE_RULES).toContain("at most TWICE per bar");
+    // the old fixed-instruction to place a note off-grid must be gone
+    expect(PRODUCE_RULES).not.toMatch(/place at least one note deliberately off-grid/i);
+    expect(PRODUCE_RULES).toContain("late/swing feel on hats, at most 1/32 beat");
+  });
+
+  it("pins the B-section contrast rule (note 3 — 'things fall apart towards the end')", () => {
+    expect(PRODUCE_RULES).toContain("B SECTION");
+    expect(PRODUCE_RULES).toContain("B is NOT a new song");
+    expect(PRODUCE_RULES).toContain("keeps the drum groove and the hook");
+    expect(PRODUCE_RULES).toContain("exactly ONE texture");
+    expect(PRODUCE_RULES).toContain("Bars 7-8");
+    expect(PRODUCE_RULES).toContain("AT LEAST AS DENSE");
+  });
+
+  it("pins the described (not exampled) drum jerk-feel rule (note 6 — 808/low end + drums groove/feel)", () => {
+    expect(PRODUCE_RULES).toContain("DRUMS FEEL");
+    expect(PRODUCE_RULES).toContain("the 'a' of 2");
+    expect(PRODUCE_RULES).toContain("the '&' of 3");
+    expect(PRODUCE_RULES).toContain("2-step");
+    expect(PRODUCE_RULES).toContain("ghost-velocity drops");
+    expect(PRODUCE_RULES).toContain("'&' of 4");
+    expect(PRODUCE_RULES).toContain("call-and-response");
+    // pad-coverage and 0-32 coverage rules must still stand
+    expect(PRODUCE_RULES).toContain("at least 7 of the 10 pads");
+    expect(PRODUCE_RULES).toContain("cover every beat from 0 to 32");
   });
 });
 
@@ -131,8 +184,9 @@ describe("renderProduceTemplate", () => {
     expect(renderProduceTemplate(undefined)).toBe("");
   });
 
-  it("renders every REQUIRED track — drum pad map, 808 keyNote, and per-synth preset (or its absence)", () => {
+  it("renders every REQUIRED track — key, drum pad map, 808 keyNote, and per-synth preset (or its absence)", () => {
     const rendered = renderProduceTemplate(TEMPLATE);
+    expect(rendered).toContain("Key D minor");
     expect(rendered).toContain('Drums "20" pads:[36:Kick 38:Snare]');
     expect(rendered).toContain('808 "21" keyNote 60');
     expect(rendered).toContain('Lead "22" preset "Dark Lead"');
