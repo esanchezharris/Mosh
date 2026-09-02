@@ -142,12 +142,18 @@ function readPaletteManifest(path: string): readonly PaletteItem[] {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
   const items = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
   if (!Array.isArray(items)) throw new Error(`--swap manifest ${path}: expected an array or {items:[...]}`);
-  for (const item of items) {
+  // Accept both the projected list_palette shape ({path, role, rootNote}) and the
+  // raw palette-v2 / lab manifest shape ({path, role_guess, root_note}).
+  return items.map((item) => {
     const it = item as Record<string, unknown>;
-    if (typeof it.path !== "string" || typeof it.role !== "string")
-      throw new Error(`--swap manifest ${path}: every item needs string "path" and "role" fields, got ${JSON.stringify(item).slice(0, 120)}`);
-  }
-  return items as PaletteItem[];
+    const role = typeof it.role === "string" ? it.role : it.role_guess;
+    if (typeof it.path !== "string" || typeof role !== "string")
+      throw new Error(`--swap manifest ${path}: every item needs string "path" and "role"/"role_guess" fields, got ${JSON.stringify(item).slice(0, 120)}`);
+    const root = typeof it.rootNote === "number" ? it.rootNote : typeof it.root_note === "number" ? it.root_note : undefined;
+    const out: PaletteItem = { path: it.path, role };
+    if (root !== undefined) (out as { rootNote?: number }).rootNote = root;
+    return out;
+  });
 }
 
 function templatePlaceholderMap(template: Record<string, unknown>): Record<string, string> {
