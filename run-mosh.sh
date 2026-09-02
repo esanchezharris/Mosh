@@ -50,6 +50,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${MOSH_BRAIN_ENV:-$ROOT/ui/.env.local}"
 MODE="${1:-gui}"
+OWNER_TEAM_ID="ZYT77F9B27"
 
 # Resolve the newest built Mosh.app. The documented build is the
 # `macos-arm64-debug` preset (-> build-macos-arm64/); we also check the legacy
@@ -367,7 +368,8 @@ install_app() {                                 # $1 = source app, $2 = dest
 # the app to an unsigned state, which is exactly the TCC re-prompt bug #452 fixed.
 dev_id_identity() {
   security find-identity -v -p codesigning 2>/dev/null \
-    | awk '/Developer ID Application/ { print $2; exit }'
+    | awk -v team="$OWNER_TEAM_ID" \
+        '/Developer ID Application/ && index($0, "(" team ")") { print $2; exit }'
 }
 
 sign_app() {
@@ -377,10 +379,17 @@ sign_app() {
   if [ -n "$ID" ]; then
     codesign --force --deep --sign "$ID" "$DEST"
     LABEL="${LABEL/ad-hoc/Developer ID}"
+    local SIGNED_TEAM
+    SIGNED_TEAM="$(codesign -dv --verbose=4 "$DEST" 2>&1 \
+      | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+    if [ "$SIGNED_TEAM" != "$OWNER_TEAM_ID" ]; then
+      echo "  FATAL: expected TeamIdentifier=$OWNER_TEAM_ID, got ${SIGNED_TEAM:-not set}" >&2
+      return 1
+    fi
   else
-    echo "  note: no Developer ID Application identity found — signing ad-hoc." >&2
-    echo "        macOS may re-prompt for microphone/camera access after every rebuild." >&2
-    codesign --force --deep --sign - "$DEST"
+    echo "  FATAL: no Developer ID Application identity for team $OWNER_TEAM_ID was found." >&2
+    echo "         Refusing an ad-hoc owner deployment because it would break stable consent." >&2
+    return 1
   fi
   # macOS may attach protected provenance immediately after a copy/sign burst.
   # Give the metadata writer a moment, then strip again before final verification.
