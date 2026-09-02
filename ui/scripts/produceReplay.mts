@@ -230,7 +230,7 @@ async function main(): Promise<void> {
   const templateCmdsFromProgram = raw.filter((l) => TEMPLATE_COMMANDS.has(l.command));
 
   const wavFile = resolve(outDir, "mix.wav");
-  const session = `_harness/produce-replay-${RUN_ID}`;
+  const session = `produce-replay-${RUN_ID}`; // leaf only: realEngine.runScript writes WORK/<session>.jsonl and prefixes _harness/ itself for MOSH_SELFTEST_SESSION
 
   if (!swapManifest && !FIXTURE) {
     // (a) plain replay — the ORIGINAL template + note commands, verbatim.
