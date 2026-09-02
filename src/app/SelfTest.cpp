@@ -8789,17 +8789,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((bool) data.getProperty ("exists", false), "list_directory exists:true for a real dir");
         check (data.getProperty ("path", var()).toString() == browseDir.getFullPathName(), "list_directory path round-trips (normalized)");
 
-        // roots is a non-empty array containing a Home entry pointing at a real dir.
         {
             auto rootsVar = data.getProperty ("roots", var());
-            check (rootsVar.isArray() && rootsVar.size() > 0, "list_directory roots is a non-empty array");
-            bool homeOk = false;
+            check (rootsVar.isArray() && rootsVar.size() == 1, "list_directory exposes only one safe root");
+            bool importsOk = false, protectedRootAdvertised = false;
             if (auto* ra = rootsVar.getArray())
                 for (auto& r : *ra)
-                    if (r.getProperty ("name", var()).toString() == "Home"
-                        && File (r.getProperty ("path", var()).toString()).isDirectory())
-                        homeOk = true;
-            check (homeOk, "list_directory roots includes a Home pointing at a real directory");
+                {
+                    const auto name = r.getProperty ("name", var()).toString();
+                    const auto path = File (r.getProperty ("path", var()).toString());
+                    if (name == "Imports" && path == eng.sessionDir().getChildFile ("imports")
+                        && path.isDirectory())
+                        importsOk = true;
+                    if (name == "Home" || name == "Desktop" || name == "Documents" || name == "Downloads")
+                        protectedRootAdvertised = true;
+                }
+            check (importsOk, "list_directory roots includes the Mosh-owned Imports directory");
+            check (! protectedRootAdvertised, "list_directory does not advertise protected user folders");
         }
 
         // entries: the seeded .wav is present (isDir:false, size>0); the .txt is filtered
