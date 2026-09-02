@@ -133,6 +133,20 @@ namespace mosh::audiostartup
         return channels;
     }
 
+    inline juce::String inputNameForActivation (const juce::String& requestedInput,
+                                                const juce::String& preferredInput,
+                                                const juce::StringArray& availableInputs,
+                                                int defaultInputIndex)
+    {
+        if (requestedInput.isNotEmpty())
+            return requestedInput;
+        if (availableInputs.contains (preferredInput))
+            return preferredInput;
+        if (juce::isPositiveAndBelow (defaultInputIndex, availableInputs.size()))
+            return availableInputs[defaultInputIndex];
+        return availableInputs.isEmpty() ? juce::String() : availableInputs[0];
+    }
+
     /** Name the device we were trying to open, for the error the user actually reads.
         A setup with no explicit names is the system default. */
     inline juce::String deviceLabel (const juce::XmlElement* setupXml)

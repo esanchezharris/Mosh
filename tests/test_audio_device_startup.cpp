@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "engine/AudioDeviceStartup.h"
+#include "app/MacMicrophonePermission.h"
 #include "util/Env.h"
 
 using namespace mosh::audiostartup;
@@ -188,6 +189,38 @@ TEST_CASE ("the probed input channel mask is reused for the live open",
     CHECK (channels.toString (2) == "11");
     CHECK (channels.countNumberOfSetBits() == 2);
     CHECK (inputChannelMaskForOpen (0).isZero());
+}
+
+TEST_CASE ("deferred activation retains the preferred input and falls back to CoreAudio",
+           "[audiostartup][privacy]")
+{
+    const juce::StringArray inputs { "Emilio's iPhone Microphone",
+                                     "MacBook Pro Microphone" };
+
+    CHECK (inputNameForActivation ("BlackHole 2ch", "MacBook Pro Microphone",
+                                   inputs, 1) == "BlackHole 2ch");
+    CHECK (inputNameForActivation ({}, "MacBook Pro Microphone",
+                                   inputs, 0) == "MacBook Pro Microphone");
+    CHECK (inputNameForActivation ({}, "Missing input",
+                                   inputs, 1) == "MacBook Pro Microphone");
+    CHECK (inputNameForActivation ({}, {}, inputs, -1)
+           == "Emilio's iPhone Microphone");
+    CHECK (inputNameForActivation ({}, {}, {}, -1).isEmpty());
+}
+
+TEST_CASE ("microphone denial returns a recoverable recording error",
+           "[audiostartup][privacy]")
+{
+    using mosh::mac::MicrophonePermissionStatus;
+    using mosh::mac::microphonePermissionError;
+
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::granted).isEmpty());
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::denied)
+               .contains ("System Settings"));
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::restricted)
+               .contains ("not available"));
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::timedOut)
+               .contains ("did not finish"));
 }
 
 TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")

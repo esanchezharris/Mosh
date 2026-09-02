@@ -8,6 +8,7 @@
 #include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
 #include "state/SafeMode.h"
+#include "app/MacMicrophonePermission.h"
 
 #include <atomic>
 #include <iostream>
@@ -37,6 +38,7 @@ namespace
         bool audio;
         explicit MoshEngineBehaviour (bool a) : audio (a) {}
         bool autoInitialiseDeviceManager() override { return false; }
+        bool shouldOpenAudioInputByDefault() override { return false; }
         // No audio → don't enumerate audio I/O device types (avoids the macOS
         // mic-permission prompt on headless/no-audio launches).
         bool addSystemAudioIODeviceTypes() override { return audio; }
@@ -644,21 +646,27 @@ juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputN
         && (requestedInputName.isEmpty() || setup.inputDeviceName == requestedInputName))
         return {};
 
-    auto inputName = requestedInputName.isNotEmpty() ? requestedInputName
-                                                     : preferredInputDeviceName;
-    if (inputName.isEmpty())
-        if (auto* type = manager.getCurrentDeviceTypeObject())
-        {
-            const auto names = type->getDeviceNames (true);
-            const int defaultIndex = type->getDefaultDeviceIndex (true);
-            if (juce::isPositiveAndBelow (defaultIndex, names.size()))
-                inputName = names[defaultIndex];
-            else if (! names.isEmpty())
-                inputName = names[0];
-        }
+    juce::String inputName;
+    if (auto* type = manager.getCurrentDeviceTypeObject())
+    {
+        type->scanForDevices();
+        const auto names = type->getDeviceNames (true);
+        inputName = audiostartup::inputNameForActivation (
+            requestedInputName, preferredInputDeviceName, names,
+            type->getDefaultDeviceIndex (true));
+    }
+    else
+    {
+        inputName = requestedInputName.isNotEmpty() ? requestedInputName
+                                                    : preferredInputDeviceName;
+    }
 
     if (inputName.isEmpty())
         return "No audio input device is available";
+
+    if (const auto permissionError = mac::microphonePermissionError (
+            mac::requestMicrophonePermission()); permissionError.isNotEmpty())
+        return permissionError;
 
     auto probeSetup = std::unique_ptr<juce::XmlElement> (manager.createStateXml());
     if (probeSetup == nullptr)

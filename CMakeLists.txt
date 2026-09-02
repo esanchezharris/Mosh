@@ -484,6 +484,10 @@ if (MOSH_BUILD_APP)
         target_sources(Mosh PRIVATE src/app/MacStateRestoration.mm)
         set_source_files_properties(src/app/MacStateRestoration.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
+        target_sources(Mosh PRIVATE src/app/MacMicrophonePermission.mm)
+        set_source_files_properties(src/app/MacMicrophonePermission.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_link_libraries(Mosh PRIVATE "-framework AVFoundation")
+
         # Native WKWebView media-capture permission delegate (collaborator video
         # getUserMedia) — Obj-C++ with ARC.
         target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)
