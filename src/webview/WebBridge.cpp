@@ -291,9 +291,13 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 const auto req      = args.size() > 0 ? args[0] : juce::var();
                 const auto messages = req.getProperty ("messages", juce::var());
                 const auto provider = req.getProperty ("provider", juce::var()).toString();
-                juce::Thread::launch ([messages, provider, completion]() mutable
+                // Optional per-call ChatOptions (bridge.ts's BrainChatOptions: maxTokens /
+                // temperature / timeoutMs). Absent -> optionsFromVar's defaults, which
+                // reproduce the exact pre-W1.1 800/0.6/provider-default payload.
+                const auto opts = BrainProxy::optionsFromVar (req.getProperty ("options", juce::var()));
+                juce::Thread::launch ([messages, provider, opts, completion]() mutable
                 {
-                    auto result = BrainProxy::chat (messages, provider);
+                    auto result = BrainProxy::chat (messages, provider, opts);
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
