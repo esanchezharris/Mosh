@@ -131,6 +131,46 @@ Costs: all brain calls went through your Claude subscription (`claude -p`);
 OpenRouter was never needed (0 calls, $0). Shim ledger:
 `~/Library/Mosh/logs/brain-shim.jsonl`.
 
+## Round 2 (owner awake, 11:40 → ~14:40)
+
+**Verdict on round 1: all seven candidates FAIL** (notes verbatim in
+`docs/produce-corrections/produce-r1-2026-09-02.meta.json`). What the data
+said about each note, and what changed:
+
+| Owner note | Finding | Fix (commit) |
+|---|---|---|
+| synth part identical across runs; no variation | presets + samples identical in every run — picker seed was constant 0; stab preset was a cowbell, arp a self-sequencing patch | seeded picks per run (`db6928da`); curation excludes sequence/off-role percussive patches, `~/Library/Mosh/presets/vital/REVIEW.md` veto list (`59b46cce`) |
+| timing / wrong notes | chords held 8 beats "following" an 808 that moves every 1-2 beats → 47-67% of chord notes clashed with the sounding 808 root; prompt demanded an off-grid note | harmony + re-voicing rules, no forced off-grid; `produceCheck.ts` scores clashes/coverage/B-density (`d42782f9`) |
+| falls apart towards the end | the flywheel's recorded "missing B section" mode; nothing checked it | B-section rule + check (`d42782f9`) |
+| drums copied from the Ableton session | note-level few-shot of your corrected beat in the prompt | removed; style paragraph instead (`d42782f9`) |
+| 808 / low end weak | picked 808 was the 2nd-weakest sub of 17 (−12.6 dB band RMS; best −6.7; your *spice* −3.6) | 808 = most sub energy (`measure_sub.py`), +3 dB, gain map, master compressor (`db6928da`) |
+| mix (secondary) | every render clipped at 0 dBFS | gain map + master glue; still no limiter builtin |
+
+Round-2 candidates (same ask, seeds 1/2/3, all with stems in `runs/<id>/stems/`):
+
+| Run | Brain | Wall | Validator after run |
+|---|---|---|---|
+| `r2-sonnet-s1c` | Sonnet, medium effort | 15.6 min | chords no longer clash; counter/arp/lead did; **the repair pass deleted five clips** (remove_clip) — render is what survived. Guard added after (`fa78d9ee`) |
+| `r2-sonnet-s2` | Sonnet | 16.3 min | drone missing → repair added it; counter/arp/stab still clash |
+| `r2-opus-s3` | Opus, guard on | 5.9 min | all 9 tracks first try, no invalid commands; lead/chords/counter/arp/stab flagged for clashes; repair declined |
+
+Each has a `B-labkit-<run>.wav` twin on your Live-set samples. Costs: still
+$0 (all `claude -p`); OpenRouter fell back twice during a shim timeout and
+returned empty content both times — a bug to look at before it is relied on.
+
+Attempts that don't count (in `partial-runs/`): `r2-sonnet-s1` hit the
+shim's 170 s per-call timeout on the 200-note drum step (raised to 600 s);
+`r2-sonnet-s1b` was progressing and I killed it by mistake, thinking its
+`add_note` steps were failing — they weren't. Medium `--effort` on the CLI cut
+per-step latency from 1-4 min to 15-60 s with no visible loss in the
+validator.
+
+**Honest read:** the validator says the harmonic clash problem is reduced,
+not gone (chords fixed; single-line parts still flagged on a strict
+chord-tone rule that may itself be too strict for a lead). Nobody has heard
+round 2. Your ear is the gate; the stems are there so the next verdict can
+name the track.
+
 ## Where things are
 
 - Package: `~/Library/Mosh/produce-ab/2026-09-02/` (audition.html,
