@@ -150,6 +150,30 @@ async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: str
   }
 }
 
+// Produce lane is CLOUD-ONLY by owner decision ("frontier now, distill later",
+// docs/POSTMORTEM-2026-09.md): a full production pass on the local assistant
+// model is exactly the silent quality substitution the postmortem bans. Try the
+// cloud providers in order and VERIFY the responder (a requested-but-incomplete
+// provider resolves to a fallback natively — the result's `provider` field is
+// the truth). No local fallback: failing loudly beats producing quietly worse.
+const PRODUCE_CLOUD_PROVIDERS = ["deepseek", "openai", "xai"] as const;
+async function produceCloudChat(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
+  if (demoBrainAvailable()) return mockLoopChat(messages); // dev/e2e surface stays deterministic
+  let lastError: unknown;
+  for (const p of PRODUCE_CLOUD_PROVIDERS) {
+    try {
+      const r = await brainChat(messages, p);
+      if (r.provider && r.provider !== p) { lastError = new Error(`${p} not configured (served by ${r.provider})`); continue; }
+      return r;
+    } catch (e) { lastError = e; }
+  }
+  throw new Error(
+    "Produce mode needs a configured cloud brain (a provider's *_API_KEY, *_BASE_URL and *_MODEL env trio) — " +
+    "refusing to run a full production pass on the local assistant model. " +
+    (lastError instanceof Error ? lastError.message : ""),
+  );
+}
+
 async function runCompactMelodyTask(
   text: string,
   env: AgentEnv,
@@ -231,7 +255,7 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
       // DOSAGE lane byte-identically (systemPrompt/budgets omitted).
       const produce = useSettings.getState().get("produceLane") === true && isProduceAsk(text);
       run = await runAgentLoop({ ask: text }, {
-        chat: chatWithFallback,
+        chat: produce ? produceCloudChat : chatWithFallback,
         env: exec.env,
         signal,
         onProgress: (ev) => useTaskStore.getState().progress(ev),
