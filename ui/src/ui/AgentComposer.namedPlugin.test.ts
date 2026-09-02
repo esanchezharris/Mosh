@@ -212,6 +212,11 @@ describe("AgentComposer named plug-in skill", () => {
     });
   });
 
+  it("offers text entry without a speech-recognition control", () => {
+    expect(host.querySelector("[data-testid=agent-input]")).not.toBeNull();
+    expect(host.querySelector("[data-testid=agent-mic]")).toBeNull();
+  });
+
   it("loads the unique exact Serum 2 match without asking the cloud brain for an id", async () => {
     const input = host.querySelector<HTMLInputElement>("[data-testid=agent-input]");
     const send = host.querySelector<HTMLButtonElement>("[data-testid=agent-send]");

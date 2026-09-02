@@ -29,7 +29,6 @@ const AGENTIC_SELECTORS: Record<string, string> = {
   // the time, and the busy state it carried is already shown where the work happens (the
   // composer's "thinking…" placeholder, the Moshi card's narration). One fewer surface
   // wearing the agentic lime is a gain for this reservation, not a loss.
-  ".v2-shell .agent-input.listening": "the push-to-talk recognizer is live — the machine is listening right now",
   ".v2-shell .agent-send": "the Ask Moshi submit — the act of handing work to the agent",
   ".v2-shell .v2-agent-drawer": "the drawer while .live: title, step chips, spinner — a task in flight",
   ".v2-shell .v2-skel-confirm": "the mumble-to-skeleton confirm strip — a generative result awaiting a verdict",
@@ -45,7 +44,6 @@ const NEUTRAL_EXCLUSIONS: Record<string, string> = {
   ".v2-shell .v2-live": "multiplayer presence is 'live' but NOT agentic — the owner scoped it out explicitly",
   ".v2-shell .v2-live .led": "the LIVE dot: it stayed lime in the first mockup purely because it sits inside the Mosh card",
   ".v2-shell .v2-agent-btn": "the drawer's generic utility buttons (Undo task, close) — chrome, not the agent",
-  ".v2-shell .agent-mic": "the mic control is an input affordance, not a running model",
   ".v2-shell .v2-skel-confirm .v2-btn": "the confirm strip's buttons are ordinary controls inside an agentic strip",
   ".v2-shell .v2-flow-dot.on": "a flow grid dot is a metric readout, not an agent state",
   ".v2-shell .v2-composer-face-btn": "the Moshi mark doubling as the drawer recall toggle — a button, not a state",

@@ -130,6 +130,10 @@ add_test(NAME HarnessSessionShell
          COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
+if (APPLE)
+    add_test(NAME PrivacyManifest
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/privacy-manifest-test.sh)
+endif()
 if (TARGET Mosh)
     add_test(NAME AudioRecoverySmoke
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/audio-recovery-isolation-test.sh

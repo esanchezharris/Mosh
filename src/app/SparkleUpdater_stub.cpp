@@ -1,8 +1,3 @@
-// SparkleUpdater_stub.cpp — the non-Apple implementation of the SparkleUpdater
-// surface. Same pattern as src/voice/NativeSpeech_stub.cpp: Sparkle is a macOS
-// framework, so Windows and Linux get a TU that satisfies the header and reports
-// itself unavailable. Callers (Main.cpp, MenuController) stay platform-free.
-//
 // Windows auto-update is not built — see docs/WINDOWS_PARITY.md. Whatever fills that
 // role there (WinSparkle, MSIX, Squirrel) will replace this file, not the header.
 

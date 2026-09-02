@@ -167,23 +167,6 @@ export async function archivePair(row: unknown): Promise<void> {
   if (realNative()) await native("archive_pair")(row);
 }
 
-// Native speech-to-text (packaged app). The browser Web Speech API covers the Vite
-// dev path; WKWebView lacks it, so there we drive macOS Speech via these wrappers.
-// Transcripts arrive on the "voice_event" channel (subscribe with onEvent). All are
-// no-ops outside the real WebView, so voiceInput.ts can branch on nativeVoiceAvailable().
-export function nativeVoiceAvailable(): boolean { return realNative(); }
-export async function voiceSupported(): Promise<boolean> {
-  if (!realNative()) return false;
-  try { const r = (await native("voice_supported")()) as { supported?: boolean }; return !!r?.supported; }
-  catch { return false; }
-}
-export async function voiceStart(): Promise<void> { if (realNative()) await native("voice_start")(); }
-export async function voiceStop(): Promise<void> { if (realNative()) await native("voice_stop")(); }
-// Always-on (hands-free) variants — a continuous session emits MANY `final`s on the same
-// voice_event channel and only ends on voice_listen_stop / a fatal error.
-export async function voiceListenStart(): Promise<void> { if (realNative()) await native("voice_listen_start")(); }
-export async function voiceListenStop(): Promise<void> { if (realNative()) await native("voice_listen_stop")(); }
-
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
   if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
   return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;

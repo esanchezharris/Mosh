@@ -2,7 +2,6 @@
 #include "UiResourcePathGuard.h"
 #include "../agent/CertifiedSkillLoader.h"
 #include "../brain/BrainProxy.h"
-#include "../voice/NativeSpeech.h"
 // Crash/telemetry module (src/telemetry/) — opt-in, privacy-respecting. This is
 // the ONE chokepoint every UI- and agent-issued command passes through, so it is
 // where the redacted command-NAME-ONLY breadcrumb trail + the anonymous usage
@@ -19,7 +18,7 @@ namespace mosh
 using Resource = juce::WebBrowserComponent::Resource;
 
 WebBridge::WebBridge() = default;
-WebBridge::~WebBridge() = default;   // NativeSpeech is complete here → unique_ptr can destroy it
+WebBridge::~WebBridge() = default;
 
 namespace
 {
@@ -322,98 +321,6 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     auto result = handler (row);
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
-            })
-        // Native speech-to-text (packaged-app voice). isSupported() does NOT imply
-        // permission — that is requested on the first voice_start. Transcripts flow
-        // to the UI on the dedicated `voice_event` channel.
-        .withNativeFunction (
-            juce::Identifier ("voice_supported"),
-            [] (const juce::Array<juce::var>&,
-                juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                auto* o = new juce::DynamicObject();
-                o->setProperty ("supported", NativeSpeech::isSupported());
-                completion (juce::var (o));
-            })
-        .withNativeFunction (
-            juce::Identifier ("voice_start"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech == nullptr)
-                    speech = std::make_unique<NativeSpeech>();
-
-                auto emit = [this] (const char* type, const juce::String& text, bool hasText)
-                {
-                    auto* o = new juce::DynamicObject();
-                    o->setProperty ("type", juce::String (type));
-                    if (hasText) o->setProperty ("text", text);
-                    emitEvent (juce::Identifier ("voice_event"), juce::var (o));
-                };
-
-                NativeSpeech::Callbacks cb;
-                cb.onStart   = [emit] { emit ("start", {}, false); };
-                cb.onInterim = [emit] (const juce::String& t) { emit ("interim", t, true); };
-                cb.onFinal   = [emit] (const juce::String& t) { emit ("final", t, true); };
-                cb.onStop    = [emit] { emit ("stop", {}, false); };
-                cb.onError   = [emit] (const juce::String& e) { emit ("error", e, true); };
-                speech->start (std::move (cb));
-
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
-        .withNativeFunction (
-            juce::Identifier ("voice_stop"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech != nullptr) speech->stop();
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
-        // Always-on (hands-free) speech. Same `voice_event` channel + five types as
-        // hold-to-talk, but a continuous session yields MANY `final`s and only stops on
-        // voice_listen_stop / a fatal error — so the UI's continuous controller keeps its
-        // subscription open and treats each `final` as one command candidate.
-        .withNativeFunction (
-            juce::Identifier ("voice_listen_start"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech == nullptr)
-                    speech = std::make_unique<NativeSpeech>();
-
-                auto emit = [this] (const char* type, const juce::String& text, bool hasText)
-                {
-                    auto* o = new juce::DynamicObject();
-                    o->setProperty ("type", juce::String (type));
-                    if (hasText) o->setProperty ("text", text);
-                    emitEvent (juce::Identifier ("voice_event"), juce::var (o));
-                };
-
-                NativeSpeech::Callbacks cb;
-                cb.onStart   = [emit] { emit ("start", {}, false); };
-                cb.onInterim = [emit] (const juce::String& t) { emit ("interim", t, true); };
-                cb.onFinal   = [emit] (const juce::String& t) { emit ("final", t, true); };
-                cb.onStop    = [emit] { emit ("stop", {}, false); };
-                cb.onError   = [emit] (const juce::String& e) { emit ("error", e, true); };
-                speech->startContinuous (std::move (cb));
-
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
-        .withNativeFunction (
-            juce::Identifier ("voice_listen_stop"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech != nullptr) speech->stopContinuous();
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
             })
         .withNativeFunction (
             juce::Identifier ("remote_start_pairing"),

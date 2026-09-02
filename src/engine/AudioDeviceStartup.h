@@ -63,8 +63,33 @@ namespace mosh::audiostartup
 
     inline juce::String inputNameFromSetup (const juce::XmlElement* setupXml)
     {
-        return setupXml != nullptr ? setupXml->getStringAttribute ("audioInputDeviceName")
-                                   : juce::String();
+        if (setupXml == nullptr)
+            return {};
+        const auto input = setupXml->getStringAttribute ("audioInputDeviceName");
+        return input.isNotEmpty() ? input
+                                  : setupXml->getStringAttribute ("audioDeviceName");
+    }
+
+    /** Copy a persisted duplex setup into the setup safe for an ordinary app launch.
+        Playback opens immediately, but input stays closed until an explicit input-device
+        selection or record-arm action. The original remains untouched so the chosen input
+        can be restored when recording is requested. */
+    inline std::unique_ptr<juce::XmlElement> outputOnlySetup (
+        const juce::XmlElement* setupXml)
+    {
+        if (setupXml == nullptr)
+            return {};
+
+        auto result = std::make_unique<juce::XmlElement> (*setupXml);
+        const auto sharedDevice = result->getStringAttribute ("audioDeviceName");
+        if (sharedDevice.isNotEmpty())
+        {
+            result->setAttribute ("audioOutputDeviceName", sharedDevice);
+            result->removeAttribute ("audioDeviceName");
+        }
+        result->removeAttribute ("audioInputDeviceName");
+        result->setAttribute ("audioDeviceInChans", "0");
+        return result;
     }
 
     /** Name the device we were trying to open, for the error the user actually reads.

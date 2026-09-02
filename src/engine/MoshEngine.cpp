@@ -513,16 +513,17 @@ juce::String MoshEngine::openAudioDeviceBounded()
             setupXml->setAttribute ("audioInputDeviceName", requestedInput);
     }
 
-    const auto label = audiostartup::deviceLabel (setupXml.get());
-    const int numIn  = enginePtr->getEngineBehaviour().shouldOpenAudioInputByDefault()
-                           ? te::DeviceManager::defaultNumChannelsToOpen : 0;
+    preferredInputDeviceName = audiostartup::inputNameFromSetup (setupXml.get());
+    auto launchSetup = audiostartup::outputOnlySetup (setupXml.get());
+    const auto label = audiostartup::deviceLabel (launchSetup.get());
+    const int numIn  = 0;
     const int numOut = te::DeviceManager::defaultNumChannelsToOpen;
 
     const auto nonce = juce::Uuid().toString();
     const auto probeArguments = audiostartup::probeChildArguments (
         juce::File::getSpecialLocation (juce::File::currentExecutableFile),
         nonce,
-        setupXml.get(),
+        launchSetup.get(),
         numIn,
         numOut,
         juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
@@ -578,9 +579,9 @@ juce::String MoshEngine::openAudioDeviceBounded()
     // the order it expects). Residual risk is the millisecond gap between probe and
     // open; the failure this guards against was persistent (reproducible 3/3, >63s), so
     // the probe catches it.
-    if (setupXml != nullptr)
+    if (launchSetup != nullptr)
         enginePtr->getPropertyStorage().setXmlProperty (
-            te::SettingID::audio_device_setup, *setupXml);
+            te::SettingID::audio_device_setup, *launchSetup);
     enginePtr->getDeviceManager().initialise (numIn, numOut);
 
     // Tracktion schedules its first MIDI-device inventory a few milliseconds after
@@ -629,6 +630,50 @@ void MoshEngine::adoptOpenedAudioDevice()
     audioOpen = true;
     audioError = {};                // the banner clears on the next snapshot
     ensurePlaybackContext();
+}
+
+juce::String MoshEngine::activateAudioInput()
+{
+    if (! audioWanted || ! audioReady())
+        return audioReadinessError();
+
+    auto& manager = enginePtr->getDeviceManager().deviceManager;
+    auto setup = manager.getAudioDeviceSetup();
+    if (setup.inputDeviceName.isNotEmpty()
+        && ! setup.inputChannels.isZero())
+        return {};
+
+    auto inputName = preferredInputDeviceName;
+    if (inputName.isEmpty())
+        if (auto* type = manager.getCurrentDeviceTypeObject())
+        {
+            const auto names = type->getDeviceNames (true);
+            const int defaultIndex = type->getDefaultDeviceIndex (true);
+            if (juce::isPositiveAndBelow (defaultIndex, names.size()))
+                inputName = names[defaultIndex];
+            else if (! names.isEmpty())
+                inputName = names[0];
+        }
+
+    if (inputName.isEmpty())
+        return "No audio input device is available";
+
+    setup.inputDeviceName = inputName;
+    setup.inputChannels.clear();
+    setup.useDefaultInputChannels = true;
+    if (const auto error = manager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        return error;
+
+    preferredInputDeviceName = inputName;
+    enginePtr->getDeviceManager().rescanWaveDeviceList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (50);
+
+    inputsConfigured = false;
+    ensurePlaybackContext();
+    if (auto stateXml = std::unique_ptr<juce::XmlElement> (manager.createStateXml()))
+        stateXml->writeTo (session.getChildFile ("audio-device.xml"));
+    return {};
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)

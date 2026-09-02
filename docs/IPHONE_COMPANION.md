@@ -355,8 +355,8 @@ must be resolved before any TestFlight build can even be uploaded.
 
 - **Privacy usage strings are present and specific**, contrary to what you
   might expect from a "diagnostics is DEBUG-only" codebase:
-  `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`,
-  `NSLocalNetworkUsageDescription`, and `NSBonjourServices` (scoped to
+  `NSMicrophoneUsageDescription`, `NSLocalNetworkUsageDescription`, and
+  `NSBonjourServices` (scoped to
   `_moshcompanion._tcp`) all exist in `Info.plist` with real, user-facing
   copy — no boilerplate placeholder text. Nothing to do here.
 - `CFBundleURLTypes` correctly declares the `mosh://` scheme used by deep-link

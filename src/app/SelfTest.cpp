@@ -14,7 +14,6 @@
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
-#include "voice/NativeSpeech.h"
 #include "util/Env.h"
 #include <juce_cryptography/juce_cryptography.h>
 #include <atomic>
@@ -11547,14 +11546,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "brain: chat() with no provider returns { ok:false } (no crash, no network)");
         mosh::unsetEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG");
 
-        // Native speech: probe availability + lifecycle without requesting permission.
-       #if JUCE_MAC
-        check (NativeSpeech::isSupported(), "voice: macOS Speech available (SFSpeechRecognizer present)");
-       #endif
-        NativeSpeech sp;
-        check (! sp.isListening(), "voice: a fresh NativeSpeech is idle");
-        sp.stop();   // stop-while-idle must be a safe no-op
-        check (! sp.isListening(), "voice: stop() while idle is a safe no-op");
+
     }
 
     section ("Multiplayer: stable logical track IDs (MP-001)");
@@ -15416,52 +15408,11 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         check ((bool) recordStart["data"].getProperty ("recording", false),
                "GAP2: record command entered recording state");
 
-        // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
-        // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
-        // Tracktion's recording (JUCE AudioDeviceManager) capture the SAME mic at once?
-        // Gated on MOSH_VOICE_BARGE_IN=1 (needs Speech authorization + a real mic) so the
-        // plain GAP-2 recording smoke still runs without it. `speech` is declared AFTER the
-        // captured locals so it (and its callbacks) tear down BEFORE them.
-        const bool bargeIn = SystemStats::getEnvironmentVariable ("MOSH_VOICE_BARGE_IN", "0").getIntValue() != 0;
-        std::atomic<bool> voiceStarted { false };
-        std::atomic<int>  voiceErrors  { 0 };
-        String voiceErr;
-        std::unique_ptr<NativeSpeech> speech;
-        if (bargeIn)
-        {
-            section ("GAP 4 — barge-in (continuous speech sharing the mic with a live take)");
-            check (NativeSpeech::isSupported(), "GAP4: macOS Speech available");
-            speech = std::make_unique<NativeSpeech>();
-            NativeSpeech::Callbacks cb;
-            cb.onStart = [&voiceStarted] { voiceStarted.store (true); };
-            cb.onError = [&voiceErrors, &voiceErr] (const String& e) { voiceErrors.fetch_add (1); voiceErr = e; };
-            speech->startContinuous (std::move (cb));   // async: auth + AVAudioEngine on the message thread
-        }
-
-        // Longer window under barge-in so the async auth + engine-start + a few mic buffers
-        // all land while the take is still recording.
-        const auto recEnd = Time::getMillisecondCounter() + (uint32) (bargeIn ? 2500 : 1200);
+        const auto recEnd = Time::getMillisecondCounter() + (uint32) 1200;
         while (Time::getMillisecondCounter() < recEnd)
         {
             if (mm != nullptr) mm->runDispatchLoopUntil (50);
             else Thread::sleep (50);
-        }
-
-        if (bargeIn && speech != nullptr)
-        {
-            // The take is STILL recording here. Assert the recognizer opened its OWN input
-            // client and actually pulled mic buffers CONCURRENTLY (the simultaneous-capture
-            // proof — stronger than "the engine started"), then release it before the take is
-            // stopped + checked for non-silence (which then proves the voice client didn't
-            // starve/glitch the DAW capture).
-            check (eng.edit().getTransport().isRecording(), "GAP4: DAW transport still recording while voice ran");
-            if (voiceErrors.load() > 0) std::cerr << "  ..   GAP4 voice error: " << voiceErr << "\n";
-            check (voiceErrors.load() == 0, "GAP4: continuous voice started without error (grant Speech permission if this fails)");
-            check (voiceStarted.load(), "GAP4: AVAudioEngine started while the take recorded (two simultaneous input clients)");
-            check (speech->isListening(), "GAP4: continuous recognizer listening during the take");
-            std::cerr << "  ..   GAP4 diag: tapBuffers=" << speech->tapBufferCount() << "\n";
-            check (speech->tapBufferCount() > 0, "GAP4: mic tap captured audio buffers concurrently with the take");
-            speech->stopContinuous();
         }
 
         check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before generic stop");
@@ -15826,147 +15777,6 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     std::cerr << "run-script: " << executed << " command(s), " << failures << " failure(s)\n";
     return failures;
 }
-
-// ── Voice STT smoke (`Mosh --voice-smoke`) ──────────────────────────────────────
-// Synthesizes a known phrase with macOS `say`, transcribes it through the SAME
-// SFSpeechRecognizer the app uses, and asserts the transcript — proving speech-to-text
-// end-to-end with nobody speaking. FILE mode (default) reads a `say`-rendered file (no
-// mic; needs only a Speech grant). MIC mode (MOSH_VOICE_SMOKE_MIC=1) drives the live
-// mic recognizer while `say` plays into the default input — set that input to BlackHole
-// for a reliable digital loopback. Returns 0 on a matching transcript.
-int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
-{
-    using namespace juce;
-    ignoreUnused (eng, ops);
-
-    const auto phrase   = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_PHRASE", "create a drum track");
-    const bool micMode  = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_MIC", "0") == "1";
-    const int  timeoutMs = jmax (4000, SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_TIMEOUT_MS", "25000").getIntValue());
-
-    // Also write the verdict to a fixed file. TCC attributes a shell-launched binary to
-    // the terminal (not the granted Mosh.app), so the smoke must be `open`-launched to
-    // see the Speech/Mic grant — and an `open` run can't return its stderr, so the
-    // driver reads this file instead.
-    auto resultFile = File::getSpecialLocation (File::userHomeDirectory)
-                          .getChildFile ("Library/Mosh/voice-smoke-result.txt");
-    resultFile.getParentDirectory().createDirectory();
-    resultFile.deleteFile();
-    auto finish = [&resultFile] (int rc, const String& summary)
-    {
-        resultFile.replaceWithText (String (rc) + "\t" + summary + "\n");
-        std::cerr << "  [result] rc=" << rc << "  " << summary.toStdString() << "\n";
-        return rc;
-    };
-
-    std::cerr << "===== Mosh voice smoke (" << (micMode ? "MIC / loopback" : "FILE") << ") =====\n";
-    std::cerr << "  phrase: \"" << phrase.toStdString() << "\"\n";
-
-    if (! NativeSpeech::isSupported())
-    {
-        std::cerr << "  FAIL: native speech-to-text is unsupported here\n";
-        return finish (1, "native speech-to-text unsupported");
-    }
-
-    // Gate on the SYNCHRONOUS auth status. A headless process can't raise the system
-    // Speech/Mic prompt (those need a GUI app context), and entering the async
-    // recognition path unauthorized risks a teardown-time crash — so skip cleanly.
-    const int auth = NativeSpeech::authorizationStatus();
-    if (auth != 3)   // 3 = authorized
-    {
-        const char* why = auth == 0 ? "not yet granted (notDetermined)"
-                        : auth == 1 ? "denied"
-                        : auth == 2 ? "restricted"
-                                    : "unavailable";
-        std::cerr << "  SKIP: Speech Recognition is " << why << " (status " << auth << ").\n"
-                     "  Grant it ONCE via the GUI — launch the app, use voice (the 👂 cap / hold-to-talk),\n"
-                     "  approve the Speech" << (micMode ? " + Microphone" : "") << " prompt — then re-run this. A headless\n"
-                     "  run can't surface the system prompt. Returning 2 (skipped, not a failure).\n";
-        return finish (2, "skip: speech auth status " + String (auth));
-    }
-    std::cerr << "  Speech Recognition authorized ✓\n";
-
-    auto* mm = MessageManager::getInstanceWithoutCreating();
-    auto pump = [mm] (int ms)
-    {
-        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
-        while (Time::getMillisecondCounter() < end) { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
-    };
-
-    // Lowercase + non-alphanumerics → spaces, so word matching ignores punctuation/case.
-    auto norm = [] (const String& s)
-    {
-        const auto low = s.toLowerCase();
-        String out;
-        for (int i = 0; i < low.length(); ++i)
-            out += (CharacterFunctions::isLetterOrDigit (low[i]) ? String::charToString (low[i]) : String (" "));
-        return out;
-    };
-
-    NativeSpeech speech;
-    String transcript, error;
-    std::atomic<bool> finished { false }, gotFinal { false };
-    NativeSpeech::Callbacks cb;
-    cb.onStart = []                       { std::cerr << "  recognizer started…\n"; };
-    cb.onFinal = [&] (const String& t)    { transcript = t; gotFinal = true; };
-    cb.onError = [&] (const String& e)    { error = e; };
-    cb.onStop  = [&]                      { finished = true; };
-
-    if (! micMode)
-    {
-        auto aiff = selftestTempPath (eng, "voice-smoke.aiff");
-        aiff.deleteFile();
-        ChildProcess say;
-        say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });
-        say.waitForProcessToFinish (15000);
-        if (! aiff.existsAsFile() || aiff.getSize() == 0)
-        {
-            std::cerr << "  FAIL: `say` produced no audio at " << aiff.getFullPathName().toStdString() << "\n";
-            return finish (1, "say produced no audio");
-        }
-        std::cerr << "  synthesized " << aiff.getSize() << " bytes via `say`, transcribing…\n";
-        speech.transcribeFile (aiff.getFullPathName(), cb);
-    }
-    else
-    {
-        std::cerr << "  (MIC mode: set the default input to BlackHole 2ch and route `say` there for a clean loopback)\n";
-        speech.startContinuous (cb);
-        pump (2000);   // let auth + the AVAudioEngine come up before speaking
-        ChildProcess say;
-        say.start (StringArray { "say", phrase });
-        say.waitForProcessToFinish (15000);
-    }
-
-    const auto deadline = Time::getMillisecondCounter() + (uint32) timeoutMs;
-    while (! gotFinal && ! finished && Time::getMillisecondCounter() < deadline) pump (100);
-    pump (200);
-    if (micMode) speech.stopContinuous();
-
-    if (! gotFinal)
-    {
-        if (error.isNotEmpty())
-        {
-            std::cerr << "  FAIL: " << error.toStdString() << "\n";
-            if (error.containsIgnoreCase ("not authorized"))
-                std::cerr << "  → Speech Recognition is not granted yet. Approve it once (the prompt, or System\n"
-                             "    Settings › Privacy & Security › Speech Recognition) and re-run.\n";
-        }
-        else
-            std::cerr << "  FAIL: no transcript within " << timeoutMs << "ms\n";
-        return finish (1, error.isNotEmpty() ? ("error: " + error) : "no transcript within timeout");
-    }
-
-    std::cerr << "  transcript: \"" << transcript.toStdString() << "\"\n";
-
-    const auto nt = " " + norm (transcript) + " ";
-    auto words = StringArray::fromTokens (norm (phrase), " ", "");
-    words.removeEmptyStrings();
-    int hits = 0;
-    for (const auto& w : words) if (nt.containsIgnoreCase (" " + w + " ")) ++hits;
-    const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
-    std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
-    return finish (pass ? 0 : 1, "transcript=\"" + transcript + "\"; matched " + String (hits) + "/" + String (words.size()) + " words");
-}
-
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,

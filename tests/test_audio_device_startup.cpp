@@ -81,6 +81,48 @@ TEST_CASE ("the failure names the device the user has to fix", "[audiostartup]")
     }
 }
 
+TEST_CASE ("normal launch projects a saved setup to output only", "[audiostartup][privacy]")
+{
+    juce::XmlElement saved ("DEVICESETUP");
+    saved.setAttribute ("deviceType", "CoreAudio");
+    saved.setAttribute ("audioOutputDeviceName", "MacBook Pro Speakers");
+    saved.setAttribute ("audioInputDeviceName", "MacBook Pro Microphone");
+    saved.setAttribute ("audioDeviceInChans", "11");
+    saved.setAttribute ("audioDeviceOutChans", "11");
+    saved.setAttribute ("audioDeviceRate", 48000.0);
+    saved.createNewChildElement ("MIDIINPUT")->setAttribute ("name", "Keyboard");
+
+    const auto projected = outputOnlySetup (&saved);
+
+    REQUIRE (projected != nullptr);
+    CHECK (projected->getStringAttribute ("audioOutputDeviceName")
+           == "MacBook Pro Speakers");
+    CHECK (projected->getStringAttribute ("audioInputDeviceName").isEmpty());
+    CHECK (projected->getStringAttribute ("audioDeviceInChans") == "0");
+    CHECK (projected->getStringAttribute ("audioDeviceOutChans") == "11");
+    CHECK (projected->getDoubleAttribute ("audioDeviceRate") == 48000.0);
+    CHECK (projected->getChildByName ("MIDIINPUT") != nullptr);
+    CHECK (saved.getStringAttribute ("audioInputDeviceName")
+           == "MacBook Pro Microphone");
+}
+
+TEST_CASE ("legacy duplex setup keeps its output while deferring its input",
+           "[audiostartup][privacy]")
+{
+    juce::XmlElement saved ("DEVICESETUP");
+    saved.setAttribute ("audioDeviceName", "Scarlett 2i2");
+    saved.setAttribute ("audioDeviceInChans", "11");
+
+    CHECK (inputNameFromSetup (&saved) == "Scarlett 2i2");
+    const auto projected = outputOnlySetup (&saved);
+
+    REQUIRE (projected != nullptr);
+    CHECK_FALSE (projected->hasAttribute ("audioDeviceName"));
+    CHECK (projected->getStringAttribute ("audioOutputDeviceName") == "Scarlett 2i2");
+    CHECK (projected->getStringAttribute ("audioInputDeviceName").isEmpty());
+    CHECK (projected->getStringAttribute ("audioDeviceInChans") == "0");
+}
+
 TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")
 {
     const auto msg = timeoutMessage (deviceLabel (nullptr), 5000);

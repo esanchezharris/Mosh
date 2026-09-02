@@ -150,7 +150,6 @@ public:
             commandLine.contains ("--audio-recovery-isolation-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
-        const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
         const bool demoGui = commandLine.contains ("--demo3")
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
@@ -163,12 +162,12 @@ public:
                           || (headless
                               && ! audioRecoverySmoke
                               && ! audioRecoveryIsolationSmoke)
-                          || scanDeep || runScript || voiceSmoke;
+                          || scanDeep || runScript;
 
         // Owner-only Finder runtime: loading this mode-600 JSON is opt-in and
         // machine-local. startAsync sets the SA3 release policy immediately, then
         // loads/verifies the exact local model without delaying engine/audio/UI startup.
-        if (! headless && ! liveAudio && ! scanDeep && ! runScript && ! voiceSmoke)
+        if (! headless && ! liveAudio && ! scanDeep && ! runScript)
         {
             ownerRuntime = std::make_unique<LocalBrainManager> (OwnerRuntimeConfig::load());
             ownerRuntime->startAsync();
@@ -203,7 +202,6 @@ public:
         modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
-        modes.voiceSmoke     = voiceSmoke;
         modes.demoGui        = demoGui;
         modes.envNoAudio     = envNoAudio;
         const juce::String sessionBaseName =
@@ -556,23 +554,6 @@ public:
         {
             const int fails = runMidiRecordSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
-            quit();
-            return;
-        }
-
-        // Headless speech-to-text smoke (`Mosh --voice-smoke`): synthesize a phrase
-        // with `say`, transcribe it via SFSpeechRecognizer, assert the text. Needs only
-        // a one-time Speech grant (FILE mode); MOSH_VOICE_SMOKE_MIC=1 drives the live
-        // mic path (pair with a BlackHole input for a reliable digital loopback).
-        if (voiceSmoke)
-        {
-            // `--mic` selects loopback mode via the command line too, so an `open
-            // --args --voice-smoke --mic` launch (which drops env vars but carries the
-            // granted Mosh.app TCC identity) still reaches MIC mode.
-            if (commandLine.contains ("--mic"))
-                mosh::setEnvVar ("MOSH_VOICE_SMOKE_MIC", "1");
-            const int rc = runVoiceSmoke (*engine, *moshOps);
-            setApplicationReturnValue (rc);
             quit();
             return;
         }

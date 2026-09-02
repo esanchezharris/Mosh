@@ -72,6 +72,11 @@ public:
         state is unreachable there, by audioRequested()'s construction). */
     void adoptOpenedAudioDevice();
 
+    /** Open the selected/default hardware input after a deliberate recording action.
+        Normal launch is output-only so macOS never asks for microphone access during
+        playback, MIDI editing, or project browsing. Empty means success. */
+    juce::String activateAudioInput();
+
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 
@@ -239,6 +244,7 @@ private:
     bool       safeModeActive = false;           // FS-T2 — live Edit has third-party plugins scrubbed (READ-ONLY)
     juce::String loadError;                // PRJ-FMT — non-empty ⇒ a refused (newer-format) load is live
     bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
+    juce::String preferredInputDeviceName;
     juce::String audioError;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)

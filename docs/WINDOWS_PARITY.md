@@ -21,8 +21,8 @@ runtime status.
 Three read-only audits over the ~220 commits since the port (`962a03fd`, 2026-06-20):
 
 1. **MSVC compile drift: zero critical breakages.** POSIX calls are already
-   `#if JUCE_WINDOWS`-guarded; `.mm` files are `if(APPLE)`-guarded with a non-Apple
-   `NativeSpeech_stub.cpp`. The intended Windows shape is a **flat layout**: `Mosh.exe`
+   `#if JUCE_WINDOWS`-guarded; `.mm` files are `if(APPLE)`-guarded. The intended
+   Windows shape is a **flat layout**: `Mosh.exe`
    with `ui\`, `drumkits\`, `service\`, `brain.env` as siblings
    (`GenerativeJobManager` already has a tier-4 `<exeDir>\service\server.py` lookup).
 2. **Two shared-code paths were macOS-hardcoded** (fixed this pass):
@@ -44,7 +44,7 @@ Three read-only audits over the ~220 commits since the port (`962a03fd`, 2026-06
 | **Native menu bar** | ✅ Works now | JUCE `MenuBarModel`/`ApplicationCommandManager` → an in-window menu bar; only `setMacMainMenu` is `#if JUCE_MAC`. Same command set, platform-idiomatic chrome. |
 | **Per-feature venvs: transcribe / whisper / phonology / skeleton** | ✅ Windows path now | `_venv_py()` Windows branch (`Scripts\python.exe`, `%LOCALAPPDATA%\Mosh\venvs`) + `service/setup-feature-venv.ps1` (manifest mirrors the bash deps). |
 | **Per-feature venvs: sketch / transform-RAVE / flp** | 🟡 Deferred follow-up | Lower value: RAVE real-time is anira-gated (OFF by default); flp is import-only (PyFLP). Add to `setup-feature-venv.ps1`'s manifest when needed. |
-| **Native voice (always-on STT)** | 🍎 macOS-only v1 | `NativeSpeech.mm` = `SFSpeechRecognizer` (Apple). `NativeSpeech_stub.cpp` on Windows = safe no-op. **Browser Web Speech still works** in the WebView (`ui/src/agent/voiceInput.ts`), so voice-to-agent is available a different way. |
+| **Speech-to-text controls** | ➖ Retired | Mosh no longer exposes native or browser speech recognition. Audio input remains available for recording. |
 | **Companion — pairing + phone takes** | ✅ Works now (manual pairing) | `RemoteCompanionServer` is plain `juce::StreamingSocket` — HTTP command/snapshot API, phone takes, monitoring all cross-platform. |
 | **Companion — mDNS auto-discovery** | 🍎 macOS-only v1 | `startBonjour()` is `#if JUCE_MAC` (`DNSServiceRegister` via `dlsym`). Windows has no built-in mDNS; the phone can't resolve the `.local` host. Use the manual QR/URL pairing. See "Asymmetric features" below. |
 | **SoulX sing (FMS Phase-3)** | ⚡ Asymmetric — redesign, not a port | See below. The SSH-to-a-PC backend is a Mac-has-no-GPU workaround; the correct Windows path is a local-CUDA render branch, **not** built this pass. |

@@ -48,10 +48,8 @@ already cross-platform, and `anira` (the only heavy/torch dep) stays `OFF` by de
   unconditionally and is portable; plugin *editor windows* need X11 at runtime, but
   headless scanning/hosting does not. AU hosting stays macOS-only (`MOSH_PLUGINHOST_AU=0`
   on Linux).
-- **Skipped subsystems.** The macOS `NSApp`/`NSMenu` menu bar and macOS Speech voice are
-  **already** excluded on non-Apple via the existing `if (NOT APPLE)` block, which
-  compiles `src/voice/NativeSpeech_stub.cpp` and stages runtime resources next to the
-  executable instead of into a `.app`. No Linux-specific work was needed there.
+- **Skipped subsystems.** The macOS `NSApp`/`NSMenu` menu bar is excluded on non-Apple;
+  runtime resources are staged next to the executable instead of into a `.app`.
 
 ## How to use it
 

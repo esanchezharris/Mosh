@@ -160,15 +160,8 @@ and why.
   libanira dylibs — that variant isn't wired into `release`/CI yet (see §7).
 - **The regression guard**: `scripts/release/check-plist-keys.sh` runs automatically at
   three checkpoints inside `sign-and-notarize.sh` — before signing, after signing, and
-  after stapling — asserting the bundle still carries
-  `NSSpeechRecognitionUsageDescription` (and the other two keys
-  `cmake/InjectInfoPlistKeys.cmake` injects at build time). This exists because a
-  missing speech-usage key doesn't degrade gracefully: macOS TCC **hard-crashes**
-  (SIGABRT) the app the instant the always-on voice feature calls
-  `SFSpeechRecognizer` — and that exact bug shipped once already in a hand-copied
-  `/Applications/Mosh.app` (see `CLAUDE.md`, *"'Serum 1 load crash' was a TCC speech
-  crash, not a plugin-host crash"*, 2026-06-27). The guard doesn't assume signing is
-  "supposed to" leave the plist alone; it proves it, every release.
+  after stapling — asserting that recording and camera usage strings remain present
+  while the retired Speech Recognition key remains absent.
 
 ## 5. Running via CI (GitHub Actions)
 

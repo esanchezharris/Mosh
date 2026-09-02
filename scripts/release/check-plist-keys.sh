@@ -4,20 +4,6 @@
 # carries the Info.plist usage-description keys that cmake/InjectInfoPlistKeys.cmake
 # injects at build time.
 #
-# WHY THIS EXISTS: a missing NSSpeechRecognitionUsageDescription does not degrade —
-# macOS TCC HARD-CRASHES (SIGABRT) the instant the always-on voice calls
-# SFSpeechRecognizer (src/voice/NativeSpeech.mm). This exact class of bug shipped once
-# already in a hand-copied /Applications/Mosh.app (see CLAUDE.md, "'Serum 1 load crash'
-# was a TCC speech crash, not a plugin-host crash", 2026-06-27) — the crash was
-# misdiagnosed as a plugin-host bug because whatever VST happened to be loading at the
-# time showed up in the crash report. The fix at the time was build-side
-# (cmake/InjectInfoPlistKeys.cmake, run from an always-run ALL target so no build
-# configuration can skip it, plus a re-inject-and-verify in run-mosh.sh's install_app).
-# This script is the SIGNING-side half of that guarantee: codesign/notarytool/stapler
-# all touch the bundle after the build already got the keys right, and none of them are
-# *supposed* to rewrite Info.plist — but "supposed to" is exactly the kind of assumption
-# that shipped the original bug. Prove it, don't assume it.
-#
 # Usage:
 #   scripts/release/check-plist-keys.sh <bundle.app> [checkpoint-label]
 #
@@ -52,8 +38,6 @@ if [ ! -f "$PLIST" ]; then
   exit 1
 fi
 
-# key ; human label. Mirrors cmake/InjectInfoPlistKeys.cmake's three keys exactly —
-# keep this list in sync with that file if it ever grows another key.
 #
 # `plutil -extract <key> raw -o -` is used deliberately over `-extract <key> json`:
 # json format REFUSES to print a bare top-level scalar ("Invalid object in plist for
@@ -63,7 +47,7 @@ fi
 # what we need here (a presence/non-emptiness check, not a content diff). Verified by
 # hand against real XML and binary1 plists before relying on this in the pipeline —
 # see the PR description for the probe transcript.
-CHECKS="NSSpeechRecognitionUsageDescription:voice-to-Moshi (TCC hard-crash if absent)
+CHECKS="NSMicrophoneUsageDescription:audio recording
 NSCameraUsageDescription:WebView multiplayer camera
 NSBonjourServices:companion discovery (_moshcompanion._tcp)"
 
@@ -85,14 +69,20 @@ done <<EOF
 $CHECKS
 EOF
 
+if /usr/bin/plutil -extract NSSpeechRecognitionUsageDescription raw -o - "$PLIST" >/dev/null 2>&1; then
+  echo "check-plist-keys ($CHECKPOINT): FORBIDDEN NSSpeechRecognitionUsageDescription" >&2
+  fail=1
+else
+  echo "check-plist-keys ($CHECKPOINT): OK      NSSpeechRecognitionUsageDescription absent"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-plist-keys ($CHECKPOINT): FAILED — $(basename "$APP") is missing a required" >&2
-  echo "  Info.plist usage-description key. Shipping this bundle risks a TCC hard-crash" >&2
-  echo "  (SIGABRT) the moment the affected feature is used. Refusing to treat it as" >&2
+  echo "  or has a forbidden Info.plist privacy key. Refusing to treat it as" >&2
   echo "  shippable. Do not hand-patch the plist — rebuild via cmake, which runs" >&2
   echo "  cmake/InjectInfoPlistKeys.cmake on every build (both a relink POST_BUILD and" >&2
   echo "  an always-run ALL target, so a stale/partial build can't skip it either)." >&2
   exit 1
 fi
 
-echo "check-plist-keys ($CHECKPOINT): OK — all required Info.plist usage keys present in $(basename "$APP")"
+echo "check-plist-keys ($CHECKPOINT): OK — privacy policy satisfied in $(basename "$APP")"

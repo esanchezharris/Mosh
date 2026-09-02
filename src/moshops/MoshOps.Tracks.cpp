@@ -1001,7 +1001,15 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     // the context available before looking up device instances rather than exposing a
     // hidden Play-first precondition. Headless remains a graceful applied:false no-op.
     if (armed && eng.hasAudio())
+    {
+        if (! trackHasInstrument (*track))
+            if (const auto error = eng.activateAudioInput(); error.isNotEmpty())
+            {
+                logLine ("arm_track", args, false, error, false);
+                return errResult ("arm_track", error);
+            }
         eng.ensurePlaybackContext();
+    }
 
     // getAllInputDevices() is still empty headless / without an open audio device, so
     // there are no instances to operate on. Degrade gracefully: ok result,
