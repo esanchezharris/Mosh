@@ -78,8 +78,10 @@ function readProgramFile(path: string): ProgramLine[] {
   // produceLiveRun.mts writes), a JSON array, or a single JSON object (the
   // landed W2.7 fixture: one LoopReply `{intent,say,status,plan:[{goal,
   // commands}]}` — loop/parse.ts:14-20's shape, not a flat command list).
-  if (text.startsWith("[")) return flattenEntries(JSON.parse(text) as unknown[]);
-  if (text.startsWith("{")) return flattenEntries([JSON.parse(text)]);
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const looksJsonl = lines.length > 1 && lines.every((l) => l.startsWith("{") && l.endsWith("}"));
+  if (!looksJsonl && text.startsWith("[")) return flattenEntries(JSON.parse(text) as unknown[]);
+  if (!looksJsonl && text.startsWith("{")) return flattenEntries([JSON.parse(text)]);
   return text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l) as ProgramLine);
 }
 
