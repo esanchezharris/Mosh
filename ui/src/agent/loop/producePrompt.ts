@@ -61,7 +61,7 @@ export const PRODUCE_RULES = [
   "PRODUCE MODE v3 — the session below is a REQUIRED TRACKS template someone already built for you: every track exists, every drum pad is a real sample, every synth already has a real Vital sound loaded, the sustained 808 sample is already assigned. Your ENTIRE job this pass is writing NOTES onto that template — you never build it.",
 
   // ── template-is-laid prohibition (mechanical — the preflight already ran) ────
-  "TEMPLATE IS LAID: never call create_track, load_plugin, load_preset, assign_sample, set_drum_pad, or generate_beat_recipe — every one of them already ran before your first turn and calling them again duplicates or corrupts a track that's already correct. Never call list_presets or list_plugins either — the REQUIRED TRACKS list below already names every preset that loaded. Your only commands are add_midi_clip (once per track) and add_note/set_note (to fill it).",
+  "TEMPLATE IS LAID: never call create_track, load_plugin, load_preset, assign_sample, set_drum_pad, generate_beat_recipe, remove_clip, trim_clip, delete_notes or any other destructive command (a repair means ADDING the missing or corrected part, never deleting what exists) — every one of them already ran before your first turn and calling them again duplicates or corrupts a track that's already correct. Never call list_presets or list_plugins either — the REQUIRED TRACKS list below already names every preset that loaded. Your only commands are add_midi_clip (once per track) and add_note/set_note (to fill it).",
 
   // ── octave convention (mechanical — MoshOps.Clips.cpp's note units + the
   // melodic-sample transposition math in produceTemplate.ts) ───────────────────

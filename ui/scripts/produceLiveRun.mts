@@ -534,9 +534,28 @@ async function main(): Promise<void> {
         if (!initial.ok && !NO_REPAIR) {
           checkResult.repairAttempted = true;
           const repairAsk = `${ASK!}\n\nREPAIR: ${checkMod.renderCheckAsRepairError(initial)}`;
+          // The repair pass may only ADD material. Round-2 run 1's repair
+          // "fixed" harmony clashes with remove_clip and left five tracks
+          // empty, so any batch carrying a non-additive command is refused
+          // whole (the loop replans on the error text).
+          const REPAIR_ALLOWED = new Set(["add_midi_clip", "add_note", "set_note"]);
+          const repairEnv: AgentEnv = {
+            ...exec.env,
+            runBatch: async (label, calls) => {
+              const bad = calls.filter((c) => !REPAIR_ALLOWED.has(c.command)).map((c) => c.command);
+              if (bad.length) {
+                const results: StepCommandResult[] = calls.map((c) => ({
+                  command: c.command, ok: false,
+                  error: `repair pass may only add notes (add_midi_clip with inline notes); refused: ${[...new Set(bad)].join(", ")}`,
+                }));
+                return { results, snapshot: await exec.env.getSnapshot() };
+              }
+              return exec.env.runBatch(label, calls);
+            },
+          };
           const repairRun = await runAgentLoop({ ask: repairAsk }, {
             chat: loggedChat,
-            env: exec.env,
+            env: repairEnv,
             budgets: { maxSteps: 6, maxPlannerCalls: 2, maxStepCalls: 6, softWallMs: 300_000 },
             systemPrompt,
             signal,

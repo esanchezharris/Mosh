@@ -83,7 +83,7 @@ describe("produce prompt composition (v2)", () => {
 
   it("v2 forbids the v1 build-it-yourself commands — only a PROHIBITION, never an instruction to call them", () => {
     expect(PRODUCE_RULES).toContain("TEMPLATE IS LAID");
-    expect(PRODUCE_RULES).toContain("never call create_track, load_plugin, load_preset, assign_sample, set_drum_pad, or generate_beat_recipe");
+    expect(PRODUCE_RULES).toContain("never call create_track, load_plugin, load_preset, assign_sample, set_drum_pad, generate_beat_recipe, remove_clip, trim_clip, delete_notes");
     // "FOUNDATION FIRST: ... call it ONCE early" (v1's instruction to invoke the
     // recipe generator) must be gone — recipe only appears inside the prohibition.
     expect(PRODUCE_RULES).not.toContain("FOUNDATION FIRST");
