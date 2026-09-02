@@ -632,7 +632,7 @@ void MoshEngine::adoptOpenedAudioDevice()
     ensurePlaybackContext();
 }
 
-juce::String MoshEngine::activateAudioInput()
+juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputName)
 {
     if (! audioWanted || ! audioReady())
         return audioReadinessError();
@@ -640,10 +640,12 @@ juce::String MoshEngine::activateAudioInput()
     auto& manager = enginePtr->getDeviceManager().deviceManager;
     auto setup = manager.getAudioDeviceSetup();
     if (setup.inputDeviceName.isNotEmpty()
-        && ! setup.inputChannels.isZero())
+        && ! setup.inputChannels.isZero()
+        && (requestedInputName.isEmpty() || setup.inputDeviceName == requestedInputName))
         return {};
 
-    auto inputName = preferredInputDeviceName;
+    auto inputName = requestedInputName.isNotEmpty() ? requestedInputName
+                                                     : preferredInputDeviceName;
     if (inputName.isEmpty())
         if (auto* type = manager.getCurrentDeviceTypeObject())
         {
@@ -657,6 +659,43 @@ juce::String MoshEngine::activateAudioInput()
 
     if (inputName.isEmpty())
         return "No audio input device is available";
+
+    auto probeSetup = std::unique_ptr<juce::XmlElement> (manager.createStateXml());
+    if (probeSetup == nullptr)
+        probeSetup = std::make_unique<juce::XmlElement> ("DEVICESETUP");
+    probeSetup->setAttribute ("audioInputDeviceName", inputName);
+    probeSetup->setAttribute ("audioDeviceInChans", "11");
+
+    const int timeoutMs = audiostartup::timeoutMsFromEnv (
+        juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_TIMEOUT_MS", {}));
+    const auto nonce = juce::Uuid().toString();
+    const auto arguments = audiostartup::probeChildArguments (
+        juce::File::getSpecialLocation (juce::File::currentExecutableFile),
+        nonce,
+        probeSetup.get(),
+        te::DeviceManager::defaultNumChannelsToOpen,
+        te::DeviceManager::defaultNumChannelsToOpen,
+        juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_OPEN_STALL_MS", {})
+            .trim().getIntValue());
+    if (arguments.isEmpty())
+        return "The selected audio input setup is invalid or too large";
+
+    const auto probe = audiostartup::runProbeProcess (arguments, timeoutMs);
+    if (probe.status == audiostartup::ProbeProcessStatus::failedToStart)
+        return "The audio input safety probe could not start";
+    if (probe.status == audiostartup::ProbeProcessStatus::timedOut)
+        return "Audio input \"" + inputName + "\" did not open within "
+             + juce::String (timeoutMs / 1000.0, 1)
+             + "s. Playback remains available, but recording input is off.";
+    if (probe.status == audiostartup::ProbeProcessStatus::failedToTerminate)
+        return "The audio input safety probe could not be terminated";
+
+    const auto response = audiostartup::parseProbeResponse (probe.output, nonce);
+    const bool exitMatches = (probe.exitCode == 0) == response.error.isEmpty();
+    if (! response.valid || ! exitMatches)
+        return "The audio input safety probe exited without a valid result";
+    if (response.error.isNotEmpty())
+        return "Audio input \"" + inputName + "\" could not open: " + response.error;
 
     setup.inputDeviceName = inputName;
     setup.inputChannels.clear();

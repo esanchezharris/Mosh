@@ -1297,14 +1297,17 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
         dm.setCurrentAudioDeviceType (type, true);
 
     auto setup = dm.getAudioDeviceSetup();
+    const bool hasInputPatch = args.hasProperty ("inputDevice");
+    const auto requestedInput = hasInputPatch
+        ? args.getProperty ("inputDevice", var()).toString()
+        : juce::String();
     if (args.hasProperty ("outputDevice"))
         setup.outputDeviceName = args.getProperty ("outputDevice", var()).toString();
-    if (args.hasProperty ("inputDevice"))
+    if (hasInputPatch && requestedInput.isEmpty())
     {
-        setup.inputDeviceName = args.getProperty ("inputDevice", var()).toString();
-        // Only request default input channels when an input device is selected.
+        setup.inputDeviceName.clear();
         setup.inputChannels.clear();
-        setup.useDefaultInputChannels = setup.inputDeviceName.isNotEmpty();
+        setup.useDefaultInputChannels = false;
     }
     if (args.hasProperty ("sampleRate"))
         setup.sampleRate = (double) args.getProperty ("sampleRate", 0.0);
@@ -1316,6 +1319,11 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
     const auto err = dm.setAudioDeviceSetup (setup, true);
     if (err.isNotEmpty())
         return err;
+
+    if (hasInputPatch && requestedInput.isNotEmpty())
+        if (const auto inputError = eng.activateAudioInput (requestedInput);
+            inputError.isNotEmpty())
+            return inputError;
 
     // Rebuild Tracktion's wave-device wrappers + flush the async device update
     // before the next snapshot.

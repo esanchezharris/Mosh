@@ -11503,7 +11503,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", st));   // tidy
     }
 
-    section ("Moshi brain proxy + native voice (packaged-app pieces)");
+    section ("Moshi brain proxy (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.
         mosh::setEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1");

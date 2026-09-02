@@ -72,10 +72,10 @@ public:
         state is unreachable there, by audioRequested()'s construction). */
     void adoptOpenedAudioDevice();
 
-    /** Open the selected/default hardware input after a deliberate recording action.
+    /** Open a requested or selected/default hardware input after a deliberate recording action.
         Normal launch is output-only so macOS never asks for microphone access during
         playback, MIDI editing, or project browsing. Empty means success. */
-    juce::String activateAudioInput();
+    juce::String activateAudioInput (const juce::String& requestedInputName = {});
 
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }

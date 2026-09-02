@@ -76,6 +76,17 @@ else
   echo "check-plist-keys ($CHECKPOINT): OK      NSSpeechRecognitionUsageDescription absent"
 fi
 
+BINARY="$APP/Contents/MacOS/Mosh"
+if [ -f "$BINARY" ]; then
+  if /usr/bin/nm -u "$BINARY" 2>/dev/null | /usr/bin/grep -q 'SFSpeechRecognizer' \
+      || /usr/bin/strings -a "$BINARY" 2>/dev/null | /usr/bin/grep -q 'SFSpeechRecognizer'; then
+    echo "check-plist-keys ($CHECKPOINT): FORBIDDEN retired Speech framework capability" >&2
+    fail=1
+  else
+    echo "check-plist-keys ($CHECKPOINT): OK      retired Speech capability absent"
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-plist-keys ($CHECKPOINT): FAILED — $(basename "$APP") is missing a required" >&2
   echo "  or has a forbidden Info.plist privacy key. Refusing to treat it as" >&2

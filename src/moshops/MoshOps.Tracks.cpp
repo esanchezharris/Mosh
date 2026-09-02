@@ -11,6 +11,7 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "RecordingLanding.h"
+#include "engine/AudioDeviceStartup.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
 #include "state/TrackIcons.h"
@@ -1002,7 +1003,11 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     // hidden Play-first precondition. Headless remains a graceful applied:false no-op.
     if (armed && eng.hasAudio())
     {
-        if (! trackHasInstrument (*track))
+        const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
+        const bool explicitInputIsMidi = chosenID.isNotEmpty()
+            && eng.engine().getDeviceManager().findMidiInputDeviceForID (chosenID) != nullptr;
+        if (audiostartup::shouldActivateAudioInputForArm (
+                armed, trackHasInstrument (*track), explicitInputIsMidi))
             if (const auto error = eng.activateAudioInput(); error.isNotEmpty())
             {
                 logLine ("arm_track", args, false, error, false);

@@ -46,7 +46,7 @@ export function Composer() {
         <div className="v2-composer-host">
           <div className="v2-composer-copy" aria-hidden="true">
             <span className="v2-composer-kicker">Ask Moshi</span>
-            <span className="v2-composer-hint">Voice or text for arrangement moves, takes, and quick fixes.</span>
+            <span className="v2-composer-hint">Type arrangement moves, take decisions, and quick fixes.</span>
           </div>
           <AgentComposer />
         </div>

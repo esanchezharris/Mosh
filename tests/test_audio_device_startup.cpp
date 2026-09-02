@@ -123,6 +123,16 @@ TEST_CASE ("legacy duplex setup keeps its output while deferring its input",
     CHECK (projected->getStringAttribute ("audioDeviceInChans") == "0");
 }
 
+TEST_CASE ("record arm activates audio input only for audio routes", "[audiostartup][privacy]")
+{
+    using mosh::audiostartup::shouldActivateAudioInputForArm;
+
+    CHECK_FALSE (shouldActivateAudioInputForArm (false, false, false));
+    CHECK_FALSE (shouldActivateAudioInputForArm (true, true, false));
+    CHECK_FALSE (shouldActivateAudioInputForArm (true, false, true));
+    CHECK (shouldActivateAudioInputForArm (true, false, false));
+}
+
 TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")
 {
     const auto msg = timeoutMessage (deviceLabel (nullptr), 5000);

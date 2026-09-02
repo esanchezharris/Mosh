@@ -92,6 +92,13 @@ namespace mosh::audiostartup
         return result;
     }
 
+    inline bool shouldActivateAudioInputForArm (bool armed,
+                                                bool trackHasInstrument,
+                                                bool explicitInputIsMidi)
+    {
+        return armed && ! trackHasInstrument && ! explicitInputIsMidi;
+    }
+
     /** Name the device we were trying to open, for the error the user actually reads.
         A setup with no explicit names is the system default. */
     inline juce::String deviceLabel (const juce::XmlElement* setupXml)

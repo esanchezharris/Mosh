@@ -333,6 +333,8 @@ install_app() {                                 # $1 = source app, $2 = dest
     cmake -DPLIST="$2/Contents/Info.plist" -P "$ROOT/cmake/InjectInfoPlistKeys.cmake" \
       && echo "  Info.plist: recording/camera/bonjour policy applied; Speech Recognition absent" \
       || { echo "  FATAL: Info.plist privacy policy failed — refusing to ship" >&2; return 1; }
+    "$ROOT/scripts/release/check-plist-keys.sh" "$2" install \
+      || { echo "  FATAL: bundle privacy capability check failed — refusing to ship" >&2; return 1; }
   fi
 }
 
