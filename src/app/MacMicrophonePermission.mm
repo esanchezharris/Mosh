@@ -9,18 +9,32 @@
 
 namespace mosh::mac
 {
-MicrophonePermissionStatus requestMicrophonePermission (int timeoutMs)
+MicrophonePermissionStatus microphonePermissionStatus()
 {
     switch ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio])
     {
-        case AVAuthorizationStatusAuthorized:
+        case AVAuthorizationStatusAuthorized:    return MicrophonePermissionStatus::granted;
+        case AVAuthorizationStatusDenied:        return MicrophonePermissionStatus::denied;
+        case AVAuthorizationStatusRestricted:    return MicrophonePermissionStatus::restricted;
+        case AVAuthorizationStatusNotDetermined: return MicrophonePermissionStatus::notDetermined;
+    }
+    return MicrophonePermissionStatus::restricted;
+}
+
+MicrophonePermissionStatus requestMicrophonePermission (int timeoutMs)
+{
+    switch (microphonePermissionStatus())
+    {
+        case MicrophonePermissionStatus::granted:
             return MicrophonePermissionStatus::granted;
-        case AVAuthorizationStatusDenied:
+        case MicrophonePermissionStatus::denied:
             return MicrophonePermissionStatus::denied;
-        case AVAuthorizationStatusRestricted:
+        case MicrophonePermissionStatus::restricted:
             return MicrophonePermissionStatus::restricted;
-        case AVAuthorizationStatusNotDetermined:
+        case MicrophonePermissionStatus::notDetermined:
             break;
+        case MicrophonePermissionStatus::timedOut:
+            return MicrophonePermissionStatus::timedOut;
     }
 
     struct PermissionState

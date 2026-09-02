@@ -279,6 +279,9 @@ if (MOSH_BUILD_APP)
         # serveUiResource); split out so it's testable without juce_gui_extra.
         src/webview/UiResourcePathGuard.cpp
         src/files/DirectoryListing.cpp
+        src/files/ImportCopy.cpp
+        src/files/SampleFolderAccess.cpp
+        src/files/SampleFolderStore.cpp
         # Moshi's server-side LLM proxy and owner runtime.
         src/brain/BrainProxy.cpp
         src/brain/OwnerRuntime.cpp
@@ -486,6 +489,8 @@ if (MOSH_BUILD_APP)
 
         target_sources(Mosh PRIVATE src/app/MacMicrophonePermission.mm)
         set_source_files_properties(src/app/MacMicrophonePermission.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_sources(Mosh PRIVATE src/files/MacFileBookmark.mm)
+        set_source_files_properties(src/files/MacFileBookmark.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework AVFoundation")
 
         # Native WKWebView media-capture permission delegate (collaborator video

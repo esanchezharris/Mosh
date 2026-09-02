@@ -6,6 +6,7 @@ namespace mosh::mac
 {
 enum class MicrophonePermissionStatus
 {
+    notDetermined,
     granted,
     denied,
     restricted,
@@ -16,6 +17,8 @@ inline juce::String microphonePermissionError (MicrophonePermissionStatus status
 {
     switch (status)
     {
+        case MicrophonePermissionStatus::notDetermined:
+            return {};
         case MicrophonePermissionStatus::granted:
             return {};
         case MicrophonePermissionStatus::denied:
@@ -28,9 +31,27 @@ inline juce::String microphonePermissionError (MicrophonePermissionStatus status
     return "Microphone access is not available on this Mac.";
 }
 
+inline juce::String microphonePermissionStatusName (MicrophonePermissionStatus status)
+{
+    switch (status)
+    {
+        case MicrophonePermissionStatus::notDetermined: return "not-determined";
+        case MicrophonePermissionStatus::granted:       return "granted";
+        case MicrophonePermissionStatus::denied:        return "denied";
+        case MicrophonePermissionStatus::restricted:    return "restricted";
+        case MicrophonePermissionStatus::timedOut:      return "timed-out";
+    }
+    return "restricted";
+}
+
 #if JUCE_MAC
+MicrophonePermissionStatus microphonePermissionStatus();
 MicrophonePermissionStatus requestMicrophonePermission (int timeoutMs = 120000);
 #else
+inline MicrophonePermissionStatus microphonePermissionStatus()
+{
+    return MicrophonePermissionStatus::granted;
+}
 inline MicrophonePermissionStatus requestMicrophonePermission (int = 120000)
 {
     return MicrophonePermissionStatus::granted;

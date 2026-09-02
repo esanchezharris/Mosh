@@ -7,6 +7,9 @@ import type { CommandResult, DirListing } from "../types";
 
 const bridge = vi.hoisted(() => ({
   pickFiles: vi.fn(async () => ({ ok: false, files: [] as string[] })),
+  addSampleFolder: vi.fn(async (): Promise<{
+    ok: boolean; path?: string; name?: string;
+  }> => ({ ok: false })),
 }));
 
 vi.mock("../bridge", async (importOriginal) => {
@@ -51,6 +54,8 @@ describe("SampleBrowser — bounded native listings", () => {
     host.remove();
     bridge.pickFiles.mockReset();
     bridge.pickFiles.mockResolvedValue({ ok: false, files: [] });
+    bridge.addSampleFolder.mockReset();
+    bridge.addSampleFolder.mockResolvedValue({ ok: false });
   });
 
   it("explains the native cap instead of silently hiding a large folder's tail", async () => {
@@ -84,5 +89,20 @@ describe("SampleBrowser — bounded native listings", () => {
     });
     expect(useStore.getState().exec).toHaveBeenCalledWith("import_clip", { file: "/picked/kick.wav", trackId: undefined });
     expect(useStore.getState().exec).toHaveBeenCalledWith("import_clip", { file: "/picked/snare.aif", trackId: undefined });
+  });
+
+  it("adds a persistent sample folder only after an explicit click", async () => {
+    bridge.addSampleFolder.mockResolvedValueOnce({ ok: true, path: "/picked/Samples", name: "Samples" });
+    await act(async () => { root.render(React.createElement(SampleBrowser)); });
+    await act(async () => {});
+    expect(bridge.addSampleFolder).not.toHaveBeenCalled();
+
+    const add = host.querySelector<HTMLButtonElement>('[data-testid="sample-browser-add-folder"]');
+    expect(add).not.toBeNull();
+    await act(async () => { add?.click(); });
+
+    expect(bridge.addSampleFolder).toHaveBeenCalledOnce();
+    expect(useStore.getState().exec).toHaveBeenCalledWith(
+      "list_directory", { path: "/picked/Samples" });
   });
 });

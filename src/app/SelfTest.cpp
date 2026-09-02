@@ -8759,7 +8759,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     {
         // Seed a known dir under the session: one audio file + one non-audio file +
         // one sub-directory. The session-selftest dir is wiped each run, so seed fresh.
-        auto browseDir = eng.sessionDir().getChildFile ("browse-test");
+        auto browseDir = eng.sessionDir().getChildFile ("imports/browse-test");
         browseDir.deleteRecursively();
         browseDir.createDirectory();
         auto wav = browseDir.getChildFile ("probe-tone.wav");
@@ -8833,7 +8833,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // A browser must not materialise an unbounded directory on the WebView/message
         // thread. Seed one entry beyond the production page limit: the response must be
         // explicitly truncated instead of returning every row and freezing the surface.
-        auto boundedDir = eng.sessionDir().getChildFile ("browse-bounded-test");
+        auto boundedDir = eng.sessionDir().getChildFile ("imports/browse-bounded-test");
         boundedDir.deleteRecursively();
         boundedDir.createDirectory();
         for (int i = 0; i < 513; ++i)
@@ -8870,9 +8870,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (rel), "list_directory relative path returns ok (graceful)");
         check (! (bool) rel["data"].getProperty ("exists", true), "list_directory relative path exists:false (not resolved against cwd)");
 
-        // Empty path defaults to Home (a real dir).
-        auto home = cmd (ops, "list_directory", var());
-        check (ok (home) && (bool) home["data"].getProperty ("exists", false), "list_directory with no path defaults to a real Home dir");
+        auto initialListing = cmd (ops, "list_directory", var());
+        check (ok (initialListing)
+                   && (bool) initialListing["data"].getProperty ("exists", false),
+               "list_directory with no path defaults to Mosh Imports");
 
         // READ-ONLY: no JSONL line written, no snapshot_invalidated emitted.
         check (logCount ("list_directory") == ldLogBefore, "list_directory is READ-ONLY (not logged)");

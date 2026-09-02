@@ -229,6 +229,60 @@ export async function pickSaveFile(opts?: {
   return (await native("pick_save_file")(opts ?? {})) as { ok: boolean; file: string };
 }
 
+export type MicrophonePermissionStatus =
+  | "not-determined"
+  | "granted"
+  | "denied"
+  | "restricted"
+  | "timed-out";
+
+export type MicrophonePermissionResult = {
+  status: MicrophonePermissionStatus;
+  error?: string;
+};
+
+function parseMicrophonePermissionResult(value: unknown): MicrophonePermissionResult {
+  if (typeof value !== "object" || value === null || !("status" in value)) {
+    return { status: "restricted", error: "Microphone permission status is unavailable." };
+  }
+  const status = value.status;
+  if (status !== "not-determined" && status !== "granted" && status !== "denied"
+    && status !== "restricted" && status !== "timed-out") {
+    return { status: "restricted", error: "Microphone permission status is unavailable." };
+  }
+  const error = "error" in value && typeof value.error === "string" ? value.error : undefined;
+  return error ? { status, error } : { status };
+}
+
+export async function microphonePermissionStatus(): Promise<MicrophonePermissionResult> {
+  if (!realNative()) return { status: "not-determined" };
+  return parseMicrophonePermissionResult(await native("microphone_permission_status")());
+}
+
+export async function requestMicrophonePermission(): Promise<MicrophonePermissionResult> {
+  if (!realNative()) return { status: "not-determined" };
+  return parseMicrophonePermissionResult(await native("request_microphone_permission")());
+}
+
+export type AddSampleFolderResult = {
+  ok: boolean;
+  path?: string;
+  name?: string;
+  error?: string;
+};
+
+export async function addSampleFolder(): Promise<AddSampleFolderResult> {
+  if (!realNative()) return { ok: false };
+  const value: unknown = await native("add_sample_folder")();
+  if (typeof value !== "object" || value === null || !("ok" in value)
+    || typeof value.ok !== "boolean") return { ok: false };
+  const path = "path" in value && typeof value.path === "string" ? value.path : undefined;
+  const name = "name" in value && typeof value.name === "string" ? value.name : undefined;
+  const error = "error" in value && typeof value.error === "string" ? value.error : undefined;
+  return { ok: value.ok, ...(path ? { path } : {}), ...(name ? { name } : {}),
+    ...(error ? { error } : {}) };
+}
+
 // Skill Foundry Task 4 — three DEDICATED, non-MoshOps native reads for the certified
 // skill loader (src/agent/CertifiedSkillLoader.{h,cpp}). Each is its OWN top-level
 // `.withNativeFunction` on WebBridge (src/webview/WebBridge.cpp), threaded exactly like

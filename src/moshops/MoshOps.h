@@ -75,7 +75,8 @@ public:
         a large, cloud-backed, or disconnected directory, so WebBridge invokes this
         method on a worker instead of the audio/message thread. */
     static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                  const juce::var& command);
+                                                  const juce::var& command,
+                                                  juce::Array<juce::File> sampleFolders = {});
 
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();

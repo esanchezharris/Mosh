@@ -2,6 +2,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
 #include "app/MacStateRestoration.h"
+#include "files/SampleFolderAccess.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
 #include "app/LiveInstrumentSmoke.h"
@@ -566,7 +567,8 @@ public:
         const auto browserSessionDir = engine->sessionDir();
         bridge.setAsyncCommandHandler ([browserSessionDir] (const juce::var& cmd)
         {
-            return MoshOps::executeFileBrowserReadOnly (browserSessionDir, cmd);
+            return MoshOps::executeFileBrowserReadOnly (
+                browserSessionDir, cmd, sampleFolderPlaces());
         });
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });

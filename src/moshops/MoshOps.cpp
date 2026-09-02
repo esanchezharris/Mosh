@@ -570,14 +570,16 @@ juce::var MoshOps::execute (const juce::var& command)
 }
 
 juce::var MoshOps::executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                const juce::var& command)
+                                                const juce::var& command,
+                                                juce::Array<juce::File> sampleFolders)
 {
     const auto name = command.getProperty ("command", var()).toString();
     if (name != "list_directory")
         return errResult (name, "command is not safe for the file-browser worker");
 
     const auto args = command.getProperty ("args", var (new DynamicObject()));
-    return okResult (name, directory_listing::buildData (sessionDir, args));
+    return okResult (name, directory_listing::buildData (
+        sessionDir, args, std::move (sampleFolders)));
 }
 
 juce::var MoshOps::executeImpl (const juce::var& command)
