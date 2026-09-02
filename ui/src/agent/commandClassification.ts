@@ -40,6 +40,11 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   list_midi_inputs: "device discovery feeding the input picker UI",
   list_wave_inputs: "device discovery feeding the input picker UI",
   list_directory: "filesystem browsing is the file-picker's job; agent file access is by explicit path args",
+  // W2.2 (produce lane) — StepCommandResult carries no payload (ui/src/agent/loopSeam.ts),
+  // so a list_* call inside the loop is useless to the model; everything it must know
+  // arrives via the snapshot render or the system prompt. list_palette feeds the
+  // produce-lane preflight/picker (drumPalette.ts) directly, before the model's first turn.
+  list_palette: "loop model never sees command results — feeds the produce-lane preflight/picker directly, never the model",
 
   // ── executor/undo plumbing — owned by the harness, never the model ────────────
   batch_begin: "the executor opens/closes the agent's own undo batches — the model never manages transactions",

@@ -205,7 +205,12 @@ namespace
             || name == "create_track"
             || name == "assign_sample"
             || name == "add_midi_clip"
-            || name == "import_clip";
+            || name == "import_clip"
+            // The compiler's mix stage (service/teardown/render/compile.py:314-319) emits
+            // one set_track_volume per element as a flat headroom trim — every generated
+            // recipe hit "disallowed command: set_track_volume" and its tracks were undone
+            // until this admitted it (2026-09 overnight postmortem).
+            || name == "set_track_volume";
     }
 
     bool generatedRecipeRefName (const juce::String& value, juce::String& name)
@@ -813,6 +818,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "clear_drum_pad")    return cmdClearDrumPad (args);
     if (name == "apply_choke")       return cmdApplyChoke (args);
     if (name == "list_drum_kits")    return cmdListDrumKits (args);
+    if (name == "list_palette")      return cmdListPalette (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);

@@ -534,7 +534,7 @@ const MOCK_TXN_READS = new Set([
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
   "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
-  "list_presets",
+  "list_presets", "list_palette",
   "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
@@ -4572,6 +4572,28 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       ];
       const filter = str(args.plugin, "").toLowerCase();
       return ok(command, { presets: filter ? lib.filter((p) => p.plugin === filter) : lib });
+    }
+    // W2.2 (produce lane) — mirrors native cmdListPalette's CONTRACT: a fixed 12-item
+    // fixture standing in for a measured palette-v2 manifest scan. Only the two bass
+    // (808) items carry rootNote, matching the real manifest (only bass roles are pitch-
+    // measured; every other role's root_note is null and so is omitted here — see
+    // list_palette's native section in src/app/SelfTest.cpp).
+    case "list_palette": {
+      const items = [
+        { path: "/mock/palette/kick_1.wav", role: "kick" },
+        { path: "/mock/palette/kick_2.wav", role: "kick" },
+        { path: "/mock/palette/snare_1.wav", role: "snare" },
+        { path: "/mock/palette/snare_2.wav", role: "snare" },
+        { path: "/mock/palette/clap_1.wav", role: "clap" },
+        { path: "/mock/palette/clap_2.wav", role: "clap" },
+        { path: "/mock/palette/hat_1.wav", role: "hat" },
+        { path: "/mock/palette/openhat_1.wav", role: "openhat" },
+        { path: "/mock/palette/perc_1.wav", role: "perc" },
+        { path: "/mock/palette/fx_1.wav", role: "fx" },
+        { path: "/mock/palette/bass_1.wav", role: "bass", rootNote: 24 },
+        { path: "/mock/palette/bass_2.wav", role: "bass", rootNote: 33 },
+      ];
+      return ok(command, { items });
     }
     case "load_preset": {
       const t = findTrack(str(args.trackId));

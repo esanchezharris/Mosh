@@ -380,6 +380,12 @@ private:
     juce::var cmdClearDrumPad   (const juce::var& args);
     juce::var cmdApplyChoke     (const juce::var& args);
     juce::var cmdListDrumKits   (const juce::var& args);
+    // W2.2 (produce lane) — read-only scan of the palette-v2 manifest (measured sample
+    // library). {manifest?} defaults to MOSH_PALETTE_MANIFEST env or
+    // ~/Library/Mosh/palette-v2/manifest.json; missing files drop from the result rather
+    // than erroring. UI-only: the loop model never sees command result data, so this feeds
+    // the produce-lane preflight/picker directly, never the agent.
+    juce::var cmdListPalette    (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);

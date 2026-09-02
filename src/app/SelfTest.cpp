@@ -5667,6 +5667,88 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         beatFile.deleteFile();
     }
 
+    // ── list_palette (W2.2, produce-lane quality pivot 2026-09) — read-only scan of the
+    // palette-v2 manifest. UI-only by design (the loop model never sees command result
+    // data — StepCommandResult carries {command, ok, error} only, ui/src/agent/loopSeam.ts):
+    // this proves the CONTRACT the produce-lane preflight/picker (drumPalette.ts) depends
+    // on, not agent reachability. Hermetic: builds its own manifest under tempDirectory so
+    // it never reads or depends on the real ~/Library/Mosh/palette-v2.
+    section ("list_palette (W2.2 produce-lane data seam)");
+    {
+        auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("selftest-palette");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+
+        auto kickFile = tmpDir.getChildFile ("kick_1.wav");
+        kickFile.replaceWithText ("fake-wav");
+        auto bassFile = tmpDir.getChildFile ("bass_1.wav");
+        bassFile.replaceWithText ("fake-wav");
+        // Deliberately NOT created — proves a stale manifest row (its file since deleted)
+        // drops silently rather than erroring the whole scan.
+        auto missingFile = tmpDir.getChildFile ("snare_gone.wav");
+
+        auto manifest = tmpDir.getChildFile ("manifest.json");
+        {
+            juce::Array<juce::var> items;
+            items.add (objN ({ { "path", kickFile.getFullPathName() }, { "role_guess", "kick" } }));
+            items.add (objN ({ { "path", bassFile.getFullPathName() }, { "role_guess", "bass" },
+                                { "root_note", 33 } }));
+            items.add (objN ({ { "path", missingFile.getFullPathName() }, { "role_guess", "snare" } }));
+            const auto manifestVar = objN ({ { "items", juce::var (items) } });
+            manifest.replaceWithText (juce::JSON::toString (manifestVar));
+        }
+
+        // Explicit {manifest} arg.
+        auto lp = cmd (ops, "list_palette", args1 ("manifest", manifest.getFullPathName()));
+        check (ok (lp), "list_palette ok with an explicit manifest arg");
+        auto* itemsArr = lp["data"].getProperty ("items", var()).getArray();
+        check (itemsArr != nullptr && itemsArr->size() == 2,
+               "the missing-file row is dropped, not errored (2 of 3 rows survive)");
+        if (itemsArr != nullptr)
+        {
+            bool foundKick = false, foundBass = false;
+            for (auto& it : *itemsArr)
+            {
+                if (it.getProperty ("role", var()).toString() == "kick")
+                {
+                    foundKick = true;
+                    check (it.getProperty ("path", var()).toString() == kickFile.getFullPathName(),
+                           "kick item carries its absolute path");
+                    check (! it.hasProperty ("rootNote"), "a role with no measured root_note omits rootNote");
+                }
+                if (it.getProperty ("role", var()).toString() == "bass")
+                {
+                    foundBass = true;
+                    check ((int) it.getProperty ("rootNote", -1) == 33, "bass item carries its measured rootNote");
+                }
+            }
+            check (foundKick && foundBass, "both surviving items are present with the right roles");
+        }
+
+        // MOSH_PALETTE_MANIFEST env override — the harness path, mirrors MOSH_KITS_USER_DIR
+        // (JUCE ignores $HOME, so a test must never depend on the real user library).
+        ::setenv ("MOSH_PALETTE_MANIFEST", manifest.getFullPathName().toRawUTF8(), 1);
+        auto lpEnv = cmd (ops, "list_palette");
+        check (ok (lpEnv), "list_palette ok via MOSH_PALETTE_MANIFEST env override");
+        auto* envItems = lpEnv["data"].getProperty ("items", var()).getArray();
+        check (envItems != nullptr && envItems->size() == 2, "env override resolves the same manifest");
+        ::unsetenv ("MOSH_PALETTE_MANIFEST");
+
+        // Missing manifest file → errResult, not a crash or a silent empty ok.
+        auto lpMissing = cmd (ops, "list_palette",
+                               args1 ("manifest", tmpDir.getChildFile ("no-such-manifest.json").getFullPathName()));
+        check (! ok (lpMissing), "list_palette errors on a missing manifest file");
+
+        // Malformed JSON → errResult.
+        auto badManifest = tmpDir.getChildFile ("bad.json");
+        badManifest.replaceWithText ("{ not json");
+        auto lpBad = cmd (ops, "list_palette", args1 ("manifest", badManifest.getFullPathName()));
+        check (! ok (lpBad), "list_palette errors on malformed JSON");
+
+        tmpDir.deleteRecursively();
+    }
+
     // --- DRM-002: add_drum_pattern — a whole drum grid in ONE undoable command ---
     // Parser semantics (DSL chars, tiling, aliases, errors) are pinned hermetically by
     // tests/test_drum_pattern.cpp ⇄ ui drumPatternUtil.test.ts; THIS section pins the
@@ -11635,12 +11717,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         mosh::setEnvVar ("XAI_MODEL", "grok-test");
         mosh::setEnvVar ("XAI_API_KEY", "sk-test-xai");
         mosh::unsetEnvVar ("OPENAI_API_KEY");          // leave openai incomplete
+        mosh::unsetEnvVar ("OPENROUTER_API_KEY");       // leave openrouter incomplete for now
         mosh::setEnvVar ("MOSHI_BRAIN_PROVIDER", "xai");
 
         auto info  = BrainProxy::providersInfo();
         auto provs = info.getProperty ("providers", var());
-        check (provs.isArray() && provs.getArray()->size() == 3,
-               "brain: three providers enumerated (deepseek/openai/xai)");
+        check (provs.isArray() && provs.getArray()->size() == 4,
+               "brain: four providers enumerated (deepseek/openai/xai/openrouter)");
 
         auto chosen = BrainProxy::resolve();    // honours MOSHI_BRAIN_PROVIDER=xai
         check (chosen.id == "xai", "brain: MOSHI_BRAIN_PROVIDER selects the default provider");
@@ -11658,6 +11741,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) badShape.getProperty ("ok", true)
                    && badShape.getProperty ("error", var()).toString().isNotEmpty(),
                "brain: chat() rejects a non-array messages payload with an error shape");
+
+        // W1.1 — the openrouter provider + per-call ChatOptions.
+        mosh::setEnvVar ("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
+        mosh::setEnvVar ("OPENROUTER_MODEL", "anthropic/claude-sonnet-5");
+        mosh::setEnvVar ("OPENROUTER_API_KEY", "sk-or-test");
+        check (BrainProxy::resolve ("openrouter").id == "openrouter",
+               "brain: an explicit openrouter provider resolves once fully configured");
+
+        const auto defaultPayload = BrainProxy::requestPayload (
+            BrainProxy::resolve ("deepseek"), var (Array<var>{}));   // default ChatOptions
+        check ((int) defaultPayload.getProperty ("max_tokens", 0) == 800
+                   && std::abs ((double) defaultPayload.getProperty ("temperature", 0.0) - 0.6) < 1e-9,
+               "brain: default ChatOptions reproduce the byte-identical 800-token/0.6-temp payload");
+
+        BrainProxy::ChatOptions produceOpts;
+        produceOpts.maxTokens = 8192;
+        produceOpts.timeoutMs = 180000;
+        const auto producePayload = BrainProxy::requestPayload (
+            BrainProxy::resolve ("openrouter"), var (Array<var>{}), produceOpts);
+        check ((int) producePayload.getProperty ("max_tokens", 0) == 8192
+                   && BrainProxy::requestTimeoutMs (BrainProxy::resolve ("openrouter"), produceOpts) == 180000,
+               "brain: ChatOptions override max_tokens and the request timeout");
+
+        auto* rawOpts = new juce::DynamicObject();
+        rawOpts->setProperty ("maxTokens", 999999);
+        rawOpts->setProperty ("timeoutMs", -5);
+        const auto clamped = BrainProxy::optionsFromVar (var (rawOpts));
+        check (clamped.maxTokens == 32768 && clamped.timeoutMs == 1000,
+               "brain: optionsFromVar clamps out-of-range maxTokens/timeoutMs to [1,32768]/[1000,600000]");
+
+        mosh::unsetEnvVar ("OPENROUTER_API_KEY"); mosh::unsetEnvVar ("OPENROUTER_BASE_URL"); mosh::unsetEnvVar ("OPENROUTER_MODEL");
 
         // Clear every key → no provider resolves and chat() errors cleanly (no network).
         mosh::unsetEnvVar ("DEEPSEEK_API_KEY"); mosh::unsetEnvVar ("XAI_API_KEY"); mosh::unsetEnvVar ("MOSHI_BRAIN_PROVIDER");
@@ -15312,6 +15426,70 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Clean up the fixture track so the harness leaves the session as it found it.
         cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
+    }
+
+    {
+        section ("generate_beat_recipe: recipe-command allowlist (2026-09 overnight postmortem)");
+
+        // Hermetic via args.__prefetchedProgram (MoshOps.cpp:2253-2255) — no generative
+        // service involved. Proves the native gate isGeneratedRecipeCommandAllowed
+        // (MoshOps.cpp:200-213) directly against the exact shape the compiled recipe
+        // program emits (service/teardown/render/compile.py: create_track+capture per
+        // element, then a per-track set_track_volume headroom trim at :314-319) — the
+        // allowlist gap that undid every generated recipe's tracks overnight.
+        auto prefetchedProgram = [] (Array<var> steps) -> var
+        {
+            return objN ({ { "ok", var (true) },
+                           { "program", objN ({ { "commands", var (steps) } }) } });
+        };
+
+        const int tracksBefore = tracks (ops);
+
+        Array<var> allowedSteps;
+        allowedSteps.add (objN ({ { "command", var ("create_track") },
+                                  { "args", objN ({ { "name", var ("SelfTest Recipe Track") },
+                                                    { "type", var ("audio") } }) },
+                                  { "capture", objN ({ { "T0", var ("trackId") } }) } }));
+        allowedSteps.add (objN ({ { "command", var ("set_track_volume") },
+                                  { "args", objN ({ { "trackId", var ("${T0}") },
+                                                    { "db", var (-4.5) } }) } }));
+        auto allowedResult = cmd (ops, "generate_beat_recipe",
+                                  objN ({ { "__prefetchedProgram", prefetchedProgram (allowedSteps) } }));
+        check (ok (allowedResult),
+              "generate_beat_recipe applies an allowed program (create_track + set_track_volume)");
+        check ((int) allowedResult["data"].getProperty ("appliedCount", 0) == 2,
+              "…both steps applied: create_track, then the set_track_volume headroom trim");
+        check (tracks (ops) == tracksBefore + 1, "…and the track it created is really there");
+
+        // Clean up the fixture track so the harness leaves the session as it found it.
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", var()).toString() == "SelfTest Recipe Track")
+                        cmd (ops, "remove_track", objN ({ { "trackId", tv.getProperty ("id", var()) } }));
+        }
+        check (tracks (ops) == tracksBefore, "…and cleanup leaves the track count as found");
+
+        Array<var> disallowedSteps;
+        disallowedSteps.add (objN ({ { "command", var ("create_track") },
+                                     { "args", objN ({ { "name", var ("SelfTest Recipe Track 2") },
+                                                       { "type", var ("audio") } }) },
+                                     { "capture", objN ({ { "T0", var ("trackId") } }) } }));
+        // Any real, unrelated mutating command absent from isGeneratedRecipeCommandAllowed
+        // proves the same thing set_track_volume used to: the allowlist, not a hard-coded
+        // name list mirrored here, is what decides.
+        disallowedSteps.add (objN ({ { "command", var ("load_plugin") },
+                                     { "args", objN ({ { "trackId", var ("${T0}") },
+                                                       { "pluginId", var ("4OSC") } }) } }));
+        auto disallowedResult = cmd (ops, "generate_beat_recipe",
+                                     objN ({ { "__prefetchedProgram", prefetchedProgram (disallowedSteps) } }));
+        check (! ok (disallowedResult),
+              "generate_beat_recipe REJECTS a program containing a disallowed command");
+        check (disallowedResult.getProperty ("error", var()).toString().contains ("disallowed command"),
+              "…and the error names it \"disallowed command\"");
+        check (tracks (ops) == tracksBefore,
+              "…and the create_track step it DID apply was undone along with the rest of the batch");
     }
 
     finishSection();

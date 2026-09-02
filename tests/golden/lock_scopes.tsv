@@ -97,6 +97,7 @@ list_drum_kits	Unguarded
 list_issues	Unguarded
 list_loras	Unguarded
 list_midi_inputs	Unguarded
+list_palette	Unguarded
 list_plugins	Unguarded
 list_presets	Unguarded
 list_rave_models	Unguarded

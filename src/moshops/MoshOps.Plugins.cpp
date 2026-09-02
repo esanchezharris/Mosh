@@ -445,6 +445,64 @@ juce::var MoshOps::cmdListDrumKits (const juce::var&)
     return okResult ("list_drum_kits", var (data));   // read-only: no txn, no log, no event
 }
 
+// W2.2 (produce lane, quality-pivot 2026-09) — a read-only scan of the palette-v2
+// manifest: the measured sample library (docs/palette-generation-method.md) the drum/808
+// picker (ui/src/agent/loop/drumPalette.ts) draws from. Resolution mirrors drumKitsUserRoot:
+// an explicit {manifest} arg wins, then MOSH_PALETTE_MANIFEST (harness override — JUCE
+// ignores $HOME, so a test must never depend on the real user library), then the real
+// default. The manifest's own item shape (path/role_guess/root_note/root_source/
+// content_hash/kind) is a generation artifact, not a command contract — this projects only
+// {path, role, rootNote?}. An item whose file no longer exists on disk is DROPPED rather
+// than erroring, so a half-synced palette directory degrades to "fewer choices" for the
+// picker instead of a hard failure; a missing or malformed manifest itself IS an error
+// (there is nothing to degrade to).
+juce::var MoshOps::cmdListPalette (const juce::var& args)
+{
+    using juce::File;
+
+    File manifestFile;
+    const auto argManifest = args.getProperty ("manifest", var()).toString();
+    if (argManifest.isNotEmpty())
+    {
+        manifestFile = File (argManifest);
+    }
+    else
+    {
+        const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_PALETTE_MANIFEST", {});
+        manifestFile = env.isNotEmpty()
+            ? File (env)
+            : File::getSpecialLocation (File::userHomeDirectory)
+                  .getChildFile ("Library/Mosh/palette-v2/manifest.json");
+    }
+
+    if (! manifestFile.existsAsFile())
+        return errResult ("list_palette", "manifest not found: " + manifestFile.getFullPathName());
+
+    juce::var parsed;
+    if (juce::JSON::parse (manifestFile.loadFileAsString(), parsed).failed() || ! parsed.isObject())
+        return errResult ("list_palette", "manifest is not valid JSON: " + manifestFile.getFullPathName());
+
+    Array<var> out;
+    if (auto* items = parsed.getProperty ("items", var()).getArray())
+    {
+        for (auto& it : *items)
+        {
+            const auto path = it.getProperty ("path", var()).toString();
+            if (path.isEmpty() || ! File (path).existsAsFile()) continue;   // dropped, not fatal
+            auto* o = new DynamicObject();
+            o->setProperty ("path", path);
+            o->setProperty ("role", it.getProperty ("role_guess", var()).toString());
+            if (it.hasProperty ("root_note"))
+                o->setProperty ("rootNote", it.getProperty ("root_note", var()));
+            out.add (var (o));
+        }
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("items", var (out));
+    return okResult ("list_palette", var (data));   // read-only: no txn, no log, no event
+}
+
 // Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
 //
 // This exists because live choke cannot reach clip playback. During playback the MIDI
