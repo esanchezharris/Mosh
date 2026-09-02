@@ -70,6 +70,7 @@ import type { ProduceTemplate, ProduceTemplateDeps } from "../src/agent/loop/pro
 // VALUES behind a try/catch, but the types are safe to name directly here.
 import type { CheckInput, CheckReport } from "../src/agent/loop/produceCheck";
 import type { Snapshot } from "../src/types";
+import type { PaletteItem } from "../src/agent/loop/drumPalette";
 
 // ── args ────────────────────────────────────────────────────────────────────
 
@@ -356,7 +357,29 @@ async function tryPreflight(rawExec: ProduceTemplateDeps["exec"], getSnapshot: (
     console.error("[produceLiveRun] produceTemplate.ts has no runProduceTemplate() export yet — skipping preflight.");
     return undefined;
   }
-  const template = await mod.runProduceTemplate(ask, { exec: rawExec, getSnapshot, seed });
+  // The native list_palette projection carries only {path, role, rootNote};
+  // sub_energy_db (the 808 low-end pick, round-2 note 6) lives in the manifest
+  // file, so the driver reads the manifest itself and injects the items.
+  const manifestPath = argFlag("palette-manifest", resolve(process.env.HOME ?? "", "Library/Mosh/palette-v2/manifest.json"))!;
+  let palette: PaletteItem[] | undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as { items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+    const items = Array.isArray(parsed) ? parsed : parsed.items ?? [];
+    palette = items
+      .filter((it) => typeof it.path === "string" && existsSync(it.path as string))
+      .map((it) => {
+        const out: PaletteItem = { path: it.path as string, role: String(it.role ?? it.role_guess ?? "") };
+        const root = typeof it.rootNote === "number" ? it.rootNote : typeof it.root_note === "number" ? it.root_note : undefined;
+        const sub = typeof it.subEnergyDb === "number" ? it.subEnergyDb : typeof it.sub_energy_db === "number" ? it.sub_energy_db : undefined;
+        if (root !== undefined) (out as { rootNote?: number }).rootNote = root;
+        if (sub !== undefined) (out as { subEnergyDb?: number }).subEnergyDb = sub;
+        return out;
+      });
+    console.error(`[produceLiveRun] palette from ${manifestPath}: ${palette.length} items`);
+  } catch (e) {
+    console.error(`[produceLiveRun] palette manifest unreadable (${String((e as Error)?.message ?? e).slice(0, 120)}) — falling back to list_palette`);
+  }
+  const template = await mod.runProduceTemplate(ask, { exec: rawExec, getSnapshot, seed, ...(palette ? { palette } : {}) });
   return template as ProduceTemplate;
 }
 
