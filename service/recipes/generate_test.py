@@ -226,6 +226,30 @@ check("melodic non-bass elements (pad/lead) DO get a sampler when matched (the s
       all(e.sample_match.matched_path in roots for e in bound if e.role.value in ("pad", "lead", "pluck")),
       str([(e.role.value, e.sample_match.matched_path in roots) for e in bound]))
 
+# ── 808 <-> bass palette alias (2026-09 "808 never binds" regression) ────────────
+# The REAL palette manifest tags 808 one-shots under role_guess "bass" (17 items, measured
+# roots) — a straight palette.get("808") lookup for an 808-role element never found them and
+# every 808 fell back to 4OSC (compile.py's "808/bass has notes but no matched sample"
+# deferral). Pool lookup must alias 808<->bass both ways (generate.py:~1027-1032).
+FAKE_PAL_BASS_ONLY = dict(FAKE_PAL)
+FAKE_PAL_BASS_ONLY.pop("808")
+FAKE_PAL_BASS_ONLY["bass"] = [{"path": "/tmp/pal_bass_a.wav", "root_note": 24},
+                               {"path": "/tmp/pal_bass_b.wav", "root_note": 36}]
+rec_alias, prov_alias = G.generate({"mood": "dark", "tempo": 140, "key": "F minor"}, seed=5,
+                                    palette=FAKE_PAL_BASS_ONLY)
+alias_808 = [e for e in rec_alias.elements if e.role.value == "808" and e.midi.notes]
+check("808 element with notes exists to test the alias against", len(alias_808) > 0, str(len(alias_808)))
+check("808 binds a sample from a palette that only has a 'bass' pool (role alias fires)",
+      len(alias_808) > 0
+      and all(e.sample_match.status.value == "matched" for e in alias_808)
+      and all(e.sample_match.matched_path in {p["path"] for p in FAKE_PAL_BASS_ONLY["bass"]}
+              for e in alias_808),
+      str([(e.role.value, e.sample_match.status.value, e.sample_match.matched_path) for e in alias_808]))
+alias_unresolved = compile_recipe(rec_alias).unresolved
+check("no '808/bass has notes but no matched sample' unresolved entry once the alias fires",
+      not any("808/bass has notes" in str(u.get("issue", "")) for u in alias_unresolved),
+      str(alias_unresolved))
+
 # ── 808 register normalization (2026-07 audition regression: "808 too high" ×6) ──
 # Unit: a phrase written 2 octaves high (the FL-import register) folds into the sub
 # window by whole octaves — median lands in [SUB_LO, SUB_HI], pitch classes and

@@ -1024,8 +1024,13 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         role = e.role.value
         if not e.midi.notes:
             continue
+        # 2026-09 fix: the palette manifest's role_guess tags 808 one-shots "bass" (17
+        # measured-root items) — a straight palette.get("808") lookup never found them and
+        # every 808 element fell back to the stock 4OSC sine patch. Alias 808<->bass BOTH
+        # ways (a recipe element can carry either role name for the sub voice).
         pool = (palette.get(role)
-                or (palette.get("808") if role == "808" else None)
+                or (palette.get("bass") if role == "808" else None)
+                or (palette.get("808") if role == "bass" else None)
                 or (palette.get("melodic") if role in ("pad", "lead", "pluck") else None))
         if pool:
             before = len(pool)
