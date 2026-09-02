@@ -39,7 +39,7 @@
 //     [--ask "<original ask — read from run.json next to --program if omitted>"] \
 //     [--swap lab=<manifest.json>] [--fixture] [--dry-run]
 
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
   argFlag, findBin, runScript, type Cmd as EngineCmd,
@@ -202,6 +202,7 @@ async function main(): Promise<void> {
   if (!OUT_DIR) throw new Error("produceReplay: need --out-dir <dir>");
 
   const outDir = resolve(OUT_DIR);
+  mkdirSync(outDir, { recursive: true });
   const programPath = FIXTURE ? FIXTURE_PATH : resolve(PROGRAM_PATH!);
   const swapMatch = SWAP?.match(/^lab=(.+)$/);
   const swapManifest = swapMatch ? resolve(swapMatch[1]!) : undefined;
@@ -238,7 +239,7 @@ async function main(): Promise<void> {
     const lines: EngineCmd[] = [
       { command: "new_project", args: {} },
       ...[...templateCmdsFromProgram, ...notes].map((l) => ({ command: l.command, args: l.args ?? {} }) as EngineCmd),
-      { command: "export_audio", args: { file: wavFile, format: "wav", range: "loop", renderMode: "auto" } },
+      { command: "export_audio", args: { file: wavFile, format: "wav", range: "custom", start: 0, end: Number((template as { constants?: { eightBarsSeconds?: number } })?.constants?.eightBarsSeconds) || 32 * 60 / 148, renderMode: "auto", tail: "include", tailSeconds: 1 } },
     ];
     const out = runScript(bin, lines, session, 600_000);
     return finish(outDir, wavFile, out.results, resolvedConfig);
@@ -285,7 +286,7 @@ async function main(): Promise<void> {
   }
 
   for (const line of replayNotes) await harness.exec(line.command, line.args ?? {});
-  const exportResult = await harness.exec("export_audio", { file: wavFile, format: "wav", range: "loop", renderMode: "auto" });
+  const exportResult = await harness.exec("export_audio", { file: wavFile, format: "wav", range: "custom", start: 0, end: Number((template as { constants?: { eightBarsSeconds?: number } })?.constants?.eightBarsSeconds) || 32 * 60 / 148, renderMode: "auto", tail: "include", tailSeconds: 1 });
   writeFileSync(resolve(outDir, "swap-program.jsonl"), [...harness.script, { command: "export_audio", args: { file: wavFile } }].map((l) => JSON.stringify(l)).join("\n") + "\n");
   finish(outDir, wavFile, [{ command: "export_audio", ok: exportResult.ok, error: exportResult.error }], resolvedConfig);
 }
