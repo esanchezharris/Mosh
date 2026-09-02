@@ -36,10 +36,6 @@ Array<var> rootsFor (const File& sessionDir)
         roots.add (var (object));
     };
 
-    addRoot ("Home", File::getSpecialLocation (File::userHomeDirectory));
-    addRoot ("Music", File::getSpecialLocation (File::userMusicDirectory));
-    addRoot ("Desktop", File::getSpecialLocation (File::userDesktopDirectory));
-    addRoot ("Documents", File::getSpecialLocation (File::userDocumentsDirectory));
     addRoot ("Imports", sessionDir.getChildFile ("imports"));
     return roots;
 }
@@ -78,7 +74,8 @@ var buildData (const File& sessionDir, const var& args)
     File directory;
     if (requested.isEmpty())
     {
-        directory = File::getSpecialLocation (File::userHomeDirectory);
+        const auto imports = sessionDir.getChildFile ("imports");
+        directory = imports.isDirectory() ? imports : sessionDir;
     }
     else if (! File::isAbsolutePath (requested))
     {

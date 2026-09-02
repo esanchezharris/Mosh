@@ -5,6 +5,7 @@
 // top via file_peaks / audition_file once the backend ships them.
 
 import { useEffect, useRef, useState } from "react";
+import { pickFiles } from "../bridge";
 import { useStore } from "../store";
 import type { DirListing } from "../types";
 import { filterEntries, loadRecents, addRecentSample, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
@@ -82,6 +83,16 @@ export function SampleBrowser() {
     await refresh();
   };
 
+  const chooseFiles = async () => {
+    const picked = await pickFiles({
+      multiple: true,
+      filters: "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg",
+      title: "Choose audio files",
+    });
+    if (!picked.ok) return;
+    for (const file of picked.files) await onImport(file);
+  };
+
   const toggleAudition = (path: string) => async () => {
     if (auditioning === path) { await exec("stop_audition"); setAuditioning(null); }
     else { const r = await exec("audition_file", { path }); if (r.ok) setAuditioning(path); }
@@ -149,6 +160,8 @@ export function SampleBrowser() {
             {loading ? "Loading sounds..." : (listing?.path ?? "Loading sounds...")}
           </span>
         </div>
+        <button className="btn" type="button" data-testid="sample-browser-choose-files"
+          onClick={() => void chooseFiles()}>Choose files…</button>
       </div>
       <label className="sb-search-field">
         <span className="sb-search-label">Search sounds</span>
