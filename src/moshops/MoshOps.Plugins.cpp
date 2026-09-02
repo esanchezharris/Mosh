@@ -409,12 +409,15 @@ juce::var MoshOps::cmdClearDrumPad (const juce::var& args)
 juce::var MoshOps::cmdListDrumKits (const juce::var&)
 {
     Array<var> kits;
-    auto root = drumKitsRoot();
-    if (root.isDirectory())
+    juce::StringArray seen;
+    auto scanRoot = [&] (const juce::File& root, const char* source)
     {
+        if (! root.isDirectory()) return;
         for (auto& d : juce::RangedDirectoryIterator (root, false, "*", juce::File::findDirectories))
         {
             const auto id = d.getFile().getFileName();
+            if (seen.contains (id)) continue;   // user kit shadows a same-id bundled kit
+            seen.add (id);
             int pads = 0;
             for (auto& pad : kDefaultKit)
                 if (d.getFile().getChildFile (pad.file).existsAsFile()) ++pads;
@@ -427,9 +430,15 @@ juce::var MoshOps::cmdListDrumKits (const juce::var&)
             o->setProperty ("pads", pads);
             o->setProperty ("path", d.getFile().getFullPathName());
             o->setProperty ("available", pads > 0);
+            o->setProperty ("source", source);
             kits.add (var (o));
         }
-    }
+    };
+    // User first so a same-id user kit wins the listing, matching drumKitDir's
+    // resolution order — the picker must never show a kit load_drum_kit would
+    // then resolve differently.
+    scanRoot (drumKitsUserRoot(), "user");
+    scanRoot (drumKitsRoot(), "bundled");
     auto* data = new DynamicObject();
     data->setProperty ("kits", kits);
     data->setProperty ("defaultKit", kDefaultKitId);
@@ -1511,6 +1520,16 @@ juce::File MoshOps::drumKitsRoot() const
     return bundled;   // best-effort; callers guard on existsAsFile()
 }
 
+// See MoshOps.h: the user's own kit library; env override keeps harness runs
+// off the real ~/Library (JUCE ignores $HOME).
+juce::File MoshOps::drumKitsUserRoot() const
+{
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_KITS_USER_DIR", {});
+    if (env.isNotEmpty()) return juce::File (env);
+    return juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+        .getChildFile ("Library/Mosh/kits");
+}
+
 juce::File MoshOps::drumKitDir (const juce::String& kitId) const
 {
     using juce::File;
@@ -1523,6 +1542,12 @@ juce::File MoshOps::drumKitDir (const juce::String& kitId) const
     {
         File d (env);
         if (d.isDirectory()) return d;
+    }
+    // A named user kit shadows a same-id bundled kit (the user's curation wins).
+    if (kitId.isNotEmpty())
+    {
+        auto user = drumKitsUserRoot().getChildFile (kitId);
+        if (user.isDirectory()) return user;
     }
     return drumKitsRoot().getChildFile (kitId.isEmpty() ? kDefaultKitId : kitId);
 }

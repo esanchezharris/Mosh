@@ -753,6 +753,12 @@ private:
     juce::File           drumKitDir() const;
     // The library root (one folder per kit) and a named kit inside it.
     juce::File           drumKitsRoot() const;
+    // The user's OWN kit library (~/Library/Mosh/kits, one folder per kit, same
+    // 8-pad layout) — curated palettes land here (e.g. palette-v2 kits). A named
+    // kit in the user library shadows a same-id bundled kit. MOSH_KITS_USER_DIR
+    // overrides for tests: JUCE ignores $HOME, so without it a harness run would
+    // see — and depend on — the real user library.
+    juce::File           drumKitsUserRoot() const;
     juce::File           drumKitDir (const juce::String& kitId) const;
     // Preset library roots (P1 preset seam). Bundled mirrors drumKitsRoot's resolution
     // (env MOSH_PRESETS_DIR → app bundle Resources/presets → exe-sibling presets);

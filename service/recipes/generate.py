@@ -37,7 +37,13 @@ LIB_DIR = os.path.join(_HERE, "library")
 # byte-identical to pre-fix). Env override first, then home, then the repo-local file.
 _PALETTE_HOME = os.path.expanduser("~/Library/Mosh/palette-v1/manifest.json")
 _PALETTE_REPO = os.path.join(_SERVICE, "palette", "palette", "manifest.json")
+# palette-v2 (2026-09): the owner-CURATED library — every one-shot passed a
+# by-ear keep decision (docs/PALETTE-GENERATION-METHOD.md), with measured
+# root_note on the pitched roles. Preferred over the larger uncurated v1 pool
+# when present; MOSH_PALETTE_MANIFEST still overrides everything (the A/B lever).
+_PALETTE_V2 = os.path.expanduser("~/Library/Mosh/palette-v2/manifest.json")
 PALETTE_MANIFEST = (os.environ.get("MOSH_PALETTE_MANIFEST")
+                    or (_PALETTE_V2 if os.path.isfile(_PALETTE_V2) else None)
                     or (_PALETTE_HOME if os.path.isfile(_PALETTE_HOME) else _PALETTE_REPO))
 DRUM_ROLES = {"kick", "snare", "hat", "clap", "perc"}
 MELODIC_ROLES = {"808", "bass", "lead", "pad", "pluck"}  # transposed; drums are not

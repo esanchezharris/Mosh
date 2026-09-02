@@ -5496,6 +5496,48 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check ((int) [&] { auto p = trackById (pt).getProperty ("drumPads", var());
                                    return p.getArray() ? p.getArray()->size() : 0; }() == 8,
                        "a failed kit load leaves the existing pads untouched");
+
+                // ── USER kit library (~/Library/Mosh/kits; env-pointed here so the
+                // harness never reads or depends on the real user library) ──
+                {
+                    auto userRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                        .getChildFile ("selftest-user-kits");
+                    auto kitDir = userRoot.getChildFile ("selftest-user-kit");
+                    kitDir.createDirectory();
+                    // Two REAL pads copied from the bundled kit found above — a partial
+                    // kit on purpose, so pad COUNT proves per-file resolution.
+                    juce::File bundledKit;
+                    if (auto* a = lk["data"].getProperty ("kits", var()).getArray())
+                        for (auto& k : *a)
+                            if (k.getProperty ("id", var()).toString() == "mosh-kit")
+                                bundledKit = juce::File (k.getProperty ("path", var()).toString());
+                    bundledKit.getChildFile ("kick.wav").copyFileTo (kitDir.getChildFile ("kick.wav"));
+                    bundledKit.getChildFile ("snare.wav").copyFileTo (kitDir.getChildFile ("snare.wav"));
+                    ::setenv ("MOSH_KITS_USER_DIR", userRoot.getFullPathName().toRawUTF8(), 1);
+
+                    auto lk2 = cmd (ops, "list_drum_kits");
+                    bool listed = false, srcUser = false; int userPads = 0;
+                    if (auto* a = lk2["data"].getProperty ("kits", var()).getArray())
+                        for (auto& k : *a)
+                            if (k.getProperty ("id", var()).toString() == "selftest-user-kit")
+                            {
+                                listed = true;
+                                srcUser = k.getProperty ("source", var()).toString() == "user";
+                                userPads = (int) k.getProperty ("pads", 0);
+                            }
+                    check (listed, "a user-library kit is listed alongside the bundled kits");
+                    check (srcUser, "the user kit carries source:user");
+                    check (userPads == 2, "the user kit's pad count reflects its actual files");
+
+                    auto ldu = cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", "selftest-user-kit" }}));
+                    check (ok (ldu) && (int) ldu["data"].getProperty ("pads", 0) == 2,
+                           "load_drum_kit loads a USER-library kit (partial pads resolve per-file)");
+
+                    ::unsetenv ("MOSH_KITS_USER_DIR");
+                    userRoot.deleteRecursively();
+                    // Restore the full bundled kit so later sections see the 8 pads.
+                    cmd (ops, "load_drum_kit", args1 ("trackId", pt));
+                }
             }
 
             cmd (ops, "remove_track", args1 ("trackId", pt));
