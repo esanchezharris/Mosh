@@ -143,7 +143,7 @@
    Miss this and every `var(--accent)` consumer inside an agentic subtree silently
    stays near-white.
    ══════════════════════════════════════════════════════════════════════════════ */
-.v2-shell .v2-mosh-stage,          /* Moshi himself — all moods, hands-free, the GL mount */
+.v2-shell .v2-mosh-stage,          /* Moshi himself — all moods and the GL mount */
 .v2-shell .v2-mosh-status,         /* his status wave + narration line */
 .v2-shell .agent-send,             /* the "Ask Moshi" submit */
 .v2-shell .v2-agent-drawer,        /* drawer title while .live, step chips, the spinner */

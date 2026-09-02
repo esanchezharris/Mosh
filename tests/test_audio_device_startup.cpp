@@ -133,6 +133,28 @@ TEST_CASE ("record arm activates audio input only for audio routes", "[audiostar
     CHECK (shouldActivateAudioInputForArm (true, false, false));
 }
 
+TEST_CASE ("explicit non-audio inputs fail closed before microphone activation",
+           "[audiostartup][privacy]")
+{
+    using mosh::audiostartup::explicitInputBlocksAudioActivation;
+
+    CHECK_FALSE (explicitInputBlocksAudioActivation ({}, {}, false));
+    CHECK_FALSE (explicitInputBlocksAudioActivation ("built-in-mic", "wave", false));
+    CHECK (explicitInputBlocksAudioActivation ("keyboard", "midi", true));
+    CHECK (explicitInputBlocksAudioActivation ("disconnected", {}, false));
+    CHECK (explicitInputBlocksAudioActivation ("keyboard", "wave", true));
+}
+
+TEST_CASE ("the probed input channel mask is reused for the live open",
+           "[audiostartup][privacy]")
+{
+    const auto channels = inputChannelMaskForOpen (2);
+
+    CHECK (channels.toString (2) == "11");
+    CHECK (channels.countNumberOfSetBits() == 2);
+    CHECK (inputChannelMaskForOpen (0).isZero());
+}
+
 TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")
 {
     const auto msg = timeoutMessage (deviceLabel (nullptr), 5000);

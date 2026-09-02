@@ -3488,6 +3488,9 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         {
             auto* in = new DynamicObject();
             in->setProperty ("deviceID", chosenID);
+            const auto storedKind = t.state.getProperty (
+                ids::moshInputDeviceKind, var()).toString();
+            if (storedKind.isNotEmpty()) in->setProperty ("kind", storedKind);
             auto& dm = eng.engine().getDeviceManager();
             for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
                 if (auto* wi = dm.getWaveInDevice (i))

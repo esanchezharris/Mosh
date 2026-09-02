@@ -669,6 +669,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     if (args.hasProperty ("deviceID") && deviceID.isEmpty())
     {
         track->state.removeProperty (ids::moshInputDevice, nullptr);
+        track->state.removeProperty (ids::moshInputDeviceKind, nullptr);
         for (auto* inst : eng.edit().getAllInputDevices())
             if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
                 [[maybe_unused]] auto r = inst->removeTarget (track->itemID, nullptr);
@@ -701,6 +702,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     // controller B never released A, leaving both driving the track.
     auto& dm = eng.engine().getDeviceManager();
     const bool wantMidi = dm.findMidiInputDeviceForID (deviceID) != nullptr;
+    track->state.setProperty (ids::moshInputDeviceKind, wantMidi ? "midi" : "wave", nullptr);
 
     bool applied = false;
     bool wasArmed = false;
@@ -1004,10 +1006,14 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     if (armed && eng.hasAudio())
     {
         const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
-        const bool explicitInputIsMidi = chosenID.isNotEmpty()
-            && eng.engine().getDeviceManager().findMidiInputDeviceForID (chosenID) != nullptr;
+        const auto chosenKind = track->state.getProperty (
+            ids::moshInputDeviceKind, var()).toString();
+        const bool explicitInputBlocksAudio = audiostartup::explicitInputBlocksAudioActivation (
+            chosenID,
+            chosenKind,
+            eng.engine().getDeviceManager().findMidiInputDeviceForID (chosenID) != nullptr);
         if (audiostartup::shouldActivateAudioInputForArm (
-                armed, trackHasInstrument (*track), explicitInputIsMidi))
+                armed, trackHasInstrument (*track), explicitInputBlocksAudio))
             if (const auto error = eng.activateAudioInput(); error.isNotEmpty())
             {
                 logLine ("arm_track", args, false, error, false);

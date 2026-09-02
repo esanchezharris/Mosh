@@ -26,10 +26,9 @@ if /usr/bin/plutil -extract NSSpeechRecognitionUsageDescription raw "$PLIST" >/d
 fi
 
 /usr/bin/plutil -extract NSMicrophoneUsageDescription raw "$PLIST" >/dev/null
-grep -q 'type == WKMediaCaptureTypeCamera' "$ROOT/src/webview/WebViewCameraPermission.mm"
-grep -q 'WKPermissionDecisionDeny' "$ROOT/src/webview/WebViewCameraPermission.mm"
 mkdir -p "$APP/Contents/MacOS"
 printf '%s\n' 'SFSpeechRecognizer' > "$APP/Contents/MacOS/Mosh"
+dd if=/dev/zero bs=1024 count=1024 >> "$APP/Contents/MacOS/Mosh" 2>/dev/null
 if "$ROOT/scripts/release/check-plist-keys.sh" "$APP" stale-binary >/dev/null 2>&1; then
   echo "a stale Speech-capable binary must be rejected" >&2
   exit 1

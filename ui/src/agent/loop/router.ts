@@ -1,8 +1,7 @@
 // The lane router: which asks deserve the multi-step loop, which stay on the
 // cheap single-shot path. Pure heuristic v1 (a model-based router is a later
 // upgrade behind this same seam). Precedence is decided by the CALLER —
-// sectionScope and the fast path always run first, and hands-free voice never
-// reaches an LLM at all.
+// sectionScope and the fast path always run first.
 
 export type Lane = "single" | "loop";
 

@@ -94,9 +94,24 @@ namespace mosh::audiostartup
 
     inline bool shouldActivateAudioInputForArm (bool armed,
                                                 bool trackHasInstrument,
-                                                bool explicitInputIsMidi)
+                                                bool explicitInputBlocksAudio)
     {
-        return armed && ! trackHasInstrument && ! explicitInputIsMidi;
+        return armed && ! trackHasInstrument && ! explicitInputBlocksAudio;
+    }
+
+    inline bool explicitInputBlocksAudioActivation (const juce::String& chosenID,
+                                                     const juce::String& storedKind,
+                                                     bool currentlyRecognizedMidi)
+    {
+        return chosenID.isNotEmpty()
+            && (storedKind != "wave" || currentlyRecognizedMidi);
+    }
+
+    inline juce::BigInteger inputChannelMaskForOpen (int numChannels)
+    {
+        juce::BigInteger channels;
+        channels.setRange (0, juce::jmax (0, numChannels), true);
+        return channels;
     }
 
     /** Name the device we were trying to open, for the error the user actually reads.

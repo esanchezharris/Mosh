@@ -77,9 +77,12 @@ else
 fi
 
 BINARY="$APP/Contents/MacOS/Mosh"
-if [ -f "$BINARY" ]; then
-  if /usr/bin/nm -u "$BINARY" 2>/dev/null | /usr/bin/grep -q 'SFSpeechRecognizer' \
-      || /usr/bin/strings -a "$BINARY" 2>/dev/null | /usr/bin/grep -q 'SFSpeechRecognizer'; then
+if [ ! -f "$BINARY" ]; then
+  echo "check-plist-keys ($CHECKPOINT): MISSING executable at $BINARY" >&2
+  fail=1
+else
+  if /usr/bin/nm -u "$BINARY" 2>/dev/null | /usr/bin/grep 'SFSpeechRecognizer' >/dev/null \
+      || /usr/bin/strings -a "$BINARY" 2>/dev/null | /usr/bin/grep 'SFSpeechRecognizer' >/dev/null; then
     echo "check-plist-keys ($CHECKPOINT): FORBIDDEN retired Speech framework capability" >&2
     fail=1
   else

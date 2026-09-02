@@ -221,7 +221,7 @@ export type State = {
   memoryToast: { text: string; scope: "global" | "project"; kind: string; ts: number } | null;
   setMemoryToast: (t: State["memoryToast"]) => void;
 
-  // Performer mode (hands-free voice take recording). `recording` is derived from the
+  // Performer take review. `recording` is derived from the
   // live snapshot; `takeDecisionPending` marks "a just-recorded take awaits keep/redo".
   takeDecisionPending: boolean;
   lastTakeClipId: string | null;

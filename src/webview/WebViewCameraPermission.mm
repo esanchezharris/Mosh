@@ -37,8 +37,14 @@ API_AVAILABLE(macos(12.0))
     type:(WKMediaCaptureType)type
     decisionHandler:(void (^)(WKPermissionDecision))decisionHandler
 {
-    decisionHandler (type == WKMediaCaptureTypeCamera ? WKPermissionDecisionGrant
-                                                       : WKPermissionDecisionDeny);
+    const auto kind = type == WKMediaCaptureTypeCamera
+        ? mosh::WebViewMediaCaptureKind::camera
+        : type == WKMediaCaptureTypeMicrophone
+            ? mosh::WebViewMediaCaptureKind::microphone
+            : mosh::WebViewMediaCaptureKind::cameraAndMicrophone;
+    decisionHandler (mosh::shouldGrantWebViewMediaCapture (kind)
+                         ? WKPermissionDecisionGrant
+                         : WKPermissionDecisionDeny);
 }
 - (BOOL)respondsToSelector:(SEL)aSelector
 {

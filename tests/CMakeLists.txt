@@ -10,6 +10,7 @@ target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_session_paths.cpp
     test_audio_device_startup.cpp
+    test_webview_camera_permission.cpp
     test_drum_pattern.cpp
     test_automation_mode.cpp
     test_automation_curve_write.cpp

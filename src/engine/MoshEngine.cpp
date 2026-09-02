@@ -664,7 +664,9 @@ juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputN
     if (probeSetup == nullptr)
         probeSetup = std::make_unique<juce::XmlElement> ("DEVICESETUP");
     probeSetup->setAttribute ("audioInputDeviceName", inputName);
-    probeSetup->setAttribute ("audioDeviceInChans", "11");
+    const auto inputChannels = audiostartup::inputChannelMaskForOpen (
+        te::DeviceManager::defaultNumChannelsToOpen);
+    probeSetup->setAttribute ("audioDeviceInChans", inputChannels.toString (2));
 
     const int timeoutMs = audiostartup::timeoutMsFromEnv (
         juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_TIMEOUT_MS", {}));
@@ -698,8 +700,8 @@ juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputN
         return "Audio input \"" + inputName + "\" could not open: " + response.error;
 
     setup.inputDeviceName = inputName;
-    setup.inputChannels.clear();
-    setup.useDefaultInputChannels = true;
+    setup.inputChannels = inputChannels;
+    setup.useDefaultInputChannels = false;
     if (const auto error = manager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
         return error;
 
