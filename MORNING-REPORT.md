@@ -90,7 +90,16 @@ Live-run lessons already promoted tonight:
   no orphans) — so it runs with the same documented one-time
   `MOSH_MAX_CODEX_CHILDREN=256` override as run 1.
 
-<!-- GATE_RESULT -->
+**Gate (native, `20cb69e8`, 07:10-07:28):** build_app, build_tests, catch2,
+**selftest ×3 = 3341/3341/3341 (0 failed)**, verify_py, daw_conformance,
+vitest, replay_e2e, harness/port/plist/patch-stack checks — all `ok`. Three
+bookkeeping steps were red and are fixed in the follow-up commit:
+`parity_coverage` (all 21 coverage waivers expired on 2026-09-01 — a
+calendar event; renewed to 2026-10-02 with a grep-backed re-review note
+each, precedent `20772cf5`), and `parity_scoreboard` /
+`daw_scoreboard_current` (`docs/FEATURE_AUDIT.md` regenerated: `list_palette`
+raised the dispatch surface to 260, 239 covered). Re-run the gate on the
+new HEAD before merging; the code-level steps did not change.
 
 ## Honest limits
 
@@ -128,8 +137,13 @@ OpenRouter was never needed (0 calls, $0). Shim ledger:
   verdict.json, MORNING-REPORT-produce.md, runs/<id>/{run.json, template.json,
   brain-replies.jsonl, program.jsonl, *.mosh, mix.wav, swap/}).
 - App instance from this worktree is left RUNNING (lab feed on 47873, pid in
-  `runs/app.pid`) so you can type the same ask in-app; quit it with
-  `kill -TERM $(cat ~/Library/Mosh/produce-ab/2026-09-02/runs/app.pid)`.
-  The shim is running too (`~/Library/Mosh/brain-shim/shim.pid`).
+  `runs/app.pid`). It was built at 06:46, BEFORE the "Vital" name-case and
+  compile-reply fixes, so its in-app produce path is stale — the overnight
+  runs drove the loop from Node, not from that bundle. To try the ask in-app:
+  `kill -TERM $(cat ~/Library/Mosh/produce-ab/2026-09-02/runs/app.pid)`, then
+  `bash scripts/produce-lane/launch-app.sh` (picks up the gate-rebuilt
+  binary + bundle), Settings → Moshi → "Produce mode (experimental)", type
+  the ask. The shim must be up (`~/Library/Mosh/brain-shim/shim.pid`;
+  `bash service/brain_shim/run-shim.sh &` if not).
 - Branch `claude/music-generation-workflow-19ca09` (PR #680) carries all
   commits; no merges, no pushes to shared branches.
