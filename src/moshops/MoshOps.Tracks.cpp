@@ -703,10 +703,9 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     auto& dm = eng.engine().getDeviceManager();
     auto* selectedDevice = dm.findInputDeviceForID (deviceID);
     const bool wantMidi = selectedDevice != nullptr && selectedDevice->isMidi();
-    track->state.setProperty (
-        ids::moshInputDeviceKind,
-        audiostartup::explicitInputKind (selectedDevice != nullptr, wantMidi),
-        nullptr);
+    const auto selectedKind = audiostartup::explicitInputKind (
+        selectedDevice != nullptr, wantMidi);
+    track->state.setProperty (ids::moshInputDeviceKind, selectedKind, nullptr);
 
     bool applied = false;
     bool wasArmed = false;
@@ -746,7 +745,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("deviceID", deviceID);
-    data->setProperty ("kind", wantMidi ? "midi" : "wave");
+    data->setProperty ("kind", selectedKind);
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", "no live input instance (choice stored)");
     logLine ("set_track_input", args, true, {}, false);   // preference — not undoable
@@ -1015,7 +1014,7 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
         auto* selectedDevice = eng.engine().getDeviceManager().findInputDeviceForID (chosenID);
         const bool currentlyMidi = selectedDevice != nullptr && selectedDevice->isMidi();
         const auto chosenKind = audiostartup::effectiveExplicitInputKind (
-            storedKind, selectedDevice != nullptr, currentlyMidi);
+            chosenID, storedKind, selectedDevice != nullptr, currentlyMidi);
         if (storedKind.isEmpty() && selectedDevice != nullptr)
             track->state.setProperty (ids::moshInputDeviceKind, chosenKind, nullptr);
         const bool explicitInputBlocksAudio = audiostartup::explicitInputBlocksAudioActivation (

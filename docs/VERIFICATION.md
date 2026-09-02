@@ -126,7 +126,7 @@ relay/multiplayer → MP-two-mac.
 
 | id | Steps | Expect | ~min | last-passed |
 | --- | --- | --- | --- | --- |
-| REC-mic | Arm the vocal track (voice/agent `arm_track` until the arm button ships), `set_count_in` 1 bar, record 4 bars against the click, stop. | Take lands where it was played; the count-in bar is audible but excluded from the clip. | 5 | — |
+| REC-mic | Arm the vocal track with `arm_track` (until the arm button ships), `set_count_in` 1 bar, record 4 bars against the click, stop. | Take lands where it was played; the count-in bar is audible but excluded from the clip. | 5 | — |
 | REC-latency | Record the metronome via a loopback (BlackHole/cable); zoom to a click transient in the recorded take. | Recorded transient within ~5 ms of the grid line (input-latency compensation applied). | 5 | — |
 | REC-monitor | Toggle `set_input_monitor` on the armed track while singing. | Live input audibly gates on/off with the toggle. | 1 | — |
 | EAR-fades | 1 s fade-in + fade-out on a clip; split a sustained clip and crossfade the splice. | No clicks/pops at any boundary; crossfade is smooth. | 3 | — |

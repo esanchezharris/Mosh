@@ -156,17 +156,28 @@ TEST_CASE ("an unknown setter route remains microphone cold when armed",
     CHECK (explicitInputKind (true, true) == "midi");
 }
 
-TEST_CASE ("legacy wave selections are classified when the device is available",
+TEST_CASE ("legacy wave selections survive output-only startup",
            "[audiostartup][privacy]")
 {
-    const auto availableWave = effectiveExplicitInputKind ({}, true, false);
-    const auto unavailableLegacy = effectiveExplicitInputKind ({}, false, false);
+    const auto availableWave = effectiveExplicitInputKind (
+        "wavein_live", {}, true, false);
+    const auto unavailableLegacyWave = effectiveExplicitInputKind (
+        "wavein_1a2b3c", {}, false, false);
+    const auto unavailableUnknown = effectiveExplicitInputKind (
+        "not-a-real-device", {}, false, false);
 
     CHECK (availableWave == "wave");
     CHECK_FALSE (explicitInputBlocksAudioActivation ("legacy-wave", availableWave, false));
-    CHECK (unavailableLegacy == "unknown");
+    CHECK (unavailableLegacyWave == "wave");
+    CHECK_FALSE (explicitInputBlocksAudioActivation (
+        "wavein_1a2b3c", unavailableLegacyWave, false));
+    CHECK (unavailableUnknown == "unknown");
     CHECK (explicitInputBlocksAudioActivation (
-        "missing-legacy-input", unavailableLegacy, false));
+        "not-a-real-device", unavailableUnknown, false));
+    CHECK (effectiveExplicitInputKind (
+        "wavein_live", "unknown", true, false) == "wave");
+    CHECK (effectiveExplicitInputKind (
+        "midiin_live", "unknown", true, true) == "midi");
 }
 
 TEST_CASE ("the probed input channel mask is reused for the live open",

@@ -114,13 +114,16 @@ namespace mosh::audiostartup
         return midi ? "midi" : "wave";
     }
 
-    inline juce::String effectiveExplicitInputKind (const juce::String& storedKind,
+    inline juce::String effectiveExplicitInputKind (const juce::String& chosenID,
+                                                     const juce::String& storedKind,
                                                      bool currentlyRecognized,
                                                      bool currentlyMidi)
     {
-        return storedKind.isNotEmpty()
-            ? storedKind
-            : explicitInputKind (currentlyRecognized, currentlyMidi);
+        if (currentlyRecognized)
+            return explicitInputKind (true, currentlyMidi);
+        if (storedKind.isNotEmpty())
+            return storedKind;
+        return chosenID.startsWith ("wavein_") ? "wave" : "unknown";
     }
 
     inline juce::BigInteger inputChannelMaskForOpen (int numChannels)
