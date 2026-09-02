@@ -100,7 +100,8 @@ describe("produce prompt composition (v2)", () => {
 
   it("pins the 9-step goal-only STEP PLAN order", () => {
     expect(PRODUCE_RULES).toContain("(1) drums, (2) 808, (3) lead, (4) chords, (5) drone + ambient, (6) counter, (7) stab, (8) arp, (9)");
-    expect(PRODUCE_RULES).toContain("under 120 notes");
+    expect(PRODUCE_RULES).toContain("under 120");
+    expect(PRODUCE_RULES).toContain("beat 0 to beat 32"); // Opus run 2026-09-02: drums stopped at bar 4
   });
 
   it("carries the load-bearing genre disciplines (correction-round lineage)", () => {
