@@ -21,12 +21,13 @@
 // off, so it's the ONLY case where every step's prompt stays byte-identical to the
 // pre-M2 shape.
 
-import { archivePair, brainChat, demoBrainAvailable } from "../../bridge";
+import { archivePair, brainChat, demoBrainAvailable, type BrainChatOptions } from "../../bridge";
 import { inScale, resolveKey, scaleMask } from "../../musicalKey";
 import { useSettings } from "../../settings/store";
 import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
 import { buildProduceSystemPrompt, isProduceAsk, PRODUCE_BUDGETS } from "./producePrompt";
+import { runProduceTemplate, type ProduceTemplate } from "./produceTemplate";
 import { createTaskExecutor, undoAgentTask } from "./taskExec";
 import { mockLoopChat } from "./loopBrainMock";
 import { hasSequentialMarkers } from "./router";
@@ -156,13 +157,22 @@ async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: str
 // cloud providers in order and VERIFY the responder (a requested-but-incomplete
 // provider resolves to a fallback natively — the result's `provider` field is
 // the truth). No local fallback: failing loudly beats producing quietly worse.
-const PRODUCE_CLOUD_PROVIDERS = ["deepseek", "openai", "xai"] as const;
+//
+// Order (W1.2, OVERNIGHT RUN 2): "openai" is the claude-cli shim's env-trio slot
+// (dev-time only — see W1.3), tried first per the owner's 2026-09-02 decision;
+// "openrouter" (Sonnet 5 via OpenRouter) is the fallback; deepseek/xai trail behind
+// both. PRODUCE_CHAT_OPTIONS raises the token ceiling and timeout well past the
+// DOSAGE defaults so a full multi-track program fits in one completion — the
+// DOSAGE lane (chatWithFallback above) never sees these, so its brainChat(messages)
+// call stays byte-identical to before this options seam existed.
+const PRODUCE_CLOUD_PROVIDERS = ["openai", "openrouter", "deepseek", "xai"] as const;
+const PRODUCE_CHAT_OPTIONS: BrainChatOptions = { maxTokens: 8192, timeoutMs: 180_000 };
 async function produceCloudChat(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
   if (demoBrainAvailable()) return mockLoopChat(messages); // dev/e2e surface stays deterministic
   let lastError: unknown;
   for (const p of PRODUCE_CLOUD_PROVIDERS) {
     try {
-      const r = await brainChat(messages, p);
+      const r = await brainChat(messages, p, PRODUCE_CHAT_OPTIONS);
       if (r.provider && r.provider !== p) { lastError = new Error(`${p} not configured (served by ${r.provider})`); continue; }
       return r;
     } catch (e) { lastError = e; }
@@ -254,14 +264,51 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
       // gets the genre-rule prompt and full-pass budgets; everything else keeps the
       // DOSAGE lane byte-identically (systemPrompt/budgets omitted).
       const produce = useSettings.getState().get("produceLane") === true && isProduceAsk(text);
-      run = await runAgentLoop({ ask: text }, {
-        chat: produce ? produceCloudChat : chatWithFallback,
-        env: exec.env,
-        signal,
-        onProgress: (ev) => useTaskStore.getState().progress(ev),
-        memory,
-        ...(produce ? { systemPrompt: buildProduceSystemPrompt, budgets: PRODUCE_BUDGETS } : {}),
-      });
+      // W2.5 — the produce-lane PREFLIGHT: a deterministic pass (tempo/key,
+      // sections, a 10-pad drum track, the sustained 808, 7 Vital synth tracks —
+      // see produceTemplate.ts) that runs ONCE inside the SAME undo transaction as
+      // the loop's own steps (exec.execRaw lazily opens it, same as env.runBatch),
+      // BEFORE the model's first call. `listPalette`/`presets` are deliberately
+      // omitted here — runProduceTemplate's own fallback already calls
+      // exec("list_palette", {}) / exec("list_presets", {plugin:"vital"}) when
+      // they're absent, so there is exactly one place that wiring lives.
+      let produceTemplate: ProduceTemplate | undefined;
+      let produceSetupError: string | undefined;
+      if (produce) {
+        try {
+          produceTemplate = await runProduceTemplate(text, { exec: exec.execRaw });
+        } catch (e) {
+          produceSetupError = `couldn't set up the produce-lane template: ${String(e).slice(0, 200)}`;
+        }
+      }
+      if (produceSetupError) {
+        run = {
+          finalSnapshot: await exec.env.getSnapshot(),
+          transcript: [],
+          stepCount: 0,
+          deferred: true,
+          outcome: "error",
+          error: produceSetupError,
+        };
+      } else {
+        run = await runAgentLoop({ ask: text }, {
+          chat: produce ? produceCloudChat : chatWithFallback,
+          env: exec.env,
+          signal,
+          onProgress: (ev) => useTaskStore.getState().progress(ev),
+          memory,
+          ...(produce
+            ? {
+                // Bound closure so the loop FSM's own 3-arg call site
+                // (loop.ts:99, `(snap, query, memory)`) stays exactly that shape —
+                // `template` never becomes a 4th argument the FSM has to know about.
+                systemPrompt: (snap: Snapshot | null, query?: string, mem?: string) =>
+                  buildProduceSystemPrompt(snap, query, mem, produceTemplate),
+                budgets: PRODUCE_BUDGETS,
+              }
+            : {}),
+        });
+      }
     }
   } finally {
     await exec.close(); // the task's undo transaction closes on EVERY exit path
