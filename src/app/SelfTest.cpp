@@ -8498,7 +8498,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Project safety: portable projects + relink (gap 3)");
     {
         const auto sessionEdit = eng.editFile();
-        const auto poolAudio   = eng.sessionDir().getChildFile ("audio");
+        const auto poolImports = eng.sessionDir().getChildFile ("imports");
 
         // local snapshot helpers (the trackById/clip helpers elsewhere are out of scope here)
         auto trackVar = [&] (const String& tid) -> var {
@@ -8524,7 +8524,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackId.isNotEmpty(), "create_track returned a trackId");
         check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", trackId }, { "seconds", 1 }, { "freq", 330 } }))), "add_test_tone_clip ok");
         const auto poolSrc = File (firstTrack (ops)["clips"][0].getProperty ("sourceFile", var()).toString());
-        check (poolSrc.isAChildOf (poolAudio), "clip audio starts in the shared session pool");
+        check (poolSrc.isAChildOf (poolImports), "clip audio starts in Mosh Imports");
 
         // DRM-001 — a drum track's sampler sounds (the bundled kit, stored as ABSOLUTE
         // bundle paths) must ALSO consolidate into the portable project, or the project
@@ -8544,7 +8544,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // On-disk edit must reference audio RELATIVELY (portable), never the shared pool.
         const auto xml = destEdit.loadFileAsString();
-        check (! xml.contains (poolAudio.getFullPathName()), "saved edit has no shared-pool absolute audio path");
+        check (! xml.contains (poolImports.getFullPathName()), "saved edit has no shared-pool absolute audio path");
         check (! xml.contains ("Resources/drumkits"),
                "saved edit references the kit by a relative path, not the absolute app-bundle path");
         check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
