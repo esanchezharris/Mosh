@@ -1,0 +1,41 @@
+{
+  "id": "produce-corrections/produce-r1-2026-09-02",
+  "created": "2026-09-02",
+  "ask": "produce me a dark jerk trap beat at 148 in D minor",
+  "prompt_version": "2",
+  "run": "/Users/emiliosanchez-harris/Library/Mosh/produce-ab/2026-09-02/runs/live5-sonnet",
+  "reference": "A-flywheel.wav \u2014 owner's Live 12 export of the corrected cATHARDIC_trap_r0_gen001 A section (4 bars, 6.5 s), copied from ~/Desktop into the package",
+  "rating": "fail",
+  "user_verdict": "these all sound bad (all 7 candidates rated fail: B-mosh-live3-sonnet, B-labkit-live3-sonnet, B-mosh-live4-opus, B-labkit-live4-opus, B-mosh-live5-sonnet, B-labkit-live5-sonnet, B-reference-notes-moshsounds)",
+  "notes": [
+    "timing / wrong notes",
+    "there's a synth part that's exactly the same through all runs; no variation in the synth sounds across runs",
+    "things fall apart towards the end - this is a known failure mode",
+    "parts of the drums sound exactly copied from our ableton session - we were able to get variations before",
+    "mix also isn't great but that's far from the main problem",
+    "808 / low end weak or wrong",
+    "drums groove / feel",
+    "composition (melody/chords/arrangement) AND sounds are both bad, not just the mix"
+  ],
+  "promoted_to": "ui/src/agent/loop/producePrompt.ts PRODUCE_VERSION 3 + produceCheck.ts (plan: correction round 2 \u2192 produce lane v3)",
+  "candidates": [
+    "B-mosh-live3-sonnet.wav",
+    "B-labkit-live3-sonnet.wav",
+    "B-mosh-live4-opus.wav",
+    "B-labkit-live4-opus.wav",
+    "B-mosh-live5-sonnet.wav",
+    "B-labkit-live5-sonnet.wav",
+    "B-reference-notes-moshsounds.wav"
+  ],
+  "analysis": {
+    "by": "Claude (data, not ear) \u2014 2026-09-02",
+    "findings": [
+      "No track note array is identical across runs 3/4/5, but the Vital presets AND samples are identical in all three: runProduceTemplate seed defaulted to 0 and the driver never varied it (note 2). The stab preset was keys-10924-cowbell-trap-6, the arp arp-lucy-blake-dpo-broken-wings-sq-1 (a sequence patch with its own internal motion).",
+      "PRODUCE_FEWSHOT carried bars 1-2 of the owner corrected beat (808+stab+hat); literal hat-hit overlap was 4/32 (run 3) and 0/32 (runs 4,5). Dropped anyway: concrete-note few-shot invites copying (note 4).",
+      "add_midi_clip: start/length are SECONDS, notes are BEATS (MoshOps.Clips.cpp:1779) \u2014 models wrote length 32 (a 32 s superset) and beat-unit notes, so timing is not a units bug. \"Wrong notes\" is harmonic: the prompt has the 808 move every 1-2 beats while chords hold 8 beats and \"follow\" it, so chord/arp tones clash with the moving bass; the prompt also demanded one off-grid note (note 1).",
+      "The flywheel record names the \"falls apart\" mode: PROMPT-trap-v4 anti-pattern \"Missing B section (must have contrasting section)\"; nothing checked B keeps the groove/hooks (note 3).",
+      "Every Mosh render peaks at 0.0 dBFS (clipping) yet sits 6-8 dB quieter than A (A: RMS -4.1 dBFS, crest 2.5 dB, darker spectrum) (note 5).",
+      "808 roots verified (808_p02_s61 = C1, lab spice = C1): tuning is right; the palette 808 is thin next to the pads \u2192 selection/level (note 6)."
+    ]
+  }
+}
