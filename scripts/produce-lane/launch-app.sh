@@ -27,7 +27,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 BIN_OVERRIDE=""
 MODEL="${MODEL:-sonnet}"
-WAIT_HEALTH_S=30
+WAIT_HEALTH_S=90
 while [ $# -gt 0 ]; do
   case "$1" in
     --bin) BIN_OVERRIDE="$2"; shift 2 ;;
@@ -97,8 +97,11 @@ export MOSH_ENABLE_SA3=1
 export MOSH_OWNER_RUNTIME_CONFIG=/nonexistent
 export MOSH_IGNORE_BUNDLED_BRAIN_CONFIG=1
 unset MOSH_BRAIN_PROXY_URL || true
-export OPENAI_BASE_URL="${OPENAI_BASE_URL:-http://127.0.0.1:8788/v1}"
-export OPENAI_API_KEY="${OPENAI_API_KEY:-shim}"
+# The `openai` provider slot IS the shim for this lane. The owner's profile
+# exports a real OPENAI_BASE_URL/OPENAI_API_KEY, so these are unconditional —
+# MOSH_SHIM_BASE_URL is the only override.
+export OPENAI_BASE_URL="${MOSH_SHIM_BASE_URL:-http://127.0.0.1:8788/v1}"
+export OPENAI_API_KEY="shim"
 export OPENAI_MODEL="$MODEL"
 export OPENROUTER_BASE_URL="${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}"
 export OPENROUTER_MODEL="${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}"

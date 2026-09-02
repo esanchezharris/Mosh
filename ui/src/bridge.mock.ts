@@ -3852,7 +3852,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "load_plugin": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const v = mockPluginCatalog.find((x) => x.id === str(args.pluginId)); if (!v) return err(command, "unknown plugin");
+      // Native PluginHost::findDescription accepts the catalog id OR the display
+      // name ("Vital"); mirror both so callers can use the real catalog name.
+      const wantedId = str(args.pluginId);
+      const v = mockPluginCatalog.find((x) => x.id === wantedId || x.name === wantedId); if (!v) return err(command, "unknown plugin");
       // Mirrors the native wave-3 guard (MoshOps::cmdLoadPlugin): an instrument on a
       // track holding WAVE clips is silent-by-construction and refused with the way
       // out named. Empty/MIDI-only tracks stay loadable (that's how one starts).

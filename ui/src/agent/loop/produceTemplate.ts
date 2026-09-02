@@ -60,7 +60,7 @@ export type ProduceTemplateDeps = {
   retryDelayMs?: number;
 };
 
-const VITAL_PLUGIN_ID = "vital"; // matches bridge.mock.ts's catalog id and (case-
+const VITAL_PLUGIN_ID = "Vital"; // PluginHost::findDescription matches `d.name == pluginId` CASE-SENSITIVELY (the catalog entry is name="Vital"); the mock lowercases. Was "vital" — every synth track failed with "unknown plugin" on the first live smoke. // matches bridge.mock.ts's catalog id and (case-
                                   // insensitively) native's PluginHost name lookup
 
 const SECTION_A = { name: "A", startBeat: 0, endBeat: 16 };

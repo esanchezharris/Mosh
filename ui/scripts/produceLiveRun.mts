@@ -410,7 +410,15 @@ async function main(): Promise<void> {
   const moshFile = resolve(OUT_DIR!, `produce-${RUN_ID}-${MODEL}.mosh`);
   const wavFile = resolve(OUT_DIR!, "mix.wav");
   const saveRes = await client.command("save_as", { file: moshFile }, { timeoutMs: 60_000 });
-  const exportRes = await client.command("export_audio", { file: wavFile, format: "wav", range: "loop", renderMode: "auto" }, { timeoutMs: 180_000 });
+  // No loop region is set by the preflight, so render an explicit 8-bar window
+  // (32 beats at the session tempo) rather than range:"loop".
+  const bpm = Number(finalSnap?.tempo ?? template?.bpm ?? 148) || 148;
+  const eightBarsSeconds = Number(template?.constants?.eightBarsSeconds) || (32 * 60) / bpm;
+  const exportRes = await client.command(
+    "export_audio",
+    { file: wavFile, format: "wav", range: "custom", start: 0, end: eightBarsSeconds, renderMode: "auto", tail: "include", tailSeconds: 1 },
+    { timeoutMs: 180_000 },
+  );
 
   let renderBytes = 0;
   let renderRmsDbfs: number | null = null;
