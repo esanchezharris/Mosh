@@ -144,18 +144,53 @@ function readPaletteManifest(path: string): readonly PaletteItem[] {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
   const items = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
   if (!Array.isArray(items)) throw new Error(`--swap manifest ${path}: expected an array or {items:[...]}`);
-  // Accept both the projected list_palette shape ({path, role, rootNote}) and the
-  // raw palette-v2 / lab manifest shape ({path, role_guess, root_note}).
+  // Accept both the projected list_palette shape ({path, role, rootNote,
+  // subEnergyDb}) and the raw palette-v2 / lab manifest shape ({path,
+  // role_guess, root_note, sub_energy_db}) — round 2 note 6's field, optional
+  // on either shape (drumPalette.ts's pickDrumPalette falls back to the
+  // nearest-root rule when it's absent).
   return items.map((item) => {
     const it = item as Record<string, unknown>;
     const role = typeof it.role === "string" ? it.role : it.role_guess;
     if (typeof it.path !== "string" || typeof role !== "string")
       throw new Error(`--swap manifest ${path}: every item needs string "path" and "role"/"role_guess" fields, got ${JSON.stringify(item).slice(0, 120)}`);
     const root = typeof it.rootNote === "number" ? it.rootNote : typeof it.root_note === "number" ? it.root_note : undefined;
+    const subEnergyDb = typeof it.subEnergyDb === "number" ? it.subEnergyDb
+      : typeof it.sub_energy_db === "number" ? it.sub_energy_db : undefined;
     const out: PaletteItem = { path: it.path, role };
     if (root !== undefined) (out as { rootNote?: number }).rootNote = root;
+    if (subEnergyDb !== undefined) (out as { subEnergyDb?: number }).subEnergyDb = subEnergyDb;
     return out;
   });
+}
+
+/** Best-effort read of a sibling JSON file next to `programPath` (same
+ *  directory a produceLiveRun.mts run wrote its run.json/template.json into).
+ *  Returns undefined on any I/O or parse failure — a missing/corrupt sibling
+ *  degrades to the caller's own default, never a hard failure. */
+function readSiblingJson(programPath: string, filename: string): Record<string, unknown> | undefined {
+  try {
+    const p = resolve(dirname(programPath), filename);
+    if (!existsSync(p)) return undefined;
+    return JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Round 2 note 2 (R2.2) — a `--swap` (or `--fixture`) replay re-runs the
+ *  W2.5 preflight from scratch, so without this it would silently draw a
+ *  FRESH seed (0, runProduceTemplate's default) instead of the ORIGINAL run's
+ *  — defeating the point of a same-notes-different-sounds A/B (the swap twin
+ *  must pick the SAME synth presets/808, just from the lab kit's files).
+ *  Reads run.json first (produceLiveRun.mts's own seed field), then
+ *  template.json (the preflight's own recorded seed) as a fallback. */
+function seedFromSibling(programPath: string): number | undefined {
+  const runJson = readSiblingJson(programPath, "run.json");
+  if (typeof runJson?.seed === "number") return runJson.seed;
+  const templateJson = readSiblingJson(programPath, "template.json");
+  if (typeof templateJson?.seed === "number") return templateJson.seed;
+  return undefined;
 }
 
 function templatePlaceholderMap(template: Record<string, unknown>): Record<string, string> {
@@ -210,12 +245,24 @@ async function main(): Promise<void> {
   const swapManifest = swapMatch ? resolve(swapMatch[1]!) : undefined;
   if (SWAP && !swapMatch) throw new Error(`produceReplay: --swap must look like "lab=<manifest.json>", got ${SWAP}`);
 
+  // R2.2 — the ORIGINAL run's seed, so a --swap twin picks the SAME synth
+  // presets/808 as the run it's paired against (just from a different sample
+  // source) rather than silently drawing runProduceTemplate's default seed 0.
+  // Read once, up front — plain replay doesn't use it (no preflight re-run),
+  // but the sibling lookup is cheap and this keeps --dry-run's config output
+  // honest about what a swap/fixture leg WOULD use even before it runs.
+  const seed = seedFromSibling(programPath);
+
   const resolvedConfig = {
     mode: FIXTURE ? "fixture" : swapManifest ? "swap" : "plain",
     programPath,
     outDir,
     runId: RUN_ID,
     swapManifest: swapManifest ?? null,
+    // null here (not 0) means "no sibling run.json/template.json found" —
+    // runProduceTemplate would then fall back to ITS OWN default (seed 0),
+    // not this driver silently substituting one.
+    seed: seed ?? null,
   };
 
   if (DRY_RUN) {
@@ -236,12 +283,23 @@ async function main(): Promise<void> {
   const session = `produce-replay-${RUN_ID}`; // leaf only: realEngine.runScript writes WORK/<session>.jsonl and prefixes _harness/ itself for MOSH_SELFTEST_SESSION
 
   if (!swapManifest && !FIXTURE) {
-    // (a) plain replay — the ORIGINAL template + note commands, verbatim.
+    // (a) plain replay — the ORIGINAL template + note commands, verbatim. No
+    // preflight re-run here, so `template` isn't in scope yet (it's declared
+    // further down, for the swap/fixture branch only) — the export window
+    // instead falls back to the sibling run's OWN recorded eightBarsSeconds
+    // (template.json), or its tempo (run.json), or 148 BPM as a last resort.
     const bin = findBin(argFlag("bin"));
+    const siblingTemplateJson = readSiblingJson(programPath, "template.json");
+    const siblingRunJson = readSiblingJson(programPath, "run.json");
+    const siblingEightBars = (siblingTemplateJson?.constants as { eightBarsSeconds?: unknown } | undefined)?.eightBarsSeconds;
+    const fallbackBpm = Number(siblingRunJson?.tempo) || Number(siblingTemplateJson?.bpm) || 148;
+    const eightBarsSecondsFallback = typeof siblingEightBars === "number" && siblingEightBars > 0
+      ? siblingEightBars
+      : (32 * 60) / fallbackBpm;
     const lines: EngineCmd[] = [
       { command: "new_project", args: {} },
       ...[...templateCmdsFromProgram, ...notes].map((l) => ({ command: l.command, args: l.args ?? {} }) as EngineCmd),
-      { command: "export_audio", args: { file: wavFile, format: "wav", range: "custom", start: 0, end: Number((template as { constants?: { eightBarsSeconds?: number } })?.constants?.eightBarsSeconds) || 32 * 60 / 148, renderMode: "auto", tail: "include", tailSeconds: 1 } },
+      { command: "export_audio", args: { file: wavFile, format: "wav", range: "custom", start: 0, end: eightBarsSecondsFallback, renderMode: "auto", tail: "include", tailSeconds: 1 } },
     ];
     const out = runScript(bin, lines, session, 600_000);
     return finish(outDir, wavFile, out.results, resolvedConfig);
@@ -276,6 +334,7 @@ async function main(): Promise<void> {
   // means "use THIS palette instead of list_palette's default."
   const templateDeps: ProduceTemplateDeps = { exec: harness.exec, getSnapshot: harness.getSnapshot };
   if (swapManifest) templateDeps.palette = readPaletteManifest(swapManifest);
+  if (seed !== undefined) templateDeps.seed = seed;
   const template = await mod.runProduceTemplate(ask, templateDeps);
   writeFileSync(resolve(outDir, "template.json"), JSON.stringify(template, null, 2));
 

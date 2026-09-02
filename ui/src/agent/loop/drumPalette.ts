@@ -17,8 +17,12 @@
 import type { SessionKey } from "../../types";
 
 /** Item shape shared by both the native manifest and the lab manifest. `rootNote`
- *  is present only on measured items (today: role "bass" — 808 one-shots). */
-export type PaletteItem = { readonly path: string; readonly role: string; readonly rootNote?: number };
+ *  is present only on measured items (today: role "bass" — 808 one-shots).
+ *  `subEnergyDb` (round 2, correction note 6) is a 30-120 Hz band RMS in dBFS,
+ *  written by the manifest generators onto "bass" items only — optional: a
+ *  manifest without it (or a native list_palette response that hasn't been
+ *  taught to forward it yet) degrades to the pre-round-2 nearest-root pick. */
+export type PaletteItem = { readonly path: string; readonly role: string; readonly rootNote?: number; readonly subEnergyDb?: number };
 
 /** One instrument preset, the shape `list_presets` returns per entry. */
 export type PresetItem = { readonly plugin: string; readonly name: string; readonly file: string; readonly source?: string };
@@ -55,14 +59,18 @@ export type DrumLane = {
   readonly chokeGroup?: number;
 };
 
+// Round 2 correction note 6 ("808 / low end weak or wrong; drums groove / feel"):
+// kick -2dB (was fighting the 808 for headroom), both hats -6dB (they were
+// washing out the groove), clap2 -6 -> -8dB (a layer tag should sit UNDER the
+// main clap it doubles, not beside it).
 export const DEFAULT_DRUM_LANES: readonly DrumLane[] = [
-  { id: "kick", note: 36, role: "kick", label: "Kick" },
+  { id: "kick", note: 36, role: "kick", label: "Kick", gainDb: -2 },
   { id: "snare", note: 38, role: "snare", label: "Snare" },
   { id: "snare2", note: 37, role: "snare", label: "Snare 2" },
   { id: "clap", note: 39, role: "clap", label: "Clap" },
-  { id: "clap2", note: 40, role: "clap", label: "Clap 2", gainDb: -6 },
-  { id: "hat", note: 42, role: "hat", label: "Hat", chokeGroup: 1 },
-  { id: "openhat", note: 46, role: "openhat", label: "Open Hat", chokeGroup: 1 },
+  { id: "clap2", note: 40, role: "clap", label: "Clap 2", gainDb: -8 },
+  { id: "hat", note: 42, role: "hat", label: "Hat", gainDb: -6, chokeGroup: 1 },
+  { id: "openhat", note: 46, role: "openhat", label: "Open Hat", gainDb: -6, chokeGroup: 1 },
   { id: "perc", note: 41, role: "perc", label: "Perc" },
   { id: "fx", note: 43, role: "fx", label: "FX" },
   { id: "roll", note: 44, role: "roll", label: "Roll" },
@@ -122,9 +130,20 @@ export function pickDrumPalette(items: readonly PaletteItem[], opts: PickDrumPal
   const bassCandidates = items.filter((i) => i.role === "bass" && typeof i.rootNote === "number");
   if (bassCandidates.length === 0)
     throw new Error("pickDrumPalette: no palette item with role \"bass\" and a measured rootNote");
-  const bassSorted = bassCandidates
-    .slice()
-    .sort((a, b) => Math.abs((a.rootNote! + 36) - 60) - Math.abs((b.rootNote! + 36) - 60) || a.path.localeCompare(b.path));
+  // Round 2 correction note 6 ("808 / low end weak or wrong"): when the
+  // manifest carries a measured sub-band level, the loudest 30-120 Hz item
+  // wins outright — a thin-sounding 808 was a level/selection problem, not a
+  // tuning one (every candidate is already re-pitched to keyNote via the
+  // rootNote+36 math below, so raw measured level is directly comparable).
+  // A manifest with no subEnergyDb on ANY bass candidate (the pre-round-2
+  // shape, and every existing fixture) falls back to the original
+  // nearest-to-60 rule unchanged.
+  const withEnergy = bassCandidates.filter((i) => typeof i.subEnergyDb === "number");
+  const bassSorted = withEnergy.length > 0
+    ? withEnergy.slice().sort((a, b) => (b.subEnergyDb! - a.subEnergyDb!) || a.path.localeCompare(b.path))
+    : bassCandidates
+        .slice()
+        .sort((a, b) => Math.abs((a.rootNote! + 36) - 60) - Math.abs((b.rootNote! + 36) - 60) || a.path.localeCompare(b.path));
   const bassItem = bassSorted[0]!;
 
   // Pool per role, sorted for determinism; `used` tracks paths already claimed so
@@ -206,6 +225,23 @@ function presetRoleOf(file: string): string {
   return base.split("-")[0]?.toLowerCase() ?? "";
 }
 
+// Round 2 correction note 2 ("there's a synth part that's exactly the same
+// through all runs" / "no variation in the synth sounds"): the constant-seed
+// bug is the root cause (fixed at the driver — produceLiveRun.mts's --seed),
+// but a SQ/ARP/SEQ-tagged patch has its OWN internal motion regardless of what
+// notes it's given ("arp-lucy-blake-dpo-broken-wings-sq-1" sounded identical
+// across runs even though its note data differed) — belt-and-braces alongside
+// the curate_vital.py source-side curation: prefer a filename that does NOT
+// look self-sequencing for every role except "arp", which WANTS that motion.
+// A soft preference, not a hard exclusion — a role whose only candidates are
+// all SQ/ARP/SEQ-tagged still gets one rather than going silent.
+const SQ_SEQ_ARP_RE = /sq|seq|arp/i;
+function preferNonSequencing(pool: readonly PresetItem[], role: SynthRole): readonly PresetItem[] {
+  if (role === "arp") return pool;
+  const safe = pool.filter((p) => !SQ_SEQ_ARP_RE.test(p.file));
+  return safe.length > 0 ? safe : pool;
+}
+
 /** Pick one non-repeating Vital preset per synth role from the curated menu.
  *  Deterministic given the same menu + seed. A role with no reachable preset
  *  (its whole preference chain, and the role-agnostic fallback, are exhausted)
@@ -225,15 +261,15 @@ export function pickSynthPresets(menu: PresetMenu, seed = 0): readonly SynthPres
   for (const bucket of byPresetRole.values()) bucket.sort((a, b) => a.file.localeCompare(b.file));
 
   const used = new Set<string>();
-  const takeFromPresetRole = (role: string): PresetItem | undefined => {
-    const bucket = (byPresetRole.get(role) ?? []).filter((p) => !used.has(p.file));
+  const takeFromPresetRole = (presetRole: string, role: SynthRole): PresetItem | undefined => {
+    const bucket = preferNonSequencing((byPresetRole.get(presetRole) ?? []).filter((p) => !used.has(p.file)), role);
     if (bucket.length === 0) return undefined;
     const picked = pickOne(bucket, rng);
     used.add(picked.file);
     return picked;
   };
-  const takeAnyLeftover = (): PresetItem | undefined => {
-    const leftover = vital.filter((p) => !used.has(p.file)).sort((a, b) => a.file.localeCompare(b.file));
+  const takeAnyLeftover = (role: SynthRole): PresetItem | undefined => {
+    const leftover = preferNonSequencing(vital.filter((p) => !used.has(p.file)).sort((a, b) => a.file.localeCompare(b.file)), role);
     if (leftover.length === 0) return undefined;
     const picked = pickOne(leftover, rng);
     used.add(picked.file);
@@ -244,10 +280,10 @@ export function pickSynthPresets(menu: PresetMenu, seed = 0): readonly SynthPres
   for (const role of SYNTH_ROLE_ORDER) {
     let found: PresetItem | undefined;
     for (const presetRole of SYNTH_ROLE_PREFERENCE[role]) {
-      found = takeFromPresetRole(presetRole);
+      found = takeFromPresetRole(presetRole, role);
       if (found) break;
     }
-    found = found ?? takeAnyLeftover(); // role-short fallback: any unused preset beats a bare 4OSC default
+    found = found ?? takeAnyLeftover(role); // role-short fallback: any unused preset beats a bare 4OSC default
     if (found) picks.push({ role, file: found.file, name: found.name });
   }
   return picks;

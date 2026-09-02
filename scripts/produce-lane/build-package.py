@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -48,13 +49,23 @@ from html import escape
 from pathlib import Path
 from typing import Any, Optional
 
-DEFAULT_REFERENCE_RELEASE = Path.home() / "Documents" / "release-f0a3f525-final.wav"
+# Round 2 (produce-r1-2026-09-02.meta.json): the provisional A was a symlink
+# to a file OUTSIDE the package folder (~/Documents) — browsers refuse
+# file:// parent traversal from audition.html, so it silently never played.
+# The owner has since exported the real corrected beat to
+# ~/Desktop/A-flywheel.wav (4-bar A section, 6.5s, float32) and, for this
+# round, straight into the package folder itself. resolve_a_reference below
+# either COPIES an explicit --a-file in (never symlinks — that's exactly how
+# round 1's A silently failed to play) or uses an A-flywheel.wav already
+# sitting in the folder; audition.html uses it as the ONLY A — no more
+# A-release-<slug>.wav symlink pointing outside the folder.
 DEFAULT_FLYWHEEL_NOTE = (
-    "A-flywheel.wav is not in this package: the corrected reference beat "
-    "exists ONLY as the Live set (cATHARDIC_trap_r0_gen001.als) and Live is "
-    "off-limits overnight. Export it by hand this morning (bounce the .als to "
-    "A-flywheel.wav and drop it in this folder) to complete the third A "
-    "reference."
+    "A-flywheel.wav is not in this package and no --a-file was given (or the "
+    "path didn't exist): the corrected reference beat exists ONLY as the Live "
+    "set (cATHARDIC_trap_r0_gen001.als) and Live is off-limits overnight. "
+    "Export it by hand (bounce the .als to a wav) and re-run this script with "
+    "--a-file <path> — it will be COPIED in, never symlinked, so it plays from "
+    "audition.html's file:// origin."
 )
 
 
@@ -120,30 +131,34 @@ def relink(dest: Path, target: Path, dry_run: bool) -> str:
     return f"linked {dest.name} -> {rel}"
 
 
-def slugify(text: str) -> str:
-    out = []
-    for ch in text:
-        if ch.isalnum():
-            out.append(ch.lower())
-        elif ch in "-_.":
-            out.append(ch)
-        else:
-            out.append("-")
-    slug = "".join(out).strip("-")
-    while "--" in slug:
-        slug = slug.replace("--", "-")
-    return slug or "candidate"
-
-
-def build_links(package_dir: Path, runs: list[RunInfo], fixture_wav: Optional[Path],
-                 reference_release: Path, dry_run: bool) -> list[str]:
+def resolve_a_reference(package_dir: Path, a_file_arg: Optional[Path], dry_run: bool) -> tuple[Optional[Path], list[str]]:
+    """Resolve the package's ONE A reference: A-flywheel.wav inside
+    package_dir. `a_file_arg` (--a-file), when given, is COPIED in (never
+    symlinked — browsers refuse file:// parent traversal, which is exactly
+    how round 1's provisional A silently failed to play) and OVERWRITES
+    whatever was already there. Absent --a-file, a real A-flywheel.wav
+    already sitting in the folder (the common case — the owner drops it in
+    by hand) is used as-is. Returns (path-or-None, report notes)."""
+    dest = package_dir / "A-flywheel.wav"
     notes: list[str] = []
-    if reference_release.is_file():
-        notes.append(relink(package_dir / f"A-release-{slugify(reference_release.stem)}.wav", reference_release, dry_run))
-    else:
-        notes.append(f"A-release reference NOT FOUND at {reference_release} — no A-release-*.wav symlink made")
+    if a_file_arg is not None:
+        src = a_file_arg.expanduser().resolve()
+        if not src.is_file():
+            notes.append(f"--a-file {src} not found — A-flywheel.wav NOT updated from it")
+        elif dry_run:
+            notes.append(f"would copy --a-file {src} -> {dest.name}")
+        else:
+            shutil.copyfile(src, dest)
+            notes.append(f"copied --a-file {src} -> {dest.name}")
+    if dest.is_file():
+        notes.append(f"using {dest.name} as the A reference")
+        return dest, notes
     notes.append(DEFAULT_FLYWHEEL_NOTE)
+    return None, notes
 
+
+def build_links(package_dir: Path, runs: list[RunInfo], fixture_wav: Optional[Path], dry_run: bool) -> list[str]:
+    notes: list[str] = []
     for r in runs:
         if r.mix_wav:
             notes.append(relink(package_dir / f"B-mosh-{r.run_id}.wav", r.mix_wav, dry_run))
@@ -171,6 +186,10 @@ button.play.playing{{background:#2b6cb0}}
 button.play:hover{{background:#555}}
 .name{{color:#ccc;font-family:ui-monospace,monospace;font-size:12px}}
 .meta{{color:#888;font-size:11px}}
+details.stems{{margin-top:8px}}
+details.stems summary{{cursor:pointer;color:#7fd4ff;font-size:11px;text-transform:uppercase}}
+details.stems button.play{{min-width:0;height:22px;padding:0 10px;font-size:11px}}
+details.stems .row{{padding:3px 0 3px 14px}}
 select{{background:#181818;color:#eee;border:1px solid #333;border-radius:4px;padding:3px 6px}}
 textarea.notes{{width:100%;min-height:44px;background:#181818;color:#eee;border:1px solid #333;border-radius:4px;font:12px ui-monospace,monospace;padding:6px;margin-top:6px}}
 #bar{{position:fixed;left:0;right:0;bottom:0;background:#000d;border-top:1px solid #333;padding:10px 16px;display:flex;gap:12px;align-items:center;backdrop-filter:blur(6px)}}
@@ -282,6 +301,7 @@ PAIR_TEMPLATE = """<div class="pair" data-candidate="{candidate_id}" data-candid
 <span class="name">{b_label}</span>
 <span class="meta">{meta}</span>
 </div>
+{stems_block}
 <div class="row">
 <label>rating <select class="rating"><option value="">-- pick --</option><option value="pass">pass</option><option value="pass_with_notes">pass_with_notes</option><option value="fail">fail</option></select></label>
 </div>
@@ -290,9 +310,36 @@ PAIR_TEMPLATE = """<div class="pair" data-candidate="{candidate_id}" data-candid
 """
 
 
+def stem_rows_html(package_dir: Path, stems: list[dict[str, Any]]) -> str:
+    """R2.8 — one play row per stem file (run.json.stems, written by
+    produceLiveRun.mts's export_stems call), folded under its candidate's B
+    row so the owner can name WHICH track is wrong next round instead of just
+    the whole mix. Empty string (no <details>) when the run has no stems —
+    an older run, or a run whose export_stems call failed."""
+    rows: list[str] = []
+    for i, s in enumerate(stems):
+        f = s.get("file")
+        if not isinstance(f, str):
+            continue
+        try:
+            rel = os.path.relpath(Path(f), start=package_dir)
+        except Exception:  # noqa: BLE001 — a bad path just drops that one stem row
+            continue
+        name = s.get("name") or Path(f).name
+        rows.append(
+            f'<div class="row"><button class="play" data-side="stem-{i}" data-src="{escape(rel, quote=True)}">&#9654;</button>'
+            f'<span class="name">{escape(str(name))}</span></div>'
+        )
+    if not rows:
+        return ""
+    return f'<details class="stems"><summary>stems ({len(rows)})</summary>\n' + "\n".join(rows) + "\n</details>"
+
+
 def render_audition_html(package_dir: Path, date_str: str, ask: str, runs: list[RunInfo],
-                          reference_release: Path) -> str:
-    reference_rel = os.path.relpath(reference_release, start=package_dir) if reference_release.is_file() else ""
+                          a_reference: Optional[Path]) -> str:
+    a_rel = os.path.relpath(a_reference, start=package_dir) if a_reference else ""
+    a_label = a_reference.name if a_reference else "(no A-flywheel.wav in this package — see the report)"
+    a_reference_file = escape("A-flywheel.wav" if a_reference else "", quote=True)
     pairs_html: list[str] = []
     for r in runs:
         if not r.mix_wav:
@@ -300,41 +347,45 @@ def render_audition_html(package_dir: Path, date_str: str, ask: str, runs: list[
         b_src = f"runs/{r.run_id}/mix.wav"
         rj = r.run_json
         meta = f"model={rj.get('model','?')} outcome={rj.get('outcome','?')} tracks={rj.get('tracks','?')} silent={rj.get('render',{}).get('silentRender','?')}"
+        stems = rj.get("stems") or []
         pairs_html.append(PAIR_TEMPLATE.format(
             candidate_id=escape(f"B-mosh-{r.run_id}", quote=True),
             candidate_file=escape(f"B-mosh-{r.run_id}.wav", quote=True),
-            reference_file=escape(f"A-release-{slugify(reference_release.stem)}.wav" if reference_rel else "", quote=True),
+            reference_file=a_reference_file,
             title=escape(f"run {r.run_id}"),
-            a_src=escape(reference_rel),
-            a_label=escape(reference_release.name if reference_rel else "(no A-release reference found)"),
+            a_src=escape(a_rel),
+            a_label=escape(a_label),
             b_src=escape(b_src),
             b_label=escape(f"B-mosh-{r.run_id}.wav"),
             meta=escape(meta),
+            stems_block=stem_rows_html(package_dir, stems if isinstance(stems, list) else []),
         ))
         if r.swap_wav:
             pairs_html.append(PAIR_TEMPLATE.format(
                 candidate_id=escape(f"B-labkit-{r.run_id}", quote=True),
                 candidate_file=escape(f"B-labkit-{r.run_id}.wav", quote=True),
-                reference_file=escape(f"A-release-{slugify(reference_release.stem)}.wav" if reference_rel else "", quote=True),
+                reference_file=a_reference_file,
                 title=escape(f"run {r.run_id} — sound-matched (labkit)"),
-                a_src=escape(reference_rel),
-                a_label=escape(reference_release.name if reference_rel else "(no A-release reference found)"),
+                a_src=escape(a_rel),
+                a_label=escape(a_label),
                 b_src=escape(f"runs/{r.run_id}/swap/mix.wav"),
                 b_label=escape(f"B-labkit-{r.run_id}.wav"),
                 meta="sound-matched replay: original run's notes, owner's lab kit",
+                stems_block="",
             ))
     fixture_mix = package_dir / "runs" / "fixture-replay" / "mix.wav"
     if fixture_mix.is_file():
         pairs_html.append(PAIR_TEMPLATE.format(
             candidate_id="B-reference-notes-moshsounds",
             candidate_file="B-reference-notes-moshsounds.wav",
-            reference_file=escape(f"A-release-{slugify(reference_release.stem)}.wav" if reference_rel else "", quote=True),
+            reference_file=a_reference_file,
             title="reference notes, Mosh sounds (fixture replay)",
-            a_src=escape(reference_rel),
-            a_label=escape(reference_release.name if reference_rel else "(no A-release reference found)"),
+            a_src=escape(a_rel),
+            a_label=escape(a_label),
             b_src="runs/fixture-replay/mix.wav",
             b_label="B-reference-notes-moshsounds.wav",
             meta="the corrected reference beat's own notes, played back with Mosh's own sounds",
+            stems_block="",
         ))
     return AUDITION_TEMPLATE.format(
         date=escape(date_str), ask=escape(ask or "(no ask recorded)"),
@@ -342,8 +393,8 @@ def render_audition_html(package_dir: Path, date_str: str, ask: str, runs: list[
     )
 
 
-def build_verdict_template(date_str: str, runs: list[RunInfo], reference_release: Path) -> list[dict[str, Any]]:
-    reference = f"A-release-{slugify(reference_release.stem)}.wav" if reference_release.is_file() else None
+def build_verdict_template(date_str: str, runs: list[RunInfo], a_reference: Optional[Path]) -> list[dict[str, Any]]:
+    reference = "A-flywheel.wav" if a_reference else None
     out: list[dict[str, Any]] = []
     for r in runs:
         if r.mix_wav:
@@ -383,7 +434,7 @@ def read_ledger_batch_end(ledger_path: Path) -> Optional[dict[str, Any]]:
 
 
 def build_morning_report(package_dir: Path, date_str: str, ask: str, runs: list[RunInfo],
-                          fixture_wav: Optional[Path], reference_release: Path,
+                          fixture_wav: Optional[Path], a_reference: Optional[Path],
                           link_notes: list[str]) -> str:
     lines: list[str] = []
     lines.append(f"# Produce-lane overnight report — {date_str}")
@@ -457,7 +508,10 @@ def build_morning_report(package_dir: Path, date_str: str, ask: str, runs: list[
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--produce-ab-dir", required=True, type=Path)
-    p.add_argument("--reference-release", type=Path, default=DEFAULT_REFERENCE_RELEASE)
+    p.add_argument("--a-file", type=Path, default=None,
+                    help="path to the corrected reference beat's wav — COPIED into the package "
+                         "folder as A-flywheel.wav (never symlinked). Omit to use an "
+                         "A-flywheel.wav already sitting in the package folder.")
     p.add_argument("--ask", default=None, help="override the ask shown in the report (defaults to the first run's ask)")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
@@ -477,13 +531,17 @@ def main() -> int:
     if not runs:
         eprint("[build-package] WARNING: no runs found — the package will still be built (empty audition page, a report noting zero runs).")
 
-    link_notes = build_links(package_dir, runs, fixture_wav, args.reference_release, args.dry_run)
-    for n in link_notes:
+    a_reference, a_notes = resolve_a_reference(package_dir, args.a_file, args.dry_run)
+    for n in a_notes:
         print(f"[build-package] {n}")
 
-    audition_html = render_audition_html(package_dir, date_str, ask, runs, args.reference_release)
-    verdict_template = build_verdict_template(date_str, runs, args.reference_release)
-    report_md = build_morning_report(package_dir, date_str, ask, runs, fixture_wav, args.reference_release, link_notes)
+    link_notes = a_notes + build_links(package_dir, runs, fixture_wav, args.dry_run)
+    for n in link_notes[len(a_notes):]:
+        print(f"[build-package] {n}")
+
+    audition_html = render_audition_html(package_dir, date_str, ask, runs, a_reference)
+    verdict_template = build_verdict_template(date_str, runs, a_reference)
+    report_md = build_morning_report(package_dir, date_str, ask, runs, fixture_wav, a_reference, link_notes)
 
     if args.dry_run:
         print("[build-package] --dry-run: not writing audition.html / verdict.json / MORNING-REPORT-produce.md")

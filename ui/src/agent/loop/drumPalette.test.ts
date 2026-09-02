@@ -49,12 +49,16 @@ describe("pickDrumPalette", () => {
     expect(roll!.file).toMatch(/\.wav$/);
   });
 
-  it("clap2 carries the -6dB layer gain and hat/openhat share chokeGroup 1", () => {
+  it("round-2 pad gain map: kick -2dB, hat/openhat -6dB, clap2 -8dB layer gain, hat/openhat share chokeGroup 1", () => {
     const pick = pickDrumPalette(PALETTE, { seed: 5 });
+    const kick = pick.pads.find((p) => p.note === 36)!;
+    expect(kick.gainDb).toBe(-2);
     const clap2 = pick.pads.find((p) => p.note === 40)!;
-    expect(clap2.gainDb).toBe(-6);
+    expect(clap2.gainDb).toBe(-8);
     const hat = pick.pads.find((p) => p.note === 42)!;
     const openhat = pick.pads.find((p) => p.note === 46)!;
+    expect(hat.gainDb).toBe(-6);
+    expect(openhat.gainDb).toBe(-6);
     expect(hat.chokeGroup).toBe(1);
     expect(openhat.chokeGroup).toBe(1);
   });
@@ -75,6 +79,22 @@ describe("pickDrumPalette", () => {
     const pick = pickDrumPalette(items.concat(PALETTE.filter((i) => i.role !== "bass")), { seed: 0 });
     expect(pick.bass.file).toBe("/b.wav");
     expect(pick.bass.keyNote).toBe(56);
+  });
+
+  it("round-2 note 6: picks the HIGHEST subEnergyDb bass item when the manifest carries it, even when that's NOT the nearest-to-60 root", () => {
+    const items: PaletteItem[] = [
+      { path: "/near.wav", role: "bass", rootNote: 24, subEnergyDb: -18 }, // keyNote 60 (exact center) but thin
+      { path: "/far-but-loud.wav", role: "bass", rootNote: 30, subEnergyDb: -6 }, // keyNote 66, further off-center but the fattest 808
+    ];
+    const pick = pickDrumPalette(items.concat(PALETTE.filter((i) => i.role !== "bass")), { seed: 0 });
+    expect(pick.bass.file).toBe("/far-but-loud.wav");
+    expect(pick.bass.keyNote).toBe(66);
+  });
+
+  it("falls back to the nearest-root rule when NO bass candidate carries subEnergyDb (pre-round-2 manifests)", () => {
+    const pick = pickDrumPalette(PALETTE, { seed: 0 });
+    // Unchanged from the pre-round-2 behavior: rootNote 24 -> keyNote 60 wins.
+    expect(pick.bass.file).toBe("/mock/palette/bass_1.wav");
   });
 
   it("throws a clear error when no bass item has a measured rootNote", () => {
@@ -138,5 +158,63 @@ describe("pickSynthPresets", () => {
     const picks = pickSynthPresets(scarce, 0);
     expect(picks).toHaveLength(1);
     expect(picks[0]!.role).toBe("lead");
+  });
+
+  // Round 2 correction note 2 — "there's a synth part that's exactly the same
+  // through all runs" / "no variation in the synth sounds across runs": the
+  // constant seed (runProduceTemplate defaulted to seed 0, and the driver
+  // never varied it) was the root cause, so a wide-enough menu really does
+  // rotate once the caller passes distinct seeds.
+  describe("round-2 seed rotation (note 2)", () => {
+    // >= 6 presets per role, so every role's own bucket alone has room to move.
+    const wide: PresetMenu = [
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Lead ${s}`, file: `/presets/vital/lead-${s}.vital` })),
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Pad ${s}`, file: `/presets/vital/pad-${s}.vital` })),
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Atmos ${s}`, file: `/presets/vital/atmos-${s}.vital` })),
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Pluck ${s}`, file: `/presets/vital/pluck-${s}.vital` })),
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Keys ${s}`, file: `/presets/vital/keys-${s}.vital` })),
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Arp ${s}`, file: `/presets/vital/arp-${s}.vital` })),
+      ...["a", "b", "c", "d", "e", "f", "g"].map((s) => ({ plugin: "vital", name: `Bell ${s}`, file: `/presets/vital/bell-${s}.vital` })),
+    ];
+
+    it("seeds 1..5 yield at least 3 distinct preset sets", () => {
+      const sets = [1, 2, 3, 4, 5].map((seed) => JSON.stringify(pickSynthPresets(wide, seed).map((p) => p.file).sort()));
+      expect(new Set(sets).size).toBeGreaterThanOrEqual(3);
+    });
+
+    it("never repeats a preset file within a single run's picks", () => {
+      for (const seed of [1, 2, 3, 4, 5]) {
+        const files = pickSynthPresets(wide, seed).map((p) => p.file);
+        expect(new Set(files).size).toBe(files.length);
+      }
+    });
+
+    it("prefers a non-SQ/SEQ/ARP-tagged filename for every role except arp", () => {
+      const tagged: PresetMenu = [
+        { plugin: "vital", name: "Trap Pluck SQ", file: "/presets/vital/pluck-trap-sq-1.vital" },
+        { plugin: "vital", name: "Trap Pluck Clean", file: "/presets/vital/pluck-trap-clean.vital" },
+        { plugin: "vital", name: "Lead A", file: "/presets/vital/lead-a.vital" },
+        { plugin: "vital", name: "Pad A", file: "/presets/vital/pad-a.vital" },
+        { plugin: "vital", name: "Atmos A", file: "/presets/vital/atmos-a.vital" },
+        { plugin: "vital", name: "Keys A", file: "/presets/vital/keys-a.vital" },
+        { plugin: "vital", name: "Arp Broken Wings SQ", file: "/presets/vital/arp-broken-wings-sq-1.vital" },
+      ];
+      // Across every seed, "counter" (preference chain: pluck, keys) never lands
+      // on the -sq- pluck while the clean alternative is available — the filter
+      // removes it from the pool entirely rather than merely de-weighting it.
+      for (const seed of [0, 1, 2, 3, 4]) {
+        const counter = pickSynthPresets(tagged, seed).find((p) => p.role === "counter");
+        expect(counter?.file).toBe("/presets/vital/pluck-trap-clean.vital");
+      }
+      const arp = pickSynthPresets(tagged, 0).find((p) => p.role === "arp");
+      expect(arp?.file).toBe("/presets/vital/arp-broken-wings-sq-1.vital"); // arp is exempt from the filter
+    });
+
+    it("a role whose only candidates are all SQ/SEQ/ARP-tagged still gets one (soft preference, not a hard block)", () => {
+      const onlyTagged: PresetMenu = [{ plugin: "vital", name: "Only Lead SQ", file: "/presets/vital/lead-sq-1.vital" }];
+      const picks = pickSynthPresets(onlyTagged, 0);
+      expect(picks).toHaveLength(1);
+      expect(picks[0]!.file).toBe("/presets/vital/lead-sq-1.vital");
+    });
   });
 });

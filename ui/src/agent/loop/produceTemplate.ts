@@ -34,12 +34,34 @@ export type ProduceSynth = {
   readonly presetError?: string;
 };
 
+/** Round 2 correction note 5 ("mix also isn't great") — the preflight's fixed
+ *  gain map + master-bus dynamics, recorded here so a run's template.json is
+ *  the honest record of what was actually asked for (not necessarily what
+ *  stuck — a failed set_track_volume/load_master_builtin call is recorded but
+ *  never aborts the preflight, same posture as a synth's presetError). */
+export type ProduceMix = {
+  /** trackId -> the dB requested via set_track_volume, keyed by the SAME role
+   *  labels as `roles` below ("drums", "808", plus the 7 SynthRole names). */
+  readonly gainsDb: Readonly<Record<string, number>>;
+  /** MIDI note -> the dB requested via set_drum_pad's gainDb (a subset of
+   *  DEFAULT_DRUM_LANES's own gainDb entries — recorded here too so a run's
+   *  mix is readable from template.json alone, without cross-referencing
+   *  drumPalette.ts's lane table). */
+  readonly padGainsDb: Readonly<Record<number, number>>;
+  /** load_master_builtin's type vocabulary (MoshOpsInternal.h's kBuiltins) has
+   *  no "limiter" entry today — this always tries it first anyway (so the
+   *  mix upgrades for free the day one ships) and falls back to "compressor". */
+  readonly master: { readonly requested: "limiter"; readonly loaded: "limiter" | "compressor" | null; readonly error?: string };
+};
+
 export type ProduceTemplate = {
   readonly bpm: number;
   readonly key: { readonly tonic: string; readonly mode: string };
+  readonly seed: number;
   readonly drums: { readonly trackId: string; readonly pads: readonly DrumPadPick[] };
   readonly bass: { readonly trackId: string; readonly keyNote: number; readonly file: string };
   readonly synths: readonly ProduceSynth[];
+  readonly mix: ProduceMix;
   readonly constants: { readonly eightBarsSeconds: number };
 };
 
@@ -65,6 +87,22 @@ const VITAL_PLUGIN_ID = "Vital"; // PluginHost::findDescription matches `d.name 
 
 const SECTION_A = { name: "A", startBeat: 0, endBeat: 16 };
 const SECTION_B = { name: "B", startBeat: 16, endBeat: 32 };
+
+// Round 2 correction note 5 ("mix also isn't great") — every Mosh render
+// peaked at 0 dBFS while sitting 6-8dB quieter than the owner's reference; a
+// fixed headroom map applied right after each track is created (not a
+// creative choice the model gets to make) plus a master-bus glue stage.
+const DRUMS_GAIN_DB = 0;
+const BASS_GAIN_DB = 3;
+const SYNTH_GAIN_DB: Record<SynthRole, number> = {
+  chords_pad: -9,
+  drone: -12,
+  ambient: -12,
+  lead: -6,
+  counter: -8,
+  stab: -6,
+  arp: -10,
+};
 
 /** Exported so producePrompt.ts's renderProduceTemplate can name a synth track the
  *  SAME way the preflight itself named it — one label table, not two. */
@@ -112,11 +150,31 @@ async function withRetry(
   return last;
 }
 
+/** Round 2 correction note 6 — `sub_energy_db` (the 30-120 Hz band-RMS field
+ *  the manifest generators write onto "bass" items) is projected onto
+ *  PaletteItem defensively: today's native list_palette (MoshOps.Plugins.cpp's
+ *  cmdListPalette) doesn't forward it yet, so this accepts either casing
+ *  (camelCase from a test/production seam that already normalized it, or the
+ *  manifest's own snake_case) and simply omits the field when neither is a
+ *  number — pickDrumPalette's fallback to the nearest-root rule handles that
+ *  the same way it always has. */
+function projectPaletteItem(raw: Record<string, unknown>): PaletteItem {
+  const subEnergyDb = typeof raw.subEnergyDb === "number" ? raw.subEnergyDb
+    : typeof raw.sub_energy_db === "number" ? raw.sub_energy_db : undefined;
+  return {
+    path: raw.path as string,
+    role: raw.role as string,
+    ...(typeof raw.rootNote === "number" ? { rootNote: raw.rootNote } : {}),
+    ...(subEnergyDb !== undefined ? { subEnergyDb } : {}),
+  };
+}
+
 async function resolvePalette(deps: ProduceTemplateDeps): Promise<readonly PaletteItem[]> {
   if (deps.palette) return deps.palette;
   if (deps.listPalette) return deps.listPalette();
   const r = await deps.exec("list_palette", {});
-  return (r.data as { items?: PaletteItem[] } | undefined)?.items ?? [];
+  const items = (r.data as { items?: Array<Record<string, unknown>> } | undefined)?.items ?? [];
+  return items.map(projectPaletteItem);
 }
 
 async function resolvePresets(deps: ProduceTemplateDeps): Promise<PresetMenu> {
@@ -157,6 +215,11 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
   const drumsTrackRes = await exec("create_track", { name: "Drums", type: "drum" });
   if (!drumsTrackRes.ok) throw new Error(`produceTemplate: create_track (drums) failed: ${drumsTrackRes.error ?? "unknown"}`);
   const drumsTrackId = trackIdOf(drumsTrackRes);
+  // Gain map applied right after each track is created (round 2 note 5) —
+  // best-effort, same posture as the pad gain/choke calls below: a mix level
+  // that fails to apply must never abort a preflight that otherwise built a
+  // whole beat.
+  await exec("set_track_volume", { trackId: drumsTrackId, db: DRUMS_GAIN_DB });
 
   for (const pad of pick.pads) {
     await exec("assign_sample", { trackId: drumsTrackId, note: pad.note, file: pad.file, name: pad.name });
@@ -183,6 +246,7 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
   await exec("assign_sample", {
     trackId: bassTrackId, note: pick.bass.keyNote, file: pick.bass.file, name: "808", mode: "melodic",
   });
+  await exec("set_track_volume", { trackId: bassTrackId, db: BASS_GAIN_DB });
 
   // ── 7 Vital synth tracks — real sounds before the model ever gets a turn ────
   const presets = await resolvePresets(deps);
@@ -193,6 +257,7 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
     const trackRes = await exec("create_track", { name: label });
     if (!trackRes.ok) throw new Error(`produceTemplate: create_track (${label}) failed: ${trackRes.error ?? "unknown"}`);
     const trackId = trackIdOf(trackRes);
+    await exec("set_track_volume", { trackId, db: SYNTH_GAIN_DB[role] });
 
     const picked = synthPicks.find((p) => p.role === role);
     if (!picked) {
@@ -220,12 +285,33 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
     synths.push({ trackId, role, preset: picked.name, file: picked.file });
   }
 
+  // ── master-bus glue (round 2 note 5) — try "limiter" first (not in
+  // MoshOpsInternal.h's kBuiltins today, so this always falls through to
+  // "compressor" as of this writing, but costs nothing to keep trying: the
+  // day a limiter type ships, this upgrades with no code change here). ──────
+  const padGainsDb: Record<number, number> = {};
+  for (const pad of pick.pads) if (pad.gainDb !== undefined) padGainsDb[pad.note] = pad.gainDb;
+  const gainsDb: Record<string, number> = { drums: DRUMS_GAIN_DB, "808": BASS_GAIN_DB, ...SYNTH_GAIN_DB };
+
+  let master: ProduceMix["master"];
+  const limiterRes = await exec("load_master_builtin", { type: "limiter" });
+  if (limiterRes.ok) {
+    master = { requested: "limiter", loaded: "limiter" };
+  } else {
+    const compressorRes = await exec("load_master_builtin", { type: "compressor" });
+    master = compressorRes.ok
+      ? { requested: "limiter", loaded: "compressor" }
+      : { requested: "limiter", loaded: null, error: compressorRes.error ?? limiterRes.error ?? "load_master_builtin failed" };
+  }
+
   return {
     bpm,
     key,
+    seed,
     drums: { trackId: drumsTrackId, pads: pick.pads },
     bass: { trackId: bassTrackId, keyNote: pick.bass.keyNote, file: pick.bass.file },
     synths,
+    mix: { gainsDb, padGainsDb, master },
     constants: { eightBarsSeconds: (32 * 60) / bpm }, // 32 beats @ 4/4 = 8 bars
   };
 }

@@ -163,6 +163,50 @@ describe("runProduceTemplate — the deterministic produce-lane preflight", () =
     expect(template.bass.file).toBeTruthy();
   });
 
+  it("round 2 note 5: applies the fixed gain map via set_track_volume and records it on template.mix, falling back load_master_builtin limiter -> compressor", async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const t = createTaskExecutor("produce", { utterance: "produce a beat" });
+    const spy: ProduceExec = async (command, args) => {
+      calls.push({ command, args });
+      return t.execRaw(command, args);
+    };
+    const template = await runProduceTemplate("produce a beat", { exec: spy, palette: PALETTE, presets: PRESETS, seed: 2 });
+    await t.close();
+
+    const volumeCalls = calls.filter((c) => c.command === "set_track_volume");
+    expect(volumeCalls.find((c) => c.args?.trackId === template.drums.trackId)?.args?.db).toBe(0);
+    expect(volumeCalls.find((c) => c.args?.trackId === template.bass.trackId)?.args?.db).toBe(3);
+    const dbFor = (role: string) => volumeCalls.find((c) => c.args?.trackId === template.synths.find((s) => s.role === role)!.trackId)?.args?.db;
+    expect(dbFor("chords_pad")).toBe(-9);
+    expect(dbFor("drone")).toBe(-12);
+    expect(dbFor("ambient")).toBe(-12);
+    expect(dbFor("lead")).toBe(-6);
+    expect(dbFor("counter")).toBe(-8);
+    expect(dbFor("stab")).toBe(-6);
+    expect(dbFor("arp")).toBe(-10);
+    expect(template.mix.gainsDb).toEqual({
+      drums: 0, "808": 3, chords_pad: -9, drone: -12, ambient: -12, lead: -6, counter: -8, stab: -6, arp: -10,
+    });
+
+    // MoshOpsInternal.h's kBuiltins has no "limiter" today — the mock mirrors
+    // that vocabulary, so this always falls back to "compressor" as of now.
+    const masterCalls = calls.filter((c) => c.command === "load_master_builtin");
+    expect(masterCalls.map((c) => c.args?.type)).toEqual(["limiter", "compressor"]);
+    expect(template.mix.master).toEqual({ requested: "limiter", loaded: "compressor" });
+
+    expect(template.seed).toBe(2);
+  });
+
+  it("round 2 note 6: the pad gain map (kick -2, hat/openhat -6, clap2 -8) is recorded on template.mix.padGainsDb keyed by MIDI note", async () => {
+    const t = createTaskExecutor("produce", {});
+    const template = await runProduceTemplate("produce a beat", { exec: t.execRaw, palette: PALETTE, presets: PRESETS, seed: 1 });
+    await t.close();
+    expect(template.mix.padGainsDb[36]).toBe(-2); // kick
+    expect(template.mix.padGainsDb[42]).toBe(-6); // hat
+    expect(template.mix.padGainsDb[46]).toBe(-6); // openhat
+    expect(template.mix.padGainsDb[40]).toBe(-8); // clap2
+  });
+
   it("a synth role with no matching Vital preset is recorded, not thrown", async () => {
     const t = createTaskExecutor("produce", {});
     const scarcePresets: PresetMenu = [{ plugin: "vital", name: "Only Lead", file: "/presets/vital/lead-only.vital" }];

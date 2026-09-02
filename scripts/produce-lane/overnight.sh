@@ -287,8 +287,11 @@ while [ "$run_index" -le "$MAX_RUNS" ]; do
   mkdir -p "$out_dir"
   log "run $run_id: model=$model seed=$run_index"
 
+  # R2.2 — a distinct seed per run (the run index itself: 1, 2, 3, ...) so
+  # drumPalette.ts's picker actually rotates presets/808 across the batch;
+  # the log line above already claimed this, this is what makes it true.
   live_args=(--url "http://127.0.0.1:${PORT:-47873}" --token-file "$TOKEN_FILE"
-    --ask "$ASK" --run-id "$run_id" --out-dir "$out_dir" --model "$model"
+    --ask "$ASK" --run-id "$run_id" --out-dir "$out_dir" --model "$model" --seed "$run_index"
     --hard-timeout-ms "$((PER_RUN_TIMEOUT_S * 1000))")
   [ "$MOCK_BRAIN" -eq 1 ] && live_args+=(--mock-brain)
 

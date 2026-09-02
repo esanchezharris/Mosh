@@ -27,7 +27,21 @@
 //     --run-id r1 --out-dir ~/Library/Mosh/produce-ab/2026-09-02/runs/r1 \
 //     [--mock-brain] [--brain shim|openrouter] [--model sonnet|opus] \
 //     [--timeout-ms 20000] [--hard-timeout-ms 720000] [--no-preflight] \
+//     [--seed <n>] [--no-repair] \
 //     [--pid <app pid, for RSS sampling>] [--dry-run]
+//
+// --seed (round 2 correction note 2 — "no variation in the synth sounds
+// across runs"): threaded into runProduceTemplate's drum/808/synth-preset
+// picking (drumPalette.ts). Defaults to an FNV-1a hash of --run-id, so two
+// runs never silently share the pre-round-2 constant-0 seed just because the
+// caller forgot the flag — overnight.sh passes a distinct seed (its own
+// run index) per run explicitly.
+//
+// --no-repair (R2.4 driver half — see tryLoadProduceCheck below): skip the
+// post-loop produceCheck pass entirely. The check+repair hook itself degrades the same
+// way the W2.5 preflight does when its dependency isn't landed yet: a dynamic,
+// try/catch-guarded import of produceCheck.ts, silently skipped (not a
+// failure) when that file doesn't exist on this worktree.
 //
 // `--dry-run` resolves and prints the full config as JSON and exits 0 WITHOUT
 // touching the companion server — the only mode safe to run with no app up.
@@ -51,6 +65,10 @@ import type { AgentEnv, StepCommandResult } from "../src/agent/loopSeam";
 // landed yet, unlike the dynamic `import()` below which is deliberately
 // try/catch-guarded for exactly that case.
 import type { ProduceTemplate, ProduceTemplateDeps } from "../src/agent/loop/produceTemplate";
+// Same erased-at-runtime reasoning for R2.4's repair hook — produceCheck.ts is
+// another agent's file; tryLoadProduceCheck below still dynamic-imports the
+// VALUES behind a try/catch, but the types are safe to name directly here.
+import type { CheckInput, CheckReport } from "../src/agent/loop/produceCheck";
 import type { Snapshot } from "../src/types";
 
 // ── args ────────────────────────────────────────────────────────────────────
@@ -78,11 +96,28 @@ const MODEL = argFlag("model", "sonnet")!;
 const TIMEOUT_MS = Number(argFlag("timeout-ms", "20000"));
 const HARD_TIMEOUT_MS = Number(argFlag("hard-timeout-ms", "720000"));
 const NO_PREFLIGHT = argBool("no-preflight");
+const NO_REPAIR = argBool("no-repair");
 const DRY_RUN = argBool("dry-run");
 const APP_PID = argFlag("pid");
+const SEED_FLAG = argFlag("seed");
 
 const TOKEN = TOKEN_FLAG ?? (TOKEN_FILE && existsSync(TOKEN_FILE) ? readTokenFile(TOKEN_FILE) : undefined);
 const OUT_DIR = OUT_DIR_ARG ? resolve(OUT_DIR_ARG) : undefined;
+
+// FNV-1a over the run id — deterministic (same --run-id ⇒ same default seed,
+// useful for a --dry-run sanity check) but decorrelated ACROSS run ids, which
+// is the property that actually matters here: two runs in the same overnight
+// batch must not silently collide on seed 0 (drumPalette.ts's picker was
+// hard-defaulted to that before round 2 — the root cause of note 2).
+function fnv1aHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+const SEED = SEED_FLAG !== undefined ? Number(SEED_FLAG) : fnv1aHash(RUN_ID);
 
 const resolvedConfig = {
   url: URL,
@@ -95,6 +130,8 @@ const resolvedConfig = {
   timeoutMs: TIMEOUT_MS,
   hardTimeoutMs: HARD_TIMEOUT_MS,
   preflight: !NO_PREFLIGHT,
+  repair: !NO_REPAIR,
+  seed: SEED,
   tokenPresent: !!TOKEN,
   pid: APP_PID ?? null,
 };
@@ -306,7 +343,7 @@ function makeLocalTaskExecutor(client: CompanionClient, label: string, meta: { u
 //    still run, degraded, on a worktree where produceTemplate.ts isn't
 //    landed yet; --no-preflight silences the resulting warning) ────────────
 
-async function tryPreflight(rawExec: ProduceTemplateDeps["exec"], getSnapshot: () => Promise<Snapshot>, ask: string): Promise<ProduceTemplate | undefined> {
+async function tryPreflight(rawExec: ProduceTemplateDeps["exec"], getSnapshot: () => Promise<Snapshot>, ask: string, seed: number): Promise<ProduceTemplate | undefined> {
   if (!resolvedConfig.preflight) return undefined;
   let mod: { runProduceTemplate?: (ask: string, deps: ProduceTemplateDeps) => Promise<ProduceTemplate> };
   try {
@@ -319,8 +356,54 @@ async function tryPreflight(rawExec: ProduceTemplateDeps["exec"], getSnapshot: (
     console.error("[produceLiveRun] produceTemplate.ts has no runProduceTemplate() export yet — skipping preflight.");
     return undefined;
   }
-  const template = await mod.runProduceTemplate(ask, { exec: rawExec, getSnapshot });
+  const template = await mod.runProduceTemplate(ask, { exec: rawExec, getSnapshot, seed });
   return template as ProduceTemplate;
+}
+
+// ── R2.4 repair hook (driver half) — checkProduceRun/renderCheckAsRepairError
+// live in produceCheck.ts (another agent's file, not yet landed on every
+// worktree): a dynamic, try/catch-guarded VALUE import, exactly tryPreflight's
+// idiom above; the CheckInput/CheckReport TYPES are imported directly at the
+// top of the file (erased at runtime — see that import's comment), so this
+// driver keeps working whether or not produceCheck.ts exists yet. ──────────
+
+type ProduceCheckModule = {
+  checkProduceRun: (input: CheckInput) => CheckReport;
+  renderCheckAsRepairError: (report: CheckReport) => string;
+};
+
+async function tryLoadProduceCheck(): Promise<ProduceCheckModule | undefined> {
+  let mod: Partial<ProduceCheckModule>;
+  try {
+    mod = await import("../src/agent/loop/produceCheck");
+  } catch {
+    console.error("[produceLiveRun] produceCheck.ts not available yet — skipping the R2.4 repair hook (the run still saves/exports normally). Pass --no-repair to silence this.");
+    return undefined;
+  }
+  if (typeof mod.checkProduceRun !== "function" || typeof mod.renderCheckAsRepairError !== "function") {
+    console.error("[produceLiveRun] produceCheck.ts has no checkProduceRun()/renderCheckAsRepairError() exports yet — skipping the repair hook.");
+    return undefined;
+  }
+  return mod as ProduceCheckModule;
+}
+
+/** Project the run's clips into produceCheck's CheckInput shape: which track
+ *  is which role (drums/808/the 7 SynthRoles, straight from the W2.5
+ *  template), and every note on it, in beats (matches add_midi_clip's own
+ *  units — MoshOps.Clips.cpp:1779, commands.ts:71). Undefined when either the
+ *  preflight never ran (no template — nothing to attribute roles to) or the
+ *  loop never produced a final snapshot (nothing to check). */
+function buildCheckInput(template: ProduceTemplate | undefined, snap: Snapshot | undefined): CheckInput | undefined {
+  if (!template || !snap) return undefined;
+  const roles: Record<string, string> = { [template.drums.trackId]: "drums", [template.bass.trackId]: "808" };
+  for (const s of template.synths) roles[s.trackId] = s.role;
+  const tracks: CheckInput["tracks"] = {};
+  for (const trackId of Object.keys(roles)) {
+    const t = snap.tracks?.find((x) => x.id === trackId);
+    const notes = (t?.clips ?? []).flatMap((c) => c.notes ?? []);
+    tracks[trackId] = notes.map((n) => ({ pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity }));
+  }
+  return { key: template.key, roles, tracks, pads: template.drums.pads.map((p) => p.note), bars: 8 };
 }
 
 // ── RSS sampling (optional, --pid) ─────────────────────────────────────────
@@ -367,13 +450,21 @@ async function main(): Promise<void> {
   let loopError: string | undefined;
   let finalSnap: Snapshot | undefined;
   let template: ProduceTemplate | undefined;
+  let checkResult: {
+    ok: boolean;
+    initial: CheckReport | null;
+    repaired: CheckReport | null;
+    repairAttempted: boolean;
+    repairOutcome?: string;
+    skippedReason?: string;
+  } | null = null;
 
   try {
     // The preflight's exec calls land inside the SAME undo unit as the loop's
     // steps — force the batch open before it runs (see forceOpen's comment).
     await exec.forceOpen();
     const rawExec = (command: string, args?: Record<string, unknown>) => client.command(command, args, { timeoutMs: TIMEOUT_MS });
-    template = await tryPreflight(rawExec, () => client.snapshot(), ASK!);
+    template = await tryPreflight(rawExec, () => client.snapshot(), ASK!, SEED);
     if (template) writeFileSync(resolve(OUT_DIR!, "template.json"), JSON.stringify(template, null, 2));
 
     // Same closure pattern producePrompt.ts's own header documents for
@@ -405,6 +496,42 @@ async function main(): Promise<void> {
     finalSnap = run.finalSnapshot;
     for (const step of run.transcript)
       step.commands.forEach((c, i) => programLines.push({ command: c.command, args: c.args, ok: step.results[i]?.ok, error: step.results[i]?.error }));
+
+    // ── R2.4 repair hook — after the loop ends, BEFORE save/export, while the
+    // batch is still open so a repair pass's commands land in the SAME undo
+    // transaction as everything else in this run. ──────────────────────────
+    const checkMod = await tryLoadProduceCheck();
+    if (checkMod) {
+      const input = buildCheckInput(template, finalSnap);
+      if (!input) {
+        checkResult = { ok: true, initial: null, repaired: null, repairAttempted: false, skippedReason: "no template/finalSnapshot to check (preflight skipped or the loop produced no snapshot)" };
+      } else {
+        const initial = checkMod.checkProduceRun(input);
+        checkResult = { ok: initial.ok, initial, repaired: null, repairAttempted: false };
+        if (!initial.ok && !NO_REPAIR) {
+          checkResult.repairAttempted = true;
+          const repairAsk = `${ASK!}\n\nREPAIR: ${checkMod.renderCheckAsRepairError(initial)}`;
+          const repairRun = await runAgentLoop({ ask: repairAsk }, {
+            chat: loggedChat,
+            env: exec.env,
+            budgets: { maxSteps: 6, maxPlannerCalls: 2, maxStepCalls: 6, softWallMs: 300_000 },
+            systemPrompt,
+            signal,
+            onProgress: (ev) => progressEvents.push(ev),
+          });
+          checkResult.repairOutcome = repairRun.outcome;
+          for (const step of repairRun.transcript)
+            step.commands.forEach((c, i) => programLines.push({ command: c.command, args: c.args, ok: step.results[i]?.ok, error: step.results[i]?.error }));
+          if (repairRun.finalSnapshot) finalSnap = repairRun.finalSnapshot;
+          const reInput = buildCheckInput(template, finalSnap);
+          if (reInput) {
+            const repaired = checkMod.checkProduceRun(reInput);
+            checkResult.repaired = repaired;
+            checkResult.ok = repaired.ok;
+          }
+        }
+      }
+    }
   } catch (e) {
     loopError = String((e as Error)?.message ?? e).slice(0, 500);
   } finally {
@@ -421,7 +548,7 @@ async function main(): Promise<void> {
   const saveRes = await client.command("save_as", { file: moshFile }, { timeoutMs: 60_000 });
   // No loop region is set by the preflight, so render an explicit 8-bar window
   // (32 beats at the session tempo) rather than range:"loop".
-  const bpm = Number(finalSnap?.tempo ?? template?.bpm ?? 148) || 148;
+  const bpm = Number(finalSnap?.session?.tempo ?? template?.bpm ?? 148) || 148;
   const eightBarsSeconds = Number(template?.constants?.eightBarsSeconds) || (32 * 60) / bpm;
   const exportRes = await client.command(
     "export_audio",
@@ -442,6 +569,18 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── R2.8 — stems, so the next correction round can name WHICH track is
+  // wrong instead of just "the mix". A generous timeout: rendering 9 tracks
+  // one-by-one runs well past a single export_audio's budget. Best-effort —
+  // a stems failure never fails the run; run.json.stemsError records why.
+  const stemsDir = resolve(OUT_DIR!, "stems");
+  mkdirSync(stemsDir, { recursive: true });
+  const stemsRes = await client.command("export_stems", { dir: stemsDir, format: "wav" }, { timeoutMs: 300_000 });
+  const stems = stemsRes.ok
+    ? ((stemsRes.data as { stems?: Array<{ trackId: string; name: string; index: number; file: string; bytes: number }> } | undefined)?.stems ?? [])
+    : [];
+  if (!stemsRes.ok) console.error(`[produceLiveRun] export_stems failed: ${stemsRes.error ?? "unknown error"}`);
+
   const rssAfterKb = rssKb(APP_PID);
   const endedAt = Date.now();
   const clipCount = (snap: Snapshot | undefined) => (snap?.tracks ?? []).reduce((n, t) => n + (t.clips?.length ?? 0), 0);
@@ -452,6 +591,7 @@ async function main(): Promise<void> {
     ask: ASK,
     model: MODEL,
     provider: MOCK_BRAIN ? "mock" : BRAIN_PRIMARY,
+    seed: SEED,
     outcome,
     error: loopError,
     brainErrors,
@@ -467,6 +607,10 @@ async function main(): Promise<void> {
     key: finalSnap?.session?.key ?? null,
     save: { ok: saveRes.ok, error: saveRes.error, file: moshFile },
     render: { file: wavFile, ok: exportRes.ok, error: exportRes.error, bytes: renderBytes, seconds: null, rmsDbfs: renderRmsDbfs, silentRender },
+    stems,
+    stemsOk: stemsRes.ok,
+    stemsError: stemsRes.ok ? undefined : stemsRes.error,
+    check: checkResult,
     appRssBeforeKb: rssBeforeKb,
     appRssAfterKb: rssAfterKb,
     preflight: !!template,
