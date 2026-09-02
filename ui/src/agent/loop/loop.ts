@@ -178,8 +178,18 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
         if (!r) { outcome = "error"; break; }
         say = r.say ?? say;
         if (r.status === "need_user") { outcome = "need_user"; break; }
-        if (!r.commands?.length) { outcome = r.status === "done" ? "done" : "error"; break; }
-        commands = r.commands;
+        // Models sometimes answer a compile request with the plan shape again,
+        // carrying this step's commands inside plan[i].commands (Sonnet did it
+        // on 2 of 4 compile replies in the first live produce run). Accept it
+        // when exactly one plan entry carries commands; anything else is still
+        // "no commands".
+        let compiled = r.commands;
+        if (!compiled?.length && r.plan?.length) {
+          const carrying = r.plan.filter((p) => p.commands?.length);
+          if (carrying.length === 1) compiled = carrying[0]!.commands;
+        }
+        if (!compiled?.length) { outcome = r.status === "done" ? "done" : "error"; break; }
+        commands = compiled;
         goal = step.goal;
         doneAfterStep = r.status === "done";
         planIdx++;

@@ -32,7 +32,7 @@
 // `--dry-run` resolves and prints the full config as JSON and exits 0 WITHOUT
 // touching the companion server — the only mode safe to run with no app up.
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, appendFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { makeCompanionClient, wavRmsDbfs, type CommandResult, type CompanionClient } from "./lib/companionClient.mts";
@@ -383,8 +383,17 @@ async function main(): Promise<void> {
       ? (snap: Snapshot | null, query?: string, memory?: string) => buildProduceSystemPrompt(snap, query, memory, template)
       : buildProduceSystemPrompt;
 
+    // Every raw model reply lands in brain-replies.jsonl beside the run so a
+    // parse/shape failure can be diagnosed from the file, not re-run.
+    const repliesPath = resolve(OUT_DIR!, "brain-replies.jsonl");
+    const loggedChat = async (messages: ChatMessage[]) => {
+      const r = await chatWithFallback(messages);
+      const lastUser = messages[messages.length - 1]?.content ?? "";
+      appendFileSync(repliesPath, JSON.stringify({ ts: Date.now(), ms: r.ms ?? null, userTail: lastUser.slice(-400), content: r.content }) + "\n");
+      return r;
+    };
     const run = await runAgentLoop({ ask: ASK! }, {
-      chat: chatWithFallback,
+      chat: loggedChat,
       env: exec.env,
       budgets: PRODUCE_BUDGETS,
       systemPrompt,
