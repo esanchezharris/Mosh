@@ -113,7 +113,7 @@ export const PRODUCE_RULES = [
   // ── synths — sustain/breaks/octave-dip is the mac-r0-001 stab rewrite,
   // generalized to every sustain-style role (counter, stab); chord holds now
   // point at CHORD RE-VOICING above instead of a fixed bar count ─────────────
-  "SYNTHS: lead plays 2-4 notes per bar. Chords are polyphonic (a batched add_note with simultaneous starts, 3-4 voices) — see CHORD RE-VOICING above for how long a voicing holds. Drone holds whole-bar (or longer) notes.",
+  "SYNTHS: lead plays 2-4 notes per bar. Chords are polyphonic (3-4 voices with simultaneous starts, all inside the ONE add_midi_clip notes array — never add_note, which needs a clip id you never learn) — see CHORD RE-VOICING above for how long a voicing holds. Drone holds whole-bar (or longer) notes.",
   // lesson: produce-corrections/mac-r0-001 note 1
   // lesson: produce-corrections/mac-r0-001 note 3
   "Counter and stab tracks SUSTAIN: hold single notes an eighth note to a dotted half, phrased as short motifs with REAL breaks (silence between phrases, not wall-to-wall) — never chains of 1-step staccato chords. Give at least one phrase a dip into the lower half of the register.",
