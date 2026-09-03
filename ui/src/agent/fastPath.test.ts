@@ -178,3 +178,59 @@ describe("matchFastPath — 'remember (that/my/I…) X' (AGT-MEM, M3)", () => {
     expect(a).toMatchObject({ kind: "remember" });
   });
 });
+
+// The fast path owns ABSOLUTE tempo only — an utterance that names its own BPM needs
+// no model to resolve. Relative tempo ("make it faster") deliberately stays with the
+// agent loop, which owns the dosage rule (+8-12%) and says out loud what it chose;
+// duplicating that constant here would give the same ask two different answers
+// depending on which lane caught it.
+describe("matchFastPath — absolute tempo", () => {
+  const bpm = (text: string, mode: "idle" | "recording" | "reviewing" = "idle") => {
+    const a = matchFastPath(text, ctx(mode));
+    return a === null ? null : cmds(a)[0];
+  };
+
+  it("sets the tempo from every common numeric phrasing", () => {
+    for (const [ask, want] of [
+      ["set the tempo to 128", 128],
+      ["set tempo 128", 128],
+      ["change the tempo to 140", 140],
+      ["bump the tempo to 140", 140],
+      ["set the bpm to 96", 96],
+      ["tempo 90", 90],
+      ["128 bpm", 128],
+      ["make it 128 bpm", 128],
+      ["set it to 128 bpm", 128],
+      ["put it at 90 bpm", 90],
+      ["bump it to 140 bpm", 140],
+    ] as const)
+      expect(bpm(ask), ask).toMatchObject({ command: "set_tempo", args: { bpm: want } });
+  });
+
+  it("never invents a tempo from a number that is not one", () => {
+    // The real hazard of a bare-number rule: these all carry digits and none is a tempo.
+    // "808" as a set_tempo would be a silent, musical-sounding corruption of the session.
+    expect(bpm("split the 808 clip at bar 3")).toBeNull();
+    expect(bpm("drop the drums 3 db")).toBeNull();
+    expect(matchFastPath("put me in at bar 8", ctx("idle"))).toMatchObject({ kind: "enterRecord", bar: 8 });
+  });
+
+  it("declines anything without an explicit number — that is the loop's dosage call", () => {
+    for (const ask of ["make it faster", "make it slower", "speed it up", "slow it down",
+                       "bring the tempo up", "set the tempo to something faster"])
+      expect(bpm(ask), ask).toBeNull();
+  });
+
+  it("declines questions and out-of-range values rather than acting on them", () => {
+    expect(bpm("whats the tempo")).toBeNull();
+    expect(bpm("what is the tempo")).toBeNull();
+    expect(bpm("is the tempo 128")).toBeNull();
+    expect(bpm("set the tempo to 5")).toBeNull();
+    expect(bpm("set the tempo to 5000")).toBeNull();
+  });
+
+  it("never changes tempo mid-take", () => {
+    expect(bpm("set the tempo to 128", "recording")).toBeNull();
+    expect(bpm("set the tempo to 128", "reviewing")).toMatchObject({ command: "set_tempo" });
+  });
+});
