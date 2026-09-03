@@ -16,6 +16,18 @@
       "brain": "none (headless replay)",
       "samples": "owner's Live-set kit (15drtt-jerk-r0)",
       "mix": "same chain"
+    },
+    "r3c-opus-s3-kitmatched": {
+      "seed": 3,
+      "brain": "none (headless replay)",
+      "samples": "palette-v2, 0 ms onsets, kit-matched",
+      "mix": "same chain, ids remapped by role, highpass really at 180 Hz"
+    },
+    "r3c-opus-s3-labkit": {
+      "seed": 3,
+      "brain": "none (headless replay)",
+      "samples": "owner's Live-set kit",
+      "mix": "same chain, ids remapped, highpass 180 Hz"
     }
   },
   "candidates": [
@@ -34,12 +46,27 @@
       "notes": [
         "It sounds better, but the presets in the melody are too boring. They sound just like naked sine waves."
       ]
+    },
+    {
+      "candidate": "B-mosh-r3c-opus-s3-kitmatched.wav",
+      "rating": "pass_with_notes",
+      "user_verdict": "pass_with_notes",
+      "notes": [
+        "clap is too quiet"
+      ]
+    },
+    {
+      "candidate": "B-mosh-r3c-opus-s3-labkit.wav",
+      "rating": "pass",
+      "user_verdict": "pass",
+      "notes": []
     }
   ],
-  "rating": "pass_with_notes on both",
+  "rating": "r3 (flawed): pass_with_notes ×2; r3c (corrected): labkit PASS (first clean pass), kitmatched pass_with_notes ('clap is too quiet')",
   "user_verdict": "see candidates[] — verbatim",
   "notes": [
-    "It sounds better, but the presets in the melody are too boring. They sound just like naked sine waves."
+    "It sounds better, but the presets in the melody are too boring. They sound just like naked sine waves.",
+    "r3c-kitmatched: clap is too quiet"
   ],
   "analysis": {
     "by": "Claude (data, not ear) — 2026-09-02",
@@ -50,8 +77,9 @@
       "So the verdict judged: kit-matched/labkit drums + 808 through the new master chain, the Lead preset, and five sine-wave parts. 'Sounds better' (drums/808/master) stands; the preset judgment does not apply to the curated presets — they were never heard in round 3.",
       "Round-2's labkit twin was NOT affected (same preflight as its original run, ids matched). The pass on B-labkit-r2-opus-s3 stands.",
       "Fix: replay remaps program trackIds by ROLE via the original run's template.json (ui/src/agent/loop/produceReplayRemap.ts, tested), refuses unmappable ids, and fails loudly if the track count grows during the note replay. Renders re-issued as r3b-opus-s3-{kitmatched,labkit}.",
-      "SECOND round-3 bug, found while verifying the r3b re-render: the `highpass` builtin's live Frequency parameter probed at 0.1814 normalised = Tracktion's 4000 Hz default. The preflight's 180 Hz was written to the CachedValue only; te::LowPassPlugin::updateFilters() reads the AutomatableParameter. So every melodic track in r3/r3b was highpassed at 4 kHz (drone stem centroid 229 → 3600 Hz; chords stem −22 → −60 dB RMS; lead >4 kHz energy 3 % → 44 %). 'Too boring / thin' was partly this. Fixed in MoshOps load_builtin/load_master_builtin (frequency->setParameter) with the selftest now reading the parameter; renders re-issued as r3c."
+      "SECOND round-3 bug, found while verifying the r3b re-render: the `highpass` builtin's live Frequency parameter probed at 0.1814 normalised = Tracktion's 4000 Hz default. The preflight's 180 Hz was written to the CachedValue only; te::LowPassPlugin::updateFilters() reads the AutomatableParameter. So every melodic track in r3/r3b was highpassed at 4 kHz (drone stem centroid 229 → 3600 Hz; chords stem −22 → −60 dB RMS; lead >4 kHz energy 3 % → 44 %). 'Too boring / thin' was partly this. Fixed in MoshOps load_builtin/load_master_builtin (frequency->setParameter) with the selftest now reading the parameter; renders re-issued as r3c.",
+      "r3c verdict: labkit = PASS (clean, first ever); kitmatched = pass_with_notes 'clap is too quiet'. The kit-matched clap lane (clap_p03_s47 at 0 dB + clap 2 at −8) reads quieter than the owner's clap; the template's new pad gains and the palette clap's own level are the levers. Owner chose NOT to iterate on this note now; priority moved to reference project files."
     ]
   },
-  "promoted_to": "r3c re-render of the same frozen notes with (1) track ids remapped by role and (2) the highpass actually at 180 Hz; the owner re-judges samples/mix/presets on r3c"
+  "promoted_to": "owner priority: reference-project acquisition (docs/references/SHORTLIST-2026-09.md). Clap level on the palette lane is an open, un-iterated note."
 }
