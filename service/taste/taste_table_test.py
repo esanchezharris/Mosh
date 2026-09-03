@@ -33,30 +33,13 @@ def _log_line(ts, seq, command, args):
                        "ok": True, "undoable": True})
 
 
-def _organic_boot(t0, clip, layer, verdict, ce):
-    """One listen->label session per render; CE separates accepts from rejects so the
-    audiobox family is informative on this synthetic archive."""
-    rows = [
-        _log_line(t0, 1, "enable_all_meters", {}),
-        _log_line(t0 + 100, 2, "render_layer", {"clipId": clip}),
-        _log_line(t0 + 2000, 3, "set_transport", {"position": 0.0}),
-    ]
-    if verdict == "accept":
-        rows.append(_log_line(t0 + 9000, 4, "accept_render",
-                              {"clipId": clip, "layerId": layer, "landing": "new_clip"}))
-    else:
-        # reject logs no layerId (matches the native handler) — the census recovers it
-        # only via a previous accept, so give rejects their own accept-free boots and
-        # test the layerId-less join is DROPPED from probe rows (no audio, no axes).
-        rows.append(_log_line(t0 + 9000, 4, "reject_render", {"clipId": clip}))
-    return rows
-
-
 with tempfile.TemporaryDirectory() as td:
     os.makedirs(os.path.join(td, "renders"), exist_ok=True)
     boots, renders = [], []
-    # 16 organic accepts with high CE, 16 whose layer we label via accept-then-later-
-    # reject in SEPARATE boots (re-render between => not contradicted).
+    # 16 organic accepts with high CE, 16 organic rejects with low CE — one listen->label
+    # boot per render. BOTH verdicts carry their own layerId (matching the native
+    # accept_render / reject_render handlers), so both classes join audio + axes and the
+    # probe sees a real two-class problem.
     t = 1_780_000_000_000
     for i in range(32):
         verdict = "accept" if i % 2 == 0 else "reject"
@@ -79,7 +62,9 @@ with tempfile.TemporaryDirectory() as td:
             _log_line(t + 9000, seq, "accept_render",
                       {"clipId": clip, "layerId": layer, "landing": "new_clip"})
             if verdict == "accept" else
-            _log_line(t + 9000, seq, "reject_render", {"clipId": clip}))
+            _log_line(t + 9000, seq, "reject_render",
+                      {"clipId": clip, "layerId": layer, "cacheKey": f"ck-{i}",
+                       "adapter": "stable_audio3"}))
         boots.append(boot)
         ce = 6.0 + 0.05 * i if verdict == "accept" else 3.0 + 0.05 * i
         d = os.path.join(td, "renders", layer)
@@ -92,11 +77,6 @@ with tempfile.TemporaryDirectory() as td:
         renders.append(layer)
         t += 60_000
 
-    # Rejects carry no layerId and no prior accept in-boot -> they cannot join audio.
-    # To make the table informative, ALSO write a variant where rejects DO join:
-    # the census recovers reject layerIds from a same-boot accept only; so instead
-    # emit rejects as accept-then-re-render-then-reject in one boot (re-render breaks
-    # the contradiction rule, and the reject joins the accept's layer).
     with open(os.path.join(td, "mosh-log.jsonl"), "w") as f:
         for boot in boots:
             for ln in boot:
@@ -109,22 +89,62 @@ with tempfile.TemporaryDirectory() as td:
     check("both families present", set(fam) == {"audiobox", "fake"})
 
     ab = fam["audiobox"]
-    # Only accepts join audio+axes (rejects log no layerId) -> single class -> honest
-    # insufficient_labels, never a number.
-    check("audiobox: single-class -> insufficient_labels, no AUC",
-          ab["status"] == "insufficient_labels" and ab["auc"] is None,
+    # Both verdicts join audio+axes now that the reject label carries its own layerId, and
+    # CE separates the classes by construction -> the ok path, with a real AUC. Before the
+    # join-key fix the rejects could not join at all and this family was single-class.
+    check("audiobox: both classes join -> ok status with an AUC",
+          ab["status"] == "ok" and ab["auc"] is not None and ab["n"] == 32,
           json.dumps(ab))
+    check("audiobox: separable synthetic archive scores AUC 1.0",
+          ab["auc"] == 1.0, json.dumps(ab))
 
     md = build_table.render_markdown(report)
     check("markdown has the table header",
           "| family |" in md and "| audiobox |" in md and "| fake |" in md)
-    check("markdown never renders a fake number for an unscored family",
-          "insufficient_labels" in md)
 
     # Determinism.
     r2 = build_table.build_report(td, families=("audiobox", "fake"))
     check("build_report deterministic",
           json.dumps(report, sort_keys=True) == json.dumps(r2, sort_keys=True))
+
+
+# The honesty contract, on its own archive: a single-class archive (accepts only, the
+# shape a producer who never rejects actually produces) NEVER gets a number. This used to
+# ride on the main archive's unjoinable rejects; with the join-key fix that archive is
+# two-class, so the case gets its own fixture rather than quietly losing coverage.
+with tempfile.TemporaryDirectory() as td_one:
+    os.makedirs(os.path.join(td_one, "renders"), exist_ok=True)
+    one_boots = []
+    t = 1_780_000_000_000
+    for i in range(8):
+        layer, clip = f"only-{i}", str(200 + i)
+        boot = [_log_line(t, 1, "enable_all_meters", {}),
+                _log_line(t + 100, 2, "render_layer", {"clipId": clip})]
+        seq = 3
+        for k in range(1 + i % 4):
+            boot.append(_log_line(t + 2000 + 300 * k, seq, "set_transport",
+                                  {"position": float(k)}))
+            seq += 1
+        boot.append(_log_line(t + 9000, seq, "accept_render",
+                              {"clipId": clip, "layerId": layer, "landing": "new_clip"}))
+        one_boots.append(boot)
+        d = os.path.join(td_one, "renders", layer)
+        os.makedirs(d)
+        json.dump({"ok": True, "adapter": "stable_audio3", "pq": 6.0,
+                   "axes": {"CE": 6.0 + 0.05 * i, "CU": 5.0, "PC": 2.0, "PQ": 6.0}},
+                  open(os.path.join(d, "output_manifest.json"), "w"))
+        open(os.path.join(d, "output.wav"), "wb").write(b"RIFF0000WAVE" + bytes([i]) * 32)
+        t += 60_000
+    with open(os.path.join(td_one, "mosh-log.jsonl"), "w") as f:
+        for boot in one_boots:
+            for ln in boot:
+                f.write(ln + "\n")
+    one = build_table.build_report(td_one, families=("audiobox",))
+    ab1 = one["families"][0]
+    check("accepts-only archive -> insufficient_labels, no AUC",
+          ab1["status"] == "insufficient_labels" and ab1["auc"] is None, json.dumps(ab1))
+    check("markdown never renders a fake number for an unscored family",
+          "insufficient_labels" in build_table.render_markdown(one))
 
 # A separable archive where BOTH classes join audio+axes: accept and reject rows
 # built directly (unit-level entry) — proves the ok-path renders an AUC.

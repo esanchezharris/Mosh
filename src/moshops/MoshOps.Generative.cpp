@@ -41,6 +41,15 @@ namespace
         std::function<void()> fn;
         void timerCallback() override { stopTimer(); if (fn) fn(); }
     };
+
+    // An EXPLICIT producer "no" on the take currently on this layer, set by reject_render and
+    // cleared whenever a NEW take lands (apply / accept — a new render deserves a fresh verdict).
+    // ids::userKept CANNOT carry this: RenderLayer.h stamps userKept=false on every layer it
+    // builds, so `false` is the DEFAULT, not a verdict — and since the in-place auto-apply
+    // removed accept/reject from the wave loop, a perfectly good kept render never sets it true.
+    // logKeptRenderLabels() reads this flag so an explicitly rejected take is not swept into the
+    // render_kept soft-POSITIVE. File-local, round-trip-safe (see kLandedClipId's note).
+    const juce::Identifier kUserRejected ("userRejected");
 }
 
 juce::var MoshOps::cmdAddRenderLayer (const juce::var& args)
@@ -1197,6 +1206,7 @@ bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree no
     const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
     mosh::repointWaveClipSource (*wave, dest, eng.editFile().getParentDirectory(), local);
     node.setProperty (ids::appliedInPlace, true, nullptr);
+    node.setProperty (kUserRejected, false, nullptr);   // a NEW take: the old reject no longer applies
     // cacheArtifact stored ABSOLUTE; cmdSaveAs's consolidateRenderArtifacts copies it into
     // audio/renders/ + re-points it relative (so the saved project carries no absolute pool path).
     node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
@@ -1261,6 +1271,7 @@ bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTre
     midi->setMuted (true);
     node.setProperty (kLandedClipId, landed->itemID.toString(), &undoManager());
     node.setProperty (kSourceMutedByLayer, true, &undoManager());
+    node.setProperty (kUserRejected, false, &undoManager());   // a NEW take supersedes the old verdict
     node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);   // regenerable metadata → no undo
     node.setProperty (ids::cacheKey, cacheKey, nullptr);
     node.setProperty (ids::status, "ready", nullptr);
@@ -1350,6 +1361,11 @@ juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
 // producer persists the project (save / export_audio) was implicitly kept. One label
 // per layer (deduped on layerId in renderKeptLogged_); bypassed layers are skipped —
 // at this moment the producer is A/B'd back to the original, so "kept" would overclaim.
+// EXPLICITLY REJECTED layers are skipped for the stronger version of the same reason: the
+// producer already said no to this take in words. reject_render marks the layer dirty without
+// unwinding the in-place apply, so appliedInPlace alone cannot tell a survivor from a reject —
+// only kUserRejected can, and without it every reject earned an implicit render_kept POSITIVE
+// on the next save/export.
 void MoshOps::logKeptRenderLabels()
 {
     for (auto* t : te::getAudioTracks (eng.edit()))
@@ -1359,6 +1375,7 @@ void MoshOps::logKeptRenderLabels()
             auto rl = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
             if (! rl.isValid() || ! (bool) rl[ids::appliedInPlace]) continue;
             if (rl[ids::status].toString() == "bypassed") continue;
+            if ((bool) rl[kUserRejected]) continue;   // the producer said no to THIS take
             const auto layerId = rl[ids::id].toString();
             if (layerId.isEmpty() || renderKeptLogged_.contains (layerId)) continue;
             renderKeptLogged_.add (layerId);
@@ -1707,6 +1724,7 @@ bool MoshOps::renderAheadWindowDone (int k, int epoch, const juce::File& outFile
         if (node.isValid())
         {
             node.setProperty (ids::appliedInPlace, true, nullptr);
+            node.setProperty (kUserRejected, false, nullptr);   // a NEW take supersedes the old verdict
             node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
             node.setProperty (ids::status, "ready", nullptr);
         }
@@ -2337,6 +2355,7 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 
     node.setProperty (ids::userKept, true, &undoManager());
     node.setProperty (ids::status, "ready", &undoManager());
+    node.setProperty (kUserRejected, false, &undoManager());   // an explicit yes clears an earlier no
     // Record the landed neural clip so bypass_layer can re-route real audio (AL-008):
     // bypassing mutes THIS clip → the mix falls back to the original (pre-render) source.
     // A re-accept after bypass must start un-bypassed, so the new landed clip plays.
@@ -2354,12 +2373,30 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 
 juce::var MoshOps::cmdRejectRender (const juce::var& args)
 {
-    auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto node = findRenderLayer (clipId);
     if (! node.isValid()) return errResult ("reject_render", "no render layer");
     beginTxn ("reject_render");
     node.setProperty (ids::userKept, false, &undoManager());
     node.setProperty (ids::status, "dirty", &undoManager());
-    logLine ("reject_render", args, true, {}, true);   // TASTE LABEL (reject)
+    // The explicit "no", recorded as its own bit. reject does NOT unwind the in-place apply
+    // (that is reset_render_layer's job), so the layer stays appliedInPlace — and without this
+    // flag logKeptRenderLabels() would sweep the rejected take on the very next save/export and
+    // write a render_kept soft POSITIVE over a hard NEGATIVE. userKept can't stand in for it:
+    // false is that property's default on every layer, not a verdict.
+    node.setProperty (kUserRejected, true, &undoManager());
+    // JSONL TASTE LABEL (05 §9): reject is the workflow's explicit negative — carry the join
+    // keys (layerId/cacheKey/adapter) exactly as cmdResetRenderLayer does, so the label pairs
+    // with the render artifact in the taste census on its own instead of being reconstructed
+    // from the boot's most recent accept.
+    {
+        auto* tl = new DynamicObject();
+        tl->setProperty ("clipId", clipId);
+        tl->setProperty ("layerId", node[ids::id]);
+        tl->setProperty ("cacheKey", node[ids::cacheKey]);
+        tl->setProperty ("adapter", node[ids::modelAdapter]);
+        logLine ("reject_render", var (tl), true, {}, true);
+    }
     emitSnapshotInvalidated();
     return okResult ("reject_render");
 }

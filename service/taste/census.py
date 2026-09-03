@@ -1,7 +1,8 @@
 """Taste-label census over a Mosh session dir (charter Q1/Q3 groundwork).
 
 Reads mosh-log.jsonl + renders/<layerId>/ and classifies every accept_render /
-reject_render event:
+reject_render event (both carry their own layerId join key; see join_renders for the
+legacy-archive fallback covering rejects logged before that was true):
 
 - scripted:      the enclosing boot is a known harness replay (the verify/demo scripts
                  run against the real ~/Library/Mosh — the "JUCE ignores $HOME" class).
@@ -115,8 +116,18 @@ def label_rows(boots):
 
 def join_renders(session_dir, labels):
     """Attach each label's on-disk render artifact (wav path + manifest fields).
-    reject_render logs no layerId; recover it from the boot's most recent accept or
-    the renders/ dir is left unjoined (wav None)."""
+
+    Labels carry their own layerId: accept_render always did, and reject_render does
+    since the join-key fix (MoshOps::cmdRejectRender now builds an enriched taste label
+    -- clipId/layerId/cacheKey/adapter -- instead of logging the caller's raw args).
+
+    The last-layer-for-clip fallback below is LEGACY ONLY: reject rows already written
+    to the archive before that fix carry clipId alone, so they are recovered from the
+    most recent layerId seen for that clip in the same boot. It is a guess, not a join
+    -- a boot that rejects a take it never accepted has no layer to recover -- so it
+    applies only when the row itself has no layerId, and an unrecoverable row stays
+    honestly unjoined (wav None) rather than being attached to someone else's render.
+    Do not extend it: new rows must join on their own key."""
     rows = []
     last_layer_for_clip = {}
     for r in sorted(labels, key=lambda x: (x["ts"], x["verdict"])):
@@ -124,7 +135,7 @@ def join_renders(session_dir, labels):
         if layer:
             last_layer_for_clip[(r["boot"], r["clipId"])] = layer
         else:
-            layer = last_layer_for_clip.get((r["boot"], r["clipId"]))
+            layer = last_layer_for_clip.get((r["boot"], r["clipId"]))   # legacy rows only
         out = dict(r)
         out["layerId"] = layer
         out["wav"] = None
