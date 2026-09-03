@@ -170,11 +170,13 @@ ensure_node_modules() {
 
 run_py_tests() {
   # Run any test_*.py / *_test.py under dirs that this branch touched (relay/, service/).
+  # NB: git's 'service/**/*_test.py' does NOT match files directly under service/ (only
+  # nested ones), so 'service/*_test.py' is listed too; sort -u keeps the overlap from running twice.
   local changed; changed="$( ( cd "$WT" && git diff --name-only "$BASE...HEAD" 2>/dev/null ) || true )"
   grep -qE '^(relay|service)/' <<< "$changed" || { emit_step "py_tests" true '{"detail":"no py changes"}'; return 0; }
   local found=0 ok=true failed_tests="" log; log="$(mktemp)"
   local t
-  for t in $( cd "$WT" && git ls-files 'relay/*test*.py' 'relay/test_*.py' 'service/**/*_test.py' 'service/scripts/*test*.py' 2>/dev/null | sort -u ); do
+  for t in $( cd "$WT" && git ls-files 'relay/*test*.py' 'relay/test_*.py' 'service/*_test.py' 'service/**/*_test.py' 'service/scripts/*test*.py' 2>/dev/null | sort -u ); do
     found=1
     printf '\n=== PYTEST_FILE %s ===\n' "$t" >>"$log"
     if ( cd "$WT" && python3 "$t" ) >>"$log" 2>&1; then

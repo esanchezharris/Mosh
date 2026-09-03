@@ -19,6 +19,22 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+# librosa is needed by embed.py for every decode. The CI cheap gate's python
+# (numpy/soundfile only) has no librosa, so skip loudly there — same posture as
+# sa3_precompute_parity_test: this test is MANDATORY on a dev Mac.
+#
+# This import also used to have to happen BEFORE service/ went on sys.path,
+# because numba probes `import coverage` at import time and service/coverage.py
+# shadowed the PyPI package. That hazard is gone now that the module is
+# service/clip_coverage.py, but the import stays here: it is where the skip
+# belongs, and keeping it early costs nothing.
+try:
+    import librosa.effects  # noqa: F401
+except ImportError as exc:  # pragma: no cover — CI-only path
+    print(f"SKIP drummatch_test: librosa not importable ({exc})")
+    print("     (this test is MANDATORY on a dev Mac — do not let it skip silently in CI)")
+    sys.exit(0)
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SERVICE = os.path.dirname(os.path.dirname(_HERE))
 if _SERVICE not in sys.path:
