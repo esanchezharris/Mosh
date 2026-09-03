@@ -54,6 +54,7 @@ import {
 import { wavRmsDbfs } from "./lib/companionClient.mts";
 import type { ProduceTemplateDeps } from "../src/agent/loop/produceTemplate";
 import type { KitMatchFile, PaletteItem } from "../src/agent/loop/drumPalette";
+import { remapProgramTrackIds, templateRoleMap } from "../src/agent/loop/produceReplayRemap";
 import type { Snapshot } from "../src/types";
 
 const PROGRAM_PATH = argFlag("program");
@@ -397,14 +398,41 @@ async function main(): Promise<void> {
   writeFileSync(resolve(outDir, "template.json"), JSON.stringify(template, null, 2));
 
   let replayNotes: ProgramLine[];
+  let trackIdRemap: Record<string, string> = {};
   if (FIXTURE) {
     const map = templatePlaceholderMap(template);
     replayNotes = notes.map((l) => substitutePlaceholders(l, map));
   } else {
-    replayNotes = notes; // swap: track/clip ids are assumed stable (deterministic prefix)
+    // swap: the program's trackIds are the ORIGINAL run's; they are only stable
+    // while the preflight is. Round 3 (2026-09-02) added a highpass per synth
+    // track, every later id shifted by one, and the verbatim ids sent five
+    // melodic parts onto auto-created "Track N" tracks (default 4OSC sine at
+    // 0 dB). Remap by ROLE via the sibling template.json — and refuse to
+    // replay anything that cannot be mapped.
+    const siblingTemplate = readSiblingJson(programPath, "template.json");
+    if (!siblingTemplate)
+      throw new Error(`produceReplay: --swap needs the original run's template.json beside ${programPath} to remap track ids by role`);
+    const remap = remapProgramTrackIds(notes, siblingTemplate as Parameters<typeof remapProgramTrackIds>[1], template as Parameters<typeof remapProgramTrackIds>[2]);
+    replayNotes = remap.lines;
+    trackIdRemap = remap.remapped;
+    const n = Object.keys(trackIdRemap).length;
+    if (n > 0) console.error(`[produceReplay] remapped ${n} program track id(s) by role: ${JSON.stringify(trackIdRemap)}`);
   }
 
+  const countTracks = async (): Promise<number> => {
+    const snap = (await harness.getSnapshot()) as { tracks?: unknown[] };
+    return Array.isArray(snap.tracks) ? snap.tracks.length : -1;
+  };
+  const tracksBefore = await countTracks();
   for (const line of replayNotes) await harness.exec(line.command, line.args ?? {});
+  // Defense in depth: a replay must never grow the track list (MoshOps
+  // add_midi_clip auto-creates a track for an unknown id). Fail loudly rather
+  // than render a "candidate" the owner then judges. (The template lays
+  // ${Object.keys(templateRoleMap(...)).length} role tracks; comparing the
+  // snapshot before/after the notes is robust to whatever else it lists.)
+  const tracksAfter = await countTracks();
+  if (tracksAfter !== tracksBefore)
+    throw new Error(`produceReplay: track count grew from ${tracksBefore} to ${tracksAfter} during the note replay — a program command addressed a track that does not exist (auto-created track); template roles: ${Object.keys(templateRoleMap(template as Parameters<typeof templateRoleMap>[0])).join(",")}`);
   const exportResult = await harness.exec("export_audio", { file: wavFile, format: "wav", range: "custom", start: 0, end: Number((template as { constants?: { eightBarsSeconds?: number } })?.constants?.eightBarsSeconds) || 32 * 60 / 148, renderMode: "auto", tail: "include", tailSeconds: 1 });
   // R3 — stems here too (same owner note as the plain-replay branch above).
   const stemsDir = resolve(outDir, "stems");
@@ -418,7 +446,7 @@ async function main(): Promise<void> {
   finish(outDir, wavFile, [
     { command: "export_audio", ok: exportResult.ok, error: exportResult.error },
     { command: "export_stems", ok: stemsResult.ok, error: stemsResult.error, data: stemsResult.data },
-  ], resolvedConfig);
+  ], { ...resolvedConfig, trackIdRemap });
 }
 
 function askFromSiblingRunJson(programPath: string): string | undefined {
