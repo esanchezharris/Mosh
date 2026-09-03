@@ -22,7 +22,15 @@ import soundfile as sf
 # Warm librosa's numba import BEFORE service/ goes on sys.path: numba probes
 # `import coverage` at import time, and service/coverage.py (the re-imagine
 # whole-clip tiler) would shadow the PyPI package and crash that probe.
-import librosa.effects  # noqa: F401
+# The CI cheap gate's python (numpy/soundfile only) has no librosa, and embed.py
+# needs it for every decode, so skip loudly there — same posture as
+# sa3_precompute_parity_test: this test is MANDATORY on a dev Mac.
+try:
+    import librosa.effects  # noqa: F401
+except ImportError as exc:  # pragma: no cover — CI-only path
+    print(f"SKIP drummatch_test: librosa not importable ({exc})")
+    print("     (this test is MANDATORY on a dev Mac — do not let it skip silently in CI)")
+    sys.exit(0)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SERVICE = os.path.dirname(os.path.dirname(_HERE))
