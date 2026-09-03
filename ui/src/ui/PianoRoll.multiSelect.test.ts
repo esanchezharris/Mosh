@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PianoRoll } from "./PianoRoll";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import type { CommandResult, Snapshot, Track } from "../types";
+import type { CommandResult, MidiNote, Snapshot, Track } from "../types";
 
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
@@ -47,6 +47,14 @@ const SNAPSHOT = {
   master: { volumeDb: 0, pan: 0 },
 } as unknown as Snapshot;
 
+const snapshotWithNotes = (notes: readonly MidiNote[]): Snapshot => ({
+  ...SNAPSHOT,
+  tracks: [{
+    ...TRACK,
+    clips: [{ ...TRACK.clips[0], notes: notes.map((note) => ({ ...note })) }],
+  }],
+});
+
 describe("piano-roll multi-note editing", () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -55,6 +63,44 @@ describe("piano-roll multi-note editing", () => {
   const mount = () => {
     useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, snapDivision: "1/4", exec });
     act(() => root.render(React.createElement(PianoRoll)));
+  };
+
+  const mountWithReindexingBackend = () => {
+    let notes = NOTES.map((note) => ({ ...note }));
+    const history: typeof notes[] = [];
+    const future: typeof notes[] = [];
+    exec = vi.fn(async (command: string, args: Record<string, unknown> = {}): Promise<CommandResult> => {
+      if (command === "set_note") {
+        history.push(notes.map((note) => ({ ...note })));
+        future.length = 0;
+        const specs = Array.isArray(args.edits) ? args.edits : [args];
+        const targets = specs.map((spec) => notes[Number(spec.noteIndex)]);
+        specs.forEach((spec, ordinal) => {
+          const target = targets[ordinal];
+          if (!target) return;
+          if (typeof spec.start === "number") target.start = spec.start;
+          if (typeof spec.pitch === "number") target.pitch = spec.pitch;
+          if (typeof spec.length === "number") target.length = spec.length;
+          if (typeof spec.velocity === "number") target.velocity = spec.velocity;
+        });
+        notes = [...notes]
+          .sort((a, b) => (a.start - b.start) || (a.pitch - b.pitch))
+          .map((note, i) => ({ ...note, i }));
+        useStore.setState({ snapshot: snapshotWithNotes(notes) });
+      } else if (command === "undo" && history.length > 0) {
+        future.push(notes.map((note) => ({ ...note })));
+        notes = history.pop()!;
+        useStore.setState({ snapshot: snapshotWithNotes(notes) });
+      } else if (command === "redo" && future.length > 0) {
+        history.push(notes.map((note) => ({ ...note })));
+        notes = future.pop()!;
+        useStore.setState({ snapshot: snapshotWithNotes(notes) });
+      }
+      return { ok: true, command };
+    });
+    useStore.setState({ snapshot: snapshotWithNotes(notes), editingClipId: "c1", snap: true, snapDivision: "1/4", exec });
+    act(() => root.render(React.createElement(PianoRoll)));
+    return { undoDepth: () => history.length };
   };
 
   const noteEls = () => [...host.querySelectorAll(".pr-note")];
@@ -73,6 +119,15 @@ describe("piano-roll multi-note editing", () => {
     act(() => {
       el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 5, clientY: 5, shiftKey }));
       el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 5, clientY: 5, shiftKey }));
+    });
+  };
+
+  const clickBlankGrid = () => {
+    const grid = host.querySelector(".pr-grid");
+    if (!grid) throw new Error("piano-roll grid is missing");
+    act(() => {
+      grid.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 7, clientX: 700, clientY: 700 }));
+      grid.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 7, clientX: 700, clientY: 700 }));
     });
   };
 
@@ -151,6 +206,126 @@ describe("piano-roll multi-note editing", () => {
 
     expect(names()).toEqual(["set_note"]);           // single note ⇒ no batch
     expect(setNoteArgs()[0].noteIndex).toBe(2);
+  });
+
+  it("keeps selection on the moved note when the backend reindexes it", async () => {
+    mountWithReindexingBackend();
+    click(noteEls()[0]);
+
+    await drag(noteEls()[0], BEAT_PX * 4, 0);
+
+    const selected = host.querySelector(".pr-note.sel");
+    expect(host.querySelectorAll(".pr-note.sel")).toHaveLength(1);
+    expect(selected?.getAttribute("aria-label")).toContain("C4 note start 4.00");
+  });
+
+  it.each(["blank click", "selected-note click"] as const)(
+    "moves only the intended note after a three-note selection is replaced by %s",
+    async (replacement) => {
+      const backend = mountWithReindexingBackend();
+      const els = noteEls();
+      click(els[0]);
+      click(els[1], true);
+      click(els[2], true);
+      if (replacement === "blank click") {
+        clickBlankGrid();
+        click(noteEls()[0]);
+      } else {
+        click(noteEls()[0]);
+      }
+      exec.mockClear();
+
+      await drag(noteEls()[0], BEAT_PX * 4, 0);
+
+      const args = setNoteArgs();
+      expect(args).toHaveLength(1);
+      expect(args[0].start).toBe(4);
+      expect(args[0].edits).toBeUndefined();
+      expect(noteEls().map((note) => note.getAttribute("aria-label"))).toEqual([
+        expect.stringContaining("D4 note start 1.00"),
+        expect.stringContaining("E4 note start 2.00"),
+        expect.stringContaining("C4 note start 4.00"),
+      ]);
+      expect(host.querySelector(".pr-note.sel")?.getAttribute("aria-label"))
+        .toContain("C4 note start 4.00");
+      expect(backend.undoDepth()).toBe(1);
+      await act(async () => { await exec("undo"); });
+      expect(noteEls().map((note) => note.getAttribute("aria-label"))).toEqual([
+        expect.stringContaining("C4 note start 0.00"),
+        expect.stringContaining("D4 note start 1.00"),
+        expect.stringContaining("E4 note start 2.00"),
+      ]);
+      await act(async () => { await exec("redo"); });
+      expect(noteEls().map((note) => note.getAttribute("aria-label"))).toContainEqual(
+        expect.stringContaining("C4 note start 4.00"),
+      );
+    },
+  );
+
+  it("keeps all selected notes selected after a direct group drag reindexes them", async () => {
+    mountWithReindexingBackend();
+    const els = noteEls();
+    click(els[0]);
+    click(els[1], true);
+    click(els[2], true);
+    exec.mockClear();
+
+    await drag(noteEls()[0], BEAT_PX * 4, 0);
+
+    const edits = argsOf("set_note")?.edits as { start: number }[];
+    expect(edits.map((edit) => edit.start)).toEqual([4, 5, 6]);
+    expect(host.querySelectorAll(".pr-note.sel")).toHaveLength(3);
+  });
+
+  it("collapses a selected group on click-release but preserves it for an immediate drag", async () => {
+    mount();
+    const els = noteEls();
+    click(els[0]);
+    click(els[1], true);
+    click(els[2], true);
+
+    click(noteEls()[0]);
+
+    expect(host.querySelectorAll(".pr-note.sel")).toHaveLength(1);
+    expect(noteEls()[0].getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps keyboard nudges attached to the same note across repeated reindexing", async () => {
+    mountWithReindexingBackend();
+    click(noteEls()[0]);
+
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
+    await flush();
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
+    await flush();
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
+    await flush();
+
+    const selected = host.querySelector(".pr-note.sel");
+    expect(setNoteArgs().map((args) => args.start)).toEqual([0.5, 1, 1.5]);
+    expect(host.querySelectorAll(".pr-note.sel")).toHaveLength(1);
+    expect(selected?.getAttribute("aria-label")).toContain("C4 note start 1.50");
+  });
+
+  it("preserves a selected group when a drag returns to its origin", async () => {
+    mount();
+    const els = noteEls();
+    click(els[0]);
+    click(els[1], true);
+    click(els[2], true);
+    exec.mockClear();
+
+    act(() => {
+      const note = noteEls()[0];
+      note.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 8, clientX: 10, clientY: 200 }));
+      note.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 8, clientX: 10 + BEAT_PX, clientY: 200, buttons: 1 }));
+      note.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 8, clientX: 10, clientY: 200, buttons: 1 }));
+      note.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 8, clientX: 10, clientY: 200 }));
+    });
+    await flush();
+
+    expect(host.querySelectorAll(".pr-note.sel")).toHaveLength(3);
+    expect(names()).toEqual([]);
   });
 
   it("transposing a multi-note selection moves every note by the same interval", async () => {

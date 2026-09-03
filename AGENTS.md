@@ -44,9 +44,9 @@ result with the change. Hosted CI and screenshots are useful signals, not a
 replacement for the local gate or owner acceptance.
 
 Run the built application's --selftest three times and --selftest-undo when
-performing a final baseline/release-style verification. Do not carry forward the
-temporary MOSH_MAX_CODEX_CHILDREN=1000 consolidation override as a standing
-policy; the normal gate limits apply outside this one-time maintenance work.
+performing a final baseline/release-style verification. The preflight's agent
+child-process ceiling was removed on 2026-09-01 (it was a proxy for lingering
+Mosh instances); the memory, swap and disk limits still apply.
 
 ## Hard rules
 

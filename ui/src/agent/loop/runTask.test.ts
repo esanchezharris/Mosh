@@ -3,9 +3,10 @@
 // loop FSM → the TASK-scoped executor → the dev mock backend. One ask becomes a
 // real two-step task, the store view fills in, and ONE undo reverts everything.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   compactMelodyCommand,
+  compactMelodyDemoEnabled,
   compactMelodySpec,
   runLoopTask,
   agenticLoopEnabled,
@@ -34,6 +35,23 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
     await useStore.getState().refresh();
     useTaskStore.setState({ current: null, last: null, history: [], drawerOpen: false, signal: null });
   });
+
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  /** Seed a Keys track holding one MIDI clip, in A minor — the compact lane's shape. */
+  async function seedKeys(): Promise<{ trackId: string; clipId: string }> {
+    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
+    const clipId = (clip.data as { clipId: string }).clipId;
+    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
+    await useStore.getState().refresh();
+    return { trackId, clipId };
+  }
+
+  const notesOf = (trackId: string, clipId: string) =>
+    snap().tracks.find((candidate) => candidate.id === trackId)
+      ?.clips.find((candidate) => candidate.id === clipId)?.notes ?? [];
 
   it("the lofi script runs two steps against the real mock and lands done", async () => {
     const utters: string[] = [];
@@ -80,35 +98,39 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
     expect(JSON.stringify(snap())).toBe(before);
   });
 
-  it("runs the exact in-key melody ask through the compact local-model contract", async () => {
-    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
-    const trackId = (track.data as { trackId: string }).trackId;
-    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
-    const clipId = (clip.data as { clipId: string }).clipId;
-    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
-    await useStore.getState().refresh();
+  it("runs the exact in-key melody ask through the compact contract WHEN the demo flag is on", async () => {
+    vi.stubEnv("VITE_MOSH_ENABLE_DEMO_COMPACT_MELODY", "1");
+    const { trackId, clipId } = await seedKeys();
 
     const run = await runLoopTask("give the keys a little melody idea, nothing fancy, keep it in key", noopUi);
 
     expect(run.outcome).toBe("done");
     expect(run.stepCount).toBe(1);
-    const keys = snap().tracks.find((candidate) => candidate.id === trackId)!;
-    expect(keys.clips.find((candidate) => candidate.id === clipId)?.notes).toHaveLength(8);
+    expect(notesOf(trackId, clipId)).toHaveLength(8);
     expect(useTaskStore.getState().last?.steps[0]?.commands[0]?.args).toMatchObject({ clipId });
 
     await useStore.getState().exec("undo");
     await useStore.getState().refresh();
-    expect(snap().tracks.find((candidate) => candidate.id === trackId)!
-      .clips.find((candidate) => candidate.id === clipId)?.notes ?? []).toHaveLength(0);
+    expect(notesOf(trackId, clipId)).toHaveLength(0);
+  });
+
+  // The quarantine itself. Without the demo flag the SAME ask must reach the general
+  // agent loop — which, against the deterministic loop brain, honestly parks rather
+  // than inventing the canned eight-eighth-note phrase. If this ever goes green with
+  // 8 notes on the clip, the demo lane has escaped its flag.
+  it("leaves the in-key melody ask to the general loop when the demo flag is off", async () => {
+    const { trackId, clipId } = await seedKeys();
+
+    const run = await runLoopTask("give the keys a little melody idea, nothing fancy, keep it in key", noopUi);
+
+    expect(run.outcome).toBe("need_user");
+    expect(run.deferred).toBe(true);
+    await useStore.getState().refresh();
+    expect(notesOf(trackId, clipId)).toHaveLength(0);
   });
 
   it("accepts only a varied, in-scale pitch sequence from the compact contract", async () => {
-    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
-    const trackId = (track.data as { trackId: string }).trackId;
-    const clip = await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
-    const clipId = (clip.data as { clipId: string }).clipId;
-    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
-    await useStore.getState().refresh();
+    const { clipId } = await seedKeys();
     const spec = compactMelodySpec("give the keys a melody, keep it in key", snap())!;
 
     expect(spec.clipId).toBe(clipId);
@@ -120,11 +142,7 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
   });
 
   it("leaves compound melody requests to the full agent loop", async () => {
-    const track = await useStore.getState().exec("create_track", { name: "Keys", type: "midi" });
-    const trackId = (track.data as { trackId: string }).trackId;
-    await useStore.getState().exec("add_midi_clip", { trackId, start: 0, length: 8 });
-    await useStore.getState().exec("set_key", { tonic: "A", mode: "minor" });
-    await useStore.getState().refresh();
+    await seedKeys();
 
     for (const ask of [
       "give Keys a melody, keep it in key, and make it faster",
@@ -144,5 +162,11 @@ describe("runLoopTask — composer ask → multi-step task → one undo unit", (
     expect(agenticLoopEnabled(undefined)).toBe(false);
     expect(loopAllowedFor("1", false)).toBe(true);
     expect(loopAllowedFor("1", true)).toBe(false);
+  });
+
+  it("the compact melody lane is opt-in — off unless its own demo flag is set", () => {
+    expect(compactMelodyDemoEnabled("1")).toBe(true);
+    expect(compactMelodyDemoEnabled("0")).toBe(false);
+    expect(compactMelodyDemoEnabled(undefined)).toBe(false);
   });
 });
