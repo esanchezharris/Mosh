@@ -19,6 +19,13 @@ export type EditorGrid = {
   adaptive: boolean;
 };
 
+export type EditorGridLineKind = "bar" | "beat" | "subdivision";
+export type EditorGridLine = { beat: number; kind: EditorGridLineKind };
+export type EditorGridProjection = {
+  stepBeats: number;
+  lines: EditorGridLine[];
+};
+
 export const GRID_DEFAULT: EditorGrid = { division: "1/16", triplet: false, adaptive: true };
 
 /** Coarse → fine. What Cmd+1..4 selects from, and what adaptive picks from. Shared with
@@ -45,6 +52,32 @@ export function effectiveStepBeats(m: Meter, g: EditorGrid, beatPx: number): num
   const base = snapStepBeats(m, division);
   // A triplet fits three in the space of two, so each is 2/3 as long.
   return g.triplet ? base * (2 / 3) : base;
+}
+
+export function editorGridProjection(
+  m: Meter,
+  g: EditorGrid,
+  beatPx: number,
+  extentBeats: number,
+): EditorGridProjection {
+  const stepBeats = effectiveStepBeats(m, g, beatPx);
+  const count = Math.floor((extentBeats + stepBeats * 1.0e-8) / stepBeats);
+  const lines: EditorGridLine[] = [];
+  const nearMultiple = (value: number, unit: number) =>
+    Math.abs(value / unit - Math.round(value / unit)) < 1.0e-8;
+
+  for (let i = 0; i <= count; i++) {
+    const rawBeat = i * stepBeats;
+    const beat = nearMultiple(rawBeat, 1) ? Math.round(rawBeat) : rawBeat;
+    const kind: EditorGridLineKind = nearMultiple(beat, m.num)
+      ? "bar"
+      : nearMultiple(beat, 1)
+        ? "beat"
+        : "subdivision";
+    lines.push({ beat, kind });
+  }
+
+  return { stepBeats, lines };
 }
 
 /** What the grid button shows. Adaptive names the division it actually resolved to. */

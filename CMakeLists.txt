@@ -100,6 +100,10 @@ message(STATUS "Mosh deps: FETCHCONTENT_BASE_DIR=${FETCHCONTENT_BASE_DIR}")
 option(MOSH_BUILD_APP "Build the standalone JUCE app" ON)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
 option(MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP "Enable free-form Moshi in packaged UI builds" ON)
+# Demo-only crutch, OFF by design: bypasses the agent loop for in-key melody asks and
+# sends a bespoke compact-JSON prompt instead. Turn it ON only for a build driving a
+# model that cannot emit the full loop JSON — see ui/src/agent/loop/runTask.ts.
+option(MOSH_ENABLE_DEMO_COMPACT_MELODY "Demo-only: bypass the agent loop for in-key melody asks" OFF)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for plugin-host smoke tests" OFF)
 option(MOSH_BUILD_REIMAGINE_PLUGIN "Build the owner-local Mosh Re-Imagine VST3" ${APPLE})
@@ -501,6 +505,8 @@ if (MOSH_BUILD_APP)
         # same retry-from-WebViewShell discipline as the camera delegate above.
         target_sources(Mosh PRIVATE src/webview/WebViewKeyboardFocus.mm)
         set_source_files_properties(src/webview/WebViewKeyboardFocus.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_sources(Mosh PRIVATE src/webview/WebViewCursor.mm)
+        set_source_files_properties(src/webview/WebViewCursor.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework WebKit")
 
         # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the
