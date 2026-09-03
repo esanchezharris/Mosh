@@ -115,6 +115,43 @@ export function matchRemember(rawText: string, ctx: FastCtx): FastAction | null 
   return { kind: "remember", text, scope, intent: "DONE", say: "got it — i'll remember that" };
 }
 
+// ── absolute tempo ──────────────────────────────────────────────────────────────
+// "set the tempo to 128" needs no model: the utterance carries its own answer. These
+// are WHOLE-STRING patterns (the sessionControl style), never a substring scan, and
+// every one of them requires BOTH an explicit tempo/bpm token AND a literal number.
+// That pairing is the whole safety story — a rule that accepted a bare number would
+// read "split the 808 clip at bar 3" as set_tempo 808, a corruption that sounds
+// plausible enough to survive a listen. Anchoring also disposes of questions for
+// free: "is the tempo 128" starts with a word no pattern admits, so it can never
+// SET what it was only asking about.
+//
+// RELATIVE tempo ("make it faster") is deliberately NOT here. It has an unambiguous
+// direction but no amount, and the agent loop already owns that judgment — its dosage
+// rule picks +8-12% and says so in `say`. Answering it here too would give one ask two
+// different answers depending on which lane caught it first.
+const TEMPO_PATTERNS: readonly RegExp[] = [
+  /^(?:set|change|put|take|bump|move)\s+(?:the\s+)?(?:tempo|bpm)\s*(?:to|at)?\s*(\d{2,3})$/,
+  /^(?:set|change|put|take|bump|move|make)\s+(?:it|this|us|the song|the track|the beat)?\s*(?:to|at)?\s*(\d{2,3})\s*bpm$/,
+  /^tempo\s+(\d{2,3})$/,
+  /^(\d{2,3})\s*bpm$/,
+];
+// Mirrors insert_tempo_change's documented 20-999 range. Out of range falls THROUGH
+// rather than erroring — the fast path only claims what it is confident about.
+const TEMPO_MIN = 20;
+const TEMPO_MAX = 999;
+
+function matchTempo(norm: string, ctx: FastCtx): FastAction | null {
+  if (ctx.mode === "recording") return null;   // never re-grid a take that is being played
+  for (const pattern of TEMPO_PATTERNS) {
+    const m = norm.match(pattern);
+    if (!m) continue;
+    const bpm = Number(m[1]);
+    if (!Number.isInteger(bpm) || bpm < TEMPO_MIN || bpm > TEMPO_MAX) return null;
+    return cmd("set_tempo", { bpm }, "ACK_GOT_IT", `${bpm} bpm`);
+  }
+  return null;
+}
+
 function parseTrackNames(s: string): string[] {
   return s
     .replace(/\b(tracks?|channels?)\b/g, " ")
@@ -215,6 +252,8 @@ export function matchFastPath(text: string, ctx: FastCtx): FastAction | null {
   if (!norm) return null;
   const trackOp = matchTrackOp(norm, ctx);
   if (trackOp) return trackOp;
+  const tempo = matchTempo(norm, ctx);
+  if (tempo) return tempo;
   const uTokens = norm.split(" ");
   let best: { score: number; len: number; rule: Rule } | null = null;
   for (const rule of RULES) {
