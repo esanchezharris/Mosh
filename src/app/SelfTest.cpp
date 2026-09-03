@@ -3267,6 +3267,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
+
+        // Leave the master bus as we found it: the next section ("Master bus plugins")
+        // asserts it starts empty, and this section's redo'd highpass + softclip were
+        // being left behind (11 downstream failures, 2026-09-02).
+        for (const char* type : { "softclip", "highpass" })
+        {
+            const int idx = (int) masterBuiltin (type).getProperty ("index", -1);
+            check (idx >= 0 && ok (cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}))),
+                   String ("R3.3 cleanup: master ") + type + " removed");
+        }
+        check (! masterBuiltin ("softclip").isObject() && ! masterBuiltin ("highpass").isObject(),
+               "R3.3 cleanup: master bus carries no R3.3 builtins afterwards");
     }
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
