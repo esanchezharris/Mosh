@@ -20,7 +20,8 @@
 #                signature refresh stays cheap).
 #
 # Args: MOSH_UI_DIR, MOSH_UI_DIST, MOSH_UI_STAGE_DIR (stage mode), NPM_EXECUTABLE,
-#       MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP (build mode), MODE.
+#       MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP, MOSH_ENABLE_DEMO_COMPACT_MELODY
+#       (both build mode), MODE.
 # ─────────────────────────────────────────────────────────────────────────────
 
 if (NOT DEFINED MODE)
@@ -47,11 +48,19 @@ if (MODE STREQUAL "build")
     else()
         set(agentLoopFlag "0")
     endif()
+    if (MOSH_ENABLE_DEMO_COMPACT_MELODY)
+        set(demoMelodyFlag "1")
+    else()
+        set(demoMelodyFlag "0")
+    endif()
+    # The stamp covers EVERY option baked into the bundle, not just the first one:
+    # a bundle built with a different flag set is stale even when no source changed.
+    set(buildModeFlags "${agentLoopFlag}:${demoMelodyFlag}")
     set(buildModeStamp "${MOSH_UI_DIST}/.mosh-build-mode")
-    set(previousAgentLoopFlag "")
+    set(previousBuildModeFlags "")
     if (EXISTS "${buildModeStamp}")
-        file(READ "${buildModeStamp}" previousAgentLoopFlag)
-        string(STRIP "${previousAgentLoopFlag}" previousAgentLoopFlag)
+        file(READ "${buildModeStamp}" previousBuildModeFlags)
+        string(STRIP "${previousBuildModeFlags}" previousBuildModeFlags)
     endif()
     file(GLOB_RECURSE uiSources
          "${MOSH_UI_DIR}/src/*.ts"
@@ -67,8 +76,8 @@ if (MODE STREQUAL "build")
         file(TIMESTAMP "${MOSH_UI_DIST}/index.html" distMt "%s" UTC)
     endif()
     if (distMt STREQUAL "" OR (NOT srcMt STREQUAL "" AND srcMt GREATER distMt)
-        OR NOT previousAgentLoopFlag STREQUAL agentLoopFlag)
-        message(STATUS "UI sources or packaged build mode changed — building Mosh UI (Vite, free-form Moshi=${agentLoopFlag})")
+        OR NOT previousBuildModeFlags STREQUAL buildModeFlags)
+        message(STATUS "UI sources or packaged build mode changed — building Mosh UI (Vite, free-form Moshi=${agentLoopFlag}, demo compact melody=${demoMelodyFlag})")
         execute_process(COMMAND "${NPM_EXECUTABLE}" install --no-audit --no-fund
                         WORKING_DIRECTORY "${MOSH_UI_DIR}" RESULT_VARIABLE rc)
         if (NOT rc EQUAL 0)
@@ -76,6 +85,7 @@ if (MODE STREQUAL "build")
         endif()
         execute_process(COMMAND "${CMAKE_COMMAND}" -E env
                                 "VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=${agentLoopFlag}"
+                                "VITE_MOSH_ENABLE_DEMO_COMPACT_MELODY=${demoMelodyFlag}"
                                 "${NPM_EXECUTABLE}" run build
                         WORKING_DIRECTORY "${MOSH_UI_DIR}" RESULT_VARIABLE rc)
         if (NOT rc EQUAL 0)
@@ -84,7 +94,7 @@ if (MODE STREQUAL "build")
         if (NOT EXISTS "${MOSH_UI_DIST}/index.html")
             message(FATAL_ERROR "Vite build finished but ${MOSH_UI_DIST}/index.html is missing")
         endif()
-        file(WRITE "${buildModeStamp}" "${agentLoopFlag}\n")
+        file(WRITE "${buildModeStamp}" "${buildModeFlags}\n")
     else()
         message(STATUS "ui/dist is fresher than ui/src and packaged build mode matches — UI bundle up to date")
     endif()

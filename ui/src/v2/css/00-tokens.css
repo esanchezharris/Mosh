@@ -257,7 +257,7 @@
   --pr-key-line: var(--v2-line);
   --pr-note: var(--v2-accent);
   --pr-note-edge: color-mix(in srgb, var(--v2-accent) 68%, #000);
-  --pr-note-sel: var(--v2-accent);
+  --pr-note-sel: var(--v2-accent-ink);
   --pr-note-ring: var(--v2-text);
   --pr-lasso: var(--v2-accent-soft);
   --pr-lasso-edge: color-mix(in srgb, var(--v2-accent) 45%, transparent);
@@ -402,4 +402,3 @@
    Drums tab would not render cream cells on a dark panel. The `[data-theme="light"]
    .v2-shell` re-pin above now does the same thing for EVERY classic component in the
    subtree, so keeping this would be a second source of truth for one of them.) */
-
