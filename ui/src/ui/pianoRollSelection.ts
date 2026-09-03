@@ -75,8 +75,8 @@ export function stepSelection(notes: readonly MidiNote[], sel: ReadonlySet<numbe
 
 /** A note's value-identity — stable across the reindexing an add/remove causes. */
 export type NoteIdentity = string;
-export function noteIdentity(n: Pick<MidiNote, "pitch" | "start" | "length">): NoteIdentity {
-  return `${n.pitch}|${n.start.toFixed(6)}|${n.length.toFixed(6)}`;
+export function noteIdentity(n: Pick<MidiNote, "pitch" | "start" | "length" | "velocity" | "mute">): NoteIdentity {
+  return `${n.pitch}|${n.start.toFixed(6)}|${n.length.toFixed(6)}|${n.velocity}|${n.mute === true ? 1 : 0}`;
 }
 
 /**
@@ -84,6 +84,16 @@ export function noteIdentity(n: Pick<MidiNote, "pitch" | "start" | "length">): N
  * indices shift under us whenever notes are added or removed.
  */
 export function reselectByIdentity(notes: readonly MidiNote[], wanted: readonly NoteIdentity[]): Set<number> {
-  const want = new Set(wanted);
-  return new Set(notes.filter((n) => want.has(noteIdentity(n))).map((n) => n.i));
+  const remaining = new Map<NoteIdentity, number>();
+  for (const identity of wanted) remaining.set(identity, (remaining.get(identity) ?? 0) + 1);
+  const selected = new Set<number>();
+  for (const note of notes) {
+    const identity = noteIdentity(note);
+    const count = remaining.get(identity) ?? 0;
+    if (count === 0) continue;
+    selected.add(note.i);
+    if (count === 1) remaining.delete(identity);
+    else remaining.set(identity, count - 1);
+  }
+  return selected;
 }

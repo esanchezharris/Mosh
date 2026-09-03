@@ -505,6 +505,8 @@ if (MOSH_BUILD_APP)
         # same retry-from-WebViewShell discipline as the camera delegate above.
         target_sources(Mosh PRIVATE src/webview/WebViewKeyboardFocus.mm)
         set_source_files_properties(src/webview/WebViewKeyboardFocus.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_sources(Mosh PRIVATE src/webview/WebViewCursor.mm)
+        set_source_files_properties(src/webview/WebViewCursor.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework WebKit")
 
         # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the
