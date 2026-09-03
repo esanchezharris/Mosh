@@ -18,7 +18,7 @@
 // keyNote 60; palette-v2 bass roots 17-34 -> keyNote 53-70) — see drumPalette.ts's
 // `pickDrumPalette` for the actual math.
 
-import { pickDrumPalette, pickSynthPresets, type DrumPadPick, type PaletteItem, type PresetItem, type PresetMenu, type SynthRole } from "./drumPalette";
+import { pickDrumPalette, pickSynthPresets, type DrumPadPick, type KitMatchFile, type PaletteItem, type PresetItem, type PresetMenu, type SynthRole } from "./drumPalette";
 
 export type ExecResult = { ok: boolean; error?: string; data?: unknown };
 export type ProduceExec = (command: string, args?: Record<string, unknown>) => Promise<ExecResult>;
@@ -34,11 +34,33 @@ export type ProduceSynth = {
   readonly presetError?: string;
 };
 
+/** Round 3 (R3.3) — per-synth-track highpass attempt. Recorded honestly, same
+ *  posture as a synth's presetError: `loaded: false` (the native "highpass"
+ *  builtin isn't in the running app yet — it's landing concurrently, plan
+ *  R3.3) never aborts the preflight, it's just recorded. `paramSet` is
+ *  "skipped" until HIGHPASS_HZ_NORMALIZE (below) has a real Hz→[0,1] curve —
+ *  until then the native builtin's own 180 Hz default does the work instead
+ *  of a computed set_plugin_param call. */
+export type HighpassResult = {
+  readonly requestedHz: number;
+  readonly loaded: boolean;
+  readonly loadError?: string;
+  readonly paramSet: "applied" | "skipped" | "error";
+  readonly paramError?: string;
+};
+
+/** One step of the master-bus chain, in the order it was attempted. */
+export type MasterChainStep = { readonly type: string; readonly ok: boolean; readonly error?: string };
+
 /** Round 2 correction note 5 ("mix also isn't great") — the preflight's fixed
  *  gain map + master-bus dynamics, recorded here so a run's template.json is
  *  the honest record of what was actually asked for (not necessarily what
- *  stuck — a failed set_track_volume/load_master_builtin call is recorded but
- *  never aborts the preflight, same posture as a synth's presetError). */
+ *  stuck — a failed set_track_volume/load_builtin/load_master_builtin call is
+ *  recorded but never aborts the preflight, same posture as a synth's
+ *  presetError). Round 3 (R3.3, owner note: "highpass on melodic elements ...
+ *  standardclip and/or god particle on the master ... glue") replaces the old
+ *  limiter/compressor-only master field with a highpass-per-synth map and an
+ *  ordered master chain. */
 export type ProduceMix = {
   /** trackId -> the dB requested via set_track_volume, keyed by the SAME role
    *  labels as `roles` below ("drums", "808", plus the 7 SynthRole names). */
@@ -48,10 +70,13 @@ export type ProduceMix = {
    *  mix is readable from template.json alone, without cross-referencing
    *  drumPalette.ts's lane table). */
   readonly padGainsDb: Readonly<Record<number, number>>;
-  /** load_master_builtin's type vocabulary (MoshOpsInternal.h's kBuiltins) has
-   *  no "limiter" entry today — this always tries it first anyway (so the
-   *  mix upgrades for free the day one ships) and falls back to "compressor". */
-  readonly master: { readonly requested: "limiter"; readonly loaded: "limiter" | "compressor" | null; readonly error?: string };
+  /** Every one of the 7 SynthRole tracks gets a highpass attempt (drums and
+   *  808 — the sampler tracks — never appear here, per the owner's rule). */
+  readonly highpass: Readonly<Partial<Record<SynthRole, HighpassResult>>>;
+  /** softclip (fallback compressor) always attempted first; a third VST3 step
+   *  (the God Particle, owner-machine only) appears only when
+   *  MOSH_PRODUCE_MASTER_VST3=1 AND list_plugins names one. */
+  readonly master: { readonly chain: readonly MasterChainStep[] };
 };
 
 export type ProduceTemplate = {
@@ -63,6 +88,13 @@ export type ProduceTemplate = {
   readonly synths: readonly ProduceSynth[];
   readonly mix: ProduceMix;
   readonly constants: { readonly eightBarsSeconds: number };
+  /** Round 3 (R3.2) — present only when `deps.kitMatch` was supplied. `file`
+   *  is the manifest path (recorded here, not just its contents, so a run is
+   *  traceable to exactly which kitmatch snapshot picked its drum samples);
+   *  `lanesMatched` counts pads whose file actually came from the manifest
+   *  (drumPalette.ts's `matchCosine` field) — a number under 10 names the
+   *  palette's real holes for the next generation batch. */
+  readonly kitMatch?: { readonly file: string; readonly lanesMatched: number };
 };
 
 export type ProduceTemplateDeps = {
@@ -80,6 +112,11 @@ export type ProduceTemplateDeps = {
   /** Retry backoff for load_plugin/load_preset's "instance not available" — tests
    *  pass 0 so the retry path is provable without actually sleeping. */
   retryDelayMs?: number;
+  /** Round 3 (R3.2) — the parsed kitmatch manifest plus the path it was read
+   *  from (produceLiveRun.mts's --kit-match / produceReplay.mts's inherited
+   *  sibling path). Omitted ⇒ every drum lane falls back to the ordinary
+   *  seeded pick, byte-identical to pre-round-3 behavior. */
+  kitMatch?: { readonly file: string; readonly data: KitMatchFile };
 };
 
 const VITAL_PLUGIN_ID = "Vital"; // PluginHost::findDescription matches `d.name == pluginId` CASE-SENSITIVELY (the catalog entry is name="Vital"); the mock lowercases. Was "vital" — every synth track failed with "unknown plugin" on the first live smoke. // matches bridge.mock.ts's catalog id and (case-
@@ -92,17 +129,106 @@ const SECTION_B = { name: "B", startBeat: 16, endBeat: 32 };
 // peaked at 0 dBFS while sitting 6-8dB quieter than the owner's reference; a
 // fixed headroom map applied right after each track is created (not a
 // creative choice the model gets to make) plus a master-bus glue stage.
+// Round 3 (R3.3) revises the synth values per the owner's round-2 note
+// ("that arp is just so overpowering ... drums/bass forwards ... turned
+// down and likely eq'd") — every melodic role drops further under drums/808.
 const DRUMS_GAIN_DB = 0;
 const BASS_GAIN_DB = 3;
 const SYNTH_GAIN_DB: Record<SynthRole, number> = {
-  chords_pad: -9,
-  drone: -12,
-  ambient: -12,
-  lead: -6,
-  counter: -8,
-  stab: -6,
-  arp: -10,
+  chords_pad: -13,
+  drone: -14,
+  ambient: -16,
+  lead: -10,
+  counter: -12,
+  stab: -10,
+  arp: -16,
 };
+
+// ── round 3 (R3.3) mix chain — native highpass + master softclip/God Particle ──
+
+/** te::LowPassPlugin's own "frequency" param index, in the highpass builtin's
+ *  param list — TBD until the concurrent native slice (plan R3.3) lands and
+ *  is measured against a running app. Adjust this the day it's confirmed;
+ *  nothing else in this file needs to change (HIGHPASS_HZ_NORMALIZE below is
+ *  the other half — until IT is non-null, this index is never actually used). */
+const MIX_PARAM_INDEX = { highpassFrequency: 0 } as const;
+
+/** Hz -> the highpass builtin's normalized [0,1] param value. Unknown until
+ *  the native frequency curve is measured (plan R3.3: "if the normalization
+ *  is unknown, skip the set and rely on the 180 Hz default"), so this stays
+ *  null — set_plugin_param is never called for the highpass frequency, and
+ *  every track sits at whatever Hz the builtin itself defaults to. Flip to a
+ *  real `(hz) => value` function once measured; MIX_PARAM_INDEX above is the
+ *  index that call needs. */
+const HIGHPASS_HZ_NORMALIZE: ((hz: number) => number) | null = null;
+
+/** The native highpass builtin's own default (matches plan R3.3's "180 Hz").
+ *  Used both as the ambient/unlisted-role target AND as what actually sounds
+ *  while HIGHPASS_HZ_NORMALIZE stays null above. */
+const DEFAULT_HIGHPASS_HZ = 180;
+
+// Owner's round-2 note 3, verbatim: "highpass (cut lower frequencies) on
+// melodic elements so that drums and bass can be heard". No target is named
+// for "ambient" — it (and any future role) falls back to DEFAULT_HIGHPASS_HZ.
+const HIGHPASS_HZ_BY_ROLE: Partial<Record<SynthRole, number>> = {
+  chords_pad: 160,
+  drone: 120,
+  lead: 200,
+  counter: 200,
+  arp: 200,
+  stab: 200,
+};
+
+async function applyHighpass(exec: ProduceExec, trackId: string, role: SynthRole): Promise<HighpassResult> {
+  const requestedHz = HIGHPASS_HZ_BY_ROLE[role] ?? DEFAULT_HIGHPASS_HZ;
+  const loadRes = await exec("load_builtin", { trackId, type: "highpass" });
+  if (!loadRes.ok) {
+    // Expected until the concurrent native slice lands — recorded, not thrown,
+    // exactly like a synth's presetError.
+    return { requestedHz, loaded: false, loadError: loadRes.error ?? "load_builtin failed", paramSet: "skipped" };
+  }
+  if (!HIGHPASS_HZ_NORMALIZE) return { requestedHz, loaded: true, paramSet: "skipped" };
+  const value = HIGHPASS_HZ_NORMALIZE(requestedHz);
+  const setRes = await exec("set_plugin_param", {
+    trackId, index: MIX_PARAM_INDEX.highpassFrequency, paramIndex: MIX_PARAM_INDEX.highpassFrequency, value,
+  });
+  return setRes.ok
+    ? { requestedHz, loaded: true, paramSet: "applied" }
+    : { requestedHz, loaded: true, paramSet: "error", paramError: setRes.error };
+}
+
+/** Owner's round-2 note ("standardclip ... and/or god particle ... glue ...
+ *  characteristic of hip hop") — softclip first (compressor fallback), then
+ *  the God Particle VST3 IFF this is the owner's own Mac (env gate) AND the
+ *  running app's catalog actually has it (list_plugins gate). Neither gate
+ *  is meaningful off that Mac, so a normal dev/CI run never attempts it. */
+async function buildMasterChain(exec: ProduceExec): Promise<{ chain: readonly MasterChainStep[] }> {
+  const chain: MasterChainStep[] = [];
+  const softclipRes = await exec("load_master_builtin", { type: "softclip" });
+  if (softclipRes.ok) {
+    chain.push({ type: "softclip", ok: true });
+  } else {
+    chain.push({ type: "softclip", ok: false, error: softclipRes.error ?? "load_master_builtin failed" });
+    const compressorRes = await exec("load_master_builtin", { type: "compressor" });
+    chain.push({ type: "compressor", ok: compressorRes.ok, ...(compressorRes.ok ? {} : { error: compressorRes.error ?? "load_master_builtin failed" }) });
+  }
+
+  // `typeof process` guards the packaged/browser build, where `process` doesn't
+  // exist at all (this file also runs inside the live app via runTask.ts) —
+  // this must never throw there, it must just never enable the VST3 step.
+  const vst3Enabled = (typeof process !== "undefined" ? process.env?.MOSH_PRODUCE_MASTER_VST3 : undefined) === "1";
+  if (vst3Enabled) {
+    const listRes = await exec("list_plugins", {});
+    const plugins = (listRes.data as { plugins?: Array<{ name?: unknown }> } | undefined)?.plugins ?? [];
+    const godParticleName = plugins.map((p) => p.name).find((n): n is string => typeof n === "string" && n.includes("God Particle"));
+    if (godParticleName) {
+      const loadRes = await exec("load_master_plugin", { pluginId: godParticleName });
+      chain.push({ type: `vst3:${godParticleName}`, ok: loadRes.ok, ...(loadRes.ok ? {} : { error: loadRes.error ?? "load_master_plugin failed" }) });
+    }
+  }
+
+  return { chain };
+}
 
 /** Exported so producePrompt.ts's renderProduceTemplate can name a synth track the
  *  SAME way the preflight itself named it — one label table, not two. */
@@ -210,7 +336,7 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
 
   // ── drums: one track, 10 fixed pads (plan W2.3's Drum Rack decision) ─────────
   const palette = await resolvePalette(deps);
-  const pick = pickDrumPalette(palette, { seed });
+  const pick = pickDrumPalette(palette, { seed, kitMatch: deps.kitMatch?.data });
 
   const drumsTrackRes = await exec("create_track", { name: "Drums", type: "drum" });
   if (!drumsTrackRes.ok) throw new Error(`produceTemplate: create_track (drums) failed: ${drumsTrackRes.error ?? "unknown"}`);
@@ -252,6 +378,7 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
   const presets = await resolvePresets(deps);
   const synthPicks = pickSynthPresets(presets, seed);
   const synths: ProduceSynth[] = [];
+  const highpass: Partial<Record<SynthRole, HighpassResult>> = {};
   for (const role of Object.keys(SYNTH_ROLE_LABEL) as SynthRole[]) {
     const label = SYNTH_ROLE_LABEL[role];
     const trackRes = await exec("create_track", { name: label });
@@ -260,49 +387,49 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
     await exec("set_track_volume", { trackId, db: SYNTH_GAIN_DB[role] });
 
     const picked = synthPicks.find((p) => p.role === role);
+    let presetError: string | undefined;
     if (!picked) {
-      synths.push({ trackId, role, preset: "", file: "", presetError: "no Vital preset available for this role" });
-      continue;
+      presetError = "no Vital preset available for this role";
+    } else {
+      const loadPlugin = await withRetry(
+        () => exec("load_plugin", { trackId, pluginId: VITAL_PLUGIN_ID, replaceInstrument: true }),
+        { delayMs: retryDelayMs },
+      );
+      if (!loadPlugin.ok) {
+        presetError = loadPlugin.error ?? "load_plugin failed";
+      } else {
+        const loadPreset = await withRetry(
+          () => exec("load_preset", { trackId, file: picked.file }),
+          { delayMs: retryDelayMs },
+        );
+        if (!loadPreset.ok) presetError = loadPreset.error ?? "load_preset failed";
+        else await exec("rename_track", { trackId, name: `${label} · ${picked.name}` });
+      }
     }
 
-    const loadPlugin = await withRetry(
-      () => exec("load_plugin", { trackId, pluginId: VITAL_PLUGIN_ID, replaceInstrument: true }),
-      { delayMs: retryDelayMs },
+    // Round 3 (R3.3) — every melodic track gets a highpass attempt regardless
+    // of whether the preset itself loaded (an instrument-less track is still
+    // worth cutting the low end on, and the model still writes notes onto it).
+    highpass[role] = await applyHighpass(exec, trackId, role);
+
+    synths.push(
+      presetError
+        ? { trackId, role, preset: "", file: picked?.file ?? "", presetError }
+        : { trackId, role, preset: picked!.name, file: picked!.file },
     );
-    if (!loadPlugin.ok) {
-      synths.push({ trackId, role, preset: "", file: picked.file, presetError: loadPlugin.error ?? "load_plugin failed" });
-      continue;
-    }
-    const loadPreset = await withRetry(
-      () => exec("load_preset", { trackId, file: picked.file }),
-      { delayMs: retryDelayMs },
-    );
-    if (!loadPreset.ok) {
-      synths.push({ trackId, role, preset: "", file: picked.file, presetError: loadPreset.error ?? "load_preset failed" });
-      continue;
-    }
-    await exec("rename_track", { trackId, name: `${label} · ${picked.name}` });
-    synths.push({ trackId, role, preset: picked.name, file: picked.file });
   }
 
-  // ── master-bus glue (round 2 note 5) — try "limiter" first (not in
-  // MoshOpsInternal.h's kBuiltins today, so this always falls through to
-  // "compressor" as of this writing, but costs nothing to keep trying: the
-  // day a limiter type ships, this upgrades with no code change here). ──────
+  // ── round 3 (R3.3) master-bus glue — softclip (compressor fallback) plus,
+  // owner-machine only, the God Particle VST3 (see buildMasterChain above). ──
   const padGainsDb: Record<number, number> = {};
   for (const pad of pick.pads) if (pad.gainDb !== undefined) padGainsDb[pad.note] = pad.gainDb;
   const gainsDb: Record<string, number> = { drums: DRUMS_GAIN_DB, "808": BASS_GAIN_DB, ...SYNTH_GAIN_DB };
 
-  let master: ProduceMix["master"];
-  const limiterRes = await exec("load_master_builtin", { type: "limiter" });
-  if (limiterRes.ok) {
-    master = { requested: "limiter", loaded: "limiter" };
-  } else {
-    const compressorRes = await exec("load_master_builtin", { type: "compressor" });
-    master = compressorRes.ok
-      ? { requested: "limiter", loaded: "compressor" }
-      : { requested: "limiter", loaded: null, error: compressorRes.error ?? limiterRes.error ?? "load_master_builtin failed" };
-  }
+  const master = await buildMasterChain(exec);
+
+  // Round 3 (R3.2) — only present when a kitmatch manifest was actually
+  // supplied; lanesMatched counts pads that carry drumPalette.ts's matchCosine.
+  const lanesMatched = pick.pads.filter((p) => p.matchCosine !== undefined).length;
 
   return {
     bpm,
@@ -311,7 +438,8 @@ export async function runProduceTemplate(ask: string, deps: ProduceTemplateDeps)
     drums: { trackId: drumsTrackId, pads: pick.pads },
     bass: { trackId: bassTrackId, keyNote: pick.bass.keyNote, file: pick.bass.file },
     synths,
-    mix: { gainsDb, padGainsDb, master },
+    mix: { gainsDb, padGainsDb, highpass, master },
     constants: { eightBarsSeconds: (32 * 60) / bpm }, // 32 beats @ 4/4 = 8 bars
+    ...(deps.kitMatch ? { kitMatch: { file: deps.kitMatch.file, lanesMatched } } : {}),
   };
 }

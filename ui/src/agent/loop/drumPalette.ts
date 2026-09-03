@@ -34,6 +34,32 @@ export type DrumPadPick = {
   readonly file: string;
   readonly gainDb?: number;
   readonly chokeGroup?: number;
+  /** Round 3 (R3.2) — set only when this pad's file came from a `kitMatch`
+   *  lane mapping (the nearest-neighbour cosine similarity to the owner's kit
+   *  sample the lab-manifest generator measured), not the plain seeded pick. */
+  readonly matchCosine?: number;
+};
+
+/** One lane entry of a `~/Library/Mosh/lab-manifests/kitmatch-*.json` file
+ *  (written by `service/presets/match_kit.py`, plan R3.2) — the owner's kit
+ *  sample for this lane and its nearest palette-v2 neighbour. `alternates` is
+ *  passed through untouched; pickDrumPalette never reads it. */
+export type KitMatchLane = {
+  readonly ownerFile: string;
+  readonly role: string;
+  readonly paletteFile: string;
+  readonly cosine: number;
+  readonly alternates?: readonly unknown[];
+};
+
+/** The parsed kitmatch manifest — keyed by DrumLane id (kick, snare, snare2,
+ *  clap, clap2, hat, openhat, perc, fx, roll), matching DEFAULT_DRUM_LANES's
+ *  ids 1:1. No entry for "bass"/"808" — that pick keeps the sub-energy rule
+ *  (round 2 note 6) unconditionally; kit-matching only ever touches the 10
+ *  drum pad lanes. */
+export type KitMatchFile = {
+  readonly lanes: Readonly<Record<string, KitMatchLane>>;
+  readonly [key: string]: unknown;
 };
 
 export type BassPick = { readonly file: string; readonly rootNote: number; readonly keyNote: number };
@@ -116,6 +142,13 @@ export type PickDrumPaletteOptions = {
   readonly key?: SessionKey;
   readonly seed?: number;
   readonly lanes?: readonly DrumLane[];
+  /** Round 3 (R3.2) — a parsed kitmatch manifest. When a lane has an entry
+   *  AND that entry's `paletteFile` is present among `items`, that exact file
+   *  wins the lane (carrying `matchCosine`) instead of the seeded pick; a
+   *  missing lane entry, or a `paletteFile` that isn't in `items` (the
+   *  manifest can point at a palette snapshot older than what's on disk now),
+   *  falls back to the ordinary seeded pick for that lane, unchanged. */
+  readonly kitMatch?: KitMatchFile;
 };
 
 /** Pick the 10 drum pads + the sustained 808/bass from a flat palette-v2 (or lab
@@ -175,9 +208,23 @@ export function pickDrumPalette(items: readonly PaletteItem[], opts: PickDrumPal
     return picked;
   };
 
+  // Round 3 (R3.2) — path -> item lookup for kitMatch's exact-file wins,
+  // scoped to the same non-bass pool takeFromRole/takeAnyLeftover draw from.
+  const byPath = new Map<string, PaletteItem>();
+  for (const item of items) if (item.role !== "bass") byPath.set(item.path, item);
+
   const pads: DrumPadPick[] = [];
   for (const lane of lanes) {
-    const picked = takeFromRole(lane.role) ?? takeAnyLeftover();
+    const kitEntry = opts.kitMatch?.lanes[lane.id];
+    let picked: PaletteItem | undefined;
+    let matchCosine: number | undefined;
+    if (kitEntry && !used.has(kitEntry.paletteFile) && byPath.has(kitEntry.paletteFile)) {
+      picked = byPath.get(kitEntry.paletteFile);
+      used.add(kitEntry.paletteFile);
+      matchCosine = kitEntry.cosine;
+    } else {
+      picked = takeFromRole(lane.role) ?? takeAnyLeftover();
+    }
     if (!picked) continue; // a genuinely empty palette lane — produceTemplate reports missing pads
     pads.push({
       note: lane.note,
@@ -185,6 +232,7 @@ export function pickDrumPalette(items: readonly PaletteItem[], opts: PickDrumPal
       file: picked.path,
       ...(lane.gainDb !== undefined ? { gainDb: lane.gainDb } : {}),
       ...(lane.chokeGroup !== undefined ? { chokeGroup: lane.chokeGroup } : {}),
+      ...(matchCosine !== undefined ? { matchCosine } : {}),
     });
   }
   if (pads.length === 0) throw new Error("pickDrumPalette: no drum one-shots found in the palette");

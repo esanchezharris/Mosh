@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_DRUM_LANES, pickDrumPalette, pickSynthPresets, type PaletteItem, type PresetMenu } from "./drumPalette";
+import { DEFAULT_DRUM_LANES, pickDrumPalette, pickSynthPresets, type KitMatchFile, type PaletteItem, type PresetMenu } from "./drumPalette";
 
 // The fixture mirrors bridge.mock.ts's `list_palette` case (12 items: 2 kick,
 // 2 snare, 2 clap, 1 hat, 1 openhat, 1 perc, 1 fx = 10 non-bass items for the 10
@@ -105,6 +105,79 @@ describe("pickDrumPalette", () => {
   it("throws when the palette has no drum one-shots at all", () => {
     const onlyBass = PALETTE.filter((i) => i.role === "bass");
     expect(() => pickDrumPalette(onlyBass)).toThrow(/drum/i);
+  });
+});
+
+// Round 3 (R3.2) — kit-matched picking: each lane draws its owner-kit-matched
+// palette file when a kitmatch manifest names one AND that file is actually
+// present in `items`; otherwise the lane falls back to the ordinary seeded
+// pick, unchanged. Mirrors the real manifest shape
+// (~/Library/Mosh/lab-manifests/kitmatch-15drtt-jerk-r0.json).
+describe("pickDrumPalette — kitMatch (round 3)", () => {
+  const KIT_MATCH: KitMatchFile = {
+    version: 1,
+    created: "2026-09-02",
+    lab: "15drtt-jerk-r0",
+    palette: "palette-v2",
+    lanes: {
+      kick: { ownerFile: "/lab/kick.wav", role: "kick", paletteFile: "/mock/palette/kick_2.wav", cosine: 0.94 },
+      snare: { ownerFile: "/lab/snare.wav", role: "snare", paletteFile: "/mock/palette/snare_1.wav", cosine: 0.88 },
+      // snare2 deliberately omitted — that lane has no kitmatch entry at all.
+      clap: { ownerFile: "/lab/clap.wav", role: "clap", paletteFile: "/mock/palette/clap_1.wav", cosine: 0.79 },
+      // clap2 points at a file that isn't in `items` (a stale manifest) — falls back.
+      clap2: { ownerFile: "/lab/clap2.wav", role: "clap", paletteFile: "/mock/palette/clap_9999.wav", cosine: 0.55 },
+      hat: { ownerFile: "/lab/hat.wav", role: "hat", paletteFile: "/mock/palette/hat_1.wav", cosine: 0.91 },
+      openhat: { ownerFile: "/lab/openhat.wav", role: "openhat", paletteFile: "/mock/palette/openhat_1.wav", cosine: 0.9 },
+      perc: { ownerFile: "/lab/perc.wav", role: "perc", paletteFile: "/mock/palette/perc_1.wav", cosine: 0.62 },
+      fx: { ownerFile: "/lab/fx.wav", role: "fx", paletteFile: "/mock/palette/fx_1.wav", cosine: 0.71 },
+      roll: { ownerFile: "/lab/roll.wav", role: "roll", paletteFile: "/mock/palette/kick_1.wav", cosine: 0.4 },
+    },
+  };
+
+  it("a lane with a kitmatch entry whose paletteFile IS in items uses that exact file and carries matchCosine", () => {
+    const pick = pickDrumPalette(PALETTE, { seed: 5, kitMatch: KIT_MATCH });
+    const kick = pick.pads.find((p) => p.note === 36)!;
+    expect(kick.file).toBe("/mock/palette/kick_2.wav");
+    expect(kick.matchCosine).toBe(0.94);
+    const hat = pick.pads.find((p) => p.note === 42)!;
+    expect(hat.file).toBe("/mock/palette/hat_1.wav");
+    expect(hat.matchCosine).toBe(0.91);
+  });
+
+  it("a lane with NO kitmatch entry (snare2) falls back to the seeded pick with no matchCosine", () => {
+    const pick = pickDrumPalette(PALETTE, { seed: 5, kitMatch: KIT_MATCH });
+    const snare2 = pick.pads.find((p) => p.note === 37)!;
+    expect(snare2.matchCosine).toBeUndefined();
+  });
+
+  it("a lane whose kitmatch paletteFile is NOT in items falls back to the seeded pick with no matchCosine", () => {
+    const pick = pickDrumPalette(PALETTE, { seed: 5, kitMatch: KIT_MATCH });
+    const clap2 = pick.pads.find((p) => p.note === 40)!;
+    expect(clap2.file).not.toBe("/mock/palette/clap_9999.wav");
+    expect(clap2.matchCosine).toBeUndefined();
+  });
+
+  it("still fills all 10 lanes with 10 distinct files under a kitMatch manifest", () => {
+    const pick = pickDrumPalette(PALETTE, { seed: 5, kitMatch: KIT_MATCH });
+    expect(pick.pads).toHaveLength(10);
+    expect(new Set(pick.pads.map((p) => p.file)).size).toBe(10);
+  });
+
+  it("no kitMatch at all (undefined) is byte-identical to the pre-round-3 pick (no matchCosine anywhere)", () => {
+    const withoutKitMatch = pickDrumPalette(PALETTE, { seed: 5 });
+    expect(withoutKitMatch.pads.every((p) => p.matchCosine === undefined)).toBe(true);
+  });
+
+  it("kit-matched picks don't disturb the round-2 pad gain map (kick still -2dB even though its file came from kitMatch)", () => {
+    const pick = pickDrumPalette(PALETTE, { seed: 5, kitMatch: KIT_MATCH });
+    const kick = pick.pads.find((p) => p.note === 36)!;
+    expect(kick.gainDb).toBe(-2);
+  });
+
+  it("the 808 keeps the sub-energy rule unchanged — kitMatch never touches bass picking", () => {
+    const withKitMatch = pickDrumPalette(PALETTE, { seed: 5, kitMatch: KIT_MATCH });
+    const withoutKitMatch = pickDrumPalette(PALETTE, { seed: 5 });
+    expect(withKitMatch.bass).toEqual(withoutKitMatch.bass);
   });
 });
 

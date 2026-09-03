@@ -27,7 +27,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 BIN_OVERRIDE=""
 MODEL="${MODEL:-sonnet}"
-WAIT_HEALTH_S=90
+WAIT_HEALTH_S=180
 while [ $# -gt 0 ]; do
   case "$1" in
     --bin) BIN_OVERRIDE="$2"; shift 2 ;;

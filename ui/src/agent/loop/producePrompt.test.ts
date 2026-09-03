@@ -46,7 +46,8 @@ const TEMPLATE: ProduceTemplate = {
   mix: {
     gainsDb: {},
     padGainsDb: {},
-    master: { requested: "limiter", loaded: "limiter" },
+    highpass: {},
+    master: { chain: [{ type: "softclip", ok: true }] },
   },
   constants: { eightBarsSeconds: (32 * 60) / 148 },
 };

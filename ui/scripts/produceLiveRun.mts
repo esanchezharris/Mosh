@@ -28,6 +28,7 @@
 //     [--mock-brain] [--brain shim|openrouter] [--model sonnet|opus] \
 //     [--timeout-ms 20000] [--hard-timeout-ms 720000] [--no-preflight] \
 //     [--seed <n>] [--no-repair] \
+//     [--kit-match <kitmatch.json>] [--no-kit-match] \
 //     [--pid <app pid, for RSS sampling>] [--dry-run]
 //
 // --seed (round 2 correction note 2 — "no variation in the synth sounds
@@ -70,7 +71,7 @@ import type { ProduceTemplate, ProduceTemplateDeps } from "../src/agent/loop/pro
 // VALUES behind a try/catch, but the types are safe to name directly here.
 import type { CheckInput, CheckReport } from "../src/agent/loop/produceCheck";
 import type { Snapshot } from "../src/types";
-import type { PaletteItem } from "../src/agent/loop/drumPalette";
+import type { KitMatchFile, PaletteItem } from "../src/agent/loop/drumPalette";
 
 // ── args ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,21 @@ const NO_REPAIR = argBool("no-repair");
 const DRY_RUN = argBool("dry-run");
 const APP_PID = argFlag("pid");
 const SEED_FLAG = argFlag("seed");
+
+// Round 3 (R3.2) — kit-matched drum picking. --kit-match <json> names an
+// explicit manifest (must exist — a typo here should fail loudly, not
+// silently degrade); omitted, the owner's standing lab manifest is used IF it
+// exists on disk (a fresh checkout with no manifest yet degrades quietly to
+// the ordinary seeded pick); --no-kit-match forces it off regardless.
+const KIT_MATCH_FLAG = argFlag("kit-match");
+const NO_KIT_MATCH = argBool("no-kit-match");
+const DEFAULT_KIT_MATCH_PATH = resolve(process.env.HOME ?? "", "Library/Mosh/lab-manifests/kitmatch-15drtt-jerk-r0.json");
+function resolveKitMatchPath(): string | undefined {
+  if (NO_KIT_MATCH) return undefined;
+  if (KIT_MATCH_FLAG) return resolve(KIT_MATCH_FLAG);
+  return existsSync(DEFAULT_KIT_MATCH_PATH) ? DEFAULT_KIT_MATCH_PATH : undefined;
+}
+const KIT_MATCH_PATH = resolveKitMatchPath();
 
 const TOKEN = TOKEN_FLAG ?? (TOKEN_FILE && existsSync(TOKEN_FILE) ? readTokenFile(TOKEN_FILE) : undefined);
 const OUT_DIR = OUT_DIR_ARG ? resolve(OUT_DIR_ARG) : undefined;
@@ -135,6 +151,7 @@ const resolvedConfig = {
   seed: SEED,
   tokenPresent: !!TOKEN,
   pid: APP_PID ?? null,
+  kitMatch: KIT_MATCH_PATH ?? null,
 };
 
 if (DRY_RUN) {
@@ -379,7 +396,25 @@ async function tryPreflight(rawExec: ProduceTemplateDeps["exec"], getSnapshot: (
   } catch (e) {
     console.error(`[produceLiveRun] palette manifest unreadable (${String((e as Error)?.message ?? e).slice(0, 120)}) — falling back to list_palette`);
   }
-  const template = await mod.runProduceTemplate(ask, { exec: rawExec, getSnapshot, seed, ...(palette ? { palette } : {}) });
+  // Round 3 (R3.2) — kit-matched drum picking (--kit-match / the standing
+  // manifest / --no-kit-match; resolved to KIT_MATCH_PATH up top). A missing
+  // or corrupt manifest degrades to "no kit-matching this run", never a hard
+  // failure — the ordinary seeded pick is always a fine fallback.
+  let kitMatch: { file: string; data: KitMatchFile } | undefined;
+  if (KIT_MATCH_PATH) {
+    try {
+      const data = JSON.parse(readFileSync(KIT_MATCH_PATH, "utf8")) as KitMatchFile;
+      if (!data || typeof data !== "object" || typeof data.lanes !== "object" || data.lanes === null)
+        throw new Error("expected a {lanes:{...}} object");
+      kitMatch = { file: KIT_MATCH_PATH, data };
+      console.error(`[produceLiveRun] kit-match manifest ${KIT_MATCH_PATH}: ${Object.keys(data.lanes).length} lanes`);
+    } catch (e) {
+      console.error(`[produceLiveRun] --kit-match ${KIT_MATCH_PATH} unreadable (${String((e as Error)?.message ?? e).slice(0, 120)}) — proceeding without kit-matched picking`);
+    }
+  }
+  const template = await mod.runProduceTemplate(ask, {
+    exec: rawExec, getSnapshot, seed, ...(palette ? { palette } : {}), ...(kitMatch ? { kitMatch } : {}),
+  });
   return template as ProduceTemplate;
 }
 

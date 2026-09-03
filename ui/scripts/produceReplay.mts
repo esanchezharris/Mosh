@@ -37,7 +37,14 @@
 //   ui/node_modules/.bin/vite-node --mode development ui/scripts/produceReplay.mts \
 //     --program <run-dir>/program.jsonl --out-dir <dir> --run-id r1 [--bin <path>] \
 //     [--ask "<original ask — read from run.json next to --program if omitted>"] \
-//     [--swap lab=<manifest.json>] [--fixture] [--dry-run]
+//     [--swap lab=<manifest.json>] [--fixture] [--dry-run] \
+//     [--kit-match <kitmatch.json>] [--no-kit-match]
+//
+// --kit-match (round 3, R3.2): only meaningful for --swap/--fixture (the only
+// modes that re-run the W2.5 preflight). Omitted, a swap/fixture leg inherits
+// the ORIGINAL run's kitmatch manifest path from its sibling template.json
+// (same idiom as the seed inheritance below); --no-kit-match disables even
+// that inherited path.
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -46,7 +53,7 @@ import {
 } from "./lib/realEngine.mts";
 import { wavRmsDbfs } from "./lib/companionClient.mts";
 import type { ProduceTemplateDeps } from "../src/agent/loop/produceTemplate";
-import type { PaletteItem } from "../src/agent/loop/drumPalette";
+import type { KitMatchFile, PaletteItem } from "../src/agent/loop/drumPalette";
 import type { Snapshot } from "../src/types";
 
 const PROGRAM_PATH = argFlag("program");
@@ -56,16 +63,27 @@ const ASK_FLAG = argFlag("ask");
 const SWAP = argFlag("swap"); // "lab=<path>"
 const FIXTURE = process.argv.includes("--fixture");
 const DRY_RUN = process.argv.includes("--dry-run");
+// Round 3 (R3.2) — --kit-match overrides; --no-kit-match disables even a
+// sibling-inherited path (see kitMatchPathFor below). Only meaningful for the
+// swap/fixture branch (a plain replay never re-runs the preflight at all).
+const KIT_MATCH_FLAG = argFlag("kit-match");
+const NO_KIT_MATCH = process.argv.includes("--no-kit-match");
 
 const FIXTURE_PATH = resolve(process.cwd(), "src/agent/__fixtures__/mac_r0_001_fix.program.json");
 
 // Commands the W2.5 preflight lays — everything else (add_note, add_midi_clip,
 // add_drum_pattern, rename_track after the fact, etc.) is a "note" command the
-// swap/fixture replay carries over verbatim.
+// swap/fixture replay carries over verbatim. Round 3 (R3.3) adds the mix-chain
+// commands the preflight now also issues (set_track_volume/load_builtin/
+// set_plugin_param/load_master_builtin/load_master_plugin) — a plain replay
+// never sees them today (produceLiveRun.mts's program.jsonl only records the
+// LOOP's own commands, not the preflight's — see that driver's programLines),
+// but this keeps a plain replay correct even if that ever changes.
 const TEMPLATE_COMMANDS = new Set([
   "set_tempo", "set_key", "set_time_signature", "create_section",
   "create_track", "assign_sample", "set_drum_pad", "clear_drum_pad",
   "load_plugin", "load_preset", "rename_track",
+  "set_track_volume", "load_builtin", "set_plugin_param", "load_master_builtin", "load_master_plugin",
 ]);
 const BOOKKEEPING_COMMANDS = new Set(["new_project", "batch_begin", "batch_end", "save_as", "export_audio"]);
 
@@ -193,6 +211,26 @@ function seedFromSibling(programPath: string): number | undefined {
   return undefined;
 }
 
+/** Round 3 (R3.2) — same inheritance idiom as seedFromSibling above: a --swap
+ *  (or --fixture) replay re-running the preflight should pick the SAME
+ *  kitmatch manifest the original run used (template.json.kitMatch.file, R3.2's
+ *  own record), not silently go back to the plain seeded pick. `--kit-match`
+ *  overrides; `--no-kit-match` disables even an inherited path. */
+function kitMatchPathFor(programPath: string): string | undefined {
+  if (NO_KIT_MATCH) return undefined;
+  if (KIT_MATCH_FLAG) return resolve(KIT_MATCH_FLAG);
+  const templateJson = readSiblingJson(programPath, "template.json");
+  const file = (templateJson?.kitMatch as { file?: unknown } | undefined)?.file;
+  return typeof file === "string" ? file : undefined;
+}
+
+function readKitMatch(path: string): KitMatchFile {
+  const data = JSON.parse(readFileSync(path, "utf8")) as KitMatchFile;
+  if (!data || typeof data !== "object" || typeof data.lanes !== "object" || data.lanes === null)
+    throw new Error(`--kit-match ${path}: expected a {lanes:{...}} object`);
+  return data;
+}
+
 function templatePlaceholderMap(template: Record<string, unknown>): Record<string, string> {
   const map: Record<string, string> = {};
   const drums = template.drums as { trackId?: string } | undefined;
@@ -252,6 +290,9 @@ async function main(): Promise<void> {
   // but the sibling lookup is cheap and this keeps --dry-run's config output
   // honest about what a swap/fixture leg WOULD use even before it runs.
   const seed = seedFromSibling(programPath);
+  // Round 3 (R3.2) — same inheritance idiom as `seed`: a swap/fixture replay
+  // picks up the ORIGINAL run's kitmatch manifest path unless overridden.
+  const kitMatchPath = kitMatchPathFor(programPath);
 
   const resolvedConfig = {
     mode: FIXTURE ? "fixture" : swapManifest ? "swap" : "plain",
@@ -263,6 +304,7 @@ async function main(): Promise<void> {
     // runProduceTemplate would then fall back to ITS OWN default (seed 0),
     // not this driver silently substituting one.
     seed: seed ?? null,
+    kitMatch: kitMatchPath ?? null,
   };
 
   if (DRY_RUN) {
@@ -296,10 +338,16 @@ async function main(): Promise<void> {
     const eightBarsSecondsFallback = typeof siblingEightBars === "number" && siblingEightBars > 0
       ? siblingEightBars
       : (32 * 60) / fallbackBpm;
+    // R3 — stems too, same as produceLiveRun.mts's live driver (owner note
+    // "labkit twins: no stems are available?" — headless replays didn't export
+    // them before this).
+    const stemsDir = resolve(outDir, "stems");
+    mkdirSync(stemsDir, { recursive: true });
     const lines: EngineCmd[] = [
       { command: "new_project", args: {} },
       ...[...templateCmdsFromProgram, ...notes].map((l) => ({ command: l.command, args: l.args ?? {} }) as EngineCmd),
       { command: "export_audio", args: { file: wavFile, format: "wav", range: "custom", start: 0, end: eightBarsSecondsFallback, renderMode: "auto", tail: "include", tailSeconds: 1 } },
+      { command: "export_stems", args: { dir: stemsDir, format: "wav" } },
     ];
     const out = runScript(bin, lines, session, 600_000);
     return finish(outDir, wavFile, out.results, resolvedConfig);
@@ -335,6 +383,16 @@ async function main(): Promise<void> {
   const templateDeps: ProduceTemplateDeps = { exec: harness.exec, getSnapshot: harness.getSnapshot };
   if (swapManifest) templateDeps.palette = readPaletteManifest(swapManifest);
   if (seed !== undefined) templateDeps.seed = seed;
+  // Round 3 (R3.2) — inherited (or --kit-match-overridden) kitmatch manifest.
+  // A missing/corrupt file degrades to "no kit-matching this leg", same
+  // best-effort posture as everything else in this driver.
+  if (kitMatchPath) {
+    try {
+      templateDeps.kitMatch = { file: kitMatchPath, data: readKitMatch(kitMatchPath) };
+    } catch (e) {
+      console.error(`[produceReplay] --kit-match ${kitMatchPath} unreadable (${String((e as Error)?.message ?? e).slice(0, 120)}) — proceeding without kit-matched picking`);
+    }
+  }
   const template = await mod.runProduceTemplate(ask, templateDeps);
   writeFileSync(resolve(outDir, "template.json"), JSON.stringify(template, null, 2));
 
@@ -348,8 +406,19 @@ async function main(): Promise<void> {
 
   for (const line of replayNotes) await harness.exec(line.command, line.args ?? {});
   const exportResult = await harness.exec("export_audio", { file: wavFile, format: "wav", range: "custom", start: 0, end: Number((template as { constants?: { eightBarsSeconds?: number } })?.constants?.eightBarsSeconds) || 32 * 60 / 148, renderMode: "auto", tail: "include", tailSeconds: 1 });
-  writeFileSync(resolve(outDir, "swap-program.jsonl"), [...harness.script, { command: "export_audio", args: { file: wavFile } }].map((l) => JSON.stringify(l)).join("\n") + "\n");
-  finish(outDir, wavFile, [{ command: "export_audio", ok: exportResult.ok, error: exportResult.error }], resolvedConfig);
+  // R3 — stems here too (same owner note as the plain-replay branch above).
+  const stemsDir = resolve(outDir, "stems");
+  mkdirSync(stemsDir, { recursive: true });
+  const stemsResult = await harness.exec("export_stems", { dir: stemsDir, format: "wav" });
+  writeFileSync(
+    resolve(outDir, "swap-program.jsonl"),
+    [...harness.script, { command: "export_audio", args: { file: wavFile } }, { command: "export_stems", args: { dir: stemsDir } }]
+      .map((l) => JSON.stringify(l)).join("\n") + "\n",
+  );
+  finish(outDir, wavFile, [
+    { command: "export_audio", ok: exportResult.ok, error: exportResult.error },
+    { command: "export_stems", ok: stemsResult.ok, error: stemsResult.error, data: stemsResult.data },
+  ], resolvedConfig);
 }
 
 function askFromSiblingRunJson(programPath: string): string | undefined {
@@ -365,6 +434,14 @@ function askFromSiblingRunJson(programPath: string): string | undefined {
 
 function finish(outDir: string, wavFile: string, results: Array<Record<string, unknown>>, config: Record<string, unknown>): void {
   const exportEntry = [...results].reverse().find((r) => r.command === "export_audio");
+  // R3 — stems (owner note: "labkit twins: no stems are available?" — headless
+  // replays didn't export them before this). Best-effort, same posture as
+  // produceLiveRun.mts's own export_stems call: a failure here never fails the
+  // overall replay, it's just recorded.
+  const stemsEntry = [...results].reverse().find((r) => r.command === "export_stems");
+  const stemsOk = stemsEntry ? stemsEntry.ok !== false : false;
+  const stems = stemsOk ? ((stemsEntry?.data as { stems?: unknown[] } | undefined)?.stems ?? []) : [];
+  if (stemsEntry && !stemsOk) console.error(`[produceReplay] export_stems failed: ${String(stemsEntry.error ?? "unknown error")}`);
   let renderBytes = 0;
   let renderRmsDbfs: number | null = null;
   let silentRender = true;
@@ -382,6 +459,9 @@ function finish(outDir: string, wavFile: string, results: Array<Record<string, u
     config,
     export: { ok: exportEntry?.ok !== false, error: exportEntry?.error },
     render: { file: wavFile, bytes: renderBytes, rmsDbfs: renderRmsDbfs, silentRender },
+    stems,
+    stemsOk,
+    stemsError: stemsEntry && !stemsOk ? stemsEntry.error : undefined,
   };
   writeFileSync(resolve(outDir, "replay-result.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result, null, 2));

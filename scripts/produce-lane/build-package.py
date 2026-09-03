@@ -81,6 +81,11 @@ class RunInfo:
     mix_wav: Optional[Path] = None
     swap_wav: Optional[Path] = None
     swap_status: Optional[str] = None  # "ok" | "unavailable" | "failed" | None
+    # R3 (kit-matched round): swap/replay-result.json's own "stems" field
+    # (produceReplay.mts now runs export_stems for the swap leg too, same as
+    # the live driver) — the owner's round-2 note "labkit twins: no stems are
+    # available?" named exactly this gap.
+    swap_stems: list[dict[str, Any]] = field(default_factory=list)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -110,6 +115,10 @@ def discover_runs(runs_dir: Path) -> list[RunInfo]:
             info.swap_status = "ok"
         elif swap_result.is_file():
             info.swap_status = "failed"  # a replay-result.json with no usable wav
+        if swap_result.is_file():
+            stems = load_json(swap_result).get("stems")
+            if isinstance(stems, list):
+                info.swap_stems = stems
         runs.append(info)
     return runs
 
@@ -117,6 +126,17 @@ def discover_runs(runs_dir: Path) -> list[RunInfo]:
 def discover_fixture(runs_dir: Path) -> Optional[Path]:
     mix = runs_dir / "fixture-replay" / "mix.wav"
     return mix if mix.is_file() else None
+
+
+def discover_fixture_stems(runs_dir: Path) -> list[dict[str, Any]]:
+    """R3 — the fixture-replay leg's own replay-result.json "stems" field
+    (produceReplay.mts's --fixture branch runs export_stems the same as
+    --swap and the live driver)."""
+    result_path = runs_dir / "fixture-replay" / "replay-result.json"
+    if not result_path.is_file():
+        return []
+    stems = load_json(result_path).get("stems")
+    return stems if isinstance(stems, list) else []
 
 
 def relink(dest: Path, target: Path, dry_run: bool) -> str:
@@ -371,7 +391,7 @@ def render_audition_html(package_dir: Path, date_str: str, ask: str, runs: list[
                 b_src=escape(f"runs/{r.run_id}/swap/mix.wav"),
                 b_label=escape(f"B-labkit-{r.run_id}.wav"),
                 meta="sound-matched replay: original run's notes, owner's lab kit",
-                stems_block="",
+                stems_block=stem_rows_html(package_dir, r.swap_stems),
             ))
     fixture_mix = package_dir / "runs" / "fixture-replay" / "mix.wav"
     if fixture_mix.is_file():
@@ -385,7 +405,7 @@ def render_audition_html(package_dir: Path, date_str: str, ask: str, runs: list[
             b_src="runs/fixture-replay/mix.wav",
             b_label="B-reference-notes-moshsounds.wav",
             meta="the corrected reference beat's own notes, played back with Mosh's own sounds",
-            stems_block="",
+            stems_block=stem_rows_html(package_dir, discover_fixture_stems(package_dir / "runs")),
         ))
     return AUDITION_TEMPLATE.format(
         date=escape(date_str), ask=escape(ask or "(no ask recorded)"),
