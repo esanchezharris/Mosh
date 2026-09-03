@@ -125,7 +125,7 @@ while [ "$elapsed" -lt "$WAIT_HEALTH_S" ]; do
   fi
   if body="$(curl -fsS --max-time 2 "http://127.0.0.1:$PORT/health" 2>/dev/null)"; then
     case "$body" in
-      *'"running":true'*) healthy=1; break ;;
+      *'"running":true'*|*'"running": true'*) healthy=1; break ;;
     esac
   fi
   sleep 1
