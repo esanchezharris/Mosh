@@ -20,6 +20,21 @@
 // still learn the tool exists). `memory` is undefined only when the flag itself is
 // off, so it's the ONLY case where every step's prompt stays byte-identical to the
 // pre-M2 shape.
+//
+// COMPACT MELODY (demo lane, flag `MOSH_ENABLE_DEMO_COMPACT_MELODY`, default OFF):
+// runCompactMelodyTask below bypasses the agent loop for one narrow ask shape and
+// sends a bespoke "reply only as compact JSON" prompt instead. It exists because the
+// local free-form demo brain could not reliably emit the full loop JSON for a melody
+// — a MODEL-capability workaround, not a product capability, and it is shaped like
+// the portfolio demo it was cut for (always 8 notes, always a fixed eighth-note grid,
+// fixed velocities). The general lane is the product and is already equipped for the
+// same ask: loopPrompt's melodyTaskGuidance asks for 4-8 varied notes over a simple
+// rhythm, inKeyTaskGuidance enumerates the legal MIDI numbers, and taskExec's
+// noteKeyError rejects out-of-key/out-of-register pitches with a repairable message.
+// So this lane is QUARANTINED behind its own flag rather than generalized: turning it
+// on is an explicit statement that a build is driving a model that needs the crutch.
+// It still routes through env.runBatch — one mutation path, one undo transaction —
+// and that must not regress if the lane is ever revisited.
 
 import { archivePair, brainChat, demoBrainAvailable } from "../../bridge";
 import { inScale, resolveKey, scaleMask } from "../../musicalKey";
@@ -42,6 +57,14 @@ export const loopAllowedFor = (flag: string | undefined, multiplayerActive: bool
   agenticLoopEnabled(flag) && !multiplayerActive;
 export const agenticLoopOn = (): boolean =>
   agenticLoopEnabled(import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP);
+
+/** The compact-melody demo lane's own flag (default OFF, its own CMake option) —
+ *  see the COMPACT MELODY block in this file's header for why it is quarantined
+ *  rather than generalized. Same pure-predicate + env-reader shape as the loop flag
+ *  above so a build's posture is testable without touching import.meta.env. */
+export const compactMelodyDemoEnabled = (flag: string | undefined): boolean => flag === "1";
+export const compactMelodyDemoOn = (): boolean =>
+  compactMelodyDemoEnabled(import.meta.env.VITE_MOSH_ENABLE_DEMO_COMPACT_MELODY);
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
 /** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext+
@@ -221,7 +244,9 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   const exec = createTaskExecutor(text.slice(0, 48), { utterance: text, source: "agent_loop" }, { signal });
   let run: LoopRun;
   try {
-    const compactMelody = await runCompactMelodyTask(text, exec.env, signal);
+    const compactMelody = compactMelodyDemoOn()
+      ? await runCompactMelodyTask(text, exec.env, signal)
+      : null;
     if (compactMelody) run = compactMelody;
     else {
       const memory = await memorySectionFor(text);

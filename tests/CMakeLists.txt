@@ -52,6 +52,7 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
     test_webbridge_resource_guard.cpp
+    test_webview_cursor.cpp
     test_directory_listing.cpp
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
@@ -135,6 +136,14 @@ add_test(NAME HarnessSessionShell
          COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
+if (APPLE)
+    add_test(NAME MoshMidiCursorGateTypecheck
+             COMMAND /usr/bin/xcrun swiftc -typecheck
+                     ${CMAKE_SOURCE_DIR}/scripts/macos-midi-cursor-gate.swift)
+    add_test(NAME MoshMidiSelectionGateTypecheck
+             COMMAND /usr/bin/xcrun swiftc -typecheck
+                     ${CMAKE_SOURCE_DIR}/scripts/macos-midi-selection-gate.swift)
+endif()
 if (TARGET Mosh)
     add_test(NAME AudioRecoverySmoke
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/audio-recovery-isolation-test.sh

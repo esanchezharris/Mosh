@@ -77,8 +77,7 @@ scripts/auto-loop/gate.sh native <candidate-worktree> origin/main
 
 For final-baseline verification, also run the built app's --selftest three
 times, --selftest-undo, the generated-scoreboard check, and documentation
-link/reference checks. The temporary MOSH_MAX_CODEX_CHILDREN=1000 value was a
-one-time documented pre-pivot maintenance override, not a standing policy.
+link/reference checks. The preflight's agent child-process ceiling was removed on 2026-09-01; it was a proxy for lingering Mosh instances, not a memory limit.
 
 ## Living references
 
