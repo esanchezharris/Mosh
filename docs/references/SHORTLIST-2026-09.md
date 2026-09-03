@@ -1,5 +1,12 @@
 # Reference project files — shortlist (2026-09-02)
 
+> **Status: DEFERRED (owner decision, 2026-09-02 evening).** Prove the strategy
+> on free material first — see [FREE-FIRST-2026-09.md](FREE-FIRST-2026-09.md).
+> 25 usable project files were already on the owner's disk, including two real
+> jerk sessions by @15drtt marked "for educational purposes only". This basket
+> stays valid but is no longer urgent, and may be partly redundant for trap and
+> jerk.
+
 Purpose: buy or download real DAW project files (Ableton Live sets first) per
 genre so the produce lane's mix/arrangement rules come from measured
 references instead of my guesses (see docs/POSTMORTEM-2026-09.md — proxy
