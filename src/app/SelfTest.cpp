@@ -3166,6 +3166,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             check (lp->mode.get() == "highpass", "underlying LowPassPlugin.mode is \"highpass\"");
             check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying LowPassPlugin.frequency is 180 Hz");
+            // The filter reads the PARAMETER (updateFilters → frequency->getCurrentValue()),
+            // not the CachedValue — round 3 shipped 4 kHz highpasses while this CachedValue
+            // check passed. This is the check that would have been red.
+            check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying LowPassPlugin frequency PARAMETER (what the filter reads) is 180 Hz");
         }
         else
             check (false, "track highpass plugin resolves to a live te::LowPassPlugin");
@@ -3207,6 +3211,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
             check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
+            check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
         }
         else
             check (false, "master highpass plugin resolves to a live te::LowPassPlugin");

@@ -225,6 +225,13 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
             // transaction beginTxn opened above — one undo removes the whole insert.
             lp->mode = "highpass";
             lp->frequencyValue = 180.0f;
+            // The filter reads the AutomatableParameter (updateFilters() →
+            // frequency->getCurrentValue()), NOT the CachedValue, and the attached
+            // parameter did not follow the CachedValue write: round 3 (2026-09-02)
+            // shipped every "180 Hz" highpass at Tracktion's 4000 Hz default (probed:
+            // normalised 0.1814 = 4 kHz). setParameter writes the parameter AND its
+            // attached CachedValue (same undo transaction).
+            lp->frequency->setParameter (180.0f, juce::sendNotification);
         }
     }
 
@@ -932,9 +939,11 @@ juce::var MoshOps::cmdLoadMasterBuiltin (const juce::var& args)
     {
         if (auto* lp = dynamic_cast<te::LowPassPlugin*> (plugin.get()))
         {
-            // Same in-transaction CachedValue assignment as cmdLoadBuiltin.
+            // Same in-transaction CachedValue assignment as cmdLoadBuiltin — and the
+            // same parameter write, for the same reason (the filter reads the parameter).
             lp->mode = "highpass";
             lp->frequencyValue = 180.0f;
+            lp->frequency->setParameter (180.0f, juce::sendNotification);
         }
     }
 
