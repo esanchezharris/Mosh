@@ -3848,6 +3848,114 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (layerOf2 (gcid2), "remove_render_layer is undoable (layer restored)");
         check (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString().contains ("remove_render_layer"),
                "JSONL records remove_render_layer");
+
+        // --- NRL-004b: the render-loop TAIL commands (cancel_render / reject_render) ---
+        // Both shipped UNCOVERED on all four gate surfaces and sat behind expiring waivers
+        // (coverage_waivers.json) whose own reason called cancel_render "a real coverage gap,
+        // not a bookkeeping one". They are the two ways a producer says "no" to a render:
+        // cancel it while it is still running, or reject it once it has landed.
+        section ("NRL-004b: cancel_render / reject_render (the render-loop tail)");
+        {
+            auto ct = cmd (ops, "create_track", args1 ("name", "GenTail"))["data"].getProperty ("trackId", var()).toString();
+            auto ctone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ct }, { "seconds", 1.0 }, { "freq", 233.0 }}));
+            const auto tcid = ctone["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", tcid }, { "adapter", "fake" }}))),
+                   "tail: create_render_layer ok");
+
+            auto tailLayer = [&] (const String& cid) -> var {
+                auto trk = trackById (ct);
+                if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                    for (auto& c : *arr)
+                        if (c.getProperty ("id", var()).toString() == cid)
+                            return c.getProperty ("renderLayer", var());
+                return {};
+            };
+            auto tailStatus = [&] (const String& cid) { return tailLayer (cid).getProperty ("status", var()).toString(); };
+
+            // ── cancel_render: the layer must never stay parked, and nothing may land ──
+            // Deliberately NOT driven through render_layer{wait:false}: that path detaches a
+            // polling thread whose finalizeRender() has no cancellation guard, so a cancelled
+            // job still races to land "ready" (output present) or "error" (output absent).
+            // Asserting post-cancel state on that path would be a FLAKY gate check. Instead
+            // bypass_layer parks the layer in a known NON-dirty state on a layer that has never
+            // rendered — so "returns to idle" and "no artifact lands" are both provable, and the
+            // precondition genuinely differs from the postcondition (this cannot pass vacuously).
+            check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", tcid }, { "bypassed", true }}))),
+                   "tail: bypass_layer parks the un-rendered layer");
+            check (tailStatus (tcid) == "bypassed", "precondition: status is 'bypassed', NOT dirty");
+            check (! (bool) tailLayer (tcid).getProperty ("hasArtifact", false),
+                   "precondition: the layer has never rendered (no artifact)");
+
+            const int tracksBeforeCancel = tracks (ops);
+            // cancelJob() POSTs /cancel and reads the ack; the service answers ok for ANY reached
+            // /cancel (see GenerativeJobManager::cancelJob) so this exercises the real round-trip
+            // against the service this section already spawned.
+            check (ok (cmd (ops, "cancel_render", objN ({{ "clipId", tcid }, { "jobId", "selftest-tail-job" }}))),
+                   "cancel_render ok (the generative service acknowledged the /cancel)");
+            check (tailStatus (tcid) == "dirty",
+                   "cancel_render UNSTICKS the layer -> dirty (a Cancel click never leaves it parked)");
+            check (tailLayer (tcid).getProperty ("renderError", var()).toString().isEmpty(),
+                   "an ACKNOWLEDGED cancel records no renderError");
+            check (! (bool) tailLayer (tcid).getProperty ("hasArtifact", false),
+                   "cancel_render lands NO artifact");
+            check (tracks (ops) == tracksBeforeCancel, "cancel_render creates no lane / track");
+
+            // ── reject_render: the explicit "no" AFTER a render has landed ──
+            auto rr = cmd (ops, "render_layer", objN ({{ "clipId", tcid }, { "wait", true }}));
+            check (ok (rr), "tail: sync render for the reject case ok");
+            check (tailStatus (tcid) == "ready", "precondition: rendered -> status ready (reject must change it)");
+
+            check (ok (cmd (ops, "reject_render", args1 ("clipId", tcid))), "reject_render ok");
+            check (tailStatus (tcid) == "dirty", "reject_render -> status dirty (re-imagine available again)");
+            check (! (bool) tailLayer (tcid).getProperty ("userKept", true),
+                   "reject_render clears userKept (the NEGATIVE taste bit)");
+
+            // The JSONL taste label is the POINT of reject_render — the taste census reads the
+            // label, not the layer state — so assert the row, not just the ValueTree.
+            {
+                int rejectsForClip = 0; var lastReject;
+                for (auto& l : StringArray::fromLines (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+                {
+                    if (! l.contains ("\"reject_render\"")) continue;
+                    const auto row = JSON::parse (l);   // named local — the var-temporary UAF class
+                    if (row.getProperty ("command", var()).toString() != "reject_render") continue;
+                    if (row.getProperty ("args", var()).getProperty ("clipId", var()).toString() != tcid) continue;
+                    ++rejectsForClip; lastReject = row;
+                }
+                check (rejectsForClip == 1, "reject_render logged exactly ONE taste label for this clip");
+                check ((bool) lastReject.getProperty ("undoable", false),
+                       "reject_render is logged undoable:true (it opens a real Tracktion txn)");
+                // Honest limit, pinned deliberately: unlike cmdResetRenderLayer — which builds an
+                // enriched label carrying layerId/cacheKey/adapter — cmdRejectRender logs its RAW
+                // args, so the negative label has no join keys of its own. service/taste/census.py
+                // compensates by recovering layerId from the boot's most recent accept. Asserting
+                // clipId (not the absence of the others) keeps this test green when that gap is fixed.
+                check (lastReject.getProperty ("args", var()).getProperty ("clipId", var()).toString() == tcid,
+                       "reject taste label carries clipId (the census's join key today)");
+            }
+
+            // reject marks the take dirty; it does NOT unwind the in-place apply (cmdRemoveRenderLayer
+            // says so in its own note). Pinned because it has a consequence worth seeing: the layer is
+            // still appliedInPlace, and logKeptRenderLabels() sweeps every applied, non-bypassed layer
+            // on the next save/export — so an explicitly REJECTED take still earns an implicit
+            // render_kept POSITIVE. Flagged as a follow-up, deliberately not changed here: taste-label
+            // semantics have downstream consumers (service/taste/census.py, taste_table).
+            check ((bool) tailLayer (tcid).getProperty ("appliedInPlace", false),
+                   "reject_render does NOT unwind the in-place apply (reject != reset)");
+
+            // Housekeeping: drop the layer so this section's applied take cannot leak a second
+            // render_kept into the export-count assertions in the sections below.
+            check (ok (cmd (ops, "remove_render_layer", args1 ("clipId", tcid))),
+                   "tail: remove_render_layer cleans up the section's applied layer");
+
+            // Error path: no render layer -> an honest error, not a silent ok.
+            auto bareTone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ct }, { "seconds", 0.5 }, { "freq", 180.0 }}));
+            const auto bareId = bareTone["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "reject_render", args1 ("clipId", bareId))),
+                   "reject_render on a clip with NO render layer errors");
+            check (! ok (cmd (ops, "reject_render", args1 ("clipId", "no-such-clip"))),
+                   "reject_render on an unknown clip errors");
+        }
     }
 
     // --- Route B: Tier-B transform render mode (FakeTransformAdapter) ---

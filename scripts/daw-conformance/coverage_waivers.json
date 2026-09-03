@@ -1,107 +1,97 @@
 [
   {
     "command": "accept_lyric_proposal",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "analyze_lyrics",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "build_lyrics_from_clip",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "build_skeleton_from_clip",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "expires": "2027-03-01",
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart. RECLASSIFIED 2026-09-03: previously filed with the generic service-spawning group, but it lives in src/moshops/MoshOps.Lyrics.cpp and is the mumble-take skeleton landing command — it is a Finish-My-Song command and shares that program's paused status. It additionally needs the Basic-Pitch venv (see the note at src/app/SelfTest.cpp on the skeleton lane)."
   },
   {
     "command": "cancel_lyric_job",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "cancel_render",
-    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-08-16: STILL UNCOVERED \u2014 zero mentions across all three coverage surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Real coverage gap, not a bookkeeping one. P3 target: a conformance EXTRA family or a selftest section exercising submit -> cancel -> assert no artifact lands and the layer returns to idle.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "cancel_training_job",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
-    "expires": "2026-09-01"
+    "reason": "LoRA trainer control command. Re-reviewed 2026-09-03: THE PREVIOUS REASON WAS STALE and is corrected here — it claimed a 'fake backend', but the trainer is real now (service/training/trainer_job.py selects local_pmetal or a rented GPU, and its own comment flags the old stub default as 'a live footgun'; the stub is now the explicit local_fake opt-in). The honest blocker is NOT fakeness: covering this needs a host with the trainer binary and a base checkpoint present — server.py reports exactly that as trainingBlockers — which the gate host does not have. Still uncovered on all four surfaces. Next step is a verify-hardware check gated on the training descriptor reporting no blockers.",
+    "expires": "2026-12-01"
   },
   {
     "command": "complete_lyrics",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "fill_lyric_gap",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "get_lyric_corpus_stats",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "get_rhymes",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "import_lora_adapter",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "LoRA library surface for the Re-Imagine render lane. Re-reviewed 2026-09-03: THE PREVIOUS REASON WAS WRONG and is corrected here — it carried the verbatim lyrics boilerplate ('P5 reachability lane will map the UI affordance'), a lyrics-program commitment that has nothing to do with the LoRA library. Still uncovered on all four surfaces. Genuinely service-spawning: it degrades to an error when the generative service is unavailable, so it is kept out of the hermetic surfaces. Next step is a verify-hardware check on a host with the service and at least one adapter installed.",
+    "expires": "2026-12-01"
   },
   {
     "command": "list_loras",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "LoRA library surface for the Re-Imagine render lane. Re-reviewed 2026-09-03: THE PREVIOUS REASON WAS WRONG and is corrected here — it carried the verbatim lyrics boilerplate ('P5 reachability lane will map the UI affordance'), a lyrics-program commitment that has nothing to do with the LoRA library. Still uncovered on all four surfaces. Genuinely service-spawning: it degrades to an error when the generative service is unavailable, so it is kept out of the hermetic surfaces. Next step is a verify-hardware check on a host with the service and at least one adapter installed.",
+    "expires": "2026-12-01"
   },
   {
     "command": "list_transform_targets",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "expires": "2026-11-01",
+    "reason": "Re-Imagine transform-target list (Route B). Re-reviewed 2026-09-03: still uncovered on all four surfaces, and the previous reason carried the lyrics boilerplate ('P5 reachability lane'), which is corrected here — this belongs to the Re-Imagine lane that IS selected on main (PR #666), not to the paused lyrics program. This is therefore a LIVE commitment, not a paused one, and gets the shortest expiry in this ledger. It is service-spawning (MoshOps.Generative.cpp returns 'generative service unavailable' without one) so it stays out of the hermetic surfaces. Concrete next step: a scripts/verify-hardware check asserting the target list is non-empty and well-shaped against a live service, alongside the existing transform render checks."
   },
   {
     "command": "load_rave_model",
-    "reason": "Re-reviewed 2026-08-16: claim re-verified and still true. MOSH_ENABLE_ANIRA is still OFF by default (cmake/Dependencies.cmake:59), so this command is absent from every default build. add_rave_insert IS verify-covered (scripts/verify-hardware/rave_insert_check.py) but model HOT-SWAP is not. Covering it requires an anira-gated build, so this waiver is structural rather than a to-do \u2014 revisit only if anira ships on by default.",
-    "expires": "2026-09-01"
+    "expires": "2027-06-01",
+    "reason": "Re-verified 2026-09-03: claim still true. MOSH_ENABLE_ANIRA is still declared OFF (cmake/Dependencies.cmake, 'Fetch anira + LibTorch for the real-time RAVE insert'), so this command is absent from every default build. add_rave_insert IS verify-covered (scripts/verify-hardware/rave_insert_check.py) but model HOT-SWAP is not. Covering it requires an anira-gated build, so this is a STRUCTURAL waiver, not a to-do — it carries the longest expiry in this ledger deliberately. Revisit only if anira ships on by default; until then renewing is the correct action and 'cover it' is not available."
   },
   {
     "command": "mp_send_signal",
-    "reason": "Re-reviewed 2026-08-16: THE PREVIOUS REASON WAS STALE and is corrected here. It claimed 'covered by vitest MP store tests only'; no test file references mp_send_signal at all. It appears only in bridge.mock.ts, commandClassification.ts, store/events.ts, webrtc/useVideo.ts and the native dispatch \u2014 so it is uncovered on the three gate surfaces AND in vitest. P6 matrix:locks target; the signalling payload is WebRTC plumbing, so a store-level vitest asserting dispatch shape is the cheap first step.",
-    "expires": "2026-09-01"
+    "expires": "2026-11-01",
+    "reason": "WebRTC signalling passthrough (MoshOps.Multiplayer.cpp forwards an opaque payload to one peer via the relay session). Re-reviewed 2026-09-03: the 2026-08-16 correction still holds — still uncovered on all four surfaces AND in vitest, appearing only in bridge.mock.ts, commandClassification.ts, store/events.ts, webrtc/useVideo.ts and the native dispatch. CORRECTION to that reason's next step: it proposed 'a store-level vitest asserting dispatch shape' as the cheap first step, but vitest is NOT one of the four coverage surfaces, so that work would not clear this waiver — a misleading to-do. The real next step is a ui/e2e spec driving the video-room affordance, which needs a live relay and a second peer."
   },
   {
     "command": "regenerate_lyric",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "reject_lyric_proposal",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "reject_render",
-    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-08-16: STILL UNCOVERED \u2014 zero mentions across all three coverage surfaces. Pairs with cancel_render; cover them together, since reject is the accept/reject taste-label branch and needs the JSONL label asserted, not just the layer state.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "suggest_next_line",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "Finish-My-Song is PAUSED indefinitely (owner decision 2026-08-11; CLAUDE.md 'Paused and archived work', and the tombstone banners on docs/FINISH_MY_SONG_*.md). Re-reviewed 2026-09-03: STILL UNCOVERED on all four surfaces. The previous reason promised 'P5 reachability lane will map the UI affordance' — that commitment is RETIRED here, because the P5 lane belongs to the paused program and naming it implied live work that nobody is doing. Command is service-spawning by design and stays out of the hermetic surfaces. Note the previous reason also claimed it was 'proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e'; that is NOT restated here, because the only lyrics test on disk (service/lyrics/lyric_gen_test.py) exercises syllable/generation primitives, not this command — so there is no command-level proof anywhere, on or off the gate surfaces. Covering it on a gate surface would mean building test surface for a program with no owner-approved quality goal. Renew only while FMS stays paused; if FMS reopens, this waiver is void and the command needs real coverage as part of that restart.",
+    "expires": "2027-03-01"
   },
   {
     "command": "training_job_status",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
-    "expires": "2026-09-01"
+    "reason": "LoRA trainer control command. Re-reviewed 2026-09-03: THE PREVIOUS REASON WAS STALE and is corrected here — it claimed a 'fake backend', but the trainer is real now (service/training/trainer_job.py selects local_pmetal or a rented GPU, and its own comment flags the old stub default as 'a live footgun'; the stub is now the explicit local_fake opt-in). The honest blocker is NOT fakeness: covering this needs a host with the trainer binary and a base checkpoint present — server.py reports exactly that as trainingBlockers — which the gate host does not have. Still uncovered on all four surfaces. Next step is a verify-hardware check gated on the training descriptor reporting no blockers.",
+    "expires": "2026-12-01"
   }
 ]
