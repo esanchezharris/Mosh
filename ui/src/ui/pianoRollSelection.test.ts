@@ -93,4 +93,10 @@ describe("reselectByIdentity", () => {
   it("ignores identities that no longer exist", () => {
     expect([...reselectByIdentity(NOTES, [noteIdentity(note(0, 99, 42))])]).toEqual([]);
   });
+
+  it("matches duplicate identities by occurrence instead of selecting every duplicate", () => {
+    const duplicate = note(0, 60, 0);
+    const notes = [duplicate, { ...duplicate, i: 1 }];
+    expect([...reselectByIdentity(notes, [noteIdentity(duplicate)])]).toEqual([0]);
+  });
 });
