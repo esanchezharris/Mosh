@@ -171,6 +171,56 @@ chord-tone rule that may itself be too strict for a lead). Nobody has heard
 round 2. Your ear is the gate; the stems are there so the next verdict can
 name the track.
 
+## Round 3 (same day, ~14:50 → 18:10) — samples + mix on the frozen Opus notes
+
+**Round-2 verdict:** first pass ever — `B-labkit-r2-opus-s3` (Opus's own
+notes + same Vital presets + your Live-set samples) = pass_with_notes; the
+identical notes on palette samples = fail. Verbatim record:
+`docs/produce-corrections/produce-r2-2026-09-02.meta.json`. The twin
+isolated it: composition passed; samples + mix were the gap.
+
+What landed (commits `8e17f965..61be2e74`):
+- **0 ms onsets**: all 127 palette-v2 one-shots re-trimmed from ~5 ms (layer
+  clap 23 ms, fx 25 ms) to 0.5 ms pre-roll, originals kept as `.orig.wav`,
+  feature index rebuilt (`service/presets/retrim_onsets.py`).
+- **Kit-matched picking**: per lane, the palette sample nearest your 15drtt
+  kit in the 55-dim drummatch space (`service/presets/match_kit.py` →
+  `~/Library/Mosh/lab-manifests/kitmatch-15drtt-jerk-r0.json`). Cosines:
+  hat 0.92, clap2 0.92, fx 0.88, clap 0.84, openhat 0.78, snare2 0.75, perc
+  0.75, snare 0.71, roll 0.68 — **kick 0.25**: nothing in palette-v2 resembles
+  your jers kick. That is the palette's real hole.
+- **Native builtins** `highpass` (Tracktion LowPass in highpass mode, 180 Hz)
+  and `softclip` (tanh clipper), selftest section "R3.3", MoshTests green.
+- **Preflight mix chain**: highpass on every melodic track; gains drums 0 /
+  808 +3 / lead −10 / counter −12 / stab −10 / chords −13 / arp −16 / drone
+  −14 / ambient −16; master = softclip → The God Particle (your VST3, this
+  Mac only, `MOSH_PRODUCE_MASTER_VST3=1`). Highpass frequency stays at the
+  180 Hz default (per-Hz set skipped: normalization unknown).
+- Stems on every render incl. headless twins; A-flywheel is a real file.
+
+The two candidates (SAME notes as r2-opus-s3, same presets, same seed):
+
+| File | Samples | peak / RMS / crest (dBFS) | clip |
+|---|---|---|---|
+| `B-mosh-r3-opus-s3-kitmatched.wav` | palette-v2, kit-matched | −3.1 / −5.7 / 2.6 | 0 % |
+| `B-mosh-r3-opus-s3-labkit.wav` | your Live-set kit | −3.1 / −5.4 / 2.3 | 0 % |
+| (round 2 `r2-opus-s3` for reference) | palette-v2, seeded | 0.0 / −8.0 / 8.0 | 0.22 % |
+| `A-flywheel.wav` (your export) | — | −1.5 / −4.1 / 2.5 | 0 % |
+
+So the physical mix envelope now matches your export; whether it *sounds*
+right is yours to say. Package: `~/Library/Mosh/produce-ab/2026-09-02/`
+(round-1 fails in `round1-failed/`, round-2 in `round2-judged/`), page at
+http://127.0.0.1:8797/audition.html with stems per candidate.
+
+**Reference-project program:** researched shortlist landing in
+`docs/references/SHORTLIST-2026-09.md` (trap/jerk/rage/drill/plugg,
+R&B, house/tech house, lo-fi, synthwave, pop; BUY-NOW baskets with license
+terms; free/CC only where explicit). Findings so far: Splice sells no
+project files; jerk and plugg have essentially no project-file market
+(direct producer outreach needed); trap, drill, tech house, synthwave and
+pop are well served (Abletunes' license explicitly permits deconstruction
+for learning; Loopmasters/ModeAudio packs carry 15 Live sets each).
+
 ## Where things are
 
 - Package: `~/Library/Mosh/produce-ab/2026-09-02/` (audition.html,
