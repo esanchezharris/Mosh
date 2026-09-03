@@ -19,11 +19,6 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-# Warm librosa's numba import BEFORE service/ goes on sys.path: numba probes
-# `import coverage` at import time, and service/coverage.py (the re-imagine
-# whole-clip tiler) would shadow the PyPI package and crash that probe.
-import librosa.effects  # noqa: F401
-
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SERVICE = os.path.dirname(os.path.dirname(_HERE))
 if _SERVICE not in sys.path:
