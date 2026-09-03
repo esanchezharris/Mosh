@@ -36,6 +36,7 @@ const B = (name: string, required = true, desc?: string): ArgSpec => ({ name, ty
 export const BUILTIN_TYPES = [
   "4osc", "sampler", "4bandEq", "compressor", "reverb", "delay", "chorus",
   "phaser", "lowpass", "pitchShifter", "moshAutoTune", "moshOTT", "moshXFeedback",
+  "highpass", "softclip",
 ] as const;
 
 export const AGENT_COMMANDS: AgentCommand[] = [
@@ -211,7 +212,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "list_builtins", desc: "List the built-in effects/instruments with their display names + categories (read-only) — you do NOT need this to load one, the 'type' names are already listed on load_builtin", args: [] },
   { command: "list_plugins", desc: "List the scanned VST3/AU plugins available to load (read-only) — the 'pluginId' names load_plugin/load_master_plugin take", args: [] },
-  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track. type is EXACTLY one of: 4osc, sampler, 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune, moshOTT, moshXFeedback (an EQ is \"4bandEq\" — \"eq\" is rejected)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
+  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track. type is EXACTLY one of: 4osc, sampler, 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune, moshOTT, moshXFeedback, highpass, softclip (an EQ is \"4bandEq\" — \"eq\" is rejected; \"highpass\" is a dedicated high-pass filter distinct from \"lowpass\"; \"softclip\" is a tanh soft clipper)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
   { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
   { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash) — omit kit for the bundled default", args: [S("trackId"), S("kit", false, "kit id from list_drum_kits")] },
   { command: "assign_sample", desc: "Map an audio file to a track's sampler: mode 'drum' (default, one-shot pad at one note) or 'melodic' (a pitched 808/bass played across the keyboard, note-length gated)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127: the pad (drum) or the sample's root note (melodic)"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false), S("mode", false, "'drum' (default) or 'melodic'")] },

@@ -3014,11 +3014,14 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
 {
     auto* o = new DynamicObject();
     o->setProperty ("index", index);
-    o->setProperty ("name", p.getName());
-    o->setProperty ("type", p.getPluginType());
+    // R3.3 — a high-pass-mode LowPassPlugin reports the "highpass" built-in id/name
+    // here, not Tracktion's genuine "lowpass" xmlTypeName/"LPF/HPF" name, so this
+    // matches what load_builtin returned and stays consistent across save/reload.
+    o->setProperty ("name", effectiveBuiltinName (p));
+    o->setProperty ("type", effectiveBuiltinType (p));
     o->setProperty ("enabled", p.isEnabled());
     auto* ext = dynamic_cast<te::ExternalPlugin*> (&p);
-    const auto* bspec = findBuiltin (p.getPluginType());
+    const auto* bspec = findBuiltin (effectiveBuiltinType (p));
     o->setProperty ("external", ext != nullptr);
     o->setProperty ("builtin", bspec != nullptr);
     o->setProperty ("isInstrument", (ext != nullptr && ext->isSynth())

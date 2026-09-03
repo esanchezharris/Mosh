@@ -5,6 +5,7 @@
 #include "moshops/MoshOps.h"
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include "plugins/moshfx/MoshFxPlugins.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -2966,7 +2967,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lb = cmd (ops, "list_builtins");
         check (ok (lb), "list_builtins ok");
         const int nB = lb["data"].getProperty ("plugins", var()).size();
-        check (nB >= 13, "built-in palette has the full catalog plus Mosh FX");
+        check (nB >= 15, "built-in palette has the full catalog plus Mosh FX");
         bool sawComp = false, sawSynth = false, sawAutoTune = false, sawOTT = false, sawXFeedback = false;
         if (auto* arr = lb["data"].getProperty ("plugins", var()).getArray())
             for (auto& p : *arr)
@@ -3112,6 +3113,155 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // The scratch "Built-ins" track is left in place: the only later count
         // check in this run is relative (tracksBefore+1), and absolute-count
         // checks live in the separate runUndoSelfTest with its own fresh engine.
+    }
+
+    // ─── R3.3: highpass + softclip built-ins ───
+    // "highpass" is not its own Tracktion xmlTypeName — it's te::LowPassPlugin
+    // (xmlTypeName "lowpass") flipped into high-pass mode by load_builtin/
+    // load_master_builtin, and the snapshot serializer (effectiveBuiltinType/
+    // effectiveBuiltinName in MoshOpsInternal.h) reports it back out as "highpass",
+    // never Tracktion's genuine "lowpass". "softclip" is a wholly new Mosh FX built-in
+    // (MoshSoftClipPlugin — plain per-sample tanh, no oversampling). This section proves:
+    // the snapshot round-trip on both; the underlying LowPassPlugin's real mode/frequency
+    // for highpass (the snapshot only ever exposes a normalised param value); a single
+    // undo/redo cleanly reverts/restores the WHOLE load — creation + the in-transaction
+    // mode/frequency CachedValue writes together, not just the insert — on both the track
+    // and the master bus; set_plugin_param/set_master_plugin_param reach both; and a real
+    // render through the chain (track highpass -> master highpass -> master softclip)
+    // produces non-silent audio without error.
+    section ("R3.3: highpass + softclip built-ins");
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "R3.3 Filters"))["data"].getProperty ("trackId", var()).toString();
+
+        auto trackBuiltin = [&] (const String& type) -> var {
+            auto trk = trackById (rt);
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return p;
+            return var();
+        };
+        // Live engine access — the snapshot only exposes a normalised param value, never
+        // the plugin's real mode/Hz, so mode/frequency are checked against the actual
+        // te::LowPassPlugin object (same pattern AGT-UNDO's flushParam lookup uses above).
+        auto liveTrackLowPass = [&] (int index) -> te::LowPassPlugin* {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->itemID.toString() == rt)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (index >= 0 && index < plugins.size())
+                        return dynamic_cast<te::LowPassPlugin*> (plugins[index].get());
+                }
+            return nullptr;
+        };
+
+        // ── Track: highpass ─────────────────────────────────────────────
+        auto hpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", rt }, { "type", "highpass" }}));
+        check (ok (hpLoad), "load_builtin (highpass) on a track ok");
+        check (hpLoad["data"].getProperty ("type", var()).toString() == "highpass",
+               "load_builtin result reports type \"highpass\", not the raw Tracktion \"lowpass\"");
+        auto hpEntry = trackBuiltin ("highpass");
+        check (hpEntry.getProperty ("type", var()).toString() == "highpass", "snapshot plugin.type is \"highpass\"");
+        check ((bool) hpEntry.getProperty ("builtin", false), "track highpass flagged builtin=true");
+        check (hpEntry.getProperty ("category", var()).toString() == "Filter", "track highpass carries the Filter category");
+        if (auto* lp = liveTrackLowPass ((int) hpEntry.getProperty ("index", -1)))
+        {
+            check (lp->mode.get() == "highpass", "underlying LowPassPlugin.mode is \"highpass\"");
+            check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying LowPassPlugin.frequency is 180 Hz");
+        }
+        else
+            check (false, "track highpass plugin resolves to a live te::LowPassPlugin");
+
+        // One undo removes the WHOLE load — creation + mode + frequency writes together,
+        // not just the insert (exactly what load_builtin's CachedValue-assignment comment
+        // is there to guarantee).
+        check (ok (cmd (ops, "undo")), "undo highpass (track) load ok");
+        check (! trackBuiltin ("highpass").isObject(), "one undo fully removes the track highpass builtin");
+        check (ok (cmd (ops, "redo")), "redo highpass (track) load ok");
+        auto hpEntryRedone = trackBuiltin ("highpass");
+        check (hpEntryRedone.getProperty ("type", var()).toString() == "highpass", "redo restores the track highpass builtin");
+        if (auto* lp = liveTrackLowPass ((int) hpEntryRedone.getProperty ("index", -1)))
+            check (lp->mode.get() == "highpass", "redo restores mode \"highpass\" too, not just the insert");
+        else
+            check (false, "redo restores a live te::LowPassPlugin");
+
+        const int hpIdxFinal = (int) hpEntryRedone.getProperty ("index", -1);
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "paramIndex", 0 }, { "value", 0.4 }}))),
+               "set_plugin_param on the track highpass ok");
+
+        // ── Master: highpass + softclip ─────────────────────────────────
+        auto masterBuiltin = [&] (const String& type) -> var {
+            auto plugins = ops.snapshot().getProperty ("master", var()).getProperty ("plugins", var());
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return p;
+            return var();
+        };
+        auto liveMasterLowPass = [&] (int index) -> te::LowPassPlugin* {
+            auto plugins = eng.edit().getMasterPluginList().getPlugins();
+            return (index >= 0 && index < plugins.size()) ? dynamic_cast<te::LowPassPlugin*> (plugins[index].get()) : nullptr;
+        };
+
+        auto hpMasterLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "highpass" }}));
+        check (ok (hpMasterLoad), "load_master_builtin (highpass) ok");
+        auto hpMasterEntry = masterBuiltin ("highpass");
+        check (hpMasterEntry.getProperty ("type", var()).toString() == "highpass", "master snapshot plugin.type is \"highpass\"");
+        if (auto* lp = liveMasterLowPass ((int) hpMasterEntry.getProperty ("index", -1)))
+        {
+            check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
+            check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
+        }
+        else
+            check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
+
+        check (ok (cmd (ops, "undo")), "undo highpass (master) load ok");
+        check (! masterBuiltin ("highpass").isObject(), "one undo fully removes the master highpass builtin");
+        check (ok (cmd (ops, "redo")), "redo highpass (master) load ok");
+        check (masterBuiltin ("highpass").getProperty ("type", var()).toString() == "highpass", "redo restores the master highpass builtin");
+
+        auto scLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "softclip" }}));
+        check (ok (scLoad), "load_master_builtin (softclip) ok");
+        auto scEntry = masterBuiltin ("softclip");
+        check (scEntry.getProperty ("type", var()).toString() == "softclip", "master snapshot plugin.type is \"softclip\"");
+        check ((bool) scEntry.getProperty ("builtin", false), "master softclip flagged builtin=true");
+        check (scEntry.getProperty ("category", var()).toString() == "Dynamics", "master softclip carries the Dynamics category");
+        auto scReadout = scEntry.getProperty ("moshFx", var());
+        check (scReadout.getProperty ("kind", var()).toString() == "softclip", "master softclip exposes a moshFx readout");
+        check (std::abs ((double) scReadout.getProperty ("driveDb", 0.0) - 6.0) < 0.01, "softclip defaults to 6 dB drive");
+        check (std::abs ((double) scReadout.getProperty ("ceilingDb", 0.0) - (-0.5)) < 0.01, "softclip defaults to -0.5 dBFS ceiling");
+
+        check (ok (cmd (ops, "undo")), "undo softclip (master) load ok");
+        check (! masterBuiltin ("softclip").isObject(), "one undo fully removes the master softclip builtin");
+        check (ok (cmd (ops, "redo")), "redo softclip (master) load ok");
+        auto scEntryFinal = masterBuiltin ("softclip");
+        check (scEntryFinal.getProperty ("type", var()).toString() == "softclip", "redo restores the master softclip builtin");
+
+        const int scIdxFinal = (int) scEntryFinal.getProperty ("index", -1);
+        check (ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", scIdxFinal }, { "paramIndex", 0 }, { "value", 0.6 }}))),
+               "set_master_plugin_param on the master softclip ok");
+
+        // ── Render through both, without error, non-silent ──────────────
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", rt }, { "seconds", 1.0 }, { "freq", 440.0 }}))),
+               "R3.3 tone clip created (chain: track highpass -> master highpass -> master softclip)");
+        auto r33Out = selftestTempPath (eng, "r33-highpass-softclip.wav");
+        r33Out.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", r33Out.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
+               "R3.3 export through highpass+softclip ok (no crash, no error)");
+        bool r33NonSilent = false;
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (r33Out) })
+            {
+                const int toRead = (int) jmin ((int64) 96000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    for (int ch = 0; ch < buf.getNumChannels() && ! r33NonSilent; ++ch)
+                        if (buf.getMagnitude (ch, 0, toRead) > 0.001f)
+                            r33NonSilent = true;
+                }
+            }
+        }
+        check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
+        r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
     }
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───

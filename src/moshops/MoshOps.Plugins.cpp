@@ -211,8 +211,22 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
 
     beginTxn ("load_builtin");
     // Same cache path as load_plugin — the inserted plugin IS the one we hold.
-    auto plugin = eng.edit().getPluginCache().createNewPlugin (type, {});
+    // "highpass" isn't its own Tracktion xmlTypeName — createNewPlugin dispatches on
+    // "lowpass", and the mode flip below turns the freshly-created LowPassPlugin into
+    // the high-pass built-in (see builtinCreationXmlType's comment).
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (builtinCreationXmlType (type), {});
     if (plugin == nullptr) return errResult ("load_builtin", "create failed: " + type);
+    if (type == "highpass")
+    {
+        if (auto* lp = dynamic_cast<te::LowPassPlugin*> (plugin.get()))
+        {
+            // Assigning through the CachedValue writes via the edit's UndoManager
+            // (referTo'd in LowPassPlugin's ctor), so this lands inside the same
+            // transaction beginTxn opened above — one undo removes the whole insert.
+            lp->mode = "highpass";
+            lp->frequencyValue = 180.0f;
+        }
+    }
 
     int index = (int) args.getProperty ("index", -1);
     if (index < 0) index = track->pluginList.getPlugins().size();   // append
@@ -221,7 +235,7 @@ juce::var MoshOps::cmdLoadBuiltin (const juce::var& args)
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
-    data->setProperty ("name", plugin->getName());
+    data->setProperty ("name", effectiveBuiltinName (*plugin));
     data->setProperty ("type", type);
     data->setProperty ("isInstrument", spec->isInstrument);
     logLine ("load_builtin", args, true, {}, true);
@@ -910,9 +924,19 @@ juce::var MoshOps::cmdLoadMasterBuiltin (const juce::var& args)
     if (spec == nullptr) return errResult ("load_master_builtin", "unknown builtin: " + type);
 
     beginTxn ("load_master_builtin");
-    // Same cache path as cmdLoadMasterPlugin/cmdLoadBuiltin.
-    auto plugin = eng.edit().getPluginCache().createNewPlugin (type, {});
+    // Same cache path as cmdLoadMasterPlugin/cmdLoadBuiltin. See cmdLoadBuiltin's
+    // comment — "highpass" creates as "lowpass" and is then flipped into high-pass mode.
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (builtinCreationXmlType (type), {});
     if (plugin == nullptr) return errResult ("load_master_builtin", "create failed: " + type);
+    if (type == "highpass")
+    {
+        if (auto* lp = dynamic_cast<te::LowPassPlugin*> (plugin.get()))
+        {
+            // Same in-transaction CachedValue assignment as cmdLoadBuiltin.
+            lp->mode = "highpass";
+            lp->frequencyValue = 180.0f;
+        }
+    }
 
     auto& list = eng.edit().getMasterPluginList();
     const int boundary = masterVisibleBoundary();
@@ -928,7 +952,7 @@ juce::var MoshOps::cmdLoadMasterBuiltin (const juce::var& args)
 
     auto* data = new DynamicObject();
     data->setProperty ("index", list.indexOf (plugin.get()));
-    data->setProperty ("name", plugin->getName());
+    data->setProperty ("name", effectiveBuiltinName (*plugin));
     data->setProperty ("type", type);
     data->setProperty ("isInstrument", spec->isInstrument);
     logLine ("load_master_builtin", args, true, {}, true);

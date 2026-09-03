@@ -337,6 +337,8 @@ if (MOSH_BUILD_APP)
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
+        # R3.3 — plain tanh soft clip built-in (no separate DSP TU; it's stateless math).
+        src/plugins/moshfx/MoshSoftClipPlugin.cpp
         src/plugins/moshfx/MoshXFeedbackDsp.cpp
         src/plugins/moshfx/MoshXFeedbackPlugin.cpp
         # Route C.2 — real-time RAVE insert (gated; compiles to nothing without anira).
