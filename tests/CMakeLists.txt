@@ -51,6 +51,7 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
     test_webbridge_resource_guard.cpp
+    test_webview_cursor.cpp
     test_directory_listing.cpp
     test_import_copy.cpp
     test_sample_folder_store.cpp
@@ -138,6 +139,12 @@ add_test(NAME HarnessSessionPython
 if (APPLE)
     add_test(NAME PrivacyManifest
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/privacy-manifest-test.sh)
+    add_test(NAME MoshMidiCursorGateTypecheck
+             COMMAND /usr/bin/xcrun swiftc -typecheck
+                     ${CMAKE_SOURCE_DIR}/scripts/macos-midi-cursor-gate.swift)
+    add_test(NAME MoshMidiSelectionGateTypecheck
+             COMMAND /usr/bin/xcrun swiftc -typecheck
+                     ${CMAKE_SOURCE_DIR}/scripts/macos-midi-selection-gate.swift)
 endif()
 if (TARGET Mosh)
     add_test(NAME AudioRecoverySmoke

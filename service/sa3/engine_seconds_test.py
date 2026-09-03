@@ -7,6 +7,8 @@ that the contiguous-first path relies on. Run via gate.sh run_py_tests (named *_
 """
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 from sa3 import engine
@@ -34,7 +36,23 @@ def main():
     # deterministic
     assert engine.clamp_render_seconds(45.3) == engine.clamp_render_seconds(45.3)
 
-    print("engine_seconds_test: OK (clamp render length to [MIN, MAX], contiguous policy)")
+    original_path = os.environ.get("PATH")
+    try:
+        with tempfile.TemporaryDirectory(prefix="mosh-ffmpeg-path-") as temp_dir:
+            executable = Path(temp_dir) / "ffmpeg"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            os.environ["PATH"] = "/usr/bin:/bin"
+            resolved = engine._ensure_command_on_path("ffmpeg", (temp_dir,))
+            assert resolved == str(executable), "fallback executable is discovered"
+            assert os.environ["PATH"].split(os.pathsep)[0] == temp_dir, "fallback dir is published to subprocesses"
+    finally:
+        if original_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = original_path
+
+    print("engine_seconds_test: OK (render length clamp + restricted-PATH command discovery)")
 
 
 if __name__ == "__main__":
