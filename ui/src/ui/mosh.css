@@ -1116,10 +1116,19 @@ button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink
    whole scrollable grid, so an edge marker would scroll out of sight. */
 .pr-row.root { background: var(--lime-faint); }
 .pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--pr-line); }
+.pr-gl.subdivision { opacity: .45; }
 .pr-gl.bar { background: var(--pr-line-bar); }
-.pr-note { position: absolute; background: var(--pr-note); border: 1px solid var(--pr-note-edge); border-radius: 3px; cursor: grab; box-sizing: border-box; }
-.pr-note.sel { background: var(--pr-note-sel); box-shadow: 0 0 0 1px var(--pr-note-ring) inset; }
-.pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
+.pr-note { position: absolute; background: var(--pr-note); border: 1px solid var(--pr-note-edge); border-radius: 3px; cursor: inherit; box-sizing: border-box; }
+.pr-note.sel {
+  z-index: 3;
+  background: var(--pr-note-sel);
+  border-color: var(--pr-note-ring);
+  outline: 2px solid var(--pr-note-ring);
+  outline-offset: -1px;
+}
+.pr-note-grip { position: absolute; top: 0; bottom: 0; width: 6px; cursor: inherit; }
+.pr-note-grip-start { left: 0; z-index: 2; }
+.pr-note-grip-end { right: 0; z-index: 1; }
 .pr-lasso { position: absolute; background: var(--pr-lasso); border: 1px solid var(--pr-lasso-edge); pointer-events: none; }
 /* The draw-mode pencil's in-flight note (live shell): a real .pr-note under the
    tokens, only dimmed and disarmed — it must not catch the pointerup that commits it. */

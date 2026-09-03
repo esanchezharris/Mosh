@@ -66,7 +66,7 @@
   --pr-key-line: var(--pt-border);
   --pr-note: #7aaadd;
   --pr-note-edge: #a8c9e9;
-  --pr-note-sel: var(--pt-selected);
+  --pr-note-sel: var(--pt-on-selected);
   --pr-note-ring: var(--pt-wave-outline);
   --pr-lasso: rgba(74, 144, 217, 0.22);
   --pr-lasso-edge: var(--pt-selected);

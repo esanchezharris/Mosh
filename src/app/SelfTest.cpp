@@ -6535,25 +6535,47 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             const auto ot = cmd (ops, "create_track", args1 ("name", "OverlapInvariant"))["data"].getProperty ("trackId", var()).toString();
             auto* oc = new DynamicObject(); oc->setProperty ("trackId", ot);
             const auto overlapClip = cmd (ops, "add_midi_clip", var (oc))["data"].getProperty ("clipId", var()).toString();
+            const auto collisionFree = [] (const var& notes)
+            {
+                if (auto* arr = notes.getArray())
+                    for (int i = 0; i < arr->size(); ++i)
+                        for (int j = i + 1; j < arr->size(); ++j)
+                        {
+                            const auto a = (*arr)[i], b = (*arr)[j];
+                            if ((int) a.getProperty ("pitch", -1) != (int) b.getProperty ("pitch", -2)) continue;
+                            const double as = a.getProperty ("start", 0.0), ae = as + (double) a.getProperty ("length", 0.0);
+                            const double bs = b.getProperty ("start", 0.0), be = bs + (double) b.getProperty ("length", 0.0);
+                            if (ae > bs + 1.0e-9 && be > as + 1.0e-9) return false;
+                        }
+                return true;
+            };
             check (ok (cmd (ops, "add_note", objN ({{ "clipId", overlapClip }, { "pitch", 60 }, { "start", 0.0 }, { "length", 4.0 }}))), "overlap fixture: long note added");
             check (ok (cmd (ops, "add_note", objN ({{ "clipId", overlapClip }, { "pitch", 60 }, { "start", 1.0 }, { "length", 1.0 }}))), "overlap fixture: winning note added");
             auto ns = clipNotes (overlapClip);
             check (ns.size() == 3, "winner splits an enclosing same-pitch note into two fragments");
-            bool collisionFree = true;
-            if (auto* arr = ns.getArray())
-                for (int i = 0; i < arr->size(); ++i)
-                    for (int j = i + 1; j < arr->size(); ++j)
-                    {
-                        const auto a = (*arr)[i], b = (*arr)[j];
-                        if ((int) a.getProperty ("pitch", -1) != (int) b.getProperty ("pitch", -2)) continue;
-                        const double as = a.getProperty ("start", 0.0), ae = as + (double) a.getProperty ("length", 0.0);
-                        const double bs = b.getProperty ("start", 0.0), be = bs + (double) b.getProperty ("length", 0.0);
-                        collisionFree = collisionFree && (ae <= bs + 1.0e-9 || be <= as + 1.0e-9);
-                    }
-            check (collisionFree, "add_note enforces same-pitch non-overlap");
+            check (collisionFree (ns), "add_note enforces same-pitch non-overlap");
             cmd (ops, "undo");
             auto restored = clipNotes (overlapClip);
             check (restored.size() == 1 && std::abs ((double) restored[0].getProperty ("length", 0.0) - 4.0) < 1.0e-6, "one undo restores the exact pre-collision note");
+
+            check (ok (cmd (ops, "add_note", objN ({{ "clipId", overlapClip }, { "pitch", 60 }, { "start", 5.0 }, { "length", 1.0 }}))), "set overlap fixture: separated note added");
+            check (ok (cmd (ops, "set_note", objN ({{ "clipId", overlapClip }, { "noteIndex", 1 }, { "start", 1.0 }, { "length", 1.0 }}))), "set_note moves a later note into a collision");
+            auto movedCollision = clipNotes (overlapClip);
+            check (movedCollision.size() == 3 && collisionFree (movedCollision), "set_note applies the same later-wins collision policy as add_note");
+            cmd (ops, "undo");
+            auto movedRestored = clipNotes (overlapClip);
+            check (movedRestored.size() == 2 && collisionFree (movedRestored), "one undo restores the exact separated notes after a colliding move");
+
+            auto* batch = new DynamicObject(); batch->setProperty ("trackId", ot);
+            const auto batchClip = cmd (ops, "add_midi_clip", var (batch))["data"].getProperty ("clipId", var()).toString();
+            Array<var> copied;
+            copied.add (objN ({{ "pitch", 61 }, { "start", 0.0 }, { "length", 2.0 }, { "velocity", 90 }}));
+            copied.add (objN ({{ "pitch", 61 }, { "start", 1.0 }, { "length", 2.0 }, { "velocity", 100 }}));
+            auto* copyArgs = new DynamicObject(); copyArgs->setProperty ("clipId", batchClip); copyArgs->setProperty ("notes", copied);
+            check (ok (cmd (ops, "add_note", var (copyArgs))), "copy-style add_note batch accepts colliding notes");
+            check (clipNotes (batchClip).size() == 2 && collisionFree (clipNotes (batchClip)), "copy-style batch resolves in deterministic input order");
+            cmd (ops, "undo");
+            check (clipNotes (batchClip).size() == 0, "one undo removes the complete collision-resolved copy batch");
 
             // Legacy material is never rewritten on load. Manufacture one old-style
             // collision beneath the command seam, then prove the explicit repair is
