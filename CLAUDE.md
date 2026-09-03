@@ -69,8 +69,11 @@ cannot prove audibility, physical recovery, installed-app behavior, Ableton
 behavior, or iPhone behavior. Keep those owner acceptance boundaries explicit in
 their subsystem evidence.
 
-The MOSH_MAX_CODEX_CHILDREN=1000 threshold was a one-time, documented
-pre-pivot maintenance override. It is not a new normal gate setting.
+The memory preflight no longer counts agent child processes (removed
+2026-09-01): that ceiling was a proxy for lingering Mosh instances that were not
+being killed, and it blocked every native gate on a machine running ordinary
+agent sessions. Stray Mosh processes are handled by the gate's port ownership
+and kill_stray_services, not by a process-count heuristic.
 
 ## Paused and archived work
 
