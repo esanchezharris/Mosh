@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
+import { isRealNative } from "../bridge";
 import { useSettings } from "../settings/store";
 import type { MidiNote } from "../types";
 import { meterAt, tempoMapFrom, beatSeconds } from "../time";
@@ -18,8 +19,8 @@ import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx, snapDownBeat } fr
 import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
 import { editorKeyFocused } from "../hooks/editorFocus";
-import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
-import { moveEdits, resizeEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
+import { applyNoteEdits, removeNotes, addNotes, type NewNote, type NoteEdit } from "./noteCommands";
+import { moveEdits, resizeEdits, resizeStartEdits, previewFrom, transposeEdits, nudgeEdits, lengthEdits, velocityEdits, toggleActiveEdits, drawNoteSpan, type GestureGeom } from "./pianoRollEdit";
 import { expandLoopedNotes } from "../midi/midiLoop";
 import { ClipLoopBar } from "../live/ClipLoopBar";
 import { marqueeHit, toggleSelection, selectAtPitch, selectAll, invertSelection, stepSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
@@ -31,8 +32,9 @@ import type { QwertyState } from "../interaction/qwertyMidi";
 import { stepReduce, STEP_INITIAL, type StepState } from "./stepRecord";
 import { visiblePitches, pitchAxis, PITCH_MIN, PITCH_MAX, type FoldMode } from "./pianoRollView";
 import { copyNotes, pasteAt, duplicateAfter, setClipboard, getClipboard } from "./pianoRollClipboard";
-import { effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
+import { editorGridProjection, effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
 import { PianoRollContextNotes, type PianoRollContextNote } from "./PianoRollContextNotes";
+import { pianoRollCursorCss, useNativeEditorCursor, type PianoRollCursor } from "./useNativeEditorCursor";
 // Live shell's draw mode (the control-bar pencil, live/liveState.ts). Read here
 // rather than passed as a prop so the docked editor and the control bar can't drift;
 // the slice defaults false and only the live shell ever toggles it, so the modal
@@ -49,14 +51,53 @@ const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
 // "copy" is a move that leaves the originals behind — Ableton's Option-drag. It is latched
 // at POINTERDOWN, not read live during the drag, because Option during a move already means
 // "bypass snap" and the two must not fight over the same key mid-gesture.
-type DragKind = "move" | "resize" | "copy";
+type DragKind = "move" | "resize-start" | "resize-end" | "copy";
+type NoteHitKind = Exclude<DragKind, "copy">;
+
+export const pianoRollNoteGripWidth = (noteWidth: number): number =>
+  Math.min(10, Math.max(1, (noteWidth - 4) / 2));
+
+export const pianoRollNoteHitAtX = (noteWidth: number, localX: number): NoteHitKind => {
+  const gripWidth = pianoRollNoteGripWidth(noteWidth);
+  if (localX <= gripWidth) return "resize-start";
+  if (localX >= noteWidth - gripWidth) return "resize-end";
+  return "move";
+};
+
+const noteHitAt = (target: EventTarget | null, clientX?: number): NoteHitKind | null => {
+  const element = target instanceof Element ? target : null;
+  const note = element?.closest<HTMLElement>(".pr-note");
+  if (note && clientX != null) {
+    const rect = note.getBoundingClientRect();
+    if (rect.width > 0)
+      return pianoRollNoteHitAtX(rect.width, clientX - rect.left);
+  }
+  const raw = target instanceof Element
+    ? target.closest<HTMLElement>("[data-pr-hit]")?.dataset.prHit
+    : undefined;
+  return raw === "move" || raw === "resize-start" || raw === "resize-end" ? raw : null;
+};
+
+const cursorForNoteHit = (hit: NoteHitKind, active = false): PianoRollCursor =>
+  hit === "move" ? (active ? "grabbing" : "grab") : "ew-resize";
+
 type Drag = {
   kind: DragKind;
   anchorI: number;                    // the note actually grabbed
   orig: Map<number, MidiNote>;        // the whole selection, frozen at pointerdown
   startX: number;
   startY: number;
+  startScrollLeft: number;
+  startScrollTop: number;
+  lastX: number;
+  lastY: number;
+  lastAltKey: boolean;
+  moved: boolean;
+  collapseOnClick: boolean;
+  selectionRevision: number;
+  editGeneration: number;
 };
+type EditGuard = { selectionRevision: number; editGeneration: number };
 type GridDrag = { pointerId: number; x0: number; y0: number; moved: boolean };
 
 // `docked` is the live shell's clip-view dock (ui/src/live/DetailDock.tsx): the same
@@ -153,6 +194,8 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   const swingRef = useRef(0);
   swingRef.current = swingPct;
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
+  const selectionRevisionRef = useRef(0);
+  const editGenerationRef = useRef(0);
   const [previews, setPreviews] = useState<Map<number, MidiNote>>(() => new Map());
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   // Live draw mode (pencil): while a draw drag is in flight this is the note it will
@@ -197,6 +240,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   const dragRef = useRef<Drag | null>(null);
   const gridDragRef = useRef<GridDrag | null>(null);
   const previewRef = useRef<Map<number, MidiNote>>(new Map());
+  const applyNativeCursor = useNativeEditorCursor(Boolean(editingClipId && clip));
   // Declared UP HERE, above the `if (!clip) return null` guard further down, because the
   // effects below call it — and an effect closes over the render that scheduled it. On a
   // render where the clip is momentarily absent (a refresh landing mid-gesture) the guard
@@ -212,12 +256,61 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   // in a useEffect on selectedNotes instead would also fire on the post-refresh pruning
   // below, re-auditioning the whole selection on every snapshot event.
   const applySelection = (next: Set<number>, opts?: { audition?: boolean }) => {
+    selectionRevisionRef.current += 1;
     setSelectedNotes(next);
     if (!opts?.audition || !auditionTrackId) return;
     const byIndex = new Map((clip?.notes ?? []).map((n) => [n.i, n]));
     const pitches = [...new Set([...next].map((i) => byIndex.get(i)?.pitch).filter((p): p is number => p != null))];
     // Cap it: selecting a dense bar should not fire fifty simultaneous notes.
     for (const p of pitches.slice(0, 6)) notePreview.tap(auditionTrackId, p);
+  };
+  const nextEditGuard = (): EditGuard => ({
+    selectionRevision: selectionRevisionRef.current,
+    editGeneration: ++editGenerationRef.current,
+  });
+  const notesForClip = (clipId: string): MidiNote[] =>
+    useStore.getState().snapshot?.tracks.flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId)?.notes ?? [];
+  const reconcileSelection = async (
+    clipId: string,
+    wanted: readonly ReturnType<typeof noteIdentity>[],
+    guard: EditGuard,
+  ) => {
+    const applyFreshSelection = (): boolean => {
+      if (useStore.getState().editingClipId !== clipId
+          || selectionRevisionRef.current !== guard.selectionRevision
+          || editGenerationRef.current !== guard.editGeneration) return true;
+      const selected = reselectByIdentity(notesForClip(clipId), wanted);
+      if (selected.size !== wanted.length) return false;
+      setSelectedNotes(selected);
+      return true;
+    };
+    if (applyFreshSelection()) return;
+    if (!isRealNative()) return;
+    await useStore.getState().refresh();
+    applyFreshSelection();
+  };
+  const commitNoteEdits = async (
+    clipId: string,
+    sourceNotes: readonly MidiNote[],
+    edits: readonly NoteEdit[],
+    guard: EditGuard,
+  ) => {
+    const byIndex = new Map(sourceNotes.map((note) => [note.i, note]));
+    const wanted = edits.flatMap((edit) => {
+      const source = byIndex.get(edit.i);
+      return source ? [noteIdentity({ ...source, ...edit })] : [];
+    });
+    await applyNoteEdits(exec, clipId, edits);
+    await reconcileSelection(clipId, wanted, guard);
+  };
+  const addNotesAndSelect = async (
+    clipId: string,
+    notes: readonly NewNote[],
+    guard: EditGuard,
+  ) => {
+    await addNotes(exec, clipId, notes);
+    await reconcileSelection(clipId, notes.map(noteIdentity), guard);
   };
   const velocityDraftRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -230,6 +323,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   const setBeatPx = useStore((s) => s.setPianoRollBeatPx);
 
   useEffect(() => { if (editingClipId && !clip) close(); }, [editingClipId, clip, close]);
+  useEffect(() => { selectionRevisionRef.current += 1; }, [editingClipId]);
   useEffect(() => { setMode("piano"); }, [editingClipId]);
   // Move focus into the dialog on open so aria-modal is honest (outside is inert) and
   // keyboard users land inside the editor rather than on the trigger behind the backdrop.
@@ -343,19 +437,19 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
           if (sel.size === 0) return;
           take();
           setClipboard(copyNotes(notesNow, sel));
-          if (k === "x") { void removeNotes(exec, clipId, [...sel]); setSelectedNotes(new Set()); }
+          if (k === "x") { void removeNotes(exec, clipId, [...sel]); applySelection(new Set()); }
           return;
         }
         if (k === "v") {
           const cb = getClipboard();
           if (!cb) return;
           take();
-          void addNotes(exec, clipId, pasteAt(cb, insertBeatRef.current));
+          void addNotesAndSelect(clipId, pasteAt(cb, insertBeatRef.current), nextEditGuard());
           return;
         }
         if (sel.size === 0) return;   // Cmd+D
         take();
-        void addNotes(exec, clipId, duplicateAfter(notesNow, sel));
+        void addNotesAndSelect(clipId, duplicateAfter(notesNow, sel), nextEditGuard());
         return;
       }
       // ── quantize the clip to the grid shown here (Ableton's Cmd+U) ──
@@ -383,12 +477,18 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
         }
         take();
         if (horizontal) {
-          void applyNoteEdits(exec, clipId, nudgeEdits(notesNow, sel, dir * (stepBeatsRef.current)));
+          const step = stepBeatsRef.current;
+          const edits = e.shiftKey
+            ? lengthEdits(notesNow, sel, dir * step, step)
+            : nudgeEdits(notesNow, sel, dir * step);
+          void commitNoteEdits(clipId, notesNow, edits, nextEditGuard());
         } else if (mod) {
-          void applyNoteEdits(exec, clipId, velocityEdits(notesNow, sel, -dir * (e.shiftKey ? 1 : 10)));
+          const edits = velocityEdits(notesNow, sel, -dir * (e.shiftKey ? 1 : 10));
+          void commitNoteEdits(clipId, notesNow, edits, nextEditGuard());
         } else {
           const semis = -dir * (e.shiftKey ? 12 : 1);
-          void applyNoteEdits(exec, clipId, transposeEdits(notesNow, sel, semis, lockPitchRef.current));
+          const edits = transposeEdits(notesNow, sel, semis, lockPitchRef.current);
+          void commitNoteEdits(clipId, notesNow, edits, nextEditGuard());
         }
         return;
       }
@@ -401,7 +501,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
         if (k === "t") { take(); setGrid((g) => ({ ...g, triplet: !g.triplet })); return; }
         if (e.key === "0" && sel.size > 0) {
           take();
-          void applyNoteEdits(exec, clipId, toggleActiveEdits(notesNow, sel));
+          void commitNoteEdits(clipId, notesNow, toggleActiveEdits(notesNow, sel), nextEditGuard());
           return;
         }
       }
@@ -409,7 +509,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
         if (sel.size === 0) return;
         take();
         void removeNotes(exec, clipId, [...sel]);
-        setSelectedNotes(new Set());
+        applySelection(new Set());
       }
     };
     window.addEventListener("keydown", onKey);
@@ -459,18 +559,19 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   if (!editingClipId || !clip) return null;
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
-  // The editor's OWN grid. `snap` (the global on/off) still applies, but the DIVISION is
-  // local — changing it here never re-grids the arrangement, and vice versa.
-  const stepBeats = snap ? effectiveStepBeats(m, grid, beatPx) : 0;
-  // The step-record listener reads this at event time (see the refs above).
-  stepBeatsRef.current = stepBeats > 0 ? stepBeats : 1;
-  const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const gridBeats = gridBeatsFor({
     clipBeats: clip.length / beatSeconds(m),
     beatsPerBar: m.num,
     beatPx,
     viewportW,
   });
+  const gridProjection = editorGridProjection(m, grid, beatPx, gridBeats);
+  // The editor's OWN grid. `snap` (the global on/off) still applies, but the DIVISION is
+  // local — changing it here never re-grids the arrangement, and vice versa.
+  const stepBeats = snap ? gridProjection.stepBeats : 0;
+  // The step-record listener reads this at event time (see the refs above).
+  stepBeatsRef.current = stepBeats > 0 ? stepBeats : 1;
+  const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const gridW = gridBeats * beatPx;
   // Feed the playhead loop this render's geometry (see the rAF effect above).
   geomRef.current = { start: clip.start, beatSec: beatSeconds(m), beatPx, len: clip.length };
@@ -518,15 +619,38 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     return v == null ? base : { ...base, velocity: v };
   });
 
+  const idleGridCursor: PianoRollCursor = drawActive ? "crosshair" : "default";
+  const cursorForTarget = (target: EventTarget | null, clientX?: number): PianoRollCursor => {
+    const hit = noteHitAt(target, clientX);
+    return hit ? cursorForNoteHit(hit) : idleGridCursor;
+  };
+  const setGridCursor = (grid: HTMLElement, cursor: PianoRollCursor, refresh = false) => {
+    grid.style.cursor = pianoRollCursorCss(cursor);
+    applyNativeCursor(cursor, refresh);
+  };
+  const onGridHover = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) setGridCursor(e.currentTarget, cursorForTarget(e.target, e.clientX));
+  };
+  const onGridLeave = (e: React.PointerEvent<HTMLDivElement>) => {
+    const active = dragRef.current;
+    if (active) {
+      setGridCursor(
+        e.currentTarget,
+        active.kind === "resize-start" || active.kind === "resize-end" ? "ew-resize" : "grabbing",
+      );
+      return;
+    }
+    setGridCursor(e.currentTarget, "default");
+  };
   const onGridDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest(".pr-note")) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, e.clientX - rect.left), y = Math.max(0, e.clientY - rect.top);
     gridDragRef.current = { pointerId: e.pointerId, x0: x, y0: y, moved: false };
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    setSelectedNotes(new Set());
+    applySelection(new Set());
   };
-  const onNoteDown = (kind: "move" | "resize", n: MidiNote) => (e: React.PointerEvent) => {
+  const onNoteDown = (kind: NoteHitKind, n: MidiNote) => (e: React.PointerEvent) => {
     e.stopPropagation();
     // Shift-click edits the SELECTION and starts no drag — otherwise the same gesture
     // would both extend the selection and immediately begin moving it.
@@ -535,7 +659,8 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     // Grabbing a note that is already selected drags the WHOLE selection; grabbing an
     // unselected one selects just it first. (Replacing the selection unconditionally, as
     // this used to, is what made multi-note editing impossible.)
-    const sel = selectedNotes.has(n.i) ? selectedNotes : new Set([n.i]);
+    const wasSelected = selectedNotes.has(n.i);
+    const sel = wasSelected ? selectedNotes : new Set([n.i]);
     if (sel !== selectedNotes) applySelection(sel, { audition: true });
 
     const byIndex = new Map((clip.notes ?? []).map((x) => [x.i, x]));
@@ -543,14 +668,29 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     for (const i of sel) { const x = byIndex.get(i); if (x) orig.set(i, x); }
 
     try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+    const scroller = scrollRef.current;
+    const dragKind = kind === "move" && e.altKey ? "copy" : kind;
+    const guard = nextEditGuard();
     dragRef.current = {
-      kind: kind === "move" && e.altKey ? "copy" : kind,
+      kind: dragKind,
       anchorI: n.i, orig, startX: e.clientX, startY: e.clientY,
+      startScrollLeft: scroller?.scrollLeft ?? 0,
+      startScrollTop: scroller?.scrollTop ?? 0,
+      lastX: e.clientX, lastY: e.clientY, lastAltKey: e.altKey,
+      moved: false,
+      collapseOnClick: wasSelected && selectedNotes.size > 1,
+      ...guard,
     };
+    const grid = (e.currentTarget as HTMLElement).closest<HTMLElement>(".pr-grid");
+    if (grid) setGridCursor(grid, cursorForNoteHit(kind, true));
   };
-  const onGridMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onResolvedNoteDown = (n: MidiNote) => (e: React.PointerEvent) =>
+    onNoteDown(noteHitAt(e.target, e.clientX) ?? "move", n)(e);
+  const updateNoteDrag = (clientX: number, clientY: number, altKey: boolean) => {
     const d = dragRef.current;
     if (d) {
+      d.lastX = clientX; d.lastY = clientY; d.lastAltKey = altKey;
+      const scroller = scrollRef.current;
       // The two axes are guarded symmetrically: an axis you did not move is never
       // rewritten (see pianoRollEdit.ts, which owns that rule now). Pitch gets its
       // deadzone for free from rounding to whole rows; TIME is continuous, so it needs an
@@ -560,14 +700,21 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
       //
       // Option during a COPY drag is the modifier that started the copy, not a snap
       // bypass — reading it as both would make an Option-drag silently off-grid too.
-      const bypassSnap = d.kind !== "copy" && e.altKey;
-      const input = { orig: d.orig, dxPx: e.clientX - d.startX, dyPx: e.clientY - d.startY, bypassSnap };
-      const edits = d.kind === "resize" ? resizeEdits(input, gestureGeom(bypassSnap))
-                                        : moveEdits (input, gestureGeom(bypassSnap));
+      const bypassSnap = d.kind !== "copy" && altKey;
+      const input = {
+        orig: d.orig,
+        dxPx: clientX - d.startX + (scroller?.scrollLeft ?? d.startScrollLeft) - d.startScrollLeft,
+        dyPx: clientY - d.startY + (scroller?.scrollTop ?? d.startScrollTop) - d.startScrollTop,
+        bypassSnap,
+      };
+      const edits = d.kind === "resize-start" ? resizeStartEdits(input, gestureGeom(bypassSnap))
+                  : d.kind === "resize-end" ? resizeEdits(input, gestureGeom(bypassSnap))
+                  : moveEdits(input, gestureGeom(bypassSnap));
+      if (edits.length > 0) d.moved = true;
       // AUDITION 1/4 — hear the pitch as you drag up the scale. Driven off the ANCHOR's
       // previewed pitch, and notePreview itself collapses this to at most one command per
       // crossed semitone, so a fast octave drag is a handful of notes rather than a flood.
-      if (d.kind !== "resize" && auditionTrackId) {
+      if (d.kind !== "resize-start" && d.kind !== "resize-end" && auditionTrackId) {
         const anchor = previewFrom(d.orig, edits).get(d.anchorI);
         if (anchor) notePreview.hold("pr-drag", auditionTrackId, anchor.pitch, anchor.velocity);
       }
@@ -575,10 +722,25 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
       // out and back to the origin would otherwise release with the abandoned preview
       // still standing and commit the trip anyway.
       setPreviewNotes(previewFrom(d.orig, edits));
+      return true;
+    }
+    return false;
+  };
+  const onGridMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const activeDrag = dragRef.current;
+    if (activeDrag) {
+      setGridCursor(
+        e.currentTarget,
+        activeDrag.kind === "resize-start" || activeDrag.kind === "resize-end" ? "ew-resize" : "grabbing",
+        true,
+      );
+    }
+    if (updateNoteDrag(e.clientX, e.clientY, e.altKey)) return;
+    const gd = gridDragRef.current;
+    if (!gd || e.buttons === 0) {
+      setGridCursor(e.currentTarget, cursorForTarget(e.target, e.clientX), true);
       return;
     }
-    const gd = gridDragRef.current;
-    if (!gd || e.buttons === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, e.clientX - rect.left), y = Math.max(0, e.clientY - rect.top);
     if (Math.hypot(x - gd.x0, y - gd.y0) > 4) gd.moved = true;
@@ -597,8 +759,13 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     if (d) {
       const final = previewRef.current;
       dragRef.current = null; setPreviewNotes(new Map());
+      setGridCursor(e.currentTarget, cursorForTarget(e.target, e.clientX));
       notePreview.release("pr-drag");
-      if (final.size === 0) return;
+      if (final.size === 0) {
+        if (!d.moved && d.collapseOnClick)
+          applySelection(new Set([d.anchorI]), { audition: true });
+        return;
+      }
 
       if (d.kind === "copy") {
         // Option-drag drops a COPY at the new position and leaves the originals alone.
@@ -607,19 +774,17 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
         // otherwise the producer is left with the originals selected, or with indices
         // pointing at whichever notes happen to occupy them now.
         const made = [...final.values()].map((n) => ({ pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity }));
-        const ids = made.map(noteIdentity);
         void (async () => {
-          await addNotes(exec, clip.id, made);
-          await useStore.getState().refresh();
-          const fresh = useStore.getState().snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)?.notes ?? [];
-          setSelectedNotes(reselectByIdentity(fresh, ids));
+          await addNotesAndSelect(clip.id, made, d);
         })();
         return;
       }
 
       const edits = [...final.values()].map((n) =>
-        d.kind === "resize" ? { i: n.i, length: n.length } : { i: n.i, start: n.start, pitch: n.pitch });
-      void applyNoteEdits(exec, clip.id, edits);
+        d.kind === "resize-start" ? { i: n.i, start: n.start, length: n.length }
+        : d.kind === "resize-end" ? { i: n.i, length: n.length }
+        : { i: n.i, start: n.start, pitch: n.pitch });
+      void commitNoteEdits(clip.id, [...d.orig.values()], edits, d);
       return;
     }
     const gd = gridDragRef.current; if (!gd) return;
@@ -676,10 +841,11 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
   };
   // The single cancel funnel for pointercancel + lostpointercapture, which is why the
   // stuck-note release is one line rather than one per exit.
-  const onGridCancel = () => {
+  const onGridCancel = (e: React.PointerEvent<HTMLDivElement>) => {
     dragRef.current = null; gridDragRef.current = null;
     setPreviewNotes(new Map()); setLasso(null); setDrawGhost(null);
     notePreview.release("pr-drag");
+    setGridCursor(e.currentTarget, "default");
   };
 
   // ── velocity lane ──────────────────────────────────────────────────────────
@@ -711,7 +877,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     // Dragging a bar that is part of the current multi-selection edits the whole
     // selection; otherwise it selects and edits just that note.
     const targets = selectedNotes.has(i) && selectedNotes.size > 1 ? [...selectedNotes] : [i];
-    if (targets.length === 1) setSelectedNotes(new Set(targets));
+    if (targets.length === 1) applySelection(new Set(targets));
     paintVelocity(e, targets);
   };
   const onVelMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -738,7 +904,7 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     const edits = [...drafts.entries()]
       .filter(([i, v]) => v != null && v !== byIndex.get(i))
       .map(([i, v]) => ({ i, velocity: v }));
-    void applyNoteEdits(exec, clip.id, edits);
+    void commitNoteEdits(clip.id, clip.notes ?? [], edits, nextEditGuard());
   };
   const onVelCancel = () => { velDragRef.current = { active: false, startX: 0, drafts: new Map() }; setVelDrafts({}); };
 
@@ -774,7 +940,12 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
     const next = velocityDraftRef.current;
     if (next == null || next === selNote.velocity) return;
     velocityDraftRef.current = null; setVelocityDraft(null);
-    void exec("set_note", { clipId: clip.id, noteIndex: selNote.i, velocity: next });
+    void commitNoteEdits(
+      clip.id,
+      clip.notes ?? [],
+      [{ i: selNote.i, velocity: next }],
+      nextEditGuard(),
+    );
   };
 
   // The panel's content is identical in both mounts; only the frame differs.
@@ -982,6 +1153,18 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
             const x = `translateX(${-scrollLeft}px)`;
             if (rulerRef.current) rulerRef.current.style.transform = x;
             if (velRef.current) velRef.current.style.transform = x;
+            // A captured pointer is expressed in VIEWPORT coordinates, while notes live in
+            // this scroller's CONTENT coordinates. Re-run the gesture with the last pointer
+            // sample whenever the viewport moves so a note held at the edge travels with the
+            // content beneath the stationary pointer instead of accumulating a visible gap.
+            const d = dragRef.current;
+            if (d) {
+              updateNoteDrag(d.lastX, d.lastY, d.lastAltKey);
+              setGridCursor(
+                e.currentTarget.querySelector<HTMLElement>(".pr-grid") ?? e.currentTarget,
+                d.kind === "resize-start" || d.kind === "resize-end" ? "ew-resize" : "grabbing",
+              );
+            }
           }}
             onWheel={(e) => {
               // Cmd/Ctrl+wheel zooms about the pointer so the note under the cursor
@@ -995,7 +1178,8 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
               setBeatPx(next.beatPx);
               el.scrollLeft = next.scrollLeft;
             }}>
-            <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: axis.height }}
+            <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: axis.height, cursor: idleGridCursor }}
+              onPointerOver={onGridHover} onPointerLeave={onGridLeave}
               onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}
               onDoubleClick={onGridDoubleClick}>
               {pitches.map((p) => {
@@ -1009,7 +1193,11 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
                 const root = shade && pitchClass(p) === songKey.tonic;
                 return <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}${off ? " off-key" : ""}${root ? " root" : ""}`} style={{ top: yOf(p), height: ROW_H }} />;
               })}
-              {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * beatPx }} />)}
+              {gridProjection.lines.map((line) => (
+                <div key={`c${line.beat}`} className={`pr-gl ${line.kind}`}
+                  data-grid-kind={line.kind} data-grid-beat={line.beat}
+                  style={{ left: line.beat * beatPx }} />
+              ))}
               {/* MIDI clip loop ghosts — the loop region's repeats painted dimmer and
                   DISARMED (Live's editor ghosts): display-only, never selectable —
                   editing stays indexed into the real notes. */}
@@ -1028,14 +1216,19 @@ export function PianoRoll({ docked = false, expandControl, contextNotes = [] }: 
               />
               {notes.map((n) => {
                 const b = noteBox(n);
+                // Ten pixels is forgiving at ordinary zoom; reserving at least four pixels
+                // in the middle keeps even a minimum-width note available for moving.
+                const gripWidth = pianoRollNoteGripWidth(b.w);
                 return (
-                  <div key={n.i} className={`pr-note ${selectedNotes.has(n.i) ? "sel" : ""}`} data-testid="pr-note" role="button"
+                  <div key={n.i} className={`pr-note ${selectedNotes.has(n.i) ? "sel" : ""}`} data-testid="pr-note" data-pr-hit="move" role="button"
+                    aria-pressed={selectedNotes.has(n.i)}
                     aria-label={`${noteName(n.pitch)} note start ${n.start.toFixed(2)} length ${n.length.toFixed(2)} velocity ${n.velocity}`}
                     style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
-                    onPointerDown={onNoteDown("move", n)}
+                    onPointerDown={onResolvedNoteDown(n)}
                     onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); void exec("remove_note", { clipId: clip.id, noteIndex: n.i }); }}
                     title={`${noteName(n.pitch)} · vel ${n.velocity} · dbl-click to delete`}>
-                    <span className="pr-note-grip" role="separator" aria-label={`Resize ${noteName(n.pitch)} note`} onPointerDown={onNoteDown("resize", n)} />
+                    <span className="pr-note-grip pr-note-grip-start" data-pr-hit="resize-start" style={{ width: gripWidth }} role="separator" aria-label={`Resize start of ${noteName(n.pitch)} note`} />
+                    <span className="pr-note-grip pr-note-grip-end" data-pr-hit="resize-end" style={{ width: gripWidth }} role="separator" aria-label={`Resize end of ${noteName(n.pitch)} note`} />
                   </div>
                 );
               })}
