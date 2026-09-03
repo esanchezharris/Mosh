@@ -77,6 +77,20 @@ export function resizeEdits(input: DragInput, g: GestureGeom): NoteEdit[] {
   return edits;
 }
 
+export function resizeStartEdits(input: DragInput, g: GestureGeom): NoteEdit[] {
+  if (Math.abs(input.dxPx) <= g.dragThreshold) return [];
+  const db = input.dxPx / g.beatPx;
+  const edits: NoteEdit[] = [];
+  for (const [i, n] of input.orig) {
+    const end = n.start + n.length;
+    const proposed = g.snapBeat(n.start + db, input.bypassSnap);
+    const start = Math.max(0, Math.min(end - g.minLengthBeats, proposed));
+    if (start === n.start) continue;
+    edits.push({ i, start, length: end - start });
+  }
+  return edits;
+}
+
 /** Keyboard transpose (Up/Down = ±1, Shift+Up/Down = ±12). */
 export function transposeEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>,
                                semitones: number, lockPitch: (p: number) => number): NoteEdit[] {
@@ -90,6 +104,17 @@ export function nudgeEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>,
   if (deltaBeats === 0) return [];
   return notes.filter((n) => sel.has(n.i))
               .map((n) => ({ i: n.i, start: Math.max(0, n.start + deltaBeats) }));
+}
+
+export function lengthEdits(notes: readonly MidiNote[], sel: ReadonlySet<number>,
+                            deltaBeats: number, minLengthBeats: number): NoteEdit[] {
+  if (deltaBeats === 0 || minLengthBeats <= 0) return [];
+  return notes.flatMap((n) => {
+    if (!sel.has(n.i)) return [];
+    const minimumLength = Math.min(n.length, minLengthBeats);
+    const length = Math.max(minimumLength, n.length + deltaBeats);
+    return length === n.length ? [] : [{ i: n.i, length }];
+  });
 }
 
 /** Keyboard velocity change (Cmd+Up/Down), clamped to the engine's 1..127. */
