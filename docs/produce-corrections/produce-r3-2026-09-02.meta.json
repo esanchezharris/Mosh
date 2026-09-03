@@ -49,8 +49,9 @@
       "Stem evidence: Track 10–14 spectral flatness 1e-10 to 1e-9 (pure tones) at −12.5 to −23 dB RMS vs the r2 Vital stems at 1e-5 to 3e-3; only the Lead and Ambient Pad stems carried preset names.",
       "So the verdict judged: kit-matched/labkit drums + 808 through the new master chain, the Lead preset, and five sine-wave parts. 'Sounds better' (drums/808/master) stands; the preset judgment does not apply to the curated presets — they were never heard in round 3.",
       "Round-2's labkit twin was NOT affected (same preflight as its original run, ids matched). The pass on B-labkit-r2-opus-s3 stands.",
-      "Fix: replay remaps program trackIds by ROLE via the original run's template.json (ui/src/agent/loop/produceReplayRemap.ts, tested), refuses unmappable ids, and fails loudly if the track count grows during the note replay. Renders re-issued as r3b-opus-s3-{kitmatched,labkit}."
+      "Fix: replay remaps program trackIds by ROLE via the original run's template.json (ui/src/agent/loop/produceReplayRemap.ts, tested), refuses unmappable ids, and fails loudly if the track count grows during the note replay. Renders re-issued as r3b-opus-s3-{kitmatched,labkit}.",
+      "SECOND round-3 bug, found while verifying the r3b re-render: the `highpass` builtin's live Frequency parameter probed at 0.1814 normalised = Tracktion's 4000 Hz default. The preflight's 180 Hz was written to the CachedValue only; te::LowPassPlugin::updateFilters() reads the AutomatableParameter. So every melodic track in r3/r3b was highpassed at 4 kHz (drone stem centroid 229 → 3600 Hz; chords stem −22 → −60 dB RMS; lead >4 kHz energy 3 % → 44 %). 'Too boring / thin' was partly this. Fixed in MoshOps load_builtin/load_master_builtin (frequency->setParameter) with the selftest now reading the parameter; renders re-issued as r3c."
     ]
   },
-  "promoted_to": "r3b re-render of the same frozen notes with the id remap; the owner re-judges the presets on r3b before any preset-curation change"
+  "promoted_to": "r3c re-render of the same frozen notes with (1) track ids remapped by role and (2) the highpass actually at 180 Hz; the owner re-judges samples/mix/presets on r3c"
 }

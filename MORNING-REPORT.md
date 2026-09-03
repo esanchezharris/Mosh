@@ -221,6 +221,52 @@ project files; jerk and plugg have essentially no project-file market
 pop are well served (Abletunes' license explicitly permits deconstruction
 for learning; Loopmasters/ModeAudio packs carry 15 Live sets each).
 
+## Round 3 correction (evening) — your "naked sine waves" verdict was two bugs
+
+Verdict recorded verbatim in `docs/produce-corrections/produce-r3-2026-09-02.meta.json`
+(both r3 candidates `pass_with_notes`: "presets in the melody are too boring…
+naked sine waves"). You were hearing sine waves. Two driver/engine bugs, both
+found from the data, both fixed and re-rendered:
+
+1. **Replay addressed the wrong tracks.** `produceReplay.mts --swap` reused the
+   round-2 program's numeric track ids verbatim. Round 3's per-track highpass
+   shifted every later id by one (1025→1026 …), and MoshOps `add_midi_clip`
+   auto-creates a track (default 4OSC = sine, 0 dB) for an unknown id. So
+   chords / drone / counter / arp / ambient played as bare sines on "Track
+   10–14", the Ambient Pad track played the stab notes, and the real Vital
+   tracks were silent. Stem names gave it away; spectral flatness 1e-10
+   confirmed it. Fix: ids are remapped by ROLE via the original template.json
+   (`produceReplayRemap.ts`, tested), and the replay now fails loudly if the
+   track count grows. Round 2's labkit twin was not affected (same preflight
+   as its original), so the r2 pass stands.
+2. **The highpass was at 4 kHz, not 180 Hz.** The builtin wrote 180 Hz to
+   Tracktion's CachedValue; the filter reads the AutomatableParameter, which
+   stayed at the 4000 Hz default (probed: 0.1814 normalised). Every melodic
+   part in round 3 was highpassed at 4 kHz (drone centroid 229 → 3600 Hz,
+   chords stem −22 → −60 dB). "Thin / boring" was partly this. Fix in
+   `load_builtin` / `load_master_builtin` (parameter set), selftest now checks
+   the parameter (the check that would have been red).
+
+Also fixed while verifying: the R3.3 selftest section left its master
+highpass + softclip behind and broke the 11 master-bus checks that follow
+(present since 17:33 today, after the 07:28 gate's 3341/3341).
+
+**The corrected pair (r3c) — same notes, same presets, same seed, both bugs out:**
+
+| File | Samples | peak / RMS / crest (dBFS) | clip |
+|---|---|---|---|
+| `B-mosh-r3c-opus-s3-kitmatched.wav` | palette-v2, 0 ms onsets, kit-matched | −3.1 / −6.2 / 3.1 | 0 % |
+| `B-mosh-r3c-opus-s3-labkit.wav` | your Live-set kit | −3.1 / −5.7 / 2.6 | 0 % |
+| `A-flywheel.wav` (your export) | — | −1.5 / −4.1 / 2.5 | 0 % |
+
+All nine stems now carry their preset names; melodic stems sit −19 to −47 dB
+under a −3 dB peak with the 180 Hz highpass (chords centroid 359 Hz, drone
+230 Hz — where round 2 had them). Drum stems are ~4 dB lower than round 2
+because the round-3 template also added pad gains (kick −2, second clap −8,
+hats −6) — deliberate, but note it when you judge the drums. The flawed r3
+and r3b renders are parked in `round3-flawed/`; the page at
+http://127.0.0.1:8797/audition.html shows only the r3c pair, stems included.
+
 ## Where things are
 
 - Package: `~/Library/Mosh/produce-ab/2026-09-02/` (audition.html,
