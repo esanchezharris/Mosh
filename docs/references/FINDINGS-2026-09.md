@@ -98,3 +98,87 @@ volumes only, ignoring FL channel volume and any plugin gain. It is subject to
 exactly the same objection and should not be quoted against our preflight's
 ~19 dB until `service/flp/flp_cli.py` reads the other stages. Treat that
 comparison as unproven for now.
+
+---
+
+## S1/S2 — the extractor, and what four projects actually say
+
+`service/references/extract_als.py` (+ `roles.py`, + `extract_als_test.py`, 19
+assertions) now reads per-track effective level, low-cut, device chain, note
+statistics and master chain out of an `.als`. Run on the four projects on disk.
+
+**It never runs at produce time.** Its only legitimate consumer is a profile a
+human signed off on after listening; wiring it into the preflight would make a
+proxy metric gate a musical decision, which the postmortem contract forbids.
+
+### The measurements
+
+| Project | Tracks | Role coverage | Low-cut | *Shaping* low-cut | Shaping Hz | Drum bus | Melodic bus | Offset |
+|---|---|---|---|---|---|---|---|---|
+| Adriatique — Back To Life | 46 | 83% | 11% | 11% | 75–864 | −7.6 | +4.0 | **+11.6** |
+| Adriatique — Never Alone | 23 | 70% | 65% | 44% | 64–167 | −5.8 | +2.2 | **+8.0** |
+| STMPD — By Myself | 109 | 30% | 33% | 25% | 94–163 | +9.8 | +5.9 | **−3.8** |
+| Gravitas — Catalyst | 32 | 56% | 47% | 38% | 61–114 | +4.2 | +2.4 | **−1.8** |
+
+Master chains: **empty, empty, `Limiter → StereoGain → Eq8 → MultibandDynamics →
+Eq8 → Eq8 → GlueCompressor → StereoGain`, `Limiter`.**
+
+"Shaping" excludes low-cuts below 60 Hz. That split is not cosmetic: STMPD
+carries a 30 Hz low-cut **eight times** — EQ Eight's default, left enabled — plus
+one at 10 Hz, the device minimum. Counting those as "this producer highpasses"
+would have been false. Every band is still recorded; only the summary splits.
+
+### Against the pre-registered kill criteria
+
+- **Role coverage — FAILS.** Bar was "under 60% on two or more projects".
+  Result: 30% and 56%. Per-role aggregation is not reliable here, and STMPD's
+  buses in particular are computed from under a third of its tracks.
+- **Drum-to-melodic offset — FAILS decisively.** Bar was "spread over 6 dB".
+  Result: **15.4 dB**, and the *sign flips* — melodic sits above the drums in
+  both Adriatique projects and below in the other two. This is not a noisy
+  constant; it is not a constant.
+- **Low-cut incidence — survives, weakly.** 11% / 44% / 25% / 38%: a four-fold
+  spread, so not a transferable number, but consistently a **minority** of
+  tracks in every project.
+
+**Verdict: per-genre median mix numbers do not transfer.** Two of three
+quantitative criteria fail outright. Stated plainly rather than rescued.
+
+### What does hold, and it contradicts our preflight
+
+1. **Low-cut is always applied to a minority of tracks** (11–44%), never to
+   everything in a category. Our preflight puts one on **all seven** melodic
+   tracks, unconditionally.
+2. **The frequencies sit lower than ours.** Shaping cuts cluster **60–170 Hz**;
+   ours is a flat **180 Hz**.
+3. **There is no universal master chain.** Two of four projects have an *empty*
+   master; one has a lone limiter; one has eight devices. Our fixed
+   softclip → God Particle has no support here.
+
+### Correction to an earlier claim in this session
+
+I previously reported, from the Adriatique remake alone, that the references
+"highpass drums, not melodic parts, while we do the opposite". **Four projects do
+not support that.** Shaping low-cuts land on kick, clap, snare, perc, cymbal and
+shaker *and* on arp, pad, stab, chords and lead. Kick and clap appear in three of
+four projects — the most consistent single fact here — but melodic parts are cut
+too. The n=1 reading was wrong.
+
+### Limits, stated rather than buried
+
+- n=4 across three genres, and **two share a genre, a pack and an author**, so
+  they are correlated. This validates the mechanism; it is not a coherence
+  verdict.
+- **All four are remakes, demos or teaching projects**, not original release
+  sessions. A remake is evidence about one practitioner's reconstruction.
+- Role coverage under 60% on two projects means their per-role figures carry
+  real measurement error, independent of whether the underlying quantity
+  transfers.
+
+### What this implies for the next step
+
+Wiring a `mixProfile` of measured *constants* into the preflight is not
+justified: the constants are not there. The findings that survived are
+**structural, not numeric** — how many tracks get a low-cut, and roughly where —
+and the honest way to act on them is to put a candidate change in front of the
+owner's ear, not to encode a median nobody can defend.
