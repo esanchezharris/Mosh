@@ -141,7 +141,10 @@ struct WavShape
         {
             w.dataOffset = p + 8;
             w.declaredDataBytes = sz;
-            w.payloadBytes = juce::jmax ((std::int64_t) 0, total - w.dataOffset);
+            // Explicit template arg: juce::int64 (long long) and std::int64_t are the
+            // same type on macOS but NOT on LP64 Linux (long), so an implicit jmax
+            // fails template deduction there. Pin both operands to std::int64_t.
+            w.payloadBytes = juce::jmax<std::int64_t> (0, (std::int64_t) total - w.dataOffset);
             w.riff = haveFmt && w.channels > 0 && w.bitsPerSample > 0 && w.sampleRate > 0.0;
             return w;
         }
