@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 # Direct invocation (the gate runs `python3 <file>`): put the repo root on sys.path
 # so `service.agent_eval` resolves; pytest collection already has it via rootdir.
 import os as _os
@@ -28,7 +26,8 @@ def test_schema_bundle_publishes_every_cross_boundary_contract() -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    # The gate runs `python3 <file>` and its CI python has no pytest (the rest of
+    # service/ uses plain asserts + a __main__ runner). pytest was only ever the
+    # runner here, never a fixture, so call the test directly.
+    test_schema_bundle_publishes_every_cross_boundary_contract()
+    print("schema_task_test: OK (schema bundle publishes all four cross-boundary contracts)")

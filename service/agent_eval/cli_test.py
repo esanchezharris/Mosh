@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 # Direct invocation (the gate runs `python3 <file>`): put the repo root on sys.path
 # so `service.agent_eval` resolves; pytest collection already has it via rootdir.
 import os as _os
@@ -68,7 +66,10 @@ def test_attempt_cli_runs_isolated_fixture_through_public_surface(tmp_path: Path
 
 
 if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    # Same reason as schema_test.py. The test takes pytest's `tmp_path` fixture, so
+    # direct invocation supplies an equivalent throwaway directory.
+    import tempfile
 
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    with tempfile.TemporaryDirectory() as _tmp:
+        test_attempt_cli_runs_isolated_fixture_through_public_surface(Path(_tmp))
+    print("cli_test: OK (attempt CLI runs an isolated fixture through the public surface)")
