@@ -7,6 +7,21 @@ import sys as _sys
 
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
 
+_NAME = "schema_test"
+
+# The gate runs py tests as `python3 <file>` on a CI interpreter that carries only
+# numpy/soundfile — agent_eval needs pydantic + typer (and this file's siblings need
+# pytest). Skip LOUDLY there rather than failing the gate, the same posture as
+# service/teardown/drummatch/drummatch_test.py and sa3_precompute_parity_test.py:
+# this test is MANDATORY on a dev machine, it must never look green by vanishing.
+try:
+    import pydantic  # noqa: F401
+    import typer  # noqa: F401
+except ImportError as exc:  # pragma: no cover — CI-only path
+    print(f"SKIP {_NAME}: agent_eval deps not importable ({exc})")
+    print("     (this test is MANDATORY on a dev machine — do not let it skip silently in CI)")
+    raise SystemExit(0)
+
 from service.agent_eval import schema
 
 
