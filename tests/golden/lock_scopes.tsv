@@ -8,6 +8,7 @@ add_rave_insert	Track
 add_render_layer	Clip
 add_send	Track
 add_test_tone_clip	Track
+adopt_recording_residue	Unguarded
 agent_memory_clear	Unguarded
 agent_memory_delete	Unguarded
 agent_memory_read	Unguarded
@@ -100,6 +101,7 @@ list_loras	Unguarded
 list_midi_inputs	Unguarded
 list_plugins	Unguarded
 list_rave_models	Unguarded
+list_recording_residue	Unguarded
 list_takes	Unguarded
 list_track_outputs	Unguarded
 list_training_sources	Unguarded
@@ -140,6 +142,7 @@ paste_clip	Track
 promote_lora_checkpoint	Unguarded
 promote_take_region	Clip
 quantize_notes	Clip
+quarantine_recording_residue	Unguarded
 recover_session	SessionGlobal
 redo	Unguarded
 regenerate_lyric	Track
