@@ -22,14 +22,18 @@ const code = css.replace(/\/\*[\s\S]*?\*\//g, ""); // comments off — they disc
 
 // selector -> why it is allowed the lime. A selector with no entry is a guard failure.
 const AGENTIC_SELECTORS: Record<string, string> = {
-  ".v2-shell .v2-mosh-stage": "Moshi himself — all moods, hands-free, the live GL mount. The agent IS the character.",
+  ".v2-shell .v2-mosh-stage": "Moshi himself — all moods and the live GL mount. The agent IS the character.",
   ".v2-shell .v2-mosh-status": "his status wave and narration line — reads out what the agent is doing",
+  // Re-added 2026-09-04 with the LOCAL AI toggle (#695's native contract). This is the
+  // one control that says whether the local MODEL is loaded and holding ~17GB, so it is
+  // agentic in the literal sense the reservation is about — and it wears the lime ONLY
+  // while on, which is exactly when the agent is real rather than idle.
+  ".v2-local-ai[data-on=\"true\"]": "the local model is loaded and consuming its dedicated memory",
   // ".v2-shell .v2-pill" — the topbar AI ACTIVE pill. DELETED 2026-08-05 at the owner's
   // call: it spent ~107px of a full bar to say "active", which is what it read nearly all
   // the time, and the busy state it carried is already shown where the work happens (the
   // composer's "thinking…" placeholder, the Moshi card's narration). One fewer surface
   // wearing the agentic lime is a gain for this reservation, not a loss.
-  ".v2-shell .agent-input.listening": "the push-to-talk recognizer is live — the machine is listening right now",
   ".v2-shell .agent-send": "the Ask Moshi submit — the act of handing work to the agent",
   ".v2-shell .v2-agent-drawer": "the drawer while .live: title, step chips, spinner — a task in flight",
   ".v2-shell .v2-skel-confirm": "the mumble-to-skeleton confirm strip — a generative result awaiting a verdict",
@@ -45,7 +49,6 @@ const NEUTRAL_EXCLUSIONS: Record<string, string> = {
   ".v2-shell .v2-live": "multiplayer presence is 'live' but NOT agentic — the owner scoped it out explicitly",
   ".v2-shell .v2-live .led": "the LIVE dot: it stayed lime in the first mockup purely because it sits inside the Mosh card",
   ".v2-shell .v2-agent-btn": "the drawer's generic utility buttons (Undo task, close) — chrome, not the agent",
-  ".v2-shell .agent-mic": "the mic control is an input affordance, not a running model",
   ".v2-shell .v2-skel-confirm .v2-btn": "the confirm strip's buttons are ordinary controls inside an agentic strip",
   ".v2-shell .v2-flow-dot.on": "a flow grid dot is a metric readout, not an agent state",
   ".v2-shell .v2-composer-face-btn": "the Moshi mark doubling as the drawer recall toggle — a button, not a state",

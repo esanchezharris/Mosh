@@ -1,0 +1,23 @@
+{
+ "waveShapes": [
+  3,
+  3,
+  0,
+  0
+ ],
+ "params": {
+  "Level 1": 0.8,
+  "Level 2": 0.75,
+  "Detune 1": 0.25,
+  "Detune 2": 0.35,
+  "Amp Attack": 0.02,
+  "Amp Decay": 0.3,
+  "Amp Sustain": 0.75,
+  "Amp Release": 0.3,
+  "Filter Freq": 0.8,
+  "Filter Resonance": 0.25,
+  "Level 3": 0.0,
+  "Level 4": 0.0
+ },
+ "_note": "Bundled starter patch, authored 2026-09-01 for the P1 preset seam. Params are NORMALIZED 0..1 against 4OSC's ranges. UN-AUDITIONED: owner by-ear pass pending; edit freely."
+}

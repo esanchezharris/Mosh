@@ -16,7 +16,7 @@ import { notePreview } from "../../audio/notePreview";
 import { wireNotePreview } from "../../audio/wireNotePreview";
 import { noteName } from "../../musicalKey";
 import type { DrumPad, Track } from "../../types";
-import { SAMPLE_DND_MIME, addRecentSample } from "../sampleBrowserUtil";
+import { SAMPLE_DND_MIME, addRecentSample, importedFilePath } from "../sampleBrowserUtil";
 
 /** Ableton shows 16 pads at a time; the bank selector walks the 128-note range. */
 const BANK = 16;
@@ -60,7 +60,9 @@ export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
   const assign = async (note: number, file?: string) => {
     const path = file ?? (await pickFiles({ filters: "*.wav;*.aif;*.aiff;*.flac;*.mp3", title: "Choose a sample for this pad" })).files?.[0];
     if (!path) return;
-    await exec("assign_sample", { trackId: track.id, note, file: path });
+    const result = await exec("assign_sample", { trackId: track.id, note, file: path });
+    const imported = importedFilePath(result);
+    if (imported) addRecentSample(imported);
   };
 
   return (
@@ -113,7 +115,7 @@ export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
                     // (which already knows the real path, so no picker round-trip), or a
                     // file dragged straight in from Finder.
                     const fromBrowser = e.dataTransfer?.getData(SAMPLE_DND_MIME);
-                    if (fromBrowser) { addRecentSample(fromBrowser); void assign(note, fromBrowser); return; }
+                    if (fromBrowser) { void assign(note, fromBrowser); return; }
                     const f = e.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined;
                     if (f?.path) void assign(note, f.path);
                   }}

@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# run-mosh.sh — launch the built Mosh.app with brain configuration + native voice, for a live
-# smoke test of the packaged-app pieces (LLM brain + macOS speech-to-text).
+# run-mosh.sh — build, deploy, and launch Mosh with local brain configuration.
 #
 # THIS SCRIPT CONTAINS NO KEYS. It loads them from, in order:
 #   1. ui/.env.local   — the gitignored dotenv you paste keys into (see ui/.env.example)
 #   2. whatever is already exported in your current shell
 #
 # It launches the app's inner binary directly (NOT `open`) so the app inherits the
-# exported environment — `open(1)` would drop it. The mic/speech permission prompts
-# still appear on first use (they key off the bundle, not the launch method).
+# exported environment — `open(1)` would drop it.
 #
 # Usage:
-#   ./run-mosh.sh           launch the GUI (talk/type to Moshi — tests voice + brain)
+#   ./run-mosh.sh           launch the GUI
 #   ./run-mosh.sh smoke     non-interactive native brain round-trip; prints the reply
 #   ./run-mosh.sh build     (re)build the app, then launch the GUI
 #   ./run-mosh.sh deploy    (re)build, then install ONE canonical /Applications/Mosh.app
@@ -52,6 +50,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${MOSH_BRAIN_ENV:-$ROOT/ui/.env.local}"
 MODE="${1:-gui}"
+OWNER_TEAM_ID="ZYT77F9B27"
 
 # Resolve the newest built Mosh.app. The documented build is the
 # `macos-arm64-debug` preset (-> build-macos-arm64/); we also check the legacy
@@ -329,16 +328,14 @@ bundle_brain_key() {                            # $1 = installed app
 install_app() {                                 # $1 = source app, $2 = dest
   echo "deploying $1 -> $2"
   rm -rf "$2"; cp -R "$1" "$2"
-  # Fail-closed safety net: a bundle missing NSSpeechRecognitionUsageDescription
-  # TCC-CRASHES the moment the always-on voice starts. The build now injects it via
-  # an always-run target, but a stale/hand-built source bundle could still lack it —
-  # and that is EXACTLY how a crashing /Applications/Mosh.app once shipped (the copy
-  # path had no plist check). Re-inject + verify here, before signing, using the SAME
-  # single-source script the build uses. (Done before sign_app so the seal stays valid.)
+  # Re-apply the bundle metadata policy before signing. This also strips the retired
+  # Speech Recognition permission from stale or hand-built source bundles.
   if [ -f "$2/Contents/Info.plist" ]; then
     cmake -DPLIST="$2/Contents/Info.plist" -P "$ROOT/cmake/InjectInfoPlistKeys.cmake" \
-      && echo "  Info.plist: speech/camera/bonjour usage keys present (TCC-safe)" \
-      || { echo "  FATAL: Info.plist usage-key injection failed — refusing to ship a TCC-crashing bundle" >&2; return 1; }
+      && echo "  Info.plist: recording/camera/bonjour policy applied; Speech Recognition absent" \
+      || { echo "  FATAL: Info.plist privacy policy failed — refusing to ship" >&2; return 1; }
+    "$ROOT/scripts/release/check-plist-keys.sh" "$2" install \
+      || { echo "  FATAL: bundle privacy capability check failed — refusing to ship" >&2; return 1; }
   fi
 }
 
@@ -346,7 +343,7 @@ install_app() {                                 # $1 = source app, $2 = dest
 # installed, and only falls back to ad-hoc when there is none (CI, a fresh machine).
 #
 # WHY THE IDENTITY MATTERS FOR MORE THAN GATEKEEPER: macOS TCC pins a privacy grant
-# (Microphone, Speech Recognition, Camera, …) to the app's code-signing identity. An
+# (Microphone, Camera, …) to the app's code-signing identity. An
 # AD-HOC signature carries no certificate, so TCC has nothing durable to key on and
 # falls back to the bundle's exact `cdhash` — which changes on EVERY rebuild. The old
 # grant is then orphaned and macOS re-prompts on the next launch, forever. Signing with
@@ -371,7 +368,8 @@ install_app() {                                 # $1 = source app, $2 = dest
 # the app to an unsigned state, which is exactly the TCC re-prompt bug #452 fixed.
 dev_id_identity() {
   security find-identity -v -p codesigning 2>/dev/null \
-    | awk '/Developer ID Application/ { print $2; exit }'
+    | awk -v team="$OWNER_TEAM_ID" \
+        '/Developer ID Application/ && index($0, "(" team ")") { print $2; exit }'
 }
 
 sign_app() {
@@ -381,10 +379,17 @@ sign_app() {
   if [ -n "$ID" ]; then
     codesign --force --deep --sign "$ID" "$DEST"
     LABEL="${LABEL/ad-hoc/Developer ID}"
+    local SIGNED_TEAM
+    SIGNED_TEAM="$(codesign -dv --verbose=4 "$DEST" 2>&1 \
+      | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+    if [ "$SIGNED_TEAM" != "$OWNER_TEAM_ID" ]; then
+      echo "  FATAL: expected TeamIdentifier=$OWNER_TEAM_ID, got ${SIGNED_TEAM:-not set}" >&2
+      return 1
+    fi
   else
-    echo "  note: no Developer ID Application identity found — signing ad-hoc." >&2
-    echo "        macOS will re-prompt for mic/speech access after every rebuild." >&2
-    codesign --force --deep --sign - "$DEST"
+    echo "  FATAL: no Developer ID Application identity for team $OWNER_TEAM_ID was found." >&2
+    echo "         Refusing an ad-hoc owner deployment because it would break stable consent." >&2
+    return 1
   fi
   # macOS may attach protected provenance immediately after a copy/sign burst.
   # Give the metadata writer a moment, then strip again before final verification.

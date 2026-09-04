@@ -22,6 +22,7 @@ import {
   buildBrowserRows, LIVE_BROWSER_SECTIONS,
   type DrumKitInfo, type LiveBrowserCategory, type LiveBrowserRow,
 } from "./browserModel";
+import { LiveSamplePlaces } from "./LiveSamplePlaces";
 
 export function Browser() {
   const exec = useStore((s) => s.exec);
@@ -200,11 +201,7 @@ export function Browser() {
           }}
         />
         {cat === "samples" && !q && (
-          <div className="live-bnav">
-            <button className="live-bnav-up" disabled={!listing?.parent}
-              onClick={() => void navigate(listing?.parent ?? undefined)}>Up</button>
-            <span className="live-bnav-path" title={listing?.path}>{listing?.path ?? "…"}</span>
-          </div>
+          <LiveSamplePlaces listing={listing} navigate={navigate} />
         )}
         {cat === "project" && !q && (
           <div className="live-bempty" role="status">

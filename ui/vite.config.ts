@@ -26,6 +26,7 @@ function moshiBrain(env: Record<string, string>): Plugin {
     deepseek: { url: env.DEEPSEEK_BASE_URL, key: env.DEEPSEEK_API_KEY, model: env.DEEPSEEK_MODEL, label: "DEEPSEEK" },
     openai:   { url: env.OPENAI_BASE_URL,   key: env.OPENAI_API_KEY,   model: env.OPENAI_MODEL,   label: "OPENAI" },
     xai:      { url: env.XAI_BASE_URL,      key: env.XAI_API_KEY,      model: env.XAI_MODEL,      label: "GROK" },
+    openrouter: { url: env.OPENROUTER_BASE_URL, key: env.OPENROUTER_API_KEY, model: env.OPENROUTER_MODEL, label: "OPENROUTER" },
     // The MLX seat: an OpenAI-compatible local server (mlx_lm.server). Key is a
     // formality for local endpoints — default it so LOCAL_BASE_URL+MODEL suffice.
     local:    { url: env.LOCAL_BASE_URL,    key: env.LOCAL_API_KEY ?? (env.LOCAL_BASE_URL ? "local" : undefined), model: env.LOCAL_MODEL, label: "LOCAL" },
@@ -41,7 +42,12 @@ function moshiBrain(env: Record<string, string>): Plugin {
   // local provider key. Returns null on ANY failure (unreachable / non-2xx / malformed
   // / proxy URL unset) so the caller falls through to the direct-provider path below —
   // additive, never a regression from the pre-proxy behaviour.
-  async function tryProxy(body: { messages?: unknown; provider?: string; temperature?: number }) {
+  async function tryProxy(body: {
+    messages?: unknown;
+    provider?: string;
+    temperature?: number;
+    options?: { maxTokens?: number; timeoutMs?: number; temperature?: number };
+  }) {
     const proxyUrl = env.MOSH_BRAIN_PROXY_URL;
     if (!proxyUrl) return null;
     try {
@@ -97,9 +103,14 @@ function moshiBrain(env: Record<string, string>): Plugin {
             const p = name ? P[name] : null;
             if (!p) return send(res, 503, { error: "no provider configured — add a key to ui/.env.local (or set MOSH_BRAIN_PROXY_URL to use the brain proxy)" });
             const isReasoning = name === "openai" && /^(gpt-5|gpt-6|o[0-9])/.test(p.model ?? "");
+            // options.maxTokens/temperature (bridge.ts's BrainChatOptions) override the
+            // 800/0.6 DOSAGE defaults, same seam the native BrainProxy::optionsFromVar
+            // reads — omitted `options` reproduces the exact byte-identical payload.
+            const maxTokens = body.options?.maxTokens ?? 800;
+            const temperature = body.options?.temperature ?? body.temperature ?? 0.6;
             const payload: Record<string, unknown> = { model: p.model, messages: body.messages, response_format: { type: "json_object" } };
-            if (isReasoning) payload.max_completion_tokens = 800;
-            else { payload.max_tokens = 800; payload.temperature = body.temperature ?? 0.6; }
+            if (isReasoning) payload.max_completion_tokens = maxTokens;
+            else { payload.max_tokens = maxTokens; payload.temperature = temperature; }
             const t0 = Date.now();
             const r = await fetch(`${p.url}/chat/completions`, {
               method: "POST",

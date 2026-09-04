@@ -132,18 +132,36 @@ export async function getSnapshot<T = unknown>(): Promise<T> {
 // while the explicit dev/e2e surface may substitute a deterministic demo brain.
 // NOT the executeCommand seam — this is a chat round-trip.
 export type BrainMessage = { role: string; content: string };
-export async function brainChat(messages: BrainMessage[], provider?: string): Promise<{ content: string }> {
+// Per-call overrides layered on the DOSAGE defaults (native BrainProxy::ChatOptions /
+// the dev proxy's own 800/0.6 fallback). Every field optional; omitting `options`
+// entirely keeps brainChat's wire payload byte-identical to before this existed —
+// the produce lane (runTask.ts's PRODUCE_CHAT_OPTIONS) is the first caller to pass one.
+export type BrainChatOptions = { maxTokens?: number; timeoutMs?: number; temperature?: number };
+// `provider` in the RESULT is which provider actually served (the native side
+// resolves a requested-but-incomplete provider by falling back, so callers that
+// MUST have a specific class of brain — the produce lane's cloud-only rule —
+// verify this field rather than trusting the request).
+export async function brainChat(
+  messages: BrainMessage[],
+  provider?: string,
+  options?: BrainChatOptions,
+): Promise<{ content: string; provider?: string }> {
   if (realNative()) {
     // Native proxy returns { ok, content } or { ok:false, error }. Throw on the error
     // shape so the caller can apply its packaged/dev posture — same contract as the dev fetch.
-    const r = (await native("brain_chat")({ messages, provider })) as { ok?: boolean; content?: string; error?: string };
+    const r = (await native("brain_chat")({ messages, provider, ...(options ? { options } : {}) })) as {
+      ok?: boolean;
+      content?: string;
+      error?: string;
+      provider?: string;
+    };
     if (r && r.ok === false) throw new Error(r.error ? String(r.error) : "brain unavailable");
-    return { content: String(r?.content ?? "") };
+    return { content: String(r?.content ?? ""), provider: r?.provider ? String(r.provider) : undefined };
   }
   const r = await fetch("/api/brain/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, provider }),
+    body: JSON.stringify({ messages, provider, ...(options ? { options } : {}) }),
   });
   let j: { content?: string; error?: unknown } = {};
   try { j = await r.json(); } catch { /* non-JSON error body */ }
@@ -151,8 +169,14 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   return { content: String(j.content ?? "") };
 }
 
+/** The states OwnerRuntime::status() actually emits (src/brain/OwnerRuntime.cpp).
+ *  Deliberately NOT a superset: #678's UI carried "cleaning" and "stopping" from its
+ *  own process registry, which #677/#695 never adopted, so listing them here would
+ *  imply transitions the native side cannot produce. */
+export type BrainRuntimeState = "off" | "starting" | "ready" | "prewarming" | "error" | "unavailable";
+
 export type BrainRuntimeStatus = {
-  state: "starting" | "ready" | "prewarming" | "unavailable";
+  state: BrainRuntimeState;
   model?: string;
   endpoint?: string;
   port?: number;
@@ -160,9 +184,44 @@ export type BrainRuntimeStatus = {
   ms?: number;
   preferredShell?: "live" | "protools" | "v2" | "classic";
 };
+const BRAIN_RUNTIME_STATES: readonly BrainRuntimeState[] = [
+  "off", "starting", "ready", "prewarming", "error", "unavailable",
+];
+
+/** Native is trusted but not assumed: an older backend that predates the off-by-default
+ *  contract can answer with a state this build does not know, and the toggle must not
+ *  render an undefined state. Unknown values degrade to "unavailable" (the disabled,
+ *  says-nothing state) rather than to "off", which would invite a click that cannot work. */
+export function parseBrainRuntimeStatus(value: unknown): BrainRuntimeStatus {
+  const v = (value ?? {}) as Record<string, unknown>;
+  const raw = typeof v.state === "string" ? v.state : undefined;
+  const state = BRAIN_RUNTIME_STATES.find((s) => s === raw) ?? "unavailable";
+  const out: BrainRuntimeStatus = { state };
+  if (typeof v.model === "string") out.model = v.model;
+  if (typeof v.endpoint === "string") out.endpoint = v.endpoint;
+  if (typeof v.port === "number") out.port = v.port;
+  if (typeof v.error === "string") out.error = v.error;
+  if (typeof v.ms === "number") out.ms = v.ms;
+  if (v.preferredShell === "live" || v.preferredShell === "protools"
+      || v.preferredShell === "v2" || v.preferredShell === "classic") out.preferredShell = v.preferredShell;
+  return out;
+}
+
 export async function brainRuntimeStatus(): Promise<BrainRuntimeStatus> {
   if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
-  return (await native("brain_runtime_status")()) as BrainRuntimeStatus;
+  return parseBrainRuntimeStatus(await native("brain_runtime_status")());
+}
+
+/** Local AI is OFF at launch (owner decision 2026-09-03, shipped native in #695); these
+ *  are the only two ways it ever starts or stops. Both answer with the fresh status so
+ *  the toggle never has to guess what it just did. */
+export async function brainRuntimeStart(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_start")());
+}
+export async function brainRuntimeStop(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_stop")());
 }
 
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service
@@ -180,23 +239,6 @@ export async function escalateCandidates(payload: unknown): Promise<unknown> {
 export async function archivePair(row: unknown): Promise<void> {
   if (realNative()) await native("archive_pair")(row);
 }
-
-// Native speech-to-text (packaged app). The browser Web Speech API covers the Vite
-// dev path; WKWebView lacks it, so there we drive macOS Speech via these wrappers.
-// Transcripts arrive on the "voice_event" channel (subscribe with onEvent). All are
-// no-ops outside the real WebView, so voiceInput.ts can branch on nativeVoiceAvailable().
-export function nativeVoiceAvailable(): boolean { return realNative(); }
-export async function voiceSupported(): Promise<boolean> {
-  if (!realNative()) return false;
-  try { const r = (await native("voice_supported")()) as { supported?: boolean }; return !!r?.supported; }
-  catch { return false; }
-}
-export async function voiceStart(): Promise<void> { if (realNative()) await native("voice_start")(); }
-export async function voiceStop(): Promise<void> { if (realNative()) await native("voice_stop")(); }
-// Always-on (hands-free) variants — a continuous session emits MANY `final`s on the same
-// voice_event channel and only ends on voice_listen_stop / a fatal error.
-export async function voiceListenStart(): Promise<void> { if (realNative()) await native("voice_listen_start")(); }
-export async function voiceListenStop(): Promise<void> { if (realNative()) await native("voice_listen_stop")(); }
 
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
   if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
@@ -258,6 +300,60 @@ export async function pickSaveFile(opts?: {
     return { ok: false, file: "" };
   }
   return (await native("pick_save_file")(opts ?? {})) as { ok: boolean; file: string };
+}
+
+export type MicrophonePermissionStatus =
+  | "not-determined"
+  | "granted"
+  | "denied"
+  | "restricted"
+  | "timed-out";
+
+export type MicrophonePermissionResult = {
+  status: MicrophonePermissionStatus;
+  error?: string;
+};
+
+function parseMicrophonePermissionResult(value: unknown): MicrophonePermissionResult {
+  if (typeof value !== "object" || value === null || !("status" in value)) {
+    return { status: "restricted", error: "Microphone permission status is unavailable." };
+  }
+  const status = value.status;
+  if (status !== "not-determined" && status !== "granted" && status !== "denied"
+    && status !== "restricted" && status !== "timed-out") {
+    return { status: "restricted", error: "Microphone permission status is unavailable." };
+  }
+  const error = "error" in value && typeof value.error === "string" ? value.error : undefined;
+  return error ? { status, error } : { status };
+}
+
+export async function microphonePermissionStatus(): Promise<MicrophonePermissionResult> {
+  if (!realNative()) return { status: "not-determined" };
+  return parseMicrophonePermissionResult(await native("microphone_permission_status")());
+}
+
+export async function requestMicrophonePermission(): Promise<MicrophonePermissionResult> {
+  if (!realNative()) return { status: "not-determined" };
+  return parseMicrophonePermissionResult(await native("request_microphone_permission")());
+}
+
+export type AddSampleFolderResult = {
+  ok: boolean;
+  path?: string;
+  name?: string;
+  error?: string;
+};
+
+export async function addSampleFolder(): Promise<AddSampleFolderResult> {
+  if (!realNative()) return { ok: false };
+  const value: unknown = await native("add_sample_folder")();
+  if (typeof value !== "object" || value === null || !("ok" in value)
+    || typeof value.ok !== "boolean") return { ok: false };
+  const path = "path" in value && typeof value.path === "string" ? value.path : undefined;
+  const name = "name" in value && typeof value.name === "string" ? value.name : undefined;
+  const error = "error" in value && typeof value.error === "string" ? value.error : undefined;
+  return { ok: value.ok, ...(path ? { path } : {}), ...(name ? { name } : {}),
+    ...(error ? { error } : {}) };
 }
 
 // Skill Foundry Task 4 — three DEDICATED, non-MoshOps native reads for the certified

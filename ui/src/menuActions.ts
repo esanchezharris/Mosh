@@ -246,6 +246,19 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       return;
     }
 
+    // TPL-001 — the vocal recording template: the same lifecycle as New, with the
+    // recipe (Backing + armed Vocal, count-in, overdub takes, a four-bar loop) composed
+    // natively so a singer lands one Record press away from a stacked take.
+    case "new_vocal_project": {
+      const digest = sessionDigestFor(ctx);
+      if (digest) await writeSessionSummary(ctx, digest);
+      clearSessionLog();
+      await store.exec("new_project", { template: "vocal" });
+      await store.refresh();
+      store.invalidateMemory?.();
+      return;
+    }
+
     case "open_project": {
       let file = opts.file;
       if (!file) {
@@ -297,6 +310,19 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       const r = await ctx.pickSaveFile({ title: "Export audio", defaultName: "mix.wav" });
       if (!r.ok || !r.file) return;
       await store.exec("export_audio", { file: r.file, format: formatForFile(r.file), bitDepth: 24 });
+      return;
+    }
+
+    // IMP-001 — the selected clip, rendered from edit time zero so it drops onto another
+    // DAW's timeline at bar 1 and lands where it sits here. One clip: with several
+    // selected, the first is exported (the timeline offset is per clip, so a multi-clip
+    // export would need one file each — a later addition, not a silent merge).
+    case "export_clip_consolidated": {
+      const clipId = [...store.selection][0];
+      if (!clipId) return;
+      const r = await ctx.pickSaveFile({ title: "Export clip from bar 1", defaultName: "clip-from-bar-1.wav" });
+      if (!r.ok || !r.file) return;
+      await store.exec("export_clip_consolidated", { clipId, file: r.file });
       return;
     }
 
@@ -681,10 +707,12 @@ export interface MenuItemMeta {
  *  renderer between Open and Save. Shared by the native menu and the WebView menu. */
 export const FILE_MENU: MenuItemMeta[] = [
   { id: "new_project", label: "New", accel: "⌘N" },
+  { id: "new_vocal_project", label: "New Vocal Recording", accel: "" },
   { id: "open_project", label: "Open…", accel: "⌘O" },
   { id: "save", label: "Save", accel: "⌘S" },
   { id: "save_as", label: "Save As…", accel: "⇧⌘S" },
   { id: "export_audio", label: "Export Audio…", accel: "⇧⌘R" },
+  { id: "export_clip_consolidated", label: "Export Clip from Bar 1…", accel: "" },
 ];
 
 /** FILE_MENU minus Export — the project-lifecycle actions on their own. Three surfaces

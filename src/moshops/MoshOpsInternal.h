@@ -196,6 +196,11 @@ namespace mosh
         { "moshAutoTune", "Mosh AutoTune",         "Mosh FX",    false },
         { "moshOTT",      "Mosh OTT",              "Mosh FX",    false },
         { "moshXFeedback","Mosh X-FDBK",           "Mosh FX",    false },
+        // R3.3 — "highpass" is not its own Tracktion xmlTypeName: it's te::LowPassPlugin
+        // (xmlTypeName "lowpass") with its `mode` CachedValue set to "highpass". See
+        // effectiveBuiltinType/builtinCreationXmlType below for the two-way translation.
+        { "highpass",     "High-Pass Filter",      "Filter",     false },
+        { "softclip",     "Soft Clipper",          "Dynamics",   false },
     };
 
     inline const BuiltinSpec* findBuiltin (const juce::String& type)
@@ -204,6 +209,48 @@ namespace mosh
             if (type == b.type)
                 return &b;
         return nullptr;
+    }
+
+    // R3.3 — true when `p` is really Tracktion's built-in LowPassPlugin flipped into
+    // high-pass mode. LowPassPlugin::getPluginType() always reports its genuine
+    // xmlTypeName ("lowpass") regardless of mode, so callers that need to distinguish
+    // the two user-facing built-ins go through this instead of a raw dynamic_cast.
+    inline bool isHighPassMode (te::Plugin& p)
+    {
+        if (auto* lp = dynamic_cast<te::LowPassPlugin*> (&p))
+            return lp->mode.get() == "highpass";
+        return false;
+    }
+
+    // The built-in `type` id a plugin should be reported as (list_builtins /
+    // load_builtin / the snapshot's plugin.type) — "highpass" for a high-pass-mode
+    // LowPassPlugin, otherwise its genuine Tracktion xmlTypeName. The inverse of
+    // builtinCreationXmlType.
+    inline juce::String effectiveBuiltinType (te::Plugin& p)
+    {
+        if (isHighPassMode (p))
+            return "highpass";
+        return p.getPluginType();
+    }
+
+    // The xmlTypeName createNewPlugin actually dispatches on for a given built-in id.
+    // Only "highpass" differs from its own id — it's created as "lowpass" and then
+    // flipped into high-pass mode by the caller. The inverse of effectiveBuiltinType.
+    inline juce::String builtinCreationXmlType (const juce::String& type)
+    {
+        return type == "highpass" ? juce::String ("lowpass") : type;
+    }
+
+    // The display name a "highpass" built-in should report. te::LowPassPlugin::getName()
+    // is a fixed override ("LPF/HPF") that Mosh cannot re-point per mode without
+    // subclassing Tracktion's own plugin, so the mode-aware name lives here instead —
+    // used both at load_builtin/load_master_builtin time and by the snapshot serializer,
+    // so it stays consistent across a save/reload.
+    inline juce::String effectiveBuiltinName (te::Plugin& p)
+    {
+        if (isHighPassMode (p))
+            return "High-Pass";
+        return p.getName();
     }
 
     inline bool isSerumPlugin (te::ExternalPlugin& plugin)

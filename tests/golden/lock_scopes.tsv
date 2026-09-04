@@ -37,6 +37,7 @@ build_training_corpus	Unguarded
 bypass_layer	Clip
 bypass_master_plugin	SessionGlobal
 bypass_plugin	Track
+calibrate_latency	Unguarded
 cancel_lyric_job	Track
 cancel_render	Clip
 cancel_training_job	Unguarded
@@ -69,6 +70,7 @@ edit_annotation	SessionGlobal
 enable_all_meters	Unguarded
 enable_track_meter	Unguarded
 export_audio	Unguarded
+export_clip_consolidated	Unguarded
 export_issue	Unguarded
 export_stems	Unguarded
 file_peaks	Unguarded
@@ -98,7 +100,9 @@ list_drum_kits	Unguarded
 list_issues	Unguarded
 list_loras	Unguarded
 list_midi_inputs	Unguarded
+list_palette	Unguarded
 list_plugins	Unguarded
+list_presets	Unguarded
 list_rave_models	Unguarded
 list_recording_residue	Unguarded
 list_takes	Unguarded
@@ -110,6 +114,7 @@ load_builtin	Track
 load_drum_kit	Track
 load_master_builtin	SessionGlobal
 load_master_plugin	SessionGlobal
+load_preset	Track
 load_plugin	Track
 load_rave_model	Track
 mark_take	Unguarded

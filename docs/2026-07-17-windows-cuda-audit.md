@@ -73,8 +73,8 @@ risks, zero hardcoded `/`-separators in engine/state code.
 - **`CMakeLists.txt`** (`+1` line since `05305cce`: `src/multiplayer/TransferQueue.cpp` added
   to `target_sources`, matching the new file) — no missing source-file registrations found for
   any other file touched in the window. Windows-specific blocks (WIN32/MSVC redist DLL
-  staging lines 330-341, anira LibTorch DLL staging lines 209-246, `NativeSpeech_stub.cpp`
-  substitution lines 315-322) are unchanged and structurally sound.
+  staging lines 330-341 and anira LibTorch DLL staging lines 209-246) are unchanged
+  and structurally sound.
 
 ## 2. Generative service — Windows/CUDA branches
 

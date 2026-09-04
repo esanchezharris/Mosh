@@ -15,6 +15,7 @@ printf '%s\n' "$OUT" | jq -e '
   and ([.steps[].name] == [
     "deploy",
     "codesign",
+    "team_id",
     "installed_selftest_x3",
     "installed_selftest_undo",
     "macos_ui_automation",

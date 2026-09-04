@@ -1,0 +1,777 @@
+{
+  "task_manifest": {
+    "$defs": {
+      "BudgetSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "wall_seconds": {
+            "exclusiveMinimum": 0,
+            "title": "Wall Seconds",
+            "type": "integer"
+          },
+          "token_limit": {
+            "exclusiveMinimum": 0,
+            "title": "Token Limit",
+            "type": "integer"
+          },
+          "tool_call_limit": {
+            "exclusiveMinimum": 0,
+            "title": "Tool Call Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "wall_seconds",
+          "token_limit",
+          "tool_call_limit"
+        ],
+        "title": "BudgetSpec",
+        "type": "object"
+      },
+      "PromptSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "title": "PromptSpec",
+        "type": "object"
+      },
+      "PublicCheckSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9._-]+$",
+            "title": "Id",
+            "type": "string"
+          },
+          "command": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Command",
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "exclusiveMinimum": 0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "timeout_seconds"
+        ],
+        "title": "PublicCheckSpec",
+        "type": "object"
+      },
+      "RepositorySpec": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "base_commit": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Base Commit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "base_commit"
+        ],
+        "title": "RepositorySpec",
+        "type": "object"
+      },
+      "TaskStatus": {
+        "enum": [
+          "draft",
+          "ready"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "task_id": {
+        "pattern": "^[a-z0-9][a-z0-9._-]+$",
+        "title": "Task Id",
+        "type": "string"
+      },
+      "status": {
+        "$ref": "#/$defs/TaskStatus"
+      },
+      "repository": {
+        "$ref": "#/$defs/RepositorySpec"
+      },
+      "prompt": {
+        "$ref": "#/$defs/PromptSpec"
+      },
+      "budget": {
+        "$ref": "#/$defs/BudgetSpec"
+      },
+      "public_checks": {
+        "items": {
+          "$ref": "#/$defs/PublicCheckSpec"
+        },
+        "title": "Public Checks",
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "task_id",
+      "status",
+      "repository",
+      "prompt",
+      "budget",
+      "public_checks"
+    ],
+    "title": "TaskManifest",
+    "type": "object"
+  },
+  "attempt_record": {
+    "$defs": {
+      "AgentResult": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "passed_environment": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Passed Environment",
+            "type": "array"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "elapsed_seconds": {
+            "title": "Elapsed Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "command",
+          "passed_environment",
+          "exit_code",
+          "elapsed_seconds"
+        ],
+        "title": "AgentResult",
+        "type": "object"
+      },
+      "ArtifactFile": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "title": "ArtifactFile",
+        "type": "object"
+      },
+      "ArtifactSet": {
+        "additionalProperties": false,
+        "properties": {
+          "patch": {
+            "$ref": "#/$defs/ArtifactFile"
+          },
+          "status": {
+            "$ref": "#/$defs/ArtifactFile"
+          },
+          "transcript": {
+            "$ref": "#/$defs/ArtifactFile"
+          }
+        },
+        "required": [
+          "patch",
+          "status",
+          "transcript"
+        ],
+        "title": "ArtifactSet",
+        "type": "object"
+      },
+      "AttemptOutcome": {
+        "enum": [
+          "completed",
+          "agent_error",
+          "timeout",
+          "infra_error"
+        ],
+        "title": "AttemptOutcome",
+        "type": "string"
+      },
+      "BudgetObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "wall_seconds_limit": {
+            "title": "Wall Seconds Limit",
+            "type": "integer"
+          },
+          "token_limit": {
+            "title": "Token Limit",
+            "type": "integer"
+          },
+          "tool_call_limit": {
+            "title": "Tool Call Limit",
+            "type": "integer"
+          },
+          "token_usage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Token Usage"
+          },
+          "tool_call_usage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tool Call Usage"
+          }
+        },
+        "required": [
+          "wall_seconds_limit",
+          "token_limit",
+          "tool_call_limit"
+        ],
+        "title": "BudgetObservation",
+        "type": "object"
+      },
+      "RepositoryIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "base_commit": {
+            "title": "Base Commit",
+            "type": "string"
+          },
+          "head_after": {
+            "title": "Head After",
+            "type": "string"
+          },
+          "independent_git_dir": {
+            "title": "Independent Git Dir",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "base_commit",
+          "head_after",
+          "independent_git_dir"
+        ],
+        "title": "RepositoryIdentity",
+        "type": "object"
+      },
+      "TaskIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "prompt_sha256": {
+            "title": "Prompt Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "manifest_sha256",
+          "prompt_sha256"
+        ],
+        "title": "TaskIdentity",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "attempt_id": {
+        "title": "Attempt Id",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "outcome": {
+        "$ref": "#/$defs/AttemptOutcome"
+      },
+      "task": {
+        "$ref": "#/$defs/TaskIdentity"
+      },
+      "repository": {
+        "$ref": "#/$defs/RepositoryIdentity"
+      },
+      "agent": {
+        "$ref": "#/$defs/AgentResult"
+      },
+      "budget": {
+        "$ref": "#/$defs/BudgetObservation"
+      },
+      "artifacts": {
+        "$ref": "#/$defs/ArtifactSet"
+      }
+    },
+    "required": [
+      "attempt_id",
+      "created_at",
+      "outcome",
+      "task",
+      "repository",
+      "agent",
+      "budget",
+      "artifacts"
+    ],
+    "title": "AttemptRecord",
+    "type": "object"
+  },
+  "grade_payload": {
+    "$defs": {
+      "CheckResult": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "failure_class": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FailureClass"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "passed",
+          "score",
+          "failure_class",
+          "detail"
+        ],
+        "title": "CheckResult",
+        "type": "object"
+      },
+      "FailureClass": {
+        "enum": [
+          "build_failure",
+          "test_failure",
+          "static_integrity",
+          "no_patch",
+          "repo_escape",
+          "budget_exceeded"
+        ],
+        "title": "FailureClass",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "grader_version": {
+        "minLength": 1,
+        "title": "Grader Version",
+        "type": "string"
+      },
+      "score": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "title": "Score",
+        "type": "number"
+      },
+      "passed": {
+        "title": "Passed",
+        "type": "boolean"
+      },
+      "checks": {
+        "items": {
+          "$ref": "#/$defs/CheckResult"
+        },
+        "minItems": 1,
+        "title": "Checks",
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "grader_version",
+      "score",
+      "passed",
+      "checks"
+    ],
+    "title": "GradePayload",
+    "type": "object"
+  },
+  "grade_record": {
+    "$defs": {
+      "ArtifactFile": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "title": "ArtifactFile",
+        "type": "object"
+      },
+      "CheckResult": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "failure_class": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FailureClass"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "passed",
+          "score",
+          "failure_class",
+          "detail"
+        ],
+        "title": "CheckResult",
+        "type": "object"
+      },
+      "FailureClass": {
+        "enum": [
+          "build_failure",
+          "test_failure",
+          "static_integrity",
+          "no_patch",
+          "repo_escape",
+          "budget_exceeded"
+        ],
+        "title": "FailureClass",
+        "type": "string"
+      },
+      "GradeArtifacts": {
+        "additionalProperties": false,
+        "properties": {
+          "stdout": {
+            "$ref": "#/$defs/ArtifactFile"
+          },
+          "stderr": {
+            "$ref": "#/$defs/ArtifactFile"
+          }
+        },
+        "required": [
+          "stdout",
+          "stderr"
+        ],
+        "title": "GradeArtifacts",
+        "type": "object"
+      },
+      "GradeOutcome": {
+        "enum": [
+          "completed",
+          "infra_error",
+          "timeout"
+        ],
+        "title": "GradeOutcome",
+        "type": "string"
+      },
+      "GradePayload": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "grader_version": {
+            "minLength": 1,
+            "title": "Grader Version",
+            "type": "string"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/$defs/CheckResult"
+            },
+            "minItems": 1,
+            "title": "Checks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "grader_version",
+          "score",
+          "passed",
+          "checks"
+        ],
+        "title": "GradePayload",
+        "type": "object"
+      },
+      "GradedAttemptIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "base_commit": {
+            "title": "Base Commit",
+            "type": "string"
+          },
+          "patch_sha256": {
+            "title": "Patch Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "task_id",
+          "base_commit",
+          "patch_sha256"
+        ],
+        "title": "GradedAttemptIdentity",
+        "type": "object"
+      },
+      "GraderIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "bundle_sha256": {
+            "title": "Bundle Sha256",
+            "type": "string"
+          },
+          "command": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "elapsed_seconds": {
+            "title": "Elapsed Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "version",
+          "bundle_sha256",
+          "command",
+          "elapsed_seconds"
+        ],
+        "title": "GraderIdentity",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "grade_id": {
+        "title": "Grade Id",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "outcome": {
+        "$ref": "#/$defs/GradeOutcome"
+      },
+      "attempt": {
+        "$ref": "#/$defs/GradedAttemptIdentity"
+      },
+      "grader": {
+        "$ref": "#/$defs/GraderIdentity"
+      },
+      "result": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GradePayload"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "infrastructure_error": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Infrastructure Error"
+      },
+      "artifacts": {
+        "$ref": "#/$defs/GradeArtifacts"
+      }
+    },
+    "required": [
+      "grade_id",
+      "created_at",
+      "outcome",
+      "attempt",
+      "grader",
+      "result",
+      "infrastructure_error",
+      "artifacts"
+    ],
+    "title": "GradeRecord",
+    "type": "object"
+  }
+}

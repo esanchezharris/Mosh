@@ -205,7 +205,12 @@ namespace
             || name == "create_track"
             || name == "assign_sample"
             || name == "add_midi_clip"
-            || name == "import_clip";
+            || name == "import_clip"
+            // The compiler's mix stage (service/teardown/render/compile.py:314-319) emits
+            // one set_track_volume per element as a flat headroom trim — every generated
+            // recipe hit "disallowed command: set_track_volume" and its tracks were undone
+            // until this admitted it (2026-09 overnight postmortem).
+            || name == "set_track_volume";
     }
 
     bool generatedRecipeRefName (const juce::String& value, juce::String& name)
@@ -389,6 +394,9 @@ void MoshOps::timerCallback()
     // and survives anything the UI does; it is a no-op when nothing is held.
     sweepStuckVoices();
 
+    // LAT-001 — finish a calibration sweep that the audio thread has completed.
+    pollLatencyCalibration();
+
     // REC-002 — publish the "Mosh Keyboard" virtual MIDI input as soon as audio comes up,
     // so it is in the track input picker BEFORE the producer goes looking for it. Doing
     // this lazily (on the first audition) would mean the picker was empty exactly when
@@ -570,14 +578,16 @@ juce::var MoshOps::execute (const juce::var& command)
 }
 
 juce::var MoshOps::executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                const juce::var& command)
+                                                const juce::var& command,
+                                                juce::Array<juce::File> sampleFolders)
 {
     const auto name = command.getProperty ("command", var()).toString();
     if (name != "list_directory")
         return errResult (name, "command is not safe for the file-browser worker");
 
     const auto args = command.getProperty ("args", var (new DynamicObject()));
-    return okResult (name, directory_listing::buildData (sessionDir, args));
+    return okResult (name, directory_listing::buildData (
+        sessionDir, args, std::move (sampleFolders)));
 }
 
 juce::var MoshOps::executeImpl (const juce::var& command)
@@ -622,7 +632,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
             "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
             "normalize_clip", "set_clip_warp", "stretch_clip",
             "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
-            "set_plugin_param", "bypass_plugin", "open_plugin_editor",
+            "set_plugin_param", "bypass_plugin", "open_plugin_editor", "load_preset",
             "set_track_automation_mode", "write_automation_curve",
             "add_automation_point", "set_automation_point", "remove_automation_point",
             "clear_automation", "replace_instrument", "hot_swap_instrument",
@@ -805,12 +815,15 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "load_builtin")      return cmdLoadBuiltin (args);
     if (name == "set_track_type")    return cmdSetTrackType (args);
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
+    if (name == "list_presets")      return cmdListPresets (args);
+    if (name == "load_preset")       return cmdLoadPreset (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
     if (name == "set_drum_pad")      return cmdSetDrumPad (args);
     if (name == "clear_drum_pad")    return cmdClearDrumPad (args);
     if (name == "apply_choke")       return cmdApplyChoke (args);
     if (name == "list_drum_kits")    return cmdListDrumKits (args);
+    if (name == "list_palette")      return cmdListPalette (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
@@ -868,6 +881,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
    #endif
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "export_stems")      return cmdExportStems (args);
+    if (name == "export_clip_consolidated") return cmdExportClipConsolidated (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
@@ -899,6 +913,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_recording_residue")       return cmdListRecordingResidue (args);
     if (name == "adopt_recording_residue")      return cmdAdoptRecordingResidue (args);
     if (name == "quarantine_recording_residue") return cmdQuarantineRecordingResidue (args);
+    // LAT-001 — machine/device action like set_audio_device: never broadcast to a peer.
+    if (name == "calibrate_latency") return cmdCalibrateLatency (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -2248,16 +2264,13 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
 
 juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
 {
-    auto* body = new DynamicObject();
-    if (args.hasProperty ("mood")) body->setProperty ("mood", args.getProperty ("mood", var()));
-    if (args.hasProperty ("tempo")) body->setProperty ("tempo", args.getProperty ("tempo", var()));
-    if (args.hasProperty ("key")) body->setProperty ("key", args.getProperty ("key", var()));
-    if (args.hasProperty ("seed")) body->setProperty ("seed", args.getProperty ("seed", var()));
-    if (args.hasProperty ("lead")) body->setProperty ("lead", args.getProperty ("lead", var()));
-    if (args.hasProperty ("libraryDir")) body->setProperty ("libraryDir", args.getProperty ("libraryDir", var()));
-    if (args.hasProperty ("paletteManifest")) body->setProperty ("paletteManifest", args.getProperty ("paletteManifest", var()));
-
-    auto generated = jobManager.generateBeatRecipe (var (body));
+    // The WebBridge two-phase hop pre-fetches the program on a worker thread and
+    // re-dispatches with it attached, so THIS message-thread leg never blocks on
+    // the service. A plain synchronous call (UI drawer flow, remote path, tests)
+    // takes the fetch inline exactly as before.
+    auto generated = args.hasProperty ("__prefetchedProgram")
+                         ? args.getProperty ("__prefetchedProgram", var())
+                         : fetchBeatRecipeProgram (args);
     if (! generated.isObject() || ! (bool) generated.getProperty ("ok", false))
     {
         const auto msg = generated.isObject()
@@ -2356,6 +2369,33 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     data->setProperty ("provenance", generated.getProperty ("provenance", var()));
     data->setProperty ("applied", var (applied));
     return okResult ("generate_beat_recipe", var (data));
+}
+
+// The request-body mapping for generate_beat_recipe. A static free function kept
+// textually BETWEEN cmdGenerateBeatRecipe and the next MoshOps:: definition on
+// purpose: the agent-catalog contract test (commands.contract.test.ts) slices a
+// handler's span to the next `juce::var MoshOps::` signature, so the catalog args
+// this consumes on the handler's behalf attribute to cmdGenerateBeatRecipe.
+static juce::var beatRecipeRequestBody (const juce::var& args)
+{
+    auto* body = new juce::DynamicObject();
+    if (args.hasProperty ("mood")) body->setProperty ("mood", args.getProperty ("mood", juce::var()));
+    if (args.hasProperty ("tempo")) body->setProperty ("tempo", args.getProperty ("tempo", juce::var()));
+    if (args.hasProperty ("key")) body->setProperty ("key", args.getProperty ("key", juce::var()));
+    if (args.hasProperty ("seed")) body->setProperty ("seed", args.getProperty ("seed", juce::var()));
+    if (args.hasProperty ("lead")) body->setProperty ("lead", args.getProperty ("lead", juce::var()));
+    if (args.hasProperty ("libraryDir")) body->setProperty ("libraryDir", args.getProperty ("libraryDir", juce::var()));
+    if (args.hasProperty ("paletteManifest")) body->setProperty ("paletteManifest", args.getProperty ("paletteManifest", juce::var()));
+    return juce::var (body);
+}
+
+juce::var MoshOps::fetchBeatRecipeProgram (const juce::var& cmdArgs)
+{
+    // One recipe fetch at a time: the worker-thread leg must not interleave two
+    // service spawns; unrelated jobManager calls keep their existing posture.
+    static juce::CriticalSection fetchLock;
+    const juce::ScopedLock sl (fetchLock);
+    return jobManager.generateBeatRecipe (beatRecipeRequestBody (cmdArgs));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2986,11 +3026,14 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
 {
     auto* o = new DynamicObject();
     o->setProperty ("index", index);
-    o->setProperty ("name", p.getName());
-    o->setProperty ("type", p.getPluginType());
+    // R3.3 — a high-pass-mode LowPassPlugin reports the "highpass" built-in id/name
+    // here, not Tracktion's genuine "lowpass" xmlTypeName/"LPF/HPF" name, so this
+    // matches what load_builtin returned and stays consistent across save/reload.
+    o->setProperty ("name", effectiveBuiltinName (p));
+    o->setProperty ("type", effectiveBuiltinType (p));
     o->setProperty ("enabled", p.isEnabled());
     auto* ext = dynamic_cast<te::ExternalPlugin*> (&p);
-    const auto* bspec = findBuiltin (p.getPluginType());
+    const auto* bspec = findBuiltin (effectiveBuiltinType (p));
     o->setProperty ("external", ext != nullptr);
     o->setProperty ("builtin", bspec != nullptr);
     o->setProperty ("isInstrument", (ext != nullptr && ext->isSynth())
@@ -3252,6 +3295,11 @@ juce::var MoshOps::snapshot()
     session->setProperty ("roundTripLatencySamples", dm.getRecordAdjustmentSamples());
     session->setProperty ("roundTripLatencyMs", dm.getRecordAdjustmentMs());
 
+    // LAT-001 — the MEASURED round trip, if the producer has run a calibration, and
+    // whether its residual is currently in effect (see cmdCalibrateLatency). Distinct
+    // from roundTripLatency* above, which is only what the driver claims.
+    session->setProperty ("latencyCalibration", latencyCalibrationToVar());
+
     // Plugin delay compensation readout (MON-004). This is the WHOLE-GRAPH reported
     // latency Tracktion itself compensates — the single authoritative total from the
     // prepared playback graph (te::EditPlaybackContext::getLatencySamples()), which
@@ -3495,6 +3543,10 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         {
             auto* in = new DynamicObject();
             in->setProperty ("deviceID", chosenID);
+            const auto storedKind = t.state.getProperty (
+                ids::moshInputDeviceKind, var()).toString();
+            if (storedKind == "wave" || storedKind == "midi")
+                in->setProperty ("kind", storedKind);
             auto& dm = eng.engine().getDeviceManager();
             for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
                 if (auto* wi = dm.getWaveInDevice (i))

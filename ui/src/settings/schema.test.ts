@@ -75,7 +75,7 @@ describe("settingsByCategory", () => {
     expect(appearance.settings.map((s) => s.id)).toEqual(["skin", "theme", "uiScale"]);
     const moshi = groups.find((g) => g.category === "Moshi");
     if (!moshi) throw new Error("Moshi settings group is missing");
-    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "handsFree", "handsFreePauseOnRecord", "agentMemory"]);
+    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "agentMemory", "produceLane"]);
   });
 
   it("covers every setting exactly once", () => {

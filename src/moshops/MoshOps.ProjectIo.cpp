@@ -406,6 +406,121 @@ juce::var MoshOps::cmdImportLoraAdapter (const juce::var& args)
     return okResult ("import_lora_adapter", var (d));
 }
 
+// ── export_clip_consolidated (IMP-001) ───────────────────────────────────────────────
+//
+// The Moshpit "consolidated export" idea without the Room Bundle: one clip, rendered
+// from edit time ZERO to its end, so the leading silence IS the timeline position.
+// Dropped onto any DAW at bar 1 (or fed to Re-Imagine's Import Take at bar 1), the
+// audio lands exactly where the clip sat in Mosh — no offset arithmetic on either
+// side, which is the whole point. Renders through the clip's track chain (the take's
+// own sound) but not the master. Rate follows the project setting, else the device.
+juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    if (clip == nullptr)
+        return errResult ("export_clip_consolidated", "no clip with id " + clipId);
+    auto* track = clip->getTrack();
+    if (track == nullptr)
+        return errResult ("export_clip_consolidated", "clip is not on a track");
+
+    const double clipEnd = clip->getPosition().getEnd().inSeconds();
+    if (clipEnd <= 1.0e-4)
+        return errResult ("export_clip_consolidated", "clip has no length");
+    const double tailSeconds = juce::jlimit (0.0, 30.0, (double) args.getProperty ("tailSeconds", 0.0));
+    const double endSec = clipEnd + tailSeconds;
+
+    auto file = args.getProperty ("file", var()).toString().isNotEmpty()
+                    ? juce::File (args.getProperty ("file", var()).toString()).withFileExtension (".wav")
+                    : eng.sessionDir().getChildFile ("exports")
+                          .getChildFile ("clip-" + clipId + "-" + String (Time::getCurrentTime().toMilliseconds()))
+                          .withFileExtension (".wav");
+
+    // PRJ-008 defaults, as export_audio: the stored per-project rate/depth, else device.
+    auto projectSettings = edit.state.getChildWithName (ids::MOSH_PROJECT);
+    double sampleRate = args.hasProperty ("sampleRate") ? (double) args.getProperty ("sampleRate", 0.0)
+                      : projectSettings.hasProperty (ids::projectSampleRate) ? (double) projectSettings.getProperty (ids::projectSampleRate)
+                      : edit.engine.getDeviceManager().getSampleRate();
+    if (sampleRate < 7000.0) sampleRate = 44100.0;
+    int bitDepth = args.hasProperty ("bitDepth") ? (int) args.getProperty ("bitDepth", 24)
+                 : projectSettings.hasProperty (ids::projectBitDepth) ? (int) projectSettings.getProperty (ids::projectBitDepth)
+                 : 24;
+    if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
+        return errResult ("export_clip_consolidated", "bitDepth must be 16, 24, or 32");
+
+    // Render exclusivity, exactly as every other offline render here.
+    unregisterAllMeterClients();
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;
+
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    te::Renderer::Parameters params (edit);
+    params.destFile = file;
+    params.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
+    params.bitDepth = bitDepth;
+    params.sampleRateForAudio = sampleRate;
+    params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
+    if (params.blockSizeForAudio <= 0) params.blockSizeForAudio = 512;
+    params.time = { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimePosition::fromSeconds (endSec) };
+    juce::Array<te::Track*> just; just.add (track);
+    params.tracksToDo = te::toBitSet (just);
+    juce::Array<te::Clip*> only; only.add (clip);
+    params.allowedClips = only;
+    params.usePlugins = true;
+    params.useMasterPlugins = false;
+    params.createMidiFile = false;
+    params.realTimeRender = findSerumRealtimeRenderReason (edit).isNotEmpty();
+
+    juce::String renderError;
+    {
+        const te::Edit::ScopedRenderStatus srs (edit, true);
+        te::TransportControl::stopAllTransports (edit.engine, false, true);
+        te::Renderer::turnOffAllPlugins (edit);
+        te::Renderer::RenderTask task ("Mosh consolidated clip export", params, nullptr, nullptr);
+        const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
+        const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, endSec * 8000.0 + 60000.0);
+        const juce::uint32 stallMs    = 20000;
+        float  lastProgress   = -1.0f;
+        juce::uint32 lastProgressMs = startMs;
+        while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+        {
+            const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+            const float p = task.getCurrentTaskProgress();
+            if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
+            if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
+            {
+                if (task.errorMessage.isEmpty()) task.errorMessage = "consolidated export stalled";
+                break;
+            }
+        }
+        te::Renderer::turnOffAllPlugins (edit);
+        renderError = task.errorMessage;
+    }
+    if (renderError.isNotEmpty() || ! file.existsAsFile() || file.getSize() == 0)
+    {
+        file.deleteFile();
+        const auto msg = renderError.isNotEmpty() ? renderError : String ("consolidated export produced no file");
+        logLine ("export_clip_consolidated", args, false, msg, false);
+        return errResult ("export_clip_consolidated", msg);
+    }
+
+    logLine ("export_clip_consolidated", args, true, {}, false);   // an export, never undoable
+    auto* d = new DynamicObject();
+    d->setProperty ("file", file.getFullPathName());
+    d->setProperty ("clipId", clipId);
+    d->setProperty ("startSeconds", 0.0);
+    d->setProperty ("clipStartSeconds", clip->getPosition().getStart().inSeconds());
+    d->setProperty ("endSeconds", endSec);
+    d->setProperty ("sampleRate", sampleRate);
+    d->setProperty ("bitDepth", bitDepth);
+    d->setProperty ("frames", (juce::int64) std::llround (endSec * sampleRate));
+    return okResult ("export_clip_consolidated", var (d));
+}
+
 juce::var MoshOps::cmdExportAudio (const juce::var& args)
 {
     auto& edit = eng.edit();
@@ -1297,14 +1412,17 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
         dm.setCurrentAudioDeviceType (type, true);
 
     auto setup = dm.getAudioDeviceSetup();
+    const bool hasInputPatch = args.hasProperty ("inputDevice");
+    const auto requestedInput = hasInputPatch
+        ? args.getProperty ("inputDevice", var()).toString()
+        : juce::String();
     if (args.hasProperty ("outputDevice"))
         setup.outputDeviceName = args.getProperty ("outputDevice", var()).toString();
-    if (args.hasProperty ("inputDevice"))
+    if (hasInputPatch && requestedInput.isEmpty())
     {
-        setup.inputDeviceName = args.getProperty ("inputDevice", var()).toString();
-        // Only request default input channels when an input device is selected.
+        setup.inputDeviceName.clear();
         setup.inputChannels.clear();
-        setup.useDefaultInputChannels = setup.inputDeviceName.isNotEmpty();
+        setup.useDefaultInputChannels = false;
     }
     if (args.hasProperty ("sampleRate"))
         setup.sampleRate = (double) args.getProperty ("sampleRate", 0.0);
@@ -1316,6 +1434,11 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
     const auto err = dm.setAudioDeviceSetup (setup, true);
     if (err.isNotEmpty())
         return err;
+
+    if (hasInputPatch && requestedInput.isNotEmpty())
+        if (const auto inputError = eng.activateAudioInput (requestedInput);
+            inputError.isNotEmpty())
+            return inputError;
 
     // Rebuild Tracktion's wave-device wrappers + flush the async device update
     // before the next snapshot.
@@ -1419,6 +1542,7 @@ juce::var MoshOps::cmdSetBufferSize (const juce::var& args)
         return errResult ("set_buffer_size", err);
     }
 
+    eng.applyLatencyCalibrationToDevices();   // LAT-001 — the device restarted; re-decide the residual
     logLine ("set_buffer_size", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
     return okResult ("set_buffer_size", currentAudioSelection());
@@ -1500,9 +1624,63 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
+
+    // TPL-001 — the simple vocal recording template. Pure COMPOSITION of existing
+    // commands on the fresh Edit (nothing new in the engine): a Backing track to drop
+    // the beat on, a Vocal track armed with automatic input monitoring, a one-bar
+    // count-in, overdub takes (each loop pass stacks a take on the same clip), and a
+    // four-bar loop from bar 1 so the singer can go straight to Record. Every step
+    // is the same command the producer could issue by hand, so the JSONL reads as a
+    // recipe and any failure leaves an ordinary (partially set-up) project, never a
+    // broken one.
+    auto* data = new DynamicObject();
+    const auto tpl = args.getProperty ("template", var()).toString().trim().toLowerCase();
+    if (tpl == "vocal")
+    {
+        auto run = [&] (const char* command, juce::var cmdArgs) -> juce::var
+        {
+            auto* c = new DynamicObject();
+            c->setProperty ("command", command);
+            c->setProperty ("args", cmdArgs);
+            return execute (var (c));
+        };
+        auto obj = [] (std::initializer_list<std::pair<const char*, juce::var>> kv)
+        {
+            auto* o = new DynamicObject();
+            for (auto& [k, v] : kv) o->setProperty (k, v);
+            return var (o);
+        };
+        auto trackIdOf = [] (const juce::var& r)
+        {
+            return r.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        };
+        const auto backing = trackIdOf (run ("create_track", obj ({ { "name", "Backing" }, { "type", "audio" } })));
+        const auto vocal   = trackIdOf (run ("create_track", obj ({ { "name", "Vocal" },   { "type", "audio" } })));
+        if (vocal.isNotEmpty())
+        {
+            run ("arm_track",         obj ({ { "trackId", vocal }, { "armed", true } }));
+            run ("set_input_monitor", obj ({ { "trackId", vocal }, { "mode", "automatic" } }));
+        }
+        run ("set_count_in",       obj ({ { "bars", 1 } }));
+        run ("set_record_options", obj ({ { "overdub", true }, { "replaceExisting", false }, { "punchInOut", false } }));
+        // Four bars from bar 1, in the Edit's own tempo/signature (16 beats in 4/4).
+        const auto loopEnd = eng.edit().tempoSequence.toTime (tracktion::BeatPosition::fromBeats (16.0)).inSeconds();
+        run ("set_transport", obj ({ { "loop", true }, { "loopStart", 0.0 }, { "loopEnd", loopEnd } }));
+        eng.markDirty();
+        data->setProperty ("template", "vocal");
+        data->setProperty ("backingTrackId", backing);
+        data->setProperty ("vocalTrackId", vocal);
+        data->setProperty ("loopEnd", loopEnd);
+    }
+    else if (tpl.isNotEmpty())
+    {
+        // An unknown template still yields the empty project (already created above):
+        // say so in the result rather than pretend a recipe ran.
+        data->setProperty ("template", "");
+        data->setProperty ("templateError", "unknown template: " + tpl + " (known: vocal)");
+    }
     emitProjectReplaced ("new_project");
 
-    auto* data = new DynamicObject();
     data->setProperty ("editFile", eng.editFile().getFullPathName());
     return okResult ("new_project", var (data));
 }

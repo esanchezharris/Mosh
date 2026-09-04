@@ -63,8 +63,88 @@ namespace mosh::audiostartup
 
     inline juce::String inputNameFromSetup (const juce::XmlElement* setupXml)
     {
-        return setupXml != nullptr ? setupXml->getStringAttribute ("audioInputDeviceName")
-                                   : juce::String();
+        if (setupXml == nullptr)
+            return {};
+        const auto input = setupXml->getStringAttribute ("audioInputDeviceName");
+        return input.isNotEmpty() ? input
+                                  : setupXml->getStringAttribute ("audioDeviceName");
+    }
+
+    /** Copy a persisted duplex setup into the setup safe for an ordinary app launch.
+        Playback opens immediately, but input stays closed until an explicit input-device
+        selection or record-arm action. The original remains untouched so the chosen input
+        can be restored when recording is requested. */
+    inline std::unique_ptr<juce::XmlElement> outputOnlySetup (
+        const juce::XmlElement* setupXml)
+    {
+        if (setupXml == nullptr)
+            return {};
+
+        auto result = std::make_unique<juce::XmlElement> (*setupXml);
+        const auto sharedDevice = result->getStringAttribute ("audioDeviceName");
+        if (sharedDevice.isNotEmpty())
+        {
+            result->setAttribute ("audioOutputDeviceName", sharedDevice);
+            result->removeAttribute ("audioDeviceName");
+        }
+        result->removeAttribute ("audioInputDeviceName");
+        result->setAttribute ("audioDeviceInChans", "0");
+        return result;
+    }
+
+    inline bool shouldActivateAudioInputForArm (bool armed,
+                                                bool trackHasInstrument,
+                                                bool explicitInputBlocksAudio)
+    {
+        return armed && ! trackHasInstrument && ! explicitInputBlocksAudio;
+    }
+
+    inline bool explicitInputBlocksAudioActivation (const juce::String& chosenID,
+                                                     const juce::String& storedKind,
+                                                     bool currentlyRecognizedMidi)
+    {
+        return chosenID.isNotEmpty()
+            && (storedKind != "wave" || currentlyRecognizedMidi);
+    }
+
+    inline juce::String explicitInputKind (bool recognized, bool midi)
+    {
+        if (! recognized)
+            return "unknown";
+        return midi ? "midi" : "wave";
+    }
+
+    inline juce::String effectiveExplicitInputKind (const juce::String& chosenID,
+                                                     const juce::String& storedKind,
+                                                     bool currentlyRecognized,
+                                                     bool currentlyMidi)
+    {
+        if (currentlyRecognized)
+            return explicitInputKind (true, currentlyMidi);
+        if (storedKind.isNotEmpty())
+            return storedKind;
+        return chosenID.startsWith ("wavein_") ? "wave" : "unknown";
+    }
+
+    inline juce::BigInteger inputChannelMaskForOpen (int numChannels)
+    {
+        juce::BigInteger channels;
+        channels.setRange (0, juce::jmax (0, numChannels), true);
+        return channels;
+    }
+
+    inline juce::String inputNameForActivation (const juce::String& requestedInput,
+                                                const juce::String& preferredInput,
+                                                const juce::StringArray& availableInputs,
+                                                int defaultInputIndex)
+    {
+        if (requestedInput.isNotEmpty())
+            return requestedInput;
+        if (availableInputs.contains (preferredInput))
+            return preferredInput;
+        if (juce::isPositiveAndBelow (defaultInputIndex, availableInputs.size()))
+            return availableInputs[defaultInputIndex];
+        return availableInputs.isEmpty() ? juce::String() : availableInputs[0];
     }
 
     /** Name the device we were trying to open, for the error the user actually reads.

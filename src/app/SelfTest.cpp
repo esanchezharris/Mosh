@@ -5,6 +5,7 @@
 #include "moshops/MoshOps.h"
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include "plugins/moshfx/MoshFxPlugins.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -14,7 +15,6 @@
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
-#include "voice/NativeSpeech.h"
 #include "util/Env.h"
 #include <juce_cryptography/juce_cryptography.h>
 #include <atomic>
@@ -2966,7 +2966,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lb = cmd (ops, "list_builtins");
         check (ok (lb), "list_builtins ok");
         const int nB = lb["data"].getProperty ("plugins", var()).size();
-        check (nB >= 13, "built-in palette has the full catalog plus Mosh FX");
+        check (nB >= 15, "built-in palette has the full catalog plus Mosh FX");
         bool sawComp = false, sawSynth = false, sawAutoTune = false, sawOTT = false, sawXFeedback = false;
         if (auto* arr = lb["data"].getProperty ("plugins", var()).getArray())
             for (auto& p : *arr)
@@ -3112,6 +3112,172 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // The scratch "Built-ins" track is left in place: the only later count
         // check in this run is relative (tracksBefore+1), and absolute-count
         // checks live in the separate runUndoSelfTest with its own fresh engine.
+    }
+
+    // ─── R3.3: highpass + softclip built-ins ───
+    // "highpass" is not its own Tracktion xmlTypeName — it's te::LowPassPlugin
+    // (xmlTypeName "lowpass") flipped into high-pass mode by load_builtin/
+    // load_master_builtin, and the snapshot serializer (effectiveBuiltinType/
+    // effectiveBuiltinName in MoshOpsInternal.h) reports it back out as "highpass",
+    // never Tracktion's genuine "lowpass". "softclip" is a wholly new Mosh FX built-in
+    // (MoshSoftClipPlugin — plain per-sample tanh, no oversampling). This section proves:
+    // the snapshot round-trip on both; the underlying LowPassPlugin's real mode/frequency
+    // for highpass (the snapshot only ever exposes a normalised param value); a single
+    // undo/redo cleanly reverts/restores the WHOLE load — creation + the in-transaction
+    // mode/frequency CachedValue writes together, not just the insert — on both the track
+    // and the master bus; set_plugin_param/set_master_plugin_param reach both; and a real
+    // render through the chain (track highpass -> master highpass -> master softclip)
+    // produces non-silent audio without error.
+    section ("R3.3: highpass + softclip built-ins");
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "R3.3 Filters"))["data"].getProperty ("trackId", var()).toString();
+
+        auto trackBuiltin = [&] (const String& type) -> var {
+            auto trk = trackById (rt);
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return p;
+            return var();
+        };
+        // Live engine access — the snapshot only exposes a normalised param value, never
+        // the plugin's real mode/Hz, so mode/frequency are checked against the actual
+        // te::LowPassPlugin object (same pattern AGT-UNDO's flushParam lookup uses above).
+        auto liveTrackLowPass = [&] (int index) -> te::LowPassPlugin* {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->itemID.toString() == rt)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (index >= 0 && index < plugins.size())
+                        return dynamic_cast<te::LowPassPlugin*> (plugins[index].get());
+                }
+            return nullptr;
+        };
+
+        // ── Track: highpass ─────────────────────────────────────────────
+        auto hpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", rt }, { "type", "highpass" }}));
+        check (ok (hpLoad), "load_builtin (highpass) on a track ok");
+        check (hpLoad["data"].getProperty ("type", var()).toString() == "highpass",
+               "load_builtin result reports type \"highpass\", not the raw Tracktion \"lowpass\"");
+        auto hpEntry = trackBuiltin ("highpass");
+        check (hpEntry.getProperty ("type", var()).toString() == "highpass", "snapshot plugin.type is \"highpass\"");
+        check ((bool) hpEntry.getProperty ("builtin", false), "track highpass flagged builtin=true");
+        check (hpEntry.getProperty ("category", var()).toString() == "Filter", "track highpass carries the Filter category");
+        if (auto* lp = liveTrackLowPass ((int) hpEntry.getProperty ("index", -1)))
+        {
+            check (lp->mode.get() == "highpass", "underlying LowPassPlugin.mode is \"highpass\"");
+            check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying LowPassPlugin.frequency is 180 Hz");
+            // The filter reads the PARAMETER (updateFilters → frequency->getCurrentValue()),
+            // not the CachedValue — round 3 shipped 4 kHz highpasses while this CachedValue
+            // check passed. This is the check that would have been red.
+            check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying LowPassPlugin frequency PARAMETER (what the filter reads) is 180 Hz");
+        }
+        else
+            check (false, "track highpass plugin resolves to a live te::LowPassPlugin");
+
+        // One undo removes the WHOLE load — creation + mode + frequency writes together,
+        // not just the insert (exactly what load_builtin's CachedValue-assignment comment
+        // is there to guarantee).
+        check (ok (cmd (ops, "undo")), "undo highpass (track) load ok");
+        check (! trackBuiltin ("highpass").isObject(), "one undo fully removes the track highpass builtin");
+        check (ok (cmd (ops, "redo")), "redo highpass (track) load ok");
+        auto hpEntryRedone = trackBuiltin ("highpass");
+        check (hpEntryRedone.getProperty ("type", var()).toString() == "highpass", "redo restores the track highpass builtin");
+        if (auto* lp = liveTrackLowPass ((int) hpEntryRedone.getProperty ("index", -1)))
+            check (lp->mode.get() == "highpass", "redo restores mode \"highpass\" too, not just the insert");
+        else
+            check (false, "redo restores a live te::LowPassPlugin");
+
+        const int hpIdxFinal = (int) hpEntryRedone.getProperty ("index", -1);
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "paramIndex", 0 }, { "value", 0.4 }}))),
+               "set_plugin_param on the track highpass ok");
+
+        // ── Master: highpass + softclip ─────────────────────────────────
+        auto masterBuiltin = [&] (const String& type) -> var {
+            auto plugins = ops.snapshot().getProperty ("master", var()).getProperty ("plugins", var());
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return p;
+            return var();
+        };
+        auto liveMasterLowPass = [&] (int index) -> te::LowPassPlugin* {
+            auto plugins = eng.edit().getMasterPluginList().getPlugins();
+            return (index >= 0 && index < plugins.size()) ? dynamic_cast<te::LowPassPlugin*> (plugins[index].get()) : nullptr;
+        };
+
+        auto hpMasterLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "highpass" }}));
+        check (ok (hpMasterLoad), "load_master_builtin (highpass) ok");
+        auto hpMasterEntry = masterBuiltin ("highpass");
+        check (hpMasterEntry.getProperty ("type", var()).toString() == "highpass", "master snapshot plugin.type is \"highpass\"");
+        if (auto* lp = liveMasterLowPass ((int) hpMasterEntry.getProperty ("index", -1)))
+        {
+            check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
+            check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
+            check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
+        }
+        else
+            check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
+
+        check (ok (cmd (ops, "undo")), "undo highpass (master) load ok");
+        check (! masterBuiltin ("highpass").isObject(), "one undo fully removes the master highpass builtin");
+        check (ok (cmd (ops, "redo")), "redo highpass (master) load ok");
+        check (masterBuiltin ("highpass").getProperty ("type", var()).toString() == "highpass", "redo restores the master highpass builtin");
+
+        auto scLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "softclip" }}));
+        check (ok (scLoad), "load_master_builtin (softclip) ok");
+        auto scEntry = masterBuiltin ("softclip");
+        check (scEntry.getProperty ("type", var()).toString() == "softclip", "master snapshot plugin.type is \"softclip\"");
+        check ((bool) scEntry.getProperty ("builtin", false), "master softclip flagged builtin=true");
+        check (scEntry.getProperty ("category", var()).toString() == "Dynamics", "master softclip carries the Dynamics category");
+        auto scReadout = scEntry.getProperty ("moshFx", var());
+        check (scReadout.getProperty ("kind", var()).toString() == "softclip", "master softclip exposes a moshFx readout");
+        check (std::abs ((double) scReadout.getProperty ("driveDb", 0.0) - 6.0) < 0.01, "softclip defaults to 6 dB drive");
+        check (std::abs ((double) scReadout.getProperty ("ceilingDb", 0.0) - (-0.5)) < 0.01, "softclip defaults to -0.5 dBFS ceiling");
+
+        check (ok (cmd (ops, "undo")), "undo softclip (master) load ok");
+        check (! masterBuiltin ("softclip").isObject(), "one undo fully removes the master softclip builtin");
+        check (ok (cmd (ops, "redo")), "redo softclip (master) load ok");
+        auto scEntryFinal = masterBuiltin ("softclip");
+        check (scEntryFinal.getProperty ("type", var()).toString() == "softclip", "redo restores the master softclip builtin");
+
+        const int scIdxFinal = (int) scEntryFinal.getProperty ("index", -1);
+        check (ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", scIdxFinal }, { "paramIndex", 0 }, { "value", 0.6 }}))),
+               "set_master_plugin_param on the master softclip ok");
+
+        // ── Render through both, without error, non-silent ──────────────
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", rt }, { "seconds", 1.0 }, { "freq", 440.0 }}))),
+               "R3.3 tone clip created (chain: track highpass -> master highpass -> master softclip)");
+        auto r33Out = selftestTempPath (eng, "r33-highpass-softclip.wav");
+        r33Out.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", r33Out.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
+               "R3.3 export through highpass+softclip ok (no crash, no error)");
+        bool r33NonSilent = false;
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (r33Out) })
+            {
+                const int toRead = (int) jmin ((int64) 96000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    for (int ch = 0; ch < buf.getNumChannels() && ! r33NonSilent; ++ch)
+                        if (buf.getMagnitude (ch, 0, toRead) > 0.001f)
+                            r33NonSilent = true;
+                }
+            }
+        }
+        check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
+        r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
+
+        // Leave the master bus as we found it: the next section ("Master bus plugins")
+        // asserts it starts empty, and this section's redo'd highpass + softclip were
+        // being left behind (11 downstream failures, 2026-09-02).
+        for (const char* type : { "softclip", "highpass" })
+        {
+            const int idx = (int) masterBuiltin (type).getProperty ("index", -1);
+            check (idx >= 0 && ok (cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}))),
+                   String ("R3.3 cleanup: master ") + type + " removed");
+        }
+        check (! masterBuiltin ("softclip").isObject() && ! masterBuiltin ("highpass").isObject(),
+               "R3.3 cleanup: master bus carries no R3.3 builtins afterwards");
     }
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
@@ -4601,6 +4767,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (File (exportFile).existsAsFile() && (juce::int64) exp["data"].getProperty ("bytes", 0) > 1000,
                "export produced a non-empty WAV (full producer loop)");
 
+        // IMP-001 — consolidated clip export: the file starts at edit time ZERO, so the
+        // clip's position is embedded as leading silence. mcid sits at 0.5 s for 0.8 s.
+        {
+            auto cexp = cmd (ops, "export_clip_consolidated", objN ({{ "clipId", mcid }, { "sampleRate", 44100.0 }}));
+            check (ok (cexp), "export_clip_consolidated ok");
+            const auto cfile = File (cexp["data"].getProperty ("file", var()).toString());
+            check (cfile.existsAsFile(), "export_clip_consolidated wrote a file");
+            check ((double) cexp["data"].getProperty ("startSeconds", -1.0) == 0.0, "consolidated export starts at edit time zero");
+            check (std::abs ((double) cexp["data"].getProperty ("clipStartSeconds", 0.0) - 0.5) < 1.0e-6,
+                   "consolidated export reports where the clip begins inside the file (0.5 s)");
+            check (std::abs ((double) cexp["data"].getProperty ("endSeconds", 0.0) - 1.3) < 1.0e-6,
+                   "consolidated export ends at the clip end (1.3 s)");
+            juce::AudioFormatManager afm; afm.registerBasicFormats();
+            if (auto reader = std::unique_ptr<juce::AudioFormatReader> (afm.createReaderFor (cfile)))
+            {
+                const auto expectedFrames = (juce::int64) std::llround (1.3 * reader->sampleRate);
+                check (std::abs (reader->lengthInSamples - expectedFrames) <= 2,
+                       "consolidated export length == clip end * rate (leading silence embedded)");
+                // The first 0.5 s (minus a safety margin for the render's own fade) is silence,
+                // and the audio after it is not.
+                const int lead = (int) (0.49 * reader->sampleRate);
+                juce::AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+                reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+                float leadPeak = 0.0f, bodyPeak = 0.0f;
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                {
+                    leadPeak = juce::jmax (leadPeak, buf.getMagnitude (ch, 0, lead));
+                    bodyPeak = juce::jmax (bodyPeak, buf.getMagnitude (ch, lead, buf.getNumSamples() - lead));
+                }
+                check (leadPeak < 1.0e-4f, "consolidated export: the clip's timeline offset is silence in the file");
+                check (bodyPeak > 0.01f,   "consolidated export: the clip's audio follows the leading silence");
+            }
+            else
+                check (false, "consolidated export is a readable WAV");
+            check (! ok (cmd (ops, "export_clip_consolidated", args1 ("clipId", "nope"))),
+                   "export_clip_consolidated refuses an unknown clip");
+        }
+
         check (std::abs ((double) trackById (mt).getProperty ("volumeDb", 0.0) + 4.0) < 0.5, "mix volume applied (-4 dB)");
 
         // undo/redo correct throughout (a clean undoable op after the full loop)
@@ -5622,9 +5826,118 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check ((int) [&] { auto p = trackById (pt).getProperty ("drumPads", var());
                                    return p.getArray() ? p.getArray()->size() : 0; }() == 8,
                        "a failed kit load leaves the existing pads untouched");
+
+                // ── USER kit library (~/Library/Mosh/kits; env-pointed here so the
+                // harness never reads or depends on the real user library) ──
+                {
+                    auto userRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                        .getChildFile ("selftest-user-kits");
+                    auto kitDir = userRoot.getChildFile ("selftest-user-kit");
+                    kitDir.createDirectory();
+                    // Two REAL pads copied from the bundled kit found above — a partial
+                    // kit on purpose, so pad COUNT proves per-file resolution.
+                    juce::File bundledKit;
+                    if (auto* a = lk["data"].getProperty ("kits", var()).getArray())
+                        for (auto& k : *a)
+                            if (k.getProperty ("id", var()).toString() == "mosh-kit")
+                                bundledKit = juce::File (k.getProperty ("path", var()).toString());
+                    bundledKit.getChildFile ("kick.wav").copyFileTo (kitDir.getChildFile ("kick.wav"));
+                    bundledKit.getChildFile ("snare.wav").copyFileTo (kitDir.getChildFile ("snare.wav"));
+                    ::setenv ("MOSH_KITS_USER_DIR", userRoot.getFullPathName().toRawUTF8(), 1);
+
+                    auto lk2 = cmd (ops, "list_drum_kits");
+                    bool listed = false, srcUser = false; int userPads = 0;
+                    if (auto* a = lk2["data"].getProperty ("kits", var()).getArray())
+                        for (auto& k : *a)
+                            if (k.getProperty ("id", var()).toString() == "selftest-user-kit")
+                            {
+                                listed = true;
+                                srcUser = k.getProperty ("source", var()).toString() == "user";
+                                userPads = (int) k.getProperty ("pads", 0);
+                            }
+                    check (listed, "a user-library kit is listed alongside the bundled kits");
+                    check (srcUser, "the user kit carries source:user");
+                    check (userPads == 2, "the user kit's pad count reflects its actual files");
+
+                    auto ldu = cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", "selftest-user-kit" }}));
+                    check (ok (ldu) && (int) ldu["data"].getProperty ("pads", 0) == 2,
+                           "load_drum_kit loads a USER-library kit (partial pads resolve per-file)");
+
+                    ::unsetenv ("MOSH_KITS_USER_DIR");
+                    userRoot.deleteRecursively();
+                    // Restore the full bundled kit so later sections see the 8 pads.
+                    cmd (ops, "load_drum_kit", args1 ("trackId", pt));
+                }
             }
 
             cmd (ops, "remove_track", args1 ("trackId", pt));
+        }
+
+        // ── preset seam (P1-A2): list_presets / load_preset ──
+        // The 4OSC arm is fully provable headless; the Vital arm needs a hosted
+        // plugin and an ear, so here it is exercised only to its REFUSAL edge
+        // (a .vital must never touch a track without Vital).
+        {
+            auto lp = cmd (ops, "list_presets");
+            check (ok (lp), "list_presets ok");
+            juce::Array<juce::var> foscBundled;
+            if (auto* a = lp["data"].getProperty ("presets", var()).getArray())
+                for (auto& p : *a)
+                    if (p.getProperty ("plugin", var()).toString() == "4osc"
+                        && p.getProperty ("source", var()).toString() == "bundled")
+                        foscBundled.add (p);
+            check (foscBundled.size() >= 5, "the bundled 4OSC bank lists at least its 5 starter patches");
+
+            // A melodic track: add_midi_clip's default-instrument policy loads 4OSC.
+            auto mt = cmd (ops, "create_track", args1 ("name", "PresetTarget"))["data"]
+                          .getProperty ("trackId", var()).toString();
+            cmd (ops, "add_midi_clip", args1 ("trackId", mt));
+            check ((bool) trackById (mt).getProperty ("isInstrument", false),
+                   "preset target track carries the 4OSC instrument");
+
+            if (foscBundled.size() > 0)
+            {
+                const auto file0 = foscBundled[0].getProperty ("file", var()).toString();
+                auto ld = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", file0 }}));
+                check (ok (ld), "load_preset applies a bundled 4OSC patch");
+                check (ld["data"].getProperty ("plugin", var()).toString() == "4osc",
+                       "load_preset reports the 4OSC target");
+                check ((int) ld["data"].getProperty ("paramsApplied", 0) >= 6,
+                       "the patch actually drove a real number of 4OSC params");
+                // Zero tolerance for display-name drift: an 'unknownParams' field means
+                // the bundled bank and the 4OSC param table disagree.
+                check (! ld["data"].hasProperty ("unknownParams"),
+                       "every bundled patch param resolves against 4OSC (no unknownParams)");
+                // A SECOND, different patch also lands (the bank is not one lucky file).
+                if (foscBundled.size() > 1)
+                {
+                    const auto file1 = foscBundled[1].getProperty ("file", var()).toString();
+                    check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", file1 }}))),
+                           "a second bundled patch loads on the same track");
+                }
+            }
+
+            // Wrong-family refusal: a .vital preset must never touch a 4OSC-only track.
+            auto tmpVital = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("selftest-refusal.vital");
+            tmpVital.replaceWithText ("{}");
+            check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", tmpVital.getFullPathName() }}))),
+                   "a .vital preset is refused on a track without Vital");
+            tmpVital.deleteFile();
+
+            // G14 guard: a FAILED load must not have opened an empty transaction —
+            // otherwise the next undo destroys the PREVIOUS edit's neighbour instead
+            // of the edit itself. Sequence: real edit → failed load → undo must
+            // revert exactly the real edit.
+            cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "volumeDb", -6.0 }}));
+            check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", "/nonexistent/nope.json" }}))),
+                   "load_preset errors on a missing file");
+            cmd (ops, "undo");
+            check ([&] { const double v = (double) trackById (mt).getProperty ("volumeDb", -999.0);
+                         return v > -0.01 && v < 0.01; }(),
+                   "undo after a FAILED preset load reverts the prior edit (no empty-txn G14 trap)");
+
+            cmd (ops, "remove_track", args1 ("trackId", mt));
         }
 
         // At this point the reload happened while lane 38 was SOLOED, so every other pad
@@ -5682,6 +5995,88 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         silentFile.deleteFile();
         beatFile.deleteFile();
+    }
+
+    // ── list_palette (W2.2, produce-lane quality pivot 2026-09) — read-only scan of the
+    // palette-v2 manifest. UI-only by design (the loop model never sees command result
+    // data — StepCommandResult carries {command, ok, error} only, ui/src/agent/loopSeam.ts):
+    // this proves the CONTRACT the produce-lane preflight/picker (drumPalette.ts) depends
+    // on, not agent reachability. Hermetic: builds its own manifest under tempDirectory so
+    // it never reads or depends on the real ~/Library/Mosh/palette-v2.
+    section ("list_palette (W2.2 produce-lane data seam)");
+    {
+        auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("selftest-palette");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+
+        auto kickFile = tmpDir.getChildFile ("kick_1.wav");
+        kickFile.replaceWithText ("fake-wav");
+        auto bassFile = tmpDir.getChildFile ("bass_1.wav");
+        bassFile.replaceWithText ("fake-wav");
+        // Deliberately NOT created — proves a stale manifest row (its file since deleted)
+        // drops silently rather than erroring the whole scan.
+        auto missingFile = tmpDir.getChildFile ("snare_gone.wav");
+
+        auto manifest = tmpDir.getChildFile ("manifest.json");
+        {
+            juce::Array<juce::var> items;
+            items.add (objN ({ { "path", kickFile.getFullPathName() }, { "role_guess", "kick" } }));
+            items.add (objN ({ { "path", bassFile.getFullPathName() }, { "role_guess", "bass" },
+                                { "root_note", 33 } }));
+            items.add (objN ({ { "path", missingFile.getFullPathName() }, { "role_guess", "snare" } }));
+            const auto manifestVar = objN ({ { "items", juce::var (items) } });
+            manifest.replaceWithText (juce::JSON::toString (manifestVar));
+        }
+
+        // Explicit {manifest} arg.
+        auto lp = cmd (ops, "list_palette", args1 ("manifest", manifest.getFullPathName()));
+        check (ok (lp), "list_palette ok with an explicit manifest arg");
+        auto* itemsArr = lp["data"].getProperty ("items", var()).getArray();
+        check (itemsArr != nullptr && itemsArr->size() == 2,
+               "the missing-file row is dropped, not errored (2 of 3 rows survive)");
+        if (itemsArr != nullptr)
+        {
+            bool foundKick = false, foundBass = false;
+            for (auto& it : *itemsArr)
+            {
+                if (it.getProperty ("role", var()).toString() == "kick")
+                {
+                    foundKick = true;
+                    check (it.getProperty ("path", var()).toString() == kickFile.getFullPathName(),
+                           "kick item carries its absolute path");
+                    check (! it.hasProperty ("rootNote"), "a role with no measured root_note omits rootNote");
+                }
+                if (it.getProperty ("role", var()).toString() == "bass")
+                {
+                    foundBass = true;
+                    check ((int) it.getProperty ("rootNote", -1) == 33, "bass item carries its measured rootNote");
+                }
+            }
+            check (foundKick && foundBass, "both surviving items are present with the right roles");
+        }
+
+        // MOSH_PALETTE_MANIFEST env override — the harness path, mirrors MOSH_KITS_USER_DIR
+        // (JUCE ignores $HOME, so a test must never depend on the real user library).
+        ::setenv ("MOSH_PALETTE_MANIFEST", manifest.getFullPathName().toRawUTF8(), 1);
+        auto lpEnv = cmd (ops, "list_palette");
+        check (ok (lpEnv), "list_palette ok via MOSH_PALETTE_MANIFEST env override");
+        auto* envItems = lpEnv["data"].getProperty ("items", var()).getArray();
+        check (envItems != nullptr && envItems->size() == 2, "env override resolves the same manifest");
+        ::unsetenv ("MOSH_PALETTE_MANIFEST");
+
+        // Missing manifest file → errResult, not a crash or a silent empty ok.
+        auto lpMissing = cmd (ops, "list_palette",
+                               args1 ("manifest", tmpDir.getChildFile ("no-such-manifest.json").getFullPathName()));
+        check (! ok (lpMissing), "list_palette errors on a missing manifest file");
+
+        // Malformed JSON → errResult.
+        auto badManifest = tmpDir.getChildFile ("bad.json");
+        badManifest.replaceWithText ("{ not json");
+        auto lpBad = cmd (ops, "list_palette", args1 ("manifest", badManifest.getFullPathName()));
+        check (! ok (lpBad), "list_palette errors on malformed JSON");
+
+        tmpDir.deleteRecursively();
     }
 
     // --- DRM-002: add_drum_pattern — a whole drum grid in ONE undoable command ---
@@ -6550,13 +6945,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 10 }}))),
                    "humanize ok");
             const auto run1 = notesOf (nc);
-            { bool inRange = run1.size() == fixture.size();
-              for (size_t i = 0; i < run1.size() && inRange; ++i)
-                  inRange = std::abs (std::get<0> (run1[i]) - std::get<0> (fixture[i])) <= 0.025 + 1.0e-9
-                         && std::abs (std::get<2> (run1[i]) - std::get<2> (fixture[i])) < 1.0e-9
-                         && std::get<1> (run1[i]) == std::get<1> (fixture[i])
-                         && std::abs (std::get<3> (run1[i]) - std::get<3> (fixture[i])) <= 11
-                         && std::get<3> (run1[i]) >= 1 && std::get<3> (run1[i]) <= 127;
+            // Pair notes BY PITCH (unique in this fixture), not by sorted position:
+            // two fixture notes tie at start 2.0, so ±jitter can flip their sort
+            // order depending on the humanize seed — which is seeded per command
+            // and therefore shifts whenever ANY earlier section adds a command.
+            // Position-pairing made this check fail on unrelated selftest growth.
+            { auto byPitch = [] (auto v) {
+                  std::sort (v.begin(), v.end(), [] (const auto& a, const auto& b)
+                             { return std::get<1> (a) < std::get<1> (b); });
+                  return v; };
+              const auto r1 = byPitch (run1);
+              const auto fx = byPitch (fixture);
+              bool inRange = r1.size() == fx.size();
+              for (size_t i = 0; i < r1.size() && inRange; ++i)
+                  inRange = std::abs (std::get<0> (r1[i]) - std::get<0> (fx[i])) <= 0.025 + 1.0e-9
+                         && std::abs (std::get<2> (r1[i]) - std::get<2> (fx[i])) < 1.0e-9
+                         && std::get<1> (r1[i]) == std::get<1> (fx[i])
+                         && std::abs (std::get<3> (r1[i]) - std::get<3> (fx[i])) <= 11
+                         && std::get<3> (r1[i]) >= 1 && std::get<3> (r1[i]) <= 127;
               check (inRange, "humanize: timing within ±(amount% of a 16th), velocity within ±amount, pitches/lengths untouched"); }
             check (! matchNotes (run1, fixture), "humanize actually moved something");
             undoRestores ("undo after humanize ok");
@@ -8647,7 +9053,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Project safety: portable projects + relink (gap 3)");
     {
         const auto sessionEdit = eng.editFile();
-        const auto poolAudio   = eng.sessionDir().getChildFile ("audio");
+        const auto poolImports = eng.sessionDir().getChildFile ("imports");
 
         // local snapshot helpers (the trackById/clip helpers elsewhere are out of scope here)
         auto trackVar = [&] (const String& tid) -> var {
@@ -8673,7 +9079,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackId.isNotEmpty(), "create_track returned a trackId");
         check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", trackId }, { "seconds", 1 }, { "freq", 330 } }))), "add_test_tone_clip ok");
         const auto poolSrc = File (firstTrack (ops)["clips"][0].getProperty ("sourceFile", var()).toString());
-        check (poolSrc.isAChildOf (poolAudio), "clip audio starts in the shared session pool");
+        check (poolSrc.isAChildOf (poolImports), "clip audio starts in Mosh Imports");
 
         // DRM-001 — a drum track's sampler sounds (the bundled kit, stored as ABSOLUTE
         // bundle paths) must ALSO consolidate into the portable project, or the project
@@ -8693,7 +9099,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // On-disk edit must reference audio RELATIVELY (portable), never the shared pool.
         const auto xml = destEdit.loadFileAsString();
-        check (! xml.contains (poolAudio.getFullPathName()), "saved edit has no shared-pool absolute audio path");
+        check (! xml.contains (poolImports.getFullPathName()), "saved edit has no shared-pool absolute audio path");
         check (! xml.contains ("Resources/drumkits"),
                "saved edit references the kit by a relative path, not the absolute app-bundle path");
         check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
@@ -8908,7 +9314,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     {
         // Seed a known dir under the session: one audio file + one non-audio file +
         // one sub-directory. The session-selftest dir is wiped each run, so seed fresh.
-        auto browseDir = eng.sessionDir().getChildFile ("browse-test");
+        auto browseDir = eng.sessionDir().getChildFile ("imports/browse-test");
         browseDir.deleteRecursively();
         browseDir.createDirectory();
         auto wav = browseDir.getChildFile ("probe-tone.wav");
@@ -8938,17 +9344,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((bool) data.getProperty ("exists", false), "list_directory exists:true for a real dir");
         check (data.getProperty ("path", var()).toString() == browseDir.getFullPathName(), "list_directory path round-trips (normalized)");
 
-        // roots is a non-empty array containing a Home entry pointing at a real dir.
         {
             auto rootsVar = data.getProperty ("roots", var());
-            check (rootsVar.isArray() && rootsVar.size() > 0, "list_directory roots is a non-empty array");
-            bool homeOk = false;
+            check (rootsVar.isArray() && rootsVar.size() == 1, "list_directory exposes only one safe root");
+            bool importsOk = false, protectedRootAdvertised = false;
             if (auto* ra = rootsVar.getArray())
                 for (auto& r : *ra)
-                    if (r.getProperty ("name", var()).toString() == "Home"
-                        && File (r.getProperty ("path", var()).toString()).isDirectory())
-                        homeOk = true;
-            check (homeOk, "list_directory roots includes a Home pointing at a real directory");
+                {
+                    const auto name = r.getProperty ("name", var()).toString();
+                    const auto path = File (r.getProperty ("path", var()).toString());
+                    if (name == "Imports" && path == eng.sessionDir().getChildFile ("imports")
+                        && path.isDirectory())
+                        importsOk = true;
+                    if (name == "Home" || name == "Desktop" || name == "Documents" || name == "Downloads")
+                        protectedRootAdvertised = true;
+                }
+            check (importsOk, "list_directory roots includes the Mosh-owned Imports directory");
+            check (! protectedRootAdvertised, "list_directory does not advertise protected user folders");
         }
 
         // entries: the seeded .wav is present (isDir:false, size>0); the .txt is filtered
@@ -8976,7 +9388,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // A browser must not materialise an unbounded directory on the WebView/message
         // thread. Seed one entry beyond the production page limit: the response must be
         // explicitly truncated instead of returning every row and freezing the surface.
-        auto boundedDir = eng.sessionDir().getChildFile ("browse-bounded-test");
+        auto boundedDir = eng.sessionDir().getChildFile ("imports/browse-bounded-test");
         boundedDir.deleteRecursively();
         boundedDir.createDirectory();
         for (int i = 0; i < 513; ++i)
@@ -9013,9 +9425,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (rel), "list_directory relative path returns ok (graceful)");
         check (! (bool) rel["data"].getProperty ("exists", true), "list_directory relative path exists:false (not resolved against cwd)");
 
-        // Empty path defaults to Home (a real dir).
-        auto home = cmd (ops, "list_directory", var());
-        check (ok (home) && (bool) home["data"].getProperty ("exists", false), "list_directory with no path defaults to a real Home dir");
+        auto initialListing = cmd (ops, "list_directory", var());
+        check (ok (initialListing)
+                   && (bool) initialListing["data"].getProperty ("exists", false),
+               "list_directory with no path defaults to Mosh Imports");
 
         // READ-ONLY: no JSONL line written, no snapshot_invalidated emitted.
         check (logCount ("list_directory") == ldLogBefore, "list_directory is READ-ONLY (not logged)");
@@ -10261,6 +10674,94 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (qPref, "quarantine_recording_residue logged undoable:false");
         }
         quarantined.deleteFile(); old.deleteFile();
+        }
+
+    // ─── TPL-001 — the vocal recording template (new_project template:"vocal") ───
+    // Composition only: the recipe is the same commands a producer could issue by hand.
+    // What is provable headless is the SHAPE it leaves behind; that the armed track
+    // actually captures is hardware-gated (row 6b) exactly as for any recording.
+    section ("TPL-001: vocal recording template (new_project template:vocal)");
+    {
+        auto np = cmd (ops, "new_project", args1 ("template", "vocal"));
+        check (ok (np), "new_project template:vocal ok");
+        check (np["data"].getProperty ("template", var()).toString() == "vocal", "result names the template");
+        const auto vocalId = np["data"].getProperty ("vocalTrackId", var()).toString();
+        check (vocalId.isNotEmpty(), "result carries the vocal track id");
+        auto snap = ops.snapshot();
+        auto tracks = snap.getProperty ("tracks", var());
+        juce::StringArray names; var vocal;
+        if (auto* arr = tracks.getArray())
+            for (auto& t : *arr)
+            {
+                names.add (t.getProperty ("name", var()).toString());
+                if (t.getProperty ("id", var()).toString() == vocalId) vocal = t;
+            }
+        check (names.contains ("Backing") && names.contains ("Vocal"), "template created Backing + Vocal tracks");
+        // Arming needs an input instance, which needs an audio device: headless the arm is
+        // ISSUED (the recipe ran it — the JSONL is the witness) but cannot take effect, exactly
+        // as arm_track itself degrades. With a device the snapshot must show it armed.
+        check (vocal.isObject(), "Vocal track exists in the snapshot");
+        if (eng.hasAudio())
+            check ((bool) vocal.getProperty ("armed", false), "Vocal track is armed (audio device present)");
+        {
+            auto tLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool armIssued = false;
+            for (auto& ln : juce::StringArray::fromLines (tLog))
+                if (ln.contains ("\"command\": \"arm_track\"") && ln.contains (vocalId)) armIssued = true;
+            check (armIssued, "the recipe issued arm_track for the Vocal track (JSONL witness)");
+        }
+        const auto session = snap.getProperty ("session", var());
+        check ((int) session.getProperty ("countInBars", 0) == 1, "count-in is one bar");
+        check ((bool) session.getProperty ("project", var()).getProperty ("recordOptions", var()).getProperty ("overdub", false),
+               "overdub takes are on");
+        const auto transport = snap.getProperty ("transport", var());
+        check ((bool) transport.getProperty ("looping", false), "loop is armed");
+        const double loopEnd = (double) transport.getProperty ("loopEnd", 0.0);
+        check (loopEnd > 0.0 && std::abs (loopEnd - (double) np["data"].getProperty ("loopEnd", -1.0)) < 1.0e-6,
+               "loop end matches the four bars the recipe set");
+        // An unknown template still yields a usable empty project and says so.
+        auto bad = cmd (ops, "new_project", args1 ("template", "nope"));
+        check (ok (bad), "new_project with an unknown template still creates a project");
+        check (bad["data"].getProperty ("templateError", var()).toString().isNotEmpty(), "unknown template is reported");
+    }
+    // ─── LAT-001 — measured round-trip latency calibration (headless surface) ───
+    // The sweep itself needs an output, a room and a mic, so a headless run proves only
+    // the SURFACE: `start` refuses honestly with no device (never a silent ok), status /
+    // apply / clear are always answerable, an unknown action is refused, and the snapshot
+    // carries a stable-keyed block the UI can render cold. The maths (detector, residual,
+    // honour rule, lifecycle) is pinned engine-free in tests/test_latency_calibration.cpp.
+    section ("LAT-001: latency calibration surface (calibrate_latency)");
+    {
+        auto cal = [&] { return ops.snapshot().getProperty ("session", var()).getProperty ("latencyCalibration", var()); };
+        check (cal().isObject(), "snapshot session.latencyCalibration present");
+        check (cal().getProperty ("state", var()).toString() == "idle", "latencyCalibration.state is idle headless");
+        check (! (bool) cal().getProperty ("applied", true), "latencyCalibration.applied is false headless");
+        check (! (bool) cal().getProperty ("stale", true), "latencyCalibration.stale is false with no record");
+        for (auto* k : { "frames", "sampleRate", "ms", "confidence", "measuredAt", "inputDevice", "outputDevice",
+                         "method", "deviceReportedSamples", "appliedMs", "applied", "stale", "error" })
+            check (cal().hasProperty (k), juce::String ("latencyCalibration always carries ") + k);
+
+        auto startR = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+        check (! ok (startR), "calibrate_latency start refuses headless (no audio device)");
+        check (startR["error"].toString().contains ("no audio device"),
+               "calibrate_latency start names the missing device");
+        check (cal().getProperty ("state", var()).toString() == "idle", "a refused start leaves the state idle");
+
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "status"))), "calibrate_latency status ok headless");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "apply"))),  "calibrate_latency apply ok headless (nothing to push)");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "cancel"))), "calibrate_latency cancel ok with nothing running");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))),  "calibrate_latency clear ok headless");
+        check (! ok (cmd (ops, "calibrate_latency", args1 ("action", "bogus"))), "calibrate_latency refuses an unknown action");
+        check (cal().getProperty ("state", var()).toString() == "idle", "state still idle after the headless round");
+
+        // NON-undoable machine action, same posture (and same check) as set_record_options.
+        {
+            auto calLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool calPref = false;
+            for (auto& ln : juce::StringArray::fromLines (calLog))
+                if (ln.contains ("\"command\": \"calibrate_latency\"") && ln.contains ("\"undoable\": false")) calPref = true;
+            check (calPref, "calibrate_latency logged undoable:false (machine action)");
+        }
     }
 
     // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
@@ -11376,16 +11877,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
         check (ok (sti), "routing: set_track_input ok (graceful headless)");
         check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
-        // The chosen device's FAMILY. Only the wave side is provable here: headless the
-        // engine enumerates no MIDI devices at all (see the CTL-001 note above), so a
-        // MIDI deviceID cannot be resolved and the midi branch is HARDWARE-GATED — do
-        // not read this check as proof that MIDI routing works. What it does pin is that
-        // family resolution happens and defaults to wave for an unknown id, which is the
-        // contract the (previously MIDI-blind) retarget loop now depends on.
-        check (sti["data"].getProperty ("kind", var()).toString() == "wave",
-               "routing: a non-MIDI deviceID resolves to the wave family");
+        // Headless cannot resolve a hardware family, so the public result omits kind
+        // while the persisted internal classification remains fail-closed.
+        check (! sti["data"].hasProperty ("kind"),
+               "routing: unresolved input omits its public family");
         check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
+        check (! trackById (ra)["input"].hasProperty ("kind"),
+               "routing: unresolved snapshot input omits its public family");
         // Explicit clear (Live's "No Input"): present-but-empty deviceID removes the
         // choice — the snapshot omits `input` — and it stays undoable:false (a
         // preference like the set). An ABSENT deviceID remains a malformed call.
@@ -11794,7 +12293,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", st));   // tidy
     }
 
-    section ("Moshi brain proxy + native voice (packaged-app pieces)");
+    section ("Moshi brain proxy (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.
         mosh::setEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1");
@@ -11805,12 +12304,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         mosh::setEnvVar ("XAI_MODEL", "grok-test");
         mosh::setEnvVar ("XAI_API_KEY", "sk-test-xai");
         mosh::unsetEnvVar ("OPENAI_API_KEY");          // leave openai incomplete
+        mosh::unsetEnvVar ("OPENROUTER_API_KEY");       // leave openrouter incomplete for now
         mosh::setEnvVar ("MOSHI_BRAIN_PROVIDER", "xai");
 
         auto info  = BrainProxy::providersInfo();
         auto provs = info.getProperty ("providers", var());
-        check (provs.isArray() && provs.getArray()->size() == 3,
-               "brain: three providers enumerated (deepseek/openai/xai)");
+        check (provs.isArray() && provs.getArray()->size() == 4,
+               "brain: four providers enumerated (deepseek/openai/xai/openrouter)");
 
         auto chosen = BrainProxy::resolve();    // honours MOSHI_BRAIN_PROVIDER=xai
         check (chosen.id == "xai", "brain: MOSHI_BRAIN_PROVIDER selects the default provider");
@@ -11829,6 +12329,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && badShape.getProperty ("error", var()).toString().isNotEmpty(),
                "brain: chat() rejects a non-array messages payload with an error shape");
 
+        // W1.1 — the openrouter provider + per-call ChatOptions.
+        mosh::setEnvVar ("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
+        mosh::setEnvVar ("OPENROUTER_MODEL", "anthropic/claude-sonnet-5");
+        mosh::setEnvVar ("OPENROUTER_API_KEY", "sk-or-test");
+        check (BrainProxy::resolve ("openrouter").id == "openrouter",
+               "brain: an explicit openrouter provider resolves once fully configured");
+
+        const auto defaultPayload = BrainProxy::requestPayload (
+            BrainProxy::resolve ("deepseek"), var (Array<var>{}));   // default ChatOptions
+        check ((int) defaultPayload.getProperty ("max_tokens", 0) == 800
+                   && std::abs ((double) defaultPayload.getProperty ("temperature", 0.0) - 0.6) < 1e-9,
+               "brain: default ChatOptions reproduce the byte-identical 800-token/0.6-temp payload");
+
+        BrainProxy::ChatOptions produceOpts;
+        produceOpts.maxTokens = 8192;
+        produceOpts.timeoutMs = 180000;
+        const auto producePayload = BrainProxy::requestPayload (
+            BrainProxy::resolve ("openrouter"), var (Array<var>{}), produceOpts);
+        check ((int) producePayload.getProperty ("max_tokens", 0) == 8192
+                   && BrainProxy::requestTimeoutMs (BrainProxy::resolve ("openrouter"), produceOpts) == 180000,
+               "brain: ChatOptions override max_tokens and the request timeout");
+
+        auto* rawOpts = new juce::DynamicObject();
+        rawOpts->setProperty ("maxTokens", 999999);
+        rawOpts->setProperty ("timeoutMs", -5);
+        const auto clamped = BrainProxy::optionsFromVar (var (rawOpts));
+        check (clamped.maxTokens == 32768 && clamped.timeoutMs == 1000,
+               "brain: optionsFromVar clamps out-of-range maxTokens/timeoutMs to [1,32768]/[1000,600000]");
+
+        mosh::unsetEnvVar ("OPENROUTER_API_KEY"); mosh::unsetEnvVar ("OPENROUTER_BASE_URL"); mosh::unsetEnvVar ("OPENROUTER_MODEL");
+
         // Clear every key → no provider resolves and chat() errors cleanly (no network).
         mosh::unsetEnvVar ("DEEPSEEK_API_KEY"); mosh::unsetEnvVar ("XAI_API_KEY"); mosh::unsetEnvVar ("MOSHI_BRAIN_PROVIDER");
         check (! BrainProxy::resolve().isComplete(), "brain: nothing resolves when no key is set");
@@ -11837,14 +12368,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "brain: chat() with no provider returns { ok:false } (no crash, no network)");
         mosh::unsetEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG");
 
-        // Native speech: probe availability + lifecycle without requesting permission.
-       #if JUCE_MAC
-        check (NativeSpeech::isSupported(), "voice: macOS Speech available (SFSpeechRecognizer present)");
-       #endif
-        NativeSpeech sp;
-        check (! sp.isListening(), "voice: a fresh NativeSpeech is idle");
-        sp.stop();   // stop-while-idle must be a safe no-op
-        check (! sp.isListening(), "voice: stop() while idle is a safe no-op");
+
     }
 
     section ("Multiplayer: stable logical track IDs (MP-001)");
@@ -15484,6 +16008,70 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
     }
 
+    {
+        section ("generate_beat_recipe: recipe-command allowlist (2026-09 overnight postmortem)");
+
+        // Hermetic via args.__prefetchedProgram (MoshOps.cpp:2253-2255) — no generative
+        // service involved. Proves the native gate isGeneratedRecipeCommandAllowed
+        // (MoshOps.cpp:200-213) directly against the exact shape the compiled recipe
+        // program emits (service/teardown/render/compile.py: create_track+capture per
+        // element, then a per-track set_track_volume headroom trim at :314-319) — the
+        // allowlist gap that undid every generated recipe's tracks overnight.
+        auto prefetchedProgram = [] (Array<var> steps) -> var
+        {
+            return objN ({ { "ok", var (true) },
+                           { "program", objN ({ { "commands", var (steps) } }) } });
+        };
+
+        const int tracksBefore = tracks (ops);
+
+        Array<var> allowedSteps;
+        allowedSteps.add (objN ({ { "command", var ("create_track") },
+                                  { "args", objN ({ { "name", var ("SelfTest Recipe Track") },
+                                                    { "type", var ("audio") } }) },
+                                  { "capture", objN ({ { "T0", var ("trackId") } }) } }));
+        allowedSteps.add (objN ({ { "command", var ("set_track_volume") },
+                                  { "args", objN ({ { "trackId", var ("${T0}") },
+                                                    { "db", var (-4.5) } }) } }));
+        auto allowedResult = cmd (ops, "generate_beat_recipe",
+                                  objN ({ { "__prefetchedProgram", prefetchedProgram (allowedSteps) } }));
+        check (ok (allowedResult),
+              "generate_beat_recipe applies an allowed program (create_track + set_track_volume)");
+        check ((int) allowedResult["data"].getProperty ("appliedCount", 0) == 2,
+              "…both steps applied: create_track, then the set_track_volume headroom trim");
+        check (tracks (ops) == tracksBefore + 1, "…and the track it created is really there");
+
+        // Clean up the fixture track so the harness leaves the session as it found it.
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", var()).toString() == "SelfTest Recipe Track")
+                        cmd (ops, "remove_track", objN ({ { "trackId", tv.getProperty ("id", var()) } }));
+        }
+        check (tracks (ops) == tracksBefore, "…and cleanup leaves the track count as found");
+
+        Array<var> disallowedSteps;
+        disallowedSteps.add (objN ({ { "command", var ("create_track") },
+                                     { "args", objN ({ { "name", var ("SelfTest Recipe Track 2") },
+                                                       { "type", var ("audio") } }) },
+                                     { "capture", objN ({ { "T0", var ("trackId") } }) } }));
+        // Any real, unrelated mutating command absent from isGeneratedRecipeCommandAllowed
+        // proves the same thing set_track_volume used to: the allowlist, not a hard-coded
+        // name list mirrored here, is what decides.
+        disallowedSteps.add (objN ({ { "command", var ("load_plugin") },
+                                     { "args", objN ({ { "trackId", var ("${T0}") },
+                                                       { "pluginId", var ("4OSC") } }) } }));
+        auto disallowedResult = cmd (ops, "generate_beat_recipe",
+                                     objN ({ { "__prefetchedProgram", prefetchedProgram (disallowedSteps) } }));
+        check (! ok (disallowedResult),
+              "generate_beat_recipe REJECTS a program containing a disallowed command");
+        check (disallowedResult.getProperty ("error", var()).toString().contains ("disallowed command"),
+              "…and the error names it \"disallowed command\"");
+        check (tracks (ops) == tracksBefore,
+              "…and the create_track step it DID apply was undone along with the rest of the batch");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
@@ -15706,52 +16294,11 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         check ((bool) recordStart["data"].getProperty ("recording", false),
                "GAP2: record command entered recording state");
 
-        // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
-        // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
-        // Tracktion's recording (JUCE AudioDeviceManager) capture the SAME mic at once?
-        // Gated on MOSH_VOICE_BARGE_IN=1 (needs Speech authorization + a real mic) so the
-        // plain GAP-2 recording smoke still runs without it. `speech` is declared AFTER the
-        // captured locals so it (and its callbacks) tear down BEFORE them.
-        const bool bargeIn = SystemStats::getEnvironmentVariable ("MOSH_VOICE_BARGE_IN", "0").getIntValue() != 0;
-        std::atomic<bool> voiceStarted { false };
-        std::atomic<int>  voiceErrors  { 0 };
-        String voiceErr;
-        std::unique_ptr<NativeSpeech> speech;
-        if (bargeIn)
-        {
-            section ("GAP 4 — barge-in (continuous speech sharing the mic with a live take)");
-            check (NativeSpeech::isSupported(), "GAP4: macOS Speech available");
-            speech = std::make_unique<NativeSpeech>();
-            NativeSpeech::Callbacks cb;
-            cb.onStart = [&voiceStarted] { voiceStarted.store (true); };
-            cb.onError = [&voiceErrors, &voiceErr] (const String& e) { voiceErrors.fetch_add (1); voiceErr = e; };
-            speech->startContinuous (std::move (cb));   // async: auth + AVAudioEngine on the message thread
-        }
-
-        // Longer window under barge-in so the async auth + engine-start + a few mic buffers
-        // all land while the take is still recording.
-        const auto recEnd = Time::getMillisecondCounter() + (uint32) (bargeIn ? 2500 : 1200);
+        const auto recEnd = Time::getMillisecondCounter() + (uint32) 1200;
         while (Time::getMillisecondCounter() < recEnd)
         {
             if (mm != nullptr) mm->runDispatchLoopUntil (50);
             else Thread::sleep (50);
-        }
-
-        if (bargeIn && speech != nullptr)
-        {
-            // The take is STILL recording here. Assert the recognizer opened its OWN input
-            // client and actually pulled mic buffers CONCURRENTLY (the simultaneous-capture
-            // proof — stronger than "the engine started"), then release it before the take is
-            // stopped + checked for non-silence (which then proves the voice client didn't
-            // starve/glitch the DAW capture).
-            check (eng.edit().getTransport().isRecording(), "GAP4: DAW transport still recording while voice ran");
-            if (voiceErrors.load() > 0) std::cerr << "  ..   GAP4 voice error: " << voiceErr << "\n";
-            check (voiceErrors.load() == 0, "GAP4: continuous voice started without error (grant Speech permission if this fails)");
-            check (voiceStarted.load(), "GAP4: AVAudioEngine started while the take recorded (two simultaneous input clients)");
-            check (speech->isListening(), "GAP4: continuous recognizer listening during the take");
-            std::cerr << "  ..   GAP4 diag: tapBuffers=" << speech->tapBufferCount() << "\n";
-            check (speech->tapBufferCount() > 0, "GAP4: mic tap captured audio buffers concurrently with the take");
-            speech->stopContinuous();
         }
 
         check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before generic stop");
@@ -16117,146 +16664,27 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
-// ── Voice STT smoke (`Mosh --voice-smoke`) ──────────────────────────────────────
-// Synthesizes a known phrase with macOS `say`, transcribes it through the SAME
-// SFSpeechRecognizer the app uses, and asserts the transcript — proving speech-to-text
-// end-to-end with nobody speaking. FILE mode (default) reads a `say`-rendered file (no
-// mic; needs only a Speech grant). MIC mode (MOSH_VOICE_SMOKE_MIC=1) drives the live
-// mic recognizer while `say` plays into the default input — set that input to BlackHole
-// for a reliable digital loopback. Returns 0 on a matching transcript.
-int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
-{
-    using namespace juce;
-    ignoreUnused (eng, ops);
-
-    const auto phrase   = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_PHRASE", "create a drum track");
-    const bool micMode  = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_MIC", "0") == "1";
-    const int  timeoutMs = jmax (4000, SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_TIMEOUT_MS", "25000").getIntValue());
-
-    // Also write the verdict to a fixed file. TCC attributes a shell-launched binary to
-    // the terminal (not the granted Mosh.app), so the smoke must be `open`-launched to
-    // see the Speech/Mic grant — and an `open` run can't return its stderr, so the
-    // driver reads this file instead.
-    auto resultFile = File::getSpecialLocation (File::userHomeDirectory)
-                          .getChildFile ("Library/Mosh/voice-smoke-result.txt");
-    resultFile.getParentDirectory().createDirectory();
-    resultFile.deleteFile();
-    auto finish = [&resultFile] (int rc, const String& summary)
-    {
-        resultFile.replaceWithText (String (rc) + "\t" + summary + "\n");
-        std::cerr << "  [result] rc=" << rc << "  " << summary.toStdString() << "\n";
-        return rc;
-    };
-
-    std::cerr << "===== Mosh voice smoke (" << (micMode ? "MIC / loopback" : "FILE") << ") =====\n";
-    std::cerr << "  phrase: \"" << phrase.toStdString() << "\"\n";
-
-    if (! NativeSpeech::isSupported())
-    {
-        std::cerr << "  FAIL: native speech-to-text is unsupported here\n";
-        return finish (1, "native speech-to-text unsupported");
-    }
-
-    // Gate on the SYNCHRONOUS auth status. A headless process can't raise the system
-    // Speech/Mic prompt (those need a GUI app context), and entering the async
-    // recognition path unauthorized risks a teardown-time crash — so skip cleanly.
-    const int auth = NativeSpeech::authorizationStatus();
-    if (auth != 3)   // 3 = authorized
-    {
-        const char* why = auth == 0 ? "not yet granted (notDetermined)"
-                        : auth == 1 ? "denied"
-                        : auth == 2 ? "restricted"
-                                    : "unavailable";
-        std::cerr << "  SKIP: Speech Recognition is " << why << " (status " << auth << ").\n"
-                     "  Grant it ONCE via the GUI — launch the app, use voice (the 👂 cap / hold-to-talk),\n"
-                     "  approve the Speech" << (micMode ? " + Microphone" : "") << " prompt — then re-run this. A headless\n"
-                     "  run can't surface the system prompt. Returning 2 (skipped, not a failure).\n";
-        return finish (2, "skip: speech auth status " + String (auth));
-    }
-    std::cerr << "  Speech Recognition authorized ✓\n";
-
-    auto* mm = MessageManager::getInstanceWithoutCreating();
-    auto pump = [mm] (int ms)
-    {
-        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
-        while (Time::getMillisecondCounter() < end) { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
-    };
-
-    // Lowercase + non-alphanumerics → spaces, so word matching ignores punctuation/case.
-    auto norm = [] (const String& s)
-    {
-        const auto low = s.toLowerCase();
-        String out;
-        for (int i = 0; i < low.length(); ++i)
-            out += (CharacterFunctions::isLetterOrDigit (low[i]) ? String::charToString (low[i]) : String (" "));
-        return out;
-    };
-
-    NativeSpeech speech;
-    String transcript, error;
-    std::atomic<bool> finished { false }, gotFinal { false };
-    NativeSpeech::Callbacks cb;
-    cb.onStart = []                       { std::cerr << "  recognizer started…\n"; };
-    cb.onFinal = [&] (const String& t)    { transcript = t; gotFinal = true; };
-    cb.onError = [&] (const String& e)    { error = e; };
-    cb.onStop  = [&]                      { finished = true; };
-
-    if (! micMode)
-    {
-        auto aiff = selftestTempPath (eng, "voice-smoke.aiff");
-        aiff.deleteFile();
-        ChildProcess say;
-        say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });
-        say.waitForProcessToFinish (15000);
-        if (! aiff.existsAsFile() || aiff.getSize() == 0)
-        {
-            std::cerr << "  FAIL: `say` produced no audio at " << aiff.getFullPathName().toStdString() << "\n";
-            return finish (1, "say produced no audio");
-        }
-        std::cerr << "  synthesized " << aiff.getSize() << " bytes via `say`, transcribing…\n";
-        speech.transcribeFile (aiff.getFullPathName(), cb);
-    }
-    else
-    {
-        std::cerr << "  (MIC mode: set the default input to BlackHole 2ch and route `say` there for a clean loopback)\n";
-        speech.startContinuous (cb);
-        pump (2000);   // let auth + the AVAudioEngine come up before speaking
-        ChildProcess say;
-        say.start (StringArray { "say", phrase });
-        say.waitForProcessToFinish (15000);
-    }
-
-    const auto deadline = Time::getMillisecondCounter() + (uint32) timeoutMs;
-    while (! gotFinal && ! finished && Time::getMillisecondCounter() < deadline) pump (100);
-    pump (200);
-    if (micMode) speech.stopContinuous();
-
-    if (! gotFinal)
-    {
-        if (error.isNotEmpty())
-        {
-            std::cerr << "  FAIL: " << error.toStdString() << "\n";
-            if (error.containsIgnoreCase ("not authorized"))
-                std::cerr << "  → Speech Recognition is not granted yet. Approve it once (the prompt, or System\n"
-                             "    Settings › Privacy & Security › Speech Recognition) and re-run.\n";
-        }
-        else
-            std::cerr << "  FAIL: no transcript within " << timeoutMs << "ms\n";
-        return finish (1, error.isNotEmpty() ? ("error: " + error) : "no transcript within timeout");
-    }
-
-    std::cerr << "  transcript: \"" << transcript.toStdString() << "\"\n";
-
-    const auto nt = " " + norm (transcript) + " ";
-    auto words = StringArray::fromTokens (norm (phrase), " ", "");
-    words.removeEmptyStrings();
-    int hits = 0;
-    for (const auto& w : words) if (nt.containsIgnoreCase (" " + w + " ")) ++hits;
-    const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
-    std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
-    return finish (pass ? 0 : 1, "transcript=\"" + transcript + "\"; matched " + String (hits) + "/" + String (words.size()) + " words");
-}
-
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,
+// with NOBODY PLAYING A KEYBOARD.
+//
+// This exists because every other harness in this file is blind to it. --selftest has no
+// audio device, so getAllInputDevices() is empty, so the routing fork in cmdAuditionNote
+// is never taken and the retrospective buffer never fills. Everything REC-001/REC-002
+// added — overdub, record-quantise, Capture, and the input path itself — was therefore
+// verifiable only by hand, with a controller plugged in.
+//
+// What makes it automatable is the virtual "Mosh Keyboard" MIDI input. A physical
+// controller cannot be synthesised; a virtual device's handleIncomingMidiMessage is
+// exactly the entry point a physical one uses, so driving it through audition_note IS a
+// producer playing the computer keyboard. The audio device still has to be real (no
+// device ⇒ no playback context ⇒ no input instances), which is why this is its own CLI
+// mode and not a --selftest section.
+//
+// Deliberately NOT asserted anywhere below: that anything was AUDIBLE. This proves the
+// notes reach the recorder and land in a clip. Whether they reach a speaker is
+// --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
+// sound it never measured.
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,
@@ -16279,6 +16707,148 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
 // notes reach the recorder and land in a clip. Whether they reach a speaker is
 // --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
 // sound it never measured.
+// ── LAT-001 — measured latency, end to end through a loopback device ─────────────────
+//
+// What this proves that --selftest structurally cannot: the sweep really goes out the
+// device and comes back in, the detector finds it, the residual really reaches
+// Tracktion's record path, and a take then LANDS where it was played. With a digital
+// loopback (BlackHole) the round trip is exactly the device's own buffering, so the
+// residual is small and the landed click must sit within 1 ms of the click that
+// produced it. Nothing here needs a human: no speakers, no mic, no listening.
+int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh latency-calibration smoke (LAT-001) =====\n";
+    section ("LAT-001 live: calibrate through a loopback, then land a click within 1 ms");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples()
+              << " reportedIn=" << device->getInputLatencyInSamples()
+              << " reportedOut=" << device->getOutputLatencyInSamples() << "\n";
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
+    const double rate = device->getCurrentSampleRate();
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (20);
+            else Thread::sleep (20);
+        }
+    };
+    auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
+
+    // ── 1. calibrate ──
+    check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
+    auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+    check (ok (start), "calibrate_latency start ok with a live device");
+    check (calState().getProperty ("state", var()).toString() == "running", "calibration reports running");
+    const auto deadline = Time::getMillisecondCounter() + 12000;
+    while (Time::getMillisecondCounter() < deadline
+           && calState().getProperty ("state", var()).toString() == "running")
+        pump (100);
+    auto cal = calState();
+    const auto state = cal.getProperty ("state", var()).toString();
+    std::cerr << "  ..   calibration: state=" << state
+              << " frames=" << (int64) cal.getProperty ("frames", 0)
+              << " ms=" << (double) cal.getProperty ("ms", 0.0)
+              << " confidence=" << (double) cal.getProperty ("confidence", 0.0)
+              << " deviceReported=" << (int64) cal.getProperty ("deviceReportedSamples", 0)
+              << " appliedMs=" << (double) cal.getProperty ("appliedMs", 0.0)
+              << " error=" << cal.getProperty ("error", var()).toString() << "\n";
+    check (state == "measured", "calibration produced a measurement (not a refusal, not a hang)");
+    check ((bool) cal.getProperty ("applied", false), "measured residual is applied to the record path");
+    check (! (bool) cal.getProperty ("stale", true), "record is honoured at this rate/device");
+    check ((double) cal.getProperty ("confidence", 0.0) > 0.0, "detector confidence is positive");
+    const double measuredMs = (double) cal.getProperty ("ms", 0.0);
+    check (measuredMs >= 0.0 && measuredMs < 200.0, "loopback round trip is a sane number (< 200 ms)");
+    check (std::abs ((double) cal.getProperty ("sampleRate", 0.0) - rate) < 0.5, "record carries the device rate");
+
+    // ── 2. the click: play at 1.0 s on one track, record the loopback on another ──
+    auto clickTrack = cmd (ops, "create_track", args1 ("name", "Click"));
+    check (ok (clickTrack), "create_track Click ok");
+    const auto clickTrackId = clickTrack["data"].getProperty ("trackId", var()).toString();
+    auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", clickTrackId }, { "seconds", 0.25 }, { "freq", 1000.0 }}));
+    check (ok (tone), "add_test_tone_clip ok");
+    const auto clickId = tone["data"].getProperty ("clipId", var()).toString();
+    check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
+
+    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
+    check (ok (takeTrack), "create_track Take ok");
+    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
+           "input monitoring OFF on the take (so the loopback carries only the click)");
+
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
+    auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+    check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
+    pump (2500);
+    auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+    check (ok (stop), "recording stopped");
+
+    // ── 3. where did it land? ──
+    var landed;
+    {
+        auto snap = ops.snapshot();
+        auto tracksVar = snap.getProperty ("tracks", var());
+        if (auto* tracks = tracksVar.getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == takeTrackId)
+                    landed = t.getProperty ("clips", var());
+    }
+    const int nLanded = landed.isArray() ? landed.size() : 0;
+    check (nLanded > 0, "a take landed on the armed track");
+    if (nLanded > 0)
+    {
+        const auto clip = landed[0];
+        const double clipStart  = (double) clip.getProperty ("start", 0.0);
+        const double clipOffset = (double) clip.getProperty ("offset", 0.0);
+        const File src (clip.getProperty ("sourceFile", var()).toString());
+        check (src.existsAsFile(), "landed take has a source WAV on disk");
+        AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (src));
+        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable");
+        if (reader != nullptr && reader->lengthInSamples > 0)
+        {
+            AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+            reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+            // First sample above a floor well under the tone's 10 ms fade-in slope: at 0.25
+            // peak the fade crosses 0.003 about 0.12 ms in, so the threshold itself costs
+            // far less than the 1 ms budget. The loopback is digital, so the floor is zero.
+            int onset = -1;
+            for (int i = 0; i < buf.getNumSamples() && onset < 0; ++i)
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    if (std::abs (buf.getSample (ch, i)) > 0.003f) { onset = i; break; }
+            check (onset >= 0, "the click is present in the recorded take");
+            if (onset >= 0)
+            {
+                const double onsetEditSeconds = clipStart + ((double) onset / reader->sampleRate - clipOffset);
+                const double errorMs = (onsetEditSeconds - 1.0) * 1000.0;
+                std::cerr << "  ..   landed: clipStart=" << clipStart << " offset=" << clipOffset
+                          << " onsetSample=" << onset << " onset=" << onsetEditSeconds
+                          << " s error=" << errorMs << " ms\n";
+                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)");
+            }
+        }
+    }
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 // ── CAP-001 run 1 — record, then get killed ──────────────────────────────────────────
 int runRecordHoldSmoke (MoshEngine& eng, MoshOps& ops)
 {
