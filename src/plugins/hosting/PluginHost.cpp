@@ -293,6 +293,7 @@ void PluginHost::initialise()
     engine.getPluginManager().createBuiltInType<TrackMutePlugin>();
     engine.getPluginManager().createBuiltInType<MoshAutoTunePlugin>();
     engine.getPluginManager().createBuiltInType<MoshOTTPlugin>();
+    engine.getPluginManager().createBuiltInType<MoshSoftClipPlugin>();
     engine.getPluginManager().createBuiltInType<MoshXFeedbackPlugin>();
    #if MOSH_HAVE_ANIRA
     // Route C.2 — the real-time RAVE insert (only registered in the anira build).

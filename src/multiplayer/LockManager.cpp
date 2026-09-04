@@ -18,7 +18,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     static const std::set<juce::String> unguarded {
         "list_plugins", "list_builtins", "list_audio_devices", "list_midi_inputs",
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors", "list_loras",
-        "list_directory", "list_training_sources", "list_drum_kits",
+        "list_directory", "list_training_sources", "list_drum_kits", "list_presets", "list_palette",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file", "detect_clip_bpm",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
         // LoRA Lab audition. Renders a candidate adapter stack to a wav under the
@@ -89,7 +89,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "add_test_tone_clip", "set_track_volume", "set_track_pan", "set_track_mute",
         "set_track_solo", "set_track_active", "arm_track", "set_input_monitor", "set_current_take",
         "keep_take", "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
-        "set_plugin_param", "bypass_plugin",
+        "set_plugin_param", "bypass_plugin", "load_preset",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
         "set_track_type", "load_drum_kit", "assign_sample", "set_drum_lane",
         "set_drum_pad", "clear_drum_pad",

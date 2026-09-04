@@ -132,18 +132,36 @@ export async function getSnapshot<T = unknown>(): Promise<T> {
 // while the explicit dev/e2e surface may substitute a deterministic demo brain.
 // NOT the executeCommand seam — this is a chat round-trip.
 export type BrainMessage = { role: string; content: string };
-export async function brainChat(messages: BrainMessage[], provider?: string): Promise<{ content: string }> {
+// Per-call overrides layered on the DOSAGE defaults (native BrainProxy::ChatOptions /
+// the dev proxy's own 800/0.6 fallback). Every field optional; omitting `options`
+// entirely keeps brainChat's wire payload byte-identical to before this existed —
+// the produce lane (runTask.ts's PRODUCE_CHAT_OPTIONS) is the first caller to pass one.
+export type BrainChatOptions = { maxTokens?: number; timeoutMs?: number; temperature?: number };
+// `provider` in the RESULT is which provider actually served (the native side
+// resolves a requested-but-incomplete provider by falling back, so callers that
+// MUST have a specific class of brain — the produce lane's cloud-only rule —
+// verify this field rather than trusting the request).
+export async function brainChat(
+  messages: BrainMessage[],
+  provider?: string,
+  options?: BrainChatOptions,
+): Promise<{ content: string; provider?: string }> {
   if (realNative()) {
     // Native proxy returns { ok, content } or { ok:false, error }. Throw on the error
     // shape so the caller can apply its packaged/dev posture — same contract as the dev fetch.
-    const r = (await native("brain_chat")({ messages, provider })) as { ok?: boolean; content?: string; error?: string };
+    const r = (await native("brain_chat")({ messages, provider, ...(options ? { options } : {}) })) as {
+      ok?: boolean;
+      content?: string;
+      error?: string;
+      provider?: string;
+    };
     if (r && r.ok === false) throw new Error(r.error ? String(r.error) : "brain unavailable");
-    return { content: String(r?.content ?? "") };
+    return { content: String(r?.content ?? ""), provider: r?.provider ? String(r.provider) : undefined };
   }
   const r = await fetch("/api/brain/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, provider }),
+    body: JSON.stringify({ messages, provider, ...(options ? { options } : {}) }),
   });
   let j: { content?: string; error?: unknown } = {};
   try { j = await r.json(); } catch { /* non-JSON error body */ }

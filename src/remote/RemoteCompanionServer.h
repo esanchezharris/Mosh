@@ -38,6 +38,13 @@ public:
     juce::var handleTestRequest (const juce::String& method,
                                  const juce::String& path,
                                  const juce::var& body);
+
+    /** Exposes the same [1000,600000]ms clamp (absent -> 5000ms default) that
+        /snapshot and /command apply to a caller-supplied `timeoutMs` before passing
+        it to callOnMessageThread. See RemoteCompanionServer.cpp's timeoutMsFromBody
+        for why this is a static free-function forward rather than a live end-to-end
+        async timing test. */
+    static int testCompanionTimeoutMsFromBody (const juce::var& body);
 #endif
 
 private:

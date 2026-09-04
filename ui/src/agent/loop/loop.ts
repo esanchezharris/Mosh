@@ -62,6 +62,12 @@ export type LoopDeps = {
    *  FSM stays pure/deps-injected (no bridge call inside the loop itself). Omitted ⇒
    *  every step's prompt is byte-identical to the pre-M2 shape. */
   memory?: string;
+  /** P1 produce lane — an optional system-prompt builder replacing
+   *  buildLoopSystemPrompt (same signature). Omitted ⇒ every step's prompt is
+   *  byte-identical to the default lane; the produce lane passes
+   *  buildProduceSystemPrompt (producePrompt.ts), which wraps the default rather
+   *  than forking it. */
+  systemPrompt?: (snap: Snapshot | null, query?: string, memory?: string) => string;
 };
 
 export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string };
@@ -90,7 +96,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
   const repliesLeft = () => Math.max(0, b.maxPlannerCalls - plannerCalls) + Math.max(0, b.maxStepCalls - stepCalls);
   const callModel = async (mode: TaskContextMode, goal?: string): Promise<LoopReply | null> => {
     const messages: ChatMessage[] = [
-      { role: "system", content: buildLoopSystemPrompt(snap, task.ask, deps.memory) },
+      { role: "system", content: (deps.systemPrompt ?? buildLoopSystemPrompt) (snap, task.ask, deps.memory) },
       { role: "user", content: renderTaskContext({
           ask: task.ask, plan, planIdx, history: transcript,
           stepsLeft: Math.max(0, b.maxSteps - transcript.length), repliesLeft: repliesLeft(),
@@ -172,8 +178,18 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
         if (!r) { outcome = "error"; break; }
         say = r.say ?? say;
         if (r.status === "need_user") { outcome = "need_user"; break; }
-        if (!r.commands?.length) { outcome = r.status === "done" ? "done" : "error"; break; }
-        commands = r.commands;
+        // Models sometimes answer a compile request with the plan shape again,
+        // carrying this step's commands inside plan[i].commands (Sonnet did it
+        // on 2 of 4 compile replies in the first live produce run). Accept it
+        // when exactly one plan entry carries commands; anything else is still
+        // "no commands".
+        let compiled = r.commands;
+        if (!compiled?.length && r.plan?.length) {
+          const carrying = r.plan.filter((p) => p.commands?.length);
+          if (carrying.length === 1) compiled = carrying[0]!.commands;
+        }
+        if (!compiled?.length) { outcome = r.status === "done" ? "done" : "error"; break; }
+        commands = compiled;
         goal = step.goal;
         doneAfterStep = r.status === "done";
         planIdx++;

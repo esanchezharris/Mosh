@@ -1,0 +1,23 @@
+{
+  "id": "gen001-808-register",
+  "created": "2026-03-19",
+  "ask": null,
+  "prompt_version": "pre-produce-lane (PROMPT-trap-v3, the 2026-03-19 flywheel breakthrough)",
+  "run": null,
+  "reference": "~/AbletonMONSTER/flywheel-data/corrections/gen001_correction.meta.json (external — the flywheel lab's own correction store; source .als: flywheel-data/output/gen_001edit Project/gen_001edit.als)",
+  "rating": "fail",
+  "user_verdict": null,
+  "notes": [
+    "808 pitched WAY too low — needs to be in Db4-Db5 range, not C2",
+    "808 notes must be HELD OUT until the next note, no gaps",
+    "808 pattern too simplistic — needs rhythmic bounce (avoids beat 2, uses offbeats)",
+    "808 must fill ALL clips — no empty MIDI clips",
+    "Tempo too slow for jerk — needs 140-150 BPM",
+    "Need MANY more melodic layers: lead, atmosphere, chord stabs, countermelodies, arps",
+    "Less empty space — fill out the track",
+    "A/B section structure with different 808 patterns between sections",
+    "Two different 808 sounds for A and B sections",
+    "Track names should describe musical function"
+  ],
+  "promoted_to": "PROMPT-trap-v3.md, then produce-lane PRODUCE_RULES v1 (808 62-70 register, sustain-to-next-note) and v2 (808 RULES, TRACK NAMES, SECTIONS)"
+}

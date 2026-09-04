@@ -20,6 +20,23 @@ namespace mosh
     The bridge calls chat() OFF the message thread (it blocks on HTTP) and resolves
     the WebView promise with the returned var.
 */
+/** Per-call overrides for a chat request, layered on top of the DOSAGE defaults
+    (max_tokens 800 / temperature 0.6 / provider-default timeout). Default-
+    constructed options are BYTE-IDENTICAL to the previously hardcoded payload —
+    every existing caller that doesn't pass options keeps producing the exact same
+    wire request. timeoutMs==0 is the sentinel for "use requestTimeoutMs's existing
+    local/cloud split"; a positive value (after optionsFromVar's clamp) overrides it —
+    the produce lane needs this to raise the ~30s JUCE-side wait so an 8k-token
+    completion isn't cut off mid-flight.
+    Namespace-scope (not nested) because clang refuses a nested struct's default
+    member initialisers as a `= {}` default argument inside the enclosing class. */
+struct BrainChatOptions
+{
+    int maxTokens = 800;
+    double temperature = 0.6;
+    int timeoutMs = 0;
+};
+
 struct BrainProxy
 {
     struct Provider
@@ -28,8 +45,20 @@ struct BrainProxy
         bool isComplete() const { return key.isNotEmpty() && url.isNotEmpty() && model.isNotEmpty(); }
     };
 
-    /** The three known providers with their env-resolved fields (regardless of
-        whether they are fully configured). Order: deepseek, openai, xai. */
+    using ChatOptions = BrainChatOptions;
+
+    /** Parses a `{maxTokens?, temperature?, timeoutMs?}` var (the shape bridge.ts's
+        BrainChatOptions sends as brain_chat's `options` argument) into a clamped
+        ChatOptions: maxTokens 1..32768, timeoutMs 1000..600000, temperature 0..2.
+        A void/non-object `options` (the common case — most callers omit it) or a
+        missing field yields the corresponding ChatOptions default untouched. */
+    static ChatOptions optionsFromVar (const juce::var& options);
+
+    /** The known providers with their env-resolved fields (regardless of whether
+        they are fully configured). Order: deepseek, openai, xai, openrouter — plus a
+        machine-local "local" entry FIRST when configureLocal() has been called.
+        openrouter is appended LAST so it can never shift resolve()'s first-complete
+        default away from an already-configured deepseek/openai/xai. */
     static juce::Array<Provider> providers();
 
     /** Pick the provider to use: `requested` if it is complete, else
@@ -39,10 +68,14 @@ struct BrainProxy
 
     /** Build the direct OpenAI-compatible request body for a resolved provider.
         Kept as a pure seam so provider-specific payload policy is unit-testable
-        without making a network request. */
-    static juce::var requestPayload (const Provider&, const juce::var& messages);
+        without making a network request. Default `opts` reproduces the exact
+        800-token/0.6-temperature payload this always sent. */
+    static juce::var requestPayload (const Provider&, const juce::var& messages, const ChatOptions& opts = {});
 
-    static int requestTimeoutMs (const Provider&);
+    /** Default `opts` (timeoutMs==0) reproduces the pre-W1.1 120s-local/30s-cloud
+        split exactly. A positive opts.timeoutMs (already clamped by optionsFromVar)
+        overrides that split outright. */
+    static int requestTimeoutMs (const Provider&, const ChatOptions& opts = {});
 
     static juce::var parseDirectResponse (const juce::String& body, int statusCode,
                                           const Provider&, int elapsedMs);
@@ -57,8 +90,10 @@ struct BrainProxy
         bundled key. Any proxy failure (unreachable / non-2xx / malformed reply) falls
         through to the direct-provider path below it — additive, never a regression
         from the pre-proxy behaviour (proxyEnabled()==false skips the branch entirely,
-        so an unset MOSH_BRAIN_PROXY_URL is byte-identical to before this existed). */
-    static juce::var chat (const juce::var& messages, const juce::String& requested = {});
+        so an unset MOSH_BRAIN_PROXY_URL is byte-identical to before this existed).
+
+        Default `opts` keeps every existing caller's wire payload byte-identical. */
+    static juce::var chat (const juce::var& messages, const juce::String& requested = {}, const ChatOptions& opts = {});
 
     /** Diagnostics for a future picker / the log: which providers are configured. */
     static juce::var providersInfo();

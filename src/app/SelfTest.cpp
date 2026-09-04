@@ -5,6 +5,7 @@
 #include "moshops/MoshOps.h"
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include "plugins/moshfx/MoshFxPlugins.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -2965,7 +2966,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lb = cmd (ops, "list_builtins");
         check (ok (lb), "list_builtins ok");
         const int nB = lb["data"].getProperty ("plugins", var()).size();
-        check (nB >= 13, "built-in palette has the full catalog plus Mosh FX");
+        check (nB >= 15, "built-in palette has the full catalog plus Mosh FX");
         bool sawComp = false, sawSynth = false, sawAutoTune = false, sawOTT = false, sawXFeedback = false;
         if (auto* arr = lb["data"].getProperty ("plugins", var()).getArray())
             for (auto& p : *arr)
@@ -3111,6 +3112,172 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // The scratch "Built-ins" track is left in place: the only later count
         // check in this run is relative (tracksBefore+1), and absolute-count
         // checks live in the separate runUndoSelfTest with its own fresh engine.
+    }
+
+    // ─── R3.3: highpass + softclip built-ins ───
+    // "highpass" is not its own Tracktion xmlTypeName — it's te::LowPassPlugin
+    // (xmlTypeName "lowpass") flipped into high-pass mode by load_builtin/
+    // load_master_builtin, and the snapshot serializer (effectiveBuiltinType/
+    // effectiveBuiltinName in MoshOpsInternal.h) reports it back out as "highpass",
+    // never Tracktion's genuine "lowpass". "softclip" is a wholly new Mosh FX built-in
+    // (MoshSoftClipPlugin — plain per-sample tanh, no oversampling). This section proves:
+    // the snapshot round-trip on both; the underlying LowPassPlugin's real mode/frequency
+    // for highpass (the snapshot only ever exposes a normalised param value); a single
+    // undo/redo cleanly reverts/restores the WHOLE load — creation + the in-transaction
+    // mode/frequency CachedValue writes together, not just the insert — on both the track
+    // and the master bus; set_plugin_param/set_master_plugin_param reach both; and a real
+    // render through the chain (track highpass -> master highpass -> master softclip)
+    // produces non-silent audio without error.
+    section ("R3.3: highpass + softclip built-ins");
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "R3.3 Filters"))["data"].getProperty ("trackId", var()).toString();
+
+        auto trackBuiltin = [&] (const String& type) -> var {
+            auto trk = trackById (rt);
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return p;
+            return var();
+        };
+        // Live engine access — the snapshot only exposes a normalised param value, never
+        // the plugin's real mode/Hz, so mode/frequency are checked against the actual
+        // te::LowPassPlugin object (same pattern AGT-UNDO's flushParam lookup uses above).
+        auto liveTrackLowPass = [&] (int index) -> te::LowPassPlugin* {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->itemID.toString() == rt)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (index >= 0 && index < plugins.size())
+                        return dynamic_cast<te::LowPassPlugin*> (plugins[index].get());
+                }
+            return nullptr;
+        };
+
+        // ── Track: highpass ─────────────────────────────────────────────
+        auto hpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", rt }, { "type", "highpass" }}));
+        check (ok (hpLoad), "load_builtin (highpass) on a track ok");
+        check (hpLoad["data"].getProperty ("type", var()).toString() == "highpass",
+               "load_builtin result reports type \"highpass\", not the raw Tracktion \"lowpass\"");
+        auto hpEntry = trackBuiltin ("highpass");
+        check (hpEntry.getProperty ("type", var()).toString() == "highpass", "snapshot plugin.type is \"highpass\"");
+        check ((bool) hpEntry.getProperty ("builtin", false), "track highpass flagged builtin=true");
+        check (hpEntry.getProperty ("category", var()).toString() == "Filter", "track highpass carries the Filter category");
+        if (auto* lp = liveTrackLowPass ((int) hpEntry.getProperty ("index", -1)))
+        {
+            check (lp->mode.get() == "highpass", "underlying LowPassPlugin.mode is \"highpass\"");
+            check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying LowPassPlugin.frequency is 180 Hz");
+            // The filter reads the PARAMETER (updateFilters → frequency->getCurrentValue()),
+            // not the CachedValue — round 3 shipped 4 kHz highpasses while this CachedValue
+            // check passed. This is the check that would have been red.
+            check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying LowPassPlugin frequency PARAMETER (what the filter reads) is 180 Hz");
+        }
+        else
+            check (false, "track highpass plugin resolves to a live te::LowPassPlugin");
+
+        // One undo removes the WHOLE load — creation + mode + frequency writes together,
+        // not just the insert (exactly what load_builtin's CachedValue-assignment comment
+        // is there to guarantee).
+        check (ok (cmd (ops, "undo")), "undo highpass (track) load ok");
+        check (! trackBuiltin ("highpass").isObject(), "one undo fully removes the track highpass builtin");
+        check (ok (cmd (ops, "redo")), "redo highpass (track) load ok");
+        auto hpEntryRedone = trackBuiltin ("highpass");
+        check (hpEntryRedone.getProperty ("type", var()).toString() == "highpass", "redo restores the track highpass builtin");
+        if (auto* lp = liveTrackLowPass ((int) hpEntryRedone.getProperty ("index", -1)))
+            check (lp->mode.get() == "highpass", "redo restores mode \"highpass\" too, not just the insert");
+        else
+            check (false, "redo restores a live te::LowPassPlugin");
+
+        const int hpIdxFinal = (int) hpEntryRedone.getProperty ("index", -1);
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "paramIndex", 0 }, { "value", 0.4 }}))),
+               "set_plugin_param on the track highpass ok");
+
+        // ── Master: highpass + softclip ─────────────────────────────────
+        auto masterBuiltin = [&] (const String& type) -> var {
+            auto plugins = ops.snapshot().getProperty ("master", var()).getProperty ("plugins", var());
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return p;
+            return var();
+        };
+        auto liveMasterLowPass = [&] (int index) -> te::LowPassPlugin* {
+            auto plugins = eng.edit().getMasterPluginList().getPlugins();
+            return (index >= 0 && index < plugins.size()) ? dynamic_cast<te::LowPassPlugin*> (plugins[index].get()) : nullptr;
+        };
+
+        auto hpMasterLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "highpass" }}));
+        check (ok (hpMasterLoad), "load_master_builtin (highpass) ok");
+        auto hpMasterEntry = masterBuiltin ("highpass");
+        check (hpMasterEntry.getProperty ("type", var()).toString() == "highpass", "master snapshot plugin.type is \"highpass\"");
+        if (auto* lp = liveMasterLowPass ((int) hpMasterEntry.getProperty ("index", -1)))
+        {
+            check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
+            check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
+            check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
+        }
+        else
+            check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
+
+        check (ok (cmd (ops, "undo")), "undo highpass (master) load ok");
+        check (! masterBuiltin ("highpass").isObject(), "one undo fully removes the master highpass builtin");
+        check (ok (cmd (ops, "redo")), "redo highpass (master) load ok");
+        check (masterBuiltin ("highpass").getProperty ("type", var()).toString() == "highpass", "redo restores the master highpass builtin");
+
+        auto scLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "softclip" }}));
+        check (ok (scLoad), "load_master_builtin (softclip) ok");
+        auto scEntry = masterBuiltin ("softclip");
+        check (scEntry.getProperty ("type", var()).toString() == "softclip", "master snapshot plugin.type is \"softclip\"");
+        check ((bool) scEntry.getProperty ("builtin", false), "master softclip flagged builtin=true");
+        check (scEntry.getProperty ("category", var()).toString() == "Dynamics", "master softclip carries the Dynamics category");
+        auto scReadout = scEntry.getProperty ("moshFx", var());
+        check (scReadout.getProperty ("kind", var()).toString() == "softclip", "master softclip exposes a moshFx readout");
+        check (std::abs ((double) scReadout.getProperty ("driveDb", 0.0) - 6.0) < 0.01, "softclip defaults to 6 dB drive");
+        check (std::abs ((double) scReadout.getProperty ("ceilingDb", 0.0) - (-0.5)) < 0.01, "softclip defaults to -0.5 dBFS ceiling");
+
+        check (ok (cmd (ops, "undo")), "undo softclip (master) load ok");
+        check (! masterBuiltin ("softclip").isObject(), "one undo fully removes the master softclip builtin");
+        check (ok (cmd (ops, "redo")), "redo softclip (master) load ok");
+        auto scEntryFinal = masterBuiltin ("softclip");
+        check (scEntryFinal.getProperty ("type", var()).toString() == "softclip", "redo restores the master softclip builtin");
+
+        const int scIdxFinal = (int) scEntryFinal.getProperty ("index", -1);
+        check (ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", scIdxFinal }, { "paramIndex", 0 }, { "value", 0.6 }}))),
+               "set_master_plugin_param on the master softclip ok");
+
+        // ── Render through both, without error, non-silent ──────────────
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", rt }, { "seconds", 1.0 }, { "freq", 440.0 }}))),
+               "R3.3 tone clip created (chain: track highpass -> master highpass -> master softclip)");
+        auto r33Out = selftestTempPath (eng, "r33-highpass-softclip.wav");
+        r33Out.deleteFile();
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", r33Out.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
+               "R3.3 export through highpass+softclip ok (no crash, no error)");
+        bool r33NonSilent = false;
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (r33Out) })
+            {
+                const int toRead = (int) jmin ((int64) 96000, reader->lengthInSamples);
+                if (toRead > 0)
+                {
+                    AudioBuffer<float> buf ((int) reader->numChannels, toRead);
+                    reader->read (&buf, 0, toRead, 0, true, true);
+                    for (int ch = 0; ch < buf.getNumChannels() && ! r33NonSilent; ++ch)
+                        if (buf.getMagnitude (ch, 0, toRead) > 0.001f)
+                            r33NonSilent = true;
+                }
+            }
+        }
+        check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
+        r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
+
+        // Leave the master bus as we found it: the next section ("Master bus plugins")
+        // asserts it starts empty, and this section's redo'd highpass + softclip were
+        // being left behind (11 downstream failures, 2026-09-02).
+        for (const char* type : { "softclip", "highpass" })
+        {
+            const int idx = (int) masterBuiltin (type).getProperty ("index", -1);
+            check (idx >= 0 && ok (cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}))),
+                   String ("R3.3 cleanup: master ") + type + " removed");
+        }
+        check (! masterBuiltin ("softclip").isObject() && ! masterBuiltin ("highpass").isObject(),
+               "R3.3 cleanup: master bus carries no R3.3 builtins afterwards");
     }
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
@@ -5533,9 +5700,118 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check ((int) [&] { auto p = trackById (pt).getProperty ("drumPads", var());
                                    return p.getArray() ? p.getArray()->size() : 0; }() == 8,
                        "a failed kit load leaves the existing pads untouched");
+
+                // ── USER kit library (~/Library/Mosh/kits; env-pointed here so the
+                // harness never reads or depends on the real user library) ──
+                {
+                    auto userRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                        .getChildFile ("selftest-user-kits");
+                    auto kitDir = userRoot.getChildFile ("selftest-user-kit");
+                    kitDir.createDirectory();
+                    // Two REAL pads copied from the bundled kit found above — a partial
+                    // kit on purpose, so pad COUNT proves per-file resolution.
+                    juce::File bundledKit;
+                    if (auto* a = lk["data"].getProperty ("kits", var()).getArray())
+                        for (auto& k : *a)
+                            if (k.getProperty ("id", var()).toString() == "mosh-kit")
+                                bundledKit = juce::File (k.getProperty ("path", var()).toString());
+                    bundledKit.getChildFile ("kick.wav").copyFileTo (kitDir.getChildFile ("kick.wav"));
+                    bundledKit.getChildFile ("snare.wav").copyFileTo (kitDir.getChildFile ("snare.wav"));
+                    ::setenv ("MOSH_KITS_USER_DIR", userRoot.getFullPathName().toRawUTF8(), 1);
+
+                    auto lk2 = cmd (ops, "list_drum_kits");
+                    bool listed = false, srcUser = false; int userPads = 0;
+                    if (auto* a = lk2["data"].getProperty ("kits", var()).getArray())
+                        for (auto& k : *a)
+                            if (k.getProperty ("id", var()).toString() == "selftest-user-kit")
+                            {
+                                listed = true;
+                                srcUser = k.getProperty ("source", var()).toString() == "user";
+                                userPads = (int) k.getProperty ("pads", 0);
+                            }
+                    check (listed, "a user-library kit is listed alongside the bundled kits");
+                    check (srcUser, "the user kit carries source:user");
+                    check (userPads == 2, "the user kit's pad count reflects its actual files");
+
+                    auto ldu = cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", "selftest-user-kit" }}));
+                    check (ok (ldu) && (int) ldu["data"].getProperty ("pads", 0) == 2,
+                           "load_drum_kit loads a USER-library kit (partial pads resolve per-file)");
+
+                    ::unsetenv ("MOSH_KITS_USER_DIR");
+                    userRoot.deleteRecursively();
+                    // Restore the full bundled kit so later sections see the 8 pads.
+                    cmd (ops, "load_drum_kit", args1 ("trackId", pt));
+                }
             }
 
             cmd (ops, "remove_track", args1 ("trackId", pt));
+        }
+
+        // ── preset seam (P1-A2): list_presets / load_preset ──
+        // The 4OSC arm is fully provable headless; the Vital arm needs a hosted
+        // plugin and an ear, so here it is exercised only to its REFUSAL edge
+        // (a .vital must never touch a track without Vital).
+        {
+            auto lp = cmd (ops, "list_presets");
+            check (ok (lp), "list_presets ok");
+            juce::Array<juce::var> foscBundled;
+            if (auto* a = lp["data"].getProperty ("presets", var()).getArray())
+                for (auto& p : *a)
+                    if (p.getProperty ("plugin", var()).toString() == "4osc"
+                        && p.getProperty ("source", var()).toString() == "bundled")
+                        foscBundled.add (p);
+            check (foscBundled.size() >= 5, "the bundled 4OSC bank lists at least its 5 starter patches");
+
+            // A melodic track: add_midi_clip's default-instrument policy loads 4OSC.
+            auto mt = cmd (ops, "create_track", args1 ("name", "PresetTarget"))["data"]
+                          .getProperty ("trackId", var()).toString();
+            cmd (ops, "add_midi_clip", args1 ("trackId", mt));
+            check ((bool) trackById (mt).getProperty ("isInstrument", false),
+                   "preset target track carries the 4OSC instrument");
+
+            if (foscBundled.size() > 0)
+            {
+                const auto file0 = foscBundled[0].getProperty ("file", var()).toString();
+                auto ld = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", file0 }}));
+                check (ok (ld), "load_preset applies a bundled 4OSC patch");
+                check (ld["data"].getProperty ("plugin", var()).toString() == "4osc",
+                       "load_preset reports the 4OSC target");
+                check ((int) ld["data"].getProperty ("paramsApplied", 0) >= 6,
+                       "the patch actually drove a real number of 4OSC params");
+                // Zero tolerance for display-name drift: an 'unknownParams' field means
+                // the bundled bank and the 4OSC param table disagree.
+                check (! ld["data"].hasProperty ("unknownParams"),
+                       "every bundled patch param resolves against 4OSC (no unknownParams)");
+                // A SECOND, different patch also lands (the bank is not one lucky file).
+                if (foscBundled.size() > 1)
+                {
+                    const auto file1 = foscBundled[1].getProperty ("file", var()).toString();
+                    check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", file1 }}))),
+                           "a second bundled patch loads on the same track");
+                }
+            }
+
+            // Wrong-family refusal: a .vital preset must never touch a 4OSC-only track.
+            auto tmpVital = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("selftest-refusal.vital");
+            tmpVital.replaceWithText ("{}");
+            check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", tmpVital.getFullPathName() }}))),
+                   "a .vital preset is refused on a track without Vital");
+            tmpVital.deleteFile();
+
+            // G14 guard: a FAILED load must not have opened an empty transaction —
+            // otherwise the next undo destroys the PREVIOUS edit's neighbour instead
+            // of the edit itself. Sequence: real edit → failed load → undo must
+            // revert exactly the real edit.
+            cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "volumeDb", -6.0 }}));
+            check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", "/nonexistent/nope.json" }}))),
+                   "load_preset errors on a missing file");
+            cmd (ops, "undo");
+            check ([&] { const double v = (double) trackById (mt).getProperty ("volumeDb", -999.0);
+                         return v > -0.01 && v < 0.01; }(),
+                   "undo after a FAILED preset load reverts the prior edit (no empty-txn G14 trap)");
+
+            cmd (ops, "remove_track", args1 ("trackId", mt));
         }
 
         // At this point the reload happened while lane 38 was SOLOED, so every other pad
@@ -5593,6 +5869,88 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         silentFile.deleteFile();
         beatFile.deleteFile();
+    }
+
+    // ── list_palette (W2.2, produce-lane quality pivot 2026-09) — read-only scan of the
+    // palette-v2 manifest. UI-only by design (the loop model never sees command result
+    // data — StepCommandResult carries {command, ok, error} only, ui/src/agent/loopSeam.ts):
+    // this proves the CONTRACT the produce-lane preflight/picker (drumPalette.ts) depends
+    // on, not agent reachability. Hermetic: builds its own manifest under tempDirectory so
+    // it never reads or depends on the real ~/Library/Mosh/palette-v2.
+    section ("list_palette (W2.2 produce-lane data seam)");
+    {
+        auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("selftest-palette");
+        tmpDir.deleteRecursively();
+        tmpDir.createDirectory();
+
+        auto kickFile = tmpDir.getChildFile ("kick_1.wav");
+        kickFile.replaceWithText ("fake-wav");
+        auto bassFile = tmpDir.getChildFile ("bass_1.wav");
+        bassFile.replaceWithText ("fake-wav");
+        // Deliberately NOT created — proves a stale manifest row (its file since deleted)
+        // drops silently rather than erroring the whole scan.
+        auto missingFile = tmpDir.getChildFile ("snare_gone.wav");
+
+        auto manifest = tmpDir.getChildFile ("manifest.json");
+        {
+            juce::Array<juce::var> items;
+            items.add (objN ({ { "path", kickFile.getFullPathName() }, { "role_guess", "kick" } }));
+            items.add (objN ({ { "path", bassFile.getFullPathName() }, { "role_guess", "bass" },
+                                { "root_note", 33 } }));
+            items.add (objN ({ { "path", missingFile.getFullPathName() }, { "role_guess", "snare" } }));
+            const auto manifestVar = objN ({ { "items", juce::var (items) } });
+            manifest.replaceWithText (juce::JSON::toString (manifestVar));
+        }
+
+        // Explicit {manifest} arg.
+        auto lp = cmd (ops, "list_palette", args1 ("manifest", manifest.getFullPathName()));
+        check (ok (lp), "list_palette ok with an explicit manifest arg");
+        auto* itemsArr = lp["data"].getProperty ("items", var()).getArray();
+        check (itemsArr != nullptr && itemsArr->size() == 2,
+               "the missing-file row is dropped, not errored (2 of 3 rows survive)");
+        if (itemsArr != nullptr)
+        {
+            bool foundKick = false, foundBass = false;
+            for (auto& it : *itemsArr)
+            {
+                if (it.getProperty ("role", var()).toString() == "kick")
+                {
+                    foundKick = true;
+                    check (it.getProperty ("path", var()).toString() == kickFile.getFullPathName(),
+                           "kick item carries its absolute path");
+                    check (! it.hasProperty ("rootNote"), "a role with no measured root_note omits rootNote");
+                }
+                if (it.getProperty ("role", var()).toString() == "bass")
+                {
+                    foundBass = true;
+                    check ((int) it.getProperty ("rootNote", -1) == 33, "bass item carries its measured rootNote");
+                }
+            }
+            check (foundKick && foundBass, "both surviving items are present with the right roles");
+        }
+
+        // MOSH_PALETTE_MANIFEST env override — the harness path, mirrors MOSH_KITS_USER_DIR
+        // (JUCE ignores $HOME, so a test must never depend on the real user library).
+        ::setenv ("MOSH_PALETTE_MANIFEST", manifest.getFullPathName().toRawUTF8(), 1);
+        auto lpEnv = cmd (ops, "list_palette");
+        check (ok (lpEnv), "list_palette ok via MOSH_PALETTE_MANIFEST env override");
+        auto* envItems = lpEnv["data"].getProperty ("items", var()).getArray();
+        check (envItems != nullptr && envItems->size() == 2, "env override resolves the same manifest");
+        ::unsetenv ("MOSH_PALETTE_MANIFEST");
+
+        // Missing manifest file → errResult, not a crash or a silent empty ok.
+        auto lpMissing = cmd (ops, "list_palette",
+                               args1 ("manifest", tmpDir.getChildFile ("no-such-manifest.json").getFullPathName()));
+        check (! ok (lpMissing), "list_palette errors on a missing manifest file");
+
+        // Malformed JSON → errResult.
+        auto badManifest = tmpDir.getChildFile ("bad.json");
+        badManifest.replaceWithText ("{ not json");
+        auto lpBad = cmd (ops, "list_palette", args1 ("manifest", badManifest.getFullPathName()));
+        check (! ok (lpBad), "list_palette errors on malformed JSON");
+
+        tmpDir.deleteRecursively();
     }
 
     // --- DRM-002: add_drum_pattern — a whole drum grid in ONE undoable command ---
@@ -6461,13 +6819,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 10 }}))),
                    "humanize ok");
             const auto run1 = notesOf (nc);
-            { bool inRange = run1.size() == fixture.size();
-              for (size_t i = 0; i < run1.size() && inRange; ++i)
-                  inRange = std::abs (std::get<0> (run1[i]) - std::get<0> (fixture[i])) <= 0.025 + 1.0e-9
-                         && std::abs (std::get<2> (run1[i]) - std::get<2> (fixture[i])) < 1.0e-9
-                         && std::get<1> (run1[i]) == std::get<1> (fixture[i])
-                         && std::abs (std::get<3> (run1[i]) - std::get<3> (fixture[i])) <= 11
-                         && std::get<3> (run1[i]) >= 1 && std::get<3> (run1[i]) <= 127;
+            // Pair notes BY PITCH (unique in this fixture), not by sorted position:
+            // two fixture notes tie at start 2.0, so ±jitter can flip their sort
+            // order depending on the humanize seed — which is seeded per command
+            // and therefore shifts whenever ANY earlier section adds a command.
+            // Position-pairing made this check fail on unrelated selftest growth.
+            { auto byPitch = [] (auto v) {
+                  std::sort (v.begin(), v.end(), [] (const auto& a, const auto& b)
+                             { return std::get<1> (a) < std::get<1> (b); });
+                  return v; };
+              const auto r1 = byPitch (run1);
+              const auto fx = byPitch (fixture);
+              bool inRange = r1.size() == fx.size();
+              for (size_t i = 0; i < r1.size() && inRange; ++i)
+                  inRange = std::abs (std::get<0> (r1[i]) - std::get<0> (fx[i])) <= 0.025 + 1.0e-9
+                         && std::abs (std::get<2> (r1[i]) - std::get<2> (fx[i])) < 1.0e-9
+                         && std::get<1> (r1[i]) == std::get<1> (fx[i])
+                         && std::abs (std::get<3> (r1[i]) - std::get<3> (fx[i])) <= 11
+                         && std::get<3> (r1[i]) >= 1 && std::get<3> (r1[i]) <= 127;
               check (inRange, "humanize: timing within ±(amount% of a 16th), velocity within ±amount, pitches/lengths untouched"); }
             check (! matchNotes (run1, fixture), "humanize actually moved something");
             undoRestores ("undo after humanize ok");
@@ -11809,12 +12178,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         mosh::setEnvVar ("XAI_MODEL", "grok-test");
         mosh::setEnvVar ("XAI_API_KEY", "sk-test-xai");
         mosh::unsetEnvVar ("OPENAI_API_KEY");          // leave openai incomplete
+        mosh::unsetEnvVar ("OPENROUTER_API_KEY");       // leave openrouter incomplete for now
         mosh::setEnvVar ("MOSHI_BRAIN_PROVIDER", "xai");
 
         auto info  = BrainProxy::providersInfo();
         auto provs = info.getProperty ("providers", var());
-        check (provs.isArray() && provs.getArray()->size() == 3,
-               "brain: three providers enumerated (deepseek/openai/xai)");
+        check (provs.isArray() && provs.getArray()->size() == 4,
+               "brain: four providers enumerated (deepseek/openai/xai/openrouter)");
 
         auto chosen = BrainProxy::resolve();    // honours MOSHI_BRAIN_PROVIDER=xai
         check (chosen.id == "xai", "brain: MOSHI_BRAIN_PROVIDER selects the default provider");
@@ -11832,6 +12202,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) badShape.getProperty ("ok", true)
                    && badShape.getProperty ("error", var()).toString().isNotEmpty(),
                "brain: chat() rejects a non-array messages payload with an error shape");
+
+        // W1.1 — the openrouter provider + per-call ChatOptions.
+        mosh::setEnvVar ("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
+        mosh::setEnvVar ("OPENROUTER_MODEL", "anthropic/claude-sonnet-5");
+        mosh::setEnvVar ("OPENROUTER_API_KEY", "sk-or-test");
+        check (BrainProxy::resolve ("openrouter").id == "openrouter",
+               "brain: an explicit openrouter provider resolves once fully configured");
+
+        const auto defaultPayload = BrainProxy::requestPayload (
+            BrainProxy::resolve ("deepseek"), var (Array<var>{}));   // default ChatOptions
+        check ((int) defaultPayload.getProperty ("max_tokens", 0) == 800
+                   && std::abs ((double) defaultPayload.getProperty ("temperature", 0.0) - 0.6) < 1e-9,
+               "brain: default ChatOptions reproduce the byte-identical 800-token/0.6-temp payload");
+
+        BrainProxy::ChatOptions produceOpts;
+        produceOpts.maxTokens = 8192;
+        produceOpts.timeoutMs = 180000;
+        const auto producePayload = BrainProxy::requestPayload (
+            BrainProxy::resolve ("openrouter"), var (Array<var>{}), produceOpts);
+        check ((int) producePayload.getProperty ("max_tokens", 0) == 8192
+                   && BrainProxy::requestTimeoutMs (BrainProxy::resolve ("openrouter"), produceOpts) == 180000,
+               "brain: ChatOptions override max_tokens and the request timeout");
+
+        auto* rawOpts = new juce::DynamicObject();
+        rawOpts->setProperty ("maxTokens", 999999);
+        rawOpts->setProperty ("timeoutMs", -5);
+        const auto clamped = BrainProxy::optionsFromVar (var (rawOpts));
+        check (clamped.maxTokens == 32768 && clamped.timeoutMs == 1000,
+               "brain: optionsFromVar clamps out-of-range maxTokens/timeoutMs to [1,32768]/[1000,600000]");
+
+        mosh::unsetEnvVar ("OPENROUTER_API_KEY"); mosh::unsetEnvVar ("OPENROUTER_BASE_URL"); mosh::unsetEnvVar ("OPENROUTER_MODEL");
 
         // Clear every key → no provider resolves and chat() errors cleanly (no network).
         mosh::unsetEnvVar ("DEEPSEEK_API_KEY"); mosh::unsetEnvVar ("XAI_API_KEY"); mosh::unsetEnvVar ("MOSHI_BRAIN_PROVIDER");
@@ -15479,6 +15880,70 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Clean up the fixture track so the harness leaves the session as it found it.
         cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
+    }
+
+    {
+        section ("generate_beat_recipe: recipe-command allowlist (2026-09 overnight postmortem)");
+
+        // Hermetic via args.__prefetchedProgram (MoshOps.cpp:2253-2255) — no generative
+        // service involved. Proves the native gate isGeneratedRecipeCommandAllowed
+        // (MoshOps.cpp:200-213) directly against the exact shape the compiled recipe
+        // program emits (service/teardown/render/compile.py: create_track+capture per
+        // element, then a per-track set_track_volume headroom trim at :314-319) — the
+        // allowlist gap that undid every generated recipe's tracks overnight.
+        auto prefetchedProgram = [] (Array<var> steps) -> var
+        {
+            return objN ({ { "ok", var (true) },
+                           { "program", objN ({ { "commands", var (steps) } }) } });
+        };
+
+        const int tracksBefore = tracks (ops);
+
+        Array<var> allowedSteps;
+        allowedSteps.add (objN ({ { "command", var ("create_track") },
+                                  { "args", objN ({ { "name", var ("SelfTest Recipe Track") },
+                                                    { "type", var ("audio") } }) },
+                                  { "capture", objN ({ { "T0", var ("trackId") } }) } }));
+        allowedSteps.add (objN ({ { "command", var ("set_track_volume") },
+                                  { "args", objN ({ { "trackId", var ("${T0}") },
+                                                    { "db", var (-4.5) } }) } }));
+        auto allowedResult = cmd (ops, "generate_beat_recipe",
+                                  objN ({ { "__prefetchedProgram", prefetchedProgram (allowedSteps) } }));
+        check (ok (allowedResult),
+              "generate_beat_recipe applies an allowed program (create_track + set_track_volume)");
+        check ((int) allowedResult["data"].getProperty ("appliedCount", 0) == 2,
+              "…both steps applied: create_track, then the set_track_volume headroom trim");
+        check (tracks (ops) == tracksBefore + 1, "…and the track it created is really there");
+
+        // Clean up the fixture track so the harness leaves the session as it found it.
+        {
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tv : *arr)
+                    if (tv.getProperty ("name", var()).toString() == "SelfTest Recipe Track")
+                        cmd (ops, "remove_track", objN ({ { "trackId", tv.getProperty ("id", var()) } }));
+        }
+        check (tracks (ops) == tracksBefore, "…and cleanup leaves the track count as found");
+
+        Array<var> disallowedSteps;
+        disallowedSteps.add (objN ({ { "command", var ("create_track") },
+                                     { "args", objN ({ { "name", var ("SelfTest Recipe Track 2") },
+                                                       { "type", var ("audio") } }) },
+                                     { "capture", objN ({ { "T0", var ("trackId") } }) } }));
+        // Any real, unrelated mutating command absent from isGeneratedRecipeCommandAllowed
+        // proves the same thing set_track_volume used to: the allowlist, not a hard-coded
+        // name list mirrored here, is what decides.
+        disallowedSteps.add (objN ({ { "command", var ("load_plugin") },
+                                     { "args", objN ({ { "trackId", var ("${T0}") },
+                                                       { "pluginId", var ("4OSC") } }) } }));
+        auto disallowedResult = cmd (ops, "generate_beat_recipe",
+                                     objN ({ { "__prefetchedProgram", prefetchedProgram (disallowedSteps) } }));
+        check (! ok (disallowedResult),
+              "generate_beat_recipe REJECTS a program containing a disallowed command");
+        check (disallowedResult.getProperty ("error", var()).toString().contains ("disallowed command"),
+              "…and the error names it \"disallowed command\"");
+        check (tracks (ops) == tracksBefore,
+              "…and the create_track step it DID apply was undone along with the rest of the batch");
     }
 
     finishSection();

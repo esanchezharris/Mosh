@@ -274,6 +274,16 @@
 }
 .v2-menu-panel-floating .v2-menu button[data-highlighted] { background: var(--v2-accent-soft); }
 
+/* Base UI renders Popup inside a Positioner ([role="presentation"]) inside the portal.
+   The POSITIONER owns the stacking context, so .v2-menu-panel-floating's own z-index
+   cannot lift the menu above the arrangement's sticky ruler (.v2-ruler-cell /
+   .v2-corner-ruler). While the add-track menu was four items tall it never reached the
+   ruler; the fifth entry ("Recipe beat") made it tall enough that the ruler painted over
+   the lower items and swallowed their clicks — the button was visible and enabled, and
+   the ruler intercepted the pointer. Pro Tools already needed this rule
+   (protools/css/toolbar.css); scoped here to v2's own menus. */
+[data-base-ui-portal]:has(.v2-menu) > [data-open][role="presentation"] { z-index: 60; }
+
 /* REC-001 — the take-behaviour panel. A settings sheet rather than a menu: rows are
    label-over-hint with their control on the right, so each toggle explains what it does
    without a tooltip. Every colour is a token (the theme guard rejects raw hex). */

@@ -36,6 +36,7 @@ const B = (name: string, required = true, desc?: string): ArgSpec => ({ name, ty
 export const BUILTIN_TYPES = [
   "4osc", "sampler", "4bandEq", "compressor", "reverb", "delay", "chorus",
   "phaser", "lowpass", "pitchShifter", "moshAutoTune", "moshOTT", "moshXFeedback",
+  "highpass", "softclip",
 ] as const;
 
 export const AGENT_COMMANDS: AgentCommand[] = [
@@ -115,6 +116,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
   { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
+
+  // ── curated recipe generation (owner groove library + palette one-shots) ──
+  { command: "generate_beat_recipe", desc: "Generate a full multi-element beat from the curated recipe library: retrieves real grooves, recombines per-element motifs (drums/808/chords/lead), binds a real one-shot sound per role from the palette, and applies it all as ONE undoable batch — the strongest 'lay down a real-sounding beat' move; slow (the local service may cold-start), so call it once, not in a loop", args: [S("mood", false, "vibe words steering retrieval, e.g. 'dark bounce'"), N("tempo", false, "BPM; omit to let the recipe choose"), S("key", false, "e.g. 'F minor'; omit to let the recipe choose"), N("seed", false, "set for a reproducible pick"), B("lead", false, "include a lead line (default yes)")] },
 
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
@@ -208,11 +212,13 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "list_builtins", desc: "List the built-in effects/instruments with their display names + categories (read-only) — you do NOT need this to load one, the 'type' names are already listed on load_builtin", args: [] },
   { command: "list_plugins", desc: "List the scanned VST3/AU plugins available to load (read-only) — the 'pluginId' names load_plugin/load_master_plugin take", args: [] },
-  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track. type is EXACTLY one of: 4osc, sampler, 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune, moshOTT, moshXFeedback (an EQ is \"4bandEq\" — \"eq\" is rejected)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
+  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track. type is EXACTLY one of: 4osc, sampler, 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune, moshOTT, moshXFeedback, highpass, softclip (an EQ is \"4bandEq\" — \"eq\" is rejected; \"highpass\" is a dedicated high-pass filter distinct from \"lowpass\"; \"softclip\" is a tanh soft clipper)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
   { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
   { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash) — omit kit for the bundled default", args: [S("trackId"), S("kit", false, "kit id from list_drum_kits")] },
   { command: "assign_sample", desc: "Map an audio file to a track's sampler: mode 'drum' (default, one-shot pad at one note) or 'melodic' (a pitched 808/bass played across the keyboard, note-length gated)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127: the pad (drum) or the sample's root note (melodic)"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false), S("mode", false, "'drum' (default) or 'melodic'")] },
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins). An INSTRUMENT is refused on a track holding audio clips (silent-by-construction) — use an instrument track. replaceInstrument:true hot-swaps an incoming instrument for the track's current one (same slot, one undo step) instead of stacking", args: [S("trackId"), S("pluginId"), N("index", false, "chain position"), B("replaceInstrument", false, "incoming instrument replaces the track's existing one instead of appending")] },
+  { command: "list_presets", desc: "List the instrument preset library (read-only): bundled + user presets under presets/<plugin>/ — the 'file' paths load_preset takes. Plugin keys today: 'vital' (.vital patches) and '4osc' (built-in synth patches)", args: [S("plugin", false, "filter to one plugin key, e.g. 'vital' or '4osc'")] },
+  { command: "load_preset", desc: "Load a preset onto a track's instrument as one undo step (file from list_presets). A .vital targets the track's hosted Vital only (never another synth); a .json targets the built-in 4OSC. This is how a melodic track gets a REAL sound instead of the default patch", args: [S("trackId"), S("file", true, "preset file path from list_presets"), N("index", false, "target a specific plugin chain position; omit to auto-find the instrument")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
   { command: "bypass_plugin", desc: "Bypass/enable a plugin in a track's chain", args: [S("trackId"), N("index"), B("bypassed")] },
   { command: "reorder_plugin", desc: "Move a plugin to a new chain position", args: [S("trackId"), N("index"), N("toIndex")] },
@@ -385,6 +391,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_clip_warp": return a.autoTempo ? `Warped a clip to follow the tempo${a.detect ? " (detected its BPM)" : ""}` : `Turned off a clip's warp`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
+    case "generate_beat_recipe": return `Generated a beat from the recipe library`;
     case "add_note": {
       const noteCount = Array.isArray(args.notes) ? args.notes.length : 1;
       return noteCount > 1 ? `Added ${noteCount} melody notes` : `Added a note`;
@@ -440,6 +447,8 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "load_drum_kit": return `Loaded the drum kit`;
     case "assign_sample": return `Assigned a sample to a pad`;
     case "load_plugin": return `Added a plugin`;
+    case "list_presets": return `Listed the preset library`;
+    case "load_preset": return `Loaded an instrument preset`;
     case "set_plugin_param": return `Tweaked a plugin parameter`;
     case "bypass_plugin": return a.bypassed ? `Bypassed a plugin` : `Enabled a plugin`;
     case "reorder_plugin": return `Reordered a plugin`;

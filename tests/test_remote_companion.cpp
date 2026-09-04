@@ -169,6 +169,82 @@ TEST_CASE ("remote companion server rejects unauthenticated commands and routes 
     server.stopServer();
 }
 
+TEST_CASE ("remote companion server still routes /command and /snapshot when the request carries a timeoutMs field", "[remote][server][timeout]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("mosh-remote-server-timeout-field-test");
+    root.deleteRecursively();
+
+    RemoteCompanionServer server (root);
+    int calls = 0;
+    server.setCommandHandler ([&] (const juce::var& command) {
+        ++calls;
+        auto* result = new juce::DynamicObject();
+        result->setProperty ("ok", true);
+        result->setProperty ("command", command.getProperty ("command", {}).toString());
+        return juce::var (result);
+    });
+    server.setSnapshotProvider ([&] {
+        auto* data = new juce::DynamicObject();
+        data->setProperty ("fake", true);
+        return juce::var (data);
+    });
+
+    auto pairingResult = startPairingOnFreePort (server);
+    REQUIRE ((bool) pairingResult.getProperty ("ok", false));
+    const auto token = pairingResult.getProperty ("data", {}).getProperty ("pairing", {}).getProperty ("token", {}).toString();
+    REQUIRE (token.isNotEmpty());
+
+    auto* command = new juce::DynamicObject();
+    command->setProperty ("command", "export_audio");
+
+    auto* commandBody = new juce::DynamicObject();
+    commandBody->setProperty ("token", token);
+    commandBody->setProperty ("command", juce::var (command));
+    commandBody->setProperty ("timeoutMs", 45000);   // an export_audio-sized budget, well above the 5s default
+    auto commandResult = server.handleTestRequest ("POST", "/command", juce::var (commandBody));
+    REQUIRE ((bool) commandResult.getProperty ("ok", false));
+    REQUIRE (calls == 1);
+
+    auto* snapshotBody = new juce::DynamicObject();
+    snapshotBody->setProperty ("token", token);
+    snapshotBody->setProperty ("timeoutMs", 20000);
+    auto snapshotResult = server.handleTestRequest ("POST", "/snapshot", juce::var (snapshotBody));
+    REQUIRE ((bool) snapshotResult.getProperty ("ok", false));
+    REQUIRE ((bool) snapshotResult.getProperty ("data", {}).getProperty ("fake", false));
+
+    server.stopServer();
+}
+
+// W3.1 — /snapshot and /command honour a caller-supplied `timeoutMs`, clamped to
+// [1000, 600000] (absent -> the pre-existing 5000ms default). callOnMessageThread's
+// actual async/cross-thread wait can't be exercised end-to-end here: MoshTests
+// doesn't define JUCE_MODAL_LOOPS_PERMITTED (no runDispatchLoopUntil), and
+// runDispatchLoop()'s only exit — stopDispatchLoop() — permanently stops the shared
+// MessageManager from posting ANY message for the rest of the test process (every
+// later handleTestRequest call from a different thread would silently "time out").
+// So this pins the EXACT clamp function both routes call via a MOSH_TESTING-only
+// static forward (testCompanionTimeoutMsFromBody), which is the part most likely to
+// carry an off-by-one; the one-line `callOnMessageThread(..., timeoutMsFromBody(body))`
+// wiring at the two call sites is a direct code read, not exercised by a running test.
+TEST_CASE ("remote companion clamps a caller-supplied timeoutMs to [1000,600000], defaulting to 5000", "[remote][server][timeout]")
+{
+    auto bodyWithTimeout = [] (juce::var value) {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("timeoutMs", value);
+        return juce::var (o);
+    };
+
+    CHECK (RemoteCompanionServer::testCompanionTimeoutMsFromBody (bodyWithTimeout (1)) == 1000);          // below the floor -> clamped up
+    CHECK (RemoteCompanionServer::testCompanionTimeoutMsFromBody (bodyWithTimeout (1000)) == 1000);       // exactly the floor
+    CHECK (RemoteCompanionServer::testCompanionTimeoutMsFromBody (bodyWithTimeout (45000)) == 45000);     // an honoured mid-range value (export_audio-sized)
+    CHECK (RemoteCompanionServer::testCompanionTimeoutMsFromBody (bodyWithTimeout (600000)) == 600000);   // exactly the ceiling
+    CHECK (RemoteCompanionServer::testCompanionTimeoutMsFromBody (bodyWithTimeout (5000000)) == 600000);  // above the ceiling -> clamped down
+    CHECK (RemoteCompanionServer::testCompanionTimeoutMsFromBody (juce::var (new juce::DynamicObject())) == 5000);   // absent -> unchanged default
+}
+
 TEST_CASE ("remote companion server accepts standard Base64 phone take chunks", "[remote][takes]")
 {
     juce::ScopedJuceInitialiser_GUI juce;
