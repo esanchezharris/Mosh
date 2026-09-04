@@ -920,8 +920,8 @@ private:
     void  logLine (const juce::String& command, const juce::var& args,
                    bool ok, const juce::String& error, bool undoable);
     // TASTE-002 — the in-place workflow's soft POSITIVE: at save/export time, every
-    // still-applied (appliedInPlace, not bypassed) render layer logs ONE render_kept
-    // JSONL taste label, deduped on layerId for the life of this process.
+    // still-applied (appliedInPlace, not bypassed, not explicitly rejected) render layer
+    // logs ONE render_kept JSONL taste label, deduped on layerId for the life of this process.
     void  logKeptRenderLabels();
     juce::StringArray renderKeptLogged_;
 

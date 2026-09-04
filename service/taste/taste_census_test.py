@@ -39,6 +39,7 @@ def _line(ts, seq, command, args, ok=True, undoable=True):
 # The exact 7-command harness replay observed in the real archive (06-11..06-13):
 # create_track, import_clip, create_render_layer, set_render_param, render_layer,
 # accept_render, reject_render — accept AND reject on the same clip, seconds apart.
+# Both labels carry their own join keys, matching MoshOps::cmdAcceptRender/cmdRejectRender.
 def _scripted_boot(t0, layer_id):
     return [
         _line(t0 + 0, 1, "create_track", {"name": "t"}),
@@ -48,7 +49,9 @@ def _scripted_boot(t0, layer_id):
         _line(t0 + 400, 5, "render_layer", {"clipId": "1023"}),
         _line(t0 + 8000, 6, "accept_render",
               {"clipId": "1023", "layerId": layer_id, "landing": "new_clip"}),
-        _line(t0 + 9500, 7, "reject_render", {"clipId": "1023"}),
+        _line(t0 + 9500, 7, "reject_render",
+              {"clipId": "1023", "layerId": layer_id, "cacheKey": "ck-1023",
+               "adapter": "fake"}),
     ]
 
 
@@ -167,6 +170,72 @@ with tempfile.TemporaryDirectory() as td:
           u_all["undos"] == 7 and u_all["organic_undos"] == 1
           and u_all["organic_after"] == {"move_clip": 1},
           json.dumps(u_all, sort_keys=True))
+
+    # A reject joins on its OWN layerId, not on a neighbouring accept's. Proven by making the
+    # two DIFFER: the clip is accepted on rl-old, re-rendered, then rejected on rl-new. The
+    # last-layer-for-clip fallback would attribute the reject to rl-old and pair the negative
+    # with the wrong audio; the row's own key is the only thing that gets this right.
+    with tempfile.TemporaryDirectory() as td2:
+        boot = [
+            _line(1_783_000_000_000, 1, "enable_all_meters", {}),
+            _line(1_783_000_001_000, 2, "render_layer", {"clipId": "55"}),
+            _line(1_783_000_002_000, 3, "set_transport", {"position": 1.0}),
+            _line(1_783_000_003_000, 4, "accept_render",
+                  {"clipId": "55", "layerId": "rl-old", "landing": "new_clip"}),
+            _line(1_783_000_004_000, 5, "render_layer", {"clipId": "55"}),
+            _line(1_783_000_005_000, 6, "set_transport", {"position": 2.0}),
+            _line(1_783_000_006_000, 7, "reject_render",
+                  {"clipId": "55", "layerId": "rl-new", "cacheKey": "ck-new",
+                   "adapter": "stable_audio3"}),
+        ]
+        _write_session(td2, boots=[boot], renders=[
+            ("rl-old", {"ok": True, "adapter": "fake", "pq": 1.0}, True),
+            ("rl-new", {"ok": True, "adapter": "stable_audio3", "pq": 2.0}, True),
+        ])
+        j2 = census.join_renders(td2, census.label_rows(
+            census.parse_boots(os.path.join(td2, "mosh-log.jsonl"))))
+        rej = [r for r in j2 if r["verdict"] == "reject"]
+        check("reject joins on its own layerId, not the preceding accept's",
+              len(rej) == 1 and rej[0]["layerId"] == "rl-new"
+              and rej[0]["adapter"] == "stable_audio3", json.dumps(rej, sort_keys=True))
+
+    # LEGACY archive rows: rejects logged before the join-key fix carry clipId alone. The
+    # fallback still recovers them from the boot's most recent layerId for that clip, so the
+    # scarce existing archive stays readable.
+    with tempfile.TemporaryDirectory() as td3:
+        boot = [
+            _line(1_784_000_000_000, 1, "enable_all_meters", {}),
+            _line(1_784_000_001_000, 2, "render_layer", {"clipId": "66"}),
+            _line(1_784_000_002_000, 3, "set_transport", {"position": 1.0}),
+            _line(1_784_000_003_000, 4, "accept_render",
+                  {"clipId": "66", "layerId": "rl-legacy", "landing": "new_clip"}),
+            _line(1_784_000_004_000, 5, "reject_render", {"clipId": "66"}),   # pre-fix shape
+        ]
+        _write_session(td3, boots=[boot], renders=[
+            ("rl-legacy", {"ok": True, "adapter": "fake", "pq": 3.0}, True)])
+        j3 = census.join_renders(td3, census.label_rows(
+            census.parse_boots(os.path.join(td3, "mosh-log.jsonl"))))
+        legacy = [r for r in j3 if r["verdict"] == "reject"]
+        check("legacy key-less reject still recovers a layerId (archive stays readable)",
+              len(legacy) == 1 and legacy[0]["layerId"] == "rl-legacy"
+              and legacy[0]["wav"] is not None, json.dumps(legacy, sort_keys=True))
+
+    # An unrecoverable legacy reject (no layerId anywhere for the clip) stays HONESTLY
+    # unjoined — it is never attached to some other clip's render.
+    with tempfile.TemporaryDirectory() as td4:
+        boot = [
+            _line(1_785_000_000_000, 1, "enable_all_meters", {}),
+            _line(1_785_000_001_000, 2, "render_layer", {"clipId": "77"}),
+            _line(1_785_000_002_000, 3, "set_transport", {"position": 1.0}),
+            _line(1_785_000_003_000, 4, "reject_render", {"clipId": "77"}),   # pre-fix, no accept
+        ]
+        _write_session(td4, boots=[boot], renders=[
+            ("rl-other", {"ok": True, "adapter": "fake", "pq": 3.0}, True)])
+        j4 = census.join_renders(td4, census.label_rows(
+            census.parse_boots(os.path.join(td4, "mosh-log.jsonl"))))
+        check("an unrecoverable legacy reject stays unjoined (no wrong-render guess)",
+              len(j4) == 1 and j4[0]["layerId"] is None and j4[0]["wav"] is None,
+              json.dumps(j4, sort_keys=True))
 
     # Determinism: summarize twice — byte-identical JSON.
     s1 = json.dumps(census.summarize(td), sort_keys=True)

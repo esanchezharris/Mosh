@@ -4091,23 +4091,41 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (rejectsForClip == 1, "reject_render logged exactly ONE taste label for this clip");
                 check ((bool) lastReject.getProperty ("undoable", false),
                        "reject_render is logged undoable:true (it opens a real Tracktion txn)");
-                // Honest limit, pinned deliberately: unlike cmdResetRenderLayer — which builds an
-                // enriched label carrying layerId/cacheKey/adapter — cmdRejectRender logs its RAW
-                // args, so the negative label has no join keys of its own. service/taste/census.py
-                // compensates by recovering layerId from the boot's most recent accept. Asserting
-                // clipId (not the absence of the others) keeps this test green when that gap is fixed.
-                check (lastReject.getProperty ("args", var()).getProperty ("clipId", var()).toString() == tcid,
-                       "reject taste label carries clipId (the census's join key today)");
+                // The negative carries its OWN join keys, exactly as the reset negative and the
+                // render_kept positive do. It used to log the caller's RAW args (clipId only), so
+                // service/taste/census.py had to recover layerId by guessing it from the boot's
+                // most recent accept — a heuristic that mis-attributes the moment a boot rejects a
+                // take that was never accepted. These four pin the label the census actually joins on.
+                const auto rja = lastReject.getProperty ("args", var());
+                check (rja.getProperty ("clipId", var()).toString() == tcid,
+                       "reject taste label carries clipId");
+                check (rja.getProperty ("layerId", var()).toString() == tailLayer (tcid).getProperty ("id", var()).toString()
+                           && rja.getProperty ("layerId", var()).toString().isNotEmpty(),
+                       "reject taste label carries layerId (joins to renders/<layerId>/ with no heuristic)");
+                check (rja.getProperty ("cacheKey", var()).toString().isNotEmpty(),
+                       "reject taste label carries the render cacheKey");
+                check (rja.getProperty ("adapter", var()).toString() == "fake",
+                       "reject taste label carries the adapter");
             }
 
             // reject marks the take dirty; it does NOT unwind the in-place apply (cmdRemoveRenderLayer
-            // says so in its own note). Pinned because it has a consequence worth seeing: the layer is
-            // still appliedInPlace, and logKeptRenderLabels() sweeps every applied, non-bypassed layer
-            // on the next save/export — so an explicitly REJECTED take still earns an implicit
-            // render_kept POSITIVE. Flagged as a follow-up, deliberately not changed here: taste-label
-            // semantics have downstream consumers (service/taste/census.py, taste_table).
+            // says so in its own note) — that stays reset_render_layer's job, and changing it would
+            // change what the producer HEARS after a reject.
             check ((bool) tailLayer (tcid).getProperty ("appliedInPlace", false),
                    "reject_render does NOT unwind the in-place apply (reject != reset)");
+
+            // ...which is exactly why the reject must be excluded from the render_kept sweep by an
+            // explicit flag rather than by the apply state. logKeptRenderLabels() takes every
+            // applied, non-bypassed layer at save/export time as a soft POSITIVE; a rejected take is
+            // still applied, so before the fix the very next save wrote render_kept for a take the
+            // producer had just said NO to — a hard negative overwritten by a soft positive in an
+            // archive that has almost no organic labels to spare. (userKept cannot carry this:
+            // RenderLayer.h stamps userKept=false on EVERY layer, so it is a default, not a verdict.)
+            const auto tailLayerId = tailLayer (tcid).getProperty ("id", var()).toString();
+            check (keptFor (tailLayerId) == 0, "precondition: no render_kept for the tail layer yet");
+            check (ok (cmd (ops, "save")), "save after reject ok (the render_kept sweep runs)");
+            check (keptFor (tailLayerId) == 0,
+                   "a REJECTED take earns NO render_kept positive (the sweep skips it)");
 
             // Housekeeping: drop the layer so this section's applied take cannot leak a second
             // render_kept into the export-count assertions in the sections below.
