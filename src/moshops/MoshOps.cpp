@@ -897,6 +897,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     // resyncs through the ordinary structural path.
     if (name == "set_record_options") return broadcastStructuralIfActive (name, args, cmdSetRecordOptions (args));
     if (name == "capture_midi")      return cmdCaptureMidi (args);
+    // CAP-001 — crash-residue takes: a read plus two explicit human decisions.
+    if (name == "list_recording_residue")       return cmdListRecordingResidue (args);
+    if (name == "adopt_recording_residue")      return cmdAdoptRecordingResidue (args);
+    if (name == "quarantine_recording_residue") return cmdQuarantineRecordingResidue (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -3179,6 +3183,9 @@ juce::var MoshOps::snapshot()
     {
         session->setProperty ("recoveryAvailable", true);
         session->setProperty ("recoverableCount", pendingRecovery_.size());
+        // CAP-001 — take WAVs the crash left behind that no clip references. Only listed
+        // after an unclean exit (the notice's job); list_recording_residue answers anytime.
+        session->setProperty ("recordingResidue", recordingResidueToVar());
     }
     // FS-T2 — the crash happened WHILE loading these third-party plugins, so the normal
     // recovery offer is not enough: reopening the project re-crashes on the same plugin.
@@ -3714,6 +3721,17 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (&c))
     {
         o->setProperty ("type", "wave");
+        // CAP-001 — present only for takes landed by stop_recording (measured once there).
+        // silent == peak below -80 dBFS: the interface was muted or the wrong input was
+        // armed. Imports/renders stay honestly unmeasured (no key at all).
+        if (c.state.hasProperty (ids::moshPeakLevel))
+        {
+            const double peak = (double) c.state.getProperty (ids::moshPeakLevel);
+            o->setProperty ("peakLevel", peak);
+            o->setProperty ("silent", peak < 1.0e-4);
+        }
+        if ((bool) c.state.getProperty (ids::moshRecovered, false))
+            o->setProperty ("recovered", true);
         // A REVERSED clip's CURRENT source is a per-session temp proxy
         // (~/Library/Mosh/Temporary/edit_0_xx — a different name every reload); the UI
         // must see the USER's file, and sourceMissing must cue relink on the original,

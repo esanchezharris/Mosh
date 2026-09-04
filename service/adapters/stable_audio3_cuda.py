@@ -28,7 +28,7 @@ JUDGE = os.environ.get("MOSH_JUDGE", "dsp")
 LATENT_CACHE_MAX = int(os.environ.get("MOSH_SA3_LATENT_CACHE", "8"))
 # One render window. Must agree with the native side's ra.winLen (render-ahead) and
 # the MLX engine's pinned SA3_SECONDS — setup-sa3-cuda.ps1 persists SA3_SECONDS so
-# the coupling is explicit. Long clips are covered by coverage.render windows.
+# the coupling is explicit. Long clips are covered by clip_coverage.render windows.
 WINDOW_SECONDS = min(MAX_DURATION, float(os.environ.get("SA3_SECONDS", "8.0")))
 # Sampler tuning is ENGINE-LEVEL config (env), NOT a per-render param — the exact
 # posture of the MLX engine's SA3_STEPS. The native side no longer sends cfg/steps
@@ -424,7 +424,7 @@ def _write_wav(path: str, audio, sr: int):
 def render(input_wav: str, output_wav: str, params: dict) -> dict:
     import torch
 
-    import coverage
+    import clip_coverage
     from adapters import stable_audio3_adapter as _canon   # NL guard constants
     from loras import registry as LR
 
@@ -455,7 +455,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
 
     def _render_window(in_wav, out_wav, p):
         # ONE SA3 window (<= WINDOW_SECONDS). Re-imagine when this window has a
-        # source + nl, else generate. coverage.render slices long clips into
+        # source + nl, else generate. clip_coverage.render slices long clips into
         # windows / one loop cycle and passes them through here.
         win_src = bool(in_wav) and os.path.isfile(in_wav)
         nl = p.get("nl", None)
@@ -521,7 +521,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "render_sec": round(time.time() - t0, 2),
         }
 
-    manifest = coverage.render(_render_window, input_wav, output_wav, params, WINDOW_SECONDS)
+    manifest = clip_coverage.render(_render_window, input_wav, output_wav, params, WINDOW_SECONDS)
 
     # Best-effort QA once, on the FINAL (tiled/stitched) output — parity with the
     # MLX adapter's qa.augment_manifest placement; the judge stays the DSP readout.

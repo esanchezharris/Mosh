@@ -71,6 +71,20 @@ export function RecoveryNotice() {
     await refresh();
     dismiss();
   };
+  // CAP-001 — take WAVs the crash left on disk that no clip references. Adopt lands one
+  // through the normal import at its recorded position; Quarantine renames it in place
+  // (never deletes). Both are explicit per-file decisions; the list refreshes after each.
+  const residue = snapshot?.session.recordingResidue ?? [];
+  const onAdopt = async (file: string) => {
+    const r = await exec("adopt_recording_residue", { file });
+    if (!r.ok) useStore.setState({ lastError: r.error ?? "Could not recover the take." });
+    await refresh();
+  };
+  const onQuarantine = async (file: string) => {
+    const r = await exec("quarantine_recording_residue", { file });
+    if (!r.ok) useStore.setState({ lastError: r.error ?? "Could not set the take aside." });
+    await refresh();
+  };
 
   return (
     <div className="error-bar" role="status" aria-live="polite" data-testid="recovery-notice">
@@ -93,6 +107,24 @@ export function RecoveryNotice() {
               {" "}<strong>{count}</strong> unsaved change{count === 1 ? "" : "s"} can be recovered.
               <button type="button" onClick={onRecover} style={{ marginLeft: 8 }} data-testid="recovery-recover">Recover</button>
             </>
+          )}
+          {residue.length > 0 && (
+            <span data-testid="recovery-residue">
+              {" "}<strong>{residue.length}</strong> recording{residue.length === 1 ? "" : "s"} from that session
+              {residue.length === 1 ? " was" : " were"} still on disk:
+              {residue.map((r) => (
+                <span key={r.file} style={{ marginLeft: 8 }} data-testid="recovery-residue-item">
+                  <em>{r.name}</em>
+                  {r.readable || r.repairable ? ` (${r.seconds.toFixed(1)} s, ${r.trackName || "no track"})` : " (unreadable)"}
+                  {r.decision === "adopt" && (
+                    <button type="button" onClick={() => void onAdopt(r.file)} style={{ marginLeft: 4 }}
+                      data-testid="recovery-residue-adopt">Recover take</button>
+                  )}
+                  <button type="button" onClick={() => void onQuarantine(r.file)} style={{ marginLeft: 4 }}
+                    data-testid="recovery-residue-quarantine">Set aside</button>
+                </span>
+              ))}
+            </span>
           )}
           {safe.canOffer && (
             <>

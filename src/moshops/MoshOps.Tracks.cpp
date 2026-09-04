@@ -1237,6 +1237,12 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                                                 beforeCaptureStates[id],
                                                 captureStateForClip (*c)))
                     {
+                        // CAP-001 — measure the landed take ONCE (peak of its source file) so
+                        // the UI can flag a take that captured nothing (a muted interface, the
+                        // wrong input) before the producer sings four more over it. Message
+                        // thread, bounded read; stored non-undoably like the take id above.
+                        // Absent on anything not landed here (imports stay honestly unmeasured).
+                        measureLandedClipPeak (*c);
                         landed.add (clipToVar (*c));
                         trackLanded = true;
                     }
@@ -1261,6 +1267,34 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
             ? "no take captured (no live input)"
             : "one or more armed tracks did not capture a take");
     return okResult ("stop_recording", var (data));
+}
+
+// CAP-001 — see cmdStopRecording. Reads at most 10 minutes of the take in 64k-frame
+// blocks; a longer take reports the peak of its first 10 minutes (a silent take is silent
+// from the start). Never throws, never fails the landing: an unreadable file simply stays
+// unmeasured.
+void MoshOps::measureLandedClipPeak (te::Clip& c)
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (&c);
+    if (w == nullptr) return;
+    const auto file = w->getOriginalFile();
+    if (! file.existsAsFile()) return;
+    juce::AudioFormatManager afm; afm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (afm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0) return;
+    const juce::int64 maxFrames = (juce::int64) (reader->sampleRate * 600.0);
+    const juce::int64 total = juce::jmin (reader->lengthInSamples, maxFrames);
+    constexpr int block = 65536;
+    juce::AudioBuffer<float> buf ((int) reader->numChannels, block);
+    float peak = 0.0f;
+    for (juce::int64 pos = 0; pos < total; pos += block)
+    {
+        const int n = (int) juce::jmin ((juce::int64) block, total - pos);
+        if (! reader->read (&buf, 0, n, pos, true, true)) break;
+        for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+            peak = juce::jmax (peak, buf.getMagnitude (ch, 0, n));
+    }
+    c.state.setProperty (ids::moshPeakLevel, (double) peak, nullptr);   // non-undoable metadata
 }
 
 juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)

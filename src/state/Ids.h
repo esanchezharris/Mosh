@@ -356,6 +356,12 @@ namespace mosh::ids
     // once, on first sight of that take (mosh::takeidentity::backfill), with a NULL
     // UndoManager — a lowercase dashed juce::Uuid string. Never reassigned.
     MOSH_DECLARE_ID (moshTakeId)
+    // CAP-001 — the measured peak (linear, 0..1+) of a landed recording's source file, set
+    // once at landing time so the UI can flag a take that captured nothing. Absent on
+    // imported/generated clips (honestly unmeasured), never re-measured.
+    MOSH_DECLARE_ID (moshPeakLevel)
+    // CAP-001 — the clip was adopted from crash residue (adopt_recording_residue).
+    MOSH_DECLARE_ID (moshRecovered)
 
 #undef MOSH_DECLARE_ID
 } // namespace mosh::ids

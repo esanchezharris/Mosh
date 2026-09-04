@@ -42,6 +42,24 @@ int runLiveAudioSmoke (MoshEngine&, MoshOps&);
     — that is --live-audio-smoke's job. */
 int runMidiRecordSmoke (MoshEngine&, MoshOps&);
 
+/** CAP-001 — `Mosh --record-hold-smoke`: run 1 of the crash-residue test. Creates and
+    saves a named project, arms a track on the live input, starts recording, prints one
+    "RECORD-HOLD: recording ..." line naming the edit file, and then holds the message
+    loop until the process is KILLED (that is the test: tests/crash-residue-smoke.sh
+    sends SIGKILL mid-take, then relaunches headless and asserts the take is offered and
+    adoptable). Writes the liveness sentinel exactly as the GUI does, so the relaunch
+    reads as unclean. Never returns on its own. */
+int runRecordHoldSmoke (MoshEngine&, MoshOps&);
+
+/** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
+    `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
+    matches — proving the speech-to-text path end-to-end with nobody speaking. FILE
+    mode (default) needs only Speech-Recognition auth (no mic). MIC mode
+    (MOSH_VOICE_SMOKE_MIC=1) drives the live mic recognizer while `say` plays into the
+    default input — pair with a BlackHole input for a reliable digital loopback. Needs
+    a one-time Speech (and, for MIC, Microphone) grant; reports clearly if ungranted. */
+int runVoiceSmoke (MoshEngine&, MoshOps&);
+
 /** Headless deep plugin scan (`Mosh --scan-plugins-deep`): a synchronous out-of-
     process VST3 + AudioUnit catalog sweep with the hang-watchdog engaged, then
     prints the catalog + the quarantine list. Returns 0 on success. */

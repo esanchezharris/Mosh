@@ -313,6 +313,18 @@ private:
     // Wave: recording — arm tracks + input monitoring
     juce::var cmdArmTrack       (const juce::var& args);
     juce::var cmdSetInputMonitor (const juce::var& args);
+    // CAP-001 — measure a just-landed take's source peak into ids::moshPeakLevel.
+    void measureLandedClipPeak (te::Clip& c);
+    // CAP-001 — recording residue: take WAVs Tracktion streamed to disk that no clip
+    // references and that are NEWER than the last save (a crash mid-take leaves exactly
+    // this; a removed clip's file predates the save that removed it). list is a read;
+    // adopt lands one through the normal import path at its BWAV time reference on the
+    // track its name carries; quarantine renames it in place (never deletes). Both are
+    // human decisions from the recovery notice — non-undoable, not agent-callable.
+    juce::var cmdListRecordingResidue (const juce::var& args);
+    juce::var cmdAdoptRecordingResidue (const juce::var& args);
+    juce::var cmdQuarantineRecordingResidue (const juce::var& args);
+    juce::var recordingResidueToVar();
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
     // KEEPING takes, drain the async clip-add, return the landed clip ids.
     juce::var cmdStopRecording  (const juce::var& args);

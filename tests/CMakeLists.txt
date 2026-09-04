@@ -40,6 +40,8 @@ target_sources(MoshTests PRIVATE
     test_annotations.cpp
     test_remote_companion.cpp
     test_recording_landing.cpp
+    # CAP-001 — recording residue after an unclean exit (engine-free decisions).
+    test_recording_residue.cpp
     # Skill Foundry Slice B, Task 1 — stable, persisted take identity. Engine-free
     # (juce_core + juce_data_structures only), same posture as RecordingLanding.h/
     # test_recording_landing.cpp above.
@@ -129,6 +131,9 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_data_structures
     juce::juce_events
     juce::juce_cryptography
+    # CAP-001 — test_recording_residue.cpp proves a repaired crash-torn WAV reads back
+    # through a real reader, which needs the WAV codec; still engine-free.
+    juce::juce_audio_formats
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
