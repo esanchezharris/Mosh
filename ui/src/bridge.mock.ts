@@ -3304,6 +3304,43 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "adopt_recording_residue":
     case "quarantine_recording_residue":
       return err(command, `not a recoverable take: ${str(args.file)}`);
+    // LAT-001 — measured latency calibration. The mock has neither speakers nor a mic,
+    // so `start` lands a plausible measurement at once instead of pretending to sweep;
+    // the shapes (every key present, state machine, residual = measured − reported)
+    // mirror native. Machine state, so no pushUndo.
+    case "calibrate_latency": {
+      const s = snapshot.session;
+      const cur: NonNullable<typeof s.latencyCalibration> = s.latencyCalibration ?? {
+        state: "idle", frames: 0, sampleRate: 48000, ms: 0, confidence: 0, measuredAt: "",
+        inputDevice: "", outputDevice: "", method: "farina-sweep-v1",
+        deviceReportedSamples: 0, appliedMs: 0, applied: false, stale: false, error: "",
+      };
+      const action = str(args.action, "status");
+      if (action === "start") {
+        const frames = 412, reported = 256, rate = 48000;
+        s.latencyCalibration = {
+          ...cur, state: "measured", frames, sampleRate: rate, ms: (frames * 1000) / rate,
+          confidence: 0.97, measuredAt: new Date().toISOString(),
+          inputDevice: "Mock Input", outputDevice: "Mock Output",
+          deviceReportedSamples: reported, appliedMs: ((frames - reported) * 1000) / rate,
+          applied: true, stale: false, error: "",
+        };
+        invalidate();
+        return ok(command, { started: true, expectedSeconds: 1.95 });
+      }
+      if (action === "clear") {
+        s.latencyCalibration = { ...cur, state: "idle", frames: 0, ms: 0, confidence: 0, measuredAt: "",
+          appliedMs: 0, applied: false, stale: false, error: "" };
+        invalidate();
+        return ok(command, { ...s.latencyCalibration });
+      }
+      if (action === "status" || action === "apply" || action === "cancel") {
+        s.latencyCalibration = cur;
+        if (action !== "status") invalidate();
+        return ok(command, { ...cur });
+      }
+      return err(command, "action must be start, status, apply, cancel, or clear");
+    }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {

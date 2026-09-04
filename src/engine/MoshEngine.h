@@ -1,6 +1,8 @@
 #pragma once
 
 #include <tracktion_engine/tracktion_engine.h>
+#include "engine/LatencyCalibrationRecord.h"
+#include <optional>
 
 namespace mosh
 {
@@ -76,6 +78,26 @@ public:
         Normal launch is output-only so macOS never asks for microphone access during
         playback, MIDI editing, or project browsing. Empty means success. */
     juce::String activateAudioInput (const juce::String& requestedInputName = {});
+    /** LAT-001 — measured round-trip latency calibration (ported from Moshpit M005/M006).
+        A CalibrationRecord is MACHINE state (session/latency-calibration.json), never
+        project intent. Tracktion already compensates the device-REPORTED input+output
+        latency plus graph PDC when it lands a take; what gets pushed through
+        WaveInputDevice::setRecordAdjustmentMs is only the RESIDUAL (measured minus
+        reported), and only while the record is honoured — same sample rate, same device
+        pair. Otherwise 0 ms is pushed and the record reads as stale: a wrong calibration
+        is worse than none. applyLatencyCalibrationToDevices() runs from
+        ensurePlaybackContext() so a device switch or rate change re-decides. */
+    std::optional<latency::CalibrationRecord> latencyCalibration();
+    void   setLatencyCalibration (const latency::CalibrationRecord& record);  // persist + apply
+    void   clearLatencyCalibration();                                          // delete + push 0
+    void   applyLatencyCalibrationToDevices();
+    bool   latencyCalibrationApplied() const { return calibrationApplied; }
+    bool   latencyCalibrationStale()   const { return calibrationStale; }
+    double latencyCalibrationAppliedMs() const { return calibrationAppliedMs; }
+    /** input + output latency the current device itself reports (what Tracktion's
+        DeviceManager::getRecordAdjustmentSamples() is built from); 0 with no device. */
+    juce::int64 deviceReportedLatencySamples() const;
+    juce::File  latencyCalibrationFile() const { return session.getChildFile ("latency-calibration.json"); }
 
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
@@ -246,6 +268,15 @@ private:
     bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
     juce::String preferredInputDeviceName;
     juce::String audioError;
+
+    // LAT-001 — see latencyCalibration(). Loaded lazily on first use so the ctor's
+    // session-dir setup order is untouched.
+    void loadLatencyCalibrationIfNeeded();
+    std::optional<latency::CalibrationRecord> calibration;
+    bool   calibrationLoaded    = false;
+    bool   calibrationApplied   = false;
+    bool   calibrationStale     = false;
+    double calibrationAppliedMs = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshEngine)
 };

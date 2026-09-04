@@ -147,6 +147,7 @@ public:
         // input instances ⇒ the routing fork is never taken), so it joins liveAudio below.
         const bool midiRecordSmoke = commandLine.contains ("--midi-record-smoke");
         const bool recordHoldSmoke = commandLine.contains ("--record-hold-smoke");   // CAP-001 run 1
+        const bool latencyCalibrationSmoke = commandLine.contains ("--latency-calibration-smoke");   // LAT-001
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool audioRecoveryIsolationSmoke =
             commandLine.contains ("--audio-recovery-isolation-smoke");
@@ -156,7 +157,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke;
+        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke;
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest")
                            || audioRecoverySmoke || audioRecoveryIsolationSmoke;
@@ -550,6 +551,14 @@ public:
         if (liveInstrumentSmoke)
         {
             const int fails = runLiveInstrumentSmoke (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (latencyCalibrationSmoke)
+        {
+            const int fails = runLatencyCalibrationSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;

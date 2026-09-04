@@ -37,6 +37,7 @@ build_training_corpus	Unguarded
 bypass_layer	Clip
 bypass_master_plugin	SessionGlobal
 bypass_plugin	Track
+calibrate_latency	Unguarded
 cancel_lyric_job	Track
 cancel_render	Clip
 cancel_training_job	Unguarded

@@ -1542,6 +1542,7 @@ juce::var MoshOps::cmdSetBufferSize (const juce::var& args)
         return errResult ("set_buffer_size", err);
     }
 
+    eng.applyLatencyCalibrationToDevices();   // LAT-001 — the device restarted; re-decide the residual
     logLine ("set_buffer_size", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
     return okResult ("set_buffer_size", currentAudioSelection());

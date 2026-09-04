@@ -31,6 +31,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   set_audio_device: "audio-device selection is session admin the producer must acknowledge",
   retry_audio_device: "AUD-017 — the response to a device-failed-to-open banner; the producer fixes the hardware, then presses Retry",
   set_buffer_size: "buffer-size changes are session admin the producer must acknowledge",
+  calibrate_latency: "LAT-001 — plays a sweep through the speakers and needs a human at the mic, quiet, for two seconds; a hardware ritual, not a musical move",
   set_audio_threads: "thread-count tuning is session admin the producer must acknowledge",
   set_project_settings: "project-level settings dialog plumbing, not a musical move",
   set_track_input: "physical input routing is set from the track's input picker with the device list in view",
