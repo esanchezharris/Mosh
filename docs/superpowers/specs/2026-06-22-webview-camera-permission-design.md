@@ -27,8 +27,8 @@ to decide camera/mic requests via
 `NSCameraUsageDescription` is **already** injected into the bundle Info.plist
 ([`CMakeLists.txt:170`](../../../CMakeLists.txt)). The only missing piece is the native
 delegate. JUCE 8 exposes no handle to its internal `WKWebView`, so we reach it through
-Objective-C++ — mirroring the existing [`src/voice/NativeSpeech.mm`](../../../src/voice/NativeSpeech.mm)
-pattern (the repo's one precedent for native macOS code).
+Objective-C++. At the time this design was written, the retired native Speech unit was
+the repository's precedent for this pattern.
 
 ---
 

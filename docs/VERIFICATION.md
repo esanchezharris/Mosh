@@ -13,7 +13,7 @@ loopback, we bounce the real signal chain to a file (`export_audio` / `bounce_la
 render-layer job artifacts) and assert on the WAV's contents programmatically
 (non-silent? expected level? did the Tier-B transform / SA3 actually change the audio vs its input?).
 This is deterministic, headless, and needs no one present — you can audition the saved WAVs later.
-Only a few checks are inherently live (mic/voice, two-window multiplayer sync).
+Only a few checks are inherently live (audio-input recording and two-window multiplayer sync).
 
 ## Prerequisites
 
@@ -22,8 +22,8 @@ Only a few checks are inherently live (mic/voice, two-window multiplayer sync).
 | Release `/Applications/Mosh.app` built from current `main` | everything | rebuild via `./run-mosh.sh deploy` |
 | `service/.sa3.env` wired (`service/setup-sa3.sh`) | SA3 transform check | model present at `~/AI/stable-audio-3/optimized/mlx`; run setup to wire |
 | `numpy` | WAV analysis | numpy 2.4.4 ✓ |
-| Microphone + Privacy→Microphone grant | voice, recording | owner-provided, live |
-| `ui/.env.local` brain key | full STT→LLM→command loop | **not used this pass — voice tested against the Vite demo brain** |
+| Microphone + Privacy→Microphone grant | audio recording | owner-provided, live after explicit input selection/arm |
+| `ui/.env.local` brain key | typed agent requests | optional |
 
 ## The harness
 
@@ -73,7 +73,7 @@ continuously proven even though this table's snapshot is from 2026-06-20.
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
 | 6b | Live MIDI capture (REC-001/002) | live | playing the computer keyboard reaches the RECORDER, not just the monitor: an armed track takes the engine's input path, the notes land in a take, Capture MIDI recovers notes played while NOT recording, and overdub merges into the existing clip | ✅ `--midi-record-smoke` **34/34**, deterministic over 3 consecutive runs, 0 JUCE assertions. RED-proven twice: removing the input route fails **7** checks (the take lands nothing, Capture recovers nothing, overdub lands nothing); forcing `mergeRecordings=false` fails the merge check with clips 3 → 4. `--selftest` structurally cannot see any of it — with no audio device `getAllInputDevices()` is empty, so the routing fork is never taken and the retrospective buffer never fills |
 | 6d | Crash residue + silent-take flag (CAP-001) | live | a take Tracktion streamed to disk when the app died mid-recording is offered on relaunch (adopt at its BWAV position on the named track, or set aside by rename — never deleted), and a landed take that captured nothing carries an amber "silent" badge | automated: `tests/crash-residue-smoke.sh <Mosh>` — run 1 (`--record-hold-smoke`) records from BlackHole 2ch and is `kill -9`ed mid-take; run 2 relaunches headless on the same session and must see `recoveryAvailable` + the take in `recordingResidue` (readable, decision adopt); run 3 adopts it and must find a `recovered` clip of real length on Vox, measured. Owner-side only: the silent badge with a real interface muted. Headless policy in `--selftest` CAP-001; pure decisions in `MoshTests "[residue]"` |
-| 7 | Voice (Vite demo brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
+| 7 | Audio-input consent boundary | live | launch stays output-only; explicit audio input/arm requests mic and records | ⏳ owner: verify first explicit audio-recording action prompts once and records |
 | 8 | Multiplayer (2-process) | live | protocol green; track-lock + clip-move sync | ✅ `relay/run-mp-selftest.sh` **911/911** — two-window *visual* sync still owner-side |
 | 9 | Sketch (beatbox→drums) | gated | recognizable kick/snare/hat land in a real editable clip; tempo set; byte-identical across runs | ✅ `MOSH_SELFTEST_SKETCH=1` **16/16** on the committed fixtures (boom-bap 90 + trap 140), determinism asserted; CLI stdout byte-identical across runs |
 
@@ -127,7 +127,7 @@ relay/multiplayer → MP-two-mac.
 
 | id | Steps | Expect | ~min | last-passed |
 | --- | --- | --- | --- | --- |
-| REC-mic | Arm the vocal track (voice/agent `arm_track` until the arm button ships), `set_count_in` 1 bar, record 4 bars against the click, stop. | Take lands where it was played; the count-in bar is audible but excluded from the clip. | 5 | — |
+| REC-mic | Arm the vocal track with `arm_track` (until the arm button ships), `set_count_in` 1 bar, record 4 bars against the click, stop. | Take lands where it was played; the count-in bar is audible but excluded from the clip. | 5 | — |
 | REC-latency | Record the metronome via a loopback (BlackHole/cable); zoom to a click transient in the recorded take. | Recorded transient within ~5 ms of the grid line (input-latency compensation applied). | 5 | — |
 | REC-monitor | Toggle `set_input_monitor` on the armed track while singing. | Live input audibly gates on/off with the toggle. | 1 | — |
 | EAR-fades | 1 s fade-in + fade-out on a clip; split a sustained clip and crossfade the splice. | No clicks/pops at any boundary; crossfade is smooth. | 3 | — |

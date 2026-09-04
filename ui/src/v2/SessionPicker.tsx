@@ -28,6 +28,7 @@ import { runAction } from "../menuActions";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import type { Snapshot } from "../types";
 import { projectLabel } from "../projectFile";   // PRJ-NAME — one shared implementation
+import { RecordingSetup } from "./RecordingSetup";
 
 /** Pure visibility rule, testable without a DOM (mirrors shouldShowRecoveryNotice). */
 export function shouldShowSessionPicker(
@@ -115,6 +116,8 @@ export function SessionPicker() {
             A blank session — {projectLabel(current) || "this one"} stays saved and in Recent.
           </span>
         </button>
+
+        <RecordingSetup />
 
         {recents.length > 0 && (
           <div className="v2-picker-recent" data-testid="v2-picker-recents">

@@ -17,6 +17,7 @@ OwnerRuntimeConfig OwnerRuntimeConfig::fromVar (const var& root)
 {
     OwnerRuntimeConfig c;
     c.enabled = (bool) root.getProperty ("enabled", false);
+    c.autoStart = (bool) root.getProperty ("autoStart", false);
     c.modelPathRaw = root.getProperty ("modelPath", var()).toString().trim();
     c.pythonRuntimeRaw = root.getProperty ("pythonRuntime", var()).toString().trim();
     if (File::isAbsolutePath (c.modelPathRaw)) c.modelPath = File (c.modelPathRaw);
@@ -80,6 +81,14 @@ LocalBrainManager::LocalBrainManager (OwnerRuntimeConfig c) : config (std::move 
 
 LocalBrainManager::~LocalBrainManager()
 {
+    stop();
+}
+
+// The teardown the destructor used to inline. Extracted so the owner can switch
+// the brain OFF mid-session and back on again without tearing down the app: after
+// this returns the manager is idle and startAsync() is usable again.
+void LocalBrainManager::stop()
+{
     stopping = true;
     if (startupThread.joinable()) startupThread.join();
     if (prewarmThread.joinable()) prewarmThread.join();
@@ -95,6 +104,25 @@ LocalBrainManager::~LocalBrainManager()
         if ((int) hs.getProperty ("pid", -1) == ownedPid)
             handshakeFile().deleteFile();
     }
+    spawnedByUs = false;
+    spawnedPid = 0;
+    wrapperPid = 0;
+    activePort = 0;
+    // Re-arm for a later switch-on. The destructor path never reads this again.
+    stopping = false;
+    publish ("off");
+}
+
+// Launch path. The SA3 release policy is a property of the CONFIG, not of a running
+// server, so it is applied whether or not we spawn — otherwise turning the brain on
+// later would inherit whatever release policy the process started with.
+void LocalBrainManager::launchAutoStart()
+{
+    if (! config.enabled || config.validationError().isNotEmpty()) return;
+    mosh::setEnvVar ("MOSH_SA3_RELEASE_IDLE", String (config.stableAudioReleaseIdle, 3).toRawUTF8());
+    if (config.autoStart) { startAsync(); return; }
+    publish ("off");
+    logRuntimeEvent ("autostart_disabled", config.preferredPort);
 }
 
 bool LocalBrainManager::terminateOwnedProcess (int pid, bool verifiedOwner, int graceMs)
@@ -339,7 +367,15 @@ void LocalBrainManager::setStatusCallback (std::function<void (var)> cb)
 
 void LocalBrainManager::startAsync()
 {
-    if (! config.enabled || config.validationError().isNotEmpty() || startupThread.joinable()) return;
+    if (! config.enabled || config.validationError().isNotEmpty()) return;
+    // A previous stop() left the thread joinable-but-finished; reap it so a
+    // switch-off/switch-on cycle can spawn again instead of silently no-opping.
+    if (startupThread.joinable())
+    {
+        if (activePort.load() != 0 || spawnedPid != 0) return;   // already running
+        startupThread.join();
+    }
+    stopping = false;
     const auto release = String (config.stableAudioReleaseIdle, 3);
     mosh::setEnvVar ("MOSH_SA3_RELEASE_IDLE", release.toRawUTF8());
     startupThread = std::thread ([this] { runStartup(); });

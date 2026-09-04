@@ -10,6 +10,7 @@ target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_session_paths.cpp
     test_audio_device_startup.cpp
+    test_webview_camera_permission.cpp
     test_drum_pattern.cpp
     test_automation_mode.cpp
     test_automation_curve_write.cpp
@@ -54,6 +55,8 @@ target_sources(MoshTests PRIVATE
     test_webbridge_resource_guard.cpp
     test_webview_cursor.cpp
     test_directory_listing.cpp
+    test_import_copy.cpp
+    test_sample_folder_store.cpp
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
     test_reimagine_core.cpp
@@ -89,6 +92,8 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/files/DirectoryListing.cpp
+    ${CMAKE_SOURCE_DIR}/src/files/ImportCopy.cpp
+    ${CMAKE_SOURCE_DIR}/src/files/SampleFolderStore.cpp
     # RaveEngine.cpp is unconditionally compiled (MOSH_HAVE_ANIRA gates its body,
     # not its existence — see cmake/Dependencies.cmake); MoshTests never defines
     # MOSH_HAVE_ANIRA, so this always builds the graceful no-op stub branch. That
@@ -137,6 +142,8 @@ add_test(NAME HarnessSessionShell
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
 if (APPLE)
+    add_test(NAME PrivacyManifest
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/privacy-manifest-test.sh)
     add_test(NAME MoshMidiCursorGateTypecheck
              COMMAND /usr/bin/xcrun swiftc -typecheck
                      ${CMAKE_SOURCE_DIR}/scripts/macos-midi-cursor-gate.swift)

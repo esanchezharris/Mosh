@@ -5,41 +5,16 @@
 // top via file_peaks / audition_file once the backend ships them.
 
 import { useEffect, useRef, useState } from "react";
+import { pickFiles } from "../bridge";
 import { useStore } from "../store";
 import type { DirListing } from "../types";
-import { filterEntries, loadRecents, addRecentSample, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
+import { filterEntries, loadRecents, addRecentSample, importedFilePath, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
 import { IconArrowUp, IconDrum, IconFolder, IconWaveform } from "./icons";
 import { SketchBeatboxDialog } from "./SketchBeatboxDialog";
+import { AddSampleFolderButton, SamplePlaces } from "./SampleBrowserPlaces";
+import { SampleThumb } from "./SampleThumb";
 
 const baseName = (p: string) => p.split("/").pop() ?? p;
-
-// Tiny waveform overview for an un-imported file (backend file_peaks). Drawn on a
-// canvas, themed via the canvas's CSS color so dark/light both look right.
-function SampleThumb({ path }: { path: string }) {
-  const exec = useStore((s) => s.exec);
-  const ref = useRef<HTMLCanvasElement>(null);
-  const [peaks, setPeaks] = useState<[number, number][] | null>(null);
-  useEffect(() => {
-    let cancel = false;
-    void exec("file_peaks", { path, buckets: 60 }).then((r) => {
-      if (!cancel && r.ok && r.data) setPeaks((r.data as { peaks: [number, number][] }).peaks);
-    });
-    return () => { cancel = true; };
-  }, [path, exec]);
-  useEffect(() => {
-    const c = ref.current; if (!c || !peaks) return;
-    const ctx = c.getContext("2d"); if (!ctx) return;
-    const w = c.width, h = c.height, mid = h / 2;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = getComputedStyle(c).color || "#ccff23";
-    const bw = w / Math.max(1, peaks.length);
-    peaks.forEach((p, i) => {
-      const top = mid - p[1] * mid, bot = mid - p[0] * mid;
-      ctx.fillRect(i * bw, top, Math.max(1, bw - 0.5), Math.max(1, bot - top));
-    });
-  }, [peaks]);
-  return <canvas ref={ref} className="sb-thumb" width={56} height={22} aria-hidden="true" />;
-}
 
 export function SampleBrowser() {
   const exec = useStore((s) => s.exec);
@@ -77,9 +52,20 @@ export function SampleBrowser() {
   useEffect(() => () => { void exec("stop_audition"); }, [exec]);
 
   const onImport = async (file: string) => {
-    await exec("import_clip", { file, trackId: selectedTrackId ?? undefined });
-    setRecents(addRecentSample(file));
+    const result = await exec("import_clip", { file, trackId: selectedTrackId ?? undefined });
+    const imported = importedFilePath(result);
+    if (imported) setRecents(addRecentSample(imported));
     await refresh();
+  };
+
+  const chooseFiles = async () => {
+    const picked = await pickFiles({
+      multiple: true,
+      filters: "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg",
+      title: "Choose audio files",
+    });
+    if (!picked.ok) return;
+    for (const file of picked.files) await onImport(file);
   };
 
   const toggleAudition = (path: string) => async () => {
@@ -149,7 +135,12 @@ export function SampleBrowser() {
             {loading ? "Loading sounds..." : (listing?.path ?? "Loading sounds...")}
           </span>
         </div>
+        <button className="btn" type="button" data-testid="sample-browser-choose-files"
+          onClick={() => void chooseFiles()}>Choose files…</button>
+        <AddSampleFolderButton navigate={async (path) => navigate(path)} />
       </div>
+      <SamplePlaces listing={listing} loading={loading}
+        navigate={async (path) => navigate(path)} />
       <label className="sb-search-field">
         <span className="sb-search-label">Search sounds</span>
         <input

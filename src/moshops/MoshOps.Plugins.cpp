@@ -18,6 +18,7 @@
 #include "PluginScanPlan.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
+#include "files/ImportCopy.h"
 #include <cmath>
 #include <limits>
 
@@ -534,9 +535,15 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", 60));
     const auto mode = args.getProperty ("mode", "drum").toString();   // "drum" (default, one-shot pad) | "melodic" (pitched 808/bass)
     const auto path = args.getProperty ("file", var()).toString();
-    juce::File f (path);
-    if (path.isEmpty() || ! f.existsAsFile())
+    const juce::File source (path);
+    if (path.isEmpty() || ! source.existsAsFile())
         return errResult ("assign_sample", "file not found: " + path);
+
+    const auto copied = copyIntoImports (
+        source, eng.sessionDir().getChildFile ("imports"));
+    if (copied.error.isNotEmpty())
+        return errResult ("assign_sample", copied.error);
+    const auto f = copied.file;
 
     const auto name  = args.getProperty ("name", f.getFileNameWithoutExtension()).toString();
     const float gain = (float) (double) args.getProperty ("gainDb", 0.0);
@@ -558,7 +565,12 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
 
     const int idx = sampler->getNumSounds();
     const auto err = sampler->addSound (f.getFullPathName(), name, 0.0, 0.0 /*whole file*/, gain);
-    if (err.isNotEmpty()) return errResult ("assign_sample", err);
+    if (err.isNotEmpty())
+    {
+        if (copied.copied)
+            f.deleteFile();
+        return errResult ("assign_sample", err);
+    }
     if (mode == "melodic")
     {
         // "Regular 808 functionality": ONE one-shot played across the WHOLE keyboard,
@@ -588,6 +600,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     data->setProperty ("note", note);
     data->setProperty ("name", name);
     data->setProperty ("mode", mode);
+    data->setProperty ("file", f.getFullPathName());
     data->setProperty ("sounds", sampler->getNumSounds());
     logLine ("assign_sample", args, true, {}, true);
     emitSnapshotInvalidated();

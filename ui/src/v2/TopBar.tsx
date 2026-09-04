@@ -262,8 +262,6 @@ function OverflowMenu() {
   const toggleTheme = useStore((s) => s.toggleTheme);
   const voiceOn = useStore((s) => s.voiceOn);
   const toggleVoice = useStore((s) => s.toggleVoice);
-  const handsFreeOn = useStore((s) => s.handsFreeOn);
-  const setHandsFree = useStore((s) => s.setHandsFree);
   const setShell = useSettings((s) => s.set);
   const item = (label: string, fn: () => void, kbd?: string) => (
     <button role="menuitem" onClick={() => { close(); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
@@ -343,7 +341,6 @@ function OverflowMenu() {
             {item("Redo", () => void exec("redo"), "⇧⌘Z")}
             <div className="v2-menu-sep" />
             {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
-            {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}
             <div className="v2-menu-sep" />
             {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
             {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}

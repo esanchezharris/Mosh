@@ -50,6 +50,14 @@ public:
     void clearCompareDry() noexcept { compareDry.store (0, std::memory_order_release); }
     void resetSelection();
     void relinkSelectedAsset (const juce::File&);
+    // IMP-001 — drop an externally recorded WAV (a Mosh take, another DAW's bounce) onto
+    // the Live timeline at a 1-based bar. It becomes an ordinary region whose source and
+    // selected take share one content hash, so playback substitution, Relink, New Take
+    // and Set restore all treat it like a Transfer. Refuses a sample-rate mismatch
+    // (no resampling — same rule as the consolidated-export contract) and a bar < 1.
+    // Tempo/time signature come from the host's last reported position; with none yet
+    // (plug-in never processed) 120 BPM in 4/4 is assumed and the status says so.
+    void importTakeFromFile (const juce::File&, double bar);
     void setLabEnabled (bool);
     PluginStateV1 stateSnapshot() const;
     juce::String statusText() const;

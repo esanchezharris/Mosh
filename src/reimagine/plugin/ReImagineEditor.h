@@ -31,6 +31,8 @@ private:
     juce::TextButton compare { "Dry A/B" };
     juce::TextButton reset { "Reset" };
     juce::TextButton relink { "Relink" };
+    juce::TextButton importTake { "Import" };   // IMP-001 — external WAV at a bar
+    juce::TextEditor importBar;                  // 1-based bar the import lands on
     juce::TextButton replace { "Replace overlap" };
     juce::TextButton discard { "Discard" };
     juce::TextButton refreshLoras { "Refresh" };

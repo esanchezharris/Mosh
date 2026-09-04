@@ -19,7 +19,16 @@ export function pushRecent(prev: string[], path: string, max = 8): string[] {
 // MIME so an Arrange lane can accept the drop (and ignore unrelated drags).
 export const SAMPLE_DND_MIME = "application/x-mosh-sample";
 
-const RECENTS_KEY = "mosh.recentSamples";
+const RECENTS_KEY = "mosh.recentSamples.v2";
+
+export function importedFilePath(result: unknown): string | null {
+  if (typeof result !== "object" || result === null || !("ok" in result)
+    || result.ok !== true || !("data" in result) || typeof result.data !== "object"
+    || result.data === null || !("file" in result.data) || typeof result.data.file !== "string") {
+    return null;
+  }
+  return result.data.file;
+}
 
 /** Read the persisted recent-sample paths (newest first). */
 export function loadRecents(): string[] {
