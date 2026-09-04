@@ -28,7 +28,6 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # On Windows a JUCE GUI parent may launch this service with stdout/stderr pipes
@@ -188,6 +187,15 @@ def _phonology_py() -> str:
     return _venv_py("PHONOLOGY_PY", "phonology")
 
 
+def _teardown_py() -> str:
+    """The dedicated teardown venv's python (pydantic-backed §0 recipe stack: recipes/
+    generate.py -> teardown/recipe.py -> pydantic; conventional location ~/Library/Mosh/
+    venvs/teardown, TEARDOWN_PY overrides — no setup-teardown.sh writes a .env for this one,
+    the venv is provisioned by hand). Used only when the service interpreter itself lacks
+    pydantic — see _recipe_stack_importable()."""
+    return _venv_py("TEARDOWN_PY", "teardown")
+
+
 def _phonology_available() -> bool:
     """True when phonology can produce DICTIONARY-backed rhymes — either the dedicated
     venv exists OR cmudict is importable in the service interpreter. False ⇒ /get_rhymes
@@ -196,6 +204,22 @@ def _phonology_available() -> bool:
         return True
     import importlib.util
     return importlib.util.find_spec("cmudict") is not None
+
+
+def _recipe_stack_importable() -> bool:
+    """True when THIS interpreter can run the pydantic-backed §0 recipe stack in-process
+    (recipes/generate.py imports teardown/recipe.py, which imports pydantic). Checked live
+    (not cached) so a freshly `pip install`ed pydantic works without a service restart —
+    same live-check pattern as _phonology_available()."""
+    import importlib.util
+    return importlib.util.find_spec("pydantic") is not None
+
+
+def _recipe_available() -> bool:
+    """True when /generate_recipe can actually produce a program — either this interpreter
+    has pydantic, or the dedicated teardown venv exists on disk. False ⇒ /generate_recipe
+    still answers (an honest RuntimeError -> 400), it just can't reach either interpreter."""
+    return _recipe_stack_importable() or os.path.isfile(_teardown_py())
 
 
 def _guest_capability_summary() -> dict:
@@ -222,6 +246,7 @@ def _guest_capability_summary() -> dict:
         "skeleton": _skeleton_available(),
         "whisper": _whisper_available(),
         "phonology": _phonology_available(),
+        "recipes": _recipe_available(),
         "transformReal": _tx.available(),
         "trainingBackend": lora_trainer_adapter.backend_name(),
         # Why a real backend still can't train here (missing binary/checkpoint).
@@ -425,10 +450,14 @@ def _training_descriptor() -> dict:
 
 
 def _generate_recipe_payload(data: dict) -> dict:
-    from recipes import generate as gen  # noqa: PLC0415
-    from teardown import recipe as recipe_model  # noqa: PLC0415
-    from teardown.render.compile import compile_recipe  # noqa: PLC0415
-
+    """Resolution stays HERE, in the service interpreter, and needs no pydantic (plain
+    dict/path work): request merging, seed parsing, library-dir + palette-manifest path
+    resolution. The pydantic-backed generation itself (recipes/generate.py -> teardown/
+    recipe.py -> pydantic) lives in recipes/generate_cli.py::build_payload — dispatched
+    in-process when THIS interpreter has pydantic, else as a subprocess under the dedicated
+    teardown venv (mirrors /get_rhymes's phonology dispatch, below). Neither available ⇒ an
+    honest RuntimeError (the /generate_recipe handler maps that to 400 — never a silent fake
+    recipe, never an opaque 500 from an unguarded ModuleNotFoundError)."""
     request = data.get("request", {})
     if not isinstance(request, dict):
         request = {}
@@ -446,7 +475,8 @@ def _generate_recipe_payload(data: dict) -> dict:
 
     library_dir = str(data.get("libraryDir", data.get("library_dir", "")) or "").strip()
     if not library_dir:
-        library_dir = os.environ.get("MOSH_RECIPE_LIBRARY", "").strip() or gen.LIB_DIR
+        library_dir = (os.environ.get("MOSH_RECIPE_LIBRARY", "").strip()
+                       or os.path.join(SERVICE_DIR, "recipes", "library"))
     library_dir = _resolve_path(library_dir, directory=True)
     if not os.path.isdir(library_dir):
         raise RuntimeError(f"recipe library missing: {library_dir}")
@@ -455,22 +485,38 @@ def _generate_recipe_payload(data: dict) -> dict:
     if not palette_manifest:
         palette_manifest = os.environ.get("MOSH_PALETTE_MANIFEST", "").strip()
     palette_manifest = _resolve_path(palette_manifest, directory=False)
-    palette = gen.load_palette(palette_manifest) if palette_manifest else None
 
-    rec, prov = gen.generate(request, library_dir=library_dir, seed=seed, palette=palette)
-    compiled = compile_recipe(rec).to_dict()
-    return {
-        "ok": True,
-        "recipeId": rec.recipe_id,
-        "request": request,
-        "libraryDir": library_dir,
-        "paletteManifest": palette_manifest,
-        "recipe": json.loads(recipe_model.to_json(rec)),
-        "program": compiled,
-        "provenance": asdict(prov),
-        "commandCount": len(compiled.get("commands", [])),
-        "unresolvedCount": len(compiled.get("unresolved", [])),
-    }
+    resolved = {"request": request, "seed": seed, "libraryDir": library_dir,
+                "paletteManifest": palette_manifest}
+
+    if _recipe_stack_importable():
+        from recipes import generate_cli  # noqa: PLC0415  (module-scope import is safe —
+        # build_payload() imports the pydantic-requiring stack lazily, inside itself)
+        payload = generate_cli.build_payload(resolved)
+    else:
+        py = _teardown_py()
+        if not os.path.isfile(py):
+            raise RuntimeError("recipe generation unavailable: no interpreter has pydantic "
+                               "(pip install pydantic in the service venv, or provision "
+                               "~/Library/Mosh/venvs/teardown)")
+        cli = os.path.join(SERVICE_DIR, "recipes", "generate_cli.py")
+        try:
+            proc = subprocess.run([py, cli], input=json.dumps(resolved),
+                                  capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("recipe generation timed out") from e
+        except OSError as e:
+            raise RuntimeError(f"recipe generation failed to start: {e}") from e
+        out = (proc.stdout or "").strip()
+        try:
+            payload = json.loads(out)
+        except (json.JSONDecodeError, ValueError):
+            tail = (proc.stderr or "").strip()[-400:]
+            raise RuntimeError(f"recipe generation failed: {tail or 'no output'}")
+        if not payload.get("ok"):
+            raise RuntimeError(payload.get("error") or "recipe generation failed")
+
+    return payload
 
 
 _jobs: dict[str, dict] = {}
@@ -1009,6 +1055,7 @@ class Handler(BaseHTTPRequestHandler):
                              "whisper": _whisper_available(),
                              "skeleton": _skeleton_available(),
                              "phonology": _phonology_available(),
+                             "recipes": _recipe_available(),
                              "compiler": True,
                              "bestofn": True})
         elif path == "/capabilities":

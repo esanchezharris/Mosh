@@ -153,6 +153,10 @@ Array<BrainProxy::Provider> BrainProxy::providers()
     all.add ({ "deepseek", "DEEPSEEK", env ("DEEPSEEK_BASE_URL"), env ("DEEPSEEK_API_KEY"), env ("DEEPSEEK_MODEL") });
     all.add ({ "openai",   "OPENAI",   env ("OPENAI_BASE_URL"),   env ("OPENAI_API_KEY"),   env ("OPENAI_MODEL") });
     all.add ({ "xai",      "GROK",     env ("XAI_BASE_URL"),      env ("XAI_API_KEY"),      env ("XAI_MODEL") });
+    // Appended LAST (never inserted earlier): resolve()'s "first complete provider"
+    // fallback walks `all` in order, so an already-configured deepseek/openai/xai keeps
+    // winning the unqualified default exactly as before openrouter existed.
+    all.add ({ "openrouter", "OPENROUTER", env ("OPENROUTER_BASE_URL"), env ("OPENROUTER_API_KEY"), env ("OPENROUTER_MODEL") });
     return all;
 }
 
@@ -194,7 +198,7 @@ BrainProxy::Provider BrainProxy::resolve (const String& requested)
     return {};
 }
 
-var BrainProxy::requestPayload (const Provider& p, const var& messages)
+var BrainProxy::requestPayload (const Provider& p, const var& messages, const ChatOptions& opts)
 {
     auto* payload = new DynamicObject();
     payload->setProperty ("model", p.model);
@@ -204,12 +208,12 @@ var BrainProxy::requestPayload (const Provider& p, const var& messages)
     payload->setProperty ("response_format", var (rf));
     if (p.id == "openai" && isReasoningModel (p.model))
     {
-        payload->setProperty ("max_completion_tokens", 800);
+        payload->setProperty ("max_completion_tokens", opts.maxTokens);
     }
     else
     {
-        payload->setProperty ("max_tokens", 800);
-        payload->setProperty ("temperature", 0.6);
+        payload->setProperty ("max_tokens", opts.maxTokens);
+        payload->setProperty ("temperature", opts.temperature);
     }
     if (p.id == "local")
     {
@@ -220,9 +224,25 @@ var BrainProxy::requestPayload (const Provider& p, const var& messages)
     return var (payload);
 }
 
-int BrainProxy::requestTimeoutMs (const Provider& p)
+int BrainProxy::requestTimeoutMs (const Provider& p, const ChatOptions& opts)
 {
+    if (opts.timeoutMs > 0)
+        return opts.timeoutMs;
     return p.id == "local" ? 120000 : 30000;
+}
+
+BrainProxy::ChatOptions BrainProxy::optionsFromVar (const var& options)
+{
+    ChatOptions o;
+    if (! options.isObject())
+        return o;
+    if (auto v = options.getProperty ("maxTokens", var()); ! v.isVoid())
+        o.maxTokens = jlimit (1, 32768, (int) v);
+    if (auto v = options.getProperty ("temperature", var()); ! v.isVoid())
+        o.temperature = jlimit (0.0, 2.0, (double) v);
+    if (auto v = options.getProperty ("timeoutMs", var()); ! v.isVoid())
+        o.timeoutMs = jlimit (1000, 600000, (int) v);
+    return o;
 }
 
 var BrainProxy::parseDirectResponse (const String& body, int statusCode,
@@ -309,7 +329,7 @@ String BrainProxy::installId()
     return fresh;
 }
 
-var BrainProxy::chat (const var& messages, const String& requested)
+var BrainProxy::chat (const var& messages, const String& requested, const ChatOptions& opts)
 {
     if (proxyEnabled())
     {
@@ -323,25 +343,25 @@ var BrainProxy::chat (const var& messages, const String& requested)
     const auto p = resolve (requested);
     if (! p.isComplete())
         return makeError ("no brain provider configured - set <PROVIDER>_API_KEY / _BASE_URL / _MODEL "
-                          "in the environment (deepseek | openai | xai)");
+                          "in the environment (deepseek | openai | xai | openrouter)");
 
     if (! messages.isArray())
         return makeError ("brain: messages must be an array of {role,content}");
 
     // Build the OpenAI-compatible chat payload (json_object response, capped tokens).
-    const auto payload = requestPayload (p, messages);
+    const auto payload = requestPayload (p, messages, opts);
 
     const auto headers = "Content-Type: application/json\r\nAuthorization: Bearer " + p.key;
     URL url = URL (p.url + "/chat/completions").withPOSTData (JSON::toString (payload));
 
     int statusCode = 0;
-    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
-                    .withConnectionTimeoutMs (requestTimeoutMs (p))
+    auto netOpts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (requestTimeoutMs (p, opts))
                     .withExtraHeaders (headers)
                     .withStatusCode (&statusCode);
 
     const auto t0 = Time::getMillisecondCounter();
-    auto stream = url.createInputStream (opts);
+    auto stream = url.createInputStream (netOpts);
     if (stream == nullptr)
         return makeError ("brain request failed - could not reach " + p.url + " (network / provider down)");
 

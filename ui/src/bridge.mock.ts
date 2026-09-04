@@ -534,6 +534,7 @@ const MOCK_TXN_READS = new Set([
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
   "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
+  "list_presets", "list_palette",
   "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
@@ -1158,6 +1159,8 @@ const BUILTINS = [
   { type: "moshAutoTune", name: "Mosh AutoTune", category: "Mosh FX", isInstrument: false, builtin: true as const },
   { type: "moshOTT", name: "Mosh OTT", category: "Mosh FX", isInstrument: false, builtin: true as const },
   { type: "moshXFeedback", name: "Mosh X-FDBK", category: "Mosh FX", isInstrument: false, builtin: true as const },
+  { type: "highpass", name: "High-Pass", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "softclip", name: "Mosh Soft Clipper", category: "Effects", isInstrument: false, builtin: true as const },
 ];
 const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
@@ -1345,6 +1348,8 @@ function mkBuiltinParams(type: string, isInstrument: boolean): PluginParam[] {
   if (type === "moshAutoTune") return params(["Root", "Scale", "Retune", "Amount", "Range", "Mix", "Output"], [0, 0, 0.32, 0.35, 0.33, 1, 0.75]);
   if (type === "moshOTT") return params(["Amount", "Time", "Low Gain", "Mid Gain", "High Gain", "Mix", "Output"], [0.12, 0.24, 0.5, 0.5, 0.5, 1, 0.71]);
   if (type === "moshXFeedback") return params(["Sensitivity", "Max Cuts", "Max Depth", "Release", "Auto Suppress", "Mix", "Output"], [0.62, 0.5, 0.55, 0.38, 1, 0.8, 0.5]);
+  if (type === "highpass") return params(["Frequency"], [0.34]);   // 180 Hz within the 10-22000 Hz native range
+  if (type === "softclip") return params(["Drive", "Ceiling"], [0.25, 0.958]);   // 6 dB drive, -0.5 dBFS ceiling
   return mkParams(4);
 }
 function mkMoshFx(type: string): MoshFxReadout | undefined {
@@ -3763,6 +3768,33 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
+      // TPL-001 — mirror the native recipe with the mock's own commands (synchronous
+      // dispatch, exactly as native composes through execute()) so the UI sees the same
+      // shape: two audio tracks, Vocal armed, count-in 1, overdub, a four-bar loop.
+      if (str(args.template) === "vocal") {
+        const t1 = dispatch("create_track", { name: "Backing", type: "audio" });
+        const t2 = dispatch("create_track", { name: "Vocal", type: "audio" });
+        const vocalId = (t2.data as { trackId?: string } | undefined)?.trackId ?? "";
+        if (vocalId) {
+          dispatch("arm_track", { trackId: vocalId, armed: true });
+          dispatch("set_input_monitor", { trackId: vocalId, mode: "automatic" });
+        }
+        dispatch("set_count_in", { bars: 1 });
+        dispatch("set_record_options", { overdub: true });
+        const bpm = snapshot.session.tempo ?? 120;
+        const loopEnd = (16 * 60) / bpm;
+        dispatch("set_transport", { loop: true, loopStart: 0, loopEnd });
+        invalidate();
+        return ok(command, {
+          editFile: snapshot.session.editFile, template: "vocal",
+          backingTrackId: (t1.data as { trackId?: string } | undefined)?.trackId ?? "",
+          vocalTrackId: vocalId, loopEnd,
+        });
+      }
+      if (str(args.template)) {
+        invalidate();
+        return ok(command, { editFile: snapshot.session.editFile, template: "", templateError: `unknown template: ${str(args.template)} (known: vocal)` });
+      }
       return ok(command);
     }
     case "relink_clip": return ok(command);   // gap 3 — re-point a missing wave source (mock no-op)
@@ -3877,7 +3909,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "load_plugin": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      const v = mockPluginCatalog.find((x) => x.id === str(args.pluginId)); if (!v) return err(command, "unknown plugin");
+      // Native PluginHost::findDescription accepts the catalog id OR the display
+      // name ("Vital"); mirror both so callers can use the real catalog name.
+      const wantedId = str(args.pluginId);
+      const v = mockPluginCatalog.find((x) => x.id === wantedId || x.name === wantedId); if (!v) return err(command, "unknown plugin");
       // Mirrors the native wave-3 guard (MoshOps::cmdLoadPlugin): an instrument on a
       // track holding WAVE clips is silent-by-construction and refused with the way
       // out named. Empty/MIDI-only tracks stay loadable (that's how one starts).
@@ -4514,6 +4549,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }, 400);
       return ok(command, { status: "started" });
     }
+    case "generate_beat_recipe": {
+      // Mirrors native cmdGenerateBeatRecipe's CONTRACT (fetch a generated program
+      // from the recipe service, apply it as one undoable batch) without a service:
+      // the mock applies a fixed tiny program — optional tempo + one drum track with
+      // a four-on-the-floor kick — and returns the native result shape.
+      pushUndo();
+      if (typeof args.tempo === "number") snapshot.session.tempo = Math.max(20, num(args.tempo, 120));
+      const bpm = snapshot.session.tempo;
+      const t: Track = {
+        id: nextTrackId(), index: snapshot.tracks.length, name: "Recipe Drums",
+        type: "drum", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+      };
+      ensureInstrument(t, true);
+      t.clips.push({
+        id: nextClipId(), name: "Recipe groove", type: "midi",
+        start: 0, length: 4 * 60 / Math.max(20, bpm), offset: 0, hasRenderLayer: false,
+        notes: [0, 4, 8, 12].map((s, k) => ({ i: k, pitch: 36, start: s / 4, length: 0.25, velocity: 100 })),
+      });
+      snapshot.tracks.push(t);
+      invalidate();
+      return ok(command, {
+        status: "done", recipeId: "mock-recipe",
+        commandCount: 3, appliedCount: 3, unresolved: [], applied: [],
+      });
+    }
     case "remove_note": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);
@@ -4559,6 +4619,61 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         ],
         defaultKit: "mosh-kit",
       });
+    // P1 preset seam. Mirrors native cmdListPresets/cmdLoadPreset CONTRACTS: a fixed
+    // library here (bundled 4osc bank + one fake user .vital), and load_preset finds
+    // the track's instrument and reports what it applied — no real plugin state in
+    // the mock, but the same result shape and the same failure modes.
+    case "list_presets": {
+      const lib = [
+        { plugin: "4osc", name: "mosh-bass", file: "/presets/4osc/mosh-bass.json", source: "bundled" },
+        { plugin: "4osc", name: "mosh-lead", file: "/presets/4osc/mosh-lead.json", source: "bundled" },
+        { plugin: "4osc", name: "mosh-pad", file: "/presets/4osc/mosh-pad.json", source: "bundled" },
+        { plugin: "vital", name: "user-patch", file: "/presets/vital/user-patch.vital", source: "user" },
+      ];
+      const filter = str(args.plugin, "").toLowerCase();
+      return ok(command, { presets: filter ? lib.filter((p) => p.plugin === filter) : lib });
+    }
+    // W2.2 (produce lane) — mirrors native cmdListPalette's CONTRACT: a fixed 12-item
+    // fixture standing in for a measured palette-v2 manifest scan. Only the two bass
+    // (808) items carry rootNote, matching the real manifest (only bass roles are pitch-
+    // measured; every other role's root_note is null and so is omitted here — see
+    // list_palette's native section in src/app/SelfTest.cpp).
+    case "list_palette": {
+      const items = [
+        { path: "/mock/palette/kick_1.wav", role: "kick" },
+        { path: "/mock/palette/kick_2.wav", role: "kick" },
+        { path: "/mock/palette/snare_1.wav", role: "snare" },
+        { path: "/mock/palette/snare_2.wav", role: "snare" },
+        { path: "/mock/palette/clap_1.wav", role: "clap" },
+        { path: "/mock/palette/clap_2.wav", role: "clap" },
+        { path: "/mock/palette/hat_1.wav", role: "hat" },
+        { path: "/mock/palette/openhat_1.wav", role: "openhat" },
+        { path: "/mock/palette/perc_1.wav", role: "perc" },
+        { path: "/mock/palette/fx_1.wav", role: "fx" },
+        { path: "/mock/palette/bass_1.wav", role: "bass", rootNote: 24 },
+        { path: "/mock/palette/bass_2.wav", role: "bass", rootNote: 33 },
+      ];
+      return ok(command, { items });
+    }
+    case "load_preset": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const file = str(args.file, "");
+      if (!file) return err(command, "preset file not found: ");
+      const isVital = file.endsWith(".vital");
+      const inst = (t.plugins ?? []).find((p) =>
+        isVital ? p.isInstrument && /vital/i.test(p.name) : p.isInstrument && !!p.builtin);
+      if (!inst)
+        return err(command, isVital
+          ? "no Vital instrument on this track (a .vital preset only targets Vital)"
+          : "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
+      pushUndo();
+      invalidate();
+      const preset = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
+      return ok(command, isVital
+        ? { plugin: inst.name, preset, note: "state sent; verify audibly (Vital applies patches asynchronously)" }
+        : { plugin: "4osc", preset, paramsApplied: 8 });
+    }
     case "apply_choke": {
       const f = findClip(str(args.clipId));
       if (!f?.clip.notes) return err(command, "not a midi clip");

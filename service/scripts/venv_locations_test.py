@@ -105,6 +105,10 @@ def static_checks():
         ("SKETCH_PY", "sketch"),
         ("SKELETON_PY", "skeleton"),
         ("PHONOLOGY_PY", "phonology"),
+        # teardown has no setup-teardown.sh (the venv is provisioned by hand, not by the
+        # setup-*.sh convention the SCRIPTS list below exercises behaviorally) — this row
+        # only pins that server.py resolves it through the shared _venv_py helper too.
+        ("TEARDOWN_PY", "teardown"),
     ]:
         check(f'_venv_py("{var}", "{name}")' in server, f"server.py: {var} resolves via _venv_py")
 

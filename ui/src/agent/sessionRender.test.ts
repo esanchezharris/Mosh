@@ -62,3 +62,51 @@ describe("renderSession — master chain names builtins by the id commands take"
     expect(chainOf(withMasterPlugins([]))).toBe("master: -3dB pan 0 chain:[empty]");
   });
 });
+
+// W2.1 (produce lane) — the sampler's loaded pads, so the model can see the real
+// lane map (and the 808's keyNote) instead of guessing MoshOps pad numbers.
+describe("renderSession — drum pads and the melodic (808) pad", () => {
+  const withDrumTrack = (drumPads: unknown[]): Snapshot => ({
+    schemaVersion: 1,
+    session: { sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4, metronome: false, length: 16, editFile: "" },
+    tracks: [
+      { id: "9", index: 0, name: "Drums", type: "drum", volumeDb: 0, mute: false, solo: false, clips: [], drumPads },
+    ],
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+  } as unknown as Snapshot);
+
+  const trackLineOf = (s: Snapshot): string =>
+    renderSession(s).split("\n").find((l) => l.trim().startsWith('"9"'))!;
+
+  it("a track with no drumPads renders byte-identically to the pre-2026-09 shape (no pads/808 segment)", () => {
+    const s = withDrumTrack([]);
+    expect(trackLineOf(s)).toBe('  "9" "Drums" [drum] 0dB clips:[]');
+  });
+
+  it("one-shot pads render as `pitch:name`, sorted by pitch", () => {
+    const s = withDrumTrack([
+      { index: 1, pitch: 38, minNote: 38, maxNote: 38, name: "snare", file: "/a.wav", gainDb: 0, pan: 0, openEnded: true },
+      { index: 0, pitch: 36, minNote: 36, maxNote: 36, name: "kick", file: "/b.wav", gainDb: 0, pan: 0, openEnded: true },
+    ]);
+    expect(trackLineOf(s)).toContain("pads:[36:kick 38:snare]");
+  });
+
+  it("a pad spanning the whole keyboard (minNote 0..maxNote 127 — melodic mode) renders as 808:root<pitch> instead of a pad entry", () => {
+    const s = withDrumTrack([
+      { index: 0, pitch: 60, minNote: 0, maxNote: 127, name: "808", file: "/808.wav", gainDb: 0, pan: 0, openEnded: true },
+    ]);
+    const line = trackLineOf(s);
+    expect(line).toContain("808:root60");
+    expect(line).not.toContain("pads:["); // the melodic pad is not a drum lane
+  });
+
+  it("one-shot pads AND the melodic 808 pad can coexist on the same track", () => {
+    const s = withDrumTrack([
+      { index: 0, pitch: 36, minNote: 36, maxNote: 36, name: "kick", file: "/kick.wav", gainDb: 0, pan: 0, openEnded: true },
+      { index: 1, pitch: 62, minNote: 0, maxNote: 127, name: "808", file: "/808.wav", gainDb: 0, pan: 0, openEnded: true },
+    ]);
+    const line = trackLineOf(s);
+    expect(line).toContain("pads:[36:kick]");
+    expect(line).toContain("808:root62");
+  });
+});

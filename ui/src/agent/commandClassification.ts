@@ -43,6 +43,11 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   list_midi_inputs: "device discovery feeding the input picker UI",
   list_wave_inputs: "device discovery feeding the input picker UI",
   list_directory: "filesystem browsing is the file-picker's job; agent file access is by explicit path args",
+  // W2.2 (produce lane) — StepCommandResult carries no payload (ui/src/agent/loopSeam.ts),
+  // so a list_* call inside the loop is useless to the model; everything it must know
+  // arrives via the snapshot render or the system prompt. list_palette feeds the
+  // produce-lane preflight/picker (drumPalette.ts) directly, before the model's first turn.
+  list_palette: "loop model never sees command results — feeds the produce-lane preflight/picker directly, never the model",
 
   // ── executor/undo plumbing — owned by the harness, never the model ────────────
   batch_begin: "the executor opens/closes the agent's own undo batches — the model never manages transactions",
@@ -88,7 +93,6 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   add_render_layer: "the raw Stage-1 layer primitive — the agent uses create_render_layer (auto-bounce + region scoping)",
   list_colors: "style vocab feeding the drawer UI; the agent styles via compile_render, which validates colours itself",
   list_transform_targets: "style vocab feeding the drawer UI; the agent styles via compile_render, which validates targets itself",
-  generate_beat_recipe: "service-spawning recipe generator wired to a UI flow (would freeze the message thread mid-turn); the agent composes via add_drum_pattern/add_note",
   render_ahead_arm: "Live render-ahead scheduling is transport-coupled machinery driven by the playhead, not a per-turn command",
   render_ahead_tick: "Live render-ahead scheduling is transport-coupled machinery driven by the playhead, not a per-turn command",
 
@@ -334,4 +338,10 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // now offers "Test tone", which makes an audio track and puts a reference tone on it —
   // the same create-then-populate shape the Instrument entry uses, because v2 has no
   // "add a clip to this track" affordance for a tone to hang off.)
+
+  // (generate_beat_recipe was never listed here, but its UI_ONLY_COMMANDS reason claimed a
+  // UI flow that had NO shipped call site — stale both ways. Un-fenced for the agent
+  // (2026-09, the WebBridge two-phase hop moves the service fetch off the message thread)
+  // and reachable by mouse via the v2 add-track menu's "Recipe beat" entry, which applies
+  // the generated program as one undoable batch. Ratchet stays 0.)
 };

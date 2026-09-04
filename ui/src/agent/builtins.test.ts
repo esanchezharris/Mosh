@@ -34,7 +34,7 @@ function nativeBuiltinTypes(): string[] {
 describe("BUILTIN_TYPES vs the engine's kBuiltins table", () => {
   it("parses a non-trivial table out of the C++ (the guard is not vacuous)", () => {
     const native = nativeBuiltinTypes();
-    expect(native.length).toBeGreaterThanOrEqual(13);
+    expect(native.length).toBeGreaterThanOrEqual(15);
     expect(native).toContain("4bandEq");
   });
 

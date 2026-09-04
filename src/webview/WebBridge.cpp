@@ -281,6 +281,40 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                         });
                         return;
                     }
+
+                    // generate_beat_recipe is the one service-spawning MUTATION
+                    // command. Its slow leg (service spawn + HTTP generation, up
+                    // to ~30s cold) is engine-free; its apply leg mutates the
+                    // Edit and must stay on the message thread. Two-phase hop:
+                    // fetch the program on a worker, then re-enter the ordinary
+                    // synchronous MoshOps seam with the program pre-fetched
+                    // (args.__prefetchedProgram) so undo/logging/telemetry behave
+                    // exactly like the sync path. This is what un-fences the
+                    // command for the agent catalog — it previously sat in
+                    // UI_ONLY_COMMANDS precisely because of this freeze.
+                    if (safeName == "generate_beat_recipe" && beatRecipeFetchHandler != nullptr)
+                    {
+                        auto fetch = beatRecipeFetchHandler;
+                        auto handler = commandHandler;
+                        const auto command = args[0];
+                        juce::Thread::launch ([fetch, handler, command, completion]() mutable
+                        {
+                            auto generated = fetch (command);
+                            juce::MessageManager::callAsync ([handler, command, generated, completion]() mutable
+                            {
+                                auto* rewrapped = new juce::DynamicObject();
+                                rewrapped->setProperty ("command", command.getProperty ("command", juce::var()));
+                                auto* newArgs = new juce::DynamicObject();
+                                if (auto* obj = command.getProperty ("args", juce::var()).getDynamicObject())
+                                    for (const auto& p : obj->getProperties())
+                                        newArgs->setProperty (p.name, p.value);
+                                newArgs->setProperty ("__prefetchedProgram", generated);
+                                rewrapped->setProperty ("args", juce::var (newArgs));
+                                completion (handler (juce::var (rewrapped)));
+                            });
+                        });
+                        return;
+                    }
                     completion (commandHandler (args[0]));
                 }
                 else
@@ -331,9 +365,13 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 const auto req      = args.size() > 0 ? args[0] : juce::var();
                 const auto messages = req.getProperty ("messages", juce::var());
                 const auto provider = req.getProperty ("provider", juce::var()).toString();
-                juce::Thread::launch ([messages, provider, completion]() mutable
+                // Optional per-call ChatOptions (bridge.ts's BrainChatOptions: maxTokens /
+                // temperature / timeoutMs). Absent -> optionsFromVar's defaults, which
+                // reproduce the exact pre-W1.1 800/0.6/provider-default payload.
+                const auto opts = BrainProxy::optionsFromVar (req.getProperty ("options", juce::var()));
+                juce::Thread::launch ([messages, provider, opts, completion]() mutable
                 {
-                    auto result = BrainProxy::chat (messages, provider);
+                    auto result = BrainProxy::chat (messages, provider, opts);
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
