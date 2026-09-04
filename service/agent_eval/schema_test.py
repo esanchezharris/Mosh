@@ -16,6 +16,7 @@ _NAME = "schema_test"
 # this test is MANDATORY on a dev machine, it must never look green by vanishing.
 try:
     import pydantic  # noqa: F401
+    import pytest  # noqa: F401  (sibling modules this file imports use it at import time)
     import typer  # noqa: F401
 except ImportError as exc:  # pragma: no cover — CI-only path
     print(f"SKIP {_NAME}: agent_eval deps not importable ({exc})")
