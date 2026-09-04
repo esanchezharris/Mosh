@@ -15,14 +15,6 @@ import sys
 _real_stdout = sys.stdout
 sys.stdout = sys.stderr
 
-# Warm librosa's numba import BEFORE service/ goes on sys.path (see drummatch_test.py:
-# service/coverage.py shadows numba's optional `coverage` probe). Absent librosa is
-# surfaced later as a JSON error by the embedder, not here.
-try:
-    import librosa.effects  # noqa: F401
-except ImportError:
-    pass
-
 # Run-as-a-file support: put the `service` dir on the path so the package
 # (teardown.drummatch.*) and its `..recipe` relative import resolve.
 _HERE = os.path.dirname(os.path.abspath(__file__))
