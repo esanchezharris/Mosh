@@ -3297,6 +3297,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // keeps the UI's empty-handed path — the common one — honest in dev and e2e.
     case "capture_midi":
       return ok(command, { applied: false, clips: [], reason: "nothing had been played into the retrospective buffer" });
+    // CAP-001 — the mock never crashes mid-take, so there is never residue: the list is
+    // empty and both decisions refuse exactly as native does for an unlisted file.
+    case "list_recording_residue":
+      return ok(command, { residue: [] });
+    case "adopt_recording_residue":
+    case "quarantine_recording_residue":
+      return err(command, `not a recoverable take: ${str(args.file)}`);
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {

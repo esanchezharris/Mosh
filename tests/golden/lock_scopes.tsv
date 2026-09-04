@@ -8,6 +8,7 @@ add_rave_insert	Track
 add_render_layer	Clip
 add_send	Track
 add_test_tone_clip	Track
+adopt_recording_residue	Unguarded
 agent_memory_clear	Unguarded
 agent_memory_delete	Unguarded
 agent_memory_read	Unguarded
@@ -16,11 +17,11 @@ all_notes_off	Unguarded
 analyze_lyrics	Track
 apply_choke	Clip
 apply_remote_track	Unguarded
-attach_issue_file	Unguarded
 approve_training_source	Unguarded
 arm_track	Track
 assert_lyric_line	Track
 assign_sample	Track
+attach_issue_file	Unguarded
 audition_file	Unguarded
 audition_note	Unguarded
 batch_begin	Unguarded
@@ -101,6 +102,7 @@ list_palette	Unguarded
 list_plugins	Unguarded
 list_presets	Unguarded
 list_rave_models	Unguarded
+list_recording_residue	Unguarded
 list_takes	Unguarded
 list_track_outputs	Unguarded
 list_training_sources	Unguarded
@@ -142,6 +144,7 @@ paste_clip	Track
 promote_lora_checkpoint	Unguarded
 promote_take_region	Clip
 quantize_notes	Clip
+quarantine_recording_residue	Unguarded
 recover_session	SessionGlobal
 redo	Unguarded
 regenerate_lyric	Track
@@ -158,7 +161,6 @@ remove_lyric_line	Track
 remove_lyric_sheet	Track
 remove_master_plugin	SessionGlobal
 remove_note	Clip
-report_issue	Unguarded
 remove_plugin	Track
 remove_render_layer	Clip
 remove_section	SessionGlobal
@@ -179,6 +181,7 @@ render_layer	Clip
 render_lora_take	Unguarded
 reorder_master_plugin	SessionGlobal
 reorder_plugin	Track
+report_issue	Unguarded
 rescan_plugins	Unguarded
 reset_rave	Track
 reset_render_layer	Clip
@@ -251,10 +254,10 @@ transform_velocities	Clip
 trim_clip	Clip
 unblock_plugin	Unguarded
 undo	Unguarded
-update_issue	Unguarded
 unfreeze_layer	Clip
 unfreeze_track	Track
 ungroup_clip_group	Clip
 ungroup_track	SessionGlobal
+update_issue	Unguarded
 write_automation_curve	Track
 write_clip_gain_curve	Clip

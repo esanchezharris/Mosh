@@ -177,7 +177,7 @@ bundle_service() {                              # $1 = installed app
   echo "bundling service → ${SVC#$ROOT/}"
   rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform" "$SVC/teardown/render" "$SVC/sft"
   # Top-level modules imported (transitively) by the bundled dirs below. brain_client
-  # is needed by lyrics/core.py + bestofn/runtime.py; coverage (→ stitch) by the
+  # is needed by lyrics/core.py + bestofn/runtime.py; clip_coverage (→ stitch) by the
   # generative adapters; memprobe + sa3_release by server.py's render worker, which
   # hands the SA3 model's 9.2GB back when memory is tight. Those two are imported at
   # server.py's TOP LEVEL, so omitting them is not a degraded feature — the service
@@ -186,7 +186,7 @@ bundle_service() {                              # $1 = installed app
   # service/scripts/bundle_completeness_test.py.
   cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
      "$ROOT/service/quality_readout.py" "$ROOT/service/audio_io.py" \
-     "$ROOT/service/brain_client.py" "$ROOT/service/coverage.py" "$ROOT/service/stitch.py" \
+     "$ROOT/service/brain_client.py" "$ROOT/service/clip_coverage.py" "$ROOT/service/stitch.py" \
      "$ROOT/service/memprobe.py" "$ROOT/service/sa3_release.py" \
      "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
   # FMS service modules ride whole-dir (imported in-process by server.py / the adapters;

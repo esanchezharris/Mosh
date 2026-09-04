@@ -20,6 +20,7 @@ from __future__ import annotations
 import gc
 import math
 import os
+import shutil
 import sys
 import threading
 
@@ -39,11 +40,28 @@ LORA_APPLY_VERSION = "2"   # 2: sha-keyed apply + server-side trigger injection 
 CONTIGUOUS_VERSION = "1"
 MAX_CONTIGUOUS = float(os.environ.get("MOSH_SA3_MAX_CONTIGUOUS", "240.0"))  # ceiling (memory-bound; ≥4min verified)
 MIN_SECONDS = float(os.environ.get("MOSH_SA3_MIN_SECONDS", "2.0"))          # floor (avoid a degenerate tiny grid)
+_OWNER_COMMAND_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
 
 
 def clamp_render_seconds(clip_len) -> float:
     """The length to render a clip at: its own length, clamped to [MIN_SECONDS, MAX_CONTIGUOUS]."""
     return float(max(MIN_SECONDS, min(float(clip_len), MAX_CONTIGUOUS)))
+
+
+def _ensure_command_on_path(command: str, fallback_dirs: tuple[str, ...] = _OWNER_COMMAND_DIRS) -> str | None:
+    resolved = shutil.which(command)
+    if resolved is not None:
+        return resolved
+
+    current_path = os.environ.get("PATH", "")
+    path_dirs = current_path.split(os.pathsep) if current_path else []
+    for directory in fallback_dirs:
+        candidate = os.path.join(directory, command)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            if directory not in path_dirs:
+                os.environ["PATH"] = directory + (os.pathsep + current_path if current_path else "")
+            return candidate
+    return None
 
 _engine = None
 _engine_lock = threading.Lock()
@@ -58,6 +76,7 @@ def engine_available() -> bool:
 def get_engine():
     """Lazily construct the singleton (heavy: ~seconds, first SA3 job only)."""
     global _engine
+    _ensure_command_on_path("ffmpeg")
     with _engine_lock:
         if _engine is None:
             _engine = _Engine()

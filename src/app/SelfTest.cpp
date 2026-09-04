@@ -10364,6 +10364,148 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "metronome restored to the engine defaults");
     }
 
+    // ─── CAP-001 — recording residue after an unclean exit, and the silent-take flag ───
+    // A crash mid-take leaves a WAV Tracktion streamed to disk that no clip references.
+    // Headless we cannot crash mid-take, but we CAN plant exactly that file: a Tracktion-
+    // named take WAV under the project dir, newer than the last save, carrying a BWAV time
+    // reference. The list must find it, adopt must land it at that position on the named
+    // track (measured, so a silent one is flagged), quarantine must rename never delete,
+    // and a file a clip references or that predates the save must NOT be offered.
+    section ("CAP-001: recording residue (list/adopt/quarantine) + silent-take flag");
+    {
+        check (ok (cmd (ops, "save")), "save (residue baseline) ok");
+        const auto projDir = eng.editFile().getParentDirectory();
+        check (projDir.isDirectory(), "project dir exists for residue");
+        auto vt = cmd (ops, "create_track", args1 ("name", "Vox"))["data"].getProperty ("trackId", var()).toString();
+        check (vt.isNotEmpty(), "residue track created");
+        check (ok (cmd (ops, "save")), "save (residue track) ok");
+
+        // A readable silent take at 2.0 s on "Vox", 0.5 s long, at the device/project rate.
+        const double rate = eng.edit().engine.getDeviceManager().getSampleRate() > 0.0
+                          ? eng.edit().engine.getDeviceManager().getSampleRate() : 44100.0;
+        auto writeTake = [&] (const juce::String& name, bool silent, double startSec) -> juce::File
+        {
+            auto f = projDir.getChildFile (name);
+            f.deleteFile();
+            juce::WavAudioFormat wav;
+            juce::StringPairArray meta;
+            meta.set (juce::WavAudioFormat::bwavTimeReference, juce::String ((juce::int64) (startSec * rate)));
+            std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (f), rate, 1, 24, meta, 0));
+            juce::AudioBuffer<float> buf (1, (int) (rate * 0.5));
+            buf.clear();
+            if (! silent)
+                for (int i = 0; i < buf.getNumSamples(); ++i)
+                    buf.setSample (0, i, 0.3f * std::sin (0.05f * (float) i));
+            const bool okw = w != nullptr && w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
+            w.reset();
+            check (okw, "residue fixture written: " + name);
+            return f;
+        };
+        const auto silentTake = writeTake ("session_Vox_Take_7.wav", true, 2.0);
+        const auto loudTake   = writeTake ("session_Vox_Take_8.wav", false, 0.25);
+        // A torn file: the right name, garbage bytes.
+        auto torn = projDir.getChildFile ("session_Vox_Take_9.wav");
+        torn.replaceWithText ("this is not a wav");
+        // An OLD orphan (a day old) is offered too — no freshness rule (reopening the
+        // project re-saves it) — but sorted last.
+        auto old = writeTake ("session_Vox_Take_1.wav", false, 0.0);
+        old.setLastModificationTime (juce::Time::getCurrentTime() - juce::RelativeTime::days (1));
+
+        auto listed = [&] { return cmd (ops, "list_recording_residue")["data"].getProperty ("residue", var()); };
+        auto entryFor = [&] (const juce::File& f) -> var
+        {
+            auto l = listed();   // named local: getArray() on a temporary dangles (see snapshot() notes)
+            if (auto* arr = l.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("file", var()).toString() == f.getFullPathName()) return e;
+            return {};
+        };
+        check (entryFor (silentTake).isObject(), "residue lists the silent take");
+        check (entryFor (loudTake).isObject(),   "residue lists the loud take");
+        check (entryFor (torn).isObject(),       "residue lists the torn take");
+        check (entryFor (old).isObject(),        "residue lists an old orphan too (no freshness rule)");
+        {
+            auto arr = listed();
+            check (arr.isArray() && arr.size() >= 4
+                   && arr[arr.size() - 1].getProperty ("file", var()).toString() == old.getFullPathName(),
+                   "residue is sorted newest first (the day-old orphan is last)");
+        }
+        check (entryFor (silentTake).getProperty ("decision", var()).toString() == "adopt",   "readable take -> adopt");
+        check (entryFor (torn).getProperty ("decision", var()).toString() == "quarantine",    "torn take -> quarantine");
+        check (entryFor (silentTake).getProperty ("trackName", var()).toString() == "Vox",    "residue carries the track name from the file");
+        check (std::abs ((double) entryFor (silentTake).getProperty ("startSeconds", 0.0) - 2.0) < 1.0e-3,
+               "residue carries the BWAV time reference (2.0 s)");
+
+        // Adopt the silent take: lands on Vox at 2.0 s, measured, flagged silent + recovered.
+        auto ad = cmd (ops, "adopt_recording_residue", args1 ("file", silentTake.getFullPathName()));
+        check (ok (ad), "adopt_recording_residue ok");
+        const auto adoptedId = ad["data"].getProperty ("clipId", var()).toString();
+        auto adoptedClip = [&] () -> var
+        {
+            auto snap = ops.snapshot();
+            auto tracksVar = snap.getProperty ("tracks", var());   // named locals: no getArray() on temporaries
+            if (auto* tracks = tracksVar.getArray())
+                for (auto& t : *tracks)
+                {
+                    auto clipsVar = t.getProperty ("clips", var());
+                    if (auto* clips = clipsVar.getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == adoptedId) return c;
+                }
+            return {};
+        };
+        check (adoptedClip().isObject(), "adopted take is a clip in the snapshot");
+        check (std::abs ((double) adoptedClip().getProperty ("start", -1.0) - 2.0) < 1.0e-3, "adopted take landed at its BWAV position (2.0 s)");
+        check ((bool) adoptedClip().getProperty ("recovered", false), "adopted take is marked recovered");
+        check (adoptedClip().hasProperty ("peakLevel"), "adopted take was measured (peakLevel present)");
+        check ((bool) adoptedClip().getProperty ("silent", false), "a silent take is flagged silent");
+        check (! entryFor (silentTake).isObject(), "an adopted take leaves the residue list (a clip now references it)");
+
+        // Adopt the loud one too: not silent.
+        auto ad2 = cmd (ops, "adopt_recording_residue", args1 ("file", loudTake.getFullPathName()));
+        check (ok (ad2), "adopt_recording_residue (loud) ok");
+        {
+            const auto id2 = ad2["data"].getProperty ("clipId", var()).toString();
+            auto snap = ops.snapshot(); bool found = false, silentFlag = true;
+            auto tracksVar = snap.getProperty ("tracks", var());
+            if (auto* tracks = tracksVar.getArray())
+                for (auto& t : *tracks)
+                {
+                    auto clipsVar = t.getProperty ("clips", var());
+                    if (auto* clips = clipsVar.getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == id2) { found = true; silentFlag = (bool) c.getProperty ("silent", true); }
+                }
+            check (found && ! silentFlag, "a take with audio is NOT flagged silent");
+        }
+
+        // The torn one cannot be adopted; it can be quarantined, and quarantine renames.
+        check (! ok (cmd (ops, "adopt_recording_residue", args1 ("file", torn.getFullPathName()))),
+               "adopt refuses a torn take");
+        auto q = cmd (ops, "quarantine_recording_residue", args1 ("file", torn.getFullPathName()));
+        check (ok (q), "quarantine_recording_residue ok");
+        const juce::File quarantined (q["data"].getProperty ("quarantined", var()).toString());
+        check (! torn.existsAsFile() && quarantined.existsAsFile(), "quarantine renamed the torn take in place (never deleted)");
+        check (quarantined.getParentDirectory() == projDir, "quarantined file stays in the project dir");
+        check (! entryFor (torn).isObject(), "a quarantined take leaves the residue list");
+
+        // Anything not listed is refused — no path smuggles a WAV in under the banner.
+        check (! ok (cmd (ops, "adopt_recording_residue", args1 ("file", projDir.getChildFile ("not_a_take.wav").getFullPathName()))),
+               "adopt refuses a file the scan would not offer");
+        check (! ok (cmd (ops, "quarantine_recording_residue", args1 ("file", "/nope/x_Take_1.wav"))),
+               "quarantine refuses an unknown file");
+
+        // Non-undoable file actions, same posture as set_record_options.
+        {
+            auto qLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool qPref = false;
+            for (auto& ln : juce::StringArray::fromLines (qLog))
+                if (ln.contains ("\"command\": \"quarantine_recording_residue\"") && ln.contains ("\"undoable\": false")) qPref = true;
+            check (qPref, "quarantine_recording_residue logged undoable:false");
+        }
+        quarantined.deleteFile(); old.deleteFile();
+    }
+
     // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
     // WHAT THIS CANNOT PROVE, stated up front so nothing below reads as more than it is:
     // a headless run has no audio device, so no te::MidiInputDevice exists, so
@@ -16476,6 +16618,58 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
 // notes reach the recorder and land in a clip. Whether they reach a speaker is
 // --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
 // sound it never measured.
+// ── CAP-001 run 1 — record, then get killed ──────────────────────────────────────────
+int runRecordHoldSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh record-hold smoke (CAP-001 run 1) =====\n";
+    section ("CAP-001 run 1: arm, record, hold until killed");
+    auto* device = eng.engine().getDeviceManager().deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio() && device != nullptr, "audio device is open");
+    if (device == nullptr) return failures;
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel");
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (20);
+            else Thread::sleep (20);
+        }
+    };
+
+    auto np = cmd (ops, "new_project", args1 ("name", "crashtake"));
+    check (ok (np), "new_project crashtake ok");
+    const auto editFile = np["data"].getProperty ("editFile", var()).toString();
+    auto t = cmd (ops, "create_track", args1 ("name", "Vox"));
+    check (ok (t), "create_track Vox ok");
+    const auto trackId = t["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Vox armed on the live input");
+    check (ok (cmd (ops, "save")), "project saved before recording (a project dir exists for the take)");
+    // The GUI writes this once its window is up; a kill leaves it behind, and the relaunch
+    // reads the unclean exit from it (MoshEngine::uncleanAtStartup).
+    eng.markSessionRunning();
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
+    auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+    check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
+    pump (300);   // let the recording context open its file before announcing
+    std::cerr << "RECORD-HOLD: recording editFile=" << editFile << " sessionDir=" << eng.sessionDir().getFullPathName()
+              << " trackId=" << trackId << "\n" << std::flush;
+    // Hold: the harness kills us. If nobody does within two minutes, stop honestly and
+    // report that the hold expired (so a mis-wired script cannot pass by accident).
+    const auto deadline = Time::getMillisecondCounter() + 120000;
+    while (Time::getMillisecondCounter() < deadline)
+        pump (200);
+    check (false, "record-hold expired without being killed (the harness is supposed to SIGKILL this process)");
+    return failures;
+}
+
 int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
