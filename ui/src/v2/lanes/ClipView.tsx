@@ -398,6 +398,14 @@ export function ClipView({ clip, trackType, snapshot, clipHeaderPx, clipVisualHe
         <span className="v2-clip-badge warp" data-testid="v2-clip-warp"
           title="Warped — this clip time-stretches to follow the project tempo. ⌘-drag the edge or use the Warp tab.">≈</span>
       )}
+      {clip.silent && (
+        <span className="v2-clip-badge silent" data-testid="v2-clip-silent"
+          title="This take captured nothing (below −80 dBFS). Check the interface is unmuted and the right input is armed before recording again.">silent</span>
+      )}
+      {clip.recovered && !clip.silent && (
+        <span className="v2-clip-badge recovered" data-testid="v2-clip-recovered"
+          title="Recovered from a take the previous session left on disk when it ended unexpectedly.">recovered</span>
+      )}
       {transcribing && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-transcribing">transcribing…</span>}
       {buildingLyrics && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-building-lyrics">lyrics…</span>}
       {buildingSkeleton && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-building-skeleton">flow…</span>}
