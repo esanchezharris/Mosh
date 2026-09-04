@@ -1,8 +1,8 @@
-"""Golden test for the whole-clip coverage DSP (service/stitch.py + coverage.py).
+"""Golden test for the whole-clip coverage DSP (service/stitch.py + clip_coverage.py).
 
 Deterministic + stdlib-only (no model): proves tile_to_length / stitch_windows produce the
 right length and BYTE-IDENTICAL output across runs (so golden checksums stay stable), and that
-coverage.render routes loop→tile / long→stitch / short→single. Run via gate.sh run_py_tests
+clip_coverage.render routes loop→tile / long→stitch / short→single. Run via gate.sh run_py_tests
 (named *_test.py); meant to pass 3× deterministically.
 """
 import hashlib
@@ -14,7 +14,7 @@ import tempfile
 import wave
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # service/
-import coverage
+import clip_coverage
 import stitch
 
 
@@ -104,7 +104,7 @@ def main():
     sl24b = os.path.join(td, "slice24b.wav"); stitch.slice_wav(in24, sl24b, 0.0, 0.5)
     assert _md5(sl24) == _md5(sl24b), "24-bit slice deterministic"
 
-    # coverage.render routing with a trivial passthrough window renderer.
+    # clip_coverage.render routing with a trivial passthrough window renderer.
     def passthrough(in_wav, out_wav, params):
         seg, ch, sr, sw = stitch._read(in_wav)
         stitch._write(out_wav, seg, ch, sr, sw)
@@ -113,16 +113,16 @@ def main():
     long_in = os.path.join(td, "long.wav"); _mk(long_in, 20.0)
     # capped window (8s) + no explicit loop → stitch to 20s.
     o_st = os.path.join(td, "cov_stitch.wav")
-    m = coverage.render(passthrough, long_in, o_st, {"coverage": "auto", "duration_s": 20.0}, 8.0)
+    m = clip_coverage.render(passthrough, long_in, o_st, {"coverage": "auto", "duration_s": 20.0}, 8.0)
     assert m["coverage"] == "stitch" and abs(stitch.wav_duration(o_st) - 20.0) < 0.1, "coverage stitch"
     # explicit loop → tile one 8s cycle to 20s.
     o_lp = os.path.join(td, "cov_loop.wav")
-    m = coverage.render(passthrough, long_in, o_lp, {"coverage": "loop", "duration_s": 20.0, "loop_seconds": 4.0}, 8.0)
+    m = clip_coverage.render(passthrough, long_in, o_lp, {"coverage": "loop", "duration_s": 20.0, "loop_seconds": 4.0}, 8.0)
     assert m["coverage"] == "loop" and abs(stitch.wav_duration(o_lp) - 20.0) < 0.1, "coverage loop"
     # short clip (fits the window) → single passthrough.
     short_in = os.path.join(td, "short.wav"); _mk(short_in, 3.0)
     o_sg = os.path.join(td, "cov_single.wav")
-    m = coverage.render(passthrough, short_in, o_sg, {"coverage": "auto", "duration_s": 3.0}, 8.0)
+    m = clip_coverage.render(passthrough, short_in, o_sg, {"coverage": "auto", "duration_s": 3.0}, 8.0)
     assert m["coverage"] == "single" and abs(stitch.wav_duration(o_sg) - 3.0) < 0.1, "coverage single"
 
     print("stitch_test: OK (tile/stitch length + determinism, coverage routing loop/stitch/single)")

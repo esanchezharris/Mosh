@@ -6,6 +6,15 @@ baseline is origin/main through **7eb0d617** (PR #668). The annotated tag
 it lands on main and completes final verification. Do not infer a future product
 direction from this snapshot.
 
+**Post-pivot direction (owner-approved 2026-09-01):** see
+[docs/POSTMORTEM-2026-09.md](docs/POSTMORTEM-2026-09.md) — the March–August
+forensic postmortem, the binding **quality-loop contract** (weekly human
+correction rounds with written lessons; no new label infra until the existing
+holds ≥25 real labels; proxy metrics never gate musical decisions; no
+re-platforming without postmortem + cooling period + owner sign-off; one genre
+at a time), and the approved produce-lane direction. That contract governs all
+future work in this repo.
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the code map,
 [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) for the selected/archived
 disposition, and [docs/FEATURE_AUDIT.md](docs/FEATURE_AUDIT.md) for the
@@ -60,8 +69,11 @@ cannot prove audibility, physical recovery, installed-app behavior, Ableton
 behavior, or iPhone behavior. Keep those owner acceptance boundaries explicit in
 their subsystem evidence.
 
-The MOSH_MAX_CODEX_CHILDREN=1000 threshold was a one-time, documented
-pre-pivot maintenance override. It is not a new normal gate setting.
+The memory preflight no longer counts agent child processes (removed
+2026-09-01): that ceiling was a proxy for lingering Mosh instances that were not
+being killed, and it blocked every native gate on a machine running ordinary
+agent sessions. Stray Mosh processes are handled by the gate's port ownership
+and kill_stray_services, not by a process-count heuristic.
 
 ## Paused and archived work
 

@@ -1,0 +1,93 @@
+{
+  "id": "produce-corrections/produce-r2-2026-09-02",
+  "created": "2026-09-02",
+  "ask": "produce me a dark jerk trap beat at 148 in D minor",
+  "prompt_version": "produce-v3 (PRODUCE_VERSION 3)",
+  "reference": "A-flywheel.wav \u2014 owner's Live 12 export of the corrected cATHARDIC_trap_r0_gen001 A section",
+  "runs": {
+    "r2-sonnet-s1c": {
+      "seed": 1,
+      "brain": "sonnet via claude -p (medium effort)"
+    },
+    "r2-sonnet-s2": {
+      "seed": 2,
+      "brain": "sonnet"
+    },
+    "r2-opus-s3": {
+      "seed": 3,
+      "brain": "opus"
+    }
+  },
+  "candidates": [
+    {
+      "candidate": "B-mosh-r2-opus-s3.wav",
+      "rating": "fail",
+      "user_verdict": "fail",
+      "notes": [
+        "mix and sample selection/ preset selection hold this one back from passing"
+      ]
+    },
+    {
+      "candidate": "B-labkit-r2-opus-s3.wav",
+      "rating": "pass_with_notes",
+      "user_verdict": "pass_with_notes",
+      "notes": [
+        "make sense that it passed because it just copied and swapped out the presets"
+      ]
+    },
+    {
+      "candidate": "B-mosh-r2-sonnet-s1c.wav",
+      "rating": "fail",
+      "user_verdict": "fail",
+      "notes": [
+        "drums sound out of time/ off the grid? maybe some of our samples have empty space at the beginning? there's no 808? actually a lot of stems are not playing/ missing"
+      ]
+    },
+    {
+      "candidate": "B-labkit-r2-sonnet-s1c.wav",
+      "rating": "fail",
+      "user_verdict": "fail",
+      "notes": [
+        "mix and sample selection/ preset selection hold this one back from passing. also no stems are avaliable?"
+      ]
+    },
+    {
+      "candidate": "B-mosh-r2-sonnet-s2.wav",
+      "rating": "fail",
+      "user_verdict": "fail",
+      "notes": [
+        "mix and sample selection/ preset selection hold this one back from passing. that arp is just so overpowering good rule of thumb is that hip-hop is almost always drums/ bass forwards so having a melody element thats this loud doesn't make sense it should be turned down and likely eq'd. another good rule of thumb is to do a highpass (cut lower frequencies) on melodic elements so that drums and bass can be heard - this arp has a ton of low stuff as do a lot of the other melodic elements. "
+      ]
+    },
+    {
+      "candidate": "B-labkit-r2-sonnet-s2.wav",
+      "rating": "fail",
+      "user_verdict": "fail",
+      "notes": [
+        "mix and sample selection/ preset selection hold this one back from passing as well. also no stems are avaliable again? a lot of the mixing issues would be fixed with a highpass/ puttting the melody behind the drums and 808. standardclip (a soft clipper of some kind) and/or god particle (a multiband mastering plugin of some sort) on the master is also a good way to glue a mix together and is pretty characteristic of hip hop. standardclip in particularly characteristic for making rage and jerk beats. "
+      ]
+    }
+  ],
+  "rating": "pass_with_notes on B-labkit-r2-opus-s3 (first pass ever); fail on the five others",
+  "user_verdict": "see candidates[] \u2014 verbatim",
+  "notes": [
+    "mix and sample selection/ preset selection hold this one back from passing",
+    "make sense that it passed because it just copied and swapped out the presets",
+    "drums sound out of time/ off the grid? maybe some of our samples have empty space at the beginning? there's no 808? actually a lot of stems are not playing/ missing",
+    "mix and sample selection/ preset selection hold this one back from passing. also no stems are avaliable?",
+    "mix and sample selection/ preset selection hold this one back from passing. that arp is just so overpowering good rule of thumb is that hip-hop is almost always drums/ bass forwards so having a melody element thats this loud doesn't make sense it should be turned down and likely eq'd. another good rule of thumb is to do a highpass (cut lower frequencies) on melodic elements so that drums and bass can be heard - this arp has a ton of low stuff as do a lot of the other melodic elements. ",
+    "mix and sample selection/ preset selection hold this one back from passing as well. also no stems are avaliable again? a lot of the mixing issues would be fixed with a highpass/ puttting the melody behind the drums and 808. standardclip (a soft clipper of some kind) and/or god particle (a multiband mastering plugin of some sort) on the master is also a good way to glue a mix together and is pretty characteristic of hip hop. standardclip in particularly characteristic for making rage and jerk beats. "
+  ],
+  "analysis": {
+    "by": "Claude (data, not ear) \u2014 2026-09-02",
+    "findings": [
+      "B-labkit-r2-opus-s3 = the Opus run's OWN notes + the SAME Vital presets + the owner's Live-set drum/808 samples (nothing copied) = pass_with_notes; the identical notes/presets on palette-v2 samples = fail. The composition passed; the palette drum/808 samples and the mix are the gap.",
+      "Every palette-v2 one-shot carries ~5 ms of pre-roll before its onset (trimmer kept 10 ms headroom; owner's kit samples start at 0 ms; palette layer clap 23 ms, fx 25 ms) \u2014 the 'off the grid' feel on s1c.",
+      "r2-sonnet-s1c's repair pass deleted five clips (remove_clip) before the additive-only guard landed (fa78d9ee) \u2014 hence 'no 808 / stems missing'.",
+      "Headless labkit twins did not export stems (replay path) \u2014 fixed in round 3.",
+      "Plugin catalog: The God Particle (Cradle VST3) present; no Standard Clip installed; builtins have lowpass but no highpass/clipper.",
+      "Renders peak at 0 dBFS; melodic tracks carry sub-200 Hz energy; arp at -10 dB was still dominant (owner: turn down + highpass melodic elements; drums/bass forward)."
+    ]
+  },
+  "promoted_to": "round 3 plan: 0 ms onset re-trim + kit-matched sample picking; native highpass/softclip builtins; preflight mix chain (highpass on melodic tracks, revised gain map, master soft clip + God Particle on the owner's Mac)"
+}

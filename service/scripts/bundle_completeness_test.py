@@ -8,7 +8,7 @@ module grows a NEW top-level dependency, it is easy to add the feature dir to th
 whitelist and forget the transitive top-level module — the packaged app then
 throws ModuleNotFoundError at runtime (routes 500) even though every dev-tree test
 passes, because the dev tree has the module on sys.path. This class has bitten the
-repo repeatedly (the FMS route dirs; then brain_client/coverage under the WP-11 /
+repo repeatedly (the FMS route dirs; then brain_client/clip_coverage under the WP-11 /
 re-imagine work). run.sh does `cd <bundle>/service && python3 server.py`, and
 server.py only puts its own dir on sys.path — so a top-level import resolves ONLY
 from the bundle, never the source tree.

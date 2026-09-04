@@ -205,25 +205,14 @@ export type State = {
   voiceOn: boolean;
   voiceVol: number;
   toggleVoice: () => void;
-  // Hands-free always-on listening (UI-local + persisted, exactly like voiceOn). When
-  // true, AgentComposer's useHandsFree hook engages the continuous recognizer and
-  // command phrases act without holding the mic; the mic is hot only while this is on.
-  handsFreeOn: boolean;
-  setHandsFree: (b: boolean) => void;
-  // Fallback (default off): when true, hands-free listening pauses while a take records
-  // (for inputs that can't be shared); off keeps barge-in. UI-local + persisted.
-  handsFreePauseOnRecord: boolean;
-
   // Agent (Moshi running the session) — UI-local. agentChangeSet drives Monster
   // changes; agentUtter signals the creature to react (voice + pose) to a reply.
   agentBusy: boolean;
   agentChangeSet: ChangeSet | null;
   agentUtter: { intent: string; say?: string; tick: number } | null;
-  agentListening: boolean;            // hold-to-talk active — Moshi perks toward you
   setAgentBusy: (b: boolean) => void;
   setAgentChangeSet: (cs: ChangeSet | null) => void;
   pushAgentUtter: (intent: string, say?: string) => void;
-  setAgentListening: (b: boolean) => void;
 
   // AGT-MEM (M3) — the "remember that…" fastPath rule's confirm toast. A memory
   // write is non-undoable BY DESIGN (M1) — this toast's Undo therefore calls
@@ -232,7 +221,7 @@ export type State = {
   memoryToast: { text: string; scope: "global" | "project"; kind: string; ts: number } | null;
   setMemoryToast: (t: State["memoryToast"]) => void;
 
-  // Performer mode (hands-free voice take recording). `recording` is derived from the
+  // Performer take review. `recording` is derived from the
   // live snapshot; `takeDecisionPending` marks "a just-recorded take awaits keep/redo".
   takeDecisionPending: boolean;
   lastTakeClipId: string | null;
@@ -639,8 +628,6 @@ export const useStore = create<State>((set, get, api) => ({
         uiScale: g.get("uiScale") as number,
         voiceOn: g.get("voiceOn") as boolean,
         voiceVol: g.get("voiceVol") as number,
-        handsFreeOn: g.get("handsFree") as boolean,
-        handsFreePauseOnRecord: g.get("handsFreePauseOnRecord") as boolean,
       });
     };
     mirrorSettings();
@@ -861,22 +848,13 @@ export const useStore = create<State>((set, get, api) => ({
     useSettings.getState().set("voiceOn", next); // persists through the settings store
     set({ voiceOn: next });
   },
-  handsFreeOn: useSettings.getState().get("handsFree") as boolean,
-  setHandsFree: (b) => {
-    useSettings.getState().set("handsFree", b); // persists through the settings store
-    set({ handsFreeOn: b });
-  },
-  handsFreePauseOnRecord: useSettings.getState().get("handsFreePauseOnRecord") as boolean,
-
   agentBusy: false,
   agentChangeSet: null,
   agentUtter: null,
-  agentListening: false,
   setAgentBusy: (b) => set({ agentBusy: b }),
   setAgentChangeSet: (cs) => set({ agentChangeSet: cs }),
   pushAgentUtter: (intent, say) =>
     set((s) => ({ agentUtter: { intent, say, tick: (s.agentUtter?.tick ?? 0) + 1 } })),
-  setAgentListening: (b) => set({ agentListening: b }),
 
   memoryToast: null,
   setMemoryToast: (t) => set({ memoryToast: t }),

@@ -81,6 +81,15 @@ function newTurnId(): string {
 
 export type TaskExecutor = {
   env: AgentEnv;
+  /** P1 produce-lane preflight (produceTemplate.ts) — deterministic, non-model-
+   *  authored setup that needs each command's raw `data` payload (a trackId to
+   *  chain the next call) rather than the loop-safe {command,ok,error} envelope
+   *  env.runBatch returns. Opens the SAME undo transaction as env.runBatch (lazy,
+   *  skipped for READ_ONLY commands) so the whole task — preflight included —
+   *  still reverts as one undo unit. Bypasses catalog validation/destructive
+   *  screening: callers pass only commands they constructed themselves, never
+   *  model output. */
+  execRaw(command: string, args?: Record<string, unknown>): Promise<{ ok: boolean; error?: string; data?: unknown }>;
   /** Close the task's undo transaction (idempotent; call in a finally). */
   close(): Promise<void>;
   /** Whether the native batch was actually opened (false for read-only tasks). */
@@ -198,6 +207,11 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
 
   return {
     env,
+    async execRaw(command, args) {
+      if (closed) throw new Error("task executor is closed");
+      if (!READ_ONLY.has(command)) await ensureOpen();
+      return exec(command, args ?? {});
+    },
     opened: () => opened,
     async close() {
       if (closed) return;

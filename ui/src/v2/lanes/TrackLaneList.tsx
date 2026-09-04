@@ -45,13 +45,14 @@ import { ConfirmDialog } from "../../ui/ConfirmDialog";
 // asked for them, and `add_midi_clip` had no v2 call site at all. Only the classic shell's
 // Topbar did (`+ Drums` / `+ MIDI`), so programming a beat or a melody with the mouse was
 // impossible in the default UI. `ui/src/v2/lanes/trackKinds.test.ts` pins this.
-type TrackKind = "audio" | "drum" | "midi" | "tone";
+type TrackKind = "audio" | "drum" | "midi" | "tone" | "recipe";
 
 export const TRACK_KINDS: { kind: TrackKind; label: string; hint: string }[] = [
-  { kind: "audio", label: "Audio",      hint: "Record or drop a file" },
-  { kind: "drum",  label: "Drums",      hint: "Sampler + kit, ready to program" },
-  { kind: "midi",  label: "Instrument", hint: "Synth + an empty MIDI clip" },
-  { kind: "tone",  label: "Test tone",  hint: "A reference tone — check you can hear anything" },
+  { kind: "audio",  label: "Audio",       hint: "Record or drop a file" },
+  { kind: "drum",   label: "Drums",       hint: "Sampler + kit, ready to program" },
+  { kind: "midi",   label: "Instrument",  hint: "Synth + an empty MIDI clip" },
+  { kind: "tone",   label: "Test tone",   hint: "A reference tone — check you can hear anything" },
+  { kind: "recipe", label: "Recipe beat", hint: "A full beat from the curated groove library" },
 ];
 
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
@@ -275,6 +276,12 @@ export async function addTrackOfKind(
     if (toneRes.ok && toneTrackId) await exec("add_test_tone_clip", { trackId: toneTrackId });
     return;
   }
+  // A whole beat from the curated recipe library — real grooves recombined per element
+  // with a palette one-shot bound to every role. Unlike its siblings this entry creates
+  // no track first: generate_beat_recipe's generated program creates its own tracks and
+  // clips as ONE undoable batch. The slow fetch leg (service may cold-start) runs off
+  // the message thread via the WebBridge two-phase hop, so the shell stays responsive.
+  if (kind === "recipe") { await exec("generate_beat_recipe", {}); return; }
   // There is no native "midi" track TYPE — cmdCreateTrack accepts only audio|drum, and an
   // instrument track IS an audio track carrying a synth plus MIDI clips. So: make the
   // track, then put a clip on it. add_midi_clip loads 4OSC in its own transaction when the
@@ -336,7 +343,7 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
                 {/* "tone" is not a track type — it makes an AUDIO track with a tone on
                     it — so it borrows the waveform icon rather than falling through to
                     TrackTypeIcon's unknown-type default. */}
-                <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
+                <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind === "recipe" ? "drum" : kind} />
               </span>
               <span className="v2-menu-text">
                 <span className="v2-menu-label">{label}</span>

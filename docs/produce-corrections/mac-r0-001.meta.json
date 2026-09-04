@@ -1,0 +1,20 @@
+{
+  "id": "mac-r0-001",
+  "created": "2026-09-01",
+  "ask": null,
+  "prompt_version": "pre-produce-lane (PROMPT-trap-v4, flywheel correction round r1)",
+  "run": "generations/mac_r0_001.mdsl",
+  "reference": "~/AbletonMONSTER/flywheel-data/corrections/mac_r0_001.meta.json (external — the flywheel lab's own correction store); fix: corrections/mac_r0_001_fix.mdsl; source .als: flywheel-data/rebuilt_cATHARDIC1 Project/cATHARDIC_trap_r0_gen001.als",
+  "rating": "pass_with_notes",
+  "user_verdict": "Honestly, I'm really happy with this! (fixed two things by hand in Live)",
+  "notes": [
+    "Stab/counter Serum track (t6) too short and choppy - wants a more sustained countermelody; breaks are fine, but given the nature of the patch notes should be held out longer",
+    "Straight clap pattern should be quieter or have some variation",
+    "User rewrote the A-section stabs entirely: single-note sustained phrases (eighth up to dotted-half durations, some hand-dragged free lengths), motifs with real breaks, dipped into a lower octave (D4/A3 in MDSL terms), one deliberately late off-grid placement",
+    "User kept the main law-clap steady and added variation to the LAYER clap only: extra softer hit at step 10 on bars 2 and 4 (A section)",
+    "B-section stabs were NOT corrected by the user (still the choppy original) - apply the sustained-stab rule generatively next round",
+    "ShaperBox 3 on t6 (stabs) redone by hand: the template's saved ShaperBox state came from a different plugin version and was overwritten on load - template-maintenance lesson, not a prompt rule",
+    "User renamed t6 to '7 Serum 2 this is a little too short and choppy' as an in-set annotation; renamed to descriptive after logging"
+  ],
+  "promoted_to": "PROMPT-trap-v4.md, then produce-lane PRODUCE_RULES v1 (SUSTAIN, LAYER clap) and v2 (SYNTHS sustain/breaks/octave-dip/late-placement, DRUMS layer-clap variation)"
+}

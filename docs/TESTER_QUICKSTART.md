@@ -42,9 +42,9 @@ coding, no accounts, nothing to sign up for.
 - The very first launch can take a **moment longer than usual** — Mosh is quietly scanning
   your Mac for audio plugins (instruments/effects) in the background. Just give it a few
   seconds; you don't need to do anything.
-- macOS will ask permission for **Microphone** and **Speech Recognition** — click **Allow**
-  on both if you want to talk to Mosh's voice assistant. If you'd rather just type or click,
-  it's safe to skip these; nothing else breaks.
+- Mosh does not request microphone access on launch. macOS asks for **Microphone** only
+  when you explicitly select an audio input or arm an audio track for recording. MIDI
+  editing, instrument tracks, playback, typing to Moshi, and mixing do not need it.
 
 ## 4. Sound check
 

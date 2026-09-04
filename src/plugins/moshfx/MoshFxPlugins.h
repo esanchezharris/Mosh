@@ -78,6 +78,37 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOTTPlugin)
 };
 
+// R3.3 — a plain per-sample tanh soft clipper: no oversampling, no lookahead, zero
+// latency. Two AutomatableParameters (drive in dB, ceiling in dBFS); see
+// MoshSoftClipPlugin.cpp's applyToBuffer for the exact formula and the honest
+// aliasing caveat that comes with skipping oversampling.
+class MoshSoftClipPlugin : public te::Plugin, public MoshFxDescribable
+{
+public:
+    static const char* xmlTypeName;
+    static const char* getPluginName() { return "Mosh Soft Clipper"; }
+
+    explicit MoshSoftClipPlugin (te::PluginCreationInfo);
+    ~MoshSoftClipPlugin() override;
+
+    juce::String getName() const override { return getPluginName(); }
+    juce::String getPluginType() override { return xmlTypeName; }
+    juce::String getSelectableDescription() override { return getName(); }
+
+    void initialise (const te::PluginInitialisationInfo&) override;
+    void deinitialise() override;
+    void applyToBuffer (const te::PluginRenderContext&) override;
+    int getNumOutputChannelsGivenInputs (int n) override { return n; }
+    void restorePluginStateFromValueTree (const juce::ValueTree&) override;
+    juce::var describeMoshFx() const override;
+
+private:
+    juce::CachedValue<float> driveValue, ceilingValue;
+    te::AutomatableParameter::Ptr driveParam, ceilingParam;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshSoftClipPlugin)
+};
+
 class MoshXFeedbackPlugin : public te::Plugin, public MoshFxDescribable
 {
 public:

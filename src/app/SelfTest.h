@@ -42,6 +42,24 @@ int runLiveAudioSmoke (MoshEngine&, MoshOps&);
     — that is --live-audio-smoke's job. */
 int runMidiRecordSmoke (MoshEngine&, MoshOps&);
 
+/** CAP-001 — `Mosh --record-hold-smoke`: run 1 of the crash-residue test. Creates and
+    saves a named project, arms a track on the live input, starts recording, prints one
+    "RECORD-HOLD: recording ..." line naming the edit file, and then holds the message
+    loop until the process is KILLED (that is the test: tests/crash-residue-smoke.sh
+    sends SIGKILL mid-take, then relaunches headless and asserts the take is offered and
+    adoptable). Writes the liveness sentinel exactly as the GUI does, so the relaunch
+    reads as unclean. Never returns on its own. */
+int runRecordHoldSmoke (MoshEngine&, MoshOps&);
+/** LAT-001 — `Mosh --latency-calibration-smoke`: the measured-latency path end to end
+    through a loopback device, with nobody at the mic. Pair MOSH_AUDIO_OUTPUT_DEVICE and
+    MOSH_AUDIO_INPUT_DEVICE with "BlackHole 2ch" so the sweep the calibration plays comes
+    straight back as input. Asserts a measurement lands (never a silent number), that
+    its residual is applied, and - the part that matters - that a click played at 1.0 s
+    and recorded through the same loopback lands within 1 ms of 1.0 s. Its own mode
+    because it needs a real device; proves nothing about AUDIBILITY (that is
+    --live-audio-smoke's job). */
+int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

@@ -1,8 +1,3 @@
-// The composer that lives in Moshi's rail. You ask — by holding the mic to TALK
-// (voice-hero) or by typing (the quiet fallback) — a bounded studio skill resolves
-// the request, the executor runs its edits as ONE undo step, and the result lands
-// in Monster changes. Voice and text feed the same run() funnel.
-
 import { useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
 import { runAgentBatch, logAgentTurn } from "../agent/executor";
@@ -10,8 +5,6 @@ import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
 import { writePreference } from "../agent/memory/writePreference";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
-import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
-import { createHandsFree, type HandsFree } from "../agent/handsFree";
 import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
 // Skill Foundry Slice B, Task 7 — the composer's shared-runtime step now calls the ONE
@@ -24,119 +17,21 @@ import { runStudioSkillV1, clearDefaultStudioSkillContinuationsV1 } from "../age
 import type { SkillOutcomeV1, StudioSkillEnvironmentV1 } from "../agent/skillFoundry/contracts";
 import { readSkillSourceStatusV1 } from "../agent/skillFoundry/nativeReads";
 import { createRecordingLifecycleEnvironmentV1 } from "../recordingLifecycle";
-import { IconArrowUp, IconMic } from "./icons";
+import { IconArrowUp } from "./icons";
 import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge";
 import { activeShell } from "../v2/shellFlag";
 import { matchIssueReport } from "../agent/issueRoute";
 import { IssueInbox } from "./IssueInbox";
-
-// Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
-// engages when the `handsFreeOn` toggle is true (and the tab is visible), disengages
-// otherwise. Every final transcript routes through the SAME matcher/performer as the
-// composer — but DROPS anything unknown (never the brain). Returns pause/resume so
-// hold-to-talk can temporarily own the mic for an open-ended (LLM) ask, then hand it
-// back. The controller is pure; this hook is just its React lifecycle + store wiring.
-function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: () => void; resumeAfterPushToTalk: () => void } {
-  const handsFreeOn = useStore((s) => s.handsFreeOn);
-  const ctrlRef = useRef<HandsFree | null>(null);
-  const pausedRef = useRef(false);
-  // The controller is built once; keep the latest onUnknown closure in a ref so the
-  // caption it flashes always uses the current component state.
-  const onUnknownRef = useRef(onUnknown);
-  onUnknownRef.current = onUnknown;
-
-  if (!ctrlRef.current) {
-    ctrlRef.current = createHandsFree({
-      getCtx: () => {
-        const s = useStore.getState();
-        return {
-          mode: s.currentMode(),
-          tempo: s.snapshot?.session?.tempo ?? 120,
-          timeSigNum: s.snapshot?.session?.timeSigNumerator ?? 4,
-          tracks: (s.snapshot?.tracks ?? []).map((t) => ({ id: t.id, name: t.name, mute: t.mute, solo: t.solo })),
-        };
-      },
-      isBusy: () => useStore.getState().agentBusy,
-      setBusy: (b) => useStore.getState().setAgentBusy(b),
-      dispatch: async (action, heard) => {
-        const s = useStore.getState();
-        await handleFast(action, {
-          // FS-B2a (H2) — the matched transcript IS threaded now, so a hands-free turn's
-          // marker carries what was actually said instead of the action's own caption.
-          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: heard, source: "voice" })); },
-          enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
-          utter: (intent, say) => { s.pushAgentUtter(intent, say); },
-          // AGT-MEM (M3) — same "remember" flow as the composer below, no local
-          // component state available here so a write failure just utters UHOH
-          // (matches this hook's existing error-feedback level for other actions).
-          remember: async (rtext, scope) => {
-            const res = await writePreference(s.exec, rtext, scope, true);
-            if (res.ok) s.setMemoryToast({ text: rtext, scope, kind: "preference", ts: res.ts });
-            else s.pushAgentUtter("UHOH", "couldn't remember that");
-          },
-        });
-      },
-      makeSource: (cb) => createContinuousVoiceInput(cb),
-      setListening: (b) => useStore.getState().setAgentListening(b),
-      onUnknown: (text) => onUnknownRef.current(text),
-    });
-  }
-
-  // Engage/disengage with the toggle (and tear down on unmount → mic goes cold).
-  useEffect(() => {
-    const ctrl = ctrlRef.current;
-    if (!ctrl) return;
-    if (handsFreeOn) ctrl.engage(); else ctrl.disengage();
-    return () => ctrl.disengage();
-  }, [handsFreeOn]);
-
-  // Defense-in-depth privacy: release the mic whenever the WebView is hidden.
-  useEffect(() => {
-    const onVis = () => {
-      const ctrl = ctrlRef.current; if (!ctrl) return;
-      if (document.hidden) ctrl.disengage();
-      else if (useStore.getState().handsFreeOn && !pausedRef.current) ctrl.engage();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, []);
-
-  // Fallback (opt-in): on inputs that can't be shared, pause hands-free WHILE a take
-  // records and resume when it ends — the UI-driven alternative to barge-in. Off by
-  // default (barge-in is the default), so this effect is inert unless enabled.
-  const pauseOnRecord = useStore((s) => s.handsFreePauseOnRecord);
-  const recording = useStore((s) => s.transport.recording);
-  useEffect(() => {
-    if (!handsFreeOn || !pauseOnRecord) return;
-    const ctrl = ctrlRef.current; if (!ctrl) return;
-    if (recording) ctrl.disengage(); else ctrl.engage();
-  }, [handsFreeOn, pauseOnRecord, recording]);
-
-  return {
-    pauseForPushToTalk: () => {
-      const ctrl = ctrlRef.current;
-      if (ctrl?.engaged) { pausedRef.current = true; ctrl.disengage(); }
-    },
-    resumeAfterPushToTalk: () => {
-      if (!pausedRef.current) return;
-      pausedRef.current = false;
-      if (useStore.getState().handsFreeOn) ctrlRef.current?.engage();
-    },
-  };
-}
 
 export function AgentComposer() {
   const agentBusy = useStore((s) => s.agentBusy);
   const setAgentBusy = useStore((s) => s.setAgentBusy);
   const setAgentChangeSet = useStore((s) => s.setAgentChangeSet);
   const pushAgentUtter = useStore((s) => s.pushAgentUtter);
-  const setAgentListening = useStore((s) => s.setAgentListening);
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
-  const [listening, setListening] = useState(false);
   const [brainRuntime, setBrainRuntime] = useState<BrainRuntimeStatus | null>(null);
   const [inboxOpen, setInboxOpen] = useState(false);
-  const runRef = useRef<(text: string, source: "typed" | "push_to_talk" | "always_on") => void>(() => {});
   useEffect(() => {
     void brainRuntimeStatus().then(setBrainRuntime).catch(() => setBrainRuntime({ state: "unavailable" }));
     return onEvent("brain_runtime", (payload) => setBrainRuntime(payload as BrainRuntimeStatus));
@@ -146,23 +41,6 @@ export function AgentComposer() {
   // handler/payload. No typed continuation shape lives in React state any more.
   const pendingSkillToken = useRef<string | null>(null);
 
-  // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
-  // acknowledgement so an always-on mic isn't a silent black box.
-  const sayTimer = useRef<number | undefined>(undefined);
-  const flashSay = (text: string) => {
-    setSay(text);
-    if (sayTimer.current !== undefined) clearTimeout(sayTimer.current);
-    sayTimer.current = window.setTimeout(() => setSay((cur) => (cur === text ? null : cur)), 3200);
-  };
-  useEffect(() => () => { if (sayTimer.current !== undefined) clearTimeout(sayTimer.current); }, []);
-
-  const voiceSupported = isVoiceSupported();
-  // undefined = not yet built; null = platform has no speech API.
-  const voiceRef = useRef<VoiceInput | null | undefined>(undefined);
-  const handsFree = useHandsFree((heard) => {
-    if (matchIssueReport(heard)) runRef.current(heard, "always_on");
-    else flashSay(`“${heard}” (not a command)`);
-  });
 
   // Skill Foundry Slice B, Task 7 — a project-epoch change (new/opened/reloaded project)
   // invalidates any pending continuation: clear the React token AND the runtime's own
@@ -241,7 +119,6 @@ export function AgentComposer() {
     return false;
   };
 
-  // The single funnel: typed text and final speech both arrive here.
   const run = async (text: string, source: "typed" | "push_to_talk" | "always_on" = "typed") => {
     if (!text || useStore.getState().agentBusy) return;
     setInput(""); setSay(null); setAgentBusy(true);
@@ -337,8 +214,6 @@ export function AgentComposer() {
       // The ROUTER sends multi-step-shaped asks — sequential clauses, creative
       // builds, vague-taste work — into the loop (plan, act, observe, repair,
       // ONE undo unit, live in the v2 drawer); short single-move asks stay on
-      // the fail-closed skill path. Section-scope and the fast path keep
-      // their precedence above; hands-free still never reaches an LLM.
       if (loopAllowed() && routeAsk(text) === "loop") {
         await runLoopTask(text, {
           say: (t) => setSay(t),
@@ -357,27 +232,7 @@ export function AgentComposer() {
       setAgentBusy(false);
     }
   };
-  runRef.current = (text, source) => { void run(text, source); };
   const submit = () => void run(input.trim());
-
-  // Build the speech controller lazily on first press (after a user gesture, which
-  // some browsers require). Final transcript auto-sends — release-to-send is the
-  // voice-hero feel; interim text streams into the field so you see it forming.
-  const ensureVoice = (): VoiceInput | null => {
-    if (voiceRef.current === undefined) {
-      voiceRef.current = createVoiceInput({
-        onStart: () => { setListening(true); setAgentListening(true); setInput(""); },
-        onInterim: (t) => setInput(t),
-        onStop: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); },
-        onFinal: (t) => void run(t, "push_to_talk"),
-        onError: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); setSay("didn't catch that"); },
-      });
-    }
-    return voiceRef.current;
-  };
-
-  const micLabel = !voiceSupported ? "Voice unavailable here — type instead"
-    : listening ? "Listening… release to send" : "Hold to talk";
 
   return (
     <div className="agent-composer">
@@ -388,35 +243,11 @@ export function AgentComposer() {
       </div>}
       {say && <div className="agent-say" role="status" aria-live="polite">{say}</div>}
       <button className="issue-inbox-button" onClick={() => setInboxOpen((v) => !v)}>Issues</button>
-      <div className={`agent-input${listening ? " listening" : ""}`}>
-        <button
-          className={`agent-mic${listening ? " on" : ""}`}
-          title={micLabel} aria-label={micLabel} aria-pressed={listening}
-          disabled={!voiceSupported || agentBusy}
-          data-testid="agent-mic"
-          onPointerDown={(e) => {
-            if (agentBusy || !voiceSupported) return;
-            // Holding the talk button to address Moshi pauses always-on hands-free (so the
-            // two recognizers never fight for the mic; it resumes on release) and STOPS an
-            // in-progress take first (performer mode → assistant mode), then listens.
-            handsFree.pauseForPushToTalk();
-            if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
-            const v = ensureVoice(); if (!v) return;
-            try { e.currentTarget.setPointerCapture(e.pointerId); }
-            catch { v.start(); return; }
-            v.start();
-          }}
-          onPointerUp={() => voiceRef.current?.stop()}
-          onPointerCancel={() => voiceRef.current?.stop()}
-        >
-          {listening
-            ? <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
-            : <IconMic size={16} />}
-        </button>
+      <div className="agent-input">
         <input
           data-testid="agent-input"
           value={input}
-          placeholder={listening ? "listening…" : agentBusy ? "thinking…" : "Ask Moshi…"}
+          placeholder={agentBusy ? "thinking…" : "Ask Moshi…"}
           disabled={agentBusy}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") submit(); }}

@@ -8,6 +8,7 @@
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
+#include "audio/LatencyCalibrationSession.h"
 #include "moshops/AgentTxn.h"
 #include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
@@ -75,7 +76,8 @@ public:
         a large, cloud-backed, or disconnected directory, so WebBridge invokes this
         method on a worker instead of the audio/message thread. */
     static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                  const juce::var& command);
+                                                  const juce::var& command,
+                                                  juce::Array<juce::File> sampleFolders = {});
 
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
@@ -92,6 +94,16 @@ public:
         WebBridge relay calls these on a background thread. */
     juce::var escalateCandidates (const juce::var& payload) { return jobManager.escalateCandidates (payload); }
     bool archiveDpoPair (const juce::var& row)              { return jobManager.archivePair (row); }
+
+    /** The engine-free half of generate_beat_recipe: builds the request body and
+        fetches the generated program from the local service (spawn + HTTP — the
+        slow leg, up to ~30s on a cold spawn). Safe off the message thread; the
+        WebBridge two-phase hop calls this on a worker so the fetch can't freeze
+        the UI mid-turn, then re-enters the ordinary command seam with the result
+        as args.__prefetchedProgram so undo/logging/telemetry behave exactly like
+        the sync path. Serialized against itself (not against unrelated
+        message-thread jobManager reads, whose posture is unchanged). */
+    juce::var fetchBeatRecipeProgram (const juce::var& cmdArgs);
 
 private:
     // ── command handlers ──
@@ -312,6 +324,18 @@ private:
     // Wave: recording — arm tracks + input monitoring
     juce::var cmdArmTrack       (const juce::var& args);
     juce::var cmdSetInputMonitor (const juce::var& args);
+    // CAP-001 — measure a just-landed take's source peak into ids::moshPeakLevel.
+    void measureLandedClipPeak (te::Clip& c);
+    // CAP-001 — recording residue: take WAVs Tracktion streamed to disk that no clip
+    // references and that are NEWER than the last save (a crash mid-take leaves exactly
+    // this; a removed clip's file predates the save that removed it). list is a read;
+    // adopt lands one through the normal import path at its BWAV time reference on the
+    // track its name carries; quarantine renames it in place (never deletes). Both are
+    // human decisions from the recovery notice — non-undoable, not agent-callable.
+    juce::var cmdListRecordingResidue (const juce::var& args);
+    juce::var cmdAdoptRecordingResidue (const juce::var& args);
+    juce::var cmdQuarantineRecordingResidue (const juce::var& args);
+    juce::var recordingResidueToVar();
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
     // KEEPING takes, drain the async clip-add, return the landed clip ids.
     juce::var cmdStopRecording  (const juce::var& args);
@@ -361,6 +385,8 @@ private:
     // and the track-type flag a drum track binds to (see Ids.h trackType).
     juce::var cmdSetTrackType   (const juce::var& args);
     juce::var cmdLoadDrumKit    (const juce::var& args);
+    juce::var cmdListPresets    (const juce::var& args);   // read-only preset library scan
+    juce::var cmdLoadPreset     (const juce::var& args);   // apply a preset to a track's instrument
     juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdSetDrumLane    (const juce::var& args);
     // Drum-rack pads: per-pad mixer/identity/choke, and the inverse of assign_sample.
@@ -368,6 +394,12 @@ private:
     juce::var cmdClearDrumPad   (const juce::var& args);
     juce::var cmdApplyChoke     (const juce::var& args);
     juce::var cmdListDrumKits   (const juce::var& args);
+    // W2.2 (produce lane) — read-only scan of the palette-v2 manifest (measured sample
+    // library). {manifest?} defaults to MOSH_PALETTE_MANIFEST env or
+    // ~/Library/Mosh/palette-v2/manifest.json; missing files drop from the result rather
+    // than erroring. UI-only: the loop model never sees command result data, so this feeds
+    // the produce-lane preflight/picker directly, never the agent.
+    juce::var cmdListPalette    (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
@@ -458,6 +490,12 @@ private:
     // read/render (no ValueTree mutation besides the harmless logicalid backfill
     // already used all over the snapshot path).
     juce::var cmdExportStems      (const juce::var& args);
+    // IMP-001 — render ONE clip, from edit time zero to the clip's end, into a WAV:
+    // the leading silence is embedded, so the file drops onto ANY DAW's timeline at
+    // bar 1 and the clip lands where it sat in Mosh (Re-Imagine's Import Take, a plain
+    // drag into Live). The clip's track chain applies; the master does not. Same
+    // rate/bit-depth defaults as export_audio (project setting, else device rate).
+    juce::var cmdExportClipConsolidated (const juce::var& args);
     // cmdExportStems helper: a genuinely clip-less track (includeEmpty:true) can't be
     // expressed via Renderer::Parameters::allowedClips (an EMPTY array means "no filter",
     // i.e. ALL clips — there is no way to ask the renderer for "zero clips"). So a stem for
@@ -509,6 +547,14 @@ private:
     // into clips (te::EditPlaybackContext::applyRetrospectiveRecord). The one command in
     // this group that IS an Edit mutation, so unlike its neighbours it is undoable.
     juce::var cmdCaptureMidi (const juce::var& args);
+    // LAT-001 — measured round-trip latency calibration (ported from Moshpit M005/M006).
+    // { action: start | status | apply | cancel | clear }. `start` detaches the Edit from
+    // the device (the export render's exclusivity dance), plays a sweep through the
+    // output while capturing the input inside ONE device-callback clock, and the timer
+    // polls completion; the result persists as MACHINE state on MoshEngine and only its
+    // RESIDUAL over the device-reported latency reaches Tracktion. Non-undoable, not
+    // agent-callable (needs a human at the mic). See MoshOps.Record.cpp.
+    juce::var cmdCalibrateLatency (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -568,6 +614,13 @@ private:
     // record-start and on project load, so a controller plugged in AFTER the setting was
     // made still honours it. A complete no-op headless (no devices to write to).
     void applyRecordOptionsToDevices();
+    // LAT-001 — the resolved snapshot block { state, frames, sampleRate, ms, confidence,
+    // measuredAt, inputDevice, outputDevice, method, deviceReportedSamples, appliedMs,
+    // applied, stale, error }. Every key always present (the UI renders it cold).
+    juce::var latencyCalibrationToVar();
+    // LAT-001 — timer hook: deregisters the finished sweep, measures off the audio
+    // thread, persists, re-attaches the Edit, emits. A bool test when nothing runs.
+    void pollLatencyCalibration();
 
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
@@ -741,7 +794,18 @@ private:
     juce::File           drumKitDir() const;
     // The library root (one folder per kit) and a named kit inside it.
     juce::File           drumKitsRoot() const;
+    // The user's OWN kit library (~/Library/Mosh/kits, one folder per kit, same
+    // 8-pad layout) — curated palettes land here (e.g. palette-v2 kits). A named
+    // kit in the user library shadows a same-id bundled kit. MOSH_KITS_USER_DIR
+    // overrides for tests: JUCE ignores $HOME, so without it a harness run would
+    // see — and depend on — the real user library.
+    juce::File           drumKitsUserRoot() const;
     juce::File           drumKitDir (const juce::String& kitId) const;
+    // Preset library roots (P1 preset seam). Bundled mirrors drumKitsRoot's resolution
+    // (env MOSH_PRESETS_DIR → app bundle Resources/presets → exe-sibling presets);
+    // user is ~/Library/Mosh/presets/<pluginKey>/ and wins on name collisions.
+    juce::File           presetsBundledRoot() const;
+    juce::File           presetsUserRoot() const;
     // True when at least one bundled pad is resolvable — guard mutations that load
     // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
     bool                 drumKitAvailable (const juce::String& kitId = {}) const;
@@ -979,6 +1043,14 @@ private:
     void sweepStuckVoices();
 
     MoshEngine& eng;
+    // LAT-001 — registrar first, session second: the session holds a reference to the
+    // registrar and its destructor deregisters through it, so reverse-order member
+    // destruction must free the session BEFORE the registrar.
+    std::unique_ptr<latency::DeviceManagerRegistrar> calibrationRegistrar_;
+    std::unique_ptr<latency::CalibrationSession>     calibrationSession_;
+    juce::String calibrationError_;            // last failed measurement's reason
+    double       calibrationRate_ = 0.0;       // rate the in-flight sweep runs at
+    bool         calibrationDetachedContext_ = false;   // we freed the playback context
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
     TrainerRegistry      trainerRegistry;

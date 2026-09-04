@@ -20,12 +20,29 @@
 // still learn the tool exists). `memory` is undefined only when the flag itself is
 // off, so it's the ONLY case where every step's prompt stays byte-identical to the
 // pre-M2 shape.
+//
+// COMPACT MELODY (demo lane, flag `MOSH_ENABLE_DEMO_COMPACT_MELODY`, default OFF):
+// runCompactMelodyTask below bypasses the agent loop for one narrow ask shape and
+// sends a bespoke "reply only as compact JSON" prompt instead. It exists because the
+// local free-form demo brain could not reliably emit the full loop JSON for a melody
+// — a MODEL-capability workaround, not a product capability, and it is shaped like
+// the portfolio demo it was cut for (always 8 notes, always a fixed eighth-note grid,
+// fixed velocities). The general lane is the product and is already equipped for the
+// same ask: loopPrompt's melodyTaskGuidance asks for 4-8 varied notes over a simple
+// rhythm, inKeyTaskGuidance enumerates the legal MIDI numbers, and taskExec's
+// noteKeyError rejects out-of-key/out-of-register pitches with a repairable message.
+// So this lane is QUARANTINED behind its own flag rather than generalized: turning it
+// on is an explicit statement that a build is driving a model that needs the crutch.
+// It still routes through env.runBatch — one mutation path, one undo transaction —
+// and that must not regress if the lane is ever revisited.
 
-import { archivePair, brainChat, demoBrainAvailable } from "../../bridge";
+import { archivePair, brainChat, demoBrainAvailable, type BrainChatOptions } from "../../bridge";
 import { inScale, resolveKey, scaleMask } from "../../musicalKey";
 import { useSettings } from "../../settings/store";
 import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
+import { buildProduceSystemPrompt, isProduceAsk, PRODUCE_BUDGETS } from "./producePrompt";
+import { runProduceTemplate, type ProduceTemplate } from "./produceTemplate";
 import { createTaskExecutor, undoAgentTask } from "./taskExec";
 import { mockLoopChat } from "./loopBrainMock";
 import { hasSequentialMarkers } from "./router";
@@ -42,6 +59,14 @@ export const loopAllowedFor = (flag: string | undefined, multiplayerActive: bool
   agenticLoopEnabled(flag) && !multiplayerActive;
 export const agenticLoopOn = (): boolean =>
   agenticLoopEnabled(import.meta.env.VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP);
+
+/** The compact-melody demo lane's own flag (default OFF, its own CMake option) —
+ *  see the COMPACT MELODY block in this file's header for why it is quarantined
+ *  rather than generalized. Same pure-predicate + env-reader shape as the loop flag
+ *  above so a build's posture is testable without touching import.meta.env. */
+export const compactMelodyDemoEnabled = (flag: string | undefined): boolean => flag === "1";
+export const compactMelodyDemoOn = (): boolean =>
+  compactMelodyDemoEnabled(import.meta.env.VITE_MOSH_ENABLE_DEMO_COMPACT_MELODY);
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
 /** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext+
@@ -149,6 +174,39 @@ async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: str
   }
 }
 
+// Produce lane is CLOUD-ONLY by owner decision ("frontier now, distill later",
+// docs/POSTMORTEM-2026-09.md): a full production pass on the local assistant
+// model is exactly the silent quality substitution the postmortem bans. Try the
+// cloud providers in order and VERIFY the responder (a requested-but-incomplete
+// provider resolves to a fallback natively — the result's `provider` field is
+// the truth). No local fallback: failing loudly beats producing quietly worse.
+//
+// Order (W1.2, OVERNIGHT RUN 2): "openai" is the claude-cli shim's env-trio slot
+// (dev-time only — see W1.3), tried first per the owner's 2026-09-02 decision;
+// "openrouter" (Sonnet 5 via OpenRouter) is the fallback; deepseek/xai trail behind
+// both. PRODUCE_CHAT_OPTIONS raises the token ceiling and timeout well past the
+// DOSAGE defaults so a full multi-track program fits in one completion — the
+// DOSAGE lane (chatWithFallback above) never sees these, so its brainChat(messages)
+// call stays byte-identical to before this options seam existed.
+const PRODUCE_CLOUD_PROVIDERS = ["openai", "openrouter", "deepseek", "xai"] as const;
+const PRODUCE_CHAT_OPTIONS: BrainChatOptions = { maxTokens: 8192, timeoutMs: 180_000 };
+async function produceCloudChat(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
+  if (demoBrainAvailable()) return mockLoopChat(messages); // dev/e2e surface stays deterministic
+  let lastError: unknown;
+  for (const p of PRODUCE_CLOUD_PROVIDERS) {
+    try {
+      const r = await brainChat(messages, p, PRODUCE_CHAT_OPTIONS);
+      if (r.provider && r.provider !== p) { lastError = new Error(`${p} not configured (served by ${r.provider})`); continue; }
+      return r;
+    } catch (e) { lastError = e; }
+  }
+  throw new Error(
+    "Produce mode needs a configured cloud brain (a provider's *_API_KEY, *_BASE_URL and *_MODEL env trio) — " +
+    "refusing to run a full production pass on the local assistant model. " +
+    (lastError instanceof Error ? lastError.message : ""),
+  );
+}
+
 async function runCompactMelodyTask(
   text: string,
   env: AgentEnv,
@@ -221,17 +279,61 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   const exec = createTaskExecutor(text.slice(0, 48), { utterance: text, source: "agent_loop" }, { signal });
   let run: LoopRun;
   try {
-    const compactMelody = await runCompactMelodyTask(text, exec.env, signal);
+    const compactMelody = compactMelodyDemoOn()
+      ? await runCompactMelodyTask(text, exec.env, signal)
+      : null;
     if (compactMelody) run = compactMelody;
     else {
       const memory = await memorySectionFor(text);
-      run = await runAgentLoop({ ask: text }, {
-        chat: chatWithFallback,
-        env: exec.env,
-        signal,
-        onProgress: (ev) => useTaskStore.getState().progress(ev),
-        memory,
-      });
+      // P1 produce lane (flag `produceLane`, default OFF): an explicit produce ask
+      // gets the genre-rule prompt and full-pass budgets; everything else keeps the
+      // DOSAGE lane byte-identically (systemPrompt/budgets omitted).
+      const produce = useSettings.getState().get("produceLane") === true && isProduceAsk(text);
+      // W2.5 — the produce-lane PREFLIGHT: a deterministic pass (tempo/key,
+      // sections, a 10-pad drum track, the sustained 808, 7 Vital synth tracks —
+      // see produceTemplate.ts) that runs ONCE inside the SAME undo transaction as
+      // the loop's own steps (exec.execRaw lazily opens it, same as env.runBatch),
+      // BEFORE the model's first call. `listPalette`/`presets` are deliberately
+      // omitted here — runProduceTemplate's own fallback already calls
+      // exec("list_palette", {}) / exec("list_presets", {plugin:"vital"}) when
+      // they're absent, so there is exactly one place that wiring lives.
+      let produceTemplate: ProduceTemplate | undefined;
+      let produceSetupError: string | undefined;
+      if (produce) {
+        try {
+          produceTemplate = await runProduceTemplate(text, { exec: exec.execRaw });
+        } catch (e) {
+          produceSetupError = `couldn't set up the produce-lane template: ${String(e).slice(0, 200)}`;
+        }
+      }
+      if (produceSetupError) {
+        run = {
+          finalSnapshot: await exec.env.getSnapshot(),
+          transcript: [],
+          stepCount: 0,
+          deferred: true,
+          outcome: "error",
+          error: produceSetupError,
+        };
+      } else {
+        run = await runAgentLoop({ ask: text }, {
+          chat: produce ? produceCloudChat : chatWithFallback,
+          env: exec.env,
+          signal,
+          onProgress: (ev) => useTaskStore.getState().progress(ev),
+          memory,
+          ...(produce
+            ? {
+                // Bound closure so the loop FSM's own 3-arg call site
+                // (loop.ts:99, `(snap, query, memory)`) stays exactly that shape —
+                // `template` never becomes a 4th argument the FSM has to know about.
+                systemPrompt: (snap: Snapshot | null, query?: string, mem?: string) =>
+                  buildProduceSystemPrompt(snap, query, mem, produceTemplate),
+                budgets: PRODUCE_BUDGETS,
+              }
+            : {}),
+        });
+      }
     }
   } finally {
     await exec.close(); // the task's undo transaction closes on EVERY exit path

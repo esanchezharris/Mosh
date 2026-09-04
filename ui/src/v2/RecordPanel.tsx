@@ -119,9 +119,54 @@ export function RecordOptionsChip() {
               <span className="tc">{opts.retrospectiveSeconds}s</span>
             </span>
           </label>
+
+          <LatencyCalibrationRow />
         </div>
       )}
     </span>
+  );
+}
+
+/** LAT-001 — measured round-trip latency. Lives in the recording panel because it is the
+ *  other thing that decides where a take LANDS: the driver's own latency claim is what
+ *  Tracktion compensates by default, and it is often wrong by a few milliseconds through
+ *  a real interface, room and mic. A calibration plays a two-second sweep and measures
+ *  the true round trip; Mosh then applies only the difference on top of the driver's
+ *  figure (never the whole thing, which would double-compensate). */
+export function LatencyCalibrationRow() {
+  const exec = useStore((s) => s.exec);
+  const cal = useStore((s) => s.snapshot?.session.latencyCalibration);
+  const reported = useStore((s) => s.snapshot?.session.roundTripLatencyMs);
+  const run = (action: "start" | "clear") => void exec("calibrate_latency", { action });
+
+  const state = cal?.state ?? "idle";
+  const reportedText = reported !== undefined && reported > 0 ? `${reported.toFixed(1)} ms` : "—";
+  const summary =
+    state === "running" ? "Listening… stay quiet for two seconds."
+    : state === "measured" && cal
+      ? cal.stale
+        ? `${cal.ms.toFixed(1)} ms measured on another device or rate — not in use. Calibrate again.`
+        : `${cal.ms.toFixed(1)} ms measured · ${cal.appliedMs >= 0 ? "+" : ""}${cal.appliedMs.toFixed(1)} ms on top of the driver's ${reportedText}.`
+    : state === "failed"
+      ? `Could not measure — ${cal?.error || "unknown reason"}.`
+      : `Not measured — using the driver's own ${reportedText}.`;
+
+  return (
+    <div className="v2-rec-row" data-testid="v2-rec-latency">
+      <span>
+        <b>Latency</b>
+        <em data-testid="v2-rec-latency-status">{summary}</em>
+      </span>
+      <span className="v2-rec-retro">
+        <button className="v2-tbtn" data-testid="v2-rec-calibrate" disabled={state === "running"}
+          title="Plays a short sweep through your output and listens on the mic to measure the true round trip. Stay quiet for two seconds."
+          onClick={() => run("start")}>{state === "running" ? "…" : "Calibrate"}</button>
+        {state === "measured" && (
+          <button className="v2-tbtn" data-testid="v2-rec-calibrate-clear" title="Forget the measurement and go back to the driver's figure"
+            onClick={() => run("clear")}>Clear</button>
+        )}
+      </span>
+    </div>
   );
 }
 

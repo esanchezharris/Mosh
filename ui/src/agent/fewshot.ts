@@ -13,7 +13,7 @@
 import { DEFAULT_RULES } from "./brainCore";
 
 export const WORKED_EXAMPLES = [
-  "Built-in types for load_builtin: 4osc, sampler (instruments); 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune (vocal pitch correction), moshOTT (multiband upward/downward compression), moshXFeedback.",
+  "Built-in types for load_builtin: 4osc, sampler (instruments); 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, highpass, pitchShifter, moshAutoTune (vocal pitch correction), moshOTT (multiband upward/downward compression), moshXFeedback, softclip (tanh soft clipper).",
   "Worked examples (example session has track \"7\" Drums with clip \"12\" at 0s, track \"8\" Vox, section \"s1\" Intro, tempo 120 BPM 4/4 — always substitute the REAL ids/tempo from the session below):",
   '- "slap some OTT on the drums" → {"intent":"ACK_GOT_IT","commands":[{"command":"load_builtin","args":{"trackId":"7","type":"moshOTT"}}]}',
   '- "put autotune on the vox" → {"intent":"ACK_GOT_IT","commands":[{"command":"load_builtin","args":{"trackId":"8","type":"moshAutoTune"}}]}',

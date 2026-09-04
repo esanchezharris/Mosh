@@ -17,6 +17,7 @@
 #include "ClipGainEnvelope.h"
 #include "state/Ids.h"
 #include "engine/SourceRef.h"
+#include "files/ImportCopy.h"
 #include <limits>
 
 namespace mosh
@@ -252,10 +253,18 @@ juce::var MoshOps::cmdImportClip (const juce::var& args)
     const auto path = args.getProperty ("file", var()).toString();
     if (path.isEmpty()) return errResult ("import_clip", "missing 'file'");
 
-    File file (path);
-    if (! file.existsAsFile()) return errResult ("import_clip", "file not found: " + path);
+    const File source (path);
+    if (! source.existsAsFile()) return errResult ("import_clip", "file not found: " + path);
 
-    return importWaveFileToTrack ("import_clip", file,
+    te::AudioFile sourceAudio (eng.engine(), source);
+    if (! sourceAudio.isValid()) return errResult ("import_clip", "invalid audio file");
+
+    const auto copied = copyIntoImports (
+        source, eng.sessionDir().getChildFile ("imports"));
+    if (copied.error.isNotEmpty())
+        return errResult ("import_clip", copied.error);
+
+    return importWaveFileToTrack ("import_clip", copied.file,
                                   args.getProperty ("name", var()).toString(),
                                   args.getProperty ("trackId", var()).toString(),
                                   (double) args.getProperty ("startSeconds", 0.0),
