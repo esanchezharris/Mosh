@@ -342,6 +342,8 @@ if (MOSH_BUILD_APP)
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
+        # R3.3 — plain tanh soft clip built-in (no separate DSP TU; it's stateless math).
+        src/plugins/moshfx/MoshSoftClipPlugin.cpp
         src/plugins/moshfx/MoshXFeedbackDsp.cpp
         src/plugins/moshfx/MoshXFeedbackPlugin.cpp
         # Route C.2 — real-time RAVE insert (gated; compiles to nothing without anira).
@@ -579,6 +581,15 @@ if (MOSH_BUILD_APP)
                     "${CMAKE_SOURCE_DIR}/resources/drumkits"
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/drumkits"
             COMMENT "Staging drum kits into Mosh.app/Contents/Resources/drumkits"
+            VERBATIM)
+
+        # P1 preset seam — stage the bundled instrument preset bank the same way
+        # (MoshOps::presetsBundledRoot resolves Contents/Resources/presets).
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CMAKE_SOURCE_DIR}/resources/presets"
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/presets"
+            COMMENT "Staging instrument presets into Mosh.app/Contents/Resources/presets"
             VERBATIM)
 
         # Owner-only Finder runtime: this wrapper contains no key or machine path;

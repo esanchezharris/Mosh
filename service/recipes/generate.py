@@ -37,7 +37,13 @@ LIB_DIR = os.path.join(_HERE, "library")
 # byte-identical to pre-fix). Env override first, then home, then the repo-local file.
 _PALETTE_HOME = os.path.expanduser("~/Library/Mosh/palette-v1/manifest.json")
 _PALETTE_REPO = os.path.join(_SERVICE, "palette", "palette", "manifest.json")
+# palette-v2 (2026-09): the owner-CURATED library — every one-shot passed a
+# by-ear keep decision (docs/PALETTE-GENERATION-METHOD.md), with measured
+# root_note on the pitched roles. Preferred over the larger uncurated v1 pool
+# when present; MOSH_PALETTE_MANIFEST still overrides everything (the A/B lever).
+_PALETTE_V2 = os.path.expanduser("~/Library/Mosh/palette-v2/manifest.json")
 PALETTE_MANIFEST = (os.environ.get("MOSH_PALETTE_MANIFEST")
+                    or (_PALETTE_V2 if os.path.isfile(_PALETTE_V2) else None)
                     or (_PALETTE_HOME if os.path.isfile(_PALETTE_HOME) else _PALETTE_REPO))
 DRUM_ROLES = {"kick", "snare", "hat", "clap", "perc"}
 MELODIC_ROLES = {"808", "bass", "lead", "pad", "pluck"}  # transposed; drums are not
@@ -1018,8 +1024,13 @@ def recombine(library: list, request: dict, rng: Rng, palette: dict,
         role = e.role.value
         if not e.midi.notes:
             continue
+        # 2026-09 fix: the palette manifest's role_guess tags 808 one-shots "bass" (17
+        # measured-root items) — a straight palette.get("808") lookup never found them and
+        # every 808 element fell back to the stock 4OSC sine patch. Alias 808<->bass BOTH
+        # ways (a recipe element can carry either role name for the sub voice).
         pool = (palette.get(role)
-                or (palette.get("808") if role == "808" else None)
+                or (palette.get("bass") if role == "808" else None)
+                or (palette.get("808") if role == "bass" else None)
                 or (palette.get("melodic") if role in ("pad", "lead", "pluck") else None))
         if pool:
             before = len(pool)

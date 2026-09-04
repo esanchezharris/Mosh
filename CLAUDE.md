@@ -6,6 +6,15 @@ baseline is origin/main through **7eb0d617** (PR #668). The annotated tag
 it lands on main and completes final verification. Do not infer a future product
 direction from this snapshot.
 
+**Post-pivot direction (owner-approved 2026-09-01):** see
+[docs/POSTMORTEM-2026-09.md](docs/POSTMORTEM-2026-09.md) — the March–August
+forensic postmortem, the binding **quality-loop contract** (weekly human
+correction rounds with written lessons; no new label infra until the existing
+holds ≥25 real labels; proxy metrics never gate musical decisions; no
+re-platforming without postmortem + cooling period + owner sign-off; one genre
+at a time), and the approved produce-lane direction. That contract governs all
+future work in this repo.
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the code map,
 [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md) for the selected/archived
 disposition, and [docs/FEATURE_AUDIT.md](docs/FEATURE_AUDIT.md) for the

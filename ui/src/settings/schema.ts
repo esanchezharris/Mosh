@@ -131,6 +131,15 @@ export const SETTINGS: SettingDef[] = [
     help: "Moshi recalls preferences and patterns it's learned, plus this project's own notes, and folds a few relevant ones into its thinking each turn. Off = no recall.",
   },
   {
+    id: "produceLane",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Moshi",
+    label: "Produce mode (experimental)",
+    help: "An explicit 'produce me a beat' / 'full beat' ask gets a full production pass: bigger budgets and the genre rules learned from real correction rounds, building an 8-12 track A/B arrangement with real sounds. Off = every ask stays a bounded assistant edit.",
+  },
+  {
     id: "layout",
     type: "enum",
     default: "mosh",

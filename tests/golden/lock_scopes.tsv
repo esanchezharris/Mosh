@@ -99,7 +99,9 @@ list_drum_kits	Unguarded
 list_issues	Unguarded
 list_loras	Unguarded
 list_midi_inputs	Unguarded
+list_palette	Unguarded
 list_plugins	Unguarded
+list_presets	Unguarded
 list_rave_models	Unguarded
 list_recording_residue	Unguarded
 list_takes	Unguarded
@@ -111,6 +113,7 @@ load_builtin	Track
 load_drum_kit	Track
 load_master_builtin	SessionGlobal
 load_master_plugin	SessionGlobal
+load_preset	Track
 load_plugin	Track
 load_rave_model	Track
 mark_take	Unguarded

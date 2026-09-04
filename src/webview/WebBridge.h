@@ -38,6 +38,10 @@ public:
 
     void setCommandHandler (CommandHandler h)   { commandHandler = std::move (h); }
     void setAsyncCommandHandler (AsyncCommandHandler h) { asyncCommandHandler = std::move (h); }
+    /** The engine-free fetch leg of generate_beat_recipe (service spawn + HTTP),
+        run on a worker thread; the apply leg then re-enters commandHandler on the
+        message thread with the fetched program attached as args.__prefetchedProgram. */
+    void setBeatRecipeFetchHandler (AsyncCommandHandler h) { beatRecipeFetchHandler = std::move (h); }
     void setSnapshotProvider (SnapshotProvider p) { snapshotProvider = std::move (p); }
     void setRemoteStartHandler (RemoteHandler h) { remoteStartHandler = std::move (h); }
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
@@ -90,6 +94,7 @@ private:
 
     CommandHandler    commandHandler;
     AsyncCommandHandler asyncCommandHandler;
+    AsyncCommandHandler beatRecipeFetchHandler;
     SnapshotProvider  snapshotProvider;
     RemoteHandler     remoteStartHandler;
     RemoteHandler     remoteStopHandler;

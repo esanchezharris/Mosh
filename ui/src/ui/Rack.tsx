@@ -2,7 +2,7 @@
 // Dock.tsx so both shells (classic Dock, v2 Inspector) import it without pulling in the
 // classic-only Dock wrapper. Same command seam, same arg shapes.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import type { Plugin, Track } from "../types";
 
@@ -64,6 +64,7 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           onClick={() => void exec("bypass_plugin", { trackId, index: plugin.index, bypassed: plugin.enabled })} />
         <span className="pname">{isRave ? `RAVE · ${plugin.rave!.model}` : plugin.name}</span>
         {plugin.isInstrument && <span className="ibadge">inst</span>}
+        {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId} />}
         {isRave && <span className="ibadge nbadge">RAVE</span>}
         {isBuiltin && !plugin.isInstrument && <span className="ibadge">{plugin.category}</span>}
       </div>
@@ -78,6 +79,41 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           </div>
         )}
     </div>
+  );
+}
+
+// P1 preset seam — the mouse path onto list_presets/load_preset (same seam the agent
+// uses). Shown only on instrument cards with a loadable preset format today: the
+// built-in 4OSC ('4osc' bank, .json patches) and a hosted Vital ('vital', .vital
+// patches). Other instruments (e.g. Serum) have no loadable preset format yet, so no
+// picker rather than a picker that can't work. Selecting an option fires load_preset
+// (one undo step) and resets the select so the same preset can be re-applied.
+function PresetPicker({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+  const exec = useStore((s) => s.exec);
+  const [presets, setPresets] = useState<{ name: string; file: string }[] | null>(null);
+  const key = plugin.builtin
+    ? (plugin.type === "4osc" ? "4osc" : null)
+    : /vital/i.test(plugin.name) ? "vital" : null;
+  useEffect(() => {
+    if (!key) return;
+    let dead = false;
+    void exec("list_presets", { plugin: key }).then((r) => {
+      if (dead || !r.ok) return;
+      setPresets((r.data as { presets?: { name: string; file: string }[] } | undefined)?.presets ?? []);
+    });
+    return () => { dead = true; };
+  }, [exec, key]);
+  if (!key || !presets || presets.length === 0) return null;
+  return (
+    <select className="preset-pick" data-testid="preset-pick" value=""
+      title="Load a preset" aria-label={`Load a preset onto ${plugin.name}`}
+      onChange={(e) => {
+        const file = e.target.value;
+        if (file) void exec("load_preset", { trackId, index: plugin.index, file });
+      }}>
+      <option value="" disabled>Presets…</option>
+      {presets.map((p) => <option key={p.file} value={p.file}>{p.name}</option>)}
+    </select>
   );
 }
 
