@@ -258,6 +258,13 @@ export type Clip = {
   midiLoopLengthBeats?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
+  // CAP-001 — only on takes landed by stop_recording: the source's measured peak (linear)
+  // and whether it is below -80 dBFS (a muted interface / wrong input). Imports and renders
+  // carry neither key (honestly unmeasured).
+  peakLevel?: number;
+  silent?: boolean;
+  // CAP-001 — adopted from crash residue (adopt_recording_residue).
+  recovered?: boolean;
   sourceLength?: number;
   notes?: MidiNote[];
   // Audio warp (auto-tempo): the clip re-anchors in beats and time-stretches to
@@ -683,6 +690,14 @@ export type ClickOutput = { name: string; isMidi: boolean };
 // backend pushes it into te::MidiInputDevice (mergeRecordings / replaceExistingClips /
 // quantisation) and te::Edit::recordingPunchInOut whenever it could matter, so these are
 // engine-wired settings rather than remembered ones.
+export type RecordingResidueEntry = {
+  file: string; name: string; trackName: string; take: number; readable: boolean;
+  seconds: number; sampleRate: number; startSeconds: number; decision: "adopt" | "quarantine";
+  modifiedAt?: string;
+  /** The header was never closed (the normal crash case); adopt repairs a copy. */
+  repairable?: boolean;
+};
+
 export type RecordOptions = {
   /** A new take MERGES into the clip it lands on instead of starting a fresh one. */
   overdub: boolean;
@@ -843,6 +858,11 @@ export type Snapshot = {
     // (recover_session) to restore work done since the last save. 0 ⇒ nothing to replay
     // (the notice is purely informational).
     recoverableCount?: number;
+    // CAP-001 — take WAVs the crashed session streamed to disk that no clip references.
+    // Present only with recoveryAvailable; each is adoptable (decision "adopt": lands at
+    // startSeconds on trackName through the normal import) or quarantinable (renamed in
+    // place, never deleted). list_recording_residue answers the same shape anytime.
+    recordingResidue?: RecordingResidueEntry[];
     // FS-T2 — third-party plugins implicated in a crash while the project was LOADING.
     // Present ⇒ the previous launch died mid-load with these being instantiated. Note this
     // is independent of recoveryAvailable: a load-time crash dies BEFORE the session.running
