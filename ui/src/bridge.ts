@@ -169,8 +169,14 @@ export async function brainChat(
   return { content: String(j.content ?? "") };
 }
 
+/** The states OwnerRuntime::status() actually emits (src/brain/OwnerRuntime.cpp).
+ *  Deliberately NOT a superset: #678's UI carried "cleaning" and "stopping" from its
+ *  own process registry, which #677/#695 never adopted, so listing them here would
+ *  imply transitions the native side cannot produce. */
+export type BrainRuntimeState = "off" | "starting" | "ready" | "prewarming" | "error" | "unavailable";
+
 export type BrainRuntimeStatus = {
-  state: "starting" | "ready" | "prewarming" | "unavailable";
+  state: BrainRuntimeState;
   model?: string;
   endpoint?: string;
   port?: number;
@@ -178,9 +184,44 @@ export type BrainRuntimeStatus = {
   ms?: number;
   preferredShell?: "live" | "protools" | "v2" | "classic";
 };
+const BRAIN_RUNTIME_STATES: readonly BrainRuntimeState[] = [
+  "off", "starting", "ready", "prewarming", "error", "unavailable",
+];
+
+/** Native is trusted but not assumed: an older backend that predates the off-by-default
+ *  contract can answer with a state this build does not know, and the toggle must not
+ *  render an undefined state. Unknown values degrade to "unavailable" (the disabled,
+ *  says-nothing state) rather than to "off", which would invite a click that cannot work. */
+export function parseBrainRuntimeStatus(value: unknown): BrainRuntimeStatus {
+  const v = (value ?? {}) as Record<string, unknown>;
+  const raw = typeof v.state === "string" ? v.state : undefined;
+  const state = BRAIN_RUNTIME_STATES.find((s) => s === raw) ?? "unavailable";
+  const out: BrainRuntimeStatus = { state };
+  if (typeof v.model === "string") out.model = v.model;
+  if (typeof v.endpoint === "string") out.endpoint = v.endpoint;
+  if (typeof v.port === "number") out.port = v.port;
+  if (typeof v.error === "string") out.error = v.error;
+  if (typeof v.ms === "number") out.ms = v.ms;
+  if (v.preferredShell === "live" || v.preferredShell === "protools"
+      || v.preferredShell === "v2" || v.preferredShell === "classic") out.preferredShell = v.preferredShell;
+  return out;
+}
+
 export async function brainRuntimeStatus(): Promise<BrainRuntimeStatus> {
   if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
-  return (await native("brain_runtime_status")()) as BrainRuntimeStatus;
+  return parseBrainRuntimeStatus(await native("brain_runtime_status")());
+}
+
+/** Local AI is OFF at launch (owner decision 2026-09-03, shipped native in #695); these
+ *  are the only two ways it ever starts or stops. Both answer with the fresh status so
+ *  the toggle never has to guess what it just did. */
+export async function brainRuntimeStart(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_start")());
+}
+export async function brainRuntimeStop(): Promise<BrainRuntimeStatus> {
+  if (!realNative()) return { state: "unavailable", error: "owner runtime is native-only" };
+  return parseBrainRuntimeStatus(await native("brain_runtime_stop")());
 }
 
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service

@@ -25,11 +25,6 @@
     "expires": "2026-10-01"
   },
   {
-    "command": "cancel_render",
-    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-09-02: STILL UNCOVERED, still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts), and still no vitest either (bridge.mock.ts, GenDrawer.tsx Cancel button, agent/commands.ts, loop/taskExec.ts, loop/jobWait.ts only). Real coverage gap, not a bookkeeping one. P3 target unchanged: a conformance EXTRA family or a selftest section exercising submit -> cancel -> assert no artifact lands and the layer returns to idle.",
-    "expires": "2026-10-01"
-  },
-  {
     "command": "cancel_training_job",
     "reason": "Re-reviewed 2026-09-02: THE PREVIOUS REASON WAS STALE and is corrected here. It said 'fake backend ... cover in selftest when the real backend lands'; the real local_pmetal backend landed in e933bec9 and scripts/verify-hardware/lab_train_check.py now drives import/approve/list/build/submit, but it never calls cancel_training_job, so the command is still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts) and has no vitest (store/loraLab.ts, bridge.mock.ts, commandClassification.ts only). Cheapest cover: submit a second job in lab_train_check.py, cancel it, and assert status=cancelled via training_job_status.",
     "expires": "2026-10-01"
@@ -87,11 +82,6 @@
   {
     "command": "reject_lyric_proposal",
     "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest agent/commands.test.ts; no service endpoint (native proposal bookkeeping). The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
-    "expires": "2026-10-01"
-  },
-  {
-    "command": "reject_render",
-    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-09-02: STILL UNCOVERED on the ledger surfaces, still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). It IS driven by scripts/macos-ui-automation-gate.py (demo5_reject_click asserts the JSONL reject_render line after a GUI click) and listed in scripts/validate-command-log-contract.sh, plus vitest store.lifecycle.test.ts, but none of those is a ledger surface. Pairs with cancel_render; cover them together, asserting the JSONL taste label, not just the layer state.",
     "expires": "2026-10-01"
   },
   {

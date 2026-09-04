@@ -417,3 +417,16 @@
    notice, not a fault. The accessible name carries the same fact in words. */
 .v2-outdev-drift { color: var(--v2-accent); line-height: 0; }
 .v2-outdev-default { border-bottom: 1px solid var(--v2-ground-line); margin-bottom: 4px; color: var(--v2-accent); }
+
+/* LOCAL AI — the top-bar switch for the owner's ~17GB local model (#695: off at launch).
+   Only the states OwnerRuntime actually emits are styled; #678's "cleaning"/"stopping"
+   came from its own process registry and never reach this build. */
+.v2-local-ai { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--v2-space-2);
+  padding: var(--v2-space-3) var(--v2-space-4); font-size: var(--v2-fs-xs); font-weight: 700; letter-spacing: var(--v2-tracking-caps); }
+.v2-local-ai:disabled { opacity: 0.72; }
+.v2-local-ai-dot { width: var(--v2-space-3); height: var(--v2-space-3); border-radius: var(--v2-radius-pill); background: currentColor; opacity: 0.3; }
+.v2-local-ai[data-on="true"] { --v2-accent: var(--v2-accent-agentic); color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-local-ai[data-on="true"] .v2-local-ai-dot { opacity: 1; }
+.v2-local-ai[data-state="starting"] { color: var(--status-warn); border-color: currentColor; }
+.v2-local-ai[data-state="starting"] .v2-local-ai-dot { opacity: 1; }
+.v2-local-ai[data-state="error"] { color: var(--v2-rec); border-color: currentColor; }

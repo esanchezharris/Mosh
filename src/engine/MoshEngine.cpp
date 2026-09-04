@@ -429,6 +429,11 @@ void MoshEngine::ensurePlaybackContext()
     enginePtr->getDeviceManager().dispatchPendingUpdates();
     edit().getTransport().ensureContextAllocated();
 
+    // LAT-001 — (re)decide the measured-latency residual for whatever device/rate is
+    // live now. Cheap, idempotent, and the only place it needs to happen: every device
+    // switch, retry and buffer-size change funnels through here.
+    applyLatencyCalibrationToDevices();
+
     // One-time: enable the device manager's wave inputs so record-armed tracks
     // actually capture (without setEnabled(true) they exist but stay silent). Never
     // runs headless — guarded by audioOpen — and runs once via the latch. We default
@@ -723,6 +728,84 @@ juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputN
     if (auto stateXml = std::unique_ptr<juce::XmlElement> (manager.createStateXml()))
         stateXml->writeTo (session.getChildFile ("audio-device.xml"));
     return {};
+}
+// ── LAT-001 — measured round-trip latency calibration ─────────────────────────────
+void MoshEngine::loadLatencyCalibrationIfNeeded()
+{
+    if (calibrationLoaded) return;
+    calibrationLoaded = true;
+    calibration.reset();
+    const auto file = latencyCalibrationFile();
+    if (! file.existsAsFile()) return;
+    // Fails closed: a malformed or out-of-band record is ignored, not "repaired".
+    calibration = latency::CalibrationRecord::fromVar (juce::JSON::parse (file));
+}
+
+std::optional<latency::CalibrationRecord> MoshEngine::latencyCalibration()
+{
+    loadLatencyCalibrationIfNeeded();
+    return calibration;
+}
+
+void MoshEngine::setLatencyCalibration (const latency::CalibrationRecord& record)
+{
+    loadLatencyCalibrationIfNeeded();
+    calibration = record;
+    latencyCalibrationFile().replaceWithText (juce::JSON::toString (record.toVar()));
+    applyLatencyCalibrationToDevices();
+}
+
+void MoshEngine::clearLatencyCalibration()
+{
+    loadLatencyCalibrationIfNeeded();
+    calibration.reset();
+    latencyCalibrationFile().deleteFile();
+    applyLatencyCalibrationToDevices();
+}
+
+juce::int64 MoshEngine::deviceReportedLatencySamples() const
+{
+    if (enginePtr == nullptr) return 0;
+    if (auto* device = enginePtr->getDeviceManager().deviceManager.getCurrentAudioDevice())
+        return (juce::int64) device->getInputLatencyInSamples() + (juce::int64) device->getOutputLatencyInSamples();
+    return 0;
+}
+
+void MoshEngine::applyLatencyCalibrationToDevices()
+{
+    loadLatencyCalibrationIfNeeded();
+    calibrationApplied   = false;
+    calibrationStale     = false;
+    calibrationAppliedMs = 0.0;
+    if (! audioOpen || enginePtr == nullptr) return;
+
+    auto& dm = enginePtr->getDeviceManager();
+    auto* device = dm.deviceManager.getCurrentAudioDevice();
+    if (device == nullptr) return;
+
+    double residual = 0.0;
+    if (calibration.has_value())
+    {
+        const auto setup = dm.deviceManager.getAudioDeviceSetup();
+        if (latency::isHonored (*calibration, device->getCurrentSampleRate(),
+                                setup.inputDeviceName, setup.outputDeviceName))
+        {
+            residual = latency::residualMs (*calibration, deviceReportedLatencySamples());
+            calibrationApplied   = true;
+            calibrationAppliedMs = residual;
+        }
+        else
+        {
+            calibrationStale = true;
+        }
+    }
+
+    // Always push explicitly — 0 when nothing is honoured — so Tracktion's own persisted
+    // per-device adjustMs (which Mosh never exposes) can never silently win.
+    for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+        if (auto* wip = dm.getWaveInDevice (i))
+            if (! wip->isTrackDevice())
+                wip->setRecordAdjustmentMs (residual);
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)

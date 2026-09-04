@@ -1542,6 +1542,7 @@ juce::var MoshOps::cmdSetBufferSize (const juce::var& args)
         return errResult ("set_buffer_size", err);
     }
 
+    eng.applyLatencyCalibrationToDevices();   // LAT-001 — the device restarted; re-decide the residual
     logLine ("set_buffer_size", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
     return okResult ("set_buffer_size", currentAudioSelection());
@@ -1623,9 +1624,63 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
+
+    // TPL-001 — the simple vocal recording template. Pure COMPOSITION of existing
+    // commands on the fresh Edit (nothing new in the engine): a Backing track to drop
+    // the beat on, a Vocal track armed with automatic input monitoring, a one-bar
+    // count-in, overdub takes (each loop pass stacks a take on the same clip), and a
+    // four-bar loop from bar 1 so the singer can go straight to Record. Every step
+    // is the same command the producer could issue by hand, so the JSONL reads as a
+    // recipe and any failure leaves an ordinary (partially set-up) project, never a
+    // broken one.
+    auto* data = new DynamicObject();
+    const auto tpl = args.getProperty ("template", var()).toString().trim().toLowerCase();
+    if (tpl == "vocal")
+    {
+        auto run = [&] (const char* command, juce::var cmdArgs) -> juce::var
+        {
+            auto* c = new DynamicObject();
+            c->setProperty ("command", command);
+            c->setProperty ("args", cmdArgs);
+            return execute (var (c));
+        };
+        auto obj = [] (std::initializer_list<std::pair<const char*, juce::var>> kv)
+        {
+            auto* o = new DynamicObject();
+            for (auto& [k, v] : kv) o->setProperty (k, v);
+            return var (o);
+        };
+        auto trackIdOf = [] (const juce::var& r)
+        {
+            return r.getProperty ("data", var()).getProperty ("trackId", var()).toString();
+        };
+        const auto backing = trackIdOf (run ("create_track", obj ({ { "name", "Backing" }, { "type", "audio" } })));
+        const auto vocal   = trackIdOf (run ("create_track", obj ({ { "name", "Vocal" },   { "type", "audio" } })));
+        if (vocal.isNotEmpty())
+        {
+            run ("arm_track",         obj ({ { "trackId", vocal }, { "armed", true } }));
+            run ("set_input_monitor", obj ({ { "trackId", vocal }, { "mode", "automatic" } }));
+        }
+        run ("set_count_in",       obj ({ { "bars", 1 } }));
+        run ("set_record_options", obj ({ { "overdub", true }, { "replaceExisting", false }, { "punchInOut", false } }));
+        // Four bars from bar 1, in the Edit's own tempo/signature (16 beats in 4/4).
+        const auto loopEnd = eng.edit().tempoSequence.toTime (tracktion::BeatPosition::fromBeats (16.0)).inSeconds();
+        run ("set_transport", obj ({ { "loop", true }, { "loopStart", 0.0 }, { "loopEnd", loopEnd } }));
+        eng.markDirty();
+        data->setProperty ("template", "vocal");
+        data->setProperty ("backingTrackId", backing);
+        data->setProperty ("vocalTrackId", vocal);
+        data->setProperty ("loopEnd", loopEnd);
+    }
+    else if (tpl.isNotEmpty())
+    {
+        // An unknown template still yields the empty project (already created above):
+        // say so in the result rather than pretend a recipe ran.
+        data->setProperty ("template", "");
+        data->setProperty ("templateError", "unknown template: " + tpl + " (known: vocal)");
+    }
     emitProjectReplaced ("new_project");
 
-    auto* data = new DynamicObject();
     data->setProperty ("editFile", eng.editFile().getFullPathName());
     return okResult ("new_project", var (data));
 }

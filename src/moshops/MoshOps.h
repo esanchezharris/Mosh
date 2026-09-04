@@ -8,6 +8,7 @@
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
+#include "audio/LatencyCalibrationSession.h"
 #include "moshops/AgentTxn.h"
 #include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
@@ -546,6 +547,14 @@ private:
     // into clips (te::EditPlaybackContext::applyRetrospectiveRecord). The one command in
     // this group that IS an Edit mutation, so unlike its neighbours it is undoable.
     juce::var cmdCaptureMidi (const juce::var& args);
+    // LAT-001 — measured round-trip latency calibration (ported from Moshpit M005/M006).
+    // { action: start | status | apply | cancel | clear }. `start` detaches the Edit from
+    // the device (the export render's exclusivity dance), plays a sweep through the
+    // output while capturing the input inside ONE device-callback clock, and the timer
+    // polls completion; the result persists as MACHINE state on MoshEngine and only its
+    // RESIDUAL over the device-reported latency reaches Tracktion. Non-undoable, not
+    // agent-callable (needs a human at the mic). See MoshOps.Record.cpp.
+    juce::var cmdCalibrateLatency (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -605,6 +614,13 @@ private:
     // record-start and on project load, so a controller plugged in AFTER the setting was
     // made still honours it. A complete no-op headless (no devices to write to).
     void applyRecordOptionsToDevices();
+    // LAT-001 — the resolved snapshot block { state, frames, sampleRate, ms, confidence,
+    // measuredAt, inputDevice, outputDevice, method, deviceReportedSamples, appliedMs,
+    // applied, stale, error }. Every key always present (the UI renders it cold).
+    juce::var latencyCalibrationToVar();
+    // LAT-001 — timer hook: deregisters the finished sweep, measures off the audio
+    // thread, persists, re-attaches the Edit, emits. A bool test when nothing runs.
+    void pollLatencyCalibration();
 
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
@@ -904,8 +920,8 @@ private:
     void  logLine (const juce::String& command, const juce::var& args,
                    bool ok, const juce::String& error, bool undoable);
     // TASTE-002 — the in-place workflow's soft POSITIVE: at save/export time, every
-    // still-applied (appliedInPlace, not bypassed) render layer logs ONE render_kept
-    // JSONL taste label, deduped on layerId for the life of this process.
+    // still-applied (appliedInPlace, not bypassed, not explicitly rejected) render layer
+    // logs ONE render_kept JSONL taste label, deduped on layerId for the life of this process.
     void  logKeptRenderLabels();
     juce::StringArray renderKeptLogged_;
 
@@ -1027,6 +1043,14 @@ private:
     void sweepStuckVoices();
 
     MoshEngine& eng;
+    // LAT-001 — registrar first, session second: the session holds a reference to the
+    // registrar and its destructor deregisters through it, so reverse-order member
+    // destruction must free the session BEFORE the registrar.
+    std::unique_ptr<latency::DeviceManagerRegistrar> calibrationRegistrar_;
+    std::unique_ptr<latency::CalibrationSession>     calibrationSession_;
+    juce::String calibrationError_;            // last failed measurement's reason
+    double       calibrationRate_ = 0.0;       // rate the in-flight sweep runs at
+    bool         calibrationDetachedContext_ = false;   // we freed the playback context
     PluginHost  pluginHost;
     GenerativeJobManager jobManager;
     TrainerRegistry      trainerRegistry;

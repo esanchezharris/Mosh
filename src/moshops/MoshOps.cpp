@@ -394,6 +394,9 @@ void MoshOps::timerCallback()
     // and survives anything the UI does; it is a no-op when nothing is held.
     sweepStuckVoices();
 
+    // LAT-001 — finish a calibration sweep that the audio thread has completed.
+    pollLatencyCalibration();
+
     // REC-002 — publish the "Mosh Keyboard" virtual MIDI input as soon as audio comes up,
     // so it is in the track input picker BEFORE the producer goes looking for it. Doing
     // this lazily (on the first audition) would mean the picker was empty exactly when
@@ -910,6 +913,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_recording_residue")       return cmdListRecordingResidue (args);
     if (name == "adopt_recording_residue")      return cmdAdoptRecordingResidue (args);
     if (name == "quarantine_recording_residue") return cmdQuarantineRecordingResidue (args);
+    // LAT-001 — machine/device action like set_audio_device: never broadcast to a peer.
+    if (name == "calibrate_latency") return cmdCalibrateLatency (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -3289,6 +3294,11 @@ juce::var MoshOps::snapshot()
     // getRecordAdjustment* are non-const, and `dm` here is a non-const reference.
     session->setProperty ("roundTripLatencySamples", dm.getRecordAdjustmentSamples());
     session->setProperty ("roundTripLatencyMs", dm.getRecordAdjustmentMs());
+
+    // LAT-001 — the MEASURED round trip, if the producer has run a calibration, and
+    // whether its residual is currently in effect (see cmdCalibrateLatency). Distinct
+    // from roundTripLatency* above, which is only what the driver claims.
+    session->setProperty ("latencyCalibration", latencyCalibrationToVar());
 
     // Plugin delay compensation readout (MON-004). This is the WHOLE-GRAPH reported
     // latency Tracktion itself compensates — the single authoritative total from the

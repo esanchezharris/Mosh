@@ -24,6 +24,11 @@ const code = css.replace(/\/\*[\s\S]*?\*\//g, ""); // comments off — they disc
 const AGENTIC_SELECTORS: Record<string, string> = {
   ".v2-shell .v2-mosh-stage": "Moshi himself — all moods and the live GL mount. The agent IS the character.",
   ".v2-shell .v2-mosh-status": "his status wave and narration line — reads out what the agent is doing",
+  // Re-added 2026-09-04 with the LOCAL AI toggle (#695's native contract). This is the
+  // one control that says whether the local MODEL is loaded and holding ~17GB, so it is
+  // agentic in the literal sense the reservation is about — and it wears the lime ONLY
+  // while on, which is exactly when the agent is real rather than idle.
+  ".v2-local-ai[data-on=\"true\"]": "the local model is loaded and consuming its dedicated memory",
   // ".v2-shell .v2-pill" — the topbar AI ACTIVE pill. DELETED 2026-08-05 at the owner's
   // call: it spent ~107px of a full bar to say "active", which is what it read nearly all
   // the time, and the busy state it carried is already shown where the work happens (the

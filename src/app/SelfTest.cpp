@@ -4014,6 +4014,132 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (layerOf2 (gcid2), "remove_render_layer is undoable (layer restored)");
         check (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString().contains ("remove_render_layer"),
                "JSONL records remove_render_layer");
+
+        // --- NRL-004b: the render-loop TAIL commands (cancel_render / reject_render) ---
+        // Both shipped UNCOVERED on all four gate surfaces and sat behind expiring waivers
+        // (coverage_waivers.json) whose own reason called cancel_render "a real coverage gap,
+        // not a bookkeeping one". They are the two ways a producer says "no" to a render:
+        // cancel it while it is still running, or reject it once it has landed.
+        section ("NRL-004b: cancel_render / reject_render (the render-loop tail)");
+        {
+            auto ct = cmd (ops, "create_track", args1 ("name", "GenTail"))["data"].getProperty ("trackId", var()).toString();
+            auto ctone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ct }, { "seconds", 1.0 }, { "freq", 233.0 }}));
+            const auto tcid = ctone["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", tcid }, { "adapter", "fake" }}))),
+                   "tail: create_render_layer ok");
+
+            auto tailLayer = [&] (const String& cid) -> var {
+                auto trk = trackById (ct);
+                if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                    for (auto& c : *arr)
+                        if (c.getProperty ("id", var()).toString() == cid)
+                            return c.getProperty ("renderLayer", var());
+                return {};
+            };
+            auto tailStatus = [&] (const String& cid) { return tailLayer (cid).getProperty ("status", var()).toString(); };
+
+            // ── cancel_render: the layer must never stay parked, and nothing may land ──
+            // Deliberately NOT driven through render_layer{wait:false}: that path detaches a
+            // polling thread whose finalizeRender() has no cancellation guard, so a cancelled
+            // job still races to land "ready" (output present) or "error" (output absent).
+            // Asserting post-cancel state on that path would be a FLAKY gate check. Instead
+            // bypass_layer parks the layer in a known NON-dirty state on a layer that has never
+            // rendered — so "returns to idle" and "no artifact lands" are both provable, and the
+            // precondition genuinely differs from the postcondition (this cannot pass vacuously).
+            check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", tcid }, { "bypassed", true }}))),
+                   "tail: bypass_layer parks the un-rendered layer");
+            check (tailStatus (tcid) == "bypassed", "precondition: status is 'bypassed', NOT dirty");
+            check (! (bool) tailLayer (tcid).getProperty ("hasArtifact", false),
+                   "precondition: the layer has never rendered (no artifact)");
+
+            const int tracksBeforeCancel = tracks (ops);
+            // cancelJob() POSTs /cancel and reads the ack; the service answers ok for ANY reached
+            // /cancel (see GenerativeJobManager::cancelJob) so this exercises the real round-trip
+            // against the service this section already spawned.
+            check (ok (cmd (ops, "cancel_render", objN ({{ "clipId", tcid }, { "jobId", "selftest-tail-job" }}))),
+                   "cancel_render ok (the generative service acknowledged the /cancel)");
+            check (tailStatus (tcid) == "dirty",
+                   "cancel_render UNSTICKS the layer -> dirty (a Cancel click never leaves it parked)");
+            check (tailLayer (tcid).getProperty ("renderError", var()).toString().isEmpty(),
+                   "an ACKNOWLEDGED cancel records no renderError");
+            check (! (bool) tailLayer (tcid).getProperty ("hasArtifact", false),
+                   "cancel_render lands NO artifact");
+            check (tracks (ops) == tracksBeforeCancel, "cancel_render creates no lane / track");
+
+            // ── reject_render: the explicit "no" AFTER a render has landed ──
+            auto rr = cmd (ops, "render_layer", objN ({{ "clipId", tcid }, { "wait", true }}));
+            check (ok (rr), "tail: sync render for the reject case ok");
+            check (tailStatus (tcid) == "ready", "precondition: rendered -> status ready (reject must change it)");
+
+            check (ok (cmd (ops, "reject_render", args1 ("clipId", tcid))), "reject_render ok");
+            check (tailStatus (tcid) == "dirty", "reject_render -> status dirty (re-imagine available again)");
+            check (! (bool) tailLayer (tcid).getProperty ("userKept", true),
+                   "reject_render clears userKept (the NEGATIVE taste bit)");
+
+            // The JSONL taste label is the POINT of reject_render — the taste census reads the
+            // label, not the layer state — so assert the row, not just the ValueTree.
+            {
+                int rejectsForClip = 0; var lastReject;
+                for (auto& l : StringArray::fromLines (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+                {
+                    if (! l.contains ("\"reject_render\"")) continue;
+                    const auto row = JSON::parse (l);   // named local — the var-temporary UAF class
+                    if (row.getProperty ("command", var()).toString() != "reject_render") continue;
+                    if (row.getProperty ("args", var()).getProperty ("clipId", var()).toString() != tcid) continue;
+                    ++rejectsForClip; lastReject = row;
+                }
+                check (rejectsForClip == 1, "reject_render logged exactly ONE taste label for this clip");
+                check ((bool) lastReject.getProperty ("undoable", false),
+                       "reject_render is logged undoable:true (it opens a real Tracktion txn)");
+                // The negative carries its OWN join keys, exactly as the reset negative and the
+                // render_kept positive do. It used to log the caller's RAW args (clipId only), so
+                // service/taste/census.py had to recover layerId by guessing it from the boot's
+                // most recent accept — a heuristic that mis-attributes the moment a boot rejects a
+                // take that was never accepted. These four pin the label the census actually joins on.
+                const auto rja = lastReject.getProperty ("args", var());
+                check (rja.getProperty ("clipId", var()).toString() == tcid,
+                       "reject taste label carries clipId");
+                check (rja.getProperty ("layerId", var()).toString() == tailLayer (tcid).getProperty ("id", var()).toString()
+                           && rja.getProperty ("layerId", var()).toString().isNotEmpty(),
+                       "reject taste label carries layerId (joins to renders/<layerId>/ with no heuristic)");
+                check (rja.getProperty ("cacheKey", var()).toString().isNotEmpty(),
+                       "reject taste label carries the render cacheKey");
+                check (rja.getProperty ("adapter", var()).toString() == "fake",
+                       "reject taste label carries the adapter");
+            }
+
+            // reject marks the take dirty; it does NOT unwind the in-place apply (cmdRemoveRenderLayer
+            // says so in its own note) — that stays reset_render_layer's job, and changing it would
+            // change what the producer HEARS after a reject.
+            check ((bool) tailLayer (tcid).getProperty ("appliedInPlace", false),
+                   "reject_render does NOT unwind the in-place apply (reject != reset)");
+
+            // ...which is exactly why the reject must be excluded from the render_kept sweep by an
+            // explicit flag rather than by the apply state. logKeptRenderLabels() takes every
+            // applied, non-bypassed layer at save/export time as a soft POSITIVE; a rejected take is
+            // still applied, so before the fix the very next save wrote render_kept for a take the
+            // producer had just said NO to — a hard negative overwritten by a soft positive in an
+            // archive that has almost no organic labels to spare. (userKept cannot carry this:
+            // RenderLayer.h stamps userKept=false on EVERY layer, so it is a default, not a verdict.)
+            const auto tailLayerId = tailLayer (tcid).getProperty ("id", var()).toString();
+            check (keptFor (tailLayerId) == 0, "precondition: no render_kept for the tail layer yet");
+            check (ok (cmd (ops, "save")), "save after reject ok (the render_kept sweep runs)");
+            check (keptFor (tailLayerId) == 0,
+                   "a REJECTED take earns NO render_kept positive (the sweep skips it)");
+
+            // Housekeeping: drop the layer so this section's applied take cannot leak a second
+            // render_kept into the export-count assertions in the sections below.
+            check (ok (cmd (ops, "remove_render_layer", args1 ("clipId", tcid))),
+                   "tail: remove_render_layer cleans up the section's applied layer");
+
+            // Error path: no render layer -> an honest error, not a silent ok.
+            auto bareTone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ct }, { "seconds", 0.5 }, { "freq", 180.0 }}));
+            const auto bareId = bareTone["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "reject_render", args1 ("clipId", bareId))),
+                   "reject_render on a clip with NO render layer errors");
+            check (! ok (cmd (ops, "reject_render", args1 ("clipId", "no-such-clip"))),
+                   "reject_render on an unknown clip errors");
+        }
     }
 
     // --- Route B: Tier-B transform render mode (FakeTransformAdapter) ---
@@ -10548,6 +10674,94 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (qPref, "quarantine_recording_residue logged undoable:false");
         }
         quarantined.deleteFile(); old.deleteFile();
+        }
+
+    // ─── TPL-001 — the vocal recording template (new_project template:"vocal") ───
+    // Composition only: the recipe is the same commands a producer could issue by hand.
+    // What is provable headless is the SHAPE it leaves behind; that the armed track
+    // actually captures is hardware-gated (row 6b) exactly as for any recording.
+    section ("TPL-001: vocal recording template (new_project template:vocal)");
+    {
+        auto np = cmd (ops, "new_project", args1 ("template", "vocal"));
+        check (ok (np), "new_project template:vocal ok");
+        check (np["data"].getProperty ("template", var()).toString() == "vocal", "result names the template");
+        const auto vocalId = np["data"].getProperty ("vocalTrackId", var()).toString();
+        check (vocalId.isNotEmpty(), "result carries the vocal track id");
+        auto snap = ops.snapshot();
+        auto tracks = snap.getProperty ("tracks", var());
+        juce::StringArray names; var vocal;
+        if (auto* arr = tracks.getArray())
+            for (auto& t : *arr)
+            {
+                names.add (t.getProperty ("name", var()).toString());
+                if (t.getProperty ("id", var()).toString() == vocalId) vocal = t;
+            }
+        check (names.contains ("Backing") && names.contains ("Vocal"), "template created Backing + Vocal tracks");
+        // Arming needs an input instance, which needs an audio device: headless the arm is
+        // ISSUED (the recipe ran it — the JSONL is the witness) but cannot take effect, exactly
+        // as arm_track itself degrades. With a device the snapshot must show it armed.
+        check (vocal.isObject(), "Vocal track exists in the snapshot");
+        if (eng.hasAudio())
+            check ((bool) vocal.getProperty ("armed", false), "Vocal track is armed (audio device present)");
+        {
+            auto tLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool armIssued = false;
+            for (auto& ln : juce::StringArray::fromLines (tLog))
+                if (ln.contains ("\"command\": \"arm_track\"") && ln.contains (vocalId)) armIssued = true;
+            check (armIssued, "the recipe issued arm_track for the Vocal track (JSONL witness)");
+        }
+        const auto session = snap.getProperty ("session", var());
+        check ((int) session.getProperty ("countInBars", 0) == 1, "count-in is one bar");
+        check ((bool) session.getProperty ("project", var()).getProperty ("recordOptions", var()).getProperty ("overdub", false),
+               "overdub takes are on");
+        const auto transport = snap.getProperty ("transport", var());
+        check ((bool) transport.getProperty ("looping", false), "loop is armed");
+        const double loopEnd = (double) transport.getProperty ("loopEnd", 0.0);
+        check (loopEnd > 0.0 && std::abs (loopEnd - (double) np["data"].getProperty ("loopEnd", -1.0)) < 1.0e-6,
+               "loop end matches the four bars the recipe set");
+        // An unknown template still yields a usable empty project and says so.
+        auto bad = cmd (ops, "new_project", args1 ("template", "nope"));
+        check (ok (bad), "new_project with an unknown template still creates a project");
+        check (bad["data"].getProperty ("templateError", var()).toString().isNotEmpty(), "unknown template is reported");
+    }
+    // ─── LAT-001 — measured round-trip latency calibration (headless surface) ───
+    // The sweep itself needs an output, a room and a mic, so a headless run proves only
+    // the SURFACE: `start` refuses honestly with no device (never a silent ok), status /
+    // apply / clear are always answerable, an unknown action is refused, and the snapshot
+    // carries a stable-keyed block the UI can render cold. The maths (detector, residual,
+    // honour rule, lifecycle) is pinned engine-free in tests/test_latency_calibration.cpp.
+    section ("LAT-001: latency calibration surface (calibrate_latency)");
+    {
+        auto cal = [&] { return ops.snapshot().getProperty ("session", var()).getProperty ("latencyCalibration", var()); };
+        check (cal().isObject(), "snapshot session.latencyCalibration present");
+        check (cal().getProperty ("state", var()).toString() == "idle", "latencyCalibration.state is idle headless");
+        check (! (bool) cal().getProperty ("applied", true), "latencyCalibration.applied is false headless");
+        check (! (bool) cal().getProperty ("stale", true), "latencyCalibration.stale is false with no record");
+        for (auto* k : { "frames", "sampleRate", "ms", "confidence", "measuredAt", "inputDevice", "outputDevice",
+                         "method", "deviceReportedSamples", "appliedMs", "applied", "stale", "error" })
+            check (cal().hasProperty (k), juce::String ("latencyCalibration always carries ") + k);
+
+        auto startR = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+        check (! ok (startR), "calibrate_latency start refuses headless (no audio device)");
+        check (startR["error"].toString().contains ("no audio device"),
+               "calibrate_latency start names the missing device");
+        check (cal().getProperty ("state", var()).toString() == "idle", "a refused start leaves the state idle");
+
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "status"))), "calibrate_latency status ok headless");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "apply"))),  "calibrate_latency apply ok headless (nothing to push)");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "cancel"))), "calibrate_latency cancel ok with nothing running");
+        check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))),  "calibrate_latency clear ok headless");
+        check (! ok (cmd (ops, "calibrate_latency", args1 ("action", "bogus"))), "calibrate_latency refuses an unknown action");
+        check (cal().getProperty ("state", var()).toString() == "idle", "state still idle after the headless round");
+
+        // NON-undoable machine action, same posture (and same check) as set_record_options.
+        {
+            auto calLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool calPref = false;
+            for (auto& ln : juce::StringArray::fromLines (calLog))
+                if (ln.contains ("\"command\": \"calibrate_latency\"") && ln.contains ("\"undoable\": false")) calPref = true;
+            check (calPref, "calibrate_latency logged undoable:false (machine action)");
+        }
     }
 
     // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
@@ -16471,6 +16685,170 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
 // notes reach the recorder and land in a clip. Whether they reach a speaker is
 // --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
 // sound it never measured.
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,
+// with NOBODY PLAYING A KEYBOARD.
+//
+// This exists because every other harness in this file is blind to it. --selftest has no
+// audio device, so getAllInputDevices() is empty, so the routing fork in cmdAuditionNote
+// is never taken and the retrospective buffer never fills. Everything REC-001/REC-002
+// added — overdub, record-quantise, Capture, and the input path itself — was therefore
+// verifiable only by hand, with a controller plugged in.
+//
+// What makes it automatable is the virtual "Mosh Keyboard" MIDI input. A physical
+// controller cannot be synthesised; a virtual device's handleIncomingMidiMessage is
+// exactly the entry point a physical one uses, so driving it through audition_note IS a
+// producer playing the computer keyboard. The audio device still has to be real (no
+// device ⇒ no playback context ⇒ no input instances), which is why this is its own CLI
+// mode and not a --selftest section.
+//
+// Deliberately NOT asserted anywhere below: that anything was AUDIBLE. This proves the
+// notes reach the recorder and land in a clip. Whether they reach a speaker is
+// --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
+// sound it never measured.
+// ── LAT-001 — measured latency, end to end through a loopback device ─────────────────
+//
+// What this proves that --selftest structurally cannot: the sweep really goes out the
+// device and comes back in, the detector finds it, the residual really reaches
+// Tracktion's record path, and a take then LANDS where it was played. With a digital
+// loopback (BlackHole) the round trip is exactly the device's own buffering, so the
+// residual is small and the landed click must sit within 1 ms of the click that
+// produced it. Nothing here needs a human: no speakers, no mic, no listening.
+int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh latency-calibration smoke (LAT-001) =====\n";
+    section ("LAT-001 live: calibrate through a loopback, then land a click within 1 ms");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples()
+              << " reportedIn=" << device->getInputLatencyInSamples()
+              << " reportedOut=" << device->getOutputLatencyInSamples() << "\n";
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
+    const double rate = device->getCurrentSampleRate();
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (20);
+            else Thread::sleep (20);
+        }
+    };
+    auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
+
+    // ── 1. calibrate ──
+    check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
+    auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+    check (ok (start), "calibrate_latency start ok with a live device");
+    check (calState().getProperty ("state", var()).toString() == "running", "calibration reports running");
+    const auto deadline = Time::getMillisecondCounter() + 12000;
+    while (Time::getMillisecondCounter() < deadline
+           && calState().getProperty ("state", var()).toString() == "running")
+        pump (100);
+    auto cal = calState();
+    const auto state = cal.getProperty ("state", var()).toString();
+    std::cerr << "  ..   calibration: state=" << state
+              << " frames=" << (int64) cal.getProperty ("frames", 0)
+              << " ms=" << (double) cal.getProperty ("ms", 0.0)
+              << " confidence=" << (double) cal.getProperty ("confidence", 0.0)
+              << " deviceReported=" << (int64) cal.getProperty ("deviceReportedSamples", 0)
+              << " appliedMs=" << (double) cal.getProperty ("appliedMs", 0.0)
+              << " error=" << cal.getProperty ("error", var()).toString() << "\n";
+    check (state == "measured", "calibration produced a measurement (not a refusal, not a hang)");
+    check ((bool) cal.getProperty ("applied", false), "measured residual is applied to the record path");
+    check (! (bool) cal.getProperty ("stale", true), "record is honoured at this rate/device");
+    check ((double) cal.getProperty ("confidence", 0.0) > 0.0, "detector confidence is positive");
+    const double measuredMs = (double) cal.getProperty ("ms", 0.0);
+    check (measuredMs >= 0.0 && measuredMs < 200.0, "loopback round trip is a sane number (< 200 ms)");
+    check (std::abs ((double) cal.getProperty ("sampleRate", 0.0) - rate) < 0.5, "record carries the device rate");
+
+    // ── 2. the click: play at 1.0 s on one track, record the loopback on another ──
+    auto clickTrack = cmd (ops, "create_track", args1 ("name", "Click"));
+    check (ok (clickTrack), "create_track Click ok");
+    const auto clickTrackId = clickTrack["data"].getProperty ("trackId", var()).toString();
+    auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", clickTrackId }, { "seconds", 0.25 }, { "freq", 1000.0 }}));
+    check (ok (tone), "add_test_tone_clip ok");
+    const auto clickId = tone["data"].getProperty ("clipId", var()).toString();
+    check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
+
+    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
+    check (ok (takeTrack), "create_track Take ok");
+    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
+           "input monitoring OFF on the take (so the loopback carries only the click)");
+
+    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
+    auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+    check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
+    pump (2500);
+    auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+    check (ok (stop), "recording stopped");
+
+    // ── 3. where did it land? ──
+    var landed;
+    {
+        auto snap = ops.snapshot();
+        auto tracksVar = snap.getProperty ("tracks", var());
+        if (auto* tracks = tracksVar.getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == takeTrackId)
+                    landed = t.getProperty ("clips", var());
+    }
+    const int nLanded = landed.isArray() ? landed.size() : 0;
+    check (nLanded > 0, "a take landed on the armed track");
+    if (nLanded > 0)
+    {
+        const auto clip = landed[0];
+        const double clipStart  = (double) clip.getProperty ("start", 0.0);
+        const double clipOffset = (double) clip.getProperty ("offset", 0.0);
+        const File src (clip.getProperty ("sourceFile", var()).toString());
+        check (src.existsAsFile(), "landed take has a source WAV on disk");
+        AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (src));
+        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable");
+        if (reader != nullptr && reader->lengthInSamples > 0)
+        {
+            AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+            reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+            // First sample above a floor well under the tone's 10 ms fade-in slope: at 0.25
+            // peak the fade crosses 0.003 about 0.12 ms in, so the threshold itself costs
+            // far less than the 1 ms budget. The loopback is digital, so the floor is zero.
+            int onset = -1;
+            for (int i = 0; i < buf.getNumSamples() && onset < 0; ++i)
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    if (std::abs (buf.getSample (ch, i)) > 0.003f) { onset = i; break; }
+            check (onset >= 0, "the click is present in the recorded take");
+            if (onset >= 0)
+            {
+                const double onsetEditSeconds = clipStart + ((double) onset / reader->sampleRate - clipOffset);
+                const double errorMs = (onsetEditSeconds - 1.0) * 1000.0;
+                std::cerr << "  ..   landed: clipStart=" << clipStart << " offset=" << clipOffset
+                          << " onsetSample=" << onset << " onset=" << onsetEditSeconds
+                          << " s error=" << errorMs << " ms\n";
+                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)");
+            }
+        }
+    }
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 // ── CAP-001 run 1 — record, then get killed ──────────────────────────────────────────
 int runRecordHoldSmoke (MoshEngine& eng, MoshOps& ops)
 {

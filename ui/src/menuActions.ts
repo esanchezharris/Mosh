@@ -246,6 +246,19 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       return;
     }
 
+    // TPL-001 — the vocal recording template: the same lifecycle as New, with the
+    // recipe (Backing + armed Vocal, count-in, overdub takes, a four-bar loop) composed
+    // natively so a singer lands one Record press away from a stacked take.
+    case "new_vocal_project": {
+      const digest = sessionDigestFor(ctx);
+      if (digest) await writeSessionSummary(ctx, digest);
+      clearSessionLog();
+      await store.exec("new_project", { template: "vocal" });
+      await store.refresh();
+      store.invalidateMemory?.();
+      return;
+    }
+
     case "open_project": {
       let file = opts.file;
       if (!file) {
@@ -694,6 +707,7 @@ export interface MenuItemMeta {
  *  renderer between Open and Save. Shared by the native menu and the WebView menu. */
 export const FILE_MENU: MenuItemMeta[] = [
   { id: "new_project", label: "New", accel: "⌘N" },
+  { id: "new_vocal_project", label: "New Vocal Recording", accel: "" },
   { id: "open_project", label: "Open…", accel: "⌘O" },
   { id: "save", label: "Save", accel: "⌘S" },
   { id: "save_as", label: "Save As…", accel: "⇧⌘S" },

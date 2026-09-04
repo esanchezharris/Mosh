@@ -697,6 +697,28 @@ export type RecordingResidueEntry = {
   /** The header was never closed (the normal crash case); adopt repairs a copy. */
   repairable?: boolean;
 };
+/** LAT-001 — measured round-trip latency calibration (a sweep through the speakers,
+ *  captured on the mic). `ms` is what was MEASURED; `appliedMs` is the residual Mosh
+ *  pushes into the record path on top of the device's own report; `stale` means a record
+ *  exists but was taken at a different sample rate or device pair and is NOT in effect.
+ *  Every key is always present on the wire (native defaults them); the whole block is
+ *  optional here only because an older backend will not send it. */
+export type LatencyCalibration = {
+  state: "idle" | "running" | "measured" | "failed";
+  frames: number;
+  sampleRate: number;
+  ms: number;
+  confidence: number;
+  measuredAt: string;
+  inputDevice: string;
+  outputDevice: string;
+  method: string;
+  deviceReportedSamples: number;
+  appliedMs: number;
+  applied: boolean;
+  stale: boolean;
+  error: string;
+};
 
 export type RecordOptions = {
   /** A new take MERGES into the clip it lands on instead of starting a fresh one. */
@@ -909,6 +931,9 @@ export type Snapshot = {
     // (show "—"). Smaller buffer size lowers it; monitoring is software-only.
     roundTripLatencyMs?: number;
     roundTripLatencySamples?: number;
+    // LAT-001 — the MEASURED round trip (calibrate_latency), distinct from the driver's
+    // claim above. See LatencyCalibration.
+    latencyCalibration?: LatencyCalibration;
     audioDeviceName?: string;
     /** The SYSTEM default output right now — may differ from audioDeviceName,
      *  because Mosh restores the device you last chose rather than following the

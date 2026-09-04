@@ -17,6 +17,7 @@ import { RecordOptionsChip, CaptureButton } from "./RecordPanel";
 import { AudioOutputChip } from "./AudioOutputChip";
 import { MetronomeControls } from "./MetronomePanel";
 import { AvatarCluster } from "./AvatarCluster";
+import { LocalAiToggle } from "./LocalAiToggle";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { projectLabel } from "../projectFile";
@@ -233,6 +234,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             swaps its placeholder to "thinking…" and disables send, and the Moshi card in
             the right rail narrates what the agent is actually doing. Its space paid for
             the count-in and record options moving back beside the metronome. */}
+        <LocalAiToggle />
         <AvatarCluster />
 
         <MultiplayerLauncher

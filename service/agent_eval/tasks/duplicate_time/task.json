@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "task_id": "mosh.duplicate_time",
+  "status": "draft",
+  "repository": {
+    "name": "Mosh",
+    "base_commit": "bc45c4705647e8c11fc3f960b266395f0571bab0"
+  },
+  "prompt": {
+    "path": "PROMPT.md",
+    "sha256": "826c45297a4c847d572ea6fff85e12128813479bebd3b4b70d2a6a6741279509"
+  },
+  "budget": {
+    "wall_seconds": 10800,
+    "token_limit": 200000,
+    "tool_call_limit": 1000
+  },
+  "public_checks": []
+}
