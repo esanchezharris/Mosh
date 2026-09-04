@@ -10179,6 +10179,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (qPref, "quarantine_recording_residue logged undoable:false");
         }
         quarantined.deleteFile(); old.deleteFile();
+        }
+
+    // ─── TPL-001 — the vocal recording template (new_project template:"vocal") ───
+    // Composition only: the recipe is the same commands a producer could issue by hand.
+    // What is provable headless is the SHAPE it leaves behind; that the armed track
+    // actually captures is hardware-gated (row 6b) exactly as for any recording.
+    section ("TPL-001: vocal recording template (new_project template:vocal)");
+    {
+        auto np = cmd (ops, "new_project", args1 ("template", "vocal"));
+        check (ok (np), "new_project template:vocal ok");
+        check (np["data"].getProperty ("template", var()).toString() == "vocal", "result names the template");
+        const auto vocalId = np["data"].getProperty ("vocalTrackId", var()).toString();
+        check (vocalId.isNotEmpty(), "result carries the vocal track id");
+        auto snap = ops.snapshot();
+        auto tracks = snap.getProperty ("tracks", var());
+        juce::StringArray names; var vocal;
+        if (auto* arr = tracks.getArray())
+            for (auto& t : *arr)
+            {
+                names.add (t.getProperty ("name", var()).toString());
+                if (t.getProperty ("id", var()).toString() == vocalId) vocal = t;
+            }
+        check (names.contains ("Backing") && names.contains ("Vocal"), "template created Backing + Vocal tracks");
+        // Arming needs an input instance, which needs an audio device: headless the arm is
+        // ISSUED (the recipe ran it — the JSONL is the witness) but cannot take effect, exactly
+        // as arm_track itself degrades. With a device the snapshot must show it armed.
+        check (vocal.isObject(), "Vocal track exists in the snapshot");
+        if (eng.hasAudio())
+            check ((bool) vocal.getProperty ("armed", false), "Vocal track is armed (audio device present)");
+        {
+            auto tLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool armIssued = false;
+            for (auto& ln : juce::StringArray::fromLines (tLog))
+                if (ln.contains ("\"command\": \"arm_track\"") && ln.contains (vocalId)) armIssued = true;
+            check (armIssued, "the recipe issued arm_track for the Vocal track (JSONL witness)");
+        }
+        const auto session = snap.getProperty ("session", var());
+        check ((int) session.getProperty ("countInBars", 0) == 1, "count-in is one bar");
+        check ((bool) session.getProperty ("project", var()).getProperty ("recordOptions", var()).getProperty ("overdub", false),
+               "overdub takes are on");
+        const auto transport = snap.getProperty ("transport", var());
+        check ((bool) transport.getProperty ("looping", false), "loop is armed");
+        const double loopEnd = (double) transport.getProperty ("loopEnd", 0.0);
+        check (loopEnd > 0.0 && std::abs (loopEnd - (double) np["data"].getProperty ("loopEnd", -1.0)) < 1.0e-6,
+               "loop end matches the four bars the recipe set");
+        // An unknown template still yields a usable empty project and says so.
+        auto bad = cmd (ops, "new_project", args1 ("template", "nope"));
+        check (ok (bad), "new_project with an unknown template still creates a project");
+        check (bad["data"].getProperty ("templateError", var()).toString().isNotEmpty(), "unknown template is reported");
     }
 
     // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
