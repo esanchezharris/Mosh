@@ -4475,6 +4475,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (File (exportFile).existsAsFile() && (juce::int64) exp["data"].getProperty ("bytes", 0) > 1000,
                "export produced a non-empty WAV (full producer loop)");
 
+        // IMP-001 — consolidated clip export: the file starts at edit time ZERO, so the
+        // clip's position is embedded as leading silence. mcid sits at 0.5 s for 0.8 s.
+        {
+            auto cexp = cmd (ops, "export_clip_consolidated", objN ({{ "clipId", mcid }, { "sampleRate", 44100.0 }}));
+            check (ok (cexp), "export_clip_consolidated ok");
+            const auto cfile = File (cexp["data"].getProperty ("file", var()).toString());
+            check (cfile.existsAsFile(), "export_clip_consolidated wrote a file");
+            check ((double) cexp["data"].getProperty ("startSeconds", -1.0) == 0.0, "consolidated export starts at edit time zero");
+            check (std::abs ((double) cexp["data"].getProperty ("clipStartSeconds", 0.0) - 0.5) < 1.0e-6,
+                   "consolidated export reports where the clip begins inside the file (0.5 s)");
+            check (std::abs ((double) cexp["data"].getProperty ("endSeconds", 0.0) - 1.3) < 1.0e-6,
+                   "consolidated export ends at the clip end (1.3 s)");
+            juce::AudioFormatManager afm; afm.registerBasicFormats();
+            if (auto reader = std::unique_ptr<juce::AudioFormatReader> (afm.createReaderFor (cfile)))
+            {
+                const auto expectedFrames = (juce::int64) std::llround (1.3 * reader->sampleRate);
+                check (std::abs (reader->lengthInSamples - expectedFrames) <= 2,
+                       "consolidated export length == clip end * rate (leading silence embedded)");
+                // The first 0.5 s (minus a safety margin for the render's own fade) is silence,
+                // and the audio after it is not.
+                const int lead = (int) (0.49 * reader->sampleRate);
+                juce::AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+                reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+                float leadPeak = 0.0f, bodyPeak = 0.0f;
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                {
+                    leadPeak = juce::jmax (leadPeak, buf.getMagnitude (ch, 0, lead));
+                    bodyPeak = juce::jmax (bodyPeak, buf.getMagnitude (ch, lead, buf.getNumSamples() - lead));
+                }
+                check (leadPeak < 1.0e-4f, "consolidated export: the clip's timeline offset is silence in the file");
+                check (bodyPeak > 0.01f,   "consolidated export: the clip's audio follows the leading silence");
+            }
+            else
+                check (false, "consolidated export is a readable WAV");
+            check (! ok (cmd (ops, "export_clip_consolidated", args1 ("clipId", "nope"))),
+                   "export_clip_consolidated refuses an unknown clip");
+        }
+
         check (std::abs ((double) trackById (mt).getProperty ("volumeDb", 0.0) + 4.0) < 0.5, "mix volume applied (-4 dB)");
 
         // undo/redo correct throughout (a clean undoable op after the full loop)

@@ -406,6 +406,121 @@ juce::var MoshOps::cmdImportLoraAdapter (const juce::var& args)
     return okResult ("import_lora_adapter", var (d));
 }
 
+// ── export_clip_consolidated (IMP-001) ───────────────────────────────────────────────
+//
+// The Moshpit "consolidated export" idea without the Room Bundle: one clip, rendered
+// from edit time ZERO to its end, so the leading silence IS the timeline position.
+// Dropped onto any DAW at bar 1 (or fed to Re-Imagine's Import Take at bar 1), the
+// audio lands exactly where the clip sat in Mosh — no offset arithmetic on either
+// side, which is the whole point. Renders through the clip's track chain (the take's
+// own sound) but not the master. Rate follows the project setting, else the device.
+juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    auto* clip = findClip (clipId);
+    if (clip == nullptr)
+        return errResult ("export_clip_consolidated", "no clip with id " + clipId);
+    auto* track = clip->getTrack();
+    if (track == nullptr)
+        return errResult ("export_clip_consolidated", "clip is not on a track");
+
+    const double clipEnd = clip->getPosition().getEnd().inSeconds();
+    if (clipEnd <= 1.0e-4)
+        return errResult ("export_clip_consolidated", "clip has no length");
+    const double tailSeconds = juce::jlimit (0.0, 30.0, (double) args.getProperty ("tailSeconds", 0.0));
+    const double endSec = clipEnd + tailSeconds;
+
+    auto file = args.getProperty ("file", var()).toString().isNotEmpty()
+                    ? juce::File (args.getProperty ("file", var()).toString()).withFileExtension (".wav")
+                    : eng.sessionDir().getChildFile ("exports")
+                          .getChildFile ("clip-" + clipId + "-" + String (Time::getCurrentTime().toMilliseconds()))
+                          .withFileExtension (".wav");
+
+    // PRJ-008 defaults, as export_audio: the stored per-project rate/depth, else device.
+    auto projectSettings = edit.state.getChildWithName (ids::MOSH_PROJECT);
+    double sampleRate = args.hasProperty ("sampleRate") ? (double) args.getProperty ("sampleRate", 0.0)
+                      : projectSettings.hasProperty (ids::projectSampleRate) ? (double) projectSettings.getProperty (ids::projectSampleRate)
+                      : edit.engine.getDeviceManager().getSampleRate();
+    if (sampleRate < 7000.0) sampleRate = 44100.0;
+    int bitDepth = args.hasProperty ("bitDepth") ? (int) args.getProperty ("bitDepth", 24)
+                 : projectSettings.hasProperty (ids::projectBitDepth) ? (int) projectSettings.getProperty (ids::projectBitDepth)
+                 : 24;
+    if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
+        return errResult ("export_clip_consolidated", "bitDepth must be 16, 24, or 32");
+
+    // Render exclusivity, exactly as every other offline render here.
+    unregisterAllMeterClients();
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;
+
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    te::Renderer::Parameters params (edit);
+    params.destFile = file;
+    params.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
+    params.bitDepth = bitDepth;
+    params.sampleRateForAudio = sampleRate;
+    params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
+    if (params.blockSizeForAudio <= 0) params.blockSizeForAudio = 512;
+    params.time = { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimePosition::fromSeconds (endSec) };
+    juce::Array<te::Track*> just; just.add (track);
+    params.tracksToDo = te::toBitSet (just);
+    juce::Array<te::Clip*> only; only.add (clip);
+    params.allowedClips = only;
+    params.usePlugins = true;
+    params.useMasterPlugins = false;
+    params.createMidiFile = false;
+    params.realTimeRender = findSerumRealtimeRenderReason (edit).isNotEmpty();
+
+    juce::String renderError;
+    {
+        const te::Edit::ScopedRenderStatus srs (edit, true);
+        te::TransportControl::stopAllTransports (edit.engine, false, true);
+        te::Renderer::turnOffAllPlugins (edit);
+        te::Renderer::RenderTask task ("Mosh consolidated clip export", params, nullptr, nullptr);
+        const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
+        const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, endSec * 8000.0 + 60000.0);
+        const juce::uint32 stallMs    = 20000;
+        float  lastProgress   = -1.0f;
+        juce::uint32 lastProgressMs = startMs;
+        while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+        {
+            const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+            const float p = task.getCurrentTaskProgress();
+            if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
+            if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
+            {
+                if (task.errorMessage.isEmpty()) task.errorMessage = "consolidated export stalled";
+                break;
+            }
+        }
+        te::Renderer::turnOffAllPlugins (edit);
+        renderError = task.errorMessage;
+    }
+    if (renderError.isNotEmpty() || ! file.existsAsFile() || file.getSize() == 0)
+    {
+        file.deleteFile();
+        const auto msg = renderError.isNotEmpty() ? renderError : String ("consolidated export produced no file");
+        logLine ("export_clip_consolidated", args, false, msg, false);
+        return errResult ("export_clip_consolidated", msg);
+    }
+
+    logLine ("export_clip_consolidated", args, true, {}, false);   // an export, never undoable
+    auto* d = new DynamicObject();
+    d->setProperty ("file", file.getFullPathName());
+    d->setProperty ("clipId", clipId);
+    d->setProperty ("startSeconds", 0.0);
+    d->setProperty ("clipStartSeconds", clip->getPosition().getStart().inSeconds());
+    d->setProperty ("endSeconds", endSec);
+    d->setProperty ("sampleRate", sampleRate);
+    d->setProperty ("bitDepth", bitDepth);
+    d->setProperty ("frames", (juce::int64) std::llround (endSec * sampleRate));
+    return okResult ("export_clip_consolidated", var (d));
+}
+
 juce::var MoshOps::cmdExportAudio (const juce::var& args)
 {
     auto& edit = eng.edit();

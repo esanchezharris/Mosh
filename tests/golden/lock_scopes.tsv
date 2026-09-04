@@ -69,6 +69,7 @@ edit_annotation	SessionGlobal
 enable_all_meters	Unguarded
 enable_track_meter	Unguarded
 export_audio	Unguarded
+export_clip_consolidated	Unguarded
 export_issue	Unguarded
 export_stems	Unguarded
 file_peaks	Unguarded

@@ -357,6 +357,75 @@ void ReImagineProcessor::relinkSelectedAsset (const juce::File& wav)
     workerEvent.signal();
 }
 
+void ReImagineProcessor::importTakeFromFile (const juce::File& wav, double bar)
+{
+    if (! wav.existsAsFile())
+        return setStatus ("Import: file does not exist");
+    if (! std::isfinite (bar) || bar < 1.0)
+        return setStatus ("Import: bar must be 1 or later");
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    const auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (wav));
+    if (! reader || reader->lengthInSamples <= 0)
+        return setStatus ("Import: could not read the WAV");
+
+    const auto hostRate = currentSampleRate.load (std::memory_order_acquire);
+    if (std::abs (reader->sampleRate - hostRate) > 0.5)
+        return setStatus ("Import: WAV is " + juce::String (reader->sampleRate, 0) + " Hz but the host runs at "
+                          + juce::String (hostRate, 0) + " Hz - export it at the host rate (no resampling)");
+
+    double bpm = 120.0, signature = 4.0;
+    bool assumedTempo = true;
+    if (const auto host = hostPosition(); host.has_value() && std::isfinite (host->bpm) && host->bpm > 0.0)
+    {
+        bpm = host->bpm;
+        signature = host->timeSignatureNumerator > 0.0 ? host->timeSignatureNumerator : 4.0;
+        assumedTempo = false;
+    }
+
+    // One content hash, stored as BOTH the region's source and its selected take: the
+    // region's own source check (selectedAssetsAvailable) then passes, and "New Take" can
+    // re-imagine the import exactly like a transferred region.
+    juce::String error;
+    const auto hash = assets.importWav (wav, true, error);
+    if (hash.isEmpty())
+        return setStatus ("Import: " + error);
+    if (assets.importWav (wav, false, error).isEmpty())
+        return setStatus ("Import: " + error);
+
+    auto region = regionForImportedTake (hash, reader->lengthInSamples, reader->sampleRate,
+                                         ppqForBar (bar, signature), bpm);
+    if (! region.has_value())
+        return setStatus ("Import: could not place the take");
+    auto take = importedTake (hash, juce::Time::getCurrentTime().toISO8601 (true), wav.getFileName());
+    region->takes.push_back (take);
+    region->selectedTakeId = take.id;
+
+    const juce::ScopedLock lock (stateLock);
+    regionCollection = {};
+    for (const auto& existing : pluginState.regions)
+        regionCollection.offer (existing);
+    const auto offer = regionCollection.offer (*region);
+    if (offer == RegionOffer::invalid)
+    {
+        uiStatus = "Import: region is invalid";
+        return;
+    }
+    if (offer == RegionOffer::needsOverlapDecision)
+    {
+        uiStatus = "Overlap detected - choose Replace or Discard";
+        return;
+    }
+    pluginState.regions = regionCollection.regions();
+    pluginState.selectedRegionId = region->id;
+    uiStatus = "Imported " + wav.getFileName() + " at bar " + juce::String (bar, 2)
+             + (assumedTempo ? " (host tempo unknown - assumed 120 BPM 4/4; play once and re-import if wrong)"
+                             : " at " + juce::String (bpm, 1) + " BPM");
+    loadRequested.store (1, std::memory_order_release);
+    workerEvent.signal();
+}
+
 void ReImagineProcessor::setLabEnabled (bool enabled)
 {
     const juce::ScopedLock lock (stateLock);

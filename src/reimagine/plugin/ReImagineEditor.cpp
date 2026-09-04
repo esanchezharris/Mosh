@@ -15,8 +15,8 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     setOpaque (true);
     setSize (editorWidth, editorHeight);
 
-    std::array<juce::Component*, 19> components {
-        &transfer, &newTake, &compare, &reset, &relink, &replace, &discard, &refreshLoras,
+    std::array<juce::Component*, 21> components {
+        &transfer, &newTake, &compare, &reset, &relink, &importTake, &importBar, &replace, &discard, &refreshLoras,
         &prompt, &reimagine, &mix, &seed, &takes, &regions, &lab, &status, &progressBar,
         &loraInfo, &labHelp
     };
@@ -46,6 +46,11 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
     compare.setTooltip ("Temporarily monitor the original dry audio.");
     reset.setTooltip ("Deselect the audible take without deleting history.");
     relink.setTooltip ("Relink a missing source or render WAV by verified content hash.");
+    importTake.setTooltip ("Import an external WAV (a Mosh take, another DAW's bounce) as a take at the bar on the right. Same sample rate as the host; no resampling.");
+    importBar.setInputRestrictions (8, "0123456789.");
+    importBar.setFont (juce::FontOptions (13.0f));
+    importBar.setText ("1", false);
+    importBar.setTooltip ("1-based bar the imported take starts on (fractions allowed).");
     refreshLoras.setTooltip ("Refresh the local SA3 LoRA library.");
     refreshLoras.setComponentID ("refresh-loras");
     loraInfo.setComponentID ("lora-info");
@@ -147,6 +152,19 @@ ReImagineEditor::ReImagineEditor (ReImagineProcessor& p)
                                   {
                                       const auto file = chooser.getResult();
                                       if (file.existsAsFile()) processorRef.relinkSelectedAsset (file);
+                                  });
+    };
+    importTake.onClick = [this]
+    {
+        fileChooser = std::make_unique<juce::FileChooser> ("Import a WAV as a take at bar " + importBar.getText(),
+                                                           juce::File(), "*.wav");
+        fileChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                  | juce::FileBrowserComponent::canSelectFiles,
+                                  [this] (const juce::FileChooser& chooser)
+                                  {
+                                      const auto file = chooser.getResult();
+                                      const auto bar = importBar.getText().getDoubleValue();
+                                      if (file.existsAsFile()) processorRef.importTakeFromFile (file, bar > 0.0 ? bar : 1.0);
                                   });
     };
     replace.onClick = [this] { processorRef.replacePendingOverlap(); };
@@ -417,6 +435,9 @@ void ReImagineEditor::resized()
     compare.setBounds (504, 96, 86, 34);
     reset.setBounds (598, 96, 72, 34);
     relink.setBounds (678, 96, 70, 34);
+    // IMP-001 — second row under the transport strip: Import + the bar it lands on.
+    importTake.setBounds (28, 134, 70, 22);
+    importBar.setBounds (104, 134, 56, 22);
 
     promptLabel.setBounds (28, 154, 160, 18);
     prompt.setBounds (28, 175, 510, 66);
