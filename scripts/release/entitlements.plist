@@ -49,11 +49,6 @@
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
 
-    <!-- Microphone: native voice control + audio recording (src/voice/NativeSpeech.mm,
-         src/audio/*). Pairs with NSMicrophoneUsageDescription (the TCC prompt string;
-         already present in the base Info.plist, not injected by
-         cmake/InjectInfoPlistKeys.cmake — only the three keys that history has proven
-         get silently dropped are handled there; see that file's own header). -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
 

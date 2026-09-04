@@ -28,7 +28,7 @@ import wave
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
 import quality_readout  # noqa: E402
 from audio_io import write_wav  # noqa: E402
-import coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
+import clip_coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
 
 
 def _cli_path() -> str:
@@ -251,4 +251,4 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
 def render(input_wav: str, output_wav: str, params: dict) -> dict:
     """Whole-clip aware entry: transform has no length cap, so it processes the full input for
     the default/stitch path and tiles one cycle for the loop path."""
-    return coverage.render(_render_window, input_wav, output_wav, params, coverage.WINDOW_UNCAPPED)
+    return clip_coverage.render(_render_window, input_wav, output_wav, params, clip_coverage.WINDOW_UNCAPPED)

@@ -7,8 +7,6 @@
   <array>
     <string>_moshcompanion._tcp</string>
   </array>
-  <key>NSSpeechRecognitionUsageDescription</key>
-  <string>Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing.</string>
   <!-- PRJ-NAME — .mosh is a Mosh-owned document type: the Moshi face as the Finder file
        icon, and double-click opens the project. Mirrored in InjectInfoPlistKeys.cmake,
        which is the path that actually ships (PLIST_TO_MERGE is honoured only by the

@@ -93,8 +93,8 @@ export async function stillness(page: Page): Promise<void> {
 //                   so its FFT is not reproducible even with a frozen clock
 //
 // They are MASKED rather than hidden, and masked narrowly: only the canvas host, never the card
-// around it. So the Moshi card's surface, its status text, the hands-free button and any accent on
-// them all remain covered — it is only the character's own pixels that are excluded.
+// around it. So the Moshi card's surface, its status text, and its accents remain covered — it is
+// only the character's own pixels that are excluded.
 //
 // KNOWN LIMIT, stated so a green run is not over-read: these baselines cannot see a regression in
 // the character's rendering. That belongs to the Character Lab, not to a shell screenshot gate.

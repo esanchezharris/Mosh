@@ -25,6 +25,9 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
+#include "engine/RecordingResidue.h"
+
+#include <set>
 
 namespace mosh
 {
@@ -285,6 +288,191 @@ juce::var MoshOps::cmdCaptureMidi (const juce::var& args)
 }
 
 
+// ── recording residue (CAP-001) ──────────────────────────────────────────────────────
+//
+// Tracktion streams a take to disk WHILE recording and lands the clip only when the
+// transport stops (applyLastRecording). A crash mid-take therefore leaves a WAV under
+// the project directory that no clip references — real audio the producer sang, and
+// the one thing the A3 journal replay cannot bring back (the clip never existed).
+//
+// Policy (ported from Moshpit M005-08): a readable take at the project rate is adopted
+// through the NORMAL import path, placed at its BWAV time reference on the track its
+// filename names; anything torn or unreadable is quarantined IN PLACE (renamed, never
+// deleted, never adopted); the project document is never rewritten on a failure. Both
+// are explicit commands from the recovery notice, never automatic: adoption creates a
+// clip, and which orphan is worth keeping is the producer's call. There is no "newer
+// than the last save" filter: the relaunch that recovers a crash reopens and re-saves
+// the project first, which would hide exactly the file we are looking for.
+namespace
+{
+struct ResidueEntry
+{
+    juce::File file;
+    juce::String trackName;
+    int take = 0;
+    bool readable = false;
+    double seconds = 0.0;
+    double sampleRate = 0.0;
+    double startSeconds = 0.0;
+};
+
+} // namespace
+
+juce::var MoshOps::recordingResidueToVar()
+{
+    // Read-only by contract. Cheap: one directory listing of the project dir (no
+    // recursion) plus one reader open per candidate; candidates are rare.
+    Array<var> out;
+    const auto dir = eng.editFile().getParentDirectory();
+    if (! dir.isDirectory())
+        return out;
+
+    std::set<juce::String> referenced;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        for (auto* c : t->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+            {
+                referenced.insert (w->getOriginalFile().getFullPathName());
+                referenced.insert (w->getCurrentSourceFile().getFullPathName());
+            }
+
+    // No rate gate here. Moshpit refused a rate mismatch because it had no resampler; a
+    // Tracktion clip resamples on playback, and the relaunch that recovers a crash often
+    // has NO device open (its "current rate" is a default, not the take's truth).
+    const double projectRate = 0.0;
+    juce::AudioFormatManager afm; afm.registerBasicFormats();
+    for (const auto& file : mosh::residue::findResidue (dir, referenced))
+    {
+        const auto parsed = mosh::residue::parseTakeFileName (file.getFileNameWithoutExtension());
+        std::unique_ptr<juce::AudioFormatReader> reader (afm.createReaderFor (file));
+        const bool readable = reader != nullptr && reader->lengthInSamples > 0 && reader->sampleRate > 0.0;
+        // The reader refuses every take a crash left behind: JUCE writes the WAV sizes only
+        // on close. Inspect the chunks ourselves — an intact PCM payload behind a zero-size
+        // header is the NORMAL crash residue and is adopted through a repaired copy.
+        const auto shape = readable ? mosh::residue::WavShape{} : mosh::residue::inspectWav (file);
+        const bool repairable = ! readable && shape.headerTorn();
+        const std::int64_t frames = readable ? reader->lengthInSamples : repairable ? shape.payloadFrames() : 0;
+        const double fileRate = readable ? reader->sampleRate : repairable ? shape.sampleRate : 0.0;
+        auto* o = new DynamicObject();
+        o->setProperty ("file", file.getFullPathName());
+        o->setProperty ("name", file.getFileName());
+        o->setProperty ("modifiedAt", file.getLastModificationTime().toISO8601 (true));
+        o->setProperty ("trackName", parsed ? parsed->trackName : String());
+        o->setProperty ("take", parsed ? parsed->take : 0);
+        o->setProperty ("readable", readable);
+        o->setProperty ("repairable", repairable);
+        o->setProperty ("seconds", fileRate > 0.0 ? (double) frames / fileRate : 0.0);
+        o->setProperty ("sampleRate", fileRate);
+        o->setProperty ("startSeconds", readable
+            ? mosh::residue::startSecondsFromTimeReference (
+                  reader->metadataValues.getValue (juce::WavAudioFormat::bwavTimeReference, {}), reader->sampleRate)
+            : repairable ? mosh::residue::startSecondsFromTimeReference (String (shape.bextTimeReference), shape.sampleRate)
+                         : 0.0);
+        o->setProperty ("decision",
+            mosh::residue::decide (readable || repairable, frames, fileRate, projectRate) == mosh::residue::Decision::adopt
+                ? "adopt" : "quarantine");
+        out.add (var (o));
+    }
+    return out;
+}
+
+juce::var MoshOps::cmdListRecordingResidue (const juce::var&)
+{
+    auto* d = new DynamicObject();
+    d->setProperty ("residue", recordingResidueToVar());
+    return okResult ("list_recording_residue", var (d));   // read: no log line
+}
+
+juce::var MoshOps::cmdAdoptRecordingResidue (const juce::var& args)
+{
+    static const char* const kName = "adopt_recording_residue";
+    const juce::File file (args.getProperty ("file", var()).toString());
+    // Only a file the scan itself would offer is adoptable: no path can smuggle an
+    // arbitrary WAV in under the recovery banner.
+    // Bind to a NAMED local first: getArray() on the returned temporary dangles the
+    // moment the full expression ends (the same trap MoshOps.cpp's snapshot code notes).
+    juce::var entry;
+    const auto listed = recordingResidueToVar();
+    if (auto* arr = listed.getArray())
+        for (const auto& e : *arr)
+            if (e.getProperty ("file", var()).toString() == file.getFullPathName())
+                entry = e;
+    if (! entry.isObject())
+        return errResult (kName, "not a recoverable take: " + file.getFileName());
+    if (entry.getProperty ("decision", var()).toString() != "adopt")
+        return errResult (kName, "this take is unreadable or at the wrong rate — quarantine it instead");
+
+    // The track its name carries, else an explicit trackId, else the first audio track.
+    juce::String trackId = args.getProperty ("trackId", var()).toString();
+    if (trackId.isEmpty())
+    {
+        const auto wanted = entry.getProperty ("trackName", var()).toString();
+        for (auto* t : te::getAudioTracks (eng.edit()))
+            if (t->getName() == wanted) { trackId = t->itemID.toString(); break; }
+    }
+    if (trackId.isEmpty())
+        if (auto tracks = te::getAudioTracks (eng.edit()); ! tracks.isEmpty())
+            trackId = tracks.getFirst()->itemID.toString();
+    if (trackId.isEmpty())
+        return errResult (kName, "no audio track to land the take on");
+
+    const double startSeconds = (double) entry.getProperty ("startSeconds", 0.0);
+
+    // A torn header (the normal crash case) is repaired into a sibling copy; the original
+    // is kept but renamed off the .wav extension so the scan stops offering it. The
+    // repaired copy is what the clip references from now on.
+    juce::File source = file;
+    if ((bool) entry.getProperty ("repairable", false))
+    {
+        const auto repaired = file.getSiblingFile (file.getFileNameWithoutExtension() + ".recovered.wav");
+        if (! mosh::residue::repairTruncatedWav (file, repaired))
+            return errResult (kName, "could not repair the take's header — quarantine it instead");
+        source = repaired;
+    }
+    auto result = importWaveFileToTrack (kName, source, file.getFileNameWithoutExtension(),
+                                         trackId, startSeconds, args);
+    if ((bool) result.getProperty ("ok", false))
+    {
+        if (source != file)
+            file.moveFileTo (file.getSiblingFile (file.getFileName() + ".recovered-source"));   // kept, never deleted
+        // Mark the landed clip as a recovered take (the same measured-peak posture as a
+        // normal landing, so a silent crash residue is flagged too).
+        const auto clipId = result.getProperty ("data", var()).getProperty ("clipId", var()).toString();
+        if (auto* c = findClip (clipId))
+        {
+            measureLandedClipPeak (*c);
+            c->state.setProperty (ids::moshRecovered, true, nullptr);
+        }
+        emitSnapshotInvalidated();
+    }
+    return result;
+}
+
+juce::var MoshOps::cmdQuarantineRecordingResidue (const juce::var& args)
+{
+    static const char* const kName = "quarantine_recording_residue";
+    const juce::File file (args.getProperty ("file", var()).toString());
+    bool listed = false;
+    const auto candidates = recordingResidueToVar();   // named local — see cmdAdoptRecordingResidue
+    if (auto* arr = candidates.getArray())
+        for (const auto& e : *arr)
+            if (e.getProperty ("file", var()).toString() == file.getFullPathName())
+                listed = true;
+    if (! listed)
+        return errResult (kName, "not a recoverable take: " + file.getFileName());
+    const auto target = mosh::residue::quarantineName (file);
+    if (! file.moveFileTo (target))
+    {
+        logLine (kName, args, false, "could not rename", false);
+        return errResult (kName, "could not rename " + file.getFileName());
+    }
+    logLine (kName, args, true, {}, false);   // a file action — never undoable, never deletes
+    emitSnapshotInvalidated();
+    auto* d = new DynamicObject();
+    d->setProperty ("file", file.getFullPathName());
+    d->setProperty ("quarantined", target.getFullPathName());
+    return okResult (kName, var (d));
+}
 // ── calibrate_latency (LAT-001) ──────────────────────────────────────────────────────
 //
 // Ported from Moshpit M005-13/M005-29/M006-04. The measurement is a half-second log

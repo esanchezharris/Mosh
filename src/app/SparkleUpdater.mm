@@ -1,7 +1,3 @@
-// SparkleUpdater.mm — Obj-C++ (ARC) host for Sparkle 2. Same shape as
-// src/voice/NativeSpeech.mm: a thin C++ facade over an Objective-C object, so exactly
-// one translation unit in the app speaks Objective-C to this framework.
-//
 // Compiled on every Apple build. MOSH_HAVE_SPARKLE (set by cmake/Sparkle.cmake only
 // when the framework was fetched and embedded) decides whether the body is real or a
 // no-op, so callers never need their own #ifs and -DMOSH_ENABLE_SPARKLE=OFF stays a

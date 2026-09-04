@@ -74,6 +74,10 @@ public:
         state is unreachable there, by audioRequested()'s construction). */
     void adoptOpenedAudioDevice();
 
+    /** Open a requested or selected/default hardware input after a deliberate recording action.
+        Normal launch is output-only so macOS never asks for microphone access during
+        playback, MIDI editing, or project browsing. Empty means success. */
+    juce::String activateAudioInput (const juce::String& requestedInputName = {});
     /** LAT-001 — measured round-trip latency calibration (ported from Moshpit M005/M006).
         A CalibrationRecord is MACHINE state (session/latency-calibration.json), never
         project intent. Tracktion already compensates the device-REPORTED input+output
@@ -262,6 +266,7 @@ private:
     bool       safeModeActive = false;           // FS-T2 — live Edit has third-party plugins scrubbed (READ-ONLY)
     juce::String loadError;                // PRJ-FMT — non-empty ⇒ a refused (newer-format) load is live
     bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
+    juce::String preferredInputDeviceName;
     juce::String audioError;
 
     // LAT-001 — see latencyCalibration(). Loaded lazily on first use so the ctor's
