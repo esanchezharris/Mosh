@@ -1220,6 +1220,10 @@ def run_demo6(results: dict) -> None:
     results["demo6_pid"] = pid
     win = find_window("Mosh")
     dismiss_permission_prompts()
+    try:
+        press_or_click_ax(ax_button("Continue", timeout=3.0))
+    except RuntimeError:
+        pass
     initial = capture(win, "demo6-00-initial")
 
     play_button = ax_button("Play", timeout=18.0)
@@ -1270,6 +1274,12 @@ def run_demo6(results: dict) -> None:
         before_add = capture(win, "demo6-v2-04-before-add-track")
         marker = command_log_marker()
         press_or_click_ax(ax_button("Add track"))
+        audio_track = wait_for_ax(
+            lambda row: row["role"] == "AXMenuItem" and "Audio track" in ax_text(row),
+            timeout=8.0,
+            detail="Audio item in Add track menu",
+        )
+        press_or_click_ax(audio_track)
         create_count = wait_for_command_count("create_track", marker, 1)
         wait_for_ax(
             lambda row: row["role"] == "AXCheckBox" and "Select track Audio" in ax_text(row),

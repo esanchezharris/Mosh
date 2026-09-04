@@ -151,8 +151,8 @@ typical corpora; if a very large bundle ever trips it, that's the knob to look a
 
 ## Known Windows differences (see WINDOWS_PARITY.md for the full record)
 
-- **Voice:** always-on native STT is macOS-only; on Windows use the in-app browser voice
-  input. Menu bar renders in-window (not a global menu). Both are expected, not bugs.
+- **Moshi input:** the desktop agent is text-only on macOS and Windows. Menu bar renders
+  in-window on Windows rather than as a global menu; that is expected, not a bug.
 - **Companion:** pairing + phone takes work via the manual QR/URL; there is no mDNS
   auto-discovery on Windows.
 - **SoulX sing** and the **SFT training box** are *asymmetric* — they need a local-CUDA

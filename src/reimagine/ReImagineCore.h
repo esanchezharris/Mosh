@@ -182,6 +182,26 @@ struct PluginStateV1
 };
 
 bool tempoMatches (const TempoMap&, double ppq, double hostBpm, double tolerance = 0.01) noexcept;
+
+// ── Imported takes (IMP-001) ──────────────────────────────────────────────────────
+//
+// A take that was NOT rendered by the service but recorded elsewhere (Mosh, another
+// DAW, a phone) and dropped onto the Live timeline at a bar. It becomes an ordinary
+// TransferRegion whose source AND selected take are the same content hash, so every
+// existing path (substitution playback, Relink, "New Take" re-imagining, Set restore)
+// treats it exactly like a transferred region. Engine-free: the plug-in only has to
+// import the WAV into the asset store and offer the region.
+//
+// Bars are 1-based and musical (bar 1 == ppq 0), the way Live's ruler counts.
+double ppqForBar (double bar, double timeSignatureNumerator, double timeSignatureDenominator = 4.0) noexcept;
+
+// Refuses (nullopt) a non-finite/non-positive length, rate or tempo, or a bar < 1.
+std::optional<TransferRegion> regionForImportedTake (const juce::String& contentHash,
+                                                     int64_t frames, double sampleRate,
+                                                     double ppqStart, double bpm);
+
+RenderTake importedTake (const juce::String& contentHash, const juce::String& isoTimestamp,
+                         const juce::String& sourceFileName);
 bool shouldRenderSelected (const HostPosition&, bool offline) noexcept;
 CrossfadeGains substitutionGainsForPosition (double ppq, double start, double end, double fadePpq,
                                              float mix, bool compareDry) noexcept;

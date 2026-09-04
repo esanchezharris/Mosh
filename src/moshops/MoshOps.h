@@ -75,7 +75,8 @@ public:
         a large, cloud-backed, or disconnected directory, so WebBridge invokes this
         method on a worker instead of the audio/message thread. */
     static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                  const juce::var& command);
+                                                  const juce::var& command,
+                                                  juce::Array<juce::File> sampleFolders = {});
 
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
@@ -488,6 +489,12 @@ private:
     // read/render (no ValueTree mutation besides the harmless logicalid backfill
     // already used all over the snapshot path).
     juce::var cmdExportStems      (const juce::var& args);
+    // IMP-001 — render ONE clip, from edit time zero to the clip's end, into a WAV:
+    // the leading silence is embedded, so the file drops onto ANY DAW's timeline at
+    // bar 1 and the clip lands where it sat in Mosh (Re-Imagine's Import Take, a plain
+    // drag into Live). The clip's track chain applies; the master does not. Same
+    // rate/bit-depth defaults as export_audio (project setting, else device rate).
+    juce::var cmdExportClipConsolidated (const juce::var& args);
     // cmdExportStems helper: a genuinely clip-less track (includeEmpty:true) can't be
     // expressed via Renderer::Parameters::allowedClips (an EMPTY array means "no filter",
     // i.e. ALL clips — there is no way to ask the renderer for "zero clips"). So a stem for

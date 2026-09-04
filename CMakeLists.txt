@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.24)
 # below sat dead from the day it was written: builds inherited the host SDK default
 # and shipped `minos 26.0` — an app that refuses to launch on anything older than
 # macOS 26, while docs/TESTER_QUICKSTART.md promised "macOS 11 (Big Sur) or newer"
-# and NativeSpeech/WebView guarded macOS 12 APIs behind @available for a floor that
+# and WebView guarded macOS 12 APIs behind @available for a floor that
 # never existed. Above project() the cache entry does not exist yet, so these defaults
 # apply AND an explicit -D / preset value still wins. Verify after any edit here:
 #   otool -l <Mosh.app>/Contents/MacOS/Mosh | grep -A3 LC_BUILD_VERSION   # minos 11.0
@@ -250,10 +250,9 @@ if (MOSH_BUILD_APP)
         list(APPEND MOSH_APP_EXTRA_ARGS
             LOCAL_NETWORK_PERMISSION_ENABLED TRUE
             LOCAL_NETWORK_PERMISSION_TEXT "Mosh uses the local network to pair with the iPhone companion while you are near this Mac."
-            # Microphone: recording + native voice (NSMicrophoneUsageDescription).
+            # Microphone: audio recording only. The device opens after an explicit input action.
             MICROPHONE_PERMISSION_ENABLED TRUE
-            MICROPHONE_PERMISSION_TEXT "Mosh uses the microphone to record audio and to let you talk to Moshi, your in-app collaborator."
-            # NSSpeechRecognitionUsageDescription rides in the merged plist (no JUCE flag).
+            MICROPHONE_PERMISSION_TEXT "Mosh uses the microphone when you choose an audio input or record audio."
             PLIST_TO_MERGE "${CMAKE_SOURCE_DIR}/cmake/MoshRemoteInfo.plist")
     endif()
 
@@ -284,8 +283,10 @@ if (MOSH_BUILD_APP)
         # serveUiResource); split out so it's testable without juce_gui_extra.
         src/webview/UiResourcePathGuard.cpp
         src/files/DirectoryListing.cpp
-        # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
-        # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
+        src/files/ImportCopy.cpp
+        src/files/SampleFolderAccess.cpp
+        src/files/SampleFolderStore.cpp
+        # Moshi's server-side LLM proxy and owner runtime.
         src/brain/BrainProxy.cpp
         src/brain/OwnerRuntime.cpp
         # RT-safety tripwire (debug-only; compiles to nothing in Release — see MOSH_RT_GUARD)
@@ -477,13 +478,7 @@ if (MOSH_BUILD_APP)
         endif()
     endif()
 
-    # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
-    # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path.
     if (APPLE)
-        target_sources(Mosh PRIVATE src/voice/NativeSpeech.mm)
-        set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
-        target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
-
         # FS-K2 — Sparkle 2 auto-update. Obj-C++ with ARC, same pattern as the two
         # .mm TUs above. Compiles unconditionally on Apple; the Sparkle calls inside
         # are behind MOSH_HAVE_SPARKLE, which cmake/Sparkle.cmake defines only when the
@@ -498,8 +493,14 @@ if (MOSH_BUILD_APP)
         target_sources(Mosh PRIVATE src/app/MacStateRestoration.mm)
         set_source_files_properties(src/app/MacStateRestoration.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
+        target_sources(Mosh PRIVATE src/app/MacMicrophonePermission.mm)
+        set_source_files_properties(src/app/MacMicrophonePermission.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_sources(Mosh PRIVATE src/files/MacFileBookmark.mm)
+        set_source_files_properties(src/files/MacFileBookmark.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        target_link_libraries(Mosh PRIVATE "-framework AVFoundation")
+
         # Native WKWebView media-capture permission delegate (collaborator video
-        # getUserMedia) — Obj-C++ with ARC; mirrors the NativeSpeech.mm pattern.
+        # getUserMedia) — Obj-C++ with ARC.
         target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)
         set_source_files_properties(src/webview/WebViewCameraPermission.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
@@ -514,9 +515,6 @@ if (MOSH_BUILD_APP)
         # JUCE's PLIST_TO_MERGE is honoured ONLY by the Xcode generator; under the
         # Makefiles/Ninja generator this repo uses, those merged keys are silently
         # dropped from the bundle Info.plist. Re-inject the ones we depend on:
-        #   • NSSpeechRecognitionUsageDescription — MANDATORY, or SFSpeechRecognizer
-        #     authorization TCC-CRASHES the app the moment the always-on voice starts
-        #     (src/voice/NativeSpeech.mm). This has been misread as a plugin-host crash.
         #   • NSBonjourServices — or macOS 14+ won't advertise the iPhone-companion
         #     mDNS service (keep the type in sync with cmake/MoshRemoteInfo.plist).
         #   • NSCameraUsageDescription — collaborator video tiles (getUserMedia).
@@ -564,7 +562,7 @@ if (MOSH_BUILD_APP)
                     -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
                     ${MOSH_INJECT_PLIST_ARGS}
                     -P "${MOSH_INJECT_PLIST_SCRIPT}"
-            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera + Sparkle + doc types)"
+            COMMENT "Applying Info.plist privacy, Sparkle, and document metadata policy"
             VERBATIM)
         add_custom_target(MoshFixInfoPlist ALL
             COMMAND ${CMAKE_COMMAND}
@@ -646,12 +644,9 @@ if (MOSH_BUILD_APP)
         endif()
     endif()
 
-    # ── Non-Apple (Windows): native voice is stubbed (no SFSpeechRecognizer), and
-    #    runtime resources are staged next to the .exe instead of into a bundle.
-    #    NativeSpeech.mm is Objective-C++ (Apple-only); the stub TU satisfies the
-    #    NativeSpeech.h surface WebBridge links against. ──────────────────────────
+    # ── Non-Apple (Windows): runtime resources are staged next to the .exe instead
+    #    of into a bundle. ─────────────────────────────────────────────────────────
     if (NOT APPLE)
-        target_sources(Mosh PRIVATE src/voice/NativeSpeech_stub.cpp)
         # Sparkle is macOS-only; the stub keeps Main.cpp/MenuController platform-free.
         target_sources(Mosh PRIVATE src/app/SparkleUpdater_stub.cpp)
         add_custom_command(TARGET Mosh POST_BUILD

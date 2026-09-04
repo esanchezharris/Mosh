@@ -6,7 +6,6 @@
 
 namespace mosh
 {
-class NativeSpeech;
 
 /**
     The swappable seam (00 §0, "swappable-frontend principle").
@@ -24,7 +23,7 @@ class WebBridge
 {
 public:
     WebBridge();
-    ~WebBridge();   // defined in the .cpp (NativeSpeech is incomplete here)
+    ~WebBridge();
 
     /** A command handler: takes a JSON command object, returns a JSON result
         envelope. Injected by the app once MoshOps exists (Stage 1). */
@@ -48,6 +47,11 @@ public:
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
     void setRemoteStatusProvider (RemoteStatusProvider p) { remoteStatusProvider = std::move (p); }
     void setBrainRuntimeStatusProvider (RuntimeStatusProvider p) { brainRuntimeStatusProvider = std::move (p); }
+    /** Owner-driven Local AI switch. The brain no longer starts itself at launch
+        (OwnerRuntimeConfig::autoStart defaults false), so these are how it is
+        turned on and off during a session. Both return the runtime status. */
+    void setBrainRuntimeStartHandler (RuntimeStatusProvider p) { brainRuntimeStartHandler = std::move (p); }
+    void setBrainRuntimeStopHandler  (RuntimeStatusProvider p) { brainRuntimeStopHandler  = std::move (p); }
 
     /** WP-11 best-of-n relays: UI → generative service, via native (the WebView
         cannot reach the service port itself). Same layering as brain_chat — brain
@@ -96,14 +100,12 @@ private:
     RemoteHandler     remoteStopHandler;
     RemoteStatusProvider remoteStatusProvider;
     RuntimeStatusProvider brainRuntimeStatusProvider;
+    RuntimeStatusProvider brainRuntimeStartHandler;
+    RuntimeStatusProvider brainRuntimeStopHandler;
     ServiceRelay      escalateHandler;
     ServiceRelay      archivePairHandler;
     juce::WebBrowserComponent* webView = nullptr;
     bool browserReadyForEvents = false;
-
-    // Native speech-to-text (packaged-app voice). Created lazily on the first
-    // voice_start; its transcripts are pushed to the UI as a `voice_event`.
-    std::unique_ptr<NativeSpeech> speech;
 
     // The native file dialog (wave: settings). launchAsync's callback must outlive
     // the dialog, so the FileChooser is held here, not in a local. Only one dialog at

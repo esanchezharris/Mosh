@@ -27,7 +27,6 @@ const GLOW_ALLOWED: Record<string, string> = {
   // left with the pill on 2026-08-05 (owner's call: ~107px of a full bar to say "active").
   // The shell now has ZERO blurred coloured shadows, which is the end state this pass was
   // aiming at — so the allowlist below is a standing permission, not a description.
-  ".v2-shell .agent-input.listening": "the push-to-talk ring while the recognizer is live (a 1px ring, kept for completeness)",
 };
 
 const rules: { selector: string; body: string }[] = [];

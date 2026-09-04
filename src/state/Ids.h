@@ -85,6 +85,7 @@ namespace mosh::ids
     // with the edit; arm_track prefers it over first-match. NON-undoable
     // preference (written without the undo manager, like monitor mode).
     MOSH_DECLARE_ID (moshInputDevice)
+    MOSH_DECLARE_ID (moshInputDeviceKind)
 
     // FREEZE TRACK (Live 12 ⌥⇧⌘F) — a plain property on the track's own state
     // tree (like moshInputDevice): present ⇒ the track is frozen (rendered to

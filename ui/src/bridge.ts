@@ -199,23 +199,6 @@ export async function archivePair(row: unknown): Promise<void> {
   if (realNative()) await native("archive_pair")(row);
 }
 
-// Native speech-to-text (packaged app). The browser Web Speech API covers the Vite
-// dev path; WKWebView lacks it, so there we drive macOS Speech via these wrappers.
-// Transcripts arrive on the "voice_event" channel (subscribe with onEvent). All are
-// no-ops outside the real WebView, so voiceInput.ts can branch on nativeVoiceAvailable().
-export function nativeVoiceAvailable(): boolean { return realNative(); }
-export async function voiceSupported(): Promise<boolean> {
-  if (!realNative()) return false;
-  try { const r = (await native("voice_supported")()) as { supported?: boolean }; return !!r?.supported; }
-  catch { return false; }
-}
-export async function voiceStart(): Promise<void> { if (realNative()) await native("voice_start")(); }
-export async function voiceStop(): Promise<void> { if (realNative()) await native("voice_stop")(); }
-// Always-on (hands-free) variants — a continuous session emits MANY `final`s on the same
-// voice_event channel and only ends on voice_listen_stop / a fatal error.
-export async function voiceListenStart(): Promise<void> { if (realNative()) await native("voice_listen_start")(); }
-export async function voiceListenStop(): Promise<void> { if (realNative()) await native("voice_listen_stop")(); }
-
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
   if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
   return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;
@@ -276,6 +259,60 @@ export async function pickSaveFile(opts?: {
     return { ok: false, file: "" };
   }
   return (await native("pick_save_file")(opts ?? {})) as { ok: boolean; file: string };
+}
+
+export type MicrophonePermissionStatus =
+  | "not-determined"
+  | "granted"
+  | "denied"
+  | "restricted"
+  | "timed-out";
+
+export type MicrophonePermissionResult = {
+  status: MicrophonePermissionStatus;
+  error?: string;
+};
+
+function parseMicrophonePermissionResult(value: unknown): MicrophonePermissionResult {
+  if (typeof value !== "object" || value === null || !("status" in value)) {
+    return { status: "restricted", error: "Microphone permission status is unavailable." };
+  }
+  const status = value.status;
+  if (status !== "not-determined" && status !== "granted" && status !== "denied"
+    && status !== "restricted" && status !== "timed-out") {
+    return { status: "restricted", error: "Microphone permission status is unavailable." };
+  }
+  const error = "error" in value && typeof value.error === "string" ? value.error : undefined;
+  return error ? { status, error } : { status };
+}
+
+export async function microphonePermissionStatus(): Promise<MicrophonePermissionResult> {
+  if (!realNative()) return { status: "not-determined" };
+  return parseMicrophonePermissionResult(await native("microphone_permission_status")());
+}
+
+export async function requestMicrophonePermission(): Promise<MicrophonePermissionResult> {
+  if (!realNative()) return { status: "not-determined" };
+  return parseMicrophonePermissionResult(await native("request_microphone_permission")());
+}
+
+export type AddSampleFolderResult = {
+  ok: boolean;
+  path?: string;
+  name?: string;
+  error?: string;
+};
+
+export async function addSampleFolder(): Promise<AddSampleFolderResult> {
+  if (!realNative()) return { ok: false };
+  const value: unknown = await native("add_sample_folder")();
+  if (typeof value !== "object" || value === null || !("ok" in value)
+    || typeof value.ok !== "boolean") return { ok: false };
+  const path = "path" in value && typeof value.path === "string" ? value.path : undefined;
+  const name = "name" in value && typeof value.name === "string" ? value.name : undefined;
+  const error = "error" in value && typeof value.error === "string" ? value.error : undefined;
+  return { ok: value.ok, ...(path ? { path } : {}), ...(name ? { name } : {}),
+    ...(error ? { error } : {}) };
 }
 
 // Skill Foundry Task 4 — three DEDICATED, non-MoshOps native reads for the certified

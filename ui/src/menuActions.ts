@@ -300,6 +300,19 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       return;
     }
 
+    // IMP-001 — the selected clip, rendered from edit time zero so it drops onto another
+    // DAW's timeline at bar 1 and lands where it sits here. One clip: with several
+    // selected, the first is exported (the timeline offset is per clip, so a multi-clip
+    // export would need one file each — a later addition, not a silent merge).
+    case "export_clip_consolidated": {
+      const clipId = [...store.selection][0];
+      if (!clipId) return;
+      const r = await ctx.pickSaveFile({ title: "Export clip from bar 1", defaultName: "clip-from-bar-1.wav" });
+      if (!r.ok || !r.file) return;
+      await store.exec("export_clip_consolidated", { clipId, file: r.file });
+      return;
+    }
+
     case "undo":
       await store.exec("undo");
       return;
@@ -685,6 +698,7 @@ export const FILE_MENU: MenuItemMeta[] = [
   { id: "save", label: "Save", accel: "⌘S" },
   { id: "save_as", label: "Save As…", accel: "⇧⌘S" },
   { id: "export_audio", label: "Export Audio…", accel: "⇧⌘R" },
+  { id: "export_clip_consolidated", label: "Export Clip from Bar 1…", accel: "" },
 ];
 
 /** FILE_MENU minus Export — the project-lifecycle actions on their own. Three surfaces

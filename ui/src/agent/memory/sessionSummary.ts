@@ -24,10 +24,6 @@ import type { SessionLogEntry } from "./sessionLog";
 // command NO producer ever chose to run — which was firing writeSessionSummary's optional
 // chat-polish call on the very FIRST project switch of a session (even one with a completely
 // idle producer), a genuinely surprising real LLM call as a side effect of "New Project".
-// Caught by a collateral e2e failure: hands-free.spec.ts's "unknown speech ... never the
-// brain" asserts zero /api/brain/chat calls across a whole test, and its setup happens to
-// call newProject() — an unrelated feature's stray brain call tripped an unrelated safety
-// assertion. Fixed at the source (filtered here) rather than in the test.
 const NOISY_EXACT = new Set([
   "batch_begin", "batch_end", "undo", "redo", "save", "save_as", "reload",
   "set_transport", "agent_memory_write", "agent_memory_read",

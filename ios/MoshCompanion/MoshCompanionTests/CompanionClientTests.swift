@@ -166,9 +166,12 @@ final class CompanionClientTests: XCTestCase {
         var recognized: [String] = []
 
         await recognizer.refreshAvailability()
-        try recognizer.start { phrase in recognized.append(phrase) }
+        XCTAssertEqual(source.authorizationRequestCount, 0)
+
+        try await recognizer.start { phrase in recognized.append(phrase) }
         recognizer.stop()
 
+        XCTAssertEqual(source.authorizationRequestCount, 1)
         XCTAssertEqual(recognized, ["play", "accept render"])
         XCTAssertFalse(recognizer.isListening)
     }
@@ -356,11 +359,13 @@ final class CompanionClientTests: XCTestCase {
             Data([0x03, 0x00, 0x04, 0x00])
         ]
         let source = FixturePhoneTakeAudioSource(sampleRate: 48_000, channels: 1, chunks: chunks, levels: [0.25, 0.5])
-        let recorder = PhoneTakeRecorder(audioSource: source)
+        let permission = FixtureRecordingPermissionAuthorizer(granted: true)
+        let recorder = PhoneTakeRecorder(audioSource: source, permissionAuthorizer: permission)
         let client = MockCompanionClient()
 
         try await recorder.start(client: client, trackId: "track-1", name: "Fixture Take")
         await Task.yield()
+        XCTAssertEqual(permission.requestCount, 1)
         XCTAssertTrue(recorder.isRecording)
         XCTAssertEqual(recorder.level, 0.5, accuracy: 0.001)
 
@@ -611,6 +616,7 @@ private final class FixturePhoneTakeAudioSource: PhoneTakeAudioSource {
 private final class FixtureSpeechCommandSource: SpeechCommandSource {
     let transcripts: [String]
     private(set) var isRunning = false
+    private(set) var authorizationRequestCount = 0
 
     init(transcripts: [String]) {
         self.transcripts = transcripts
@@ -620,6 +626,11 @@ private final class FixtureSpeechCommandSource: SpeechCommandSource {
         true
     }
 
+    func requestAuthorization() async -> Bool {
+        authorizationRequestCount += 1
+        return true
+    }
+
     func start(onCommand: @escaping (String) -> Void) throws {
         isRunning = true
         transcripts.forEach { onCommand($0.lowercased()) }
@@ -627,5 +638,19 @@ private final class FixtureSpeechCommandSource: SpeechCommandSource {
 
     func stop() {
         isRunning = false
+    }
+}
+
+private final class FixtureRecordingPermissionAuthorizer: AudioRecordingPermissionAuthorizing {
+    let granted: Bool
+    private(set) var requestCount = 0
+
+    init(granted: Bool) {
+        self.granted = granted
+    }
+
+    func requestPermission() async -> Bool {
+        requestCount += 1
+        return granted
     }
 }

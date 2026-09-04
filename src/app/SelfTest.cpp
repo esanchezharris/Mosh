@@ -15,7 +15,6 @@
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
-#include "voice/NativeSpeech.h"
 #include "util/Env.h"
 #include <juce_cryptography/juce_cryptography.h>
 #include <atomic>
@@ -4642,6 +4641,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (File (exportFile).existsAsFile() && (juce::int64) exp["data"].getProperty ("bytes", 0) > 1000,
                "export produced a non-empty WAV (full producer loop)");
 
+        // IMP-001 — consolidated clip export: the file starts at edit time ZERO, so the
+        // clip's position is embedded as leading silence. mcid sits at 0.5 s for 0.8 s.
+        {
+            auto cexp = cmd (ops, "export_clip_consolidated", objN ({{ "clipId", mcid }, { "sampleRate", 44100.0 }}));
+            check (ok (cexp), "export_clip_consolidated ok");
+            const auto cfile = File (cexp["data"].getProperty ("file", var()).toString());
+            check (cfile.existsAsFile(), "export_clip_consolidated wrote a file");
+            check ((double) cexp["data"].getProperty ("startSeconds", -1.0) == 0.0, "consolidated export starts at edit time zero");
+            check (std::abs ((double) cexp["data"].getProperty ("clipStartSeconds", 0.0) - 0.5) < 1.0e-6,
+                   "consolidated export reports where the clip begins inside the file (0.5 s)");
+            check (std::abs ((double) cexp["data"].getProperty ("endSeconds", 0.0) - 1.3) < 1.0e-6,
+                   "consolidated export ends at the clip end (1.3 s)");
+            juce::AudioFormatManager afm; afm.registerBasicFormats();
+            if (auto reader = std::unique_ptr<juce::AudioFormatReader> (afm.createReaderFor (cfile)))
+            {
+                const auto expectedFrames = (juce::int64) std::llround (1.3 * reader->sampleRate);
+                check (std::abs (reader->lengthInSamples - expectedFrames) <= 2,
+                       "consolidated export length == clip end * rate (leading silence embedded)");
+                // The first 0.5 s (minus a safety margin for the render's own fade) is silence,
+                // and the audio after it is not.
+                const int lead = (int) (0.49 * reader->sampleRate);
+                juce::AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+                reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+                float leadPeak = 0.0f, bodyPeak = 0.0f;
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                {
+                    leadPeak = juce::jmax (leadPeak, buf.getMagnitude (ch, 0, lead));
+                    bodyPeak = juce::jmax (bodyPeak, buf.getMagnitude (ch, lead, buf.getNumSamples() - lead));
+                }
+                check (leadPeak < 1.0e-4f, "consolidated export: the clip's timeline offset is silence in the file");
+                check (bodyPeak > 0.01f,   "consolidated export: the clip's audio follows the leading silence");
+            }
+            else
+                check (false, "consolidated export is a readable WAV");
+            check (! ok (cmd (ops, "export_clip_consolidated", args1 ("clipId", "nope"))),
+                   "export_clip_consolidated refuses an unknown clip");
+        }
+
         check (std::abs ((double) trackById (mt).getProperty ("volumeDb", 0.0) + 4.0) < 0.5, "mix volume applied (-4 dB)");
 
         // undo/redo correct throughout (a clean undoable op after the full loop)
@@ -8890,7 +8927,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Project safety: portable projects + relink (gap 3)");
     {
         const auto sessionEdit = eng.editFile();
-        const auto poolAudio   = eng.sessionDir().getChildFile ("audio");
+        const auto poolImports = eng.sessionDir().getChildFile ("imports");
 
         // local snapshot helpers (the trackById/clip helpers elsewhere are out of scope here)
         auto trackVar = [&] (const String& tid) -> var {
@@ -8916,7 +8953,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackId.isNotEmpty(), "create_track returned a trackId");
         check (ok (cmd (ops, "add_test_tone_clip", objN ({ { "trackId", trackId }, { "seconds", 1 }, { "freq", 330 } }))), "add_test_tone_clip ok");
         const auto poolSrc = File (firstTrack (ops)["clips"][0].getProperty ("sourceFile", var()).toString());
-        check (poolSrc.isAChildOf (poolAudio), "clip audio starts in the shared session pool");
+        check (poolSrc.isAChildOf (poolImports), "clip audio starts in Mosh Imports");
 
         // DRM-001 — a drum track's sampler sounds (the bundled kit, stored as ABSOLUTE
         // bundle paths) must ALSO consolidate into the portable project, or the project
@@ -8936,7 +8973,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // On-disk edit must reference audio RELATIVELY (portable), never the shared pool.
         const auto xml = destEdit.loadFileAsString();
-        check (! xml.contains (poolAudio.getFullPathName()), "saved edit has no shared-pool absolute audio path");
+        check (! xml.contains (poolImports.getFullPathName()), "saved edit has no shared-pool absolute audio path");
         check (! xml.contains ("Resources/drumkits"),
                "saved edit references the kit by a relative path, not the absolute app-bundle path");
         check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
@@ -9151,7 +9188,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     {
         // Seed a known dir under the session: one audio file + one non-audio file +
         // one sub-directory. The session-selftest dir is wiped each run, so seed fresh.
-        auto browseDir = eng.sessionDir().getChildFile ("browse-test");
+        auto browseDir = eng.sessionDir().getChildFile ("imports/browse-test");
         browseDir.deleteRecursively();
         browseDir.createDirectory();
         auto wav = browseDir.getChildFile ("probe-tone.wav");
@@ -9181,17 +9218,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((bool) data.getProperty ("exists", false), "list_directory exists:true for a real dir");
         check (data.getProperty ("path", var()).toString() == browseDir.getFullPathName(), "list_directory path round-trips (normalized)");
 
-        // roots is a non-empty array containing a Home entry pointing at a real dir.
         {
             auto rootsVar = data.getProperty ("roots", var());
-            check (rootsVar.isArray() && rootsVar.size() > 0, "list_directory roots is a non-empty array");
-            bool homeOk = false;
+            check (rootsVar.isArray() && rootsVar.size() == 1, "list_directory exposes only one safe root");
+            bool importsOk = false, protectedRootAdvertised = false;
             if (auto* ra = rootsVar.getArray())
                 for (auto& r : *ra)
-                    if (r.getProperty ("name", var()).toString() == "Home"
-                        && File (r.getProperty ("path", var()).toString()).isDirectory())
-                        homeOk = true;
-            check (homeOk, "list_directory roots includes a Home pointing at a real directory");
+                {
+                    const auto name = r.getProperty ("name", var()).toString();
+                    const auto path = File (r.getProperty ("path", var()).toString());
+                    if (name == "Imports" && path == eng.sessionDir().getChildFile ("imports")
+                        && path.isDirectory())
+                        importsOk = true;
+                    if (name == "Home" || name == "Desktop" || name == "Documents" || name == "Downloads")
+                        protectedRootAdvertised = true;
+                }
+            check (importsOk, "list_directory roots includes the Mosh-owned Imports directory");
+            check (! protectedRootAdvertised, "list_directory does not advertise protected user folders");
         }
 
         // entries: the seeded .wav is present (isDir:false, size>0); the .txt is filtered
@@ -9219,7 +9262,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // A browser must not materialise an unbounded directory on the WebView/message
         // thread. Seed one entry beyond the production page limit: the response must be
         // explicitly truncated instead of returning every row and freezing the surface.
-        auto boundedDir = eng.sessionDir().getChildFile ("browse-bounded-test");
+        auto boundedDir = eng.sessionDir().getChildFile ("imports/browse-bounded-test");
         boundedDir.deleteRecursively();
         boundedDir.createDirectory();
         for (int i = 0; i < 513; ++i)
@@ -9256,9 +9299,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (rel), "list_directory relative path returns ok (graceful)");
         check (! (bool) rel["data"].getProperty ("exists", true), "list_directory relative path exists:false (not resolved against cwd)");
 
-        // Empty path defaults to Home (a real dir).
-        auto home = cmd (ops, "list_directory", var());
-        check (ok (home) && (bool) home["data"].getProperty ("exists", false), "list_directory with no path defaults to a real Home dir");
+        auto initialListing = cmd (ops, "list_directory", var());
+        check (ok (initialListing)
+                   && (bool) initialListing["data"].getProperty ("exists", false),
+               "list_directory with no path defaults to Mosh Imports");
 
         // READ-ONLY: no JSONL line written, no snapshot_invalidated emitted.
         check (logCount ("list_directory") == ldLogBefore, "list_directory is READ-ONLY (not logged)");
@@ -11619,16 +11663,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
         check (ok (sti), "routing: set_track_input ok (graceful headless)");
         check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
-        // The chosen device's FAMILY. Only the wave side is provable here: headless the
-        // engine enumerates no MIDI devices at all (see the CTL-001 note above), so a
-        // MIDI deviceID cannot be resolved and the midi branch is HARDWARE-GATED — do
-        // not read this check as proof that MIDI routing works. What it does pin is that
-        // family resolution happens and defaults to wave for an unknown id, which is the
-        // contract the (previously MIDI-blind) retarget loop now depends on.
-        check (sti["data"].getProperty ("kind", var()).toString() == "wave",
-               "routing: a non-MIDI deviceID resolves to the wave family");
+        // Headless cannot resolve a hardware family, so the public result omits kind
+        // while the persisted internal classification remains fail-closed.
+        check (! sti["data"].hasProperty ("kind"),
+               "routing: unresolved input omits its public family");
         check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
+        check (! trackById (ra)["input"].hasProperty ("kind"),
+               "routing: unresolved snapshot input omits its public family");
         // Explicit clear (Live's "No Input"): present-but-empty deviceID removes the
         // choice — the snapshot omits `input` — and it stays undoable:false (a
         // preference like the set). An ABSENT deviceID remains a malformed call.
@@ -12037,7 +12079,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", st));   // tidy
     }
 
-    section ("Moshi brain proxy + native voice (packaged-app pieces)");
+    section ("Moshi brain proxy (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.
         mosh::setEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1");
@@ -12112,14 +12154,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "brain: chat() with no provider returns { ok:false } (no crash, no network)");
         mosh::unsetEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG");
 
-        // Native speech: probe availability + lifecycle without requesting permission.
-       #if JUCE_MAC
-        check (NativeSpeech::isSupported(), "voice: macOS Speech available (SFSpeechRecognizer present)");
-       #endif
-        NativeSpeech sp;
-        check (! sp.isListening(), "voice: a fresh NativeSpeech is idle");
-        sp.stop();   // stop-while-idle must be a safe no-op
-        check (! sp.isListening(), "voice: stop() while idle is a safe no-op");
+
     }
 
     section ("Multiplayer: stable logical track IDs (MP-001)");
@@ -16045,52 +16080,11 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
         check ((bool) recordStart["data"].getProperty ("recording", false),
                "GAP2: record command entered recording state");
 
-        // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
-        // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
-        // Tracktion's recording (JUCE AudioDeviceManager) capture the SAME mic at once?
-        // Gated on MOSH_VOICE_BARGE_IN=1 (needs Speech authorization + a real mic) so the
-        // plain GAP-2 recording smoke still runs without it. `speech` is declared AFTER the
-        // captured locals so it (and its callbacks) tear down BEFORE them.
-        const bool bargeIn = SystemStats::getEnvironmentVariable ("MOSH_VOICE_BARGE_IN", "0").getIntValue() != 0;
-        std::atomic<bool> voiceStarted { false };
-        std::atomic<int>  voiceErrors  { 0 };
-        String voiceErr;
-        std::unique_ptr<NativeSpeech> speech;
-        if (bargeIn)
-        {
-            section ("GAP 4 — barge-in (continuous speech sharing the mic with a live take)");
-            check (NativeSpeech::isSupported(), "GAP4: macOS Speech available");
-            speech = std::make_unique<NativeSpeech>();
-            NativeSpeech::Callbacks cb;
-            cb.onStart = [&voiceStarted] { voiceStarted.store (true); };
-            cb.onError = [&voiceErrors, &voiceErr] (const String& e) { voiceErrors.fetch_add (1); voiceErr = e; };
-            speech->startContinuous (std::move (cb));   // async: auth + AVAudioEngine on the message thread
-        }
-
-        // Longer window under barge-in so the async auth + engine-start + a few mic buffers
-        // all land while the take is still recording.
-        const auto recEnd = Time::getMillisecondCounter() + (uint32) (bargeIn ? 2500 : 1200);
+        const auto recEnd = Time::getMillisecondCounter() + (uint32) 1200;
         while (Time::getMillisecondCounter() < recEnd)
         {
             if (mm != nullptr) mm->runDispatchLoopUntil (50);
             else Thread::sleep (50);
-        }
-
-        if (bargeIn && speech != nullptr)
-        {
-            // The take is STILL recording here. Assert the recognizer opened its OWN input
-            // client and actually pulled mic buffers CONCURRENTLY (the simultaneous-capture
-            // proof — stronger than "the engine started"), then release it before the take is
-            // stopped + checked for non-silence (which then proves the voice client didn't
-            // starve/glitch the DAW capture).
-            check (eng.edit().getTransport().isRecording(), "GAP4: DAW transport still recording while voice ran");
-            if (voiceErrors.load() > 0) std::cerr << "  ..   GAP4 voice error: " << voiceErr << "\n";
-            check (voiceErrors.load() == 0, "GAP4: continuous voice started without error (grant Speech permission if this fails)");
-            check (voiceStarted.load(), "GAP4: AVAudioEngine started while the take recorded (two simultaneous input clients)");
-            check (speech->isListening(), "GAP4: continuous recognizer listening during the take");
-            std::cerr << "  ..   GAP4 diag: tapBuffers=" << speech->tapBufferCount() << "\n";
-            check (speech->tapBufferCount() > 0, "GAP4: mic tap captured audio buffers concurrently with the take");
-            speech->stopContinuous();
         }
 
         check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before generic stop");
@@ -16455,147 +16449,6 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     std::cerr << "run-script: " << executed << " command(s), " << failures << " failure(s)\n";
     return failures;
 }
-
-// ── Voice STT smoke (`Mosh --voice-smoke`) ──────────────────────────────────────
-// Synthesizes a known phrase with macOS `say`, transcribes it through the SAME
-// SFSpeechRecognizer the app uses, and asserts the transcript — proving speech-to-text
-// end-to-end with nobody speaking. FILE mode (default) reads a `say`-rendered file (no
-// mic; needs only a Speech grant). MIC mode (MOSH_VOICE_SMOKE_MIC=1) drives the live
-// mic recognizer while `say` plays into the default input — set that input to BlackHole
-// for a reliable digital loopback. Returns 0 on a matching transcript.
-int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
-{
-    using namespace juce;
-    ignoreUnused (eng, ops);
-
-    const auto phrase   = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_PHRASE", "create a drum track");
-    const bool micMode  = SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_MIC", "0") == "1";
-    const int  timeoutMs = jmax (4000, SystemStats::getEnvironmentVariable ("MOSH_VOICE_SMOKE_TIMEOUT_MS", "25000").getIntValue());
-
-    // Also write the verdict to a fixed file. TCC attributes a shell-launched binary to
-    // the terminal (not the granted Mosh.app), so the smoke must be `open`-launched to
-    // see the Speech/Mic grant — and an `open` run can't return its stderr, so the
-    // driver reads this file instead.
-    auto resultFile = File::getSpecialLocation (File::userHomeDirectory)
-                          .getChildFile ("Library/Mosh/voice-smoke-result.txt");
-    resultFile.getParentDirectory().createDirectory();
-    resultFile.deleteFile();
-    auto finish = [&resultFile] (int rc, const String& summary)
-    {
-        resultFile.replaceWithText (String (rc) + "\t" + summary + "\n");
-        std::cerr << "  [result] rc=" << rc << "  " << summary.toStdString() << "\n";
-        return rc;
-    };
-
-    std::cerr << "===== Mosh voice smoke (" << (micMode ? "MIC / loopback" : "FILE") << ") =====\n";
-    std::cerr << "  phrase: \"" << phrase.toStdString() << "\"\n";
-
-    if (! NativeSpeech::isSupported())
-    {
-        std::cerr << "  FAIL: native speech-to-text is unsupported here\n";
-        return finish (1, "native speech-to-text unsupported");
-    }
-
-    // Gate on the SYNCHRONOUS auth status. A headless process can't raise the system
-    // Speech/Mic prompt (those need a GUI app context), and entering the async
-    // recognition path unauthorized risks a teardown-time crash — so skip cleanly.
-    const int auth = NativeSpeech::authorizationStatus();
-    if (auth != 3)   // 3 = authorized
-    {
-        const char* why = auth == 0 ? "not yet granted (notDetermined)"
-                        : auth == 1 ? "denied"
-                        : auth == 2 ? "restricted"
-                                    : "unavailable";
-        std::cerr << "  SKIP: Speech Recognition is " << why << " (status " << auth << ").\n"
-                     "  Grant it ONCE via the GUI — launch the app, use voice (the 👂 cap / hold-to-talk),\n"
-                     "  approve the Speech" << (micMode ? " + Microphone" : "") << " prompt — then re-run this. A headless\n"
-                     "  run can't surface the system prompt. Returning 2 (skipped, not a failure).\n";
-        return finish (2, "skip: speech auth status " + String (auth));
-    }
-    std::cerr << "  Speech Recognition authorized ✓\n";
-
-    auto* mm = MessageManager::getInstanceWithoutCreating();
-    auto pump = [mm] (int ms)
-    {
-        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
-        while (Time::getMillisecondCounter() < end) { if (mm != nullptr) mm->runDispatchLoopUntil (50); else Thread::sleep (50); }
-    };
-
-    // Lowercase + non-alphanumerics → spaces, so word matching ignores punctuation/case.
-    auto norm = [] (const String& s)
-    {
-        const auto low = s.toLowerCase();
-        String out;
-        for (int i = 0; i < low.length(); ++i)
-            out += (CharacterFunctions::isLetterOrDigit (low[i]) ? String::charToString (low[i]) : String (" "));
-        return out;
-    };
-
-    NativeSpeech speech;
-    String transcript, error;
-    std::atomic<bool> finished { false }, gotFinal { false };
-    NativeSpeech::Callbacks cb;
-    cb.onStart = []                       { std::cerr << "  recognizer started…\n"; };
-    cb.onFinal = [&] (const String& t)    { transcript = t; gotFinal = true; };
-    cb.onError = [&] (const String& e)    { error = e; };
-    cb.onStop  = [&]                      { finished = true; };
-
-    if (! micMode)
-    {
-        auto aiff = selftestTempPath (eng, "voice-smoke.aiff");
-        aiff.deleteFile();
-        ChildProcess say;
-        say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });
-        say.waitForProcessToFinish (15000);
-        if (! aiff.existsAsFile() || aiff.getSize() == 0)
-        {
-            std::cerr << "  FAIL: `say` produced no audio at " << aiff.getFullPathName().toStdString() << "\n";
-            return finish (1, "say produced no audio");
-        }
-        std::cerr << "  synthesized " << aiff.getSize() << " bytes via `say`, transcribing…\n";
-        speech.transcribeFile (aiff.getFullPathName(), cb);
-    }
-    else
-    {
-        std::cerr << "  (MIC mode: set the default input to BlackHole 2ch and route `say` there for a clean loopback)\n";
-        speech.startContinuous (cb);
-        pump (2000);   // let auth + the AVAudioEngine come up before speaking
-        ChildProcess say;
-        say.start (StringArray { "say", phrase });
-        say.waitForProcessToFinish (15000);
-    }
-
-    const auto deadline = Time::getMillisecondCounter() + (uint32) timeoutMs;
-    while (! gotFinal && ! finished && Time::getMillisecondCounter() < deadline) pump (100);
-    pump (200);
-    if (micMode) speech.stopContinuous();
-
-    if (! gotFinal)
-    {
-        if (error.isNotEmpty())
-        {
-            std::cerr << "  FAIL: " << error.toStdString() << "\n";
-            if (error.containsIgnoreCase ("not authorized"))
-                std::cerr << "  → Speech Recognition is not granted yet. Approve it once (the prompt, or System\n"
-                             "    Settings › Privacy & Security › Speech Recognition) and re-run.\n";
-        }
-        else
-            std::cerr << "  FAIL: no transcript within " << timeoutMs << "ms\n";
-        return finish (1, error.isNotEmpty() ? ("error: " + error) : "no transcript within timeout");
-    }
-
-    std::cerr << "  transcript: \"" << transcript.toStdString() << "\"\n";
-
-    const auto nt = " " + norm (transcript) + " ";
-    auto words = StringArray::fromTokens (norm (phrase), " ", "");
-    words.removeEmptyStrings();
-    int hits = 0;
-    for (const auto& w : words) if (nt.containsIgnoreCase (" " + w + " ")) ++hits;
-    const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
-    std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
-    return finish (pass ? 0 : 1, "transcript=\"" + transcript + "\"; matched " + String (hits) + "/" + String (words.size()) + " words");
-}
-
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,

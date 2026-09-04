@@ -14,9 +14,6 @@ table at the bottom. Any **FAIL** becomes a backlog item (append to `docs/auto-l
 # Output device opens + real audio frames flow (no listening required):
 /Applications/Mosh.app/Contents/MacOS/Mosh --live-audio-smoke
 
-# Speech-to-text end-to-end (grant Speech once via the GUI first):
-/Applications/Mosh.app/Contents/MacOS/Mosh --voice-smoke            # FILE mode
-MOSH_VOICE_SMOKE_MIC=1 /Applications/Mosh.app/Contents/MacOS/Mosh --voice-smoke   # MIC loopback
 ```
 
 ## By-ear / by-hand checks (need you at the machine)

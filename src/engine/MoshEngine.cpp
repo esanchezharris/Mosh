@@ -8,6 +8,7 @@
 #include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
 #include "state/SafeMode.h"
+#include "app/MacMicrophonePermission.h"
 
 #include <atomic>
 #include <iostream>
@@ -37,6 +38,7 @@ namespace
         bool audio;
         explicit MoshEngineBehaviour (bool a) : audio (a) {}
         bool autoInitialiseDeviceManager() override { return false; }
+        bool shouldOpenAudioInputByDefault() override { return false; }
         // No audio → don't enumerate audio I/O device types (avoids the macOS
         // mic-permission prompt on headless/no-audio launches).
         bool addSystemAudioIODeviceTypes() override { return audio; }
@@ -513,16 +515,17 @@ juce::String MoshEngine::openAudioDeviceBounded()
             setupXml->setAttribute ("audioInputDeviceName", requestedInput);
     }
 
-    const auto label = audiostartup::deviceLabel (setupXml.get());
-    const int numIn  = enginePtr->getEngineBehaviour().shouldOpenAudioInputByDefault()
-                           ? te::DeviceManager::defaultNumChannelsToOpen : 0;
+    preferredInputDeviceName = audiostartup::inputNameFromSetup (setupXml.get());
+    auto launchSetup = audiostartup::outputOnlySetup (setupXml.get());
+    const auto label = audiostartup::deviceLabel (launchSetup.get());
+    const int numIn  = 0;
     const int numOut = te::DeviceManager::defaultNumChannelsToOpen;
 
     const auto nonce = juce::Uuid().toString();
     const auto probeArguments = audiostartup::probeChildArguments (
         juce::File::getSpecialLocation (juce::File::currentExecutableFile),
         nonce,
-        setupXml.get(),
+        launchSetup.get(),
         numIn,
         numOut,
         juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
@@ -578,9 +581,9 @@ juce::String MoshEngine::openAudioDeviceBounded()
     // the order it expects). Residual risk is the millisecond gap between probe and
     // open; the failure this guards against was persistent (reproducible 3/3, >63s), so
     // the probe catches it.
-    if (setupXml != nullptr)
+    if (launchSetup != nullptr)
         enginePtr->getPropertyStorage().setXmlProperty (
-            te::SettingID::audio_device_setup, *setupXml);
+            te::SettingID::audio_device_setup, *launchSetup);
     enginePtr->getDeviceManager().initialise (numIn, numOut);
 
     // Tracktion schedules its first MIDI-device inventory a few milliseconds after
@@ -629,6 +632,97 @@ void MoshEngine::adoptOpenedAudioDevice()
     audioOpen = true;
     audioError = {};                // the banner clears on the next snapshot
     ensurePlaybackContext();
+}
+
+juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputName)
+{
+    if (! audioWanted || ! audioReady())
+        return audioReadinessError();
+
+    auto& manager = enginePtr->getDeviceManager().deviceManager;
+    auto setup = manager.getAudioDeviceSetup();
+    if (setup.inputDeviceName.isNotEmpty()
+        && ! setup.inputChannels.isZero()
+        && (requestedInputName.isEmpty() || setup.inputDeviceName == requestedInputName))
+        return {};
+
+    juce::String inputName;
+    if (auto* type = manager.getCurrentDeviceTypeObject())
+    {
+        type->scanForDevices();
+        const auto names = type->getDeviceNames (true);
+        inputName = audiostartup::inputNameForActivation (
+            requestedInputName, preferredInputDeviceName, names,
+            type->getDefaultDeviceIndex (true));
+    }
+    else
+    {
+        inputName = requestedInputName.isNotEmpty() ? requestedInputName
+                                                    : preferredInputDeviceName;
+    }
+
+    if (inputName.isEmpty())
+        return "No audio input device is available";
+
+    if (const auto permissionError = mac::microphonePermissionError (
+            mac::requestMicrophonePermission()); permissionError.isNotEmpty())
+        return permissionError;
+
+    auto probeSetup = std::unique_ptr<juce::XmlElement> (manager.createStateXml());
+    if (probeSetup == nullptr)
+        probeSetup = std::make_unique<juce::XmlElement> ("DEVICESETUP");
+    probeSetup->setAttribute ("audioInputDeviceName", inputName);
+    const auto inputChannels = audiostartup::inputChannelMaskForOpen (
+        te::DeviceManager::defaultNumChannelsToOpen);
+    probeSetup->setAttribute ("audioDeviceInChans", inputChannels.toString (2));
+
+    const int timeoutMs = audiostartup::timeoutMsFromEnv (
+        juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_TIMEOUT_MS", {}));
+    const auto nonce = juce::Uuid().toString();
+    const auto arguments = audiostartup::probeChildArguments (
+        juce::File::getSpecialLocation (juce::File::currentExecutableFile),
+        nonce,
+        probeSetup.get(),
+        te::DeviceManager::defaultNumChannelsToOpen,
+        te::DeviceManager::defaultNumChannelsToOpen,
+        juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_OPEN_STALL_MS", {})
+            .trim().getIntValue());
+    if (arguments.isEmpty())
+        return "The selected audio input setup is invalid or too large";
+
+    const auto probe = audiostartup::runProbeProcess (arguments, timeoutMs);
+    if (probe.status == audiostartup::ProbeProcessStatus::failedToStart)
+        return "The audio input safety probe could not start";
+    if (probe.status == audiostartup::ProbeProcessStatus::timedOut)
+        return "Audio input \"" + inputName + "\" did not open within "
+             + juce::String (timeoutMs / 1000.0, 1)
+             + "s. Playback remains available, but recording input is off.";
+    if (probe.status == audiostartup::ProbeProcessStatus::failedToTerminate)
+        return "The audio input safety probe could not be terminated";
+
+    const auto response = audiostartup::parseProbeResponse (probe.output, nonce);
+    const bool exitMatches = (probe.exitCode == 0) == response.error.isEmpty();
+    if (! response.valid || ! exitMatches)
+        return "The audio input safety probe exited without a valid result";
+    if (response.error.isNotEmpty())
+        return "Audio input \"" + inputName + "\" could not open: " + response.error;
+
+    setup.inputDeviceName = inputName;
+    setup.inputChannels = inputChannels;
+    setup.useDefaultInputChannels = false;
+    if (const auto error = manager.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        return error;
+
+    preferredInputDeviceName = inputName;
+    enginePtr->getDeviceManager().rescanWaveDeviceList();
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (50);
+
+    inputsConfigured = false;
+    ensurePlaybackContext();
+    if (auto stateXml = std::unique_ptr<juce::XmlElement> (manager.createStateXml()))
+        stateXml->writeTo (session.getChildFile ("audio-device.xml"));
+    return {};
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)

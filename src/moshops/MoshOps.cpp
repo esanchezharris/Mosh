@@ -575,14 +575,16 @@ juce::var MoshOps::execute (const juce::var& command)
 }
 
 juce::var MoshOps::executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                const juce::var& command)
+                                                const juce::var& command,
+                                                juce::Array<juce::File> sampleFolders)
 {
     const auto name = command.getProperty ("command", var()).toString();
     if (name != "list_directory")
         return errResult (name, "command is not safe for the file-browser worker");
 
     const auto args = command.getProperty ("args", var (new DynamicObject()));
-    return okResult (name, directory_listing::buildData (sessionDir, args));
+    return okResult (name, directory_listing::buildData (
+        sessionDir, args, std::move (sampleFolders)));
 }
 
 juce::var MoshOps::executeImpl (const juce::var& command)
@@ -876,6 +878,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
    #endif
     if (name == "export_audio")      return cmdExportAudio (args);
     if (name == "export_stems")      return cmdExportStems (args);
+    if (name == "export_clip_consolidated") return cmdExportClipConsolidated (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
@@ -3530,6 +3533,10 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         {
             auto* in = new DynamicObject();
             in->setProperty ("deviceID", chosenID);
+            const auto storedKind = t.state.getProperty (
+                ids::moshInputDeviceKind, var()).toString();
+            if (storedKind == "wave" || storedKind == "midi")
+                in->setProperty ("kind", storedKind);
             auto& dm = eng.engine().getDeviceManager();
             for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
                 if (auto* wi = dm.getWaveInDevice (i))
