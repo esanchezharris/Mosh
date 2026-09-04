@@ -215,10 +215,11 @@ sign_app "$STAGED" "guest-zip staging" || { note_bad "sign_app failed"; exit 1; 
 header "6/10  verify bundle contents"
 
 PLIST="$STAGED/Contents/Info.plist"
-if SPEECH_TEXT="$(plutil -extract NSSpeechRecognitionUsageDescription raw "$PLIST" 2>&1)" && [[ -n "$SPEECH_TEXT" ]]; then
-  note_ok "NSSpeechRecognitionUsageDescription present (TCC-safe)"
+if plutil -extract NSMicrophoneUsageDescription raw "$PLIST" >/dev/null 2>&1 \
+    && ! plutil -extract NSSpeechRecognitionUsageDescription raw "$PLIST" >/dev/null 2>&1; then
+  note_ok "privacy manifest keeps recording access and removes Speech Recognition"
 else
-  note_bad "NSSpeechRecognitionUsageDescription MISSING — this bundle would TCC-crash on voice"
+  note_bad "privacy manifest does not match the recording-only policy"
 fi
 
 BRAIN_ENV="$STAGED/Contents/Resources/brain.env"

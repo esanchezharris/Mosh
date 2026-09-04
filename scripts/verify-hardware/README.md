@@ -32,27 +32,8 @@ Release, then `/Applications/Mosh.app`). For `--sa3`, wire the model first with
 | 4 | SA3 generative transform | a real `stable_audio3` re-imagine renders (`status: ready`), carries a quality readout (`pq`), differs from its input, and exports as audible audio |
 
 Artifacts (WAVs + `report.json`) land in `verify-artifacts/` at the repo root
-(git-ignored). The live, hands-on checks (realtime output, mic/voice, two-process
+(git-ignored). The live, hands-on checks (realtime output, mic recording, two-process
 multiplayer) are listed in [`docs/VERIFICATION.md`](../../docs/VERIFICATION.md).
-
-## Voice (speech-to-text)
-
-`Mosh --voice-smoke` synthesizes a known phrase with macOS `say`, transcribes it
-through the same `SFSpeechRecognizer` the app uses, and asserts the words — proving
-STT with nobody speaking.
-
-- **FILE mode** (default): reads a `say`-rendered file. No mic, no BlackHole — needs
-  only a one-time **Speech Recognition** grant.
-- **MIC / loopback mode**: `scripts/verify-hardware/voice-loopback.sh` routes the
-  default input + output to **BlackHole 2ch** and runs `--voice-smoke` in MIC mode, so
-  `say` plays digitally into the mic the recognizer reads (reliable, no room noise).
-  Needs **Speech + Microphone** grants.
-
-The grant is the one manual step: a headless run can't raise the macOS permission
-prompt, so `--voice-smoke` checks the auth status and **skips cleanly (exit 2) with
-guidance** until it's granted. Grant once via the GUI (launch the app, use voice), then
-`--voice-smoke` passes and is a repeatable regression guard like `--live-audio-smoke`.
-Tune with `MOSH_VOICE_SMOKE_PHRASE` / `MOSH_VOICE_SMOKE_TIMEOUT_MS`.
 
 ## How `--run-script` works
 

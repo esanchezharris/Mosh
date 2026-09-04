@@ -8,12 +8,7 @@
 # silently dropped from a shipped bundle. plutil -replace creates-if-absent and is
 # idempotent, so running it on every build is cheap and safe.
 #
-# WHY THIS MATTERS: a missing NSSpeechRecognitionUsageDescription does not degrade —
-# macOS TCC HARD-CRASHES (SIGABRT) the moment the always-on voice calls
-# SFSpeechRecognizer (src/voice/NativeSpeech.mm). That crash has been misread as a
-# plugin-host crash because whatever plugin was loading at the time shows up in the
-# crash report; it fires with no plugin loaded at all. Keep this list in sync with
-# cmake/MoshRemoteInfo.plist (the Xcode-generator path).
+# Keep this list in sync with cmake/MoshRemoteInfo.plist (the Xcode-generator path).
 
 if (NOT PLIST)
     message(FATAL_ERROR "InjectInfoPlistKeys: -DPLIST=<path> is required")
@@ -23,12 +18,11 @@ if (NOT EXISTS "${PLIST}")
 endif()
 
 # key ; plutil-args... (each entry is one plutil -replace invocation)
-set(_speech_text  "Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing.")
 set(_camera_text  "Mosh shares your camera with the collaborators in your session, so you can see each other while you produce.")
 
 execute_process(
-    COMMAND /usr/bin/plutil -replace NSSpeechRecognitionUsageDescription -string "${_speech_text}" "${PLIST}"
-    RESULT_VARIABLE _r_speech)
+    COMMAND /usr/bin/plutil -remove NSSpeechRecognitionUsageDescription "${PLIST}"
+    OUTPUT_QUIET ERROR_QUIET)
 execute_process(
     COMMAND /usr/bin/plutil -replace NSBonjourServices -json "[\"_moshcompanion._tcp\"]" "${PLIST}"
     RESULT_VARIABLE _r_bonjour)
@@ -56,11 +50,19 @@ execute_process(
     COMMAND /usr/bin/plutil -replace UTExportedTypeDeclarations -json "${_uti_exports}" "${PLIST}"
     RESULT_VARIABLE _r_uti)
 
-if (_r_speech OR _r_bonjour OR _r_camera OR _r_doctypes OR _r_uti)
+if (_r_bonjour OR _r_camera OR _r_doctypes OR _r_uti)
     message(FATAL_ERROR
         "InjectInfoPlistKeys: plutil failed on '${PLIST}' "
-        "(speech=${_r_speech} bonjour=${_r_bonjour} camera=${_r_camera} "
+        "(bonjour=${_r_bonjour} camera=${_r_camera} "
         "doctypes=${_r_doctypes} uti=${_r_uti})")
+endif()
+
+execute_process(
+    COMMAND /usr/bin/plutil -extract NSSpeechRecognitionUsageDescription raw "${PLIST}"
+    RESULT_VARIABLE _r_speech OUTPUT_QUIET ERROR_QUIET)
+if (NOT _r_speech)
+    message(FATAL_ERROR
+        "InjectInfoPlistKeys: removed Speech Recognition is still declared in '${PLIST}'")
 endif()
 
 # ── Sparkle 2 (FS-K2) ────────────────────────────────────────────────────────────
@@ -137,17 +139,6 @@ if (MOSH_SPARKLE_FEED_URL AND NOT MOSH_SPARKLE_PUBLIC_KEY)
         "Sparkle would fetch that appcast and then reject every update as unsigned. "
         "Generate a key pair (docs/release/SIGNING_RUNBOOK.md § Auto-update) and pass "
         "-DMOSH_SPARKLE_PUBLIC_KEY=<pubkey>, or unset the feed URL.")
-endif()
-
-# Fail-closed: prove the mandatory key actually landed (a silent plutil no-op would
-# otherwise let a TCC-crashing bundle ship).
-execute_process(
-    COMMAND /usr/bin/plutil -extract NSSpeechRecognitionUsageDescription raw "${PLIST}"
-    RESULT_VARIABLE _r_verify OUTPUT_QUIET ERROR_QUIET)
-if (_r_verify)
-    message(FATAL_ERROR
-        "InjectInfoPlistKeys: NSSpeechRecognitionUsageDescription missing AFTER inject in '${PLIST}' "
-        "— the bundle would TCC-crash on voice. Aborting build.")
 endif()
 
 # PRJ-NAME — same fail-closed posture for the document type. Both halves are checked

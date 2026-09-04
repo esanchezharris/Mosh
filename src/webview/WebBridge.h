@@ -6,7 +6,6 @@
 
 namespace mosh
 {
-class NativeSpeech;
 
 /**
     The swappable seam (00 §0, "swappable-frontend principle").
@@ -24,7 +23,7 @@ class WebBridge
 {
 public:
     WebBridge();
-    ~WebBridge();   // defined in the .cpp (NativeSpeech is incomplete here)
+    ~WebBridge();
 
     /** A command handler: takes a JSON command object, returns a JSON result
         envelope. Injected by the app once MoshOps exists (Stage 1). */
@@ -102,10 +101,6 @@ private:
     ServiceRelay      archivePairHandler;
     juce::WebBrowserComponent* webView = nullptr;
     bool browserReadyForEvents = false;
-
-    // Native speech-to-text (packaged-app voice). Created lazily on the first
-    // voice_start; its transcripts are pushed to the UI as a `voice_event`.
-    std::unique_ptr<NativeSpeech> speech;
 
     // The native file dialog (wave: settings). launchAsync's callback must outlive
     // the dialog, so the FileChooser is held here, not in a local. Only one dialog at

@@ -372,6 +372,7 @@ enum CompanionError: LocalizedError, Equatable {
     case server(String)
     case missingResponse
     case speechUnavailable
+    case microphoneUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -379,7 +380,8 @@ enum CompanionError: LocalizedError, Equatable {
         case .notPaired: return "Pair the iPhone with MOSH first."
         case .server(let message): return message
         case .missingResponse: return "MOSH did not return a usable response."
-        case .speechUnavailable: return "On-device speech recognition is unavailable."
+        case .speechUnavailable: return "Speech Recognition is unavailable. Enable it in Settings to use hold-to-talk."
+        case .microphoneUnavailable: return "Microphone access is unavailable. Enable it in Settings to record."
         }
     }
 }

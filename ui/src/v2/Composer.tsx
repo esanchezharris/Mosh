@@ -1,6 +1,5 @@
-// The "Ask Mosh" composer bar. Wraps the existing AgentComposer (voice + text → the
-// agent pipeline) so voice, deterministic fast paths, and bounded studio skills are
-// shared across shells. The
+// The "Ask Mosh" composer bar. Wraps the existing AgentComposer so typed asks,
+// deterministic fast paths, and bounded studio skills are shared across shells. The
 // left "+" is the existing FileOptions control (File / Open / Save / Recent / Settings
 // / Export / Samples via the shared runAction dispatcher) — demo-faithful and gives v2
 // every app/file surface for free. Reference/hum affordances ride inside AgentComposer.
@@ -46,7 +45,7 @@ export function Composer() {
         <div className="v2-composer-host">
           <div className="v2-composer-copy" aria-hidden="true">
             <span className="v2-composer-kicker">Ask Moshi</span>
-            <span className="v2-composer-hint">Voice or text for arrangement moves, takes, and quick fixes.</span>
+            <span className="v2-composer-hint">Type arrangement moves, take decisions, and quick fixes.</span>
           </div>
           <AgentComposer />
         </div>

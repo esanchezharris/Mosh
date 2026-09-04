@@ -2,8 +2,9 @@
 #include "UiResourcePathGuard.h"
 #include "WebViewCursor.h"
 #include "../agent/CertifiedSkillLoader.h"
+#include "../app/MacMicrophonePermission.h"
 #include "../brain/BrainProxy.h"
-#include "../voice/NativeSpeech.h"
+#include "../files/SampleFolderAccess.h"
 // Crash/telemetry module (src/telemetry/) — opt-in, privacy-respecting. This is
 // the ONE chokepoint every UI- and agent-issued command passes through, so it is
 // where the redacted command-NAME-ONLY breadcrumb trail + the anonymous usage
@@ -106,6 +107,16 @@ namespace
         std::vector<std::byte> out (len);
         std::memcpy (out.data(), utf8, len);
         return out;
+    }
+
+    juce::var microphonePermissionResult (mac::MicrophonePermissionStatus status)
+    {
+        auto* result = new juce::DynamicObject();
+        result->setProperty ("status", mac::microphonePermissionStatusName (status));
+        const auto error = mac::microphonePermissionError (status);
+        if (error.isNotEmpty())
+            result->setProperty ("error", error);
+        return juce::var (result);
     }
 } // namespace
 
@@ -402,98 +413,6 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
-        // Native speech-to-text (packaged-app voice). isSupported() does NOT imply
-        // permission — that is requested on the first voice_start. Transcripts flow
-        // to the UI on the dedicated `voice_event` channel.
-        .withNativeFunction (
-            juce::Identifier ("voice_supported"),
-            [] (const juce::Array<juce::var>&,
-                juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                auto* o = new juce::DynamicObject();
-                o->setProperty ("supported", NativeSpeech::isSupported());
-                completion (juce::var (o));
-            })
-        .withNativeFunction (
-            juce::Identifier ("voice_start"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech == nullptr)
-                    speech = std::make_unique<NativeSpeech>();
-
-                auto emit = [this] (const char* type, const juce::String& text, bool hasText)
-                {
-                    auto* o = new juce::DynamicObject();
-                    o->setProperty ("type", juce::String (type));
-                    if (hasText) o->setProperty ("text", text);
-                    emitEvent (juce::Identifier ("voice_event"), juce::var (o));
-                };
-
-                NativeSpeech::Callbacks cb;
-                cb.onStart   = [emit] { emit ("start", {}, false); };
-                cb.onInterim = [emit] (const juce::String& t) { emit ("interim", t, true); };
-                cb.onFinal   = [emit] (const juce::String& t) { emit ("final", t, true); };
-                cb.onStop    = [emit] { emit ("stop", {}, false); };
-                cb.onError   = [emit] (const juce::String& e) { emit ("error", e, true); };
-                speech->start (std::move (cb));
-
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
-        .withNativeFunction (
-            juce::Identifier ("voice_stop"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech != nullptr) speech->stop();
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
-        // Always-on (hands-free) speech. Same `voice_event` channel + five types as
-        // hold-to-talk, but a continuous session yields MANY `final`s and only stops on
-        // voice_listen_stop / a fatal error — so the UI's continuous controller keeps its
-        // subscription open and treats each `final` as one command candidate.
-        .withNativeFunction (
-            juce::Identifier ("voice_listen_start"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech == nullptr)
-                    speech = std::make_unique<NativeSpeech>();
-
-                auto emit = [this] (const char* type, const juce::String& text, bool hasText)
-                {
-                    auto* o = new juce::DynamicObject();
-                    o->setProperty ("type", juce::String (type));
-                    if (hasText) o->setProperty ("text", text);
-                    emitEvent (juce::Identifier ("voice_event"), juce::var (o));
-                };
-
-                NativeSpeech::Callbacks cb;
-                cb.onStart   = [emit] { emit ("start", {}, false); };
-                cb.onInterim = [emit] (const juce::String& t) { emit ("interim", t, true); };
-                cb.onFinal   = [emit] (const juce::String& t) { emit ("final", t, true); };
-                cb.onStop    = [emit] { emit ("stop", {}, false); };
-                cb.onError   = [emit] (const juce::String& e) { emit ("error", e, true); };
-                speech->startContinuous (std::move (cb));
-
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
-        .withNativeFunction (
-            juce::Identifier ("voice_listen_stop"),
-            [this] (const juce::Array<juce::var>&,
-                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
-            {
-                if (speech != nullptr) speech->stopContinuous();
-                auto* ok = new juce::DynamicObject();
-                ok->setProperty ("ok", true);
-                completion (juce::var (ok));
-            })
         .withNativeFunction (
             juce::Identifier ("remote_start_pairing"),
             [this] (const juce::Array<juce::var>& args,
@@ -606,6 +525,73 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                         o->setProperty ("file", result.getFullPathName());
                         completion (juce::var (o));            // resolved once (incl. cancel → empty)
                         pickerBusy = false;                    // allow the next dialog
+                    });
+            })
+        .withNativeFunction (
+            juce::Identifier ("microphone_permission_status"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (microphonePermissionResult (mac::microphonePermissionStatus()));
+            })
+        .withNativeFunction (
+            juce::Identifier ("request_microphone_permission"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                juce::Thread::launch ([completion]() mutable
+                {
+                    auto result = microphonePermissionResult (
+                        mac::requestMicrophonePermission());
+                    juce::MessageManager::callAsync (
+                        [completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("add_sample_folder"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                if (pickerBusy)
+                {
+                    auto* busy = new juce::DynamicObject();
+                    busy->setProperty ("ok", false);
+                    busy->setProperty ("error", "another file picker is already open");
+                    completion (juce::var (busy));
+                    return;
+                }
+
+                const int flags = juce::FileBrowserComponent::openMode
+                                | juce::FileBrowserComponent::canSelectDirectories;
+                pickerBusy = true;
+                fileChooser = std::make_unique<juce::FileChooser> (
+                    "Add Sample Folder", juce::File(), juce::String());
+                fileChooser->launchAsync (flags,
+                    [this, completion] (const juce::FileChooser& chooser) mutable
+                    {
+                        const auto directory = chooser.getResult();
+                        pickerBusy = false;
+                        if (directory == juce::File())
+                        {
+                            auto* cancelled = new juce::DynamicObject();
+                            cancelled->setProperty ("ok", false);
+                            completion (juce::var (cancelled));
+                            return;
+                        }
+
+                        juce::Thread::launch ([directory, completion]() mutable
+                        {
+                            const auto saved = rememberSampleFolder (directory);
+                            auto* response = new juce::DynamicObject();
+                            response->setProperty ("ok", saved.wasOk());
+                            response->setProperty ("path", directory.getFullPathName());
+                            response->setProperty ("name", directory.getFileName());
+                            if (saved.failed())
+                                response->setProperty ("error", saved.getErrorMessage());
+                            auto result = juce::var (response);
+                            juce::MessageManager::callAsync (
+                                [completion, result]() mutable { completion (result); });
+                        });
                     });
             })
         // Skill Foundry Task 4 — three DEDICATED, non-MoshOps native reads for the

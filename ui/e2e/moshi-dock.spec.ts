@@ -1,16 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { boot } from "./helpers";
 
-// Regression guard for the Moshi dock cap row. The centered moshi column (cap + 132px
-// creature mount + mood + composer + gaps) is taller than the default 196px detail
-// dock, so `justify-content: center` used to push the cap UP into the band that
-// `dock-host { overflow: hidden }` clips — exactly where the resize divider sits. A
-// center-click on a cap button then landed on the divider, and the "Ask Moshi"
-// composer was simultaneously clipped off the bottom. The fix lets the creature mount
-// flex-shrink (mosh.css .moshi-mount) so the column fits with no overflow. These pin
-// both ends. (On the hands-free branch the same row also carries the 👂 toggle; the
-// fix is what lets that branch's capClick use a plain center click.)
-
 test("the Moshi cap sits below the dock divider and is clickable at its center", async ({ page }) => {
   await boot(page);
   const mute = page.getByTestId("moshi-mute");

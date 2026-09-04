@@ -15,20 +15,53 @@ protocol PhoneTakeAudioSource: AnyObject {
 }
 
 @MainActor
+protocol AudioRecordingPermissionAuthorizing: AnyObject {
+    func requestPermission() async -> Bool
+}
+
+@MainActor
+final class AppleAudioRecordingPermissionAuthorizer: AudioRecordingPermissionAuthorizing {
+    func requestPermission() async -> Bool {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        @unknown default:
+            return false
+        }
+    }
+}
+
+@MainActor
 final class PhoneTakeRecorder: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var level: Float = 0
 
     private let audioSource: PhoneTakeAudioSource
+    private let permissionAuthorizer: AudioRecordingPermissionAuthorizing
     private var activeTakeId: String?
     private var uploadSequencer: ChunkSequencer?
 
-    init(audioSource: PhoneTakeAudioSource = AVAudioEnginePhoneTakeAudioSource()) {
+    init(
+        audioSource: PhoneTakeAudioSource = AVAudioEnginePhoneTakeAudioSource(),
+        permissionAuthorizer: AudioRecordingPermissionAuthorizing = AppleAudioRecordingPermissionAuthorizer()
+    ) {
         self.audioSource = audioSource
+        self.permissionAuthorizer = permissionAuthorizer
     }
 
     func start(client: CompanionClientProtocol, trackId: String?, name: String) async throws {
         guard !isRecording else { return }
+        guard await permissionAuthorizer.requestPermission() else {
+            throw CompanionError.microphoneUnavailable
+        }
 
         let format = try await audioSource.prepare()
         let started = try await client.startTake(
