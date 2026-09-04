@@ -77,7 +77,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             raise
         raise RuntimeError("stable_audio3 unavailable (no MLX or Windows CUDA backend found)")
 
-    import coverage   # whole-clip tile/stitch (service/ is on sys.path from the insert above)
+    import clip_coverage   # whole-clip tile/stitch (service/ is on sys.path from the insert above)
 
     output_wav = os.path.abspath(output_wav)
     os.makedirs(os.path.dirname(output_wav), exist_ok=True)   # clean success on a fresh dest dir
@@ -156,7 +156,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         }
 
     # Contiguous-first: retarget the engine to the clip's OWN length (capped at MAX_CONTIGUOUS)
-    # so it renders in ONE smooth pass with no windowing seams. coverage.render then takes the
+    # so it renders in ONE smooth pass with no windowing seams. clip_coverage.render then takes the
     # single-pass path whenever the clip fits, and only stitches for clips past the ceiling. The
     # retarget is a cheap in-place reconfigure (no weight reload) — see engine.set_seconds.
     target_len = float(params.get("duration_s") or 0.0)
@@ -166,7 +166,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     if target_len > 0.0:
         eng.set_seconds(target_len)
 
-    manifest = coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
+    manifest = clip_coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
     # Best-effort QA on the FINAL (tiled/stitched) output (judges venv); never fails the render.
     qa.augment_manifest(manifest, output_wav, source_wav=input_wav if has_src else None)
     return manifest

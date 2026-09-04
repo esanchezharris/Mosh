@@ -19,12 +19,15 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-# Warm librosa's numba import BEFORE service/ goes on sys.path: numba probes
-# `import coverage` at import time, and service/coverage.py (the re-imagine
-# whole-clip tiler) would shadow the PyPI package and crash that probe.
-# The CI cheap gate's python (numpy/soundfile only) has no librosa, and embed.py
-# needs it for every decode, so skip loudly there — same posture as
+# librosa is needed by embed.py for every decode. The CI cheap gate's python
+# (numpy/soundfile only) has no librosa, so skip loudly there — same posture as
 # sa3_precompute_parity_test: this test is MANDATORY on a dev Mac.
+#
+# This import also used to have to happen BEFORE service/ went on sys.path,
+# because numba probes `import coverage` at import time and service/coverage.py
+# shadowed the PyPI package. That hazard is gone now that the module is
+# service/clip_coverage.py, but the import stays here: it is where the skip
+# belongs, and keeping it early costs nothing.
 try:
     import librosa.effects  # noqa: F401
 except ImportError as exc:  # pragma: no cover — CI-only path
