@@ -196,12 +196,14 @@ final class CompanionStore: ObservableObject {
     }
 
     func startHoldToTalk() {
-        do {
-            try speech.start { [weak self] phrase in
-                Task { @MainActor in self?.runRecognizedCommand(phrase) }
+        Task {
+            do {
+                try await speech.start { [weak self] phrase in
+                    Task { @MainActor in self?.runRecognizedCommand(phrase) }
+                }
+            } catch {
+                errorText = error.localizedDescription
             }
-        } catch {
-            errorText = error.localizedDescription
         }
     }
 

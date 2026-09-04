@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "engine/AudioDeviceStartup.h"
+#include "app/MacMicrophonePermission.h"
 #include "util/Env.h"
 
 using namespace mosh::audiostartup;
@@ -79,6 +80,147 @@ TEST_CASE ("the failure names the device the user has to fix", "[audiostartup]")
         xml.setAttribute ("audioDeviceName", "Scarlett 2i2");
         CHECK (deviceLabel (&xml) == "\"Scarlett 2i2\"");
     }
+}
+
+TEST_CASE ("normal launch projects a saved setup to output only", "[audiostartup][privacy]")
+{
+    juce::XmlElement saved ("DEVICESETUP");
+    saved.setAttribute ("deviceType", "CoreAudio");
+    saved.setAttribute ("audioOutputDeviceName", "MacBook Pro Speakers");
+    saved.setAttribute ("audioInputDeviceName", "MacBook Pro Microphone");
+    saved.setAttribute ("audioDeviceInChans", "11");
+    saved.setAttribute ("audioDeviceOutChans", "11");
+    saved.setAttribute ("audioDeviceRate", 48000.0);
+    saved.createNewChildElement ("MIDIINPUT")->setAttribute ("name", "Keyboard");
+
+    const auto projected = outputOnlySetup (&saved);
+
+    REQUIRE (projected != nullptr);
+    CHECK (projected->getStringAttribute ("audioOutputDeviceName")
+           == "MacBook Pro Speakers");
+    CHECK (projected->getStringAttribute ("audioInputDeviceName").isEmpty());
+    CHECK (projected->getStringAttribute ("audioDeviceInChans") == "0");
+    CHECK (projected->getStringAttribute ("audioDeviceOutChans") == "11");
+    CHECK (projected->getDoubleAttribute ("audioDeviceRate") == 48000.0);
+    CHECK (projected->getChildByName ("MIDIINPUT") != nullptr);
+    CHECK (saved.getStringAttribute ("audioInputDeviceName")
+           == "MacBook Pro Microphone");
+}
+
+TEST_CASE ("legacy duplex setup keeps its output while deferring its input",
+           "[audiostartup][privacy]")
+{
+    juce::XmlElement saved ("DEVICESETUP");
+    saved.setAttribute ("audioDeviceName", "Scarlett 2i2");
+    saved.setAttribute ("audioDeviceInChans", "11");
+
+    CHECK (inputNameFromSetup (&saved) == "Scarlett 2i2");
+    const auto projected = outputOnlySetup (&saved);
+
+    REQUIRE (projected != nullptr);
+    CHECK_FALSE (projected->hasAttribute ("audioDeviceName"));
+    CHECK (projected->getStringAttribute ("audioOutputDeviceName") == "Scarlett 2i2");
+    CHECK (projected->getStringAttribute ("audioInputDeviceName").isEmpty());
+    CHECK (projected->getStringAttribute ("audioDeviceInChans") == "0");
+}
+
+TEST_CASE ("record arm activates audio input only for audio routes", "[audiostartup][privacy]")
+{
+    using mosh::audiostartup::shouldActivateAudioInputForArm;
+
+    CHECK_FALSE (shouldActivateAudioInputForArm (false, false, false));
+    CHECK_FALSE (shouldActivateAudioInputForArm (true, true, false));
+    CHECK_FALSE (shouldActivateAudioInputForArm (true, false, true));
+    CHECK (shouldActivateAudioInputForArm (true, false, false));
+}
+
+TEST_CASE ("explicit non-audio inputs fail closed before microphone activation",
+           "[audiostartup][privacy]")
+{
+    using mosh::audiostartup::explicitInputBlocksAudioActivation;
+
+    CHECK_FALSE (explicitInputBlocksAudioActivation ({}, {}, false));
+    CHECK_FALSE (explicitInputBlocksAudioActivation ("built-in-mic", "wave", false));
+    CHECK (explicitInputBlocksAudioActivation ("keyboard", "midi", true));
+    CHECK (explicitInputBlocksAudioActivation ("disconnected", {}, false));
+    CHECK (explicitInputBlocksAudioActivation ("keyboard", "wave", true));
+}
+
+TEST_CASE ("an unknown setter route remains microphone cold when armed",
+           "[audiostartup][privacy]")
+{
+    const auto storedKind = explicitInputKind (false, false);
+
+    CHECK (storedKind == "unknown");
+    CHECK (explicitInputBlocksAudioActivation ("not-a-real-device", storedKind, false));
+    CHECK (explicitInputKind (true, false) == "wave");
+    CHECK (explicitInputKind (true, true) == "midi");
+}
+
+TEST_CASE ("legacy wave selections survive output-only startup",
+           "[audiostartup][privacy]")
+{
+    const auto availableWave = effectiveExplicitInputKind (
+        "wavein_live", {}, true, false);
+    const auto unavailableLegacyWave = effectiveExplicitInputKind (
+        "wavein_1a2b3c", {}, false, false);
+    const auto unavailableUnknown = effectiveExplicitInputKind (
+        "not-a-real-device", {}, false, false);
+
+    CHECK (availableWave == "wave");
+    CHECK_FALSE (explicitInputBlocksAudioActivation ("legacy-wave", availableWave, false));
+    CHECK (unavailableLegacyWave == "wave");
+    CHECK_FALSE (explicitInputBlocksAudioActivation (
+        "wavein_1a2b3c", unavailableLegacyWave, false));
+    CHECK (unavailableUnknown == "unknown");
+    CHECK (explicitInputBlocksAudioActivation (
+        "not-a-real-device", unavailableUnknown, false));
+    CHECK (effectiveExplicitInputKind (
+        "wavein_live", "unknown", true, false) == "wave");
+    CHECK (effectiveExplicitInputKind (
+        "midiin_live", "unknown", true, true) == "midi");
+}
+
+TEST_CASE ("the probed input channel mask is reused for the live open",
+           "[audiostartup][privacy]")
+{
+    const auto channels = inputChannelMaskForOpen (2);
+
+    CHECK (channels.toString (2) == "11");
+    CHECK (channels.countNumberOfSetBits() == 2);
+    CHECK (inputChannelMaskForOpen (0).isZero());
+}
+
+TEST_CASE ("deferred activation retains the preferred input and falls back to CoreAudio",
+           "[audiostartup][privacy]")
+{
+    const juce::StringArray inputs { "Emilio's iPhone Microphone",
+                                     "MacBook Pro Microphone" };
+
+    CHECK (inputNameForActivation ("BlackHole 2ch", "MacBook Pro Microphone",
+                                   inputs, 1) == "BlackHole 2ch");
+    CHECK (inputNameForActivation ({}, "MacBook Pro Microphone",
+                                   inputs, 0) == "MacBook Pro Microphone");
+    CHECK (inputNameForActivation ({}, "Missing input",
+                                   inputs, 1) == "MacBook Pro Microphone");
+    CHECK (inputNameForActivation ({}, {}, inputs, -1)
+           == "Emilio's iPhone Microphone");
+    CHECK (inputNameForActivation ({}, {}, {}, -1).isEmpty());
+}
+
+TEST_CASE ("microphone denial returns a recoverable recording error",
+           "[audiostartup][privacy]")
+{
+    using mosh::mac::MicrophonePermissionStatus;
+    using mosh::mac::microphonePermissionError;
+
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::granted).isEmpty());
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::denied)
+               .contains ("System Settings"));
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::restricted)
+               .contains ("not available"));
+    CHECK (microphonePermissionError (MicrophonePermissionStatus::timedOut)
+               .contains ("did not finish"));
 }
 
 TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")

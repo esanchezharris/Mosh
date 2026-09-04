@@ -143,9 +143,8 @@
    Miss this and every `var(--accent)` consumer inside an agentic subtree silently
    stays near-white.
    ══════════════════════════════════════════════════════════════════════════════ */
-.v2-shell .v2-mosh-stage,          /* Moshi himself — all moods, hands-free, the GL mount */
+.v2-shell .v2-mosh-stage,          /* Moshi himself — all moods and the GL mount */
 .v2-shell .v2-mosh-status,         /* his status wave + narration line */
-.v2-shell .agent-input.listening,  /* push-to-talk recognizer is live */
 .v2-shell .agent-send,             /* the "Ask Moshi" submit */
 .v2-shell .v2-agent-drawer,        /* drawer title while .live, step chips, the spinner */
 .v2-shell .v2-skel-confirm,        /* mumble -> skeleton confirm strip */
@@ -185,7 +184,6 @@
 .v2-shell .v2-live,
 .v2-shell .v2-live .led,
 .v2-shell .v2-agent-btn,                    /* the drawer's generic utility buttons: Undo task, close */
-.v2-shell .agent-mic,
 .v2-shell .v2-skel-confirm .v2-btn,
 .v2-shell .v2-flow-dot.on,
 .v2-shell .v2-composer-face-btn,
@@ -197,10 +195,6 @@
   --accent: var(--v2-accent-neutral);
   --accent-ink: var(--v2-accent-neutral-ink);
   --accent-soft: var(--v2-accent-neutral-soft);
-  /* The classic family too. .agent-mic and .fo-trigger are classic components that
-     paint from --lime directly (mosh.css .agent-mic.on), so re-pinning only the v2
-     accent would leave them limed inside an agentic scope — the same half-fix the
-     LIVE dot shipped with the first time round. */
   --lime: var(--v2-accent-neutral);
   --lime-glow: var(--v2-accent-neutral);
   --lime-dim: color-mix(in srgb, var(--v2-accent-neutral) 42%, transparent);

@@ -240,6 +240,56 @@ bool tempoMatches (const TempoMap& map, double ppq, double hostBpm, double toler
     return std::abs (expected.bpm - hostBpm) <= tolerance;
 }
 
+double ppqForBar (double bar, double timeSignatureNumerator, double timeSignatureDenominator) noexcept
+{
+    if (! std::isfinite (bar) || ! std::isfinite (timeSignatureNumerator) || ! std::isfinite (timeSignatureDenominator)
+        || timeSignatureNumerator <= 0.0 || timeSignatureDenominator <= 0.0)
+        return 0.0;
+    // A bar holds `numerator` beats of 1/denominator each; ppq counts quarter notes.
+    const auto quartersPerBar = timeSignatureNumerator * (4.0 / timeSignatureDenominator);
+    return (bar - 1.0) * quartersPerBar;
+}
+
+std::optional<TransferRegion> regionForImportedTake (const juce::String& contentHash,
+                                                     int64_t frames, double sampleRate,
+                                                     double ppqStart, double bpm)
+{
+    if (contentHash.isEmpty() || frames <= 0
+        || ! std::isfinite (sampleRate) || sampleRate <= 0.0
+        || ! std::isfinite (bpm) || bpm <= 0.0
+        || ! std::isfinite (ppqStart) || ppqStart < 0.0)
+        return std::nullopt;
+    const auto seconds = static_cast<double> (frames) / sampleRate;
+    TransferRegion region;
+    region.id = juce::Uuid().toString();
+    region.ppqStart = ppqStart;
+    region.ppqEnd = ppqStart + seconds * bpm / 60.0;
+    // One tempo point at the region start: the imported file is a fixed-tempo asset, so
+    // playback substitution (sampleForPpq) and the stale-tempo guard (tempoMatches) both
+    // read the host tempo the producer imported it at.
+    region.tempoMap = { { ppqStart, bpm } };
+    region.sourceHash = contentHash;
+    region.status = RegionStatus::ready;
+    return region;
+}
+
+RenderTake importedTake (const juce::String& contentHash, const juce::String& isoTimestamp,
+                         const juce::String& sourceFileName)
+{
+    RenderTake take;
+    take.id = juce::Uuid().toString();
+    take.assetHash = contentHash;
+    take.timestampIso8601 = isoTimestamp;
+    take.seed = 0;
+    take.parameters.prompt = "import:" + sourceFileName;
+    take.parameters.reimagine = 0.0f;
+    auto* manifest = new juce::DynamicObject();
+    manifest->setProperty ("source", "import");
+    manifest->setProperty ("fileName", sourceFileName);
+    take.manifest = juce::var (manifest);
+    return take;
+}
+
 bool shouldRenderSelected (const HostPosition& host, bool offline) noexcept
 {
     return offline || host.isPlaying;

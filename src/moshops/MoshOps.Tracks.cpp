@@ -11,6 +11,7 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "RecordingLanding.h"
+#include "engine/AudioDeviceStartup.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
 #include "state/TrackIcons.h"
@@ -668,6 +669,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     if (args.hasProperty ("deviceID") && deviceID.isEmpty())
     {
         track->state.removeProperty (ids::moshInputDevice, nullptr);
+        track->state.removeProperty (ids::moshInputDeviceKind, nullptr);
         for (auto* inst : eng.edit().getAllInputDevices())
             if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
                 [[maybe_unused]] auto r = inst->removeTarget (track->itemID, nullptr);
@@ -699,7 +701,11 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     // did not take effect until the next arm_track; and switching from controller A to
     // controller B never released A, leaving both driving the track.
     auto& dm = eng.engine().getDeviceManager();
-    const bool wantMidi = dm.findMidiInputDeviceForID (deviceID) != nullptr;
+    auto* selectedDevice = dm.findInputDeviceForID (deviceID);
+    const bool wantMidi = selectedDevice != nullptr && selectedDevice->isMidi();
+    const auto selectedKind = audiostartup::explicitInputKind (
+        selectedDevice != nullptr, wantMidi);
+    track->state.setProperty (ids::moshInputDeviceKind, selectedKind, nullptr);
 
     bool applied = false;
     bool wasArmed = false;
@@ -739,7 +745,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("deviceID", deviceID);
-    data->setProperty ("kind", wantMidi ? "midi" : "wave");
+    if (selectedKind != "unknown") data->setProperty ("kind", selectedKind);
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", "no live input instance (choice stored)");
     logLine ("set_track_input", args, true, {}, false);   // preference — not undoable
@@ -1001,7 +1007,29 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     // the context available before looking up device instances rather than exposing a
     // hidden Play-first precondition. Headless remains a graceful applied:false no-op.
     if (armed && eng.hasAudio())
+    {
+        const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
+        const auto storedKind = track->state.getProperty (
+            ids::moshInputDeviceKind, var()).toString();
+        auto* selectedDevice = eng.engine().getDeviceManager().findInputDeviceForID (chosenID);
+        const bool currentlyMidi = selectedDevice != nullptr && selectedDevice->isMidi();
+        const auto chosenKind = audiostartup::effectiveExplicitInputKind (
+            chosenID, storedKind, selectedDevice != nullptr, currentlyMidi);
+        if (storedKind.isEmpty() && selectedDevice != nullptr)
+            track->state.setProperty (ids::moshInputDeviceKind, chosenKind, nullptr);
+        const bool explicitInputBlocksAudio = audiostartup::explicitInputBlocksAudioActivation (
+            chosenID,
+            chosenKind,
+            currentlyMidi);
+        if (audiostartup::shouldActivateAudioInputForArm (
+                armed, trackHasInstrument (*track), explicitInputBlocksAudio))
+            if (const auto error = eng.activateAudioInput(); error.isNotEmpty())
+            {
+                logLine ("arm_track", args, false, error, false);
+                return errResult ("arm_track", error);
+            }
         eng.ensurePlaybackContext();
+    }
 
     // getAllInputDevices() is still empty headless / without an open audio device, so
     // there are no instances to operate on. Degrade gracefully: ok result,
@@ -1209,6 +1237,12 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                                                 beforeCaptureStates[id],
                                                 captureStateForClip (*c)))
                     {
+                        // CAP-001 — measure the landed take ONCE (peak of its source file) so
+                        // the UI can flag a take that captured nothing (a muted interface, the
+                        // wrong input) before the producer sings four more over it. Message
+                        // thread, bounded read; stored non-undoably like the take id above.
+                        // Absent on anything not landed here (imports stay honestly unmeasured).
+                        measureLandedClipPeak (*c);
                         landed.add (clipToVar (*c));
                         trackLanded = true;
                     }
@@ -1233,6 +1267,34 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
             ? "no take captured (no live input)"
             : "one or more armed tracks did not capture a take");
     return okResult ("stop_recording", var (data));
+}
+
+// CAP-001 — see cmdStopRecording. Reads at most 10 minutes of the take in 64k-frame
+// blocks; a longer take reports the peak of its first 10 minutes (a silent take is silent
+// from the start). Never throws, never fails the landing: an unreadable file simply stays
+// unmeasured.
+void MoshOps::measureLandedClipPeak (te::Clip& c)
+{
+    auto* w = dynamic_cast<te::WaveAudioClip*> (&c);
+    if (w == nullptr) return;
+    const auto file = w->getOriginalFile();
+    if (! file.existsAsFile()) return;
+    juce::AudioFormatManager afm; afm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (afm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0) return;
+    const juce::int64 maxFrames = (juce::int64) (reader->sampleRate * 600.0);
+    const juce::int64 total = juce::jmin (reader->lengthInSamples, maxFrames);
+    constexpr int block = 65536;
+    juce::AudioBuffer<float> buf ((int) reader->numChannels, block);
+    float peak = 0.0f;
+    for (juce::int64 pos = 0; pos < total; pos += block)
+    {
+        const int n = (int) juce::jmin ((juce::int64) block, total - pos);
+        if (! reader->read (&buf, 0, n, pos, true, true)) break;
+        for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+            peak = juce::jmax (peak, buf.getMagnitude (ch, 0, n));
+    }
+    c.state.setProperty (ids::moshPeakLevel, (double) peak, nullptr);   // non-undoable metadata
 }
 
 juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)

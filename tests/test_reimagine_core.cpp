@@ -5,6 +5,8 @@
 #include "reimagine/ReImagineService.h"
 #include "audio/RealtimeAudioGuard.h"
 
+#include <limits>
+
 using namespace mosh::reimagine;
 
 TEST_CASE ("Transfer capture follows a continuous forward host timeline", "[reimagine][transfer]")
@@ -344,4 +346,79 @@ TEST_CASE ("Transfer and playback mapping helpers allocate nothing in an RT scop
     CHECK (tempoMatched);
     CHECK (gains.wet > 0.0f);
     CHECK (mosh::rtguard::violationCount() == before);
+}
+
+// ── IMP-001 — imported takes ──────────────────────────────────────────────────────
+TEST_CASE ("ppqForBar counts 1-based bars in quarter notes", "[reimagine][import]")
+{
+    CHECK (ppqForBar (1.0, 4.0) == Catch::Approx (0.0));
+    CHECK (ppqForBar (5.0, 4.0) == Catch::Approx (16.0));      // bars 1-4 = 16 quarters
+    CHECK (ppqForBar (3.0, 3.0) == Catch::Approx (6.0));       // 3/4: 3 quarters a bar
+    CHECK (ppqForBar (2.0, 6.0, 8.0) == Catch::Approx (3.0));  // 6/8: six eighths = 3 quarters
+    CHECK (ppqForBar (2.5, 4.0) == Catch::Approx (6.0));       // fractional bars are allowed
+    CHECK (ppqForBar (1.0, 0.0) == 0.0);                       // junk signature -> bar 1
+}
+
+TEST_CASE ("an imported take spans the WAV length at the host tempo", "[reimagine][import]")
+{
+    // 2 s at 48 kHz, 120 BPM: 2 s * 2 beats/s = 4 quarters.
+    const auto region = regionForImportedTake ("abc123", 96000, 48000.0, 16.0, 120.0);
+    REQUIRE (region.has_value());
+    CHECK (region->ppqStart == Catch::Approx (16.0));
+    CHECK (region->ppqEnd == Catch::Approx (20.0));
+    CHECK (region->sourceHash == "abc123");
+    CHECK (region->status == RegionStatus::ready);
+    REQUIRE (region->tempoMap.size() == 1);
+    CHECK (region->tempoMap[0].ppq == Catch::Approx (16.0));
+    CHECK (region->tempoMap[0].bpm == Catch::Approx (120.0));
+    CHECK (region->id.isNotEmpty());
+    // The single tempo point satisfies the stale-tempo guard inside the region and a
+    // changed host tempo trips it, exactly as a transferred region behaves.
+    CHECK (tempoMatches (region->tempoMap, 17.0, 120.0));
+    CHECK_FALSE (tempoMatches (region->tempoMap, 17.0, 90.0));
+    // And it is an ordinary region to the collection: it can be offered and overlaps
+    // are still the producer's decision.
+    RegionCollection regions;
+    CHECK (regions.offer (*region) == RegionOffer::accepted);
+    const auto overlapping = regionForImportedTake ("def456", 48000, 48000.0, 18.0, 120.0);
+    REQUIRE (overlapping.has_value());
+    CHECK (regions.offer (*overlapping) == RegionOffer::needsOverlapDecision);
+}
+
+TEST_CASE ("an imported take refuses junk rather than inventing a region", "[reimagine][import]")
+{
+    CHECK_FALSE (regionForImportedTake ("", 96000, 48000.0, 0.0, 120.0).has_value());
+    CHECK_FALSE (regionForImportedTake ("h", 0, 48000.0, 0.0, 120.0).has_value());
+    CHECK_FALSE (regionForImportedTake ("h", 96000, 0.0, 0.0, 120.0).has_value());
+    CHECK_FALSE (regionForImportedTake ("h", 96000, 48000.0, 0.0, 0.0).has_value());
+    CHECK_FALSE (regionForImportedTake ("h", 96000, 48000.0, -1.0, 120.0).has_value());
+    CHECK_FALSE (regionForImportedTake ("h", 96000, 48000.0, std::numeric_limits<double>::quiet_NaN(), 120.0).has_value());
+}
+
+TEST_CASE ("an imported take is a RenderTake the existing paths understand", "[reimagine][import]")
+{
+    const auto take = importedTake ("abc123", "2026-09-01T00:00:00Z", "vocal-take-3.wav");
+    CHECK (take.id.isNotEmpty());
+    CHECK (take.assetHash == "abc123");
+    CHECK (take.timestampIso8601 == "2026-09-01T00:00:00Z");
+    CHECK (take.parameters.prompt == "import:vocal-take-3.wav");
+    CHECK (take.parameters.reimagine == 0.0f);
+    CHECK (take.manifest.getProperty ("source", juce::var()).toString() == "import");
+    CHECK (take.manifest.getProperty ("fileName", juce::var()).toString() == "vocal-take-3.wav");
+
+    // Survives the plug-in state round trip like any other take.
+    PluginStateV1 state;
+    auto region = regionForImportedTake ("abc123", 96000, 48000.0, 0.0, 120.0);
+    REQUIRE (region.has_value());
+    region->takes.push_back (take);
+    region->selectedTakeId = take.id;
+    state.regions.push_back (*region);
+    state.selectedRegionId = region->id;
+    const auto restored = deserializeState (serializeState (state));
+    REQUIRE (restored.has_value());
+    REQUIRE (restored->regions.size() == 1);
+    REQUIRE (restored->regions[0].takes.size() == 1);
+    CHECK (restored->regions[0].takes[0].assetHash == "abc123");
+    CHECK (restored->regions[0].selectedTakeId == take.id);
+    CHECK (restored->regions[0].takes[0].manifest.getProperty ("source", juce::var()).toString() == "import");
 }

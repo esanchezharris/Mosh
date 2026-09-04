@@ -5,6 +5,7 @@ import Speech
 @MainActor
 protocol SpeechCommandSource: AnyObject {
     func refreshAvailability() async -> Bool
+    func requestAuthorization() async -> Bool
     func start(onCommand: @escaping (String) -> Void) throws
     func stop()
 }
@@ -24,8 +25,11 @@ final class SpeechCommandRecognizer: ObservableObject {
         isAvailable = await commandSource.refreshAvailability()
     }
 
-    func start(onCommand: @escaping (String) -> Void) throws {
+    func start(onCommand: @escaping (String) -> Void) async throws {
         guard isAvailable else { throw CompanionError.speechUnavailable }
+        guard await commandSource.requestAuthorization() else {
+            throw CompanionError.speechUnavailable
+        }
         stop()
         try commandSource.start { phrase in
             onCommand(phrase.lowercased())
@@ -43,15 +47,32 @@ final class SpeechCommandRecognizer: ObservableObject {
 private final class AppleSpeechCommandSource: SpeechCommandSource {
     private let recognizer = SFSpeechRecognizer()
     private let engine = AVAudioEngine()
+    private let microphonePermission = AppleAudioRecordingPermissionAuthorizer()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
 
     func refreshAvailability() async -> Bool {
-        let auth = await Self.requestAuthorizationStatus()
-        return auth == .authorized && (recognizer?.supportsOnDeviceRecognition ?? false)
+        guard recognizer?.supportsOnDeviceRecognition ?? false else { return false }
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized, .notDetermined:
+            return true
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
     }
 
-    nonisolated private static func requestAuthorizationStatus() async -> SFSpeechRecognizerAuthorizationStatus {
+    func requestAuthorization() async -> Bool {
+        let current = SFSpeechRecognizer.authorizationStatus()
+        let speechAuthorization = current == .notDetermined
+            ? await Self.requestSpeechAuthorization()
+            : current
+        guard speechAuthorization == .authorized else { return false }
+        return await microphonePermission.requestPermission()
+    }
+
+    nonisolated private static func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
         await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status)

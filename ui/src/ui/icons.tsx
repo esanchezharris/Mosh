@@ -291,19 +291,6 @@ export function IconStarOutline(p: IconProps) {
   );
 }
 
-// hands-free "always-on listening" — a sensor/broadcast mark (center dot + arcs)
-export function IconListen(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
-      <path d="M8.1 8.1a5.5 5.5 0 0 0 0 7.8" />
-      <path d="M15.9 8.1a5.5 5.5 0 0 1 0 7.8" />
-      <path d="M5.5 5.5a9.2 9.2 0 0 0 0 13" opacity="0.5" />
-      <path d="M18.5 5.5a9.2 9.2 0 0 1 0 13" opacity="0.5" />
-    </Svg>
-  );
-}
-
 // push-to-talk microphone
 export function IconMic(p: IconProps) {
   return (

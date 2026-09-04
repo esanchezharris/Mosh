@@ -3292,6 +3292,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // keeps the UI's empty-handed path — the common one — honest in dev and e2e.
     case "capture_midi":
       return ok(command, { applied: false, clips: [], reason: "nothing had been played into the retrospective buffer" });
+    // CAP-001 — the mock never crashes mid-take, so there is never residue: the list is
+    // empty and both decisions refuse exactly as native does for an unlisted file.
+    case "list_recording_residue":
+      return ok(command, { residue: [] });
+    case "adopt_recording_residue":
+    case "quarantine_recording_residue":
+      return err(command, `not a recoverable take: ${str(args.file)}`);
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {
@@ -3857,6 +3864,25 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR),
         bytes: Math.round(794000 * (seconds / MOCK_EDIT_LEN)), seconds, renderMode: "offline",
         range: rng, rangeStart: rs, rangeEnd: re, tail, endAllowance,
+      });
+    }
+    // IMP-001 — one clip from edit time zero to its end. The envelope mirrors native:
+    // startSeconds is ALWAYS 0 (that is the whole point), clipStartSeconds says where the
+    // audio begins inside the file, frames = endSeconds * sampleRate.
+    case "export_clip_consolidated": {
+      const hit = findClip(str(args.clipId));
+      if (!hit) return err(command, `no clip with id ${str(args.clipId)}`);
+      const clipEnd = num(hit.clip.start, 0) + num(hit.clip.length, 0);
+      if (clipEnd <= 1e-4) return err(command, "clip has no length");
+      const tail = Math.min(30, Math.max(0, num(args.tailSeconds, 0)));
+      const sampleRate = num(args.sampleRate, SR);
+      const bitDepth = num(args.bitDepth, 24);
+      if (![16, 24, 32].includes(bitDepth)) return err(command, "bitDepth must be 16, 24, or 32");
+      const endSeconds = clipEnd + tail;
+      return ok(command, {
+        file: str(args.file) || `/mock/clip-${hit.clip.id}.wav`, clipId: hit.clip.id,
+        startSeconds: 0, clipStartSeconds: num(hit.clip.start, 0), endSeconds,
+        sampleRate, bitDepth, frames: Math.round(endSeconds * sampleRate),
       });
     }
     case "get_command_log": {

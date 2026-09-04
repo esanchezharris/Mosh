@@ -18,6 +18,9 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   reload: "discards unsaved changes back to the last save — a data-loss gate that stays human",
   recover_session: "crash-recovery acceptance is an explicit human decision",
   discard_recovery: "throwing away a recovery point is an explicit human decision",
+  list_recording_residue: "CAP-001 — read-only feed for the recovery notice's orphan-take list",
+  adopt_recording_residue: "CAP-001 — landing a take the crash left on disk is an explicit human decision from the recovery notice",
+  quarantine_recording_residue: "CAP-001 — setting a torn take aside (renamed, never deleted) is an explicit human decision from the recovery notice",
   open_without_plugins:
     "reopens the project with the producer's third-party plugins skipped and may quarantine one — a trust decision about their own gear, made from the crash notice",
   relink_clip: "repairs a broken source-file reference — file-path surgery, not a musical move",

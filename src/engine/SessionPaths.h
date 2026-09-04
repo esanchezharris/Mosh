@@ -290,7 +290,6 @@ namespace mosh::sessionpaths
         bool midiRecordSmoke = false;   // --midi-record-smoke
         bool scanDeep        = false;   // --scan-plugins-deep
         bool runScript       = false;   // --run-script
-        bool voiceSmoke      = false;   // --voice-smoke
         bool demoGui         = false;   // --demo3/5/6
         bool envNoAudio      = false;   // MOSH_NO_AUDIO=1
     };
@@ -311,7 +310,6 @@ namespace mosh::sessionpaths
         if (m.scanDeep)       return "session-scan";
         if (m.runScript)      return "session-run-script";
         if (m.demoGui)        return "session-demo";
-        if (m.voiceSmoke)     return "session-voice-smoke";
         if (m.selfTest)       return "session-selftest";
 
         // Device-free but flagless: still not the GUI (it wipes), so keep it off "session".

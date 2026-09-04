@@ -75,7 +75,8 @@ public:
         a large, cloud-backed, or disconnected directory, so WebBridge invokes this
         method on a worker instead of the audio/message thread. */
     static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
-                                                  const juce::var& command);
+                                                  const juce::var& command,
+                                                  juce::Array<juce::File> sampleFolders = {});
 
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
@@ -312,6 +313,18 @@ private:
     // Wave: recording — arm tracks + input monitoring
     juce::var cmdArmTrack       (const juce::var& args);
     juce::var cmdSetInputMonitor (const juce::var& args);
+    // CAP-001 — measure a just-landed take's source peak into ids::moshPeakLevel.
+    void measureLandedClipPeak (te::Clip& c);
+    // CAP-001 — recording residue: take WAVs Tracktion streamed to disk that no clip
+    // references and that are NEWER than the last save (a crash mid-take leaves exactly
+    // this; a removed clip's file predates the save that removed it). list is a read;
+    // adopt lands one through the normal import path at its BWAV time reference on the
+    // track its name carries; quarantine renames it in place (never deletes). Both are
+    // human decisions from the recovery notice — non-undoable, not agent-callable.
+    juce::var cmdListRecordingResidue (const juce::var& args);
+    juce::var cmdAdoptRecordingResidue (const juce::var& args);
+    juce::var cmdQuarantineRecordingResidue (const juce::var& args);
+    juce::var recordingResidueToVar();
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
     // KEEPING takes, drain the async clip-add, return the landed clip ids.
     juce::var cmdStopRecording  (const juce::var& args);
@@ -458,6 +471,12 @@ private:
     // read/render (no ValueTree mutation besides the harmless logicalid backfill
     // already used all over the snapshot path).
     juce::var cmdExportStems      (const juce::var& args);
+    // IMP-001 — render ONE clip, from edit time zero to the clip's end, into a WAV:
+    // the leading silence is embedded, so the file drops onto ANY DAW's timeline at
+    // bar 1 and the clip lands where it sat in Mosh (Re-Imagine's Import Take, a plain
+    // drag into Live). The clip's track chain applies; the master does not. Same
+    // rate/bit-depth defaults as export_audio (project setting, else device rate).
+    juce::var cmdExportClipConsolidated (const juce::var& args);
     // cmdExportStems helper: a genuinely clip-less track (includeEmpty:true) can't be
     // expressed via Renderer::Parameters::allowedClips (an EMPTY array means "no filter",
     // i.e. ALL clips — there is no way to ask the renderer for "zero clips"). So a stem for

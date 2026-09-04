@@ -1,4 +1,5 @@
 #include "DirectoryListing.h"
+#include "engine/SessionOwnership.h"
 
 #include <algorithm>
 #include <vector>
@@ -22,7 +23,15 @@ struct Entry
     bool isDirectory = false;
 };
 
-Array<var> rootsFor (const File& sessionDir)
+Array<File> allowedRootsFor (const File& sessionDir, const Array<File>& sampleFolders)
+{
+    Array<File> roots { sessionDir.getChildFile ("imports") };
+    for (const auto& folder : sampleFolders)
+        roots.addIfNotAlreadyThere (folder);
+    return roots;
+}
+
+Array<var> rootsFor (const Array<File>& allowedRoots)
 {
     Array<var> roots;
     auto addRoot = [&] (const String& name, const File& directory)
@@ -36,12 +45,20 @@ Array<var> rootsFor (const File& sessionDir)
         roots.add (var (object));
     };
 
-    addRoot ("Home", File::getSpecialLocation (File::userHomeDirectory));
-    addRoot ("Music", File::getSpecialLocation (File::userMusicDirectory));
-    addRoot ("Desktop", File::getSpecialLocation (File::userDesktopDirectory));
-    addRoot ("Documents", File::getSpecialLocation (File::userDocumentsDirectory));
-    addRoot ("Imports", sessionDir.getChildFile ("imports"));
+    for (int index = 0; index < allowedRoots.size(); ++index)
+        addRoot (index == 0 ? String ("Imports")
+                            : allowedRoots.getReference (index).getFileName(),
+                 allowedRoots.getReference (index));
     return roots;
+}
+
+const File* containingRoot (const Array<File>& roots, const File& candidate)
+{
+    for (const auto& root : roots)
+        if (candidate == root
+            || mosh::sessionpaths::isContainedWithoutSymlinks (root, candidate))
+            return &root;
+    return nullptr;
 }
 
 var resultData (const File& directory,
@@ -70,15 +87,16 @@ var resultData (const File& directory,
 }
 }
 
-var buildData (const File& sessionDir, const var& args)
+var buildData (const File& sessionDir, const var& args, Array<File> sampleFolders)
 {
-    const auto roots = rootsFor (sessionDir);
+    const auto allowedRoots = allowedRootsFor (sessionDir, sampleFolders);
+    const auto roots = rootsFor (allowedRoots);
     const auto requested = args.getProperty ("path", var()).toString();
 
     File directory;
     if (requested.isEmpty())
     {
-        directory = File::getSpecialLocation (File::userHomeDirectory);
+        directory = sessionDir.getChildFile ("imports");
     }
     else if (! File::isAbsolutePath (requested))
     {
@@ -99,13 +117,19 @@ var buildData (const File& sessionDir, const var& args)
         directory = File (requested);
     }
 
+    const auto* root = containingRoot (allowedRoots, directory);
+    if (root == nullptr)
+        return resultData (directory, roots, false, "folder not added to Mosh",
+                           Array<var>(), nullptr, false, 0);
+
     auto parent = directory.getParentDirectory();
+    const File* visibleParent = directory == *root ? nullptr : &parent;
     if (! directory.isDirectory())
         return resultData (directory, roots, false, "not a directory or not found",
-                           Array<var>(), &parent, false, 0);
+                           Array<var>(), visibleParent, false, 0);
     if (! directory.hasReadAccess())
         return resultData (directory, roots, false, "permission denied",
-                           Array<var>(), &parent, false, 0);
+                           Array<var>(), visibleParent, false, 0);
 
     std::vector<Entry> found;
     found.reserve ((size_t) kMaxEntries);
@@ -158,6 +182,6 @@ var buildData (const File& sessionDir, const var& args)
         entries.add (var (object));
     }
 
-    return resultData (directory, roots, true, {}, entries, &parent, truncated, visited);
+    return resultData (directory, roots, true, {}, entries, visibleParent, truncated, visited);
 }
 }

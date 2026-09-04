@@ -98,7 +98,7 @@ function Copy-ServiceBundle {
     # service/scripts/bundle_completeness_test.py). run.ps1 replaces run.sh on Windows.
     $topFiles = @(
         "server.py", "run.ps1", "quality_readout.py", "audio_io.py",
-        "brain_client.py", "coverage.py", "stitch.py",
+        "brain_client.py", "clip_coverage.py", "stitch.py",
         # Imported at server.py TOP LEVEL — omitting them fails the service to start,
         # not just a feature. Kept byte-for-byte in step with run-mosh.sh; the parity
         # half of bundle_completeness_test.py fails if the two lists diverge.

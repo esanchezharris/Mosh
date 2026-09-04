@@ -37,9 +37,14 @@ API_AVAILABLE(macos(12.0))
     type:(WKMediaCaptureType)type
     decisionHandler:(void (^)(WKPermissionDecision))decisionHandler
 {
-    // The in-app camera toggle (off by default) + the macOS TCC prompt are the real
-    // gates; auto-grant here so WebKit doesn't add a redundant third prompt.
-    decisionHandler (WKPermissionDecisionGrant);
+    const auto kind = type == WKMediaCaptureTypeCamera
+        ? mosh::WebViewMediaCaptureKind::camera
+        : type == WKMediaCaptureTypeMicrophone
+            ? mosh::WebViewMediaCaptureKind::microphone
+            : mosh::WebViewMediaCaptureKind::cameraAndMicrophone;
+    decisionHandler (mosh::shouldGrantWebViewMediaCapture (kind)
+                         ? WKPermissionDecisionGrant
+                         : WKPermissionDecisionDeny);
 }
 - (BOOL)respondsToSelector:(SEL)aSelector
 {
