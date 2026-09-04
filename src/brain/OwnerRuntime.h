@@ -10,6 +10,11 @@ namespace mosh
 struct OwnerRuntimeConfig
 {
     bool enabled = false;
+    // Owner decision 2026-09-03: the local brain is OFF at launch and starts only
+    // when the owner switches it on. `enabled` still gates whether the runtime is
+    // available at all; `autoStart` gates whether it spawns by itself. Defaulting
+    // this to false means an app launch never brings up the 17GB MLX server.
+    bool autoStart = false;
     juce::File sourceFile;
     juce::File modelPath;
     juce::File pythonRuntime;
@@ -33,7 +38,14 @@ public:
     explicit LocalBrainManager (OwnerRuntimeConfig);
     ~LocalBrainManager();
 
+    /** Launch-time entry point: applies the SA3 release policy (which must happen
+        whether or not we spawn) and then starts the brain ONLY when
+        config.autoStart is set. */
+    void launchAutoStart();
     void startAsync();
+    /** Tear the spawned brain down and return to idle, leaving the manager reusable
+        so the owner can switch it back on in the same session. Idempotent. */
+    void stop();
     void prewarmAfterStableAudioUnload (const juce::var& unloadMetrics = {});
     juce::var status() const;
     void setStatusCallback (std::function<void (juce::var)> cb);

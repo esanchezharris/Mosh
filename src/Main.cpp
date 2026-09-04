@@ -171,7 +171,10 @@ public:
         if (! headless && ! liveAudio && ! scanDeep && ! runScript && ! voiceSmoke)
         {
             ownerRuntime = std::make_unique<LocalBrainManager> (OwnerRuntimeConfig::load());
-            ownerRuntime->startAsync();
+            // Owner decision 2026-09-03: Local AI stays OFF until switched on.
+            // launchAutoStart applies the SA3 release policy either way and only
+            // spawns when owner-runtime.json sets autoStart.
+            ownerRuntime->launchAutoStart();
         }
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
@@ -594,6 +597,18 @@ public:
         bridge.setBrainRuntimeStatusProvider ([this]
         {
             return ownerRuntime != nullptr ? ownerRuntime->status() : juce::var();
+        });
+        bridge.setBrainRuntimeStartHandler ([this]
+        {
+            if (ownerRuntime == nullptr) return juce::var();
+            ownerRuntime->startAsync();
+            return ownerRuntime->status();
+        });
+        bridge.setBrainRuntimeStopHandler ([this]
+        {
+            if (ownerRuntime == nullptr) return juce::var();
+            ownerRuntime->stop();
+            return ownerRuntime->status();
         });
         if (ownerRuntime != nullptr)
             ownerRuntime->setStatusCallback ([this] (juce::var status)
