@@ -15,7 +15,9 @@ struct OwnerRuntimeConfig
     juce::File pythonRuntime;
     juce::String modelPathRaw;
     juce::String pythonRuntimeRaw;
-    int preferredPort = 8091;
+    // Default range 8491+: 8091 is contended on the owner machine by a standing
+    // launchd KeepAlive mlx agent, which cascaded fresh spawns every launch.
+    int preferredPort = 8491;
     double stableAudioReleaseIdle = 0.99;
     bool prewarmAfterUnload = true;
     juce::String preferredShell;
@@ -38,6 +40,11 @@ public:
 
     static bool modelsResponseMatches (const juce::var&, const juce::String& exactModelPath);
     static bool terminateOwnedProcess (int pid, bool verifiedOwner, int graceMs = 2000);
+    static bool commandLooksLikeOwnedBrain (const juce::String& psCommand, const juce::String& modelPath);
+    static bool handshakeMatches (const juce::var& handshake, int port,
+                                  const juce::String& modelPath, const juce::String& pythonRuntime);
+    static juce::String spawnLedgerLine (int pid, int port, const juce::String& modelPath);
+    static juce::Array<juce::var> parseSpawnLedger (const juce::String& jsonlText);
 
 private:
     void runStartup();
@@ -47,6 +54,10 @@ private:
     bool canAdopt (int port) const;
     void publish (juce::String state, juce::String error = {}, double ms = 0.0);
     juce::File handshakeFile() const;
+    juce::File spawnLedgerFile() const;
+    void writeHandshake (int pid, int port) const;
+    void sweepStaleSpawns();
+    void removeSpawnLedgerEntry (int pid);
     void logRuntimeEvent (const juce::String& event, const juce::var& data = {}) const;
     void terminateSpawnedChild();
 
@@ -62,6 +73,7 @@ private:
     bool spawnedByUs = false;
     std::atomic<int> activePort { 0 };
     int spawnedPid = 0;
+    int wrapperPid = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LocalBrainManager)
 };

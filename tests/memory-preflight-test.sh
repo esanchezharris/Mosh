@@ -26,22 +26,7 @@ printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
 printf '/dev/fake 999999999 1 %s 1%% /System/Volumes/Data\n' "${FAKE_DATA_FREE_KB:-104857600}"
 SH
 
-cat > "$BIN/ps" <<'SH'
-#!/usr/bin/env sh
-printf '100 1 /Applications/ChatGPT.app/Contents/Resources/codex -c features.code_mode_host=true app-server --analytics-default-enabled\n'
-i=0
-while [ "$i" -lt "${FAKE_CODEX_CHILDREN:-0}" ]; do
-  printf '%s 100 node child-%s\n' "$((200 + i))" "$i"
-  i=$((i + 1))
-done
-j=0
-while [ "$j" -lt "${FAKE_PS_TRAILING_LINES:-0}" ]; do
-  printf '%s 1 %01024d\n' "$((1000 + j))" 0
-  j=$((j + 1))
-done
-SH
-
-chmod +x "$BIN/memory_pressure" "$BIN/sysctl" "$BIN/df" "$BIN/ps"
+chmod +x "$BIN/memory_pressure" "$BIN/sysctl" "$BIN/df"
 
 run_subject() {
   local expected_rc="$1" expected_text="$2"
@@ -52,7 +37,6 @@ run_subject() {
     -u MOSH_MIN_MEMORY_FREE_PERCENT \
     -u MOSH_MAX_SWAP_USED_MIB \
     -u MOSH_MIN_DATA_FREE_GIB \
-    -u MOSH_MAX_CODEX_CHILDREN \
     PATH="$BIN:$HOST_PATH" "$@" "$SUBJECT" 2>&1)"
   rc=$?
   set -e
@@ -66,20 +50,18 @@ run_subject() {
   fi
 }
 
-# Given healthy memory, swap, disk, and Codex fan-out.
+# Given healthy memory, swap and disk.
 # When the preflight runs.
 # Then it allows the heavyweight command.
 run_subject 0 '[memory-preflight] PASS' \
   env FAKE_MEMORY_FREE_PERCENT=80 FAKE_SWAP_USED_MB=0 \
-  FAKE_DATA_FREE_KB=104857600 FAKE_CODEX_CHILDREN=8
+  FAKE_DATA_FREE_KB=104857600
 
-# Given a large process snapshot after the app-server row.
-# When the preflight locates the app server under pipefail.
-# Then it consumes the snapshot without making the producer die on SIGPIPE.
-run_subject 0 '[memory-preflight] PASS' \
-  env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
-run_subject 0 'codex_children=8' \
-  env FAKE_CODEX_CHILDREN=8 FAKE_PS_TRAILING_LINES=4096
+# Given the machine is running many agent processes.
+# When the preflight runs.
+# Then it does NOT care: the process-count ceiling was removed 2026-09-01 (it was a
+# proxy for lingering Mosh instances, and it blocked every gate on a busy agent host).
+run_subject 0 '[memory-preflight] PASS' env MOSH_MAX_CODEX_CHILDREN=1
 
 # Given each resource limit is unsafe.
 # When the preflight runs.
@@ -87,15 +69,6 @@ run_subject 0 'codex_children=8' \
 run_subject 1 'free memory 20% is below 25%' env FAKE_MEMORY_FREE_PERCENT=20
 run_subject 1 'swap used 5000 MiB exceeds 4096 MiB' env FAKE_SWAP_USED_MB=5000
 run_subject 1 'Data volume free 20 GiB is below 32 GiB' env FAKE_DATA_FREE_KB=20971520
-
-# Given the test process inherits the owner's one-time elevated child ceiling.
-# When the default-threshold fixture runs.
-# Then it still verifies the standard 64-child policy.
-export MOSH_MAX_CODEX_CHILDREN=1000
-run_subject 1 'Codex child process count 65 exceeds 64' env FAKE_CODEX_CHILDREN=65
-unset MOSH_MAX_CODEX_CHILDREN
-
-run_subject 1 'Codex child process count 65 exceeds 64' env FAKE_CODEX_CHILDREN=65
 
 # Given the canonical gate sees unsafe memory.
 # When the cheap gate starts.
