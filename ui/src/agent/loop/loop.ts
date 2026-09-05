@@ -8,7 +8,8 @@
 // bracketing — see loopSeam.ts); the FSM owns budgets, plan-following, the
 // observe/repair ladder and stop conditions:
 //   done      — model status "done", or a fully-inline plan completed all-ok
-//   need_user — the model parked (HUH semantics), or unparseable output
+//   need_user — the model parked (HUH semantics), unparseable output, or the
+//               session's revision moved between steps (someone else edited it)
 //   budget    — steps / model calls / wall-clock exhausted
 //   error     — chat transport failure, or repairs exhausted the planner budget
 //   aborted   — the user's Stop, checked before every step
@@ -75,6 +76,28 @@ export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string };
 const countInvalid = (calls: readonly AgentCommandCall[]): number =>
   calls.filter((c) => validateCommand(c.command, (c.args ?? {}) as Record<string, unknown>) !== null).length;
 
+/** What the loop says when it parks because the session moved under it (step-1
+ *  slice 3, F5 in the brief): the plan was made against a session that no longer
+ *  exists, so acting on it would edit the wrong values. */
+export const SESSION_CHANGED_SAY = "the session changed while I was working — ask again";
+
+/** Key-order-independent JSON identity for a command list — the "exactly once"
+ *  comparisons below must not be fooled by `{a,b}` vs `{b,a}` from the same model. */
+const canonCommands = (calls: readonly AgentCommandCall[] | undefined): string =>
+  JSON.stringify(calls ?? [], (_key, value: unknown) =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((k) => [k, (value as Record<string, unknown>)[k]]))
+      : value);
+
+/** `session.revision` — the engine's per-process mutation counter (MoshOps
+ *  editRevision_: bumped by every mutating command and by undo/redo), exposed by
+ *  the step-1 engine slice. Read defensively: an engine or mock that does not
+ *  report one yields undefined, which keeps the revision guard inert. */
+const revisionOf = (s: Snapshot | null | undefined): number | undefined => {
+  const r = (s?.session as { revision?: unknown } | undefined)?.revision;
+  return typeof r === "number" && Number.isFinite(r) ? r : undefined;
+};
+
 export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promise<LoopRun> {
   const b: LoopBudgets = { ...DEFAULT_LOOP_BUDGETS, ...deps.budgets };
   const now = deps.now ?? (() => Date.now());
@@ -84,6 +107,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
 
   const transcript: StepRecord[] = [];
   let snap: Snapshot = await deps.env.getSnapshot();
+  let lastRevision = revisionOf(snap);   // the observation the plan is made against
   let plan: PlanStep[] = [];
   let planIdx = 0;
   let plannerCalls = 0;
@@ -127,7 +151,17 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
     else {
       plan = [...(first.plan ?? [])];
       const hadPlanArray = plan.length > 0;
-      if (first.commands?.length) plan.unshift({ goal: "start", commands: first.commands });
+      if (first.commands?.length) {
+        // Exactly once (step-1 slice 3, R3): a reply that carries its commands BOTH
+        // at the top level and on the plan used to run them twice — as this "start"
+        // step and again as plan step 1 (live log: A,B,A,B in one transaction, two
+        // batches ~20 ms apart, one model reply). The top-level copy is dropped when
+        // it is JSON-identical to plan[0]'s commands or to the whole plan flattened.
+        const top = canonCommands(first.commands);
+        const alreadyPlanned = hadPlanArray
+          && (top === canonCommands(plan[0]!.commands) || top === canonCommands(plan.flatMap((p) => p.commands ?? [])));
+        if (!alreadyPlanned) plan.unshift({ goal: "start", commands: first.commands });
+      }
       if (plan.length) {
         // A real plan array = plan mode (exhaustion ⇒ done). BARE commands keep
         // their own status: "continue" arms the incremental mode, "done" closes
@@ -211,12 +245,32 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
       break;
     }
 
+    // ── exactly once: a step JSON-identical to the previous ALL-OK step is not
+    // re-run (an absolute edit would be a no-op, an additive one — add_note — would
+    // land twice). A twin of a FAILED step is a legitimate repair and still runs.
+    const prev = transcript[transcript.length - 1];
+    if (prev && prev.results.every((r) => r.ok) && canonCommands(prev.commands) === canonCommands(commands)) {
+      if (doneAfterStep) { outcome = "done"; break; }
+      if (planIdx >= plan.length && lastStatus === "plan") { outcome = "done"; break; }
+      continue;
+    }
+
+    // ── revision binding: the session this step was planned against must still be
+    // the one we would edit. A GUI edit (or anything outside this task) between the
+    // last observation and now moves `session.revision`; park rather than act on
+    // stale values. Inert when the engine reports no revision (undefined).
+    if (lastRevision !== undefined) {
+      const fresh = revisionOf(await deps.env.getSnapshot());
+      if (fresh !== undefined && fresh !== lastRevision) { say = SESSION_CHANGED_SAY; outcome = "need_user"; break; }
+    }
+
     // ── STEPPING / OBSERVING ─────────────────────────────────────────────────
     progress({ kind: "phase", phase: "stepping" });
     const index = transcript.length;
     progress({ kind: "step-start", index, goal, commands });
     const { results, snapshot } = await deps.env.runBatch(`moshi task: ${task.ask.slice(0, 48)}`, commands);
     snap = snapshot;
+    lastRevision = revisionOf(snapshot);   // our own batch bumped it — that is the new baseline, not drift
     transcript.push({ say: undefined, intent: undefined, commands, results, invalidCount: countInvalid(commands), ms: lastMs });
     progress({ kind: "step-result", index, results });
 
