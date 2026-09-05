@@ -72,10 +72,10 @@ describe("settingsByCategory", () => {
     const groups = settingsByCategory();
     const appearance = groups.find((g) => g.category === "Appearance");
     if (!appearance) throw new Error("Appearance settings group is missing");
-    expect(appearance.settings.map((s) => s.id)).toEqual(["skin", "theme", "uiScale"]);
+    expect(appearance.settings.map((s) => s.id)).toEqual(["skin", "theme", "uiScale", "colorway"]);
     const moshi = groups.find((g) => g.category === "Moshi");
     if (!moshi) throw new Error("Moshi settings group is missing");
-    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "agentMemory", "produceLane"]);
+    expect(moshi.settings.map((s) => s.id)).toEqual(["voiceOn", "voiceVol", "agentMemory", "agentConfirmDestructive", "produceLane"]);
   });
 
   it("covers every setting exactly once", () => {

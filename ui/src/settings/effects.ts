@@ -29,7 +29,8 @@ export function applySettingEffects(values: Record<string, SettingValue>): void 
   // The v2 shell is a single Mosh-native design with NO skin axis. When it's active,
   // pin data-skin to "mosh" so a persisted non-mosh skin (e.g. "ableton") can't leak
   // its token overrides into v2's scoped CSS. Classic keeps the user's chosen skin.
-  if (resolveShell(values.uiShell) === "v2") root.setAttribute("data-skin", "mosh");
+  const shell = resolveShell(values.uiShell);
+  if (shell === "v2" || shell === "v3") root.setAttribute("data-skin", "mosh");
   else if (typeof values.skin === "string") root.setAttribute("data-skin", values.skin);
   if (typeof values.theme === "string") root.setAttribute("data-theme", values.theme);
   if (typeof values.uiScale === "number")

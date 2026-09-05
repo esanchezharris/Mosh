@@ -352,7 +352,7 @@ export function SettingsPanel({ snapshot }: { snapshot: Snapshot }) {
   return (
     <>
       <div className="pop-head">Settings</div>
-      {!v2 && <TemplatePicker />}
+      {!v2 && shell !== "v3" && <TemplatePicker />}
       {groups.map((g) => (
         <div className="pop-group" key={g.category}>
           <div className="pop-label">{g.category}</div>

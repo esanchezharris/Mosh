@@ -66,7 +66,8 @@ export function effectiveInteractionSetting(id: string): SettingValue {
     case "live": return "ableton";
     case "protools": return "protools";
     case "classic":
-    case "v2": return st.get(id);
+    case "v2":
+    case "v3": return st.get(id);
     default: {
       const unreachable: never = shell;
       return unreachable;

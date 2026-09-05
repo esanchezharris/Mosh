@@ -13,6 +13,7 @@ import { AppLegacy } from "./AppLegacy";
 import { AppV2 } from "./v2/AppV2";
 import { AppLive } from "./live/AppLive";
 import { AppProTools } from "./protools/AppProTools";
+import { AppV3 } from "./v3/AppV3";
 import { brainRuntimeStatus } from "./bridge";
 
 // Dev-only Character Lab demo. The reference is gated on an explicit development mode so that in
@@ -55,6 +56,8 @@ export function App() {
       return <AppLive />;
     case "protools":
       return <AppProTools />;
+    case "v3":
+      return <AppV3 />;
     default: {
       const unreachable: never = shell;
       return unreachable;

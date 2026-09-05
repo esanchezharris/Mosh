@@ -104,6 +104,23 @@ export const SETTINGS: SettingDef[] = [
     constraints: { min: 0.8, max: 1.4, step: 0.1 },
   },
   {
+    id: "colorway",
+    type: "enum",
+    default: "lime",
+    scope: "app",
+    category: "Appearance",
+    label: "Colorway",
+    help: "Accent for selection, MIDI notes, and primary actions. Session content stays bone.",
+    constraints: {
+      options: [
+        { value: "lime", label: "Lime" },
+        { value: "bone", label: "Bone" },
+        { value: "violet", label: "Violet" },
+        { value: "coral", label: "Coral" },
+      ],
+    },
+  },
+  {
     id: "voiceOn",
     type: "bool",
     default: true,
@@ -129,6 +146,15 @@ export const SETTINGS: SettingDef[] = [
     category: "Moshi",
     label: "Agent memory (experimental)",
     help: "Moshi recalls preferences and patterns it's learned, plus this project's own notes, and folds a few relevant ones into its thinking each turn. Off = no recall.",
+  },
+  {
+    id: "agentConfirmDestructive",
+    type: "bool",
+    default: true,
+    scope: "app",
+    category: "Moshi",
+    label: "Confirm destructive",
+    help: "Ask before Moshi runs a destructive edit (delete clip, remove bus, etc.).",
   },
   {
     id: "produceLane",
@@ -191,6 +217,7 @@ export const SETTINGS: SettingDef[] = [
         // ?shell=live in dev/e2e) mounts AppLive; classic and v2 are untouched.
         { value: "live", label: "Live (clone)" },
         { value: "protools", label: "Pro Tools" },
+        { value: "v3", label: "Mosh (v3)" },
       ],
     },
   },

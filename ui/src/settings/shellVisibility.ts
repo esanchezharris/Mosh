@@ -10,8 +10,19 @@ import type { ShellId } from "../v2/shellFlag";
 const V2_HIDDEN_CATEGORIES = new Set(["Layout", "Interaction", "Feel", "Keys"]);
 
 /** True when `id` (in `category`) should be hidden from Settings under `shell`. */
+const V3_HIDDEN_IDS = new Set([
+  "skin",
+  "redesignShell",
+  "protoolsDefaultFadeLengthMs",
+  "protoolsDefaultFadeCurveIn",
+  "protoolsDefaultFadeCurveOut",
+  "liveDockHeight",
+  "liveClipExpanded",
+]);
+
 export function settingHiddenForShell(shell: ShellId, category: string, id: string): boolean {
   if (shell === "v2") return V2_HIDDEN_CATEGORIES.has(category) || id === "skin";
   if (shell === "live") return id === "skin";
+  if (shell === "v3") return V3_HIDDEN_IDS.has(id) || category === "Pro Tools";
   return false;
 }
