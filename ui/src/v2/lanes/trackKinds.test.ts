@@ -90,6 +90,19 @@ describe("v2 add-track — every offered kind is reachable and lands playable (T
     expect(t.clips.length).toBe(1);
   });
 
+  it("recipe beat → one generate_beat_recipe call whose generated program lands a playable track", async () => {
+    // Unlike its siblings this entry creates no track itself — the recipe's generated
+    // program does (one undoable batch natively; the mock applies a fixed tiny program).
+    const before = snap().tracks.length;
+    await addTrackOfKind("recipe", exec);
+    await settle();
+    expect(calls.map((c) => c.command)).toEqual(["generate_beat_recipe"]);
+    expect(snap().tracks.length).toBe(before + 1);
+    const t = newest();
+    expect(hasInstrument(t)).toBe(true); // the recipe binds real sounds, never a silent track
+    expect(t.clips.length).toBeGreaterThan(0);
+  });
+
   it("never orphans a tone clip when create_track fails", async () => {
     const seen: string[] = [];
     await addTrackOfKind("tone", async (command) => {

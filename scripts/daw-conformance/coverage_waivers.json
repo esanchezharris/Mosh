@@ -1,107 +1,97 @@
 [
   {
     "command": "accept_lyric_proposal",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest-backed via bridge.mock.sing.test.ts and lyrics/corpus.test.ts; no service endpoint (native-side proposal bookkeeping). The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "analyze_lyrics",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Service endpoint /analyze_lyrics (service/server.py) with service/lyrics/analyze_test.py; vitest lyrics/analyze.test.ts. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "build_lyrics_from_clip",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). CORRECTION: the old 'mock-backed vitest/e2e' claim is overstated for this command; no *.test.* file references it at all (only bridge.mock.ts, commandClassification.ts, v2/lanes/ClipView.tsx). Uncovered on the gate surfaces AND in vitest. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "build_skeleton_from_clip",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest via bridge.mock.sing.test.ts and bridge.mock.node-replay.test.ts; service side referenced by service/lyrics/lyric_gen_test.py and service/soulx/soulx_score_test.py. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "cancel_lyric_job",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "cancel_render",
-    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-08-16: STILL UNCOVERED \u2014 zero mentions across all three coverage surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Real coverage gap, not a bookkeeping one. P3 target: a conformance EXTRA family or a selftest section exercising submit -> cancel -> assert no artifact lands and the layer returns to idle.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). CORRECTION: no *.test.* file references it (only bridge.mock.ts and commandClassification.ts); the old 'mock-backed vitest/e2e' claim did not hold for this command. Uncovered on the gate surfaces AND in vitest. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "cancel_training_job",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
-    "expires": "2026-09-01"
+    "reason": "Re-reviewed 2026-09-02: THE PREVIOUS REASON WAS STALE and is corrected here. It said 'fake backend ... cover in selftest when the real backend lands'; the real local_pmetal backend landed in e933bec9 and scripts/verify-hardware/lab_train_check.py now drives import/approve/list/build/submit, but it never calls cancel_training_job, so the command is still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts) and has no vitest (store/loraLab.ts, bridge.mock.ts, commandClassification.ts only). Cheapest cover: submit a second job in lab_train_check.py, cancel it, and assert status=cancelled via training_job_status.",
+    "expires": "2026-10-01"
   },
   {
     "command": "complete_lyrics",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Service endpoint /complete_lyrics (service/server.py) with service/lyrics/lyric_gen_test.py; vitest bridge.mock.sing.test.ts and lyrics/corpus.test.ts. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "fill_lyric_gap",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Service endpoint /fill_lyric_gap (service/server.py); the only vitest mention is sft/synthProfiles.test.ts (a profile listing, not a dispatch exercise). The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "get_lyric_corpus_stats",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest lyrics/corpus.test.ts; no service endpoint (native corpus bookkeeping). The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "get_rhymes",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Service endpoint /get_rhymes (service/server.py, service/phonology/); vitest v2/inspector/LyricPanel.rhyme.test.ts and agent/knowledge.test.ts. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "import_lora_adapter",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design: routes through jobManager.installLora (MoshOps.ProjectIo.cpp), the same validate-stage-replace install as promote_lora_checkpoint. Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). CORRECTION: the old generic 'mock-backed vitest/e2e' claim is false here; no *.test.* file references it (bridge.mock.ts, ui/TopbarTools.tsx, commandClassification.ts only). The install path itself is proven service-side by service/loras/install_test.py, but the native command is unexercised. Cheapest cover: extend scripts/verify-hardware/lab_train_check.py to import the finished run's artifact by jobId and assert it appears in list_loras.",
+    "expires": "2026-10-01"
   },
   {
     "command": "list_loras",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; store.initNoSpawn.test.ts pins that it is fetched lazily, never at init). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest via bridge.mock.loras.test.ts, GenDrawer.loraFamily.test.ts, jobs.warmup.test.ts; service side service/loras/registry_test.py + promote_test.py. The waiver stands because a hermetic surface must not spawn the service; renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "list_transform_targets",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; store.initNoSpawn.test.ts pins that it is fetched lazily, never at init). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest via bridge.mock.transform.test.ts and jobs.warmup.test.ts; the capability payload is served by service/server.py. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "load_rave_model",
-    "reason": "Re-reviewed 2026-08-16: claim re-verified and still true. MOSH_ENABLE_ANIRA is still OFF by default (cmake/Dependencies.cmake:59), so this command is absent from every default build. add_rave_insert IS verify-covered (scripts/verify-hardware/rave_insert_check.py) but model HOT-SWAP is not. Covering it requires an anira-gated build, so this waiver is structural rather than a to-do \u2014 revisit only if anira ships on by default.",
-    "expires": "2026-09-01"
+    "reason": "Re-reviewed 2026-09-02: claim re-verified and still true. MOSH_ENABLE_ANIRA is still OFF by default (cmake/Dependencies.cmake:60), so this command is absent from every default build. add_rave_insert IS verify-covered (scripts/verify-hardware/rave_insert_check.py) but model HOT-SWAP is not; vitest bridge.mock.rave.test.ts covers only the mock. Covering it requires an anira-gated build, so this waiver is structural rather than a to-do; revisit only if anira ships on by default.",
+    "expires": "2026-10-01"
   },
   {
     "command": "mp_send_signal",
-    "reason": "Re-reviewed 2026-08-16: THE PREVIOUS REASON WAS STALE and is corrected here. It claimed 'covered by vitest MP store tests only'; no test file references mp_send_signal at all. It appears only in bridge.mock.ts, commandClassification.ts, store/events.ts, webrtc/useVideo.ts and the native dispatch \u2014 so it is uncovered on the three gate surfaces AND in vitest. P6 matrix:locks target; the signalling payload is WebRTC plumbing, so a store-level vitest asserting dispatch shape is the cheap first step.",
-    "expires": "2026-09-01"
+    "reason": "Re-reviewed 2026-09-02: unchanged since the 2026-08-16 correction. No *.test.* file references mp_send_signal; it appears only in bridge.mock.ts, commandClassification.ts, store/events.ts, webrtc/useVideo.ts and the native dispatch, so it is uncovered on the three gate surfaces AND in vitest. P6 matrix:locks target; the signalling payload is WebRTC plumbing, so a store-level vitest asserting dispatch shape is the cheap first step.",
+    "expires": "2026-10-01"
   },
   {
     "command": "regenerate_lyric",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). CORRECTION: no *.test.* file references it (bridge.mock.ts, agent/commands.ts, loop/jobWait.ts, LyricPanel.tsx, sft/synthProfiles.ts only); the old 'mock-backed vitest/e2e' claim did not hold for this command. Uncovered on the gate surfaces AND in vitest. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "reject_lyric_proposal",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
-  },
-  {
-    "command": "reject_render",
-    "reason": "Stage-5 render-loop tail command. Re-reviewed 2026-08-16: STILL UNCOVERED \u2014 zero mentions across all three coverage surfaces. Pairs with cancel_render; cover them together, since reject is the accept/reject taste-label branch and needs the JSONL label asserted, not just the layer state.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Vitest agent/commands.test.ts; no service endpoint (native proposal bookkeeping). The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "suggest_next_line",
-    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
-    "expires": "2026-09-01"
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces). Re-reviewed 2026-09-02: still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts). Service endpoint /suggest_next_line (service/server.py) with service/lyrics/core.py + lyric_gen_test.py; vitest agent/smallModel.test.ts. The Finish My Song program was paused 2026-08-11 (CLAUDE.md), so the P5 reachability lane that was to map the UI affordance is not coming soon; this waiver is a structural hold while the program is paused, not a to-do. Renew or cover on expiry.",
+    "expires": "2026-10-01"
   },
   {
     "command": "training_job_status",
-    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
-    "expires": "2026-09-01"
+    "reason": "Re-reviewed 2026-09-02: THE PREVIOUS REASON WAS STALE and is corrected here. It said 'fake backend ... cover in selftest when the real backend lands'; the real local_pmetal backend landed in e933bec9 and scripts/verify-hardware/lab_train_check.py now drives the LoRA Lab end to end, but it polls completion without ever issuing training_job_status, so the command is still zero mentions on all three ledger surfaces (SelfTest*.cpp + src/app/selftest/, scripts/verify-hardware/*.py, ui/e2e/*.ts) and has no vitest. Cheapest cover: have lab_train_check.py poll training_job_status until the run reports done, which covers this and the cancel_training_job pair in one edit.",
+    "expires": "2026-10-01"
   }
 ]

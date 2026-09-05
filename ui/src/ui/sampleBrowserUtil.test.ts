@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterEntries, pushRecent } from "./sampleBrowserUtil";
+import { filterEntries, importedFilePath, pushRecent } from "./sampleBrowserUtil";
 import type { DirEntry } from "../types";
 
 const e = (name: string, isDir = false): DirEntry => ({
@@ -32,5 +32,14 @@ describe("pushRecent", () => {
     const many = ["/1", "/2", "/3", "/4", "/5", "/6", "/7", "/8"];
     expect(pushRecent(many, "/new")).toEqual(["/new", "/1", "/2", "/3", "/4", "/5", "/6", "/7"]);
     expect(pushRecent(many, "/new")).toHaveLength(8);
+  });
+});
+
+describe("importedFilePath", () => {
+  it("keeps only the Mosh-owned path returned by a successful import", () => {
+    expect(importedFilePath({ ok: true, data: { file: "/Library/Mosh/session/imports/loop.wav" } }))
+      .toBe("/Library/Mosh/session/imports/loop.wav");
+    expect(importedFilePath({ ok: false, data: { file: "/Users/me/Desktop/loop.wav" } })).toBeNull();
+    expect(importedFilePath({ ok: true })).toBeNull();
   });
 });

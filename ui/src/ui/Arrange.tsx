@@ -27,7 +27,7 @@ import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "./clipRenderers";
 import { commitClipDrag } from "./clipDrag";
 import { useDrumWindow } from "./dock/useFloatingWindow";
 import { deriveTakeLanes } from "./takeLanes";
-import { SAMPLE_DND_MIME, addRecentSample } from "./sampleBrowserUtil";
+import { SAMPLE_DND_MIME, addRecentSample, importedFilePath } from "./sampleBrowserUtil";
 import { Meter } from "./Meter";
 import { lockOwnerOfTrack } from "../multiplayer/sync";
 import { useSettings } from "../settings/store";
@@ -146,8 +146,9 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     e.preventDefault();
     const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
     const startSeconds = snapTime(Math.max(0, pxToSec(x)));
-    await exec("import_clip", { file, trackId, startSeconds });
-    addRecentSample(file);
+    const result = await exec("import_clip", { file, trackId, startSeconds });
+    const imported = importedFilePath(result);
+    if (imported) addRecentSample(imported);
     await refresh();
   };
 

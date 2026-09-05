@@ -52,6 +52,16 @@ namespace
         return p.isVoid() ? fallback : (double) p;
     }
 
+    // A caller-supplied per-request budget for the message-thread round-trip
+    // (callOnMessageThread's default 5000ms is too short for export_audio, save_as's
+    // audio consolidation, or hosting Vital's load_plugin/load_preset). Clamped to
+    // [1000, 600000] so a malformed/absent value can't turn into an effectively
+    // infinite or effectively-zero wait; absent -> the pre-existing 5000ms default.
+    int timeoutMsFromBody (const juce::var& body)
+    {
+        return juce::jlimit (1000, 600000, propInt (body, "timeoutMs", 5000));
+    }
+
     // Bind diagnostic. JUCE's createListener returns a bare bool and, on failure, runs a
     // cleanup shutdown()/close() that overwrites errno (ENOTCONN) before it returns — so the
     // real cause (e.g. EADDRINUSE) can't be read back here. Instead we probe the port
@@ -211,6 +221,17 @@ juce::var RemoteCompanionServer::handleTestRequest (const juce::String& method,
     request.body = juce::JSON::toString (body);
     return handleRequest (request);
 }
+
+// Exposes the EXACT clamp function /snapshot and /command call, so Catch2 can pin the
+// [1000,600000]ms bound and the 5000ms absent-field default without needing a real
+// cross-thread message-pump harness (MoshTests doesn't define JUCE_MODAL_LOOPS_PERMITTED,
+// so runDispatchLoopUntil isn't available there, and runDispatchLoop()'s only exit,
+// stopDispatchLoop(), permanently stops the shared MessageManager from posting ANY
+// further message for the rest of the test process — too dangerous to use here).
+int RemoteCompanionServer::testCompanionTimeoutMsFromBody (const juce::var& body)
+{
+    return timeoutMsFromBody (body);
+}
 #endif
 
 void RemoteCompanionServer::run()
@@ -274,14 +295,16 @@ juce::var RemoteCompanionServer::handleRequest (const Request& request)
         return err (auth.error);
 
     if (request.method == "POST" && request.path == "/snapshot")
-        return ok (callOnMessageThread ([this] { return snapshotProvider ? snapshotProvider() : juce::var(); }));
+        return ok (callOnMessageThread ([this] { return snapshotProvider ? snapshotProvider() : juce::var(); },
+                                        timeoutMsFromBody (body)));
 
     if (request.method == "POST" && request.path == "/command")
     {
         const auto command = body.getProperty ("command", juce::var());
         if (! command.isObject())
             return err ("missing command object");
-        return ok (callOnMessageThread ([this, command] { return commandHandler ? commandHandler (command) : juce::var(); }));
+        return ok (callOnMessageThread ([this, command] { return commandHandler ? commandHandler (command) : juce::var(); },
+                                        timeoutMsFromBody (body)));
     }
 
     if (request.method == "POST" && request.path == "/events")

@@ -45,15 +45,6 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/Mosh.app"
 
-# Fail closed if the bundle lost its Info.plist usage keys. A missing
-# NSSpeechRecognitionUsageDescription does not degrade — macOS TCC HARD-CRASHES
-# (SIGABRT) the moment the always-on voice calls SFSpeechRecognizer, and that crash has
-# historically been misread as a plugin-host crash. Reachable without any hand-editing:
-# `cmake --preset` regenerates the bundle Info.plist at generate time, and the
-# key-injection POST_BUILD only fires when Mosh relinks — so a configure-then-package
-# with no intervening rebuild zips an unpatched plist. Checked on the STAGED copy, i.e.
-# the exact bytes ditto is about to zip. Same guard the other two packaging paths run
-# (scripts/release/sign-and-notarize.sh, scripts/playtest/package-guest-zip.sh).
 echo "==> verifying Info.plist usage keys…"
 "$ROOT/scripts/release/check-plist-keys.sh" "$STAGE/Mosh.app" pre-zip
 

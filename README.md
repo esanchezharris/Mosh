@@ -15,7 +15,7 @@
 
 Import/record, arrange, host **VST3/AU plugins**, mix, and export — plus a generative
 tier: an offline "re-imagine" / timbre-transform render layer with semantic controls
-that works on any track (MIDI/drum clips auto-bounce to audio first). A voice agent (**Moshi**) and
+that works on any track (MIDI/drum clips auto-bounce to audio first). An in-app agent (**Moshi**) and
 2-player multiplayer ride on the same command spine.
 
 <p align="center">
@@ -59,7 +59,7 @@ Three pieces behind one seam (the `execute_command` + snapshot/events contract):
 ./run-mosh.sh smoke     # non-interactive native brain round-trip
 ```
 
-Brain LLM keys (optional — voice falls back to an offline mock without them) go in
+Brain LLM keys (optional — typed agent requests fall back to an offline mock without them) go in
 `ui/.env.local` (see [`ui/.env.example`](ui/.env.example)). The generative model is
 wired with [`service/setup-sa3.sh`](service/setup-sa3.sh).
 
@@ -70,7 +70,7 @@ wired with [`service/setup-sa3.sh`](service/setup-sa3.sh).
 cd ui && npm test && npm run test:e2e                   # UI units (vitest) + e2e (Playwright)
 ```
 
-The hardware-verification runbook (does it make sound, mic/voice, two-peer multiplayer)
+The hardware-verification runbook (does it make sound, record audio input, and sync two peers)
 lives in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Status

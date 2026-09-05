@@ -2,6 +2,7 @@
 #include "brain/BrainProxy.h"
 #include "engine/SessionPaths.h"
 #include <cstdlib>
+#include <cmath>
 
 // Hermetic coverage for the brain-proxy cutover (docs/brain-proxy/RUNBOOK.md): proxy-URL
 // selection, install-id resolution, and the proxy-unreachable -> direct-provider
@@ -60,6 +61,9 @@ namespace
         ScopedEnv l { "XAI_API_KEY", "" };
         ScopedEnv m { "XAI_MODEL", "" };
         ScopedEnv n { "MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1" };   // also skip any stray bundled brain.env
+        ScopedEnv o { "OPENROUTER_BASE_URL", "" };
+        ScopedEnv p { "OPENROUTER_API_KEY", "" };
+        ScopedEnv q { "OPENROUTER_MODEL", "" };
     };
 }
 
@@ -183,4 +187,106 @@ TEST_CASE ("BrainProxy direct response rejects malformed successful envelopes", 
         R"({"choices":[{"message":{"content":"{\"p\":[60,62,64,65,64,62,60,57]}"}}]})", 200, local, 12);
     CHECK ((bool) good.getProperty ("ok", false));
     CHECK (good.getProperty ("content", var()).toString().contains ("p"));
+}
+
+// ── W1.1 — ChatOptions + the openrouter provider ────────────────────────────────
+
+TEST_CASE ("BrainProxy providers() carries a fourth openrouter provider, appended last", "[brain][providers]")
+{
+    ScopedCleanBrainEnv clean;
+    ScopedEnv url ("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
+    ScopedEnv key ("OPENROUTER_API_KEY", "sk-or-test");
+    ScopedEnv model ("OPENROUTER_MODEL", "anthropic/claude-sonnet-5");
+
+    const auto all = BrainProxy::providers();
+    REQUIRE (all.size() == 4);
+    CHECK (all[0].id == "deepseek");
+    CHECK (all[1].id == "openai");
+    CHECK (all[2].id == "xai");
+    CHECK (all[3].id == "openrouter");
+    CHECK (all[3].isComplete());
+    CHECK (all[3].url == "https://openrouter.ai/api/v1");
+    CHECK (all[3].model == "anthropic/claude-sonnet-5");
+
+    // Only openrouter is complete -> it's the resolved default.
+    CHECK (BrainProxy::resolve().id == "openrouter");
+
+    // Completing deepseek too proves appending openrouter LAST didn't shift the
+    // existing first-complete-wins order: deepseek (earlier in `all`) still wins.
+    ScopedEnv burl ("DEEPSEEK_BASE_URL", "https://api.deepseek.test");
+    ScopedEnv bkey ("DEEPSEEK_API_KEY", "sk-test");
+    ScopedEnv bmodel ("DEEPSEEK_MODEL", "deepseek-test");
+    CHECK (BrainProxy::resolve().id == "deepseek");
+
+    // An explicit request for openrouter is still honoured over the default.
+    CHECK (BrainProxy::resolve ("openrouter").id == "openrouter");
+}
+
+TEST_CASE ("BrainProxy requestPayload/requestTimeoutMs default ChatOptions reproduce the exact pre-W1.1 payload", "[brain][options]")
+{
+    const BrainProxy::Provider p { "deepseek", "DEEPSEEK", "https://api.deepseek.test", "sk-test", "deepseek-test" };
+    const auto payload = BrainProxy::requestPayload (p, var (Array<var>{}));   // default opts
+    CHECK ((int) payload.getProperty ("max_tokens", 0) == 800);
+    CHECK (std::abs ((double) payload.getProperty ("temperature", 0.0) - 0.6) < 1e-9);
+    CHECK (payload.getProperty ("max_completion_tokens", var()).isVoid());
+    CHECK (BrainProxy::requestTimeoutMs (p) == 30000);   // default opts.timeoutMs==0 -> the cloud split
+}
+
+TEST_CASE ("BrainProxy ChatOptions override max_tokens / temperature / timeoutMs", "[brain][options]")
+{
+    const BrainProxy::Provider p { "deepseek", "DEEPSEEK", "https://api.deepseek.test", "sk-test", "deepseek-test" };
+    BrainProxy::ChatOptions opts;
+    opts.maxTokens = 8192;
+    opts.temperature = 0.9;
+    opts.timeoutMs = 180000;
+
+    const auto payload = BrainProxy::requestPayload (p, var (Array<var>{}), opts);
+    CHECK ((int) payload.getProperty ("max_tokens", 0) == 8192);
+    CHECK (std::abs ((double) payload.getProperty ("temperature", 0.0) - 0.9) < 1e-9);
+    CHECK (BrainProxy::requestTimeoutMs (p, opts) == 180000);   // overrides the 30s cloud default outright
+}
+
+TEST_CASE ("BrainProxy reasoning-model payload honours ChatOptions.maxTokens via max_completion_tokens", "[brain][options]")
+{
+    const BrainProxy::Provider p { "openai", "OPENAI", "https://api.openai.test", "sk-test", "gpt-5" };
+    BrainProxy::ChatOptions opts;
+    opts.maxTokens = 4096;
+
+    const auto payload = BrainProxy::requestPayload (p, var (Array<var>{}), opts);
+    CHECK ((int) payload.getProperty ("max_completion_tokens", 0) == 4096);
+    CHECK (payload.getProperty ("max_tokens", var()).isVoid());     // reasoning models reject max_tokens...
+    CHECK (payload.getProperty ("temperature", var()).isVoid());    // ...and temperature
+}
+
+TEST_CASE ("BrainProxy optionsFromVar clamps out-of-range fields and keeps defaults for missing/absent ones", "[brain][options]")
+{
+    // Every field present, all out of bounds.
+    auto* tooHigh = new DynamicObject();
+    tooHigh->setProperty ("maxTokens", 999999);
+    tooHigh->setProperty ("timeoutMs", 999999999);
+    tooHigh->setProperty ("temperature", 9.0);
+    const auto highClamped = BrainProxy::optionsFromVar (var (tooHigh));
+    CHECK (highClamped.maxTokens == 32768);
+    CHECK (highClamped.timeoutMs == 600000);
+    CHECK (std::abs (highClamped.temperature - 2.0) < 1e-9);
+
+    auto* tooLow = new DynamicObject();
+    tooLow->setProperty ("maxTokens", 0);
+    tooLow->setProperty ("timeoutMs", 1);
+    tooLow->setProperty ("temperature", -5.0);
+    const auto lowClamped = BrainProxy::optionsFromVar (var (tooLow));
+    CHECK (lowClamped.maxTokens == 1);
+    CHECK (lowClamped.timeoutMs == 1000);
+    CHECK (std::abs (lowClamped.temperature - 0.0) < 1e-9);
+
+    // No `options` object at all (the common case — most callers omit it) and an
+    // empty object both fall back to the DOSAGE defaults untouched.
+    const auto absent = BrainProxy::optionsFromVar (var());
+    CHECK (absent.maxTokens == 800);
+    CHECK (std::abs (absent.temperature - 0.6) < 1e-9);
+    CHECK (absent.timeoutMs == 0);
+
+    const auto empty = BrainProxy::optionsFromVar (var (new DynamicObject()));
+    CHECK (empty.maxTokens == 800);
+    CHECK (empty.timeoutMs == 0);
 }

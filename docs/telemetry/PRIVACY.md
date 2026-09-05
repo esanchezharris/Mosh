@@ -138,10 +138,9 @@ the file holds, and it is bounded on purpose:
   `{ts, seq, command, ok, undoable, error}` and **drops `args` entirely**, so
   the utterance never reaches that surface either. Pinned in `--selftest`
   (`get_command_log projects NO args`).
-- **Only asks addressed to Moshi are recorded** — typed, hold-to-talk, or a
-  hands-free phrase that matched a command. Hands-free speech that *didn't*
-  match is dropped without being written anywhere; an always-on mic never
-  transcribes ambient conversation into this file.
+- **Only typed asks addressed to Moshi are recorded.** Desktop Mosh has no speech
+  recognition or always-on microphone path, so ambient conversation cannot enter
+  this file.
 - **Direct manipulation carries no ask.** A clip drag or a fader move writes a
   line with no `utterance` and no `turn_id` — the key is **absent**, not empty —
   so the log stays honest about which edits were agent-driven.

@@ -13,5 +13,7 @@ inline constexpr int kMaxVisitedEntries = 8192;
     Results and filesystem visits are bounded; callers can discard an obsolete result
     without blocking the audio/message thread.
 */
-juce::var buildData (const juce::File& sessionDir, const juce::var& args);
+juce::var buildData (const juce::File& sessionDir,
+                     const juce::var& args,
+                     juce::Array<juce::File> sampleFolders = {});
 }

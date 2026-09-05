@@ -34,9 +34,8 @@
 /* the reused Moshi dock carries classic --bone-dim status text → dark-on-dark in the v2 rail.
    Recolor its cap/state/mood to read on the dark card (mood word still lights up by state). */
 .v2-shell .v2-mosh-stage .moshi-state { color: var(--v2-dim); }
-.v2-shell .v2-mosh-stage .moshi-mute, .v2-shell .v2-mosh-stage .moshi-handsfree { color: var(--v2-dim); display: inline-flex; align-items: center; justify-content: center; }
-.v2-shell .v2-mosh-stage .moshi-mute:hover, .v2-shell .v2-mosh-stage .moshi-handsfree:hover { color: var(--v2-text); }
-.v2-shell .v2-mosh-stage .moshi-handsfree.on { color: var(--v2-accent); }
+.v2-shell .v2-mosh-stage .moshi-mute { color: var(--v2-dim); display: inline-flex; align-items: center; justify-content: center; }
+.v2-shell .v2-mosh-stage .moshi-mute:hover { color: var(--v2-text); }
 .v2-shell .v2-mosh-card .moshi-mood { color: var(--v2-faint); }
 .v2-shell .v2-mosh-card .moshi-mood[data-mood="listen"] { color: var(--v2-accent); }
 .v2-shell .v2-mosh-card .moshi-mood[data-mood="rec"] { color: var(--v2-rec); }

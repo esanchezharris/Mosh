@@ -3,7 +3,7 @@
 // property that only appears with more than one: a selection keeps its internal shape.
 
 import { describe, expect, it } from "vitest";
-import { moveEdits, resizeEdits, transposeEdits, nudgeEdits, velocityEdits,
+import { moveEdits, resizeEdits, resizeStartEdits, transposeEdits, nudgeEdits, velocityEdits,
          toggleActiveEdits, previewFrom, type GestureGeom } from "./pianoRollEdit";
 import type { MidiNote } from "../types";
 
@@ -89,6 +89,31 @@ describe("resizeEdits", () => {
     const sel = new Map([[0, note(0, 60, 0, 1)]]);
     const edits = resizeEdits({ orig: sel, dxPx: -10 * BEAT_PX, dyPx: 0, bypassSnap: true }, GEOM);
     expect(edits[0].length).toBe(STEP);
+  });
+});
+
+describe("resizeStartEdits", () => {
+  it("moves the left edge while preserving each selected note's own end", () => {
+    const sel = new Map([[0, note(0, 60, 1, 1)], [1, note(1, 64, 4, 3)]]);
+    const edits = resizeStartEdits({ orig: sel, dxPx: -BEAT_PX / 2, dyPx: 0, bypassSnap: true }, GEOM);
+
+    expect(edits).toEqual([
+      { i: 0, start: 0.5, length: 1.5 },
+      { i: 1, start: 3.5, length: 3.5 },
+    ]);
+  });
+
+  it("clamps at beat zero and at the minimum note length", () => {
+    const sel = new Map([[0, note(0, 60, 1, 2)]]);
+
+    expect(resizeStartEdits({ orig: sel, dxPx: -10 * BEAT_PX, dyPx: 0, bypassSnap: true }, GEOM)[0])
+      .toEqual({ i: 0, start: 0, length: 3 });
+    expect(resizeStartEdits({ orig: sel, dxPx: 10 * BEAT_PX, dyPx: 0, bypassSnap: true }, GEOM)[0])
+      .toEqual({ i: 0, start: 2, length: 1 });
+  });
+
+  it("commits nothing inside the deadzone", () => {
+    expect(resizeStartEdits({ orig: SEL, dxPx: 2, dyPx: 0, bypassSnap: false }, GEOM)).toEqual([]);
   });
 });
 

@@ -77,6 +77,33 @@ describe("runAgentLoop — the FSM", () => {
     expect(seen[2]).toContain("mute the vocal");
   });
 
+  it("a compile reply that re-wraps its commands inside a plan entry is still executed (first live produce run, 2026-09-02)", async () => {
+    const { chat } = scriptedChat([
+      { status: "continue", plan: [{ goal: "drums" }, { goal: "808" }] },
+      // compile for "drums": commands at top level (the documented shape)
+      { status: "continue", commands: [CMD("add_midi_clip", { trackId: "1", start: 0, length: 32 })] },
+      // compile for "808": Sonnet echoed the plan and put the commands in plan[1]
+      { status: "continue", plan: [{ goal: "drums" }, { goal: "808", commands: [CMD("add_midi_clip", { trackId: "2", start: 0, length: 32 })] }] },
+    ]);
+    const { env, batches } = scriptedEnv(["ok", "ok"]);
+    const run = await runAgentLoop({ ask: "produce a beat" }, { chat, env } as LoopDeps);
+
+    expect(run.outcome).toBe("done");
+    expect(batches).toHaveLength(2);
+    expect(batches[1]!.commands).toEqual(["add_midi_clip"]);
+  });
+
+  it("a compile reply whose plan carries commands in SEVERAL entries is still 'no commands' (error, not a guess)", async () => {
+    const { chat } = scriptedChat([
+      { status: "continue", plan: [{ goal: "drums" }] },
+      { status: "continue", plan: [{ goal: "a", commands: [CMD("set_tempo", { bpm: 90 })] }, { goal: "b", commands: [CMD("set_tempo", { bpm: 91 })] }] },
+    ]);
+    const { env, batches } = scriptedEnv([]);
+    const run = await runAgentLoop({ ask: "produce a beat" }, { chat, env } as LoopDeps);
+    expect(run.outcome).toBe("error");
+    expect(batches).toHaveLength(0);
+  });
+
   it("a failed step triggers ONE repair call that sees the verbatim error", async () => {
     const { chat, seen } = scriptedChat([
       { status: "continue", plan: [{ goal: "warp", commands: [CMD("set_clip_warp", { clipId: "9", autoTempo: true })] }] },

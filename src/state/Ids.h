@@ -85,6 +85,7 @@ namespace mosh::ids
     // with the edit; arm_track prefers it over first-match. NON-undoable
     // preference (written without the undo manager, like monitor mode).
     MOSH_DECLARE_ID (moshInputDevice)
+    MOSH_DECLARE_ID (moshInputDeviceKind)
 
     // FREEZE TRACK (Live 12 ⌥⇧⌘F) — a plain property on the track's own state
     // tree (like moshInputDevice): present ⇒ the track is frozen (rendered to
@@ -355,6 +356,12 @@ namespace mosh::ids
     // once, on first sight of that take (mosh::takeidentity::backfill), with a NULL
     // UndoManager — a lowercase dashed juce::Uuid string. Never reassigned.
     MOSH_DECLARE_ID (moshTakeId)
+    // CAP-001 — the measured peak (linear, 0..1+) of a landed recording's source file, set
+    // once at landing time so the UI can flag a take that captured nothing. Absent on
+    // imported/generated clips (honestly unmeasured), never re-measured.
+    MOSH_DECLARE_ID (moshPeakLevel)
+    // CAP-001 — the clip was adopted from crash residue (adopt_recording_residue).
+    MOSH_DECLARE_ID (moshRecovered)
 
 #undef MOSH_DECLARE_ID
 } // namespace mosh::ids

@@ -11,7 +11,7 @@ import { useSettings } from "../settings/store";
 import { useIsV2 } from "../v2/shellFlag";
 import { DEFAULT_KEY } from "../musicalKey";
 import { AgentComposer } from "./AgentComposer";
-import { IconListen, IconSpeaker, IconSpeakerMute } from "./icons";
+import { IconSpeaker, IconSpeakerMute } from "./icons";
 import "../vendor/moshi.js";
 import "../vendor/voice.js";
 
@@ -292,16 +292,7 @@ export function Moshi() {
     if (agentUtter) utterRef.current(agentUtter.intent, { affect: { valence: 0.6, arousal: 0.6 } });
   }, [agentUtter]);
 
-  // ── perk toward the user the moment hold-to-talk starts (he's listening to YOU)─
-  const agentListening = useStore((s) => s.agentListening);
-  useEffect(() => {
-    const m = apiRef.current; if (!m || !agentListening) return;
-    try { m.lookAt(0, 0.18); } catch { /* noop */ } // transient nudge; eases back on its own
-  }, [agentListening]);
-
   const toggleVoice = useStore((s) => s.toggleVoice);
-  const handsFreeOn = useStore((s) => s.handsFreeOn);
-  const setHandsFree = useStore((s) => s.setHandsFree);
   // In the redesign AND v2 shells the prompt lives in a dedicated bottom bar, so it's
   // not mounted here — mounted in exactly one place either way (no double mount). Only
   // the classic non-redesign layout owns the composer inside Moshi's dock.
@@ -321,19 +312,9 @@ export function Moshi() {
     <div className="moshi-dock" data-testid="moshi-stage">
       <div className="moshi-cap">
         <span className="moshi-state tc">{stateLabel}</span>
-        {/* Hands-free always-on listening. ON = mic hot, command phrases act without
-            holding the talk button. The `on` class + agentListening pulse the 👂. */}
-        <button className={`moshi-handsfree${handsFreeOn ? " on" : ""}${handsFreeOn && agentListening ? " hot" : ""}`}
-          data-testid="moshi-handsfree" aria-pressed={handsFreeOn}
-          title={handsFreeOn ? "Hands-free listening on — tap to turn off" : "Hands-free listening off — tap for always-on voice"}
-          aria-label={handsFreeOn ? "Turn off hands-free listening" : "Turn on hands-free listening"}
-          onClick={() => setHandsFree(!handsFreeOn)}><IconListen size={15} /></button>
         <button className="moshi-mute" data-testid="moshi-mute" aria-pressed={!voiceOn}
           title={voiceOn ? "Mute Moshi" : "Unmute Moshi"} aria-label={voiceOn ? "Mute Moshi" : "Unmute Moshi"}
           onClick={() => toggleVoice()}>{voiceOn ? <IconSpeaker size={15} /> : <IconSpeakerMute size={15} />}</button>
-        <span className="moshi-handsfree-status" role="status" aria-live="polite" data-testid="handsfree-status">
-          {handsFreeOn ? "hands-free on" : ""}
-        </span>
       </div>
       {/* data-mood drives ONLY a box-shadow tint on this canvas wrapper (HARD RULE:
           never transform/filter the live-GL .moshi-mount). */}

@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const preview = process.env.MOSH_E2E_PREVIEW === "1";
+const port = process.env.MOSH_E2E_PORT ?? "5173";
+const baseURL = `http://127.0.0.1:${port}`;
 
 // E2E harness — drives the REAL React WebView UI in a headless Chromium against the
 // Vite dev server. In dev, bridge.ts wires in the in-memory mock backend
@@ -23,7 +25,7 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL,
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -47,9 +49,9 @@ export default defineConfig({
   // lane builds with --mode e2e, where DEV is false and they never load.
   webServer: {
     command: preview
-      ? "MOSH_E2E_HERMETIC_BRAIN=1 npm run build:e2e && MOSH_E2E_HERMETIC_BRAIN=1 npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port 5173"
-      : "MOSH_E2E_HERMETIC_BRAIN=1 VITE_DISABLE_REACT_DEVTOOLS=1 VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=1 npm run dev -- --host 127.0.0.1",
-    url: "http://127.0.0.1:5173",
+      ? `MOSH_E2E_HERMETIC_BRAIN=1 npm run build:e2e && MOSH_E2E_HERMETIC_BRAIN=1 npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port ${port}`
+      : `MOSH_E2E_HERMETIC_BRAIN=1 VITE_DISABLE_REACT_DEVTOOLS=1 VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP=1 npm run dev -- --host 127.0.0.1 --port ${port}`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI && !preview,
     timeout: 120_000,
     stdout: "ignore",

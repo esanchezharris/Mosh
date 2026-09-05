@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP="${MOSH_INSTALLED_APP:-/Applications/Mosh.app}"
 BIN="$APP/Contents/MacOS/Mosh"
+OWNER_TEAM_ID="ZYT77F9B27"
 CLASS="full"
 DRY_RUN=false
 SKIP_DEPLOY=false
@@ -31,6 +32,7 @@ steps_json() {
   jq -nc --arg app "$APP" '[
     {name:"deploy", command:"./run-mosh.sh deploy"},
     {name:"codesign", command:"codesign --verify --deep --strict \($app)"},
+    {name:"team_id", command:"codesign TeamIdentifier == ZYT77F9B27"},
     {name:"installed_selftest_x3", command:"MOSH_NO_AUDIO=1 \($app)/Contents/MacOS/Mosh --selftest (3 isolated runs)"},
     {name:"installed_selftest_undo", command:"MOSH_NO_AUDIO=1 \($app)/Contents/MacOS/Mosh --selftest-undo"},
     {name:"macos_ui_automation", command:"MOSH_APP_BUNDLE=\($app) python3 scripts/macos-ui-automation-gate.py"},
@@ -60,6 +62,17 @@ run_logged() {
   step_result "$name" "$ok" "$log"
   rm -f "$log"
   [[ "$ok" == true ]]
+}
+
+verify_team_id() {
+  local app="$1" details actual
+  details="$(codesign -dv --verbose=4 "$app" 2>&1)" || return 1
+  actual="$(printf '%s\n' "$details" | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+  if [[ "$actual" != "$OWNER_TEAM_ID" ]]; then
+    printf 'expected TeamIdentifier=%s, got %s\n' "$OWNER_TEAM_ID" "${actual:-not set}" >&2
+    return 1
+  fi
+  printf 'TeamIdentifier=%s\n' "$actual"
 }
 
 run_selftest_x3() {
@@ -114,6 +127,7 @@ else
   capture_step run_logged deploy ./run-mosh.sh deploy
 fi
 capture_step run_logged codesign codesign --verify --deep --strict "$APP"
+capture_step run_logged team_id verify_team_id "$APP"
 
 if [[ -x "$BIN" ]]; then
   capture_step run_selftest_x3

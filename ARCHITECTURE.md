@@ -50,7 +50,7 @@ thread. The real-time RAVE/anira insert is a separately build-gated option
 | DAWN controller | src/dawn_bridge/, resources/ableton/MoshDawnController/, ui/src/companion/ | Native bridge, Ableton Live 11 Remote Script, and phone controller. The iPhone is a controller, not an audio recorder/uploader. |
 | UI shells | ui/src/ | Pro Tools fresh-settings default plus selectable Live, v2, and classic shells; UI-local view state remains outside MoshOps. |
 | Remote companion | src/remote/, ui/src/companion/ | Pairing, owner-local command/event paths, and phone surfaces. |
-| Brain, voice, telemetry | src/brain/, src/voice/, src/telemetry/ | Local/native integrations with opt-in telemetry and no repository secrets. |
+| Brain and telemetry | src/brain/, src/telemetry/ | Local agent integration with opt-in telemetry and no repository secrets. |
 
 ## Evidence and acceptance boundaries
 

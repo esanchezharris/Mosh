@@ -258,6 +258,13 @@ export type Clip = {
   midiLoopLengthBeats?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
+  // CAP-001 — only on takes landed by stop_recording: the source's measured peak (linear)
+  // and whether it is below -80 dBFS (a muted interface / wrong input). Imports and renders
+  // carry neither key (honestly unmeasured).
+  peakLevel?: number;
+  silent?: boolean;
+  // CAP-001 — adopted from crash residue (adopt_recording_residue).
+  recovered?: boolean;
   sourceLength?: number;
   notes?: MidiNote[];
   // Audio warp (auto-tempo): the clip re-anchors in beats and time-stretches to
@@ -683,6 +690,36 @@ export type ClickOutput = { name: string; isMidi: boolean };
 // backend pushes it into te::MidiInputDevice (mergeRecordings / replaceExistingClips /
 // quantisation) and te::Edit::recordingPunchInOut whenever it could matter, so these are
 // engine-wired settings rather than remembered ones.
+export type RecordingResidueEntry = {
+  file: string; name: string; trackName: string; take: number; readable: boolean;
+  seconds: number; sampleRate: number; startSeconds: number; decision: "adopt" | "quarantine";
+  modifiedAt?: string;
+  /** The header was never closed (the normal crash case); adopt repairs a copy. */
+  repairable?: boolean;
+};
+/** LAT-001 — measured round-trip latency calibration (a sweep through the speakers,
+ *  captured on the mic). `ms` is what was MEASURED; `appliedMs` is the residual Mosh
+ *  pushes into the record path on top of the device's own report; `stale` means a record
+ *  exists but was taken at a different sample rate or device pair and is NOT in effect.
+ *  Every key is always present on the wire (native defaults them); the whole block is
+ *  optional here only because an older backend will not send it. */
+export type LatencyCalibration = {
+  state: "idle" | "running" | "measured" | "failed";
+  frames: number;
+  sampleRate: number;
+  ms: number;
+  confidence: number;
+  measuredAt: string;
+  inputDevice: string;
+  outputDevice: string;
+  method: string;
+  deviceReportedSamples: number;
+  appliedMs: number;
+  applied: boolean;
+  stale: boolean;
+  error: string;
+};
+
 export type RecordOptions = {
   /** A new take MERGES into the clip it lands on instead of starting a fresh one. */
   overdub: boolean;
@@ -843,6 +880,11 @@ export type Snapshot = {
     // (recover_session) to restore work done since the last save. 0 ⇒ nothing to replay
     // (the notice is purely informational).
     recoverableCount?: number;
+    // CAP-001 — take WAVs the crashed session streamed to disk that no clip references.
+    // Present only with recoveryAvailable; each is adoptable (decision "adopt": lands at
+    // startSeconds on trackName through the normal import) or quarantinable (renamed in
+    // place, never deleted). list_recording_residue answers the same shape anytime.
+    recordingResidue?: RecordingResidueEntry[];
     // FS-T2 — third-party plugins implicated in a crash while the project was LOADING.
     // Present ⇒ the previous launch died mid-load with these being instantiated. Note this
     // is independent of recoveryAvailable: a load-time crash dies BEFORE the session.running
@@ -889,6 +931,9 @@ export type Snapshot = {
     // (show "—"). Smaller buffer size lowers it; monitoring is software-only.
     roundTripLatencyMs?: number;
     roundTripLatencySamples?: number;
+    // LAT-001 — the MEASURED round trip (calibrate_latency), distinct from the driver's
+    // claim above. See LatencyCalibration.
+    latencyCalibration?: LatencyCalibration;
     audioDeviceName?: string;
     /** The SYSTEM default output right now — may differ from audioDeviceName,
      *  because Mosh restores the device you last chose rather than following the
