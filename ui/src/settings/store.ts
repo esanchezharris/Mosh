@@ -59,7 +59,8 @@ function activeKeymap(values: Record<string, SettingValue>): string {
     case "live": return "ableton";
     case "protools": return "protools";
     case "classic":
-    case "v2": break;
+    case "v2":
+    case "v3": break;
     default: {
       const unreachable: never = shell;
       return unreachable;

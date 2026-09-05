@@ -19,4 +19,11 @@ describe("Pro Tools shell routing", () => {
     expect(devShellOverride()).toBe("live");
     expect(resolveShell("protools")).toBe("live");
   });
+
+  it("resolves the additive v3 shell from setting and query", () => {
+    expect(resolveShell("v3")).toBe("v3");
+    window.history.replaceState({}, "", "/?shell=v3");
+    expect(devShellOverride()).toBe("v3");
+    expect(resolveShell("protools")).toBe("v3");
+  });
 });

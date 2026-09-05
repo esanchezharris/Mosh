@@ -23,4 +23,14 @@ describe("settingHiddenForShell", () => {
                              ["Plugins", "scanAU"], ["Privacy", "telemetryOptIn"]] as const)
       expect(settingHiddenForShell("live", cat, id)).toBe(false);
   });
+
+  it("v3 hides skin, classic redesign, PT fades, and Live dock prefs", () => {
+    expect(settingHiddenForShell("v3", "Appearance", "skin")).toBe(true);
+    expect(settingHiddenForShell("v3", "Layout", "redesignShell")).toBe(true);
+    expect(settingHiddenForShell("v3", "Pro Tools", "protoolsDefaultFadeLengthMs")).toBe(true);
+    expect(settingHiddenForShell("v3", "Layout", "liveDockHeight")).toBe(true);
+    expect(settingHiddenForShell("v3", "Layout", "uiShell")).toBe(false);
+    expect(settingHiddenForShell("v3", "Appearance", "colorway")).toBe(false);
+    expect(settingHiddenForShell("v3", "Moshi", "agentConfirmDestructive")).toBe(false);
+  });
 });

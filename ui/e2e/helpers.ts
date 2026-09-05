@@ -82,6 +82,19 @@ export async function bootLive(page: Page, opts: { values?: Record<string, unkno
   await expect(page.getByTestId("live-timeline")).toBeVisible();
 }
 
+/** Boot the additive v3 agentic DAW shell via `?shell=v3`. */
+export async function bootV3(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({
+      version: 2, template: null, values: { colorway: "lime" }, keyOverrides: {},
+    }));
+  });
+  await page.goto("/?shell=v3");
+  await expect(page.getByTestId("v3-shell")).toBeVisible();
+  await expect(page.getByTestId("v3-arrangement")).toBeVisible();
+}
+
 /** Boot the Pro Tools Edit Window shell against the isolated in-memory backend. */
 export async function bootProTools(page: Page): Promise<void> {
   await page.addInitScript(() => {
