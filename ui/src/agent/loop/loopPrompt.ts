@@ -98,6 +98,16 @@ const MODE_INSTRUCTION: Record<TaskContextMode, (c: TaskContext) => string> = {
   continue: () => 'If the TASK is complete, reply status "done". Otherwise give the next commands.',
 };
 
+/** ` (trackId "17", busNumber 0)` — the ids a step result carried, right after the
+ *  command name so the model chains the next call on the real id. String ids are
+ *  quoted exactly like the session render's (the string-id contract); numbers stay
+ *  bare. Empty string when the result carried none, so the line is byte-identical
+ *  to the pre-slice-4 shape. */
+const renderResultIds = (ids: StepRecord["results"][number]["ids"]): string => {
+  const parts = Object.entries(ids ?? {}).map(([k, v]) => `${k} ${typeof v === "string" ? JSON.stringify(v) : String(v)}`);
+  return parts.length ? ` (${parts.join(", ")})` : "";
+};
+
 export function renderTaskContext(c: TaskContext): string {
   const lines: string[] = [`TASK: ${c.ask}`];
   if (c.plan.length) {
@@ -112,7 +122,7 @@ export function renderTaskContext(c: TaskContext): string {
     c.history.forEach((s, i) => {
       lines.push(`  step ${i + 1}:`);
       for (const r of s.results)
-        lines.push(`    ${r.command} → ${r.ok ? "ok" : `ERROR: ${r.error ?? "failed"}`}`);
+        lines.push(`    ${r.command}${renderResultIds(r.ids)} → ${r.ok ? "ok" : `ERROR: ${r.error ?? "failed"}`}`);
       if (s.results.length === 0) lines.push("    (no commands executed)");
     });
   }

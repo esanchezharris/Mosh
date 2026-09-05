@@ -193,6 +193,35 @@ describe("renderTaskContext", () => {
   });
 });
 
+describe("renderTaskContext — result ids (step-1 slice 4)", () => {
+  // The ids a command minted (taskExec's pickResultIds) are printed right after the
+  // command name so the model can chain the next call on the REAL id instead of
+  // guessing. The system prompt builders are not involved — see the pins above.
+  const base = { ask: "add a vocal track and a reverb bus", plan: [], planIdx: 0, stepsLeft: 7, repliesLeft: 9, mode: "continue" as const };
+
+  it("prints a result's ids after the command name — string ids quoted like the session's, numbers bare", () => {
+    const ctx = renderTaskContext({ ...base, history: [{
+      commands: [{ command: "create_track", args: { name: "Vocal" } }, { command: "create_bus", args: { name: "Reverb" } }],
+      results: [
+        { command: "create_track", ok: true, ids: { trackId: "17" } },
+        { command: "create_bus", ok: true, ids: { busNumber: 0, trackId: "18" } },
+      ],
+      invalidCount: 0, ms: 5,
+    }] });
+    expect(ctx).toContain('    create_track (trackId "17") → ok');
+    expect(ctx).toContain('    create_bus (busNumber 0, trackId "18") → ok');
+  });
+
+  it("a result without ids renders exactly as before — no empty parenthesis", () => {
+    const ctx = renderTaskContext({ ...base, history: [{
+      commands: [{ command: "set_tempo", args: { bpm: 100 } }],
+      results: [{ command: "set_tempo", ok: true }],
+      invalidCount: 0, ms: 5,
+    }] });
+    expect(ctx.split("\n").find((l) => l.includes("set_tempo"))).toBe("    set_tempo → ok");
+  });
+});
+
 describe("legacy prompt semantic contract", () => {
   // Assert what the single-shot prompt must contain — the master line whose absence made
   // master-trim unsolvable single-shot, and the key it was also dropping.

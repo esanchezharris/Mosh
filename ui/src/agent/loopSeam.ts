@@ -21,6 +21,12 @@ export type StepCommandResult = {
   readonly command: string;
   readonly ok: boolean;
   readonly error?: string;
+  /** The ids the command's result payload minted or named — a pick of
+   *  {trackId, clipId, bus, busNumber, index, padId} from the raw `data`
+   *  (loop/taskExec.ts pickResultIds), so the model can chain the next call on
+   *  the REAL id instead of guessing (step-1 slice 4). Absent, not empty, when
+   *  the payload carried none; the rest of `data` still never reaches the model. */
+  readonly ids?: Readonly<Record<string, string | number>>;
 };
 
 /** One model step: what it said, what it tried, what actually happened. */

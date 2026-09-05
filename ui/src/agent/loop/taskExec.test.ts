@@ -4,7 +4,7 @@
 // proven on the same path the app ships.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTaskExecutor } from "./taskExec";
+import { createTaskExecutor, pickResultIds } from "./taskExec";
 import { DESTRUCTIVE_BLOCK_REASON } from "../destructiveScreen";
 import { useStore } from "../../store";
 import { __resetMockForTests } from "../../bridge.mock";
@@ -146,5 +146,63 @@ describe("createTaskExecutor — one undo unit per agent task", () => {
     await t.close();
     await t.close(); // second close is a no-op, not an error
     await expect(t.env.runBatch("late", [{ command: "create_track", args: { name: "Y" } }])).rejects.toThrow(/closed/);
+  });
+});
+
+describe("createTaskExecutor — result ids reach the step results (step-1 slice 4)", () => {
+  // Before this slice the step envelope was {command, ok, error} and `data` was
+  // dropped, so a trackId/clipId/busNumber a command minted never reached the model
+  // — it had to guess (or re-read the session) to chain the next call.
+  beforeEach(async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+  });
+
+  it("keeps the ids a result payload carries (create_track → trackId, create_bus → busNumber+trackId) and nothing else", async () => {
+    const t = createTaskExecutor("build", {});
+    const s = await t.env.runBatch("step 1", [
+      { command: "create_track", args: { name: "Vocal" } },
+      { command: "create_bus", args: { name: "Reverb" } },
+    ]);
+    const vocal = s.snapshot.tracks.find((x) => x.name === "Vocal")!;
+    expect(s.results[0]).toMatchObject({ command: "create_track", ok: true, ids: { trackId: vocal.id } });
+    expect(Object.keys(s.results[0]!.ids!)).toEqual(["trackId"]);
+    const reverb = s.snapshot.buses!.find((b) => b.name === "Reverb")!;
+    // the mock's create_bus payload is {busNumber, trackId, name} — `name` is not an id
+    expect(s.results[1]!.ids).toEqual({ busNumber: reverb.bus, trackId: reverb.trackId });
+    await t.close();
+  });
+
+  it("a result whose payload carries no ids has NO ids field at all (and neither does a rejected call)", async () => {
+    const t = createTaskExecutor("tempo", {});
+    const s = await t.env.runBatch("step 1", [
+      { command: "set_tempo", args: { bpm: 100 } },
+      { command: "definitely_not_a_command", args: {} },
+    ]);
+    expect(s.results[0]).toMatchObject({ command: "set_tempo", ok: true });
+    expect("ids" in s.results[0]!).toBe(false);
+    expect(s.results[1]!.ok).toBe(false);
+    expect("ids" in s.results[1]!).toBe(false);
+    await t.close();
+  });
+});
+
+describe("pickResultIds — the loop-safe subset of a result payload", () => {
+  it("picks only the id keys, in a stable order, from an object payload", () => {
+    expect(pickResultIds({ name: "x", clipId: "101", trackId: "17", nested: { trackId: "nope" } }))
+      .toEqual({ trackId: "17", clipId: "101" });
+    expect(Object.keys(pickResultIds({ clipId: "101", trackId: "17" })!)).toEqual(["trackId", "clipId"]);
+  });
+
+  it("returns undefined for a payload without ids, an array, a primitive, or nothing", () => {
+    expect(pickResultIds(undefined)).toBeUndefined();
+    expect(pickResultIds(true)).toBeUndefined();
+    expect(pickResultIds([{ trackId: "17" }])).toBeUndefined();
+    expect(pickResultIds({ name: "Kept", db: -3 })).toBeUndefined();
+  });
+
+  it("keeps numeric ids (busNumber 0, index 0, padId) and drops empty or non-finite values", () => {
+    expect(pickResultIds({ busNumber: 0, index: 0, padId: 3, bus: 1 })).toEqual({ bus: 1, busNumber: 0, index: 0, padId: 3 });
+    expect(pickResultIds({ trackId: "", clipId: null, padId: Number.NaN })).toBeUndefined();
   });
 });
