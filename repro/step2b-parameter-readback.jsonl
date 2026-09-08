@@ -17,3 +17,6 @@
 {"command":"__snapshot","args":{"label":"master_redo"}}
 {"command":"set_plugin_param","args":{"trackId":"${T}","index":"${HP}","paramIndex":999,"value":0.4}}
 {"command":"__snapshot","args":{"label":"invalid_unchanged"}}
+{"command":"save"}
+{"command":"reload"}
+{"command":"__snapshot","args":{"label":"reloaded"}}

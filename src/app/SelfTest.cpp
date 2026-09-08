@@ -3419,6 +3419,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
+        const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
+        const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
+        check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
+        check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
+                   && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,
+               "reloaded track highpass retains normalized value, display and physical limits");
+        check (masterBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz"
+                   && JSON::toString (masterBuiltin ("highpass")["params"]) == masterReadbackBeforeReload,
+               "reloaded master highpass retains normalized value, display and physical limits");
+
         // Leave the master bus as we found it: the next section ("Master bus plugins")
         // asserts it starts empty, and this section's redo'd highpass + softclip were
         // being left behind (11 downstream failures, 2026-09-02).
