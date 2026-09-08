@@ -22,6 +22,8 @@ import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge"
 import { activeShell } from "../v2/shellFlag";
 import { matchIssueReport } from "../agent/issueRoute";
 import { IssueInbox } from "./IssueInbox";
+import { useProducerRack } from "../agent/loop/producerRack";
+import { ProducerRackSetup } from "./ProducerRackSetup";
 
 export function AgentComposer() {
   const agentBusy = useStore((s) => s.agentBusy);
@@ -131,6 +133,11 @@ export function AgentComposer() {
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+      if (useProducerRack.getState().rack) {
+        if (!loopAllowed()) throw new Error("The Producer loop is unavailable in this session");
+        await runLoopTask(text, { say: setSay, utter: pushAgentUtter });
+        return;
+      }
 
       const issue = matchIssueReport(text);
       if (issue) {
@@ -243,6 +250,7 @@ export function AgentComposer() {
 
   return (
     <div className="agent-composer">
+      {loopAllowed() && <ProducerRackSetup />}
       {inboxOpen && <IssueInbox onClose={() => setInboxOpen(false)} />}
       {brainRuntime && <div className={`agent-runtime ${brainRuntime.state}`} aria-live="polite"
         title={brainRuntime.error || brainRuntime.model || "Local brain"}>

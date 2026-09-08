@@ -1,9 +1,70 @@
 #include <catch2/catch_test_macros.hpp>
 #include "moshops/AgentTxn.h"
+#include "moshops/AgentRequest.h"
 #include "moshops/TransactionSafe.h"
 
 using namespace juce;
 namespace tx = mosh::agenttxn;
+
+TEST_CASE ("agent request ledger preserves identity without payloads", "[agentrequest]")
+{
+    mosh::agentrequest::Record record;
+    record.requestId = "request-1";
+    record.projectId = "opaque-project";
+    record.payloadDigest = "opaque-payload";
+    record.status = "applying";
+    auto encoded = mosh::agentrequest::toLedger (record);
+    auto decoded = mosh::agentrequest::fromLedger (encoded);
+    REQUIRE (decoded.has_value());
+    REQUIRE (decoded->requestId == record.requestId);
+    REQUIRE (decoded->status == "unresolved");
+    REQUIRE_FALSE (encoded.hasProperty ("payload"));
+    REQUIRE_FALSE (encoded.hasProperty ("commands"));
+    REQUIRE_FALSE (encoded.hasProperty ("args"));
+    REQUIRE (tx::unresolvedIdsIn ({ JSON::toString (encoded, true) }).isEmpty());
+    record.status = "committed";
+    record.nativeCommitted = true;
+    REQUIRE (mosh::agentrequest::fromLedger (mosh::agentrequest::toLedger (record))->status == "committed");
+    REQUIRE (mosh::agentrequest::fromLedger (mosh::agentrequest::toLedger (record))->nativeCommitted);
+    record.status = "prepared";
+    REQUIRE (mosh::agentrequest::fromLedger (mosh::agentrequest::toLedger (record))->status == "prepared");
+    record.status = "unrecognised_status";
+    REQUIRE (mosh::agentrequest::fromLedger (mosh::agentrequest::toLedger (record))->status == "unresolved");
+}
+
+TEST_CASE ("agent request identities and patch admission are bounded", "[agentrequest]")
+{
+    REQUIRE (mosh::agentrequest::validId ("req-123_abc"));
+    REQUIRE_FALSE (mosh::agentrequest::validId ("/Users/owner/session"));
+    REQUIRE_FALSE (mosh::agentrequest::validId (""));
+    REQUIRE (mosh::agentrequest::allowedCommand ("set_track_volume"));
+    REQUIRE (mosh::agentrequest::allowedCommand ("set_plugin_param"));
+    REQUIRE (mosh::agentrequest::allowedCommand ("bypass_plugin"));
+    REQUIRE_FALSE (mosh::agentrequest::allowedCommand ("export_audio"));
+    REQUIRE_FALSE (mosh::agentrequest::allowedCommand ("load_plugin"));
+}
+
+TEST_CASE ("agent request fault injection requires owned isolation and exact request", "[agentrequest]")
+{
+    REQUIRE (mosh::agentrequest::faultAllowed (true, "_harness/s3-fixture", "request-1", "request-1"));
+    REQUIRE_FALSE (mosh::agentrequest::faultAllowed (false, "_harness/s3-fixture", "request-1", "request-1"));
+    REQUIRE_FALSE (mosh::agentrequest::faultAllowed (true, "session", "request-1", "request-1"));
+    REQUIRE_FALSE (mosh::agentrequest::faultAllowed (true, "_harness/s3-fixture", "request-2", "request-1"));
+    REQUIRE_FALSE (mosh::agentrequest::faultAllowed (true, "_harness/s3-fixture", "", ""));
+}
+
+TEST_CASE ("agent request journal removal preserves unrelated raw history", "[agentrequest]")
+{
+    const String earlier = "{\"c\":\"set_track_volume\",\"a\":{\"db\":-2}}\n";
+    const String ours = "{\"agentRequestId\":\"request-1\",\"agentProjectId\":\"project-1\"}\n";
+    const String other = "{\"agentRequestId\":\"request-2\",\"agentProjectId\":\"project-1\"}\n";
+    const String later = "  {\"c\":\"set_track_pan\"}\n{torn";
+    const auto full = earlier + ours + other + later;
+    REQUIRE (mosh::agentrequest::removeOwnedJournalRows (full, "request-1", "project-1") == earlier + other + later);
+    REQUIRE (mosh::agentrequest::removeOwnedJournalRows (full, "request-1", "project-2") == full);
+    REQUIRE (mosh::agentrequest::removeOwnedJournalRows (full, "absent", "project-1") == full);
+    REQUIRE (mosh::agentrequest::removeOwnedJournalRows ("", "request-1", "project-1").isEmpty());
+}
 
 // FS-B2a — the ENGINE-FREE half of the batch-transaction contract. Everything here runs
 // with no Tracktion engine and no session on disk, which is the only honest way to prove

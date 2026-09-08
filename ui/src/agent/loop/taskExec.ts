@@ -27,11 +27,13 @@ import { bumpPatternUsesIfMatched } from "../memory/usesTracking";
 import type { AgentEnv, StepCommandResult } from "../loopSeam";
 import type { SessionKey, Snapshot } from "../../types";
 import { awaitRendersSettled, RENDER_JOB_COMMANDS } from "./jobWait";
+import { createNativeTaskExecutor, type NativeTaskBinding } from "./nativeTask";
 
 export type TaskMeta = { utterance?: string; source?: string };
 
 type ExecResult = { ok: boolean; error?: string; data?: unknown };
 export type TaskExecDeps = {
+  bounded?: NativeTaskBinding;
   /** Step-1 slice 6 — the third argument is the task's provenance (`meta.source`,
    *  default "agent_loop"), forwarded as the `origin` sibling on every envelope. */
   exec?: (command: string, args?: Record<string, unknown>, origin?: string) => Promise<ExecResult>;
@@ -119,6 +121,7 @@ export type TaskExecutor = {
 };
 
 export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: TaskExecDeps = {}): TaskExecutor {
+  if (deps.bounded) return createNativeTaskExecutor(deps.bounded, deps);
   const seam = deps.exec
     ?? ((c: string, a?: Record<string, unknown>, o?: string) => useStore.getState().exec(c, a, undefined, o));
   // Step-1 slice 6 — ONE provenance value for the whole task: the same `source` the

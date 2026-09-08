@@ -325,6 +325,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
     initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
+    initAgentRequests();
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     // Live-note audition: we ARE the wasted-message listener, registered for our whole
@@ -780,6 +781,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "batch_begin")       return cmdBatchBegin (args);
     if (name == "batch_end")         return cmdBatchEnd (args);
     if (name == "batch_status")      return cmdBatchStatus (args);      // FS-B2a
+    if (name == "get_agent_context" || name == "begin_agent_request"
+        || name == "apply_agent_patch" || name == "get_agent_request"
+        || name == "cancel_agent_request" || name == "undo_agent_request")
+        return cmdAgentRequest (name, args);
     if (name == "batch_rollback")    return cmdBatchRollback (args);    // FS-B2a
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
@@ -1623,7 +1628,13 @@ void MoshOps::appendTxnLedger (const agenttxn::Record& record)
             lines.remove (lines.size() - 1);
         if (lines.size() > kMaxLedgerLines)
         {
-            lines.removeRange (0, lines.size() - kKeepLedgerLines);
+            int legacyCount = 0;
+            for (const auto& line : lines)
+                if (JSON::parse (line)["kind"].toString() != "agent_request") ++legacyCount;
+            for (int i = 0; i < lines.size() && legacyCount > kKeepLedgerLines;)
+                if (JSON::parse (lines[i])["kind"].toString() != "agent_request")
+                { lines.remove (i); --legacyCount; }
+                else ++i;
             txnLedgerFile.replaceWithText (lines.joinIntoString ("\n") + "\n");
         }
     }
@@ -4195,6 +4206,8 @@ void MoshOps::emitSnapshotInvalidated()
 
 void MoshOps::emitProjectReplaced (const juce::String& reason)
 {
+    agentEpoch_ = juce::Uuid().toString();
+    txnFingerprintRevision_ = -1;
     auto* payload = new DynamicObject();
     payload->setProperty ("projectReplaced", true);
     payload->setProperty ("reason", reason);
@@ -4411,6 +4424,11 @@ void MoshOps::appendRecoveryJournal (const juce::String& name, const juce::var& 
     o->setProperty ("c", name);
     o->setProperty ("a", args);
     o->setProperty ("r", result.getProperty ("data", var()));  // assigned ids → id-rebinding on replay
+    if (activeAgentJournalRequest_.isNotEmpty())
+    {
+        o->setProperty ("agentRequestId", activeAgentJournalRequest_);
+        o->setProperty ("agentProjectId", agentProjectId());
+    }
     recoveryJournalFile.appendText (JSON::toString (var (o), true) + "\n");
 }
 

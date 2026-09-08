@@ -17,6 +17,8 @@ import { activeShell } from "../v2/shellFlag";
 import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge";
 import { IconArrowUp, IconMic } from "../ui/icons";
 import { MoshiFace } from "./MoshiFace";
+import { useProducerRack } from "../agent/loop/producerRack";
+import { ProducerRackSetup } from "../ui/ProducerRackSetup";
 
 export function recordingDisablesDock(recording: boolean): boolean {
   return recording;
@@ -119,6 +121,11 @@ export function MoshiDock() {
     setInput(""); setSay(null); setChoices([]); setAgentBusy(true);
     try {
       const st = useStore.getState();
+      if (useProducerRack.getState().rack) {
+        if (!loopAllowed()) throw new Error("The Producer loop is unavailable in this session");
+        await runLoopTask(text, { say: setSay, utter: pushAgentUtter });
+        return;
+      }
       const issue = matchIssueReport(text);
       if (issue) {
         const result = await st.exec("report_issue", {
@@ -224,6 +231,7 @@ export function MoshiDock() {
 
   return (
     <div className={`prompt${safe ? " safe" : ""}`} data-testid="v3-moshi-dock" data-recording-safe={safe || undefined}>
+      {!safe && loopAllowed() && <ProducerRackSetup />}
       {receipt && (
         <div className="receipt" data-testid="v3-receipt" role="status">
           <span>{receipt.entries[0]?.summary ?? receipt.label}</span>

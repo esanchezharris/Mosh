@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 import type { AgentCommandCall } from "../destructiveScreen";
-import type { StepCommandResult } from "../loopSeam";
+import type { AgentExecution, StepCommandResult } from "../loopSeam";
 import type { LoopOutcome, LoopProgressEvent, LoopRun } from "./loop";
 
 export type StepView = {
@@ -17,6 +17,7 @@ export type StepView = {
 };
 
 export type TaskView = {
+  execution?: AgentExecution;
   ask: string;
   phase: "planning" | "stepping" | "repairing" | "finalizing";
   plan: readonly { goal: string }[];
@@ -42,7 +43,8 @@ interface TaskState {
 
   begin(ask: string): { aborted: boolean };
   progress(ev: LoopProgressEvent): void;
-  finish(run: LoopRun): void;
+  finish(run: Pick<LoopRun, "outcome" | "say" | "execution">): void;
+  updateExecution(execution: AgentExecution): void;
   requestStop(): void;
   setDrawerOpen(b: boolean): void;
   setSink(sink: AgentHistorySink | null): void;
@@ -88,14 +90,23 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   finish(run) {
     const cur = get().current;
     if (!cur) return;
-    const done: TaskView = { ...cur, phase: "finalizing", outcome: run.outcome, say: run.say ?? cur.say, endedAt: Date.now() };
+    const previous = run.execution ? get().history.find((task) => task.execution?.requestId === run.execution?.requestId) : undefined;
+    const done: TaskView = { ...cur, phase: "finalizing", outcome: run.outcome, say: run.say ?? cur.say, execution: run.execution, endedAt: Date.now(),
+      ...(previous && cur.steps.length === 0 ? { steps: previous.steps, plan: previous.plan } : {}) };
     get().sink?.append(done);
-    set((s) => ({ current: null, last: done, history: [...s.history, done], signal: null }));
+    set((s) => ({ current: null, last: done,
+      history: [...s.history.filter((task) => !run.execution || task.execution?.requestId !== run.execution.requestId), done], signal: null }));
   },
 
   requestStop() {
     const sig = get().signal;
     if (sig) sig.aborted = true;
+  },
+
+  updateExecution(execution) {
+    const update = (task: TaskView): TaskView => task.execution?.requestId === execution.requestId
+      && task.execution.projectId === execution.projectId ? { ...task, execution } : task;
+    set((state) => ({ history: state.history.map(update), last: state.last ? update(state.last) : null }));
   },
 
   setDrawerOpen(b) { set({ drawerOpen: b }); },

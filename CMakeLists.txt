@@ -310,6 +310,7 @@ if (MOSH_BUILD_APP)
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
+        src/moshops/MoshOps.AgentRequest.cpp
         src/moshops/MoshOps.Lyrics.cpp
         src/moshops/MoshOps.Notes.cpp
         src/moshops/MoshOps.Live.cpp

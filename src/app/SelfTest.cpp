@@ -15843,6 +15843,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
+    {
+        section ("S3-REQUEST: native bounded patch identity, ownership, stale refusal and partial failure");
+        const auto created = cmd (ops, "create_track", objN ({ { "name", "S3 request fixture" } }));
+        const auto requestTrackId = created["data"]["trackId"].toString();
+        check (requestTrackId.isNotEmpty(), "S3 request fixture exists");
+        const auto pre = agenttxn::fingerprint (ops.snapshot());
+        const auto context = cmd (ops, "get_agent_context")["data"];
+        auto request = [&] (const String& id) {
+            return objN ({ { "requestId", id }, { "projectId", context["projectId"] },
+                           { "payload", "S3 native fixture" } });
+        };
+        auto patch = [&] (const String& id, const var& observed, const Array<var>& commands) {
+            auto args = request (id);
+            args.getDynamicObject()->setProperty ("epoch", observed["epoch"]);
+            args.getDynamicObject()->setProperty ("revision", observed["revision"]);
+            args.getDynamicObject()->setProperty ("commands", commands);
+            return args;
+        };
+        auto level = [&] (double db) {
+            return objN ({ { "command", "set_track_volume" },
+                           { "args", objN ({ { "trackId", requestTrackId }, { "db", db } }) } });
+        };
+        const auto first = request ("s3-native-first");
+        check (ok (cmd (ops, "begin_agent_request", first)), "S3 reserve succeeds");
+        const auto concurrent = cmd (ops, "begin_agent_request", first);
+        check ((bool) concurrent["data"]["inProgress"] && (bool) concurrent["data"]["replayed"],
+               "S3 concurrent reservation identifies work already running");
+        const auto proposal = patch ("s3-native-first", context, { level (-6.0), level (3.0) });
+        const auto applied = cmd (ops, "apply_agent_patch", proposal);
+        check (ok (applied) && applied["data"]["status"].toString() == "committed"
+               && (int) applied["data"]["appliedCount"] == 2
+               && applied["data"]["results"].size() == 2, "S3 complete bounded patch reports both native results");
+        const auto committed = agenttxn::fingerprint (ops.snapshot());
+        check (committed != pre, "S3 committed patch has real effects");
+        const auto requestJournal = eng.sessionDir().getChildFile ("recovery-journal.jsonl");
+        check (requestJournal.loadFileAsString().contains ("s3-native-first"),
+               "S3 native patch retains tagged recovery journal coverage");
+        const auto replay = cmd (ops, "apply_agent_patch", proposal);
+        check (ok (replay) && (bool) replay["data"]["replayed"]
+               && agenttxn::fingerprint (ops.snapshot()) == committed,
+               "S3 terminal replay precedes now-stale context and performs no mutation");
+        auto conflict = first.clone();
+        conflict.getDynamicObject()->setProperty ("payload", "a different request");
+        check (! ok (cmd (ops, "begin_agent_request", conflict)), "S3 same ID different payload conflicts");
+        check (ok (cmd (ops, "set_track_volume", objN ({ { "trackId", requestTrackId }, { "db", -2.0 } }))),
+               "S3 ordinary manual edit works after native application returns");
+        const auto manual = agenttxn::fingerprint (ops.snapshot());
+        const auto journalWithManual = requestJournal.loadFileAsString();
+        check (! ok (cmd (ops, "undo_agent_request", first))
+               && agenttxn::fingerprint (ops.snapshot()) == manual,
+               "S3 task undo refuses a newer manual head and preserves it");
+        check (ok (cmd (ops, "undo")) && agenttxn::fingerprint (ops.snapshot()) == committed,
+               "S3 normal undo removes only newer manual edit");
+        check (ok (cmd (ops, "undo_agent_request", first)) && agenttxn::fingerprint (ops.snapshot()) == pre,
+               "S3 one owned undo restores entire two-command patch");
+        check (requestJournal.loadFileAsString() == agentrequest::removeOwnedJournalRows (
+                   journalWithManual, "s3-native-first", context["projectId"].toString()),
+               "S3 task undo removes only its journal rows and preserves unrelated manual history");
+        check (ok (cmd (ops, "undo_agent_request", first)) && agenttxn::fingerprint (ops.snapshot()) == pre,
+               "S3 repeated task undo removes no earlier work");
+
+        check (ok (cmd (ops, "begin_agent_request", request ("s3-native-stale"))), "S3 stale fixture reserved");
+        const auto stale = cmd (ops, "get_agent_context")["data"];
+        cmd (ops, "set_track_volume", objN ({ { "trackId", requestTrackId }, { "db", -1.0 } }));
+        const auto moved = agenttxn::fingerprint (ops.snapshot());
+        check (! ok (cmd (ops, "apply_agent_patch", patch ("s3-native-stale", stale, { level (-6.0) })))
+               && agenttxn::fingerprint (ops.snapshot()) == moved,
+               "S3 final native precondition rejects intervening manual change without mutation");
+        cmd (ops, "undo");
+
+        const auto partialRequest = request ("s3-native-partial");
+        check (ok (cmd (ops, "begin_agent_request", partialRequest)), "S3 partial fixture reserved");
+        const auto beforePartial = agenttxn::fingerprint (ops.snapshot());
+        const auto journalBeforePartial = requestJournal.loadFileAsString();
+        const auto invalid = objN ({ { "command", "set_track_volume" },
+                                    { "args", objN ({ { "trackId", "nonexistent" }, { "db", -6.0 } }) } });
+        const auto partial = cmd (ops, "apply_agent_patch", patch ("s3-native-partial",
+            cmd (ops, "get_agent_context")["data"], { level (-6.0), invalid }));
+        check (! ok (partial) && partial["data"]["status"].toString() == "rolled_back"
+               && (int) partial["data"]["appliedCount"] == 1 && partial["data"]["results"].size() == 2,
+               "S3 partial error preserves exact applied and failed native results");
+        check (agenttxn::fingerprint (ops.snapshot()) == beforePartial,
+               "S3 partial error rolls back exactly with no foreign work removed");
+        check (requestJournal.loadFileAsString() == journalBeforePartial,
+               "S3 proven rollback preserves earlier journal exactly and cannot resurrect its step");
+        const auto cancelRequest = request ("s3-native-cancel");
+        cmd (ops, "begin_agent_request", cancelRequest);
+        check (cmd (ops, "cancel_agent_request", cancelRequest)["data"]["status"].toString() == "cancelled",
+               "S3 cancellation before application records no effects");
+        const auto cancelled = cmd (ops, "apply_agent_patch", patch ("s3-native-cancel",
+            cmd (ops, "get_agent_context")["data"], { level (-6.0) }));
+        check (cancelled["data"]["status"].toString() == "cancelled"
+               && agenttxn::fingerprint (ops.snapshot()) == beforePartial,
+               "S3 late application after cancellation cannot mutate");
+        cmd (ops, "remove_track", objN ({ { "trackId", requestTrackId } }));
+    }
+
     // FS-B2a — the agent batch-TRANSACTION contract, against a REAL engine.
     // Spec: docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md, one section per acceptance
     // bullet. Runs after the undo matrix, so the fixture is a richly-mutated project —

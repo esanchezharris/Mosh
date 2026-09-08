@@ -10,6 +10,7 @@
 #include "engine/MoshEngine.h"
 #include "audio/LatencyCalibrationSession.h"
 #include "moshops/AgentTxn.h"
+#include "moshops/AgentRequest.h"
 #include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
 #include "plugins/mixer/TrackMutePlugin.h"
@@ -1202,6 +1203,18 @@ private:
     /** Called by recover_session / discard_recovery: T2's human-gated resolution of a
         crash-interrupted transaction. `provedPostState` = the journal tail was replayed. */
     void         resolveUnresolvedTxns (bool provedPostState);
+
+    std::map<juce::String, agentrequest::Record> agentRequests_;
+    juce::String agentEpoch_ = juce::Uuid().toString();
+    juce::String agentRestartCheck_;
+    juce::String activeAgentJournalRequest_;
+    juce::String agentProjectId() const;
+    void initAgentRequests();
+    bool persistAgentRequest (const agentrequest::Record& record);
+    bool removeAgentRecoveryRows (const agentrequest::Record& record);
+    juce::var agentRequestStatus (agentrequest::Record& record, bool replayed = false);
+    juce::var cmdAgentRequest (const juce::String& command, const juce::var& args);
+    juce::var applyAgentPatch (agentrequest::Record& record, const juce::var& args);
 
     double      lastPresenceBroadcastMs = 0.0;
 
