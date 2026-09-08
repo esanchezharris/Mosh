@@ -368,6 +368,10 @@ export type PluginParam = {
   index: number;
   name: string;
   value: number;
+  display?: string;
+  unit?: string;
+  min?: number;
+  max?: number;
   automated?: boolean;
   points?: AutoPoint[];
   /** Stepped, not continuous: the engine snaps every applied value (including each

@@ -11,6 +11,7 @@
 #include "ClipGainEnvelope.h"
 #include "ExportRange.h"
 #include "ScanProgress.h"
+#include "PluginParameterReadback.h"
 #include "StemExport.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
@@ -38,6 +39,23 @@ using namespace juce;
 namespace
 {
     constexpr double kMinMidiNoteBeats = 0.0625;
+
+    std::optional<juce::Range<float>> pluginParameterPhysicalRange (te::Plugin& plugin,
+                                                                 te::AutomatableParameter& parameter)
+    {
+        if (auto* filter = dynamic_cast<te::LowPassPlugin*> (&plugin))
+            if (filter->frequency.get() == &parameter)
+                return parameter.getValueRange();
+
+        if (auto* compressor = dynamic_cast<te::CompressorPlugin*> (&plugin))
+            if (compressor->attackMs.parameter.get() == &parameter
+                || compressor->releaseMs.parameter.get() == &parameter
+                || compressor->outputDb.parameter.get() == &parameter
+                || compressor->sidechainDb.parameter.get() == &parameter)
+                return parameter.getValueRange();
+
+        return std::nullopt;
+    }
 
     juce::String pluginRackTopology (te::Edit& edit)
     {
@@ -3111,6 +3129,7 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         po->setProperty ("index", i);
         po->setProperty ("name", param->getParameterName());
         po->setProperty ("value", param->getCurrentNormalisedValue());
+        addPluginParameterReadback (*po, *param, pluginParameterPhysicalRange (p, *param));
         // CAP-AUT-006 — a stepped parameter (the mute gate is the first) is applied
         // through snapToState, so the editor must snap its points to the same states
         // instead of drawing a value the engine will never use. Only emitted when true,

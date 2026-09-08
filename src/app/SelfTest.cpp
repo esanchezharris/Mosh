@@ -3113,7 +3113,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
           if (auto* arr = trk.getProperty ("plugins", var()).getArray())
             for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == cidx)
             { compFlagged = (bool) p.getProperty ("builtin", false);
-              compCategorised = p.getProperty ("category", var()).toString() == "Dynamics"; } }
+              compCategorised = p.getProperty ("category", var()).toString() == "Dynamics";
+              const auto parameters = p.getProperty ("params", var());
+              const auto threshold = parameters[0];
+              check (threshold.getProperty ("display", var()).toString().contains ("dB")
+                         && std::abs (threshold.getProperty ("display", var()).toString().getFloatValue() + 6.0f) < 0.1f,
+                     "compressor default threshold displays -6 dB");
+              check (! threshold.hasProperty ("min") && ! threshold.hasProperty ("max"),
+                     "compressor linear-gain threshold range is not published as dB");
+              check (! parameters[1].hasProperty ("min") && ! parameters[1].hasProperty ("max"),
+                     "compressor inverse-ratio range remains unavailable");
+              const double minima[] = { 0.3, 10.0, -10.0, -24.0 };
+              const double maxima[] = { 200.0, 300.0, 24.0, 24.0 };
+              for (int pi = 2; pi < 6; ++pi)
+                  check (parameters[pi].hasProperty ("min") && parameters[pi].hasProperty ("max")
+                             && std::abs ((double) parameters[pi]["min"] - minima[pi - 2]) < 0.001
+                             && std::abs ((double) parameters[pi]["max"] - maxima[pi - 2]) < 0.001,
+                         "compressor direct physical parameter " + String (pi) + " publishes its native range");
+            } }
         check (compFlagged, "built-in plugin flagged builtin=true in snapshot");
         check (compCategorised, "built-in plugin carries its category");
         if (cidx >= 0)
@@ -3276,6 +3293,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (hpLoad["data"].getProperty ("type", var()).toString() == "highpass",
                "load_builtin result reports type \"highpass\", not the raw Tracktion \"lowpass\"");
         auto hpEntry = trackBuiltin ("highpass");
+        const auto hpFrequency = hpEntry["params"][0];
+        check (hpFrequency["display"].toString() == "180 Hz", "track highpass readback displays the loaded 180 Hz");
+        check ((double) hpFrequency["min"] == 10.0 && (double) hpFrequency["max"] == 22000.0,
+               "track highpass readback supplies physical Hz limits");
         check (hpEntry.getProperty ("type", var()).toString() == "highpass", "snapshot plugin.type is \"highpass\"");
         check ((bool) hpEntry.getProperty ("builtin", false), "track highpass flagged builtin=true");
         check (hpEntry.getProperty ("category", var()).toString() == "Filter", "track highpass carries the Filter category");
@@ -3307,6 +3328,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const int hpIdxFinal = (int) hpEntryRedone.getProperty ("index", -1);
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "paramIndex", 0 }, { "value", 0.4 }}))),
                "set_plugin_param on the track highpass ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz",
+               "highpass normalized setter immediately updates physical readback");
+        check (ok (cmd (ops, "undo")), "undo highpass parameter readback change ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz",
+               "one undo restores highpass display to 180 Hz");
+        check (ok (cmd (ops, "redo")), "redo highpass parameter readback change ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz",
+               "redo restores highpass physical readback");
 
         // ── Master: highpass + softclip ─────────────────────────────────
         auto masterBuiltin = [&] (const String& type) -> var {
@@ -3323,6 +3352,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto hpMasterLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "highpass" }}));
         check (ok (hpMasterLoad), "load_master_builtin (highpass) ok");
         auto hpMasterEntry = masterBuiltin ("highpass");
+        check (hpMasterEntry["params"][0]["display"].toString() == "180 Hz",
+               "master highpass readback displays the loaded 180 Hz");
+        check ((double) hpMasterEntry["params"][0]["min"] == 10.0
+                   && (double) hpMasterEntry["params"][0]["max"] == 22000.0,
+               "master highpass readback supplies physical Hz limits");
         check (hpMasterEntry.getProperty ("type", var()).toString() == "highpass", "master snapshot plugin.type is \"highpass\"");
         if (auto* lp = liveMasterLowPass ((int) hpMasterEntry.getProperty ("index", -1)))
         {
