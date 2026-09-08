@@ -15535,9 +15535,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 }
             }
         };
-        auto canon = [&]() -> String
+        auto canonicalSnapshot = [&] (const var& snapshot, bool forPersistence) -> String
         {
-            auto s = ops.snapshot();
+            auto s = snapshot.clone();
             if (auto* o = s.getDynamicObject())
             {
                 o->removeProperty ("transport");
@@ -15558,14 +15558,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // overwritten, and a reload correctly re-derives 0.5. Comparing it across
             // save/reload compares a transient, exactly like `transport`/`dirty` above.
             // The `points` array IS the persisted truth and stays in the comparison.
-            std::function<void (var&)> dropAutomatedValues = [&dropAutomatedValues] (var& v)
+            std::function<void (var&)> dropAutomatedValues = [&dropAutomatedValues, forPersistence] (var& v)
             {
                 if (auto* arr = v.getArray())
                     for (auto& e : *arr) dropAutomatedValues (e);
                 else if (auto* o = v.getDynamicObject())
                 {
                     if (o->hasProperty ("automated") && (bool) o->getProperty ("automated"))
+                    {
                         o->removeProperty ("value");
+                        // Display follows that same live value across reload; undo still compares it.
+                        if (forPersistence) o->removeProperty ("display");
+                    }
                     for (auto& p : o->getProperties())
                     {
                         auto child = p.value;
@@ -15577,6 +15581,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             normNums (s);
             return JSON::toString (s, false);
         };
+        auto canon = [&]() -> String { return canonicalSnapshot (ops.snapshot(), false); };
         auto rid = [] (const var& r, const char* k) {
             return r.getProperty ("data", var()).getProperty (k, var()).toString(); };
 
@@ -15704,10 +15709,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // canonical equality: ANY non-serialized property among the mutated fields fails.
         for (const auto& mc : table)
             check (ok (cmd (ops, mc.name, mc.args)), (mc.name + " re-applied for persist").toRawUTF8());
-        const auto preSave = canon();
+        const auto rawPreSave = ops.snapshot();
+        const auto rawBeforeText = JSON::toString (rawPreSave);
+        const auto preSave = canonicalSnapshot (rawPreSave, true);
+        check (eng.sessionDir().getChildFile ("matrix-persist-before.json")
+                   .replaceWithText (rawBeforeText), "matrix raw before-save evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-before-canonical.json")
+                   .replaceWithText (preSave), "matrix canonical before-save evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-before-legacy.json")
+                   .replaceWithText (canonicalSnapshot (rawPreSave, false)), "matrix legacy before-save evidence written");
         check (ok (cmd (ops, "save")), "matrix save ok");
         check (ok (cmd (ops, "reload")), "matrix reload ok");
-        const auto postLoad = canon();
+        const auto rawPostLoad = ops.snapshot();
+        const auto rawAfterText = JSON::toString (rawPostLoad);
+        const auto postLoad = canonicalSnapshot (rawPostLoad, true);
+        check (eng.sessionDir().getChildFile ("matrix-persist-after.json")
+                   .replaceWithText (rawAfterText), "matrix raw after-reload evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-after-canonical.json")
+                   .replaceWithText (postLoad), "matrix canonical after-reload evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-after-legacy.json")
+                   .replaceWithText (canonicalSnapshot (rawPostLoad, false)), "matrix legacy after-reload evidence written");
         // A bare equality failure here is opaque — the same problem the golden-audio gate
         // solved with a feature vector. Print the first divergence (with a little context)
         // so a red run names the non-serialized field instead of just asserting inequality.
@@ -15722,6 +15743,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                       << "    loaded: ..." << postLoad.substring (from, i + 90) << "\n";
         }
         check (postLoad == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
+
+        auto eqParameterReadback = [&] (const var& snapshot, int paramIndex) -> var
+        {
+            const auto tracks = snapshot["tracks"];
+            for (int i = 0; i < tracks.size(); ++i)
+                if (tracks[i]["id"].toString() == mt)
+                {
+                    const auto plugins = tracks[i]["plugins"];
+                    for (int j = 0; j < plugins.size(); ++j)
+                        if ((int) plugins[j]["index"] == eqIx)
+                        {
+                            const auto params = plugins[j]["params"];
+                            if (paramIndex >= 0 && paramIndex < params.size()) return params[paramIndex];
+                        }
+                }
+            return {};
+        };
+        const auto beforeEq = eqParameterReadback (rawPreSave, 0);
+        const auto loadedEq = eqParameterReadback (rawPostLoad, 0);
+        // 1e-6 matches the matrix precision and accommodates float normalization round-trips.
+        constexpr double parameterTolerance = 1.0e-6;
+        check (std::abs ((double) beforeEq["value"] - 0.7) < parameterTolerance
+                 && beforeEq["display"].toString() == "14006 Hz",
+               "matrix automation fixture retains the explicit 0.7 / 14006 Hz before save");
+        check ((bool) beforeEq["automated"] && beforeEq["points"].size() == 1
+                 && std::abs ((double) beforeEq["points"][0]["v"] - 0.5) < parameterTolerance,
+               "matrix saved automation is a single constant 0.5 point");
+        check ((bool) loadedEq["automated"]
+                 && JSON::toString (loadedEq["points"]) == JSON::toString (beforeEq["points"]),
+               "matrix reload preserves automation presence and every point time/value");
+        check (std::abs ((double) loadedEq["value"] - 0.5) < parameterTolerance
+                 && loadedEq["display"].toString() == "10010 Hz",
+               "matrix immediate reload readback is 0.5 / 10010 Hz");
+
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "matrix evaluation seeks to zero seconds");
+        te::AutomatableParameter* evaluatedParameter = nullptr;
+        for (auto* track : te::getAudioTracks (eng.edit()))
+            if (track->itemID.toString() == mt && eqIx >= 0 && eqIx < track->pluginList.getPlugins().size())
+                if (auto* eq = dynamic_cast<te::EqualiserPlugin*> (track->pluginList.getPlugins()[eqIx].get()))
+                    evaluatedParameter = eq->loFreq.get();
+        check (evaluatedParameter != nullptr, "matrix reacquires native EQ frequency after reload");
+        if (evaluatedParameter != nullptr)
+            evaluatedParameter->updateToFollowCurve (eng.edit().getTransport().getPosition());
+        check (eng.edit().getTransport().getPosition().inSeconds() == 0.0
+                 && evaluatedParameter != nullptr
+                 && std::abs (evaluatedParameter->getCurrentNormalisedValue() - 0.5f) < parameterTolerance
+                 && evaluatedParameter->getCurrentValueAsString() == "10010 Hz",
+               "matrix EQ curve evaluated at zero is 0.5 and authoritative formatter reports 10010 Hz");
+        const auto evaluatedSnapshot = ops.snapshot();
+        const auto evaluatedEq = eqParameterReadback (evaluatedSnapshot, 0);
+        check (std::abs ((double) evaluatedEq["value"] - 0.5) < parameterTolerance
+                 && evaluatedEq["display"].toString() == "10010 Hz"
+                 && JSON::toString (evaluatedEq["points"]) == JSON::toString (beforeEq["points"]),
+               "matrix evaluated snapshot exposes the authoritative value/display and unchanged curve");
+        check (eng.sessionDir().getChildFile ("matrix-persist-evaluated.json")
+                   .replaceWithText (JSON::toString (evaluatedSnapshot)), "matrix evaluated raw evidence written");
+
+        for (const auto* field : { "t", "v" })
+        {
+            auto changed = rawPostLoad.clone();
+            const auto points = eqParameterReadback (changed, 0)["points"];
+            if (points.size() > 0)
+                if (auto* point = points[0].getDynamicObject()) point->setProperty (field, 0.25);
+            check (canonicalSnapshot (changed, true) != postLoad,
+                   (String ("matrix persistence detects a changed automation point ") + field).toRawUTF8());
+        }
+        for (const auto* field : { "value", "display" })
+        {
+            auto changed = rawPostLoad.clone();
+            auto nonAutomated = eqParameterReadback (changed, 1);
+            check (! (bool) nonAutomated["automated"] && nonAutomated.hasProperty (field),
+                   "matrix non-automated negative-control field exists");
+            if (auto* parameter = nonAutomated.getDynamicObject())
+                parameter->setProperty (field, String (field) == "value" ? var (0.25) : var ("changed"));
+            check (canonicalSnapshot (changed, true) != postLoad,
+                   (String ("matrix persistence detects a changed non-automated ") + field).toRawUTF8());
+        }
+        auto derivedChange = rawPostLoad.clone();
+        if (auto* parameter = eqParameterReadback (derivedChange, 0).getDynamicObject())
+            parameter->setProperty ("display", "changed");
+        check (canonicalSnapshot (derivedChange, true) == postLoad,
+               "matrix persistence alone excludes an automated current display");
+        check (canonicalSnapshot (derivedChange, false) != canonicalSnapshot (rawPostLoad, false),
+               "matrix undo comparison still detects an automated display change");
+        const auto metadata = objN ({ { "automated", true }, { "index", 0 }, { "name", "Fixture parameter" },
+                                     { "unit", "units" }, { "min", 0.0 }, { "max", 1.0 } });
+        for (const auto* field : { "automated", "index", "name", "unit", "min", "max" })
+        {
+            auto changed = metadata.clone();
+            changed.getDynamicObject()->removeProperty (field);
+            check (canonicalSnapshot (metadata, true) != canonicalSnapshot (changed, true),
+                   (String ("matrix persistence compares supplied stable field ") + field).toRawUTF8());
+        }
+        check (JSON::toString (rawPreSave) == rawBeforeText && JSON::toString (rawPostLoad) == rawAfterText
+                 && rawBeforeText == eng.sessionDir().getChildFile ("matrix-persist-before.json").loadFileAsString()
+                 && rawAfterText == eng.sessionDir().getChildFile ("matrix-persist-after.json").loadFileAsString(),
+               "matrix comparison copies leave raw snapshots and evidence unchanged");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
