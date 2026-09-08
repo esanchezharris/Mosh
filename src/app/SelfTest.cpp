@@ -15867,6 +15867,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         };
         const auto first = request ("s3-native-first");
         check (ok (cmd (ops, "begin_agent_request", first)), "S3 reserve succeeds");
+        const auto inventory = cmd (ops, "get_agent_context")["data"]["requests"];
+        bool requestDiscovered = false;
+        for (int i = 0; i < inventory.size(); ++i)
+            if (inventory[i]["requestId"].toString() == "s3-native-first"
+                && inventory[i]["status"].toString() == "prepared") requestDiscovered = true;
+        check (requestDiscovered, "S3 interrupted requests can be discovered without a caller-supplied ID");
         const auto concurrent = cmd (ops, "begin_agent_request", first);
         check ((bool) concurrent["data"]["inProgress"] && (bool) concurrent["data"]["replayed"],
                "S3 concurrent reservation identifies work already running");

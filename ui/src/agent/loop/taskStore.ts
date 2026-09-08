@@ -17,6 +17,7 @@ export type StepView = {
 };
 
 export type TaskView = {
+  requestIdentity?: { requestId: string; projectId: string };
   execution?: AgentExecution;
   ask: string;
   phase: "planning" | "stepping" | "repairing" | "finalizing";
@@ -41,7 +42,7 @@ interface TaskState {
   signal: { aborted: boolean } | null;
   sink: AgentHistorySink | null;
 
-  begin(ask: string): { aborted: boolean };
+  begin(ask: string, requestIdentity?: TaskView["requestIdentity"]): { aborted: boolean };
   progress(ev: LoopProgressEvent): void;
   finish(run: Pick<LoopRun, "outcome" | "say" | "execution">): void;
   updateExecution(execution: AgentExecution): void;
@@ -58,10 +59,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   signal: null,
   sink: null,
 
-  begin(ask) {
+  begin(ask, requestIdentity) {
     const signal = { aborted: false };
     set({
-      current: { ask, phase: "planning", plan: [], steps: [], startedAt: Date.now() },
+      current: { ask, requestIdentity, phase: "planning", plan: [], steps: [], startedAt: Date.now() },
       signal,
       drawerOpen: true,
     });

@@ -9,15 +9,16 @@ const snapshotSchema = z.custom<Snapshot>((value) => {
   return "schemaVersion" in value && "session" in value && "tracks" in value
     && Array.isArray(value.tracks) && typeof value.session === "object";
 });
-const contextSchema = z.object({
-  projectId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int(), snapshot: snapshotSchema,
-});
 const executionSchema = z.object({
   requestId: z.string(), projectId: z.string(),
   status: z.enum(["prepared", "committed", "cancelled", "rolled_back", "unresolved", "undone", "rejected"]),
   appliedCount: z.number().int().nonnegative(), replayed: z.boolean().optional(), inProgress: z.boolean().optional(),
   error: z.string().optional(), undoable: z.boolean().optional(),
   results: z.array(z.object({ command: z.string(), ok: z.boolean(), error: z.string().optional() })).optional(),
+});
+const contextSchema = z.object({
+  projectId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int(), snapshot: snapshotSchema,
+  requests: z.array(executionSchema),
 });
 export type NativeContext = z.infer<typeof contextSchema>;
 export type NativeExecution = z.infer<typeof executionSchema>;

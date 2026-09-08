@@ -49,7 +49,7 @@ async function fixture() {
   const calls: { command: string; args: Record<string, unknown> }[] = [];
   const exec: typeof originalExec = async (command, args = {}): Promise<CommandResult> => {
     calls.push({ command, args });
-    if (command === "get_agent_context") return { ok: true, command, data: { projectId: rack.projectId, epoch: "unit-epoch", revision: state.revision, snapshot } };
+    if (command === "get_agent_context") return { ok: true, command, data: { projectId: rack.projectId, epoch: "unit-epoch", revision: state.revision, snapshot, requests: [] } };
     const identity = envelopeSchema.parse(args);
     const existing = records.get(identity.requestId);
     if (command === "begin_agent_request") {
@@ -106,6 +106,19 @@ describe("Producer runLoopTask integration (native envelopes mocked)", () => {
     expect(chat).toHaveBeenCalledTimes(1);
     expect(env.count("apply_agent_patch")).toBe(1);
     expect(useTaskStore.getState().history).toHaveLength(1);
+  });
+
+  it("exposes a generated ordinary request identity before the provider completes", async () => {
+    const env = await fixture();
+    const pause = pauseProvider();
+    const running = runLoopTask("ordinary composer request", env.ui);
+    await pause.paused;
+    const identity = useTaskStore.getState().current?.requestIdentity;
+    expect(identity?.requestId).toBeTruthy();
+    expect(identity?.projectId).toBe(rack.projectId);
+    expect(env.count("apply_agent_patch")).toBe(0);
+    pause.release();
+    expect((await running).execution?.requestId).toBe(identity?.requestId);
   });
 
   it("rejects a changed payload while the same ID is running before another provider call", async () => {

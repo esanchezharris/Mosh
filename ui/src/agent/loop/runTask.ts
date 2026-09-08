@@ -388,7 +388,7 @@ function runProducerTask(text: string, ui: TaskUi, rack: ProducerRack, suppliedI
     return Promise.resolve({ finalSnapshot: snapshot, transcript: [], stepCount: 0, deferred: true, outcome: "need_user", say });
   }
   const promise = Promise.resolve().then(async (): Promise<LoopRun> => {
-    const signal = useTaskStore.getState().begin(text);
+    const signal = useTaskStore.getState().begin(text, { requestId, projectId: rack.projectId });
     ui.utter("ACK_WORKING");
     let run: LoopRun;
     let reserved = false;

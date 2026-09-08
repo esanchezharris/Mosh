@@ -26,11 +26,11 @@ Remaining acceptance failures: manual ownership during waits; task undo of newer
 ## Execution state
 
 1. COMPLETE: reconcile baseline and retained failures; read spec/mandate/current instructions; independent read-only native/frontend analysis.
-2. IN PROGRESS: implement bounded proposal collection, configured rack and UI entry, durable native request lifecycle, and focused regressions. Native writer owns MoshOps/tests; frontend collector writer owns its module/tests; lead owns integration/UI/evidence; the frontend writer owns the rack module and setup component.
-3. PENDING: native application S3 scenarios, repair/review iterations, scripted S4 composer/revision/undo/reopen.
+2. COMPLETE (pending native acceptance): implement bounded proposal collection, configured rack and UI entry, durable native request lifecycle, and focused regressions. Native writer owns MoshOps/tests; frontend collector writer owns its module/tests; lead owns integration/UI/evidence; the frontend writer owns the rack module and setup component.
+3. IN PROGRESS: native application S3 scenarios, repair/review iterations, scripted S4 composer/revision/undo/reopen.
 4. PENDING: local candidate commit, complete native gate with repeated selftests, exact-candidate required review/runtime audit and final handoff.
 
-Next action: commit the integrated source, build the clean candidate, and execute the prepared native-backed S3/S4 harness.
+Next action: commit the request-discovery repair, build the clean descendant, and execute the prepared native-backed S3/S4 harness.
 
 ## Implementation checkpoint
 
@@ -46,3 +46,11 @@ Focused evidence so far (working tree, not acceptance): native Catch2 186 assert
 Previous executable preserved byte-for-byte at `~/Library/Mosh/task-evidence/s3-s4-mandate-20260908/baseline-Mosh`, SHA-256 `ee7dd32575d6c4cf44534147bdaac89627f3be71472f358dc3f888838c86316b`. The new harness and all subsequent raw evidence live under that same existing task-evidence root. Native runtime, gate, exact-candidate reviews and S4 acceptance are still pending; no readiness verdict yet.
 
 Native selftests add 22 assertions for request ownership, replay, stale rejection, rollback and owned-journal preservation. Drawer tests add 2 assertions scenarios for visible refusal and proven undo status; focused UI undo/lifecycle/adapter suite is 22/22. Native wrapper journal rows carry request/project identity, preserve unrelated rows byte-for-byte, and are removed from both current and pending recovery tails only after proven task rollback/undo. A durable native-commit flag permits a formerly ambiguous committed task to regain committed status only when its exact post-state is proved.
+
+## First integration review and repair
+
+Integration candidate `714b42fca161bc5fd8017a447872978770a95065` built successfully with `cmake --build --preset macos-arm64-release-app`. Binary SHA-256 `526761514d478c12794c73d30d9cdb9a88c0b49f526479ddff28527b68436be4`; UI HTML SHA-256 `6fd0e35d0c1997784c46eb9eef6a5f6ba23eb2d3ad3994090f46e0551df4672c`. Build log and preserved binary/UI are in the task-evidence root. Remote main was rechecked as `0e57fe520d486568e90b674fbc6427e089871f1d`.
+
+Independent source audit at that exact SHA found a P2 recovery usability gap: ordinary generated request IDs were not discoverable after interruption before the final result. The original audit and old-binary raw `get_agent_context` reproducer remain preserved (`integration-audit-714b42fc.md`, `discovery-before-results.jsonl`). This was source review, not runtime acceptance.
+
+The repair adds current-project native request inventory, immediate visible identity while preparing, and actual setup controls to discover/select/inspect/resolve requests after restart. Native outcome remains authoritative. It also retains prior task history access when the newest task failed before receiving an execution result. Focused lifecycle/adapter/drawer tests pass 23/23; three actual setup DOM regressions pass, and UI typechecking passes. Native selftests now add 23 checks in total, including inventory visibility. The harness adds an ordinary composer-generated ID crash/discovery test with no supplied recovery ID. Native execution and final descendant review remain pending.

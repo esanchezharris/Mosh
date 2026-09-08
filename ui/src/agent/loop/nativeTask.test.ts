@@ -11,7 +11,7 @@ describe("bounded native task adapter", () => {
     if (!snapshot) throw new Error("missing fixture snapshot");
     const binding: NativeTaskBinding = {
       requestId: "logical-1", payload: { ask: "test" },
-      context: { projectId: "project", epoch: "epoch", revision: 17, snapshot }, validate: () => null,
+      context: { projectId: "project", epoch: "epoch", revision: 17, snapshot, requests: [] }, validate: () => null,
     };
     const calls = [
       { command: "set_track_volume", args: { trackId: "lead", db: 3 } },

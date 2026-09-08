@@ -109,8 +109,14 @@ var MoshOps::agentRequestStatus (agentrequest::Record& record, bool replayed)
 var MoshOps::cmdAgentRequest (const String& command, const var& args)
 {
     if (command == "get_agent_context")
-        return okResult (command, object ({ { "projectId", agentProjectId() },
+    {
+        const auto projectId = agentProjectId();
+        Array<var> requests;
+        for (auto& item : agentRequests_)
+            if (item.second.projectId == projectId) requests.add (agentRequestStatus (item.second));
+        return okResult (command, object ({ { "projectId", projectId }, { "requests", requests },
                           { "epoch", agentEpoch_ }, { "revision", editRevision_ }, { "snapshot", snapshot() } }));
+    }
 
     const auto id = args["requestId"].toString();
     const auto project = args["projectId"].toString();

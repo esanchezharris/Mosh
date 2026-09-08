@@ -18,6 +18,7 @@ export function ProducerRackSetup() {
   const [requestId, setRequestId] = useState("");
   const [request, setRequest] = useState<NativeExecution | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [recordedRequests, setRecordedRequests] = useState<NativeExecution[]>([]);
   const tracks = context?.snapshot.tracks.filter((track) => track.type === "audio" && !track.isGroup && !track.isReturn) ?? [];
   const filters = tracks.find((track) => track.id === lead)?.plugins?.filter((plugin) => plugin.type === "highpass" && plugin.builtin && !plugin.external) ?? [];
 
@@ -27,6 +28,7 @@ export function ProducerRackSetup() {
     try {
       const fresh = await readAgentContext();
       setContext(fresh);
+      setRecordedRequests(fresh.requests);
       const selected = rack?.projectId === fresh.projectId ? rack : null;
       setLead(selected?.leadTrackId ?? "");
       setRoom(selected?.roomTrackId ?? "");
@@ -73,6 +75,20 @@ export function ProducerRackSetup() {
     } catch (error) {
       if (!(error instanceof Error)) throw error;
       setRequestMessage(error.message);
+    } finally { setBusy(false); }
+  };
+
+  const discoverRequests = async () => {
+    setBusy(true);
+    setRequestMessage(null);
+    try {
+      const fresh = await readAgentContext();
+      setRecordedRequests(fresh.requests);
+      setRequest(null);
+      setRequestId("");
+      setRequestMessage(fresh.requests.length ? "Select a recorded request to inspect its native outcome." : "No recorded requests in this project.");
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : "Native request inventory unavailable");
     } finally { setBusy(false); }
   };
 
@@ -123,6 +139,15 @@ export function ProducerRackSetup() {
     {message && <p role="status" aria-live="polite">{message}</p>}
     <fieldset disabled={busy || running}>
       <legend>Request status in the current project</legend>
+      <button className="btn" data-testid="producer-request-discover" onClick={() => void discoverRequests()}>Find project requests</button>
+      {recordedRequests.length > 0 && <label className="pop-row"><span>Recorded request</span>
+        <select data-testid="producer-request-select" value={requestId} onChange={(event) => {
+          setRequestId(event.target.value); setRequest(null); setRequestMessage(null);
+        }}>
+          <option value="">Choose a request</option>
+          {recordedRequests.map((recorded) => <option key={recorded.requestId} value={recorded.requestId}>{recorded.requestId} · {recorded.status}</option>)}
+        </select>
+      </label>}
       <label className="pop-row"><span>Logical request ID</span>
         <input data-testid="producer-request-id" value={requestId} onChange={(event) => { setRequestId(event.target.value); setRequest(null); setRequestMessage(null); }} />
       </label>

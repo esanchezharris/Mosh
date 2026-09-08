@@ -97,10 +97,12 @@ export function AgentDrawer() {
       </div>
       <TurnBody task={task} live={live} />
       {task.execution && <div data-testid="agent-request-identity">Request {task.execution.requestId} · {task.execution.status}</div>}
-      {!live && history.filter((entry) => entry.execution).length > 1 && (
+      {!task.execution && task.requestIdentity && <div data-testid="agent-request-identity">Request {task.requestIdentity.requestId} · {live ? "preparing" : "outcome unavailable"}</div>}
+      {!live && history.some((entry) => entry.execution) && (!task.execution || history.filter((entry) => entry.execution).length > 1) && (
         <label>Task history <select aria-label="Task history" value={task.execution?.requestId ?? ""} onChange={(event) => {
           setSelectedRequest(event.target.value); setUndoMessage(null);
         }}>
+          {!task.execution && <option value="">Choose a prior request</option>}
           {history.filter((entry) => entry.execution).map((entry) => <option key={entry.execution?.requestId} value={entry.execution?.requestId}>{entry.ask}</option>)}
         </select></label>
       )}
