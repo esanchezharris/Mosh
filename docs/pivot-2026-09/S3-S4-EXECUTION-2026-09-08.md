@@ -21,16 +21,16 @@ The Producer v0 session configuration selects a bounded mode of the existing run
 
 Reuse identified native transactions and their existing JSONL ledger. Add durable opaque request/project/payload binding, native project-epoch/revision preconditions, short atomic application, exact rollback and guarded owned undo. Persist ambiguous recovery truthfully; never infer full completion from the generic journal's count, especially for excluded plugin recovery operations.
 
-Remaining acceptance failures: manual ownership during waits; task undo of newer manual work; logical redelivery/concurrency/conflicts; native-write staleness; cancellation presentation; durable task recovery. All require native-backed regression evidence before S3 passes.
+The original ownership, redelivery, stale-write, cancellation and recovery failures are repaired in source and passed retained native-backed scenarios. Acceptance remains pending the exact final executable, complete gate and independent reviews; earlier binaries and red gate evidence are supplemental, not final acceptance.
 
 ## Execution state
 
 1. COMPLETE: reconcile baseline and retained failures; read spec/mandate/current instructions; independent read-only native/frontend analysis.
-2. COMPLETE (pending native acceptance): implement bounded proposal collection, configured rack and UI entry, durable native request lifecycle, and focused regressions. Native writer owns MoshOps/tests; frontend collector writer owns its module/tests; lead owns integration/UI/evidence; the frontend writer owns the rack module and setup component.
-3. IN PROGRESS: native application S3 scenarios, repair/review iterations, scripted S4 composer/revision/undo/reopen.
-4. PENDING: local candidate commit, complete native gate with repeated selftests, exact-candidate required review/runtime audit and final handoff.
+2. COMPLETE: implement bounded proposal collection, configured rack and UI entry, durable native request lifecycle, and focused regressions. Native writer owns MoshOps/tests; frontend collector writer owns its module/tests; lead owns integration/UI/evidence; the frontend writer owns the rack module and setup component.
+3. COMPLETE (supplemental build evidence): 19 native-backed S3/S4 phases, actual manual composer two-turn/owned-undo pass, protected-state/PCM audit, packaged UI setup and durable lookup. Final executable binding is repeated below.
+4. IN PROGRESS: regenerate the one-line required coverage scoreboard, freeze this documentation-only descendant, run complete native gate and exact-executable S3/S4 proof, independent reviews, and external final handoff. No push or merge.
 
-Next action: freeze the lazy-undo/recovery-comparison repairs, build the clean candidate, and run fresh S3/S4 scenarios in task-evidence/s3-s4-mandate-20260908/harness-round2. Then run the full native gate and exact-candidate independent reviews.
+Next action: explicitly configure the clean documentation-only descendant before building, rerun the complete native gate, then run fresh native S3/S4/manual UI scenarios and final independent reviews. Exact final SHA/binary/UI identities, progress and final acceptance are recorded in the existing external evidence root `~/Library/Mosh/task-evidence/s3-s4-mandate-20260908/`; `HANDOFF.md` there is the final disposition. This tracked checkpoint is the pre-freeze state, not a readiness claim.
 
 ## Implementation checkpoint
 
@@ -76,3 +76,13 @@ Original runtime failures and prior bundles stay in `~/Library/Mosh/task-evidenc
 Focused repair validation: native Catch2 passes 200 assertions across 26 cases (14 new assertions in one request-comparison case); the native S3 selftest section now contains 25 added checks relative to the starting baseline. Recovery-UI tests pass 3/3 with an added resolved-selector assertion; full UI typecheck passes. The native application acceptance rerun remains required.
 
 The owned-notice probe also reproduces the exact prehash after removing only this request ID from its crash notice. The first diagnostic type-restoration probe crashed on a missing template array; its bounds-check repair and crash evidence are preserved separately. This was a probe failure, not a production Mosh crash. Final native syntax checks pass.
+
+## Full gate result and final evidence binding
+
+On clean `70708ad58ca78b241b819d8fc1d8edc962743330`, the complete canonical gate passed native selftests 3613/3613/3613 (zero failures/assertions), all 10 CTest entries, offline verification 35/35, conformance (154 pass, zero in-scope failures), and UI 4758 passed with one existing skip. It failed both scoreboard freshness checks because command coverage had increased from 246/265 to 247/266. `docs/FEATURE_AUDIT.md` is regenerated with the canonical script; no coverage waiver, test reduction, or source behavior change is introduced. Original red verdict: external `gate-70708ad5.json`.
+
+The pre-gate incremental executable `798c934f0e6c3a196e23cc3e68f810245a2bf7b8f10b49c0d196b7aa08420ba2` contained changed sources but stale embedded baseline Git metadata: the primary checkout uses a `.git` file, while the existing CMake auto-reconfigure watcher assumes a directory. Explicit canonical configure produced `bd49f9b051de9bf9e9d22b4780021ca12cc3ec804e2ff69632d8c4e63d82af1e` with verified embedded 70708ad5. Packaged UI remained `1bb4cbc3e1cf394823d13ac987578735d54d5fabaa7ef3768ea476fb27ec7fac`. Earlier runtime evidence remains preserved and scoped; final proof must use this descendant's explicitly configured executable. No build-system redesign is part of this patch.
+
+Two diagnostic expectations were corrected with preserved failures and independent evidence: actual store refresh owns its retained error while task undo remains proven undone; the pinned native high-pass supplies complete `80 Hz` text and no separate unit label. Corrected checks retain exact identity, one native undo, native state/PCM, metadata and protected-state comparison. The source acoustic path and relevant dependency bytes still match S2. CUA screenshot bytes are JPEG: corrected file extensions/manifests preserve identical pixels and originals.
+
+Final evidence writes remain external after this freeze so reports can bind the exact committed SHA without creating a self-referential documentation commit. Earlier checkpoint sections retain their historical results and limitations.
