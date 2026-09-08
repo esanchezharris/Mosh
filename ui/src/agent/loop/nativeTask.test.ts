@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import { __resetMockForTests } from "../../bridge.mock";
 import { createTaskExecutor } from "./taskExec";
 import type { NativeTaskBinding } from "./nativeTask";
+import { undoNativeTask } from "./nativeTask";
+import type { AgentExecution } from "../loopSeam";
 
 describe("bounded native task adapter", () => {
   beforeEach(async () => { __resetMockForTests(); await useStore.getState().refresh(); });
@@ -76,5 +78,80 @@ describe("bounded native task adapter", () => {
     const result = await createTaskExecutor("test", {}, { ...f, bounded: f.binding }).env.runBatch("all", f.calls);
     expect(f.exec.mock.calls.map((c) => c[0])).toEqual(["cancel_agent_request"]);
     expect(result.execution?.status).toBe("rejected");
+  });
+});
+
+describe("native task undo outcome and observation", () => {
+  const originalExec = useStore.getState().exec;
+  const originalRefresh = useStore.getState().refresh;
+  const committed: AgentExecution = { requestId: "undo-request", projectId: "project", status: "committed", appliedCount: 2 };
+  const undone: AgentExecution = { ...committed, status: "undone" };
+  const identity = { requestId: committed.requestId, projectId: committed.projectId };
+
+  afterEach(() => useStore.setState({ exec: originalExec, refresh: originalRefresh }));
+
+  function fixture() {
+    const exec = vi.fn<typeof originalExec>();
+    const refresh = vi.fn(async () => undefined);
+    useStore.setState({ exec, refresh });
+    return { exec, refresh };
+  }
+
+  it("retains proven native undo when fresh observation fails", async () => {
+    const { exec, refresh } = fixture();
+    exec.mockResolvedValue({ ok: true, command: "undo_agent_request", data: undone });
+    refresh.mockRejectedValue(new Error("snapshot unavailable"));
+
+    const result = await undoNativeTask(committed);
+
+    expect(result.ok).toBe(true);
+    expect(result.execution?.status).toBe("undone");
+    expect(result.message).toMatch(/undone.*observation.*unavailable/i);
+    expect(result.message).not.toMatch(/refused/i);
+    expect(exec.mock.calls.map((call) => call[0])).toEqual(["undo_agent_request"]);
+  });
+
+  it("looks up a lost undo response exactly once without repeating undo", async () => {
+    const { exec, refresh } = fixture();
+    exec.mockRejectedValueOnce(new Error("undo response lost"))
+      .mockResolvedValueOnce({ ok: true, command: "get_agent_request", data: undone });
+
+    const result = await undoNativeTask(committed);
+
+    expect(result.ok).toBe(true);
+    expect(result.execution?.status).toBe("undone");
+    expect(exec.mock.calls).toEqual([
+      ["undo_agent_request", identity, undefined, "producer_v0"],
+      ["get_agent_request", identity, undefined, "producer_v0"],
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unconfirmed undo when both delivery and outcome lookup are unavailable", async () => {
+    const { exec, refresh } = fixture();
+    exec.mockRejectedValue(new Error("native bridge unavailable"));
+
+    const result = await undoNativeTask(committed);
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/unconfirmed|unresolved|unknown/i);
+    expect(result.message).not.toMatch(/refused|Task undone|no changes/i);
+    expect(result.execution?.status).not.toBe("undone");
+    expect(exec.mock.calls.map((call) => call[0])).toEqual(["undo_agent_request", "get_agent_request"]);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("retains a known native refusal when outcome lookup still reports committed", async () => {
+    const { exec } = fixture();
+    exec.mockResolvedValueOnce({ ok: false, command: "undo_agent_request", error: "undo_head_mismatch: newer manual work" })
+      .mockResolvedValueOnce({ ok: true, command: "get_agent_request", data: committed });
+
+    const result = await undoNativeTask(committed);
+
+    expect(result.ok).toBe(false);
+    expect(result.execution?.status).toBe("committed");
+    expect(result.message).toContain("newer manual work");
+    expect(result.message).toMatch(/refused/i);
+    expect(exec.mock.calls.map((call) => call[0])).toEqual(["undo_agent_request", "get_agent_request"]);
   });
 });

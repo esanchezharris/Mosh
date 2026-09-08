@@ -22,6 +22,7 @@ const contextSchema = z.object({
 });
 export type NativeContext = z.infer<typeof contextSchema>;
 export type NativeExecution = z.infer<typeof executionSchema>;
+class NativeRequestRefusal extends Error {}
 export type NativeTaskBinding = {
   requestId: string; payload: Record<string, unknown>; context: NativeContext;
   validate: (calls: Parameters<TaskExecutor["env"]["runBatch"]>[1]) => string | null;
@@ -38,7 +39,11 @@ export async function readAgentContext(): Promise<NativeContext> {
 export async function nativeRequest(command: string, args: Record<string, unknown>): Promise<NativeExecution> {
   const result = await execNative(command, args);
   const parsed = executionSchema.safeParse(result.data);
-  if (!parsed.success) throw new Error(result.error ?? "Native request disposition unavailable");
+  if (!parsed.success) {
+    const message = result.error ?? "Native request disposition unavailable";
+    if (!result.ok) throw new NativeRequestRefusal(message);
+    throw new Error(message);
+  }
   return { ...parsed.data, ...(result.error ? { error: result.error } : {}) };
 }
 
@@ -106,13 +111,29 @@ export function createNativeTaskExecutor(binding: NativeTaskBinding, deps: TaskE
 }
 
 export async function undoNativeTask(execution: AgentExecution): Promise<{ ok: boolean; message: string; execution?: AgentExecution }> {
+  const identity = { requestId: execution.requestId, projectId: execution.projectId };
+  let result: NativeExecution;
+  let refusal: string | undefined;
   try {
-    const result = await nativeRequest("undo_agent_request", {
-      requestId: execution.requestId, projectId: execution.projectId,
-    });
-    await useStore.getState().refresh();
-    return { ok: result.status === "undone", message: result.status === "undone" ? "Task undone." : result.error ?? "Task undo was refused.", execution: result };
+    result = await nativeRequest("undo_agent_request", identity);
   } catch (error) {
-    return { ok: false, message: `Task undo refused: ${error instanceof Error ? error.message : "native outcome unavailable"}` };
+    if (error instanceof NativeRequestRefusal) refusal = error.message;
+    try { result = await nativeRequest("get_agent_request", identity); }
+    catch (lookupError) {
+      const reason = lookupError instanceof Error ? lookupError.message : "native outcome unavailable";
+      return { ok: false, message: `Task undo outcome is unconfirmed; request lookup failed: ${reason}.` };
+    }
   }
+  if (result.status !== "undone") {
+    const reason = refusal ?? result.error;
+    return { ok: false, execution: result, message: result.status === "committed" && reason
+      ? `Task undo refused: ${reason}`
+      : `Task undo is unconfirmed; the recorded request is ${result.status}.` };
+  }
+  try { await useStore.getState().refresh(); }
+  catch (error) {
+    const reason = error instanceof Error ? error.message : "snapshot unavailable";
+    return { ok: true, execution: result, message: `Task undone; fresh observation is unavailable: ${reason}.` };
+  }
+  return { ok: true, message: "Task undone.", execution: result };
 }
