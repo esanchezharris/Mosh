@@ -6,6 +6,50 @@
 using namespace juce;
 namespace tx = mosh::agenttxn;
 
+TEST_CASE ("agent request recovery comparison normalizes only empty residue and its own orphan", "[agentrequest]")
+{
+    auto* session = new DynamicObject();
+    session->setProperty ("tempo", 120.0);
+    auto* root = new DynamicObject();
+    root->setProperty ("session", var (session));
+    const var baseline (root);
+    auto empty = baseline.clone();
+    empty["session"].getDynamicObject()->setProperty ("recordingResidue", var (Array<var>()));
+    const auto baselineHash = tx::fingerprint (baseline);
+    REQUIRE (mosh::agentrequest::fingerprint (empty, "ours") == baselineHash);
+    REQUIRE (tx::fingerprint (empty) != baselineHash);
+    auto own = empty.clone();
+    auto* orphan = new DynamicObject();
+    orphan->setProperty ("count", 1);
+    orphan->setProperty ("ids", var (Array<var> { "ours" }));
+    own["session"].getDynamicObject()->setProperty ("unresolvedTransactions", var (orphan));
+    const auto rawOwn = JSON::toString (own);
+    REQUIRE (mosh::agentrequest::fingerprint (own, "ours") == baselineHash);
+    REQUIRE (tx::fingerprint (own) != baselineHash);
+    REQUIRE (mosh::agentrequest::fingerprint (own, "other") != baselineHash);
+    auto foreign = own.clone();
+    auto* foreignMetadata = foreign["session"]["unresolvedTransactions"].getDynamicObject();
+    foreignMetadata->setProperty ("count", 2);
+    foreignMetadata->setProperty ("ids", var (Array<var> { "ours", "foreign" }));
+    const auto rawForeign = JSON::toString (foreign);
+    const auto normalizedForeign = mosh::agentrequest::comparisonSnapshot (foreign, "ours");
+    REQUIRE ((int) normalizedForeign["session"]["unresolvedTransactions"]["count"] == 1);
+    REQUIRE (normalizedForeign["session"]["unresolvedTransactions"]["ids"][0].toString() == "foreign");
+    REQUIRE (mosh::agentrequest::fingerprint (foreign, "ours") != baselineHash);
+    auto residue = own.clone();
+    residue["session"].getDynamicObject()->setProperty ("recordingResidue", var (Array<var> { "unreferenced-recording" }));
+    REQUIRE (mosh::agentrequest::fingerprint (residue, "ours") != baselineHash);
+    REQUIRE (mosh::agentrequest::comparisonSnapshot (residue, "ours")["session"]["recordingResidue"].size() == 1);
+    auto music = own.clone();
+    music["session"].getDynamicObject()->setProperty ("tempo", 121.0);
+    REQUIRE (mosh::agentrequest::fingerprint (music, "ours") != baselineHash);
+    auto malformed = own.clone();
+    malformed["session"]["unresolvedTransactions"].getDynamicObject()->setProperty ("count", 99);
+    REQUIRE (mosh::agentrequest::fingerprint (malformed, "ours") != baselineHash);
+    REQUIRE (JSON::toString (own) == rawOwn);
+    REQUIRE (JSON::toString (foreign) == rawForeign);
+}
+
 TEST_CASE ("agent request ledger preserves identity without payloads", "[agentrequest]")
 {
     mosh::agentrequest::Record record;

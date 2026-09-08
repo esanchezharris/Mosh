@@ -41,6 +41,46 @@ inline juce::String removeOwnedJournalRows (const juce::String& text, const juce
     return retained;
 }
 
+inline juce::var comparisonSnapshot (const juce::var& snapshot, const juce::String& transactionId)
+{
+    // Recovery adds operational notices: compare copies without empty residue or this
+    // request's own orphan notice; real recording residue and foreign orphans remain significant.
+    auto copy = snapshot.clone();
+    auto* session = copy["session"].getDynamicObject();
+    if (session == nullptr) return copy;
+    const auto residue = session->getProperty ("recordingResidue");
+    if (residue.isArray() && residue.size() == 0) session->removeProperty ("recordingResidue");
+    const auto unresolved = session->getProperty ("unresolvedTransactions");
+    auto* metadata = unresolved.getDynamicObject();
+    const auto ids = unresolved["ids"];
+    if (transactionId.isNotEmpty() && metadata != nullptr && metadata->getProperties().size() == 2
+        && ids.isArray() && unresolved["count"].isInt() && (int) unresolved["count"] == ids.size())
+    {
+        juce::Array<juce::var> foreign;
+        bool allStrings = true;
+        for (int i = 0; i < ids.size(); ++i)
+        {
+            allStrings = allStrings && ids[i].isString();
+            if (ids[i].toString() != transactionId) foreign.add (ids[i]);
+        }
+        if (allStrings && foreign.size() != ids.size())
+        {
+            if (foreign.isEmpty()) session->removeProperty ("unresolvedTransactions");
+            else
+            {
+                metadata->setProperty ("ids", foreign);
+                metadata->setProperty ("count", foreign.size());
+            }
+        }
+    }
+    return copy;
+}
+
+inline juce::String fingerprint (const juce::var& snapshot, const juce::String& transactionId)
+{
+    return agenttxn::fingerprint (comparisonSnapshot (snapshot, transactionId));
+}
+
 struct Record
 {
     juce::String requestId, projectId, payloadDigest, patchDigest, status;

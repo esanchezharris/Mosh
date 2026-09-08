@@ -71,6 +71,7 @@ export function ProducerRackSetup() {
       const fresh = await readAgentContext();
       const result = await nativeRequest("get_agent_request", { projectId: fresh.projectId, requestId: requestId.trim() });
       setRequest(result);
+      setRecordedRequests(fresh.requests.map((recorded) => recorded.requestId === result.requestId ? result : recorded));
       setRequestMessage(result.error ?? null);
     } catch (error) {
       if (!(error instanceof Error)) throw error;
@@ -101,6 +102,7 @@ export function ProducerRackSetup() {
       if (fresh.projectId !== request.projectId) { setRequestMessage("The project changed. Look up the request in its original project."); return; }
       const result = await nativeRequest("cancel_agent_request", { projectId: request.projectId, requestId: request.requestId });
       setRequest(result);
+      setRecordedRequests(fresh.requests.map((recorded) => recorded.requestId === result.requestId ? result : recorded));
       setRequestMessage(result.error ?? (result.status === "cancelled" ? "The native engine confirmed no outstanding changes for this request." : executionPresentation(result, false).say));
     } catch (error) {
       if (!(error instanceof Error)) throw error;

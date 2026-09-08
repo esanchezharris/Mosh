@@ -81,14 +81,14 @@ var MoshOps::agentRequestStatus (agentrequest::Record& record, bool replayed)
     if (record.requestId == agentRestartCheck_ && record.projectId == agentProjectId())
     {
         agentRestartCheck_.clear();
-        if (record.postFingerprint.isEmpty() || txnFingerprint() != record.postFingerprint)
+        if (record.postFingerprint.isEmpty() || agentrequest::fingerprint (snapshot(), record.transactionId) != record.postFingerprint)
         {
             record.status = "unresolved";
             persistAgentRequest (record);
         }
     }
     if (record.status == "unresolved" && record.nativeCommitted && record.projectId == agentProjectId()
-        && record.postFingerprint.isNotEmpty() && txnFingerprint() == record.postFingerprint)
+        && record.postFingerprint.isNotEmpty() && agentrequest::fingerprint (snapshot(), record.transactionId) == record.postFingerprint)
     {
         record.status = "committed";
         persistAgentRequest (record);
@@ -97,7 +97,7 @@ var MoshOps::agentRequestStatus (agentrequest::Record& record, bool replayed)
     const bool undoable = record.status == "committed" && record.epoch == agentEpoch_
         && record.projectId == agentProjectId() && record.historyTxn == currentHistoryTxn()
         && undoManager().getUndoDescription() == agenttxn::labelFor (record.transactionId)
-        && undoManager().getNumActionsInCurrentTransaction() > 0 && ! inBatch;
+        && undoManager().canUndo() && ! inBatch;
     auto status = object ({ { "requestId", record.requestId }, { "projectId", record.projectId },
                            { "status", record.status }, { "appliedCount", record.appliedCount },
                            { "undoable", undoable }, { "replayed", replayed },
@@ -161,7 +161,7 @@ var MoshOps::cmdAgentRequest (const String& command, const var& args)
         if (record.status == "prepared") record.status = "cancelled";
         else if (record.status == "unresolved")
         {
-            if (record.preFingerprint.isEmpty() || txnFingerprint() != record.preFingerprint)
+            if (record.preFingerprint.isEmpty() || agentrequest::fingerprint (snapshot(), record.transactionId) != record.preFingerprint)
                 return errResult (command, "unresolved_request: restore the recorded pre-state before cancelling");
             if (! removeAgentRecoveryRows (record))
                 return errResult (command, "request_recovery_journal_write_failed_during_resolution");
@@ -235,7 +235,7 @@ var MoshOps::applyAgentPatch (agentrequest::Record& record, const var& args)
     }
 
     record.patchDigest = patchDigest;
-    record.preFingerprint = txnFingerprint();
+    record.preFingerprint = agentrequest::fingerprint (snapshot(), record.transactionId);
     record.epoch = agentEpoch_;
     record.transactionId = "request-" + agenttxn::digestOf (record.projectId + ":" + record.requestId);
     if (! persistAgentRequest (record)) return refusal ("request_ledger_write_failed");
@@ -289,7 +289,7 @@ var MoshOps::applyAgentPatch (agentrequest::Record& record, const var& args)
     }
     syncUndoMirror();
     record.historyTxn = currentHistoryTxn();
-    record.postFingerprint = txnFingerprint();
+    record.postFingerprint = agentrequest::fingerprint (snapshot(), record.transactionId);
     if (! persistAgentRequest (record)) { record.status = "unresolved"; failed = true; failure = "request_ledger_write_failed_after_apply"; }
     if (! failed) agentCrashPoint (eng, "after_commit", record.requestId);
     auto response = failed ? errResult ("apply_agent_patch", failure) : okResult ("apply_agent_patch");

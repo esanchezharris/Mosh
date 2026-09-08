@@ -68,6 +68,7 @@ describe("ProducerRackSetup recovery UI (native boundary mocked)", () => {
     expect(nativeRequest).toHaveBeenNthCalledWith(1, "get_agent_request", { projectId: "unit-project", requestId: prepared.requestId });
     expect(nativeRequest).toHaveBeenNthCalledWith(2, "cancel_agent_request", { projectId: "unit-project", requestId: prepared.requestId });
     expect(host.querySelector('[data-testid="producer-request-status"]')?.textContent).toBe("cancelled · 0 recorded applied command(s)");
+    expect(host.querySelector('[data-testid="producer-request-select"]')?.textContent).toContain(`${prepared.requestId} · cancelled`);
     expect(host.querySelector('[data-testid="producer-request-resolve"]')).toBeNull();
     expect(host.textContent).toContain("native engine confirmed no outstanding changes");
   });

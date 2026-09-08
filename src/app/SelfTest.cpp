@@ -15902,6 +15902,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "S3 task undo refuses a newer manual head and preserves it");
         check (ok (cmd (ops, "undo")) && agenttxn::fingerprint (ops.snapshot()) == committed,
                "S3 normal undo removes only newer manual edit");
+        eng.edit().getUndoManager().beginNewTransaction();
+        check (eng.edit().getUndoManager().getNumActionsInCurrentTransaction() == 0
+               && eng.edit().getUndoManager().canUndo()
+               && agenttxn::fingerprint (ops.snapshot()) == committed,
+               "S3 lazy timer boundary leaves the committed undo head intact with zero current actions");
+        check ((bool) cmd (ops, "get_agent_request", first)["data"]["undoable"],
+               "S3 exact task head remains undoable after a lazy transaction boundary");
         check (ok (cmd (ops, "undo_agent_request", first)) && agenttxn::fingerprint (ops.snapshot()) == pre,
                "S3 one owned undo restores entire two-command patch");
         check (requestJournal.loadFileAsString() == agentrequest::removeOwnedJournalRows (
