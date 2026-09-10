@@ -22,7 +22,7 @@ The native policy is loaded once on first chat use and cannot be reset through
 the WebView. Present but invalid policy denies chat. A valid policy pins provider,
 configured model and literal loopback endpoint, bypasses the server proxy, and
 disables HTTP redirects. Its process-wide counter reserves transport attempts
-under a lock; failures consume their reservations. Invalid messages or mismatched
+under a lock; failures consume their reservations. Non-array message payloads or mismatched
 selection do not reach transport. Restarting the process starts a new counter.
 
 This policy deliberately accepts only `loopbackOnly:true`. It does not enable a

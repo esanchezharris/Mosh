@@ -180,9 +180,9 @@ async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: str
 // Produce lane is CLOUD-ONLY by owner decision ("frontier now, distill later",
 // docs/POSTMORTEM-2026-09.md): a full production pass on the local assistant
 // model is exactly the silent quality substitution the postmortem bans. Try the
-// cloud providers in order and VERIFY the responder (a requested-but-incomplete
-// provider resolves to a fallback natively — the result's `provider` field is
-// the truth). No local fallback: failing loudly beats producing quietly worse.
+// cloud providers in order and VERIFY the responder. Native explicit selections
+// now reject incomplete providers; this loop retains its own ordered retries.
+// No local fallback: failing loudly beats producing quietly worse.
 //
 // Order (W1.2, OVERNIGHT RUN 2): "openai" is the claude-cli shim's env-trio slot
 // (dev-time only — see W1.3), tried first per the owner's 2026-09-02 decision;

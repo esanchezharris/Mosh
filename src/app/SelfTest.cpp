@@ -12483,9 +12483,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (BrainProxy::resolve ("deepseek").id == "deepseek",
                "brain: an explicit complete provider is honoured over the default");
 
-        auto fallback = BrainProxy::resolve ("openai");   // incomplete → fall back
-        check (fallback.id != "openai" && fallback.isComplete(),
-               "brain: an incomplete requested provider falls back to a configured one");
+        auto unavailable = BrainProxy::resolve ("openai");
+        check (unavailable.id.isEmpty() && ! unavailable.isComplete(),
+               "brain: an incomplete explicit provider is rejected without fallback");
 
         auto badShape = BrainProxy::chat (var(), "deepseek");   // not an array → no HTTP
         check (! (bool) badShape.getProperty ("ok", true)

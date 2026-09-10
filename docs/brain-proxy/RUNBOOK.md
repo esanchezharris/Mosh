@@ -21,7 +21,7 @@ working `MOSH_BRAIN_PROXY_URL`, Moshi fails visibly and emits no edit commands.
 | `supabase/functions/brain/index.ts` | The Edge Function. Accepts `{messages, model?/provider?, install_id}`, holds provider keys as Supabase secrets, proxies to deepseek→openai→xai (same chain + reasoning-model handling as today), enforces a per-install daily token cap, returns only `{ok, content}` — never a key, never which provider served it. |
 | `supabase/migrations/0003_brain_usage.sql` | The daily-cap table (`public.brain_usage_daily`) + two SECURITY DEFINER RPCs (`brain_usage_reserve` / `brain_usage_adjust`) the function calls as `service_role`. Verify applied state before deployment; see step 3. |
 | `supabase/config.toml` | Added `[functions.brain]` with `verify_jwt = false` (mirrors `[functions.relay]` — Mosh has no per-user Supabase Auth). |
-| `src/brain/BrainProxy.{h,cpp}` | Native path. `chat()` prefers the proxy when `MOSH_BRAIN_PROXY_URL` is set; direct-provider environment configuration remains available for local development, but packaging never copies those secrets. |
+| `src/brain/BrainProxy.{h,cpp}` | Native path. An implicit `chat()` without a rehearsal policy prefers the proxy when `MOSH_BRAIN_PROXY_URL` is set. Explicit providers and an active rehearsal policy use the direct path described in [TRIAL-PREFLIGHT.md](TRIAL-PREFLIGHT.md); packaging never copies provider secrets. |
 | `ui/vite.config.ts` | Dev server's `/api/brain/chat` middleware gets the same proxy-first-then-fallthrough branch, gated on `MOSH_BRAIN_PROXY_URL` in `ui/.env.local`. |
 | `service/brain_client.py` | Same proxy-first-then-fallthrough branch for the Python sidecar (used by the lyric-generation loop and the prompt-compiler). |
 | `docs/brain-proxy/RUNBOOK.md` | This file. |

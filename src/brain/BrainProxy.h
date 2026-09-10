@@ -11,8 +11,8 @@ namespace mosh
     the ENVIRONMENT (so API keys never reach the WebView / client bundle) and POSTs
     the chat completion.
 
-    Mirrors the dev proxy exactly (ui/vite.config.ts → moshiBrain):
-      • providers: deepseek | openai | xai, each via <PREFIX>_BASE_URL / _API_KEY / _MODEL
+    OpenAI-compatible direct-provider contract:
+      • providers: deepseek | openai | xai | openrouter, via <PREFIX>_BASE_URL / _API_KEY / _MODEL
       • default: MOSHI_BRAIN_PROVIDER if fully configured, else the first complete one
       • request: POST {url}/chat/completions, response_format=json_object, max 800 tokens
       • OpenAI reasoning models (gpt-5/6, o-series) use max_completion_tokens + no temp
