@@ -61,9 +61,8 @@ struct BrainProxy
         default away from an already-configured deepseek/openai/xai. */
     static juce::Array<Provider> providers();
 
-    /** Pick the provider to use: `requested` if it is complete, else
-        MOSHI_BRAIN_PROVIDER if complete, else the first complete provider. Returns a
-        Provider with empty fields (isComplete()==false) when none is configured. */
+    /** An explicit request resolves only that complete provider, or fails closed.
+        An absent request uses the existing local/environment/first-complete default. */
     static Provider resolve (const juce::String& requested = {});
 
     /** Build the direct OpenAI-compatible request body for a resolved provider.
@@ -81,17 +80,20 @@ struct BrainProxy
                                           const Provider&, int elapsedMs);
 
     /** Blocking chat round-trip. `messages` is a JSON array of {role,content}.
-        Returns { ok:true, content, provider, model, ms } on success, or
-        { ok:false, error } on any failure (no provider / network / upstream). Call
-        OFF the message thread.
+        Direct results retain rawResponse, statusCode, configured model, and supplied
+        responseModel/usage on success and upstream failure. Missing usage stays absent.
+        Call OFF the message thread.
 
-        Proxy-first: when proxyEnabled(), this POSTs to the server-side brain proxy
+        Proxy-first for implicit requests only: when proxyEnabled(), POST to the brain proxy
         (supabase/functions/brain) instead of calling a provider directly with a
         bundled key. Any proxy failure (unreachable / non-2xx / malformed reply) falls
         through to the direct-provider path below it — additive, never a regression
         from the pre-proxy behaviour (proxyEnabled()==false skips the branch entirely,
         so an unset MOSH_BRAIN_PROXY_URL is byte-identical to before this existed).
 
+        MOSH_BRAIN_TRIAL_POLICY, when present at first chat, pins direct loopback
+        transport and an immutable process-scoped attempt budget. It grants no paid
+        access. Invalid policy denies calls; failed attempts are never refunded.
         Default `opts` keeps every existing caller's wire payload byte-identical. */
     static juce::var chat (const juce::var& messages, const juce::String& requested = {}, const ChatOptions& opts = {});
 

@@ -1,5 +1,7 @@
 #include "BrainProxy.h"
+#include "BrainTrialPolicy.h"
 #include "engine/SessionPaths.h"
+#include <cstdlib>
 
 namespace mosh
 {
@@ -9,6 +11,11 @@ namespace
 {
     juce::CriticalSection localConfigLock;
     juce::String localEndpoint, localModel;
+    BrainTrialPolicy& trialPolicy()
+    {
+        static BrainTrialPolicy policy (std::getenv ("MOSH_BRAIN_TRIAL_POLICY"));
+        return policy;
+    }
     // A bundled brain config (key=value lines) read from Contents/Resources/brain.env,
     // used ONLY as a FALLBACK when the OS environment doesn't carry the value. The deploy
     // writes the user's key there so a Finder/Dock launch (which inherits no shell env, so
@@ -176,8 +183,11 @@ BrainProxy::Provider BrainProxy::resolve (const String& requested)
     };
 
     if (requested.isNotEmpty())
+    {
         if (auto p = find (requested); p.isComplete())
             return p;
+        return {};
+    }
 
     // owner-runtime.json is an explicit machine-local opt-in. Once its exact model
     // has passed /v1/models verification, it outranks a shell-inherited or bundled
@@ -249,12 +259,30 @@ var BrainProxy::parseDirectResponse (const String& body, int statusCode,
                                      const Provider& p, int elapsedMs)
 {
     const auto parsed = JSON::parse (body);
+    auto* receipt = new DynamicObject();
+    var result (receipt);
+    receipt->setProperty ("provider", p.id);
+    receipt->setProperty ("label", p.label);
+    receipt->setProperty ("model", p.model);
+    receipt->setProperty ("ms", elapsedMs);
+    receipt->setProperty ("statusCode", statusCode);
+    receipt->setProperty ("rawResponse", body);
+    if (const auto responseModel = parsed.getProperty ("model", {}); responseModel.isString())
+        receipt->setProperty ("responseModel", responseModel);
+    if (parsed.hasProperty ("usage"))
+        receipt->setProperty ("usage", parsed.getProperty ("usage", {}));
+    auto fail = [&] (const String& error)
+    {
+        receipt->setProperty ("ok", false);
+        receipt->setProperty ("error", error);
+        return result;
+    };
     if (statusCode < 200 || statusCode >= 300)
     {
         const auto errVar = parsed.getProperty ("error", var());
         const auto detail = errVar.isVoid() ? ("upstream HTTP " + String (statusCode))
                                             : JSON::toString (errVar);
-        return makeError ("brain provider error (" + p.label + "): " + detail);
+        return fail ("brain provider error (" + p.label + "): " + detail);
     }
 
     String content;
@@ -264,16 +292,11 @@ var BrainProxy::parseDirectResponse (const String& body, int statusCode,
         content = message.getProperty ("content", var()).toString();
     }
     if (content.trim().isEmpty())
-        return makeError ("brain provider error (" + p.label + "): malformed completion response");
+        return fail ("brain provider error (" + p.label + "): malformed completion response");
 
-    auto* result = new DynamicObject();
-    result->setProperty ("ok", true);
-    result->setProperty ("content", content);
-    result->setProperty ("provider", p.id);
-    result->setProperty ("label", p.label);
-    result->setProperty ("model", p.model);
-    result->setProperty ("ms", elapsedMs);
-    return var (result);
+    receipt->setProperty ("ok", true);
+    receipt->setProperty ("content", content);
+    return result;
 }
 
 bool BrainProxy::proxyEnabled()
@@ -331,7 +354,11 @@ String BrainProxy::installId()
 
 var BrainProxy::chat (const var& messages, const String& requested, const ChatOptions& opts)
 {
-    if (proxyEnabled())
+    auto& policy = trialPolicy();
+    if (policy.isEnabled() && ! policy.isValid())
+        return makeError ("brain trial: invalid MOSH_BRAIN_TRIAL_POLICY");
+
+    if (! policy.isEnabled() && requested.isEmpty() && proxyEnabled())
     {
         auto result = chatViaProxy (proxyUrl(), messages, requested);
         if ((bool) result.getProperty ("ok", false))
@@ -340,13 +367,16 @@ var BrainProxy::chat (const var& messages, const String& requested, const ChatOp
         // resolves, the caller receives a setup error and the UI emits no commands.
     }
 
-    const auto p = resolve (requested);
+    const auto p = resolve (policy.isEnabled() ? policy.providerId() : requested);
     if (! p.isComplete())
         return makeError ("no brain provider configured - set <PROVIDER>_API_KEY / _BASE_URL / _MODEL "
                           "in the environment (deepseek | openai | xai | openrouter)");
 
     if (! messages.isArray())
         return makeError ("brain: messages must be an array of {role,content}");
+
+    if (const auto error = policy.reserve (requested, p.id, p.model, p.url); error.isNotEmpty())
+        return makeError (error);
 
     // Build the OpenAI-compatible chat payload (json_object response, capped tokens).
     const auto payload = requestPayload (p, messages, opts);
@@ -361,9 +391,13 @@ var BrainProxy::chat (const var& messages, const String& requested, const ChatOp
                     .withStatusCode (&statusCode);
 
     const auto t0 = Time::getMillisecondCounter();
-    auto stream = url.createInputStream (netOpts);
+    auto stream = url.createInputStream (policy.isEnabled() ? netOpts.withNumRedirectsToFollow (0) : netOpts);
     if (stream == nullptr)
-        return makeError ("brain request failed - could not reach " + p.url + " (network / provider down)");
+    {
+        auto result = parseDirectResponse ({}, statusCode, p, (int) (Time::getMillisecondCounter() - t0));
+        result.getDynamicObject()->setProperty ("error", "brain request failed - could not reach " + p.url + " (network / provider down)");
+        return result;
+    }
 
     const auto bodyStr = stream->readEntireStreamAsString();
     const auto ms = (int) (Time::getMillisecondCounter() - t0);

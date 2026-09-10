@@ -1,8 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include "brain/BrainProxy.h"
+#include "brain/BrainTrialPolicy.h"
 #include "engine/SessionPaths.h"
 #include <cstdlib>
 #include <cmath>
+#include <atomic>
+#include <thread>
+#include <vector>
 
 // Hermetic coverage for the brain-proxy cutover (docs/brain-proxy/RUNBOOK.md): proxy-URL
 // selection, install-id resolution, and the proxy-unreachable -> direct-provider
@@ -220,6 +224,117 @@ TEST_CASE ("BrainProxy providers() carries a fourth openrouter provider, appende
 
     // An explicit request for openrouter is still honoured over the default.
     CHECK (BrainProxy::resolve ("openrouter").id == "openrouter");
+}
+
+TEST_CASE ("BrainProxy explicit unavailable provider does not fall back", "[brain][trial]")
+{
+    ScopedCleanBrainEnv clean;
+    ScopedEnv url ("DEEPSEEK_BASE_URL", "http://127.0.0.1:2/v1");
+    ScopedEnv key ("DEEPSEEK_API_KEY", "test");
+    ScopedEnv model ("DEEPSEEK_MODEL", "fallback-test");
+    REQUIRE (BrainProxy::resolve().id == "deepseek");
+    CHECK_FALSE (BrainProxy::resolve ("openai").isComplete());
+    CHECK_FALSE (BrainProxy::resolve ("unknown").isComplete());
+}
+
+TEST_CASE ("BrainProxy retains authoritative direct response receipts", "[brain][trial]")
+{
+    const BrainProxy::Provider p { "openai", "OPENAI", "http://127.0.0.1:2/v1", "test", "configured-model" };
+    const String body = R"({"model":"reported-model","usage":{"prompt_tokens":17,"completion_tokens":3},"choices":[{"message":{"content":"{}"}}]})";
+    const auto result = BrainProxy::parseDirectResponse (body, 200, p, 12);
+    CHECK (result.getProperty ("model", {}).toString() == "configured-model");
+    CHECK (result.getProperty ("responseModel", {}).toString() == "reported-model");
+    CHECK (result.getProperty ("rawResponse", {}).toString() == body);
+    CHECK ((int) result.getProperty ("statusCode", 0) == 200);
+    CHECK ((int) result.getProperty ("usage", {}).getProperty ("prompt_tokens", 0) == 17);
+    const auto limited = BrainProxy::parseDirectResponse (
+        R"({"model":"reported-model","usage":{"total_tokens":20},"error":{"message":"rate limited"}})", 429, p, 14);
+    CHECK_FALSE ((bool) limited.getProperty ("ok", true));
+    CHECK (limited.getProperty ("responseModel", {}).toString() == "reported-model");
+    CHECK ((int) limited.getProperty ("usage", {}).getProperty ("total_tokens", 0) == 20);
+    CHECK (limited.getProperty ("provider", {}).toString() == "openai");
+    CHECK ((int) limited.getProperty ("ms", 0) == 14);
+    for (const auto* malformedModel : { "null", "17" })
+    {
+        const auto malformedBody = String (R"({"choices":[{"message":{"content":"{}"}}],"model":)")
+            + malformedModel + "}";
+        const auto receipt = BrainProxy::parseDirectResponse (malformedBody, 200, p, 12);
+        CHECK ((bool) receipt.getProperty ("ok", false));
+        CHECK (receipt.getProperty ("responseModel", {}).isVoid());
+        CHECK (receipt.getProperty ("rawResponse", {}).toString() == malformedBody);
+    }
+    for (const auto status : { 200, 429 })
+    {
+        const auto failure = BrainProxy::parseDirectResponse ("not-json", status, p, 13);
+        CHECK_FALSE ((bool) failure.getProperty ("ok", true));
+        CHECK (failure.getProperty ("rawResponse", {}).toString() == "not-json");
+        CHECK ((int) failure.getProperty ("statusCode", 0) == status);
+        CHECK (failure.getProperty ("usage", {}).isVoid());
+        CHECK (failure.getProperty ("responseModel", {}).isVoid());
+    }
+}
+
+TEST_CASE ("Brain trial policy rejects invalid declarations and nonliteral loopback endpoints", "[brain][trial]")
+{
+    BrainTrialPolicy absent (nullptr);
+    CHECK_FALSE (absent.isEnabled());
+    CHECK (absent.reserve ({}, {}, {}, {}).isEmpty());
+    for (const auto* text : { "", "null", "{}", "not-json",
+            R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":-1,"loopbackOnly":true})",
+            R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":1.5,"loopbackOnly":true})",
+            R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":"1","loopbackOnly":true})",
+            R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":true,"loopbackOnly":true})",
+            R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":1,"loopbackOnly":false})",
+            R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":1,"loopbackOnly":true,"extra":0})" })
+    {
+        CAPTURE (text);
+        BrainTrialPolicy policy (text);
+        CHECK (policy.isEnabled());
+        CHECK_FALSE (policy.isValid());
+        CHECK (policy.reserve ({}, "openai", "fixture", "http://127.0.0.1:1234/v1").isNotEmpty());
+    }
+    for (const auto* endpoint : { "https://api.example.invalid/v1", "http://localhost:1234/v1",
+            "http://127.0.0.1:0/v1", "http://127.0.0.1:65536/v1", "http://127.0.0.1:1234@host/v1",
+            "http://127.0.0.1:1234/v1?host=x", "http://127.0.0.1:1234/v1#x", "http://127.0.0.1:1234/\\host",
+            "http://127.0.0.1:1234/%2fhost" })
+    {
+        CAPTURE (endpoint);
+        const auto config = String (R"({"provider":"openai","model":"fixture","baseUrl":)")
+            + JSON::toString (var (endpoint)) + R"(,"maxCalls":1,"loopbackOnly":true})";
+        BrainTrialPolicy policy (config.toRawUTF8());
+        CHECK_FALSE (policy.isValid());
+    }
+}
+
+TEST_CASE ("Brain trial policy pins selection and counts attempts without refunds", "[brain][trial]")
+{
+    BrainTrialPolicy policy (R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":1,"loopbackOnly":true})");
+    REQUIRE (policy.isValid());
+    CHECK (policy.reserve ("deepseek", "openai", "fixture", "http://127.0.0.1:1234/v1").isNotEmpty());
+    CHECK (policy.reserve ({}, "deepseek", "fixture", "http://127.0.0.1:1234/v1").isNotEmpty());
+    CHECK (policy.reserve ({}, "openai", "other", "http://127.0.0.1:1234/v1").isNotEmpty());
+    CHECK (policy.reserve ({}, "openai", "fixture", "http://127.0.0.1:1235/v1").isNotEmpty());
+    CHECK (policy.reserve ({}, "openai", "fixture", "http://127.0.0.1:1234/v1").isEmpty());
+    CHECK (policy.reserve ("openai", "openai", "fixture", "http://127.0.0.1:1234/v1").contains ("exhausted"));
+    BrainTrialPolicy zero (R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":0,"loopbackOnly":true})");
+    REQUIRE (zero.isValid());
+    CHECK (zero.reserve ({}, "openai", "fixture", "http://127.0.0.1:1234/v1").contains ("exhausted"));
+}
+
+TEST_CASE ("Brain trial reservations cannot exceed the budget concurrently", "[brain][trial]")
+{
+    BrainTrialPolicy policy (R"({"provider":"openai","model":"fixture","baseUrl":"http://127.0.0.1:1234/v1","maxCalls":7,"loopbackOnly":true})");
+    std::atomic<int> admitted { 0 };
+    std::vector<std::thread> callers;
+    for (int i = 0; i < 32; ++i)
+        callers.emplace_back ([&]
+        {
+            if (policy.reserve ({}, "openai", "fixture", "http://127.0.0.1:1234/v1").isEmpty())
+                ++admitted;
+        });
+    for (auto& caller : callers)
+        caller.join();
+    CHECK (admitted.load() == 7);
 }
 
 TEST_CASE ("BrainProxy requestPayload/requestTimeoutMs default ChatOptions reproduce the exact pre-W1.1 payload", "[brain][options]")

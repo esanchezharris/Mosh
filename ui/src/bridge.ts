@@ -8,6 +8,7 @@
 // plain browser, so the UI still renders during pure-web (Vite dev) work.
 
 import { getNativeFunction } from "./juce/index.js";
+import { z } from "zod";
 import { MOCK_ENABLED, mockExecute, mockSnapshot, mockOnEvent } from "./bridge.mock";
 
 type InitData = {
@@ -137,26 +138,45 @@ export type BrainMessage = { role: string; content: string };
 // entirely keeps brainChat's wire payload byte-identical to before this existed —
 // the produce lane (runTask.ts's PRODUCE_CHAT_OPTIONS) is the first caller to pass one.
 export type BrainChatOptions = { maxTokens?: number; timeoutMs?: number; temperature?: number };
-// `provider` in the RESULT is which provider actually served (the native side
-// resolves a requested-but-incomplete provider by falling back, so callers that
-// MUST have a specific class of brain — the produce lane's cloud-only rule —
-// verify this field rather than trusting the request).
+const brainReceiptSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  responseModel: z.string().optional(),
+  usage: z.unknown().optional(),
+  rawResponse: z.string().optional(),
+  statusCode: z.number().int().optional(),
+  ms: z.number().optional(),
+});
+const nativeBrainResponseSchema = brainReceiptSchema.extend({
+  ok: z.boolean(), content: z.string().optional(), error: z.string().optional(),
+});
+export type BrainReceipt = Readonly<z.infer<typeof brainReceiptSchema>>;
+export type BrainChatResult = BrainReceipt & { readonly content: string };
+export class BrainChatError extends Error {
+  constructor(message: string, readonly receipt: BrainReceipt) {
+    super(message);
+    this.name = "BrainChatError";
+  }
+}
+
+// Receipts preserve provider-reported usage; absent usage does not mean zero cost.
+// The model field is configured identity; responseModel is the upstream claim.
 export async function brainChat(
   messages: BrainMessage[],
   provider?: string,
   options?: BrainChatOptions,
-): Promise<{ content: string; provider?: string }> {
+): Promise<BrainChatResult> {
   if (realNative()) {
     // Native proxy returns { ok, content } or { ok:false, error }. Throw on the error
     // shape so the caller can apply its packaged/dev posture — same contract as the dev fetch.
-    const r = (await native("brain_chat")({ messages, provider, ...(options ? { options } : {}) })) as {
-      ok?: boolean;
-      content?: string;
-      error?: string;
-      provider?: string;
-    };
-    if (r && r.ok === false) throw new Error(r.error ? String(r.error) : "brain unavailable");
-    return { content: String(r?.content ?? ""), provider: r?.provider ? String(r.provider) : undefined };
+    const parsed = nativeBrainResponseSchema.safeParse(
+      await native("brain_chat")({ messages, provider, ...(options ? { options } : {}) }),
+    );
+    if (!parsed.success) throw new Error("malformed brain response");
+    const { ok, content, error, ...receipt } = parsed.data;
+    if (!ok) throw new BrainChatError(error || "brain unavailable", receipt);
+    if (content === undefined) throw new BrainChatError("malformed brain response", receipt);
+    return { content, ...receipt };
   }
   const r = await fetch("/api/brain/chat", {
     method: "POST",
