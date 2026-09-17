@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <vector>
+#include <juce_cryptography/juce_cryptography.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include "state/Ids.h"
 
@@ -52,65 +54,91 @@ inline juce::File resolveCacheArtifact (const juce::ValueTree& renderLayer,
     return resolveCacheArtifact (renderLayer[ids::cacheArtifact].toString(), editParentDir);
 }
 
-/** Consolidate every render layer's `cacheArtifact` into the project's `audio/renders/`
-    dir and re-point it with a portable, project-relative ref — the Save-As render-artifact
-    pass (AL-009). Walks all clips under @p editState (clips parent a single MOSH_RENDERLAYER
-    child). For each layer:
-
-      - resolve the current artifact (relative-or-absolute) against @p editParentDir;
-      - skip layers with no artifact, a missing artifact (nothing to consolidate — a later
-        re-render rebuilds it), or one already inside the project dir;
-      - copy it to `audio/renders/<layerId>.wav` (de-duping by name+size like
-        consolidateAudioInto), and rewrite `cacheArtifact` to the relative path with '/'
-        separators.
-
-    Idempotent: a second call sees the now-already-local ref and does nothing. Written
-    WITHOUT an undo manager — Save-As persistence is not an undoable user edit (matching
-    cmdSaveAs / consolidateAudioInto). */
-inline void consolidateRenderArtifacts (juce::ValueTree editState,
-                                        const juce::File& editParentDir)
+/** Preserve render assets with content-addressed, project-relative references.
+    The caller resolves old project-relative refs before changing the edit directory.
+    Ref rewrites commit only after every copy succeeds; explicit-decision layers fail
+    on missing referenced files. Legacy missing caches remain optional. Save As owns
+    this persistence operation, so it does not enter the edit's undo history. */
+inline juce::Result consolidateRenderArtifacts (juce::ValueTree editState,
+                                               const juce::File& editParentDir)
 {
-    auto rendersDir = editParentDir.getChildFile ("audio").getChildFile ("renders");
-
-    // Depth-first walk for MOSH_RENDERLAYER nodes anywhere under the edit tree (clips live
-    // under TRACK/.../CLIP; a render layer is a direct child of its clip). A recursive scan
-    // is robust to the exact track/clip nesting and matches how the snapshot finds them.
-    std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+    const auto rendersDir = editParentDir.getChildFile ("audio").getChildFile ("renders");
+    struct RefUpdate
     {
-        for (int i = 0; i < node.getNumChildren(); ++i)
-        {
-            auto child = node.getChild (i);
-            if (child.hasType (ids::MOSH_RENDERLAYER))
-            {
-                // Consolidate a stored ref (cacheArtifact OR the in-place originalSourceRef) into
-                // audio/renders/ + re-point it relative, so the saved project carries no absolute
-                // session-pool path and BOTH the render and "Reset to original" survive a move.
-                auto consolidate = [&] (const juce::Identifier& prop, const juce::String& suffix)
-                {
-                    auto src = resolveCacheArtifact (child[prop].toString(), editParentDir);
-                    if (src.existsAsFile() && ! src.isAChildOf (editParentDir))
-                    {
-                        rendersDir.createDirectory();
-                        auto dest = rendersDir.getChildFile (child[ids::id].toString() + suffix + ".wav");
-                        // De-dupe by name+size: keep an identical existing copy; otherwise refresh.
-                        if (! (dest.existsAsFile() && dest.getSize() == src.getSize()))
-                        {
-                            dest.deleteFile();
-                            src.copyFileTo (dest);
-                        }
-                        if (dest.existsAsFile())
-                            child.setProperty (prop,
-                                dest.getRelativePathFrom (editParentDir).replaceCharacter ('\\', '/'),
-                                nullptr);   // portable relative ref (no undo — Save-As persistence)
-                    }
-                };
-                consolidate (ids::cacheArtifact, "");
-                consolidate (ids::originalSourceRef, "-original");
-            }
-            visit (child);
-        }
+        juce::ValueTree layer;
+        juce::Identifier property;
+        juce::String reference;
     };
-    visit (editState);
+    std::vector<RefUpdate> updates;
+
+    auto consolidate = [&] (juce::ValueTree layer, const juce::Identifier& property) -> juce::Result
+    {
+        const auto stored = layer[property].toString();
+        if (stored.isEmpty())
+            return juce::Result::ok();
+        const auto source = resolveCacheArtifact (stored, editParentDir);
+        const auto failure = [&] (const juce::String& reason)
+        {
+            return juce::Result::fail ("Cannot preserve Re-Imagine " + property.toString()
+                                       + ": " + reason + " (" + source.getFullPathName() + ")");
+        };
+        if (! source.existsAsFile())
+            return layer["decisionPolicy"].toString() == "explicit"
+                ? failure ("referenced file is missing") : juce::Result::ok();
+
+        juce::FileInputStream sourceStream (source);
+        if (! sourceStream.openedOk())
+            return failure ("referenced file cannot be read");
+        const auto digest = juce::SHA256 (sourceStream).toHexString();
+        if (sourceStream.getStatus().failed())
+            return failure (sourceStream.getStatus().getErrorMessage());
+        const auto destination = rendersDir.getChildFile (digest + source.getFileExtension());
+        if (destination.existsAsFile())
+        {
+            juce::FileInputStream existingStream (destination);
+            if (! existingStream.openedOk() || juce::SHA256 (existingStream).toHexString() != digest
+                || existingStream.getStatus().failed())
+                return failure ("stored asset differs from its content identity");
+        }
+        else
+        {
+            if (const auto result = rendersDir.createDirectory(); result.failed())
+                return failure (result.getErrorMessage());
+            juce::TemporaryFile temporary (destination);
+            if (! source.copyFileTo (temporary.getFile()))
+                return failure ("asset copy failed");
+            {
+                juce::FileInputStream copiedStream (temporary.getFile());
+                if (! copiedStream.openedOk() || juce::SHA256 (copiedStream).toHexString() != digest
+                    || copiedStream.getStatus().failed())
+                    return failure ("copied asset differs from its content identity");
+            }
+            if (! temporary.overwriteTargetFileWithTemporary())
+                return failure ("asset could not be stored");
+        }
+        updates.push_back ({ layer, property,
+            destination.getRelativePathFrom (editParentDir).replaceCharacter ('\\', '/') });
+        return juce::Result::ok();
+    };
+
+    std::function<juce::Result (juce::ValueTree)> visit = [&] (juce::ValueTree node)
+    {
+        if (node.hasType (ids::MOSH_RENDERLAYER))
+            for (const auto& property : { ids::cacheArtifact, ids::originalSourceRef,
+                                         juce::Identifier ("committedArtifact"),
+                                         juce::Identifier ("directManifest") })
+                if (const auto result = consolidate (node, property); result.failed())
+                    return result;
+        for (int i = 0; i < node.getNumChildren(); ++i)
+            if (const auto result = visit (node.getChild (i)); result.failed())
+                return result;
+        return juce::Result::ok();
+    };
+    if (const auto result = visit (editState); result.failed())
+        return result;
+    for (auto& update : updates)
+        update.layer.setProperty (update.property, update.reference, nullptr);
+    return juce::Result::ok();
 }
 
 } // namespace mosh

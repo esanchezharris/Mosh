@@ -111,6 +111,7 @@ public:
     juce::File generateTestTone (double seconds, double freqHz, const juce::String& name);
 
     /** Save the Edit to its .tracktionedit file via EditFileOperations (01 §6). */
+    std::function<void()> beforePersist; // Restore temporary monitoring before any disk snapshot.
     bool save();
 
     /** Unsaved-changes flag (data-safety, gap 1). Every MoshOps mutation marks the

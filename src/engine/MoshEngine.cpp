@@ -855,6 +855,7 @@ void MoshEngine::stampFormatVersion()
 
 bool MoshEngine::save()
 {
+    if (beforePersist) beforePersist();
     // PRJ-FMT — a refused (newer-format) project is loaded READ-ONLY: never overwrite the
     // newer file on disk with this build's fallback/empty Edit. Saving resumes only once a
     // different project is loaded (which clears loadError).
@@ -1242,6 +1243,7 @@ juce::String MoshEngine::openProject (const juce::File& file)
 
 bool MoshEngine::saveProjectAs (const juce::File& file)
 {
+    if (beforePersist) beforePersist();
     editPtr->getTransport().stop (false, false);
     file.getParentDirectory().createDirectory();
     // saveAs re-points the Edit's backing file; force-overwrite is safe because

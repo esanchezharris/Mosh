@@ -45,6 +45,7 @@ if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import stitch  # noqa: E402  (render-ahead incremental-stitch primitive; stdlib wave only)
+from direct_render import DirectRequest, DirectRenderError  # noqa: E402
 from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
@@ -60,6 +61,7 @@ PROTOCOL_FEATURES = {
     "loraStack": True,
     "contentAddressedAudio": True,
     "sharedService": True,
+    "explicitRenderDecision": True,
 }
 START_TIME = time.time()
 _LAST_REQUEST_MONOTONIC = time.monotonic()
@@ -688,6 +690,9 @@ def _run_job(job_id: str) -> None:
             mlx_task()
         return
     try:
+        direct = job.get("direct_request")
+        if direct is not None:
+            direct.verify_source()
         soulx_real = False
         if adapter_id == "soulx":
             try:
@@ -712,25 +717,34 @@ def _run_job(job_id: str) -> None:
         # Honor a cancel that arrived in the window between the last progress check
         # and this (potentially seconds-long) render — otherwise the job runs to
         # completion and writes output the user asked to discard.
-        with _lock:
-            if _jobs[job_id].get("cancel"):
-                _jobs[job_id]["status"] = "cancelled"
-                return
         with _mlx_lock:  # see _mlx_lock: the SA3 engine is not thread-safe
-            manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+            with _lock:
+                if job.get("cancel"):
+                    job["status"] = "cancelled"
+                    return
+                job["inference_running"] = True
+            try:
+                manifest = ad.render(job["input_wav"], job["output_wav"], job["params"])
+            finally:
+                with _lock:
+                    job["inference_running"] = False
         os.makedirs(os.path.dirname(os.path.abspath(job["manifest"])), exist_ok=True)
         with open(job["manifest"], "w") as f:
             json.dump(manifest, f)
+        if direct is not None:
+            direct.complete(manifest)
+            with open(job["manifest"], "w") as f:
+                json.dump(manifest, f)
         release = _maybe_release_sa3(job.get("sa3_release_idle")) if adapter_id in ("stable_audio3", "sa3") else None
         with _lock:
             _jobs[job_id]["progress"] = 1.0
-            _jobs[job_id]["status"] = "ready"
+            _jobs[job_id]["status"] = "cancelled" if job.get("cancel") else "ready"
             _jobs[job_id]["result"] = manifest
             if release:
                 _jobs[job_id]["sa3_release"] = release
     except Exception as e:  # noqa: BLE001
         with _lock:
-            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["status"] = "cancelled" if job.get("cancel") else "error"
             _jobs[job_id]["error"] = str(e)
 
 
@@ -1084,6 +1098,7 @@ class Handler(BaseHTTPRequestHandler):
                 # field: old UI builds that don't read it are unaffected.
                 self._send(200, {"ok": True, "colors": CR.descriptor(),
                                  "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4),
+                                 "explicitRenderDecision": True,
                                  "sa3": SA3_ENABLED})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
@@ -1149,6 +1164,8 @@ class Handler(BaseHTTPRequestHandler):
                                  "outputWav": job["output_wav"],
                                  "error": job.get("error"),
                                  "manifest": job.get("result"),
+                                 "cancelRequested": bool(job.get("cancel")),
+                                 "inferenceRunning": bool(job.get("inference_running")),
                                  "sa3Release": job.get("sa3_release")})
         elif path == "/training/status":
             jid = query.get("jobId", "")
@@ -1207,10 +1224,18 @@ class Handler(BaseHTTPRequestHandler):
         if data is None:  # a 400/413 was already sent for a bad/oversized Content-Length
             return
         if path == "/submit":
+            try:
+                direct = DirectRequest.parse(data)
+            except DirectRenderError as exc:
+                self._send(400, {"ok": False, "error": str(exc)})
+                return
             adapter_id = data.get("adapter", "fake")
             if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
                 self._send(503, {"ok": False, "error": "stable_audio3 unavailable "
                                  "(model/venv absent or MOSH_ENABLE_SA3 not set)"})
+                return
+            if direct is not None and not direct.fixture and stable_audio3_adapter.backend_name() != "mlx":
+                self._send(503, {"ok": False, "error": "direct Re-Imagine requires the local MLX SA3 Medium backend"})
                 return
             input_wav = data.get("inputWav", "")
             output_wav = data.get("outputWav", "")
@@ -1243,6 +1268,7 @@ class Handler(BaseHTTPRequestHandler):
                     "input_wav": input_wav, "output_wav": output_wav,
                     "manifest": data.get("manifest", output_wav + ".manifest.json"),
                     "params": data.get("params", {}), "cancel": False,
+                    "direct_request": direct, "inference_running": False,
                     "sa3_release_idle": release_idle,
                 }
             _job_q.put((int(data.get("priority", 5)), next(_seq), job_id))
@@ -1250,9 +1276,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/cancel":
             jid = data.get("jobId", "")
             with _lock:
-                if jid in _jobs:
-                    _jobs[jid]["cancel"] = True
-            self._send(200, {"ok": True})
+                job = _jobs.get(jid)
+                cancellable = job is not None and job.get("status") in ("queued", "rendering", "running")
+                if cancellable:
+                    job["cancel"] = True
+                    job["status"] = "cancelled"
+                self._send(200, {"ok": True, "jobId": jid, "known": job is not None,
+                                 "cancelRequested": bool(job and job.get("cancel")),
+                                 "inferenceRunning": bool(job and job.get("inference_running")),
+                                 "inferenceInterrupted": False,
+                                 "status": job.get("status") if job else "unknown"})
         elif path == "/loras/install":
             # Enroll an adapter that already exists ON DISK into the library.
             # The sibling of /loras/promote: promote takes a lab take by NAME,
@@ -1872,7 +1905,8 @@ def _bind_with_fallback(host: str, port: int, tries: int = 10):
 def _render_active() -> bool:
     """Return whether inference or an MLX maintenance task is queued/running."""
     with _lock:
-        return any(job.get("status") in ("queued", "running", "rendering") for job in _jobs.values())
+        return any(job.get("inference_running") or job.get("status") in ("queued", "running", "rendering")
+                   for job in _jobs.values())
 
 
 def _idle_shutdown_loop(httpd: ThreadingHTTPServer, idle_seconds: float) -> None:

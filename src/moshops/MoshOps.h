@@ -80,6 +80,8 @@ public:
                                                   const juce::var& command,
                                                   juce::Array<juce::File> sampleFolders = {});
 
+    std::function<juce::var (const juce::var&)> generativeReadHandler();
+
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
@@ -1053,7 +1055,21 @@ private:
     double       calibrationRate_ = 0.0;       // rate the in-flight sweep runs at
     bool         calibrationDetachedContext_ = false;   // we freed the playback context
     PluginHost  pluginHost;
-    GenerativeJobManager jobManager;
+    std::shared_ptr<GenerativeJobManager> jobManagerOwner_ = std::make_shared<GenerativeJobManager>();
+    GenerativeJobManager& jobManager = *jobManagerOwner_;
+    struct DirectRenderRequest;
+    struct DirectAudition;
+    std::map<juce::String, std::shared_ptr<DirectRenderRequest>> directRenders_;
+    std::map<juce::String, std::shared_ptr<DirectAudition>> directAuditions_;
+    juce::var createDirectRenderLayer (const juce::var&);
+    juce::var submitDirectRender (const juce::var&);
+    juce::var decideDirectRender (const juce::String&, const juce::var&);
+    void pollDirectRenders();
+    void cancelDirectRenders (const juce::String& reason);
+    void restoreDirectAuditions();
+    void prepareDirectCommand (const juce::var&);
+    void appendDirectRenderSnapshot (juce::DynamicObject&, te::Clip&, const juce::ValueTree&);
+
     TrainerRegistry      trainerRegistry;
     TrainingJobManager   trainingJobManager;
     EventSink   eventSink;

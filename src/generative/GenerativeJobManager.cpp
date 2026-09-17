@@ -338,8 +338,12 @@ juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
     // poll with the stale audio. Safe: both files are per-job transients — the applied/
     // accepted audio lives in durable copies (audio/<layerId>-<fp>.wav, accept_render's
     // audio/<layerId>.wav) made at finalize.
-    outputWav.deleteFile();
-    manifest.deleteFile();
+    if (params.getProperty ("decision_policy", {}).toString() != "explicit")
+    {
+        outputWav.deleteFile();
+        manifest.deleteFile();
+    }
+    else if (outputWav.existsAsFile() || manifest.existsAsFile()) return {};
 
     auto* body = new DynamicObject();
     body->setProperty ("adapter", adapter.isNotEmpty() ? adapter : juce::String ("fake"));

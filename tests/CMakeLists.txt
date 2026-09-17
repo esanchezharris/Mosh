@@ -27,6 +27,7 @@ target_sources(MoshTests PRIVATE
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
+    test_render_artifacts.cpp
     test_migrations.cpp
     test_project_name.cpp
     test_safe_mode.cpp

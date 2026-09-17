@@ -321,6 +321,8 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.TempoProject.cpp
         src/moshops/MoshOps.Plugins.cpp
         src/moshops/MoshOps.Mixer.cpp
+        src/generative/DirectRenderJob.cpp
+        src/moshops/MoshOps.DirectRender.cpp
         src/moshops/MoshOps.Generative.cpp
         src/moshops/MoshOps.Multiplayer.cpp
         src/moshops/MoshOps.ProjectIo.cpp

@@ -4144,10 +4144,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── generative (Tier-B) render layers ────────────────────────────────────
-    // sa3: true matches the mock's existing posture (a populated colour rack always implied
-    // SA3 before this field existed) — dev/e2e keep seeing the "SA3" badge, not a spurious
-    // "preview" one now that the badge reads /colors' honest field instead of the old proxy.
-    case "list_colors": return ok(command, { colors: COLORS, sa3: true });
+    case "list_colors": return ok(command, { colors: COLORS, sa3: false, explicitRenderDecision: true, testFixture: true });
     // list_loras keeps #343's no-cap shape (maxActive removed per the owner "no cap" directive;
     // the LorasResponse type no longer carries maxActive, so re-adding it would not typecheck).
     case "list_loras": return ok(command, { loras: LORAS });
@@ -4229,6 +4226,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       });
     case "create_render_layer": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (args.decisionPolicy === "explicit" && (f.clip.renderLayer || f.clip.type !== "wave"))
+        return err(command, "direct Re-Imagine requires an audio clip without an existing layer");
       pushUndo();
       f.clip.hasRenderLayer = true;
       const mode = str(args.mode, "reimagine");
@@ -4245,6 +4244,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [], loras: [],
         regionStart: rs, regionEnd: re,
+        ...(args.decisionPolicy === "explicit" ? { decisionPolicy: "explicit", hasPending: false, audition: "committed",
+          sourceStart: f.clip.offset, sourceDuration: f.clip.length, testFixture: true, reactive: false, nl: 0.4 } : {}),
         ...(mode === "transform" ? { target: "", strength: 65 } : {}) };
       invalidate(); return ok(command);
     }
@@ -4258,11 +4259,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if ("seed" in args) rl.seed = num(args.seed, rl.seed);
       if ("target" in args) rl.target = str(args.target, rl.target ?? "");
       if ("strength" in args) rl.strength = num(args.strength, rl.strength ?? 65);
-      rl.status = "dirty"; rl.hasArtifact = false;
+      rl.status = "dirty"; if (rl.decisionPolicy !== "explicit") rl.hasArtifact = false;
       invalidate(); return ok(command);
     }
     case "render_layer": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.renderLayer.decisionPolicy === "explicit") {
+        f.clip.renderLayer = { ...f.clip.renderLayer, status: "ready", hasArtifact: true, hasPending: true,
+          audition: "committed", testFixture: true };
+        emit("layer_status", { clipId: f.clip.id, status: "ready" });
+        invalidate(); return ok(command);
+      }
       if (f.clip.renderLayer.mode === "sing") {
         if (!f.track.lyricSheet)
           return err(command, "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
@@ -4303,6 +4310,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "accept_render": case "freeze_layer": case "bounce_layer_to_clip": {
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.renderLayer.decisionPolicy === "explicit") {
+        if (command !== "accept_render" || !f.clip.renderLayer.hasPending) return err(command, "no pending direct result");
+        pushUndo();
+        f.clip.renderLayer = { ...f.clip.renderLayer, status: "ready", hasPending: false, userKept: true,
+          audition: "committed", appliedInPlace: true, hasOriginal: true };
+        invalidate(); return ok(command);
+      }
       pushUndo();
       f.clip.renderLayer.userKept = true;
       f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
@@ -4341,9 +4355,28 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (armed) { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; f.clip.renderLayer.status = "ready"; }
       invalidate(); return ok(command, { armed });
     }
-    case "reject_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; f.clip.renderLayer.userKept = false; invalidate(); } return ok(command); }
-    case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
-    case "cancel_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
+    case "reject_render": { const f = findClip(str(args.clipId));
+      if (f?.clip.renderLayer?.decisionPolicy === "explicit") {
+        pushUndo();
+        f.clip.renderLayer = { ...f.clip.renderLayer, hasPending: false, audition: "committed", status: "ready" };
+        invalidate(); return ok(command);
+      }
+      if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; f.clip.renderLayer.userKept = false; invalidate(); } return ok(command); }
+    case "bypass_layer": { const f = findClip(str(args.clipId));
+      if (f?.clip.renderLayer?.decisionPolicy === "explicit") {
+        const audition = args.audition;
+        if (audition !== "committed" && audition !== "source" && audition !== "result") return err(command, "invalid audition source");
+        if (audition === "result" && !f.clip.renderLayer.hasPending && !f.clip.renderLayer.userKept) return err(command, "no direct result");
+        f.clip.renderLayer = { ...f.clip.renderLayer, audition };
+        invalidate(); return ok(command);
+      }
+      if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
+    case "cancel_render": { const f = findClip(str(args.clipId));
+      if (f?.clip.renderLayer?.decisionPolicy === "explicit") {
+        f.clip.renderLayer = { ...f.clip.renderLayer, status: "cancelled", audition: "committed" };
+        invalidate(); return ok(command);
+      }
+      if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
     case "remove_render_layer": { const f = findClip(str(args.clipId)); if (f) { pushUndo(); f.clip.hasRenderLayer = false; delete f.clip.renderLayer; invalidate(); } return ok(command); }
     case "compile_render": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");

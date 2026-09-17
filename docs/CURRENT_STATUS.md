@@ -1,4 +1,16 @@
-# Mosh pre-pivot baseline
+# Mosh current direction
+
+**2026-09-16:** Direct SA3 Re-Imagine is the active bounded implementation.
+See [the dated scope decision](DIRECT-SA3-SCOPE-2026-09-16.md) for its exact
+baseline, deferred work and acceptance boundary. The candidate implements the explicit-decision audio-clip loop. Exact candidate,
+binary, verification results and remaining acceptance gaps are recorded under
+`~/Library/Mosh/task-evidence/direct-sa3-reimagine-20260916/`. No installed-app
+or owner listening pass is claimed.
+
+The pre-pivot ownership snapshot below is preserved as historical evidence.
+Older recording/mixing-agent and reconstruction priorities are deferred.
+
+## Historical pre-pivot baseline
 
 ## Snapshot identity
 

@@ -1761,6 +1761,21 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     // the project-scope agent-memory sidecar (a sibling of the edit file, keyed by its
     // name) can be carried over below.
     const auto oldEditFile = eng.editFile();
+    auto artifactPlan = eng.edit().state.createCopy();
+    const std::initializer_list<Identifier> artifactProperties {
+        ids::cacheArtifact, ids::originalSourceRef, Identifier ("committedArtifact"), Identifier ("directManifest") };
+    std::function<void (ValueTree)> absolutize = [&] (ValueTree node)
+    {
+        if (node.hasType (ids::MOSH_RENDERLAYER))
+            for (const auto& property : artifactProperties)
+                if (node[property].toString().isNotEmpty())
+                    node.setProperty (property, mosh::resolveCacheArtifact (node[property].toString(),
+                        oldEditFile.getParentDirectory()).getFullPathName(), nullptr);
+        for (auto child : node) absolutize (child);
+    };
+    absolutize (artifactPlan);
+    const auto artifactResult = mosh::consolidateRenderArtifacts (artifactPlan, file.getParentDirectory());
+    if (artifactResult.failed()) return errResult ("save_as", artifactResult.getErrorMessage());
 
     const bool didSave = eng.saveProjectAs (file);   // saveAs + adopt the new backing file + consolidate wave/sampler audio
     logLine ("save_as", args, didSave, didSave ? String() : String ("saveAs failed"), false);
@@ -1772,15 +1787,28 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     // save_as command itself (matches consolidateRenderArtifacts' posture below).
     mosh::AgentMemoryStore::copySidecarForSaveAs (oldEditFile, eng.editFile());
 
-    // AL-009 — consolidate Tier-B render-layer artifacts too. eng.saveProjectAs localises
-    // wave-clip sources + sampler sounds, but a render layer's cacheArtifact (the file
-    // freeze_layer / re-accept_render depend on) is written by finalizeRender as an
-    // ABSOLUTE path into the shared session pool, NOT the project dir. Copy each into the
-    // project's audio/renders/ and re-point with a portable RELATIVE ref so the rendered
-    // audio survives a project move, then persist the rewritten refs. Kept here (not in
-    // MoshEngine, a prime-directive seam) and after the engine consolidation.
-    mosh::consolidateRenderArtifacts (eng.edit().state, eng.editFile().getParentDirectory());
-    eng.save();
+    std::map<String, ValueTree> preparedLayers;
+    std::function<void (ValueTree)> collect = [&] (ValueTree node)
+    {
+        if (node.hasType (ids::MOSH_RENDERLAYER)) preparedLayers[node[ids::id].toString()] = node;
+        for (auto child : node) collect (child);
+    };
+    collect (artifactPlan);
+    for (auto* track : te::getAudioTracks (eng.edit()))
+        for (auto* clip : track->getClips())
+        {
+            auto layer = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
+            const auto found = preparedLayers.find (layer[ids::id].toString());
+            if (! layer.isValid() || found == preparedLayers.end()) continue;
+            for (const auto& property : artifactProperties)
+                if (found->second.hasProperty (property)) layer.setProperty (property, found->second[property], nullptr);
+            if (layer[Identifier ("decisionPolicy")].toString() == "explicit")
+                if (auto* wave = dynamic_cast<te::WaveAudioClip*> (clip))
+                    mosh::repointWaveClipSource (*wave,
+                        mosh::resolveCacheArtifact (layer[Identifier ("committedArtifact")].toString(), file.getParentDirectory()),
+                        file.getParentDirectory(), true);
+        }
+    if (! eng.save()) return errResult ("save_as", "Could not persist the consolidated render assets.");
     refreshMpStemDir();   // PR-2: eng.editFile() just changed (saveProjectAs adopts the new backing file)
     emitSnapshotInvalidated();
 

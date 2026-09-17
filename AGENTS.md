@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> **Current direction, 2026-09-16:** [Direct SA3 Re-Imagine](docs/DIRECT-SA3-SCOPE-2026-09-16.md) supersedes the near-term agent and mixing-experiment priorities below. Those records are preserved and deferred, not prerequisites. Engineering safety and acceptance rules remain in force.
+
 ## Pre-pivot baseline
 
 **main** is Mosh's only development trunk. This documentation update starts from

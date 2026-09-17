@@ -48,6 +48,8 @@ export type JobsSlice = {
   // callers fall back to the colour-rack-nonempty proxy (see ui/src/ui/engineBadge.ts)
   // rather than silently claiming SA3.
   sa3Available: boolean | undefined;
+  explicitRenderDecision: boolean | undefined;
+  directRenderTestFixture: boolean;
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)
   availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
@@ -72,7 +74,7 @@ export type JobsSlice = {
   loraRetrying: boolean;
   transformTargetsRetrying: boolean;
 
-  loadColors: () => void;
+  loadColors: (force?: boolean) => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
   loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
@@ -88,6 +90,8 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
   sketchingBeatbox: {},
   availableColors: [],
   sa3Available: undefined,
+  explicitRenderDecision: undefined,
+  directRenderTestFixture: false,
   availableTransformTargets: [],
   availableLoras: [],
   availableRaveModels: [],
@@ -108,18 +112,21 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
   // the same load* again while a loop is already in flight is a no-op, not a second loop),
   // and `genServiceState` never regresses from "ready" — one loader landing data means the
   // service IS up, even if a sibling loader's own retry loop hasn't caught up yet.
-  loadColors: () => {
-    if (get().availableColors.length > 0 || get().colorsRetrying) return;
-    set({ colorsRetrying: true });
+  loadColors: (force = false) => {
+    if (get().colorsRetrying || (!force && get().availableColors.length > 0)) return;
+    set({ colorsRetrying: true,
+      ...(force ? { sa3Available: undefined, explicitRenderDecision: undefined, directRenderTestFixture: false, genServiceState: "warming", genServiceError: null } : {}),
+    });
     let attemptIndex = 0;
     const attempt = () => {
-      void executeCommand<CommandResult<{ colors: AvailableColor[]; sa3?: boolean }>>({
+      void executeCommand<CommandResult<{ colors: AvailableColor[]; sa3?: boolean; explicitRenderDecision?: boolean; testFixture?: boolean }>>({
         command: "list_colors",
         args: {},
       }).then((res) => {
         if (res.ok && res.data?.colors) {
           set({
             availableColors: res.data.colors, sa3Available: res.data.sa3,
+            explicitRenderDecision: res.data.explicitRenderDecision, directRenderTestFixture: res.data.testFixture === true,
             colorsRetrying: false, genServiceState: "ready", genServiceError: null,
           });
           return;

@@ -36,7 +36,7 @@ describe("jobs slice — service warmup retry (GEN-WARMUP)", () => {
     vi.useFakeTimers();
     useStore.setState({
       availableColors: [], availableTransformTargets: [], availableLoras: [],
-      sa3Available: undefined, transformFreeText: true,
+      sa3Available: undefined, explicitRenderDecision: undefined, directRenderTestFixture: false, transformFreeText: true,
     } as never);
   });
 
@@ -106,4 +106,31 @@ describe("jobs slice — service warmup retry (GEN-WARMUP)", () => {
     expect(useStore.getState().availableLoras).toEqual([{ id: "l1", name: "Take 1" }]);
     expect(useStore.getState().availableTransformTargets).toEqual([{ name: "violin" }]);
   });
+  it("refreshes SA3 capability explicitly even when a cached color rack exists", async () => {
+    vi.mocked(executeCommand).mockResolvedValue({ ok: true, data: { colors: [{ name: "grit" }], sa3: false } });
+    useStore.setState({ colorsRetrying: false });
+    useStore.getState().loadColors();
+    await flush(3);
+    vi.mocked(executeCommand).mockResolvedValue({ ok: true, data: { colors: [], sa3: true } });
+
+    useStore.getState().loadColors(true);
+    expect(useStore.getState().sa3Available).toBeUndefined();
+    await flush(3);
+
+    expect(executeCommand).toHaveBeenCalledTimes(2);
+    expect(useStore.getState().sa3Available).toBe(true);
+  });
+
+  it("stores explicit-decision and fixture capabilities independently from SA3", async () => {
+    vi.mocked(executeCommand).mockResolvedValue({ ok: true, data: {
+      colors: [], sa3: false, explicitRenderDecision: true, testFixture: true,
+    } });
+    useStore.setState({ colorsRetrying: false });
+    useStore.getState().loadColors(true);
+    await flush(3);
+    expect(useStore.getState().sa3Available).toBe(false);
+    expect(useStore.getState().explicitRenderDecision).toBe(true);
+    expect(useStore.getState().directRenderTestFixture).toBe(true);
+  });
+
 });

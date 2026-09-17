@@ -316,6 +316,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     : eng (engineToUse), pluginHost (engineToUse.engine()),
       trainerRegistry (engineToUse.sessionDir())
 {
+    eng.beforePersist = [this] { restoreDirectAuditions(); };
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     // CAP-PRJ-005 — a per-process token scoping every history stamp. mosh-log.jsonl
     // outlives the process; the UndoManager does not. Without this, a line stamped
@@ -378,6 +379,10 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
 
 MoshOps::~MoshOps()
 {
+    eventSink = {};
+    cancelDirectRenders ("Application closing; inference may continue.");
+    restoreDirectAuditions();
+    eng.beforePersist = {};
     // Editor parameter mirrors capture this MoshOps instance. Cancel any in-flight
     // gesture and detach the listeners before other MoshOps members are destroyed.
     // MainWindow/the WebView bridge is already gone at this point, so teardown must not
@@ -399,6 +404,7 @@ MoshOps::~MoshOps()
 
 void MoshOps::timerCallback()
 {
+    pollDirectRenders();
     // Push a decimated transport delta while playing (and once on the
     // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
     auto& transport = eng.edit().getTransport();
@@ -613,7 +619,9 @@ juce::var MoshOps::execute (const juce::var& command)
             return early;   // refused or replayed: no dispatch, no mutation, no journal
     }
 
+    prepareDirectCommand (command);
     auto result = executeImpl (command);
+    pollDirectRenders();
 
     if (outermost)
         txnPostDispatch (result);
@@ -645,6 +653,11 @@ juce::var MoshOps::executeImpl (const juce::var& command)
 
     if (name.isEmpty())
         return errResult (name, "missing 'command'");
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[Identifier ("decisionPolicy")].toString() == "explicit"
+        && (name == "compile_render" || name == "render_ahead_arm" || name == "freeze_layer"
+            || name == "unfreeze_layer" || name == "bounce_layer_to_clip"))
+        return errResult (name, "Use Generate, audition, Keep or Reject for this direct Re-Imagine layer.");
+
 
     // MP-001 lock guard — the single chokepoint. When a multiplayer session is
     // active, reject any mutation to a track / clip / structure currently locked by
@@ -3992,6 +4005,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     if (rl.isValid())
     {
         auto* r = new DynamicObject();
+        appendDirectRenderSnapshot (*r, c, rl);
         r->setProperty ("id", rl[ids::id]);
         r->setProperty ("status", rl[ids::status]);
         r->setProperty ("error", rl[ids::renderError]);   // "" unless status=="error"

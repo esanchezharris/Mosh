@@ -92,6 +92,11 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
 
     write_wav(output_wav, out, n_channels, framerate)
 
+    if params.get("decision_policy") == "explicit":
+        return {"ok": True, "adapter": "fake", "backend": "fixture", "test_fixture": True,
+                "duration_s": round(n_frames / float(framerate), 3),
+                "sample_rate": framerate, "channels": n_channels, "evaluation": "disabled"}
+
     # A QA readout (judge-panel stand-in, 05 §7): the stub reports a plausible
     # production-quality score vs the source so the UI can show degradation.
     pq = round(0.82 - drive * 0.1, 3)

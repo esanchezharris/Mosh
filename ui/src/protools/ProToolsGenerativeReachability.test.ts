@@ -104,6 +104,8 @@ describe("Pro Tools generative reachability", () => {
       availableLoras: [],
       availableTransformTargets: [],
       sa3Available: true,
+      explicitRenderDecision: true,
+      directRenderTestFixture: false,
       qaByClip: {},
       loadColors: vi.fn(async () => {}),
       loadTransformTargets: vi.fn(async () => {}),
@@ -131,6 +133,8 @@ describe("Pro Tools generative reachability", () => {
       availableLoras: originalState.availableLoras,
       availableTransformTargets: originalState.availableTransformTargets,
       sa3Available: originalState.sa3Available,
+      explicitRenderDecision: originalState.explicitRenderDecision,
+      directRenderTestFixture: originalState.directRenderTestFixture,
       qaByClip: originalState.qaByClip,
       loadColors: originalState.loadColors,
       loadTransformTargets: originalState.loadTransformTargets,
@@ -147,7 +151,7 @@ describe("Pro Tools generative reachability", () => {
     expect(drawer?.getAttribute("role")).toBe("complementary");
     expect(drawer?.hasAttribute("aria-modal")).toBe(false);
     expect(drawer?.textContent).toContain("Direct Target");
-    expect(document.activeElement).toBe(drawer?.querySelector("[data-testid=gen-compile-input]"));
+    expect(document.activeElement).toBe(drawer?.querySelector("[data-testid=gen-prompt]"));
 
     const close = drawer?.querySelector<HTMLButtonElement>("[data-testid=pt-generative-close]");
     if (!close) throw new Error("Pro Tools Re-imagine close button is missing");
@@ -158,7 +162,7 @@ describe("Pro Tools generative reachability", () => {
 
   it("routes the truthful SA3 create contract to the current selected clip", async () => {
     await open();
-    const create = host.querySelector<HTMLButtonElement>("[data-testid=gen-create]");
+    const create = host.querySelector<HTMLButtonElement>("[data-testid=gen-render]");
     if (!create) throw new Error("shared Re-imagine create control is missing");
     await act(async () => create.click());
 
@@ -168,55 +172,28 @@ describe("Pro Tools generative reachability", () => {
       adapter: "stable_audio3",
       mode: "reimagine",
       modelVariant: "sa3-medium",
+      decisionPolicy: "explicit",
     });
   });
 
-  it("targets the focused member when clip-group selection contains multiple clips", async () => {
+  it("requires one selected audio clip even when a group has a focused member", async () => {
     act(() => {
-      useStore.setState({
-        snapshot: {
-          ...SNAPSHOT,
-          clipGroups: [{
-            id: "group-a",
-            name: "Grouped Clips",
-            clipIds: ["clip-a", "clip-b"],
-            active: true,
-          }],
-        },
-        selection: new Set(["clip-a", "clip-b"]),
-      });
+      useStore.setState({ selection: new Set(["clip-a", "clip-b"]) });
       useShell.setState({ selectedClipId: "clip-b" });
     });
-
     await open();
-    expect(host.querySelector("[data-testid=pt-generative-drawer]")?.textContent)
-      .toContain("Direct Target");
-    const create = host.querySelector<HTMLButtonElement>("[data-testid=gen-create]");
-    if (!create) throw new Error("shared Re-imagine create control is missing");
-    await act(async () => create.click());
-
-    expect(exec).toHaveBeenCalledWith("create_render_layer", {
-      clipId: "clip-b",
-      adapter: "stable_audio3",
-      mode: "reimagine",
-      modelVariant: "sa3-medium",
-    });
+    expect(host.querySelector("[data-testid=gen-render]")).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
   });
 
-  it("labels and routes the preview fallback honestly when SA3 is unavailable", async () => {
-    act(() => useStore.setState({ sa3Available: false }));
+  it.each([false, undefined])("disables generation without affirmative SA3 availability (%s)", async (available) => {
+    act(() => useStore.setState({ sa3Available: available }));
     await open();
-    const create = host.querySelector<HTMLButtonElement>("[data-testid=gen-create]");
-    if (!create) throw new Error("shared Re-imagine create control is missing");
-    await act(async () => create.click());
-
-    expect(host.querySelector("[data-testid=engine-badge]")?.textContent).toBe("preview");
-    expect(exec).toHaveBeenCalledWith("create_render_layer", {
-      clipId: "clip-b",
-      adapter: "fake",
-      mode: "reimagine",
-      modelVariant: "",
-    });
+    const generate = host.querySelector<HTMLButtonElement>("[data-testid=gen-render]");
+    expect(generate?.disabled).toBe(true);
+    expect(document.activeElement).toBe(host.querySelector("[data-testid=gen-prompt]"));
+    await act(async () => generate?.click());
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("closes stale controls on project replacement and never overlaps Ask Moshi", async () => {
@@ -234,19 +211,19 @@ describe("Pro Tools generative reachability", () => {
     expect(host.querySelector("[data-testid=pt-generative-drawer]")).toBeNull();
   });
 
-  it("retargets current selection and discards a draft addressed to the prior clip", async () => {
+  it("pins the opened clip and its draft when selection changes", async () => {
     await open();
-    const input = host.querySelector<HTMLInputElement>("[data-testid=gen-compile-input]");
+    const input = host.querySelector<HTMLInputElement>("[data-testid=gen-prompt]");
     if (!input) throw new Error("shared Compile field is missing");
     act(() => setInputValue(input, "make the old target darker"));
     expect(input.value).toBe("make the old target darker");
 
     act(() => useStore.setState({ selection: new Set(["clip-a"]) }));
 
-    const retargeted = host.querySelector<HTMLInputElement>("[data-testid=gen-compile-input]");
+    const retargeted = host.querySelector<HTMLInputElement>("[data-testid=gen-prompt]");
     expect(host.querySelector("[data-testid=pt-generative-drawer]")?.textContent)
-      .toContain("Selected Track Clip");
-    expect(retargeted?.value).toBe("");
+      .toContain("Direct Target");
+    expect(retargeted?.value).toBe("make the old target darker");
   });
 
   it("keeps an empty project honest and focuses its only available drawer action", async () => {
@@ -258,7 +235,32 @@ describe("Pro Tools generative reachability", () => {
     await open();
 
     const drawer = host.querySelector<HTMLElement>("[data-testid=pt-generative-drawer]");
-    expect(drawer?.textContent).toContain("Add and select a clip");
+    expect(drawer?.textContent).toContain("Select one audio clip");
     expect(document.activeElement).toBe(drawer?.querySelector("[data-testid=pt-generative-close]"));
   });
+  it("does not infer a clip from the selected track or editor", async () => {
+    act(() => useStore.setState({ selection: new Set(), editingClipId: "clip-a" }));
+    await open();
+    expect(host.querySelector("[data-testid=gen-prompt]")).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect controls when the opened target is deleted", async () => {
+    await open();
+    act(() => useStore.setState({
+      snapshot: { ...SNAPSHOT, tracks: SNAPSHOT.tracks.filter((track) => track.id !== "track-b") },
+      selection: new Set(["clip-a"]),
+    }));
+    expect(host.querySelector("[data-testid=gen-prompt]")).toBeNull();
+    expect(host.querySelector("[data-testid=gen-render]")).toBeNull();
+  });
+
+  it("keeps MIDI outside the direct audio workflow", async () => {
+    act(() => useStore.setState({ snapshot: { ...SNAPSHOT, tracks: SNAPSHOT.tracks.map((track) => ({
+      ...track, clips: track.clips.map((clip) => ({ ...clip, type: "midi" })),
+    })) } }));
+    await open();
+    expect(host.querySelector("[data-testid=gen-render]")).toBeNull();
+  });
+
 });
