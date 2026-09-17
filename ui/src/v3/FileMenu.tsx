@@ -25,7 +25,7 @@ export function FileMenu({ title }: { title: string }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, setOpen]);
 
-  const run = (id: "new_project" | "open_project" | "save") => {
+  const run = (id: "new_project" | "open_project" | "save" | "save_as" | "export_audio") => {
     setOpen(false);
     void runAction(id, actionCtx());
   };
@@ -46,6 +46,15 @@ export function FileMenu({ title }: { title: string }) {
         </button>
         <button type="button" className="mi" role="menuitem" onClick={() => run("save")}>
           <span>Save</span><kbd>⌘S</kbd>
+        </button>
+        <button type="button" className="mi" role="menuitem" onClick={() => run("save_as")}>
+          <span>Save As…</span><kbd>⇧⌘S</kbd>
+        </button>
+        <button type="button" className="mi" role="menuitem" onClick={() => {
+          setOpen(false); useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files");
+        }}><span>Import audio…</span></button>
+        <button type="button" className="mi" role="menuitem" onClick={() => run("export_audio")}>
+          <span>Export audio…</span>
         </button>
         <div className="sep" />
         <div className="mi mi-sub" role="menuitem" data-testid="v3-templates">

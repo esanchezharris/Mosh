@@ -19,7 +19,6 @@ interface V3ShellState {
   historyOpen: boolean;
   settingsOpen: boolean;
   context: V3ContextMenu | null;
-  selectedClipId: string | null;
   setPane: (pane: V3Pane) => void;
   togglePane: (pane: Exclude<V3Pane, "none">) => void;
   setPosture: (posture: V3Posture) => void;
@@ -28,7 +27,6 @@ interface V3ShellState {
   setHistoryOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setContext: (ctx: V3ContextMenu | null) => void;
-  setSelectedClipId: (id: string | null) => void;
 }
 
 export const useV3 = create<V3ShellState>((set, get) => ({
@@ -39,7 +37,6 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   historyOpen: false,
   settingsOpen: false,
   context: null,
-  selectedClipId: null,
   setPane: (pane) => set({ pane }),
   togglePane: (pane) => set({ pane: get().pane === pane ? "none" : pane }),
   setPosture: (posture) => set({ posture, fileOpen: false }),
@@ -48,5 +45,4 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   setHistoryOpen: (historyOpen) => set({ historyOpen, fileOpen: false, settingsOpen: false, context: null }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen, fileOpen: false, historyOpen: false, context: null }),
   setContext: (context) => set({ context, fileOpen: false, historyOpen: false }),
-  setSelectedClipId: (selectedClipId) => set({ selectedClipId }),
 }));

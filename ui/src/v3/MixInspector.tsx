@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { GenDrawer } from "../ui/GenDrawer";
+import { ReImagineSection } from "./ReImagineSection";
 import { midiInputOptions, trackOutputOptions, currentTrackOutput, trackOutputPatch, waveInputOptions, currentTrackInput } from "../settings/routing";
 import type { Plugin, Snapshot } from "../types";
 import { useV3 } from "./shellState";
@@ -52,7 +52,6 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
 export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
-  const selectedClipId = useV3((s) => s.selectedClipId);
   const loadRouting = useStore((s) => s.loadRouting);
   const loadMidiInputs = useStore((s) => s.loadMidiInputs);
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId) ?? snapshot.tracks[0];
@@ -106,12 +105,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
           </div>
         </details>
 
-        <details className="grp" open>
-          <summary className="grphd"><span className="sec">Generative</span></summary>
-          <div className="grp-body v3-gen">
-            <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />
-          </div>
-        </details>
+        <ReImagineSection snapshot={snapshot} />
 
         <details className="grp quiet" open>
           <summary className="grphd"><span className="sec">Sends</span></summary>

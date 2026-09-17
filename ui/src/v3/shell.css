@@ -222,7 +222,7 @@
 .v3-shell .hdr-spacer { width: 148px; flex-shrink: 0; margin-right: 6px; }
 .v3-shell .ruler {
   flex: 1; display: grid; grid-template-columns: repeat(var(--beats, 32), minmax(0, 1fr));
-  height: 20px; align-items: center; overflow: hidden;
+  height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none;
 }
 .v3-shell .rn { font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); padding-left: 1px; }
 .v3-shell .rn.bar { color: #C8CBC6; font-weight: 600; }
@@ -276,7 +276,7 @@
 .v3-shell .cwave svg { display: block; width: 100%; height: 100%; }
 
 .v3-shell .insp {
-  width: 260px; border-left: 1px solid rgba(255,255,255,.06); background: var(--insp);
+  width: 320px; border-left: 1px solid rgba(255,255,255,.06); background: var(--insp);
   display: flex; flex-direction: column; min-height: 0; flex-shrink: 0;
 }
 .v3-shell .ibody { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow: auto; }
@@ -315,8 +315,42 @@
   border-style: dashed; color: var(--muted); justify-content: center; align-items: center;
   font-size: 10px; padding: 7px; cursor: pointer; background: transparent;
 }
-.v3-shell .v3-gen .gen-head, .v3-shell .v3-gen .gen-title { display: none; }
-.v3-shell .v3-gen .gen { border: none; padding: 0; background: transparent; }
+/* The shared drawer must fit its inspector, independent of Pro Tools tokens. */
+.v3-shell .v3-gen .gen {
+  width: 100%; min-width: 0; flex: initial; border: none; padding: 0;
+  background: transparent; overflow: visible; color: var(--text);
+}
+.v3-shell .v3-reimagine { background: var(--surface); }
+.v3-shell .v3-reimagine-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v3-shell .v3-reimagine .set-hint { overflow-wrap: anywhere; }
+.v3-shell .v3-gen .gen-head { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.v3-shell .v3-gen .gen-title { display: none; }
+.v3-shell .direct-reimagine { display: grid; gap: 10px; font-size: 12px; line-height: 1.4; }
+.v3-shell .direct-reimagine-target { display: grid; gap: 4px; padding: 8px; background: var(--surface2); border-radius: 6px; overflow-wrap: anywhere; }
+.v3-shell .direct-reimagine-target span { color: var(--muted); }
+.v3-shell .direct-reimagine-field { display: grid; gap: 4px; }
+.v3-shell .direct-reimagine-field input {
+  width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--bg); color: var(--text); font: inherit;
+}
+.v3-shell .direct-reimagine :is(.nparam, .nlabel, .nval) { color: var(--text); }
+.v3-shell .direct-reimagine .nslider { min-width: 0; flex: 1; }
+.v3-shell .direct-reimagine input[type="range"] { width: 100%; min-width: 0; accent-color: var(--accent); }
+.v3-shell .direct-reimagine p { margin: 0; }
+.v3-shell .direct-reimagine-hint { color: var(--muted); }
+.v3-shell .direct-reimagine .gen-service-status { margin: 0; padding: 8px; color: var(--text); background: var(--surface2); }
+.v3-shell .direct-reimagine .gen-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.v3-shell .direct-reimagine .btn { color: var(--text); font-size: 11px; padding: 6px 8px; }
+.v3-shell .direct-reimagine .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.v3-shell .btn:disabled { opacity: .45; cursor: default; }
+.v3-shell :is(button, input, select, [role="button"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.v3-shell .clip-name { position: absolute; inset: 2px 5px auto; z-index: 1; font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .clip .cwave { padding-top: 16px; }
+.v3-shell .fader input[type="range"], .v3-shell .fader select { min-width: 0; width: 100%; }
+.v3-shell .fader .nm, .v3-shell .fader .v { flex-shrink: 0; }
+.v3-shell .fader select { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+.v3-shell .grp { flex-shrink: 0; }
+
 
 .v3-shell .prompt { flex-shrink: 0; display: flex; flex-direction: column; border-top: 1px solid var(--fog-line); background: #121414; }
 .v3-shell .adock { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }

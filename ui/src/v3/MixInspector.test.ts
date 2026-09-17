@@ -55,7 +55,7 @@ describe("v3 Mix inspector", () => {
     expect(host.querySelector('[role="tablist"]')).toBeNull();
     expect(inspectorHasForbiddenTabs(host)).toBe(false);
     expect(host.textContent).toMatch(/Levels/);
-    expect(host.textContent).toMatch(/Generative/);
+    expect(host.textContent).toMatch(/Re-Imagine/);
     expect(host.textContent).toMatch(/Sends/);
     expect(host.textContent).toMatch(/Plugins/);
   });

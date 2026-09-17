@@ -55,3 +55,12 @@ canonical native gate and independent review remain separate from one frozen
 four-second local real-model check. Only one identical-settings technical retry
 is permitted. A fixture is labelled test output. No automated result establishes
 owner listening acceptance. No push, merge, install or deployment is authorized.
+
+## V3 continuation — 2026-09-17
+
+The owner requested verification and concrete V3 UI fixes with screenshots. Start
+from repaired candidate `14be78358e7db23f5ab5d929b9d82b75683ea1bd`. Reuse V3's
+existing inspector, the shared direct drawer and command seam. Repair selection
+identity, clipped controls and discoverable file actions only. Preserve the
+other shells and deferred agent implementation. Verify with deterministic
+fixtures and stored audio; do not repeat the real-model generation.

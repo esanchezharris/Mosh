@@ -14,6 +14,13 @@ unchanged-control submission contract. Exact-candidate Release UI, gate and revi
 evidence is recorded in that directory's `reopen-repair-20260916/` subdirectory.
 The earlier real-model render is retained; this repair does not repeat inference.
 
+**2026-09-17 V3 UI repair:** the existing inspector now opens the shared direct
+Re-Imagine tool on one explicit audio clip, with a pinned target, visible source
+names and controls fitted to the panel. V3 timeline selection uses the shared
+keyboard-edit selection. File exposes browser import, Save As and Export.
+Verification and screenshots live in the same evidence root under `v3-ui-20260917/`.
+No additional real-model generation is part of this repair.
+
 The pre-pivot ownership snapshot below is preserved as historical evidence.
 Older recording/mixing-agent and reconstruction priorities are deferred.
 

@@ -37,8 +37,7 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
   const recording = useStore((s) => s.transport.recording);
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks);
-  const selectedClipId = useV3((s) => s.selectedClipId);
-  const setSelectedClipId = useV3((s) => s.setSelectedClipId);
+  const selection = useStore((s) => s.selection);
   const setContext = useV3((s) => s.setContext);
   const sel = selectedTrackId === track.id;
   const length = Math.max(1e-6, snapshot.session.length ?? 32);
@@ -63,16 +62,19 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
             onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>S</button>
         </div>
       </div>
-      <div className="lane" onClick={() => useStore.getState().setSelectedTrack(track.id)}>
+      <div className="lane" onClick={() => {
+        useStore.getState().setSelectedTrack(track.id);
+        useStore.getState().clearSelection();
+      }}>
         <LaneGrid beats={beats} />
         {clips.map((clip) => (
           <ClipBody key={clip.id} clip={clip} length={length} beats={beats}
-            selected={selectedClipId === clip.id || (sel && selectedClipId == null)}
+            selected={selection.has(clip.id)}
             live={!!(recording && track.armed && clip.type === "wave")}
             peaks={peaks[clip.id]}
             onSelect={() => {
               useStore.getState().setSelectedTrack(track.id);
-              setSelectedClipId(clip.id);
+              useStore.getState().select([clip.id]);
             }}
             onContext={(x, y) => setContext({ x, y, clipId: clip.id, trackId: track.id })}
           />
@@ -100,9 +102,14 @@ function ClipBody({
   const drums = midi && isDrumClip(clip.notes);
   return (
     <div className={`clip${selected ? " hl" : ""}`} style={{ left, width }}
-      data-testid="v3-clip" data-clip-id={clip.id}
+      data-testid="v3-clip" data-clip-id={clip.id} role="button" tabIndex={0}
+      aria-label={`${clip.name}, ${clip.type === "wave" ? "audio" : "MIDI"} clip`} aria-pressed={selected}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onSelect(); }
+      }}
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onContextMenu={(e) => { e.preventDefault(); onSelect(); onContext(e.clientX, e.clientY); }}>
+      <span className="clip-name" title={clip.name}>{clip.name}</span>
       {drums ? <DrumsClip notes={clip.notes} beats={beats} />
         : midi ? <MelodyClip notes={clip.notes} beats={beats} />
         : <SilhouetteWave peaks={peaks} selected={selected} live={live} beats={beats} />}
