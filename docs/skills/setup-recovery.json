@@ -1,0 +1,54 @@
+{
+  "authenticSetupsRecovered": 0,
+  "selectedRows": 10030,
+  "status": "unverified",
+  "reason": "Prepared rows retain messages only; shortened Current session text does not preserve original snapshots, notes, plugins, history, or setup commands.",
+  "searched": [
+    "service/sft/.sft-data/s2-mix-v5-prep/train.jsonl",
+    "~/Library/Mosh/sft-data-durable/train.jsonl (identical prepared corpus)",
+    "~/Library/Mosh/work/sft/r8-4b-smoke/train.jsonl (119 messages-only rows)",
+    "service/sft/.artifacts/a3b-r4-cuda-bundle.tgz (v4 messages-only train/prefilter/manifest)",
+    "bounded inventories under ~/Library/Mosh/work, durable data, service/sft, and two .claude worktrees",
+    "legacy ~/Documents/ClaudeMosh, intelligent-banach paths, ~/mosh-corpus absent"
+  ],
+  "retainedSegments": [
+    {
+      "trainingLines": [
+        12675,
+        12829
+      ],
+      "source": "offset-coords.jsonl",
+      "sourceLines": [
+        1,
+        155
+      ],
+      "sha256": "6194fb43ad0708950fbbc7cb8048743855b214cd7b2b07b3a4bcc798812037aa"
+    },
+    {
+      "trainingLines": [
+        12830,
+        12889
+      ],
+      "source": "render-routing.jsonl",
+      "sourceLines": [
+        1,
+        60
+      ],
+      "sha256": "2a3c4ee5cc1ef8de42f011ed62389dfa49973fb26b96a4844393f72408693427"
+    },
+    {
+      "trainingLines": [
+        12890,
+        12994
+      ],
+      "source": "r5_train_additions.jsonl",
+      "sourceLines": [
+        1,
+        105
+      ],
+      "sha256": "6085bf99efa01701ef543f03c6707f8476d3b122256eb531cc1693a0033dd80e"
+    }
+  ],
+  "segmentsAreSetupEvidence": false,
+  "heldoutGoldArgs": "Absent in evalA and frozen source; startCommands describe initial setup only, goldCommandNames omit target arguments."
+}

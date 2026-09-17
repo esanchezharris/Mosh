@@ -1,0 +1,1618 @@
+{
+  "schemaVersion": 1,
+  "id": "sft-04-add-note-8",
+  "name": "add-note-8",
+  "description": "Put an eight-note musical idea into an existing MIDI clip. Supply the pitches, rhythm, and strength of each note explicitly.",
+  "examples": [
+    "lay a brief pattern into the Acoustic Bs. track clip",
+    "lay a brief pattern into the MIDI out track clip",
+    "sketch a short pattern in the clip on Track 1",
+    "fill the clip on HA�Y HA�N G��N TH�� GI��I with a short pattern",
+    "Would you mind writing a short pattern into the clip on the Hark! the Herald track?",
+    "lay a brief pattern into the Bass track clip",
+    "Just put a short pattern into the clip on the EVA track, please.",
+    "write a short pattern into the clip on the \"���NG KHO�C NGHE EM\" track",
+    "add a quick pattern to the clip on Gt Solo",
+    "Sketch a short pattern into that clip on the Melody track."
+  ],
+  "slots": [
+    {
+      "name": "step1_clipId",
+      "type": "string",
+      "required": true,
+      "description": "Which MIDI clip should receive the note?",
+      "source": "user",
+      "default": null,
+      "input": {
+        "kind": "choice_snapshot",
+        "question": "Which MIDI clip should receive the note?",
+        "selector": "tracks[].clips[].id",
+        "defaultPolicy": "required",
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2452
+        },
+        "notes": "Requires a MIDI clip."
+      }
+    },
+    {
+      "name": "step1_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.47395833333333337,
+          "max": 21.916666666666668
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step1_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 60,
+          "max": 91
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step1_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 4,
+          "max": 372
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step1_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 99,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step2_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.40885416666666663,
+          "max": 8
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step2_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 26,
+          "median": 60.5,
+          "max": 91
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step2_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 4.923177083333334,
+          "max": 375
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step2_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 98,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step3_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.3958333333333333,
+          "max": 8.06875
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step3_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 24,
+          "median": 61.5,
+          "max": 103
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step3_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 6,
+          "max": 375.5
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step3_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 95,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step4_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.4375,
+          "max": 23.958333333333332
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step4_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 28,
+          "median": 62,
+          "max": 93
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step4_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 7,
+          "max": 376
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step4_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 97,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step5_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.4166666666666667,
+          "max": 15.989583333333334
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step5_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 28,
+          "median": 61,
+          "max": 113
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step5_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 7.775,
+          "max": 384
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step5_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 95,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step6_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.4166666666666667,
+          "max": 15.989583333333334
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step6_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 24,
+          "median": 62,
+          "max": 113
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step6_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 8,
+          "max": 392
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step6_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 96,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step7_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.44375,
+          "max": 15.989583333333334
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step7_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 27,
+          "median": 62,
+          "max": 91
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step7_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.5,
+          "median": 8.5,
+          "max": 398
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step7_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 95,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step8_length",
+      "type": "number",
+      "required": true,
+      "description": "How many beats should the note last?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How many beats should the note last?",
+        "unit": "beats",
+        "min": 0.0625,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0.0625,
+          "median": 0.4166666666666667,
+          "max": 15.989583333333334
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2477
+        },
+        "notes": "The minimum kMinMidiNoteBeats is defined at MoshOps.cpp:40."
+      }
+    },
+    {
+      "name": "step8_pitch",
+      "type": "number",
+      "required": true,
+      "description": "Which MIDI pitch should the note play?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "Which MIDI pitch should the note play?",
+        "unit": "MIDI note number",
+        "min": 0,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 28,
+          "median": 62,
+          "max": 96
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2475
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step8_start",
+      "type": "number",
+      "required": true,
+      "description": "At which beat within the clip should the note begin?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "At which beat within the clip should the note begin?",
+        "unit": "beats",
+        "min": 0,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 0,
+          "median": 9.109375,
+          "max": 399.5
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2476
+        },
+        "notes": ""
+      }
+    },
+    {
+      "name": "step8_velocity",
+      "type": "number",
+      "required": true,
+      "description": "How strongly should the note be played?",
+      "source": "user",
+      "default": "NEEDS_OWNER_VALUE",
+      "input": {
+        "kind": "number",
+        "question": "How strongly should the note be played?",
+        "unit": "MIDI velocity",
+        "min": 1,
+        "max": 127,
+        "integer": true,
+        "defaultPolicy": "owner",
+        "statistics": {
+          "min": 1,
+          "median": 96,
+          "max": 127
+        },
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.cpp",
+          "line": 2478
+        },
+        "notes": ""
+      }
+    }
+  ],
+  "template": {
+    "commands": [
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step1_length}",
+          "pitch": "{step1_pitch}",
+          "start": "{step1_start}",
+          "velocity": "{step1_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step2_length}",
+          "pitch": "{step2_pitch}",
+          "start": "{step2_start}",
+          "velocity": "{step2_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step3_length}",
+          "pitch": "{step3_pitch}",
+          "start": "{step3_start}",
+          "velocity": "{step3_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step4_length}",
+          "pitch": "{step4_pitch}",
+          "start": "{step4_start}",
+          "velocity": "{step4_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step5_length}",
+          "pitch": "{step5_pitch}",
+          "start": "{step5_start}",
+          "velocity": "{step5_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step6_length}",
+          "pitch": "{step6_pitch}",
+          "start": "{step6_start}",
+          "velocity": "{step6_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step7_length}",
+          "pitch": "{step7_pitch}",
+          "start": "{step7_start}",
+          "velocity": "{step7_velocity}"
+        }
+      },
+      {
+        "command": "add_note",
+        "args": {
+          "clipId": "{step1_clipId}",
+          "length": "{step8_length}",
+          "pitch": "{step8_pitch}",
+          "start": "{step8_start}",
+          "velocity": "{step8_velocity}"
+        }
+      }
+    ]
+  },
+  "preconditions": [
+    {
+      "type": "snapshot_choice",
+      "slot": "step1_clipId",
+      "selector": "tracks[].clips[].id"
+    }
+  ],
+  "postconditions": [
+    {
+      "type": "command_effect",
+      "step": 1,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 2,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 3,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 4,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 5,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 6,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 7,
+      "command": "add_note"
+    },
+    {
+      "type": "command_effect",
+      "step": 8,
+      "command": "add_note"
+    }
+  ],
+  "provenance": [
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4153",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4154",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4155",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4156",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4157",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4158",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4159",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4160",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4161",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4162",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4163",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4164",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4165",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4166",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4167",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4168",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4169",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4170",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4171",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4173",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4174",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4175",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4176",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4177",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4178",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4179",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4180",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4181",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4182",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4183",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4184",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4185",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4186",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4187",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4188",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4189",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4190",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4191",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4192",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4193",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4194",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4195",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4196",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4197",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4198",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4199",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4200",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4201",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4202",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4203",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4204",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4205",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4206",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4207",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4208",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4210",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4211",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4212",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4213",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4214",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4215",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4216",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4217",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4218",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4219",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4220",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4221",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4223",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4224",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4225",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4226",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4227",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4228",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4230",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4231",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4232",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4233",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4234",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4235",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4236",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4237",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4238",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4239",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4240",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4241",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4242",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4243",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4244",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4245",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4246",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4247",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4248",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4249",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4250",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4251",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4252",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4253",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4254",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4255",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4256",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4257",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4258",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4259",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4260",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4261",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4262",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4263",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4264",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4265",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4266",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4267",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4268",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4269",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4270",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4271",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4272",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4273",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4274",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4275",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4276",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4277",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4278",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4279",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4280",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4281",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4282",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4283",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4284",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4285",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4286",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4287",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4288",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4289",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4290",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4291",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4292",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4293",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4294",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4295",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4296",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4297",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4298",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4299",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4300",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4301",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4302",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4303",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4304",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4305",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4306",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4307",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4308",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4309",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4310",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4311",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4312",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4313",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4314",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4315",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4316",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4317",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4318",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4319",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4320",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4321",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4322",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4323",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4324",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4325",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4326",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4327",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4328",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4329",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4330",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4331",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4332",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4333",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4334",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4335",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4337",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4338",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4339",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4341",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4342",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4343",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4344",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4345",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4346",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4347",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4348",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4350",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4351",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4352",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4353",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4354",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4355",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4356",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4357",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4358",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4359",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4360",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4361",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4362",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4363",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4364",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4365",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4366",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4367",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4368",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4369",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4370",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4372",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4373",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4374",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4375",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4376",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4377",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4378",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4379",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4380",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4381",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4382",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4383",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4384",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4385",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4386",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4387",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4388",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4389",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4390",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4391",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4392",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4393",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4394",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4395",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4396",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4397",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4398",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4399",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4400",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4401",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4402",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4403",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4404",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4405",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4407",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4408",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4409",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4410",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4411",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4412",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4413",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4414",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4415",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4416",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4417",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4418",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4419",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4420",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4421",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4422",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4423",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4424",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4425",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4426",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4427",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4428",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4430",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4431",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4432",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4433",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4434",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4435",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4436",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4437",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4438",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4440",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4441",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4442",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4443",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4444",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4445",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4446",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4447",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4448",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4449",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4450",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4451",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4452",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4453",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4454",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4455",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4456",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4457",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4458",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4459",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4460",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4461",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4462",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4463",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4464",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4465",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4466",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4467",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4468",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4469",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4470",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4471",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4472",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4473",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4474",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4475",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4476",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4477",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4478",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4479",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4480",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4481",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4482",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4483",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4484",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4485",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4486",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4487",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4488",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4489",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4490",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4491",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4492",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4493",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4494",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4495",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4496",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4497",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4498",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4499",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4500",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4501",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4502",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4503",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4504",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4505",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4506",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4507",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4508",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4509",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4510",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4511",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4512",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4513",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4514",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4515",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4516",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4517",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4518",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4519",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4520",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4521",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4522",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4523",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4524",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4525",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4526",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4527",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4528",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4529",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4530",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4531",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4532",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4533",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4534",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4535",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4536",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4537",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4538",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4539",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4540",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4541",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4542",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4543",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4544",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4545",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4546",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4547",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4548",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4549",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4550",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4551",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4552",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4553",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4554",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4555",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4556",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12892"
+  ],
+  "triggers": [],
+  "mining": {
+    "rank": 4,
+    "shape": [
+      "add_note",
+      "add_note",
+      "add_note",
+      "add_note",
+      "add_note",
+      "add_note",
+      "add_note",
+      "add_note"
+    ],
+    "rows": 394,
+    "bindings": [
+      {
+        "slot": "step1_clipId",
+        "step": 1,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step1_length",
+        "step": 1,
+        "arg": "length"
+      },
+      {
+        "slot": "step1_pitch",
+        "step": 1,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step1_start",
+        "step": 1,
+        "arg": "start"
+      },
+      {
+        "slot": "step1_velocity",
+        "step": 1,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 2,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step2_length",
+        "step": 2,
+        "arg": "length"
+      },
+      {
+        "slot": "step2_pitch",
+        "step": 2,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step2_start",
+        "step": 2,
+        "arg": "start"
+      },
+      {
+        "slot": "step2_velocity",
+        "step": 2,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 3,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step3_length",
+        "step": 3,
+        "arg": "length"
+      },
+      {
+        "slot": "step3_pitch",
+        "step": 3,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step3_start",
+        "step": 3,
+        "arg": "start"
+      },
+      {
+        "slot": "step3_velocity",
+        "step": 3,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 4,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step4_length",
+        "step": 4,
+        "arg": "length"
+      },
+      {
+        "slot": "step4_pitch",
+        "step": 4,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step4_start",
+        "step": 4,
+        "arg": "start"
+      },
+      {
+        "slot": "step4_velocity",
+        "step": 4,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 5,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step5_length",
+        "step": 5,
+        "arg": "length"
+      },
+      {
+        "slot": "step5_pitch",
+        "step": 5,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step5_start",
+        "step": 5,
+        "arg": "start"
+      },
+      {
+        "slot": "step5_velocity",
+        "step": 5,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 6,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step6_length",
+        "step": 6,
+        "arg": "length"
+      },
+      {
+        "slot": "step6_pitch",
+        "step": 6,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step6_start",
+        "step": 6,
+        "arg": "start"
+      },
+      {
+        "slot": "step6_velocity",
+        "step": 6,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 7,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step7_length",
+        "step": 7,
+        "arg": "length"
+      },
+      {
+        "slot": "step7_pitch",
+        "step": 7,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step7_start",
+        "step": 7,
+        "arg": "start"
+      },
+      {
+        "slot": "step7_velocity",
+        "step": 7,
+        "arg": "velocity"
+      },
+      {
+        "slot": "step1_clipId",
+        "step": 8,
+        "arg": "clipId"
+      },
+      {
+        "slot": "step8_length",
+        "step": 8,
+        "arg": "length"
+      },
+      {
+        "slot": "step8_pitch",
+        "step": 8,
+        "arg": "pitch"
+      },
+      {
+        "slot": "step8_start",
+        "step": 8,
+        "arg": "start"
+      },
+      {
+        "slot": "step8_velocity",
+        "step": 8,
+        "arg": "velocity"
+      }
+    ],
+    "undo": "per_mutation"
+  }
+}
