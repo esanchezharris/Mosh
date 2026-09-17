@@ -6,6 +6,7 @@ import { TopBar } from "./TopBar";
 import { useV3 } from "./shellState";
 import { useStore } from "../store";
 import type { Snapshot } from "../types";
+import { escapeStackDepth, pushEscapeHandler } from "../hooks/escapeStack";
 
 vi.mock("../menuActions", () => ({ runAction: vi.fn() }));
 
@@ -33,6 +34,8 @@ describe("v3 File menu + top bar", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    useV3.setState({ fileOpen: false, settingsOpen: false, historyOpen: false });
+    expect(escapeStackDepth()).toBe(0);
   });
 
   it("keeps the closed File panel inert so the 180ms in-flow menu is not a keyboard trap", () => {
@@ -58,5 +61,54 @@ describe("v3 File menu + top bar", () => {
     act(() => root.render(React.createElement(TopBar, { snapshot: snap() })));
     expect(host.querySelector('[data-testid="v3-history"]')).not.toBeNull();
     expect([...host.querySelectorAll("button")].some((b) => b.textContent === "Undo")).toBe(false);
+  });
+
+  it("dismisses File with Escape and restores its trigger", () => {
+    act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
+    host.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+
+    expect(useV3.getState().fileOpen).toBe(false);
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="v3-file-trigger"]'));
+  });
+
+  it("keeps a newer overlay above File after a posture rerender", () => {
+    act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
+    const upperClose = vi.fn();
+    const pop = pushEscapeHandler(upperClose);
+    act(() => useV3.setState({ posture: "booth" }));
+
+    try {
+      act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+
+      expect(upperClose).toHaveBeenCalledOnce();
+      expect(useV3.getState().fileOpen).toBe(true);
+    } finally {
+      pop();
+    }
+  });
+
+  it.each(["Enter", " ", "ArrowRight"])("enters Templates with %s when its trigger is focused", (key) => {
+    act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
+    const templates = host.querySelector<HTMLElement>('[data-testid="v3-templates"]');
+    if (!templates) throw new Error("Missing Templates trigger");
+    templates.focus();
+    expect(document.activeElement).toBe(templates);
+
+    act(() => templates.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
+
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="v3-template-booth"]'));
+  });
+
+  it.each(["booth", "studio"] as const)("shows arrangement when the %s template is selected from Mixer", (posture) => {
+    useStore.setState({ view: "mixer" });
+    act(() => root.render(React.createElement(FileMenu, { title: "untitled" })));
+
+    act(() => host.querySelector<HTMLElement>(`[data-testid="v3-template-${posture}"]`)?.click());
+
+    expect(useV3.getState().posture).toBe(posture);
+    expect(useStore.getState().view).toBe("arrange");
+    expect(useV3.getState().fileOpen).toBe(false);
   });
 });

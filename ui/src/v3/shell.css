@@ -306,12 +306,12 @@
   background: #101212; font-size: 9px; color: var(--fog-label); cursor: pointer;
 }
 .v3-shell .chip.on { border-color: rgba(198,245,66,.45); color: var(--accent); background: rgba(198,245,66,.1); }
-.v3-shell .pr {
+.v3-shell .insp .pr {
   display: flex; flex-direction: column; gap: 6px; padding: 6px 7px; border-radius: 6px;
   background: var(--surface2); border: 1px solid var(--fog-line);
 }
-.v3-shell .pr .hdr { display: flex; align-items: center; gap: 6px; }
-.v3-shell .pr.add {
+.v3-shell .insp .pr .hdr { display: flex; align-items: center; gap: 6px; }
+.v3-shell .insp .pr.add {
   border-style: dashed; color: var(--muted); justify-content: center; align-items: center;
   font-size: 10px; padding: 7px; cursor: pointer; background: transparent;
 }
@@ -483,3 +483,24 @@
     height: auto;
   }
 }
+
+/* Existing workspace controls share the V3 palette and independent scroll areas. */
+.v3-shell .workspace-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 12px; border-bottom: 1px solid var(--fog-line); flex-shrink: 0; }
+.v3-shell .workspace-head b { font-size: 12px; margin-right: auto; }
+.v3-shell .workspace-empty { margin: auto; max-width: 360px; padding: 28px; text-align: center; }
+.v3-shell .workspace-empty p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.v3-shell .track-name { min-width: 0; width: 100%; padding: 0; text-align: left; background: transparent; color: inherit; border: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .count-in { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.v3-shell .count-in svg { width: 15px; height: 15px; }
+.v3-shell .count-in select { max-width: 110px; color: var(--text); background: var(--surface2); border: 1px solid var(--line); border-radius: 4px; font-size: 10px; padding: 4px; }
+.v3-shell .v3-mixer { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.v3-shell .mixer { min-height: 0; background: var(--bg); }
+.v3-shell .strip { background: var(--surface); border-color: var(--line); }
+.v3-shell .strip.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.v3-shell .strip.master { border-color: var(--accent); }
+.v3-shell .strip-name { color: var(--text); border: none; background: transparent; padding: 0; cursor: pointer; }
+.v3-shell .strip-db, .v3-shell .strip-fx { color: var(--muted); }
+.v3-shell .strip :is(.pan, .fader) { accent-color: var(--accent); }
+.v3-shell .strip .fader { display: block; }
+.v3-shell .strip .msx { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+.v3-shell .strip .msx[aria-pressed="true"] { background: var(--accent); color: var(--bg); }

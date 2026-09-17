@@ -1,4 +1,6 @@
+import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 import { useStore } from "../store";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useSettings } from "../settings/store";
 import { settingsByCategory, type SettingDef } from "../settings/schema";
 import { settingHiddenForShell } from "../settings/shellVisibility";
@@ -16,6 +18,7 @@ const SWATCHES = [
 ] as const;
 
 const CUSTOM = new Set(["colorway", "agentConfirmDestructive"]);
+const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 function SettingControl({ def }: { def: SettingDef }) {
   const raw = useSettings((s) => s.get(def.id));
@@ -51,6 +54,38 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
   const set = useSettings((s) => s.set);
   const confirm = Boolean(useSettings((s) => s.get("agentConfirmDestructive")));
   const shell = activeShell();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  useEscapeToClose(open, close);
+  useEffect(() => {
+    if (!open) return;
+    const trigger = document.activeElement;
+    closeRef.current?.focus();
+    return () => {
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
+    };
+  }, [open]);
+  const trapFocus = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
+      .filter((control) => !control.closest("[hidden], [inert]"));
+    const first = controls[0];
+    const last = controls.at(-1);
+    const active = document.activeElement;
+    if (!first || !last) {
+      event.preventDefault();
+      dialog.focus();
+    } else if (event.shiftKey && (active === first || !dialog.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
   const groups = settingsByCategory()
     .map((g) => ({
       ...g,
@@ -63,11 +98,12 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <div className="modal-root" data-settings data-testid="v3-settings">
-      <div className="scrim" onClick={() => setOpen(false)} />
-      <div className="modal glass" role="dialog" aria-label="Settings">
+      <div className="scrim" onClick={close} />
+      <div ref={dialogRef} className="modal glass" role="dialog" aria-label="Settings" aria-modal="true"
+        tabIndex={-1} onKeyDown={trapFocus}>
         <div className="modal-hd">
           <b>Settings</b>
-          <button type="button" className="icon-x" aria-label="Close" onClick={() => setOpen(false)}>×</button>
+          <button ref={closeRef} type="button" className="icon-x" aria-label="Close" onClick={close}>×</button>
         </div>
         <div className="modal-body">
           <div className="set-sec">
@@ -97,7 +133,7 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
 
           <div className="set-sec">
             <div className="set-label">Agent</div>
-            <div className="set-row"><span>Moshi</span><span className="val">On · optional</span></div>
+            <div className="set-row"><span>Moshi</span><span className="val">Optional assistant</span></div>
             <label className="set-row"><span>Confirm destructive</span>
               <button type="button" className="btn sm" data-testid="v3-confirm-destructive"
                 onClick={() => set("agentConfirmDestructive", !confirm)}>

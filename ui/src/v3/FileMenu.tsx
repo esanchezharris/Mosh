@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useStore } from "../store";
 import { pickFiles, pickSaveFile } from "../bridge";
 import { runAction } from "../menuActions";
@@ -15,6 +16,12 @@ export function FileMenu({ title }: { title: string }) {
   const setPosture = useV3((s) => s.setPosture);
   const setSettingsOpen = useV3((s) => s.setSettingsOpen);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, [setOpen]);
+  useEscapeToClose(open, close);
 
   useEffect(() => {
     if (!open) return;
@@ -32,7 +39,7 @@ export function FileMenu({ title }: { title: string }) {
 
   return (
     <div className={`menu sess-menu${open ? " open" : ""}`} ref={ref}>
-      <button className="sess-trig" type="button" title="File menu" aria-haspopup="true"
+      <button ref={triggerRef} className="sess-trig" type="button" title="File menu" aria-haspopup="menu"
         aria-expanded={open} data-testid="v3-file-trigger" onClick={() => setOpen(!open)}>
         <b>{title}</b><span className="caret" aria-hidden="true" />
       </button>
@@ -57,16 +64,22 @@ export function FileMenu({ title }: { title: string }) {
           <span>Export audio…</span>
         </button>
         <div className="sep" />
-        <div className="mi mi-sub" role="menuitem" data-testid="v3-templates">
+        <div className="mi mi-sub" role="menuitem" tabIndex={0} aria-haspopup="menu" aria-label="Templates"
+          data-testid="v3-templates" onKeyDown={(event) => {
+            if (event.target !== event.currentTarget || !["Enter", " ", "ArrowRight"].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
+          }}>
           <span>Templates</span><span className="chev">›</span>
-          <div className="menu-sub" role="menu">
-            <button type="button" className="mi" data-testid="v3-template-booth"
-              onClick={() => { setPosture("booth"); setOpen(false); }}>
+          <div className="menu-sub" role="menu" aria-label="Templates">
+            <button type="button" className="mi" role="menuitem" data-testid="v3-template-booth"
+              onClick={() => { useStore.getState().setView("arrange"); setPosture("booth"); close(); }}>
               <span>Recording Booth</span>
               {posture === "booth" ? <span className="check">✓</span> : null}
             </button>
-            <button type="button" className="mi" data-testid="v3-template-studio"
-              onClick={() => { setPosture("studio"); setOpen(false); }}>
+            <button type="button" className="mi" role="menuitem" data-testid="v3-template-studio"
+              onClick={() => { useStore.getState().setView("arrange"); setPosture("studio"); close(); }}>
               <span>Full Studio</span>
               {posture === "studio" ? <span className="check">✓</span> : null}
             </button>
@@ -75,7 +88,7 @@ export function FileMenu({ title }: { title: string }) {
         </div>
         <div className="sep" />
         <button type="button" className="mi" role="menuitem" data-testid="v3-open-settings"
-          onClick={() => { setOpen(false); setSettingsOpen(true); }}>
+          onClick={() => { close(); setSettingsOpen(true); }}>
           <span>Settings…</span><kbd>⌘,</kbd>
         </button>
       </div>

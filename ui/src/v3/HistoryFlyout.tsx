@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { useStore } from "../store";
 import { historyRowHint, historyRows } from "../ui/commandLogHistory";
 import type { CommandLog } from "../types";
@@ -9,6 +10,8 @@ export function HistoryFlyout() {
   const setOpen = useV3((s) => s.setHistoryOpen);
   const exec = useStore((s) => s.exec);
   const [log, setLog] = useState<CommandLog | null>(null);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  useEscapeToClose(open, close);
 
   const load = async () => {
     const r = await exec("get_command_log", { limit: 50 });
@@ -25,7 +28,7 @@ export function HistoryFlyout() {
       <div className="pane-hd">
         <span className="sec">History</span>
         <span className="muted" style={{ fontSize: 10, color: "var(--fog-label)" }}>Cmd+Z · click older</span>
-        <button type="button" className="icon-x" aria-label="Close" onClick={() => setOpen(false)}>×</button>
+        <button type="button" className="icon-x" aria-label="Close" onClick={close}>×</button>
       </div>
       <div className="hist-list">
         {rows.length === 0 ? <div className="set-hint">no commands yet</div> : rows.map((row, i) => {

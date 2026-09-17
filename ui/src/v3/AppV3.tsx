@@ -21,6 +21,9 @@ import { SettingsModal } from "./SettingsModal";
 import { BrowserPane } from "./BrowserPane";
 import { PluginsPane } from "./PluginsPane";
 import { BoothView } from "./BoothView";
+import { Mixer } from "../ui/Mixer";
+import { PianoRoll } from "../ui/PianoRoll";
+import { MoshTipProvider } from "../chrome/Tooltip";
 import { ContextMenu } from "./ContextMenu";
 import "./shell.css";
 
@@ -29,6 +32,7 @@ export function AppV3() {
   const lastError = useStore((s) => s.lastError);
   const peers = useStore((s) => s.peers);
   const displayError = lastError ? formatPeerError(lastError, peers) : null;
+  const view = useStore((s) => s.view);
   const pane = useV3((s) => s.pane);
   const posture = useV3((s) => s.posture);
   const colorway = colorwayAttr(useSettings((s) => s.get("colorway")));
@@ -49,6 +53,7 @@ export function AppV3() {
   }
 
   return (
+    <MoshTipProvider delay={350}>
     <div className="v3-shell" data-testid="v3-shell" data-colorway={colorway} data-posture={posture}>
       {snapshot && <TopBar snapshot={snapshot} />}
       {displayError && <div className="v2-errbar" role="alert">{displayError}</div>}
@@ -62,7 +67,15 @@ export function AppV3() {
         {pane === "plugins" && <PluginsPane />}
         <div className="col-main">
           {snapshot
-            ? (posture === "booth" ? <BoothView snapshot={snapshot} /> : <Arrangement snapshot={snapshot} />)
+            ? (posture === "booth" ? <BoothView snapshot={snapshot} /> : view === "mixer"
+              ? <div className="v3-mixer" data-testid="v3-mixer">
+                  <div className="workspace-head">
+                    <b>Mixer</b>
+                    <button type="button" className="btn sm" onClick={() => useStore.getState().setView("arrange")}>Back to arrangement</button>
+                  </div>
+                  <Mixer snapshot={snapshot} showMoshi={false} />
+                </div>
+              : <Arrangement snapshot={snapshot} />)
             : <div className="main"><div className="set-hint" style={{ padding: 16 }}>Loading session…</div></div>}
           <MoshiDock />
         </div>
@@ -71,6 +84,8 @@ export function AppV3() {
       <HistoryFlyout />
       {snapshot && <SettingsModal snapshot={snapshot} />}
       <ContextMenu />
+      <PianoRoll />
     </div>
+    </MoshTipProvider>
   );
 }

@@ -21,6 +21,14 @@ keyboard-edit selection. File exposes browser import, Save As and Export.
 Verification and screenshots live in the same evidence root under `v3-ui-20260917/`.
 No additional real-model generation is part of this repair.
 
+**2026-09-17 general V3 workspace repair:** the separate ordinary-UI pass repairs
+Mixer navigation, MIDI editor reachability, track selection, empty-session actions,
+count-in and keyboard overlays. It reuses existing shared components and commands.
+See [the bounded scope](V3-WORKSPACE-SCOPE-2026-09-17.md). Exact candidate, native
+screenshots, gate/review and limitations are recorded at
+`~/Library/Mosh/task-evidence/v3-general-ui-20260917/HANDOFF.md`.
+This pass does not run SA3 or runtime agents, install, merge or deploy.
+
 The pre-pivot ownership snapshot below is preserved as historical evidence.
 Older recording/mixing-agent and reconstruction priorities are deferred.
 
