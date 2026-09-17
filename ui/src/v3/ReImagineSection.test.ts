@@ -26,7 +26,7 @@ describe("V3 direct Re-Imagine targeting", () => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
     exec.mockClear();
-    useStore.setState({ selection: new Set(), projectEpoch: 7, exec, sa3Available: true, explicitRenderDecision: true,
+    useStore.setState({ selection: new Set(), projectEpoch: 7, projectTransitioning: false, exec, sa3Available: true, explicitRenderDecision: true,
       directRenderTestFixture: false, genServiceState: "ready", loadColors: vi.fn(async () => {}) });
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); useStore.setState(original); });
@@ -60,6 +60,20 @@ describe("V3 direct Re-Imagine targeting", () => {
     expect(host.textContent).toContain("no longer available");
     act(() => useStore.setState({ projectEpoch: 8 })); render();
     expect(host.querySelector('[data-testid="gen-render"]')).toBeNull();
+  });
+
+  it("cannot open an outgoing clip during a transition with reused IDs", async () => {
+    useStore.setState({ selection: new Set(["source"]), projectEpoch: 8, projectTransitioning: true });
+    render();
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="v3-reimagine-open"]')?.disabled).toBe(true);
+    await click("v3-reimagine-open");
+    expect(host.querySelector('[data-testid="gen-prompt"]')).toBeNull();
+    act(() => useStore.setState({ projectTransitioning: false }));
+    render({ ...snapshot, tracks: [{ ...tracks[0], clips: [{ ...source, name: "Replacement source" }] }] });
+    expect(host.querySelector('[data-testid="gen-prompt"]')).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+    await click("v3-reimagine-open");
+    expect(host.querySelector('[data-testid="gen-target"]')?.textContent).toContain("Replacement source");
   });
 
   it("restores committed audio when closing an audition", async () => {

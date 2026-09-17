@@ -14,9 +14,10 @@ function audioTarget(snapshot: Snapshot, clipId: string | undefined) {
 export function ReImagineSection({ snapshot }: { readonly snapshot: Snapshot }) {
   const selection = useStore((state) => state.selection);
   const epoch = useStore((state) => state.projectEpoch);
+  const transitioning = useStore((state) => state.projectTransitioning);
   const [opened, setOpened] = useState<{ readonly clipId: string; readonly epoch: number } | null>(null);
-  const selected = audioTarget(snapshot, selection.size === 1 ? selection.values().next().value : undefined);
-  const target = opened?.epoch === epoch ? audioTarget(snapshot, opened.clipId) : null;
+  const selected = transitioning ? null : audioTarget(snapshot, selection.size === 1 ? selection.values().next().value : undefined);
+  const target = !transitioning && opened?.epoch === epoch ? audioTarget(snapshot, opened.clipId) : null;
 
   return <section className="grp v3-reimagine" aria-label="Re-Imagine">
     <div className="grphd v3-reimagine-heading">
