@@ -31,8 +31,12 @@ audio layers retain their original source and store pending/committed audio;
 generation does not apply automatically. Audition substitutes one clip source
 through existing routing, restores committed playback before persistence, and
 never creates a second audible layer. Keep and Reject use Tracktion undo.
-Requests bind to the edit, clip, layer, settings and staged source. Cancellation
-prevents application; running inference may continue and returned files remain.
+Requests bind to the edit, clip, layer, settings and staged source. macOS freezes
+the request with an atomic filesystem clone before background staging; sources
+on volumes that cannot provide that snapshot, and symbolic-link sources, fail
+with a copy-into-project message. Source and pending-result content hashes are
+verified off the UI thread before Keep or Result audition. Cancellation prevents
+application; running inference may continue and returned files remain.
 
 `stable_audio3` here means the existing local SA3 Medium MLX backend. Direct
 requests require affirmative capability and provenance, bypass automatic scoring,

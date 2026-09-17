@@ -322,6 +322,7 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.Plugins.cpp
         src/moshops/MoshOps.Mixer.cpp
         src/generative/DirectRenderJob.cpp
+        src/moshops/MoshOps.DirectDecision.cpp
         src/moshops/MoshOps.DirectRender.cpp
         src/moshops/MoshOps.Generative.cpp
         src/moshops/MoshOps.Multiplayer.cpp

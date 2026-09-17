@@ -1,6 +1,9 @@
 #include "DirectRenderJob.h"
 #include "AudioStaging.h"
 #include <juce_cryptography/juce_cryptography.h>
+#if JUCE_MAC
+#include <sys/clonefile.h>
+#endif
 
 namespace mosh
 {
@@ -11,14 +14,47 @@ void DirectRenderJob::publish (const juce::String& state, const juce::String& re
     error = reason;
 }
 
+juce::Result createDirectSourceSnapshot (const juce::File& source, const juce::File& destination)
+{
+    if (! source.existsAsFile()) return juce::Result::fail ("Original source audio is missing.");
+    if (source.isSymbolicLink()) return juce::Result::fail ("Symbolic-link audio sources cannot be frozen safely. Copy the audio into the project first.");
+    if (! destination.getParentDirectory().createDirectory())
+        return juce::Result::fail ("Cannot create the request artifact directory.");
+#if JUCE_MAC
+    if (::clonefile (source.getFullPathName().toRawUTF8(), destination.getFullPathName().toRawUTF8(), 0) == 0)
+        return juce::Result::ok();
+    return juce::Result::fail ("The source could not be frozen atomically on this volume. Move or copy it into the project before using Re-Imagine.");
+#else
+    juce::ignoreUnused (destination);
+    return juce::Result::fail ("Direct Re-Imagine source freezing is currently available on macOS only.");
+#endif
+}
+
 void DirectRenderJob::run (const std::shared_ptr<GenerativeJobManager>& manager)
 {
     struct Finish { std::atomic<bool>& flag; ~Finish() { flag.store (true); } } finish { finished };
     const auto fail = [this] (const juce::String& reason) { publish ("error", reason); };
     if (cancelled) { publish ("cancelled"); return; }
+
+    if (purpose == Purpose::decisionValidation)
+    {
+        if (expectedSourceHash.isEmpty() || expectedOutputHash.isEmpty()
+            || ! originalSource.existsAsFile() || ! output.existsAsFile())
+        { fail ("Pending source or result identity is missing. Generate again."); return; }
+        const auto currentSourceHash = juce::SHA256 (originalSource).toHexString();
+        if (cancelled) { publish ("cancelled"); return; }
+        const auto currentOutputHash = juce::SHA256 (output).toHexString();
+        if (currentSourceHash != expectedSourceHash || currentOutputHash != expectedOutputHash)
+        { fail ("Source or pending result audio changed after generation. The result was not applied."); return; }
+        publish (cancelled ? "cancelled" : "ready");
+        return;
+    }
+
     if (! directory.createDirectory()) { fail ("Cannot create the request artifact directory."); return; }
     const auto input = directory.getChildFile ("input.wav");
-    const auto originalHash = juce::SHA256 (source).toHexString();
+    originalSourceHash = juce::SHA256 (source).toHexString();
+    if (! originalSource.existsAsFile() || juce::SHA256 (originalSource).toHexString() != originalSourceHash)
+    { fail ("Source audio changed before generation started. The request was not submitted."); return; }
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> sourceReader (formats.createReaderFor (source));
     if (! sourceReader || sourceReader->sampleRate <= 0 || sourceStart < 0 || duration <= 0
@@ -36,6 +72,8 @@ void DirectRenderJob::run (const std::shared_ptr<GenerativeJobManager>& manager)
         || (! fixture && ! (bool) capabilities.getProperty ("sa3", false)))
     { fail ("Local SA3 capability was not confirmed. No alternate backend was used."); return; }
     if (cancelled) { publish ("cancelled"); return; }
+    if (! originalSource.existsAsFile() || juce::SHA256 (originalSource).toHexString() != originalSourceHash)
+    { fail ("Source audio changed before inference. The request was not submitted."); return; }
     const auto id = manager->submitJob (fixture ? "fake" : "stable_audio3", input, output, manifest, params);
     { const juce::ScopedLock guard (lock); jobId = id; }
     if (id.isEmpty()) { fail ("The local service refused the Re-Imagine request."); return; }
@@ -70,7 +108,7 @@ void DirectRenderJob::run (const std::shared_ptr<GenerativeJobManager>& manager)
             // Never stretch, normalize or trim an unexpected model duration to conceal a defect.
             if (std::abs (double (reader->lengthInSamples) / reader->sampleRate - duration) > 1.0 / reader->sampleRate)
             { fail ("SA3 returned a different duration. The unmodified output was preserved and cannot replace this clip."); return; }
-            if (juce::SHA256 (source).toHexString() != originalHash)
+            if (! originalSource.existsAsFile() || juce::SHA256 (originalSource).toHexString() != originalSourceHash)
             { fail ("Source audio changed during generation. The result was preserved but will not be applied."); return; }
             outputHash = juce::SHA256 (output).toHexString();
             publish (cancelled ? "cancelled" : "ready");

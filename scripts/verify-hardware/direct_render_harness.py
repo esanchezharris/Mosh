@@ -19,7 +19,7 @@ import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -41,6 +41,7 @@ class Result(BaseModel):
 
 class Layer(BaseModel):
     model_config = ConfigDict(frozen=True, extra="allow", strict=True)
+    id: str
     status: str
     decisionPolicy: str
     hasPending: bool = False
@@ -130,6 +131,8 @@ def setup(source: Path) -> list[Command]:
 class Harness:
     binary: Path
     evidence: Path
+    observer: Callable[[Path], None] | None = None
+    settle_decisions: bool = True
 
     def run(self, name: str, commands: list[Command], mode: str = "normal") -> Run:
         """Own a fresh session/port; retain stdout, stderr, result and PID evidence."""
@@ -137,6 +140,8 @@ class Harness:
         directory.mkdir(parents=True)
         binary_hash = digest(self.binary)
         script, output = directory / "commands.jsonl", directory / "results.jsonl"
+        commands = [step for item in commands for step in ([item, command("__wait", {"ms": 2000})]
+                    if self.settle_decisions and item["command"] in ("accept_render", "bypass_layer") else [item])]
         script.write_text("\n".join(json.dumps(item) for item in commands) + "\n")
         with socket.socket() as port_socket:
             port_socket.bind(("127.0.0.1", 0))
@@ -153,6 +158,8 @@ class Harness:
         with (directory / "stdout.log").open("w") as stdout, (directory / "stderr.log").open("w") as stderr:
             with subprocess.Popen([str(self.binary), "--run-script"], env=env, stdout=stdout, stderr=stderr) as process:
                 (directory / "app.pid").write_text(str(process.pid))
+                if self.observer is not None:
+                    self.observer(directory)
                 code = process.wait(timeout=180)
         (directory / "process-result.json").write_text(json.dumps({"pid": process.pid, "exit_code": code, "port": port,
                                                                   "binary": str(self.binary), "binary_sha256": binary_hash}))

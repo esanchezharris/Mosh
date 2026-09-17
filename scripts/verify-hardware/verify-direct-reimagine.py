@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["pydantic>=2"]
 # ///
 # ─── How to run ───
@@ -19,6 +19,9 @@ import wave
 from pathlib import Path
 
 from direct_render_harness import Command, Harness, Layer, Run, command, digest, setup, snap, target, tone
+from direct_render_source_safety import source_safety
+from direct_render_split_safety import split_persistence
+from direct_render_decision_safety import cancel_pending_audition
 
 
 def layer(run: Run, label: str) -> Layer:
@@ -78,7 +81,8 @@ def decisions(harness: Harness, source: Path) -> None:
         raw_source, raw_kept, raw_reopened = (audio.readframes(audio.getnframes()) for audio in (first, second, third))
     assert raw_source != raw_kept and raw_kept == raw_reopened
     assert digest(source) == digest(Path(original.sourceFile))
-    request = Path(auditioned.sourceFile).parent
+    generated = layer(run, "pending")
+    request = Path(original.sourceFile).parent.parent / "renders" / generated.id / generated.requestId
     with wave.open(str(request / "input.wav"), "rb") as staged, wave.open(str(source), "rb") as full:
         full.setpos(44100)
         assert staged.readframes(staged.getnframes()) == full.readframes(88200)
@@ -149,6 +153,9 @@ def main() -> None:
     decisions(harness, source)
     invalidations(harness, source)
     failures(harness, source)
+    split_persistence(harness, source)
+    source_safety(harness, source)
+    cancel_pending_audition(harness, source)
     owned_pids = [path.read_text().strip() for pattern in ("*/app.pid", "*/service-started.pid") for path in evidence.glob(pattern)]
     deadline = time.monotonic() + 5
     while True:

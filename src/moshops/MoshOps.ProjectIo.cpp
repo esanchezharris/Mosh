@@ -1787,10 +1787,11 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     // save_as command itself (matches consolidateRenderArtifacts' posture below).
     mosh::AgentMemoryStore::copySidecarForSaveAs (oldEditFile, eng.editFile());
 
-    std::map<String, ValueTree> preparedLayers;
+    std::map<te::EditItemID, ValueTree> preparedLayersByClip;
     std::function<void (ValueTree)> collect = [&] (ValueTree node)
     {
-        if (node.hasType (ids::MOSH_RENDERLAYER)) preparedLayers[node[ids::id].toString()] = node;
+        if (auto layer = node.getChildWithName (ids::MOSH_RENDERLAYER); layer.isValid())
+            preparedLayersByClip[te::EditItemID::fromID (node)] = layer;
         for (auto child : node) collect (child);
     };
     collect (artifactPlan);
@@ -1798,8 +1799,8 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
         for (auto* clip : track->getClips())
         {
             auto layer = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
-            const auto found = preparedLayers.find (layer[ids::id].toString());
-            if (! layer.isValid() || found == preparedLayers.end()) continue;
+            const auto found = preparedLayersByClip.find (clip->itemID);
+            if (! layer.isValid() || found == preparedLayersByClip.end()) continue;
             for (const auto& property : artifactProperties)
                 if (found->second.hasProperty (property)) layer.setProperty (property, found->second[property], nullptr);
             if (layer[Identifier ("decisionPolicy")].toString() == "explicit")
