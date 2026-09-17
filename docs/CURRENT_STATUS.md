@@ -23,7 +23,8 @@ No additional real-model generation is part of this repair.
 
 **2026-09-17 general V3 workspace repair:** the separate ordinary-UI pass repairs
 Mixer navigation, MIDI editor reachability, track selection, empty-session actions,
-count-in and keyboard overlays. It reuses existing shared components and commands.
+count-in, keyboard overlays and Settings contrast under the shared light theme.
+It reuses existing shared components and commands.
 See [the bounded scope](V3-WORKSPACE-SCOPE-2026-09-17.md). Exact candidate, native
 screenshots, gate/review and limitations are recorded at
 `~/Library/Mosh/task-evidence/v3-general-ui-20260917/HANDOFF.md`.

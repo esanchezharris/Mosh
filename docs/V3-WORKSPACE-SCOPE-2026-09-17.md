@@ -16,6 +16,8 @@ remain preserved. No SA3 generation or autonomous runtime work is authorized her
   and modal focus containment/restoration. Remove the unsupported static claim
   that the optional runtime agent is on.
 - Preserve V3 tokens, other shells and all engine mutation/undo seams.
+- Repair Settings text contrast when the shared application theme is light;
+  native screenshot inspection exposed the inherited foreground mismatch.
 
 ## Acceptance and boundary
 

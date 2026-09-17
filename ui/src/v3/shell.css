@@ -115,6 +115,13 @@
 .v3-shell .modal-root {
   position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
 }
+.v3-shell [data-settings] {
+  --bone: var(--text);
+  --bone-dim: var(--muted);
+  --ink: var(--surface2);
+  --ink-line: var(--line);
+  --ink-line-soft: var(--fog-line);
+}
 .v3-shell .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }
 .v3-shell .modal.glass {
   position: relative; width: 420px; max-height: 86%; overflow: auto; border-radius: 14px;

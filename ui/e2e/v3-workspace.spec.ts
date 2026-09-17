@@ -2,6 +2,37 @@ import { expect, test } from "@playwright/test";
 import { boot, bootV3 } from "./helpers";
 
 for (const width of [900, 1440]) {
+  test(`V3 Settings stays readable with the light theme at ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("mosh.settings", JSON.stringify({
+        version: 2, template: null, values: { theme: "light", colorway: "lime" }, keyOverrides: {},
+      }));
+    });
+    await page.goto("/?shell=v3");
+    await expect(page.getByTestId("v3-arrangement")).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.keyboard.press("Meta+Comma");
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    await expect(settings).toBeVisible();
+    await expect(settings).toHaveCSS("opacity", "1");
+    const device = settings.getByRole("combobox", { name: "Engine device", exact: true });
+    await expect(device).toBeVisible();
+    await page.screenshot({ path: info.outputPath(`settings-${width}.png`), animations: "disabled" });
+    for (const selector of [".modal-hd b", ".set-row > span", ".pop-row > span", ".pop-row select"]) {
+      const elements = settings.locator(selector);
+      expect(await elements.count(), selector).toBeGreaterThan(0);
+      const colors = await elements.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+      expect.soft(colors, selector).toEqual(colors.map(() => "rgb(242, 238, 230)"));
+    }
+    const secondaryColors = await settings.locator(".pop-label, .pop-note, .set-num-val")
+      .evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+    expect.soft(secondaryColors).toEqual(secondaryColors.map(() => "rgb(142, 146, 142)"));
+    expect.soft(await device.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgb(30, 36, 36)");
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(settings).toHaveCount(0);
+  });
+
   test(`ordinary V3 workspace is reachable at ${width}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
     await bootV3(page);
