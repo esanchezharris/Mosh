@@ -93,8 +93,8 @@ var MoshOps::submitDirectRender (const var& args)
     work.fixture = fixtureEnabled();
     auto* params = new DynamicObject();
     params->setProperty ("decision_policy", "explicit"); params->setProperty ("request_id", work.requestId);
-    params->setProperty ("prompt", prompt); params->setProperty ("seed", layer[ids::seed]);
-    params->setProperty ("nl", parameters[ids::nl]); params->setProperty ("mode", "reimagine");
+    params->setProperty ("prompt", prompt); params->setProperty ("seed", (int) layer[ids::seed]);
+    params->setProperty ("nl", (double) parameters[ids::nl]); params->setProperty ("mode", "reimagine");
     params->setProperty ("lab", false); params->setProperty ("duration_s", work.duration);
     for (auto type : { ids::COLORS, ids::LORAS })
     {

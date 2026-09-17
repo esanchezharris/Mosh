@@ -9,6 +9,7 @@
 """Wire-level deterministic faults for the real native Re-Imagine client."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -29,6 +30,7 @@ def fixture_render(source: str, output: str, params: dict[str, Json]) -> dict[st
     """Exercise the protocol with visibly identified fixture audio and faults."""
     marker = Path(os.environ["MOSH_TEST_DIRECT_MARKER"])
     marker.write_text(str(os.getpid()))
+    (marker.parent / f"request-{params['request_id']}.json").write_text(json.dumps(params))
     mode = os.environ.get("MOSH_TEST_DIRECT_MODE", "normal")
     if mode == "delayed":
         threading.Event().wait(3.0)

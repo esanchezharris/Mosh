@@ -22,6 +22,7 @@ from direct_render_harness import Command, Harness, Layer, Run, command, digest,
 from direct_render_source_safety import source_safety
 from direct_render_split_safety import split_persistence
 from direct_render_decision_safety import cancel_pending_audition
+from direct_render_reopen import reopen_controls
 
 
 def layer(run: Run, label: str) -> Layer:
@@ -151,6 +152,7 @@ def main() -> None:
                 "model_execution": False, "backend": "deterministic fake fixture"}
     (evidence / "identity.json").write_text(json.dumps(identity, indent=2))
     decisions(harness, source)
+    reopen_controls(harness, source)
     invalidations(harness, source)
     failures(harness, source)
     split_persistence(harness, source)

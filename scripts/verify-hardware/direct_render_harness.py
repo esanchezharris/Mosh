@@ -49,6 +49,9 @@ class Layer(BaseModel):
     jobId: str = ""
     requestId: str = ""
     testFixture: bool = False
+    userKept: bool = False
+    seed: int = 0
+    nl: float = 0.4
     sourceStart: float = 0
     sourceDuration: float = 0
 

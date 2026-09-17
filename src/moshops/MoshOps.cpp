@@ -4027,7 +4027,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);
-        r->setProperty ("userKept", rl[ids::userKept]);
+        r->setProperty ("userKept", (bool) rl[ids::userKept]);
         r->setProperty ("hasArtifact", mosh::resolveCacheArtifact (rl, eng.editFile().getParentDirectory()).existsAsFile());
         // The render's time scope (seconds). For a section-scoped render this is the
         // section's sub-range; for a whole-clip render it equals the clip span.

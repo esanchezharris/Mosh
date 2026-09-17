@@ -7,6 +7,13 @@ binary, verification results and remaining acceptance gaps are recorded under
 `~/Library/Mosh/task-evidence/direct-sa3-reimagine-20260916/`. No installed-app
 or owner listening pass is claimed.
 
+The separately authorized reopen repair normalizes persisted seed/amount at the
+native request boundary and kept state at the snapshot boundary. Its regression
+reopens saved layers in fresh native processes and exercises the drawer's
+unchanged-control submission contract. Exact-candidate Release UI, gate and review
+evidence is recorded in that directory's `reopen-repair-20260916/` subdirectory.
+The earlier real-model render is retained; this repair does not repeat inference.
+
 The pre-pivot ownership snapshot below is preserved as historical evidence.
 Older recording/mixing-agent and reconstruction priorities are deferred.
 
