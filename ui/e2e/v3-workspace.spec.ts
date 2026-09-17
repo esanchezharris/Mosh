@@ -1,10 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { bootV3 } from "./helpers";
+import { boot, bootV3 } from "./helpers";
 
 for (const width of [900, 1440]) {
   test(`ordinary V3 workspace is reachable at ${width}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
     await bootV3(page);
+    const tools = page.locator(".top .tools");
+    expect(await tools.evaluate((node) => {
+      const centers = Array.from(node.children).map((child) => { const r = child.getBoundingClientRect(); return r.y + r.height / 2; });
+      return Math.max(...centers) - Math.min(...centers);
+    })).toBeLessThan(2);
     await page.getByTestId("v3-add-midi").click();
     const track = page.getByTestId("v3-track").last();
     await track.getByRole("button", { name: /^Select track/ }).click();
@@ -13,7 +18,11 @@ for (const width of [900, 1440]) {
     const roll = page.getByTestId("piano-roll");
     await expect(roll).toBeVisible();
     await expect(roll).toHaveCSS("background-color", "rgb(22, 26, 26)");
-    await page.screenshot({ path: info.outputPath(`midi-${width}.png`) });
+    await expect(roll).toHaveCSS("opacity", "1");
+    await expect(page.locator(".modal-backdrop")).toHaveCSS("opacity", "1");
+    expect(await roll.locator(".pr-head").evaluate((node) => Array.from(node.querySelectorAll("button"))
+      .every((button) => button.clientWidth >= 20 && button.scrollWidth <= button.clientWidth + 1))).toBe(true);
+    await page.screenshot({ path: info.outputPath(`midi-${width}.png`), animations: "disabled" });
     await page.keyboard.press("Escape");
     await expect(roll).toHaveCount(0);
     const trackCount = await page.getByTestId("v3-track").count();
@@ -55,4 +64,16 @@ test("empty V3 session offers existing track and import actions", async ({ page 
   await expect(page.getByTestId("v3-browser")).toBeVisible();
   await page.getByTestId("v3-rail-plugins").click();
   await expect(page.getByTestId("v3-plugins")).toBeVisible();
+});
+
+
+test("shared Mixer keeps its text-label appearance in classic", async ({ page }, info) => {
+  await boot(page);
+  await page.getByRole("button", { name: "Mixer", exact: true }).click();
+  const label = page.getByTestId("channel-strip").first().getByRole("button", { name: /^Select track/ });
+  await expect(label).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(label).toHaveCSS("border-top-width", "0px");
+  await label.focus(); await page.keyboard.press("Enter");
+  await expect(page.getByTestId("channel-strip").first()).toHaveAttribute("data-selected", "true");
+  await page.screenshot({ path: info.outputPath("classic-mixer.png"), animations: "disabled" });
 });

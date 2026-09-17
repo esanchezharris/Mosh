@@ -868,6 +868,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .strip.sel { border-color: var(--lime); box-shadow: 0 0 0 1px var(--lime) inset; }
 .strip.master { flex: 0 0 100px; width: 100px; border-color: var(--lime-dim); }
 .strip-name { font-size: 11px; font-weight: 700; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
+button.strip-name { appearance: none; border: none; background: transparent; padding: 0; cursor: pointer; }
 .strip-fx { font-size: 9px; color: var(--lime-dim); }
 .strip .pan { width: 76px; accent-color: var(--lime); }
 .strip .fader { writing-mode: vertical-lr; direction: rtl; height: 150px; accent-color: var(--lime); }

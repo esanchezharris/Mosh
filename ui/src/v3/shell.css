@@ -504,3 +504,15 @@
 .v3-shell .strip .fader { display: block; }
 .v3-shell .strip .msx { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
 .v3-shell .strip .msx[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+
+.v3-shell .top .tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.v3-shell .pr-head { flex-wrap: wrap; gap: 6px; }
+.v3-shell .pr-head > * { flex-shrink: 0; }
+.v3-shell .pr-head > strong { flex: 1 1 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.v3-shell .pr-head .pr-meta { white-space: nowrap; }
+.v3-shell .pr-head .btn { white-space: nowrap; min-width: 24px; }
+.v3-shell .pr-head .pr-loopbar { flex: 1 1 220px; min-width: 180px; }
+.v3-shell .pr-head .pr-vel input { width: 90px; }
+.v3-shell .pr-head .live-loopbar { background: var(--surface2); border-color: var(--line); }
+.v3-shell .pr-head .live-loopbar-readout { color: var(--muted); }
+.v3-shell .pr-head .live-loopbar-brace { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); }
