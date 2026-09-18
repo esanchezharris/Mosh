@@ -108,3 +108,29 @@ test("shared Mixer keeps its text-label appearance in classic", async ({ page },
   await expect(page.getByTestId("channel-strip").first()).toHaveAttribute("data-selected", "true");
   await page.screenshot({ path: info.outputPath("classic-mixer.png"), animations: "disabled" });
 });
+
+test("a note added in the shared PianoRoll lands on the clip and one undo removes it", async ({ page }) => {
+  await bootV3(page);
+  const bass = page.locator('[data-testid="v3-track"]').filter({ hasText: "Bass" });
+  await bass.getByTestId("v3-clip").first().dblclick();
+  const notes = page.getByTestId("pr-note");
+  await expect(notes.first()).toBeVisible();
+  const before = await notes.count();
+  expect(before).toBeGreaterThan(0);                                       // anti-vacuity: a real clip
+  // the grid is taller than its scroller, so pick an EMPTY point inside the visible part of it
+  const spot = await page.evaluate(() => {
+    const grid = document.querySelector(".pr-grid") as HTMLElement;
+    const r = grid.getBoundingClientRect();
+    const x = r.left + Math.min(96, r.width / 3);
+    for (let y = Math.max(r.top, 0) + 8; y < Math.min(r.bottom, window.innerHeight) - 8; y += 6) {
+      const el = document.elementFromPoint(x, y);
+      if (el && grid.contains(el) && !el.closest(".pr-note")) return { x, y };
+    }
+    return null;
+  });
+  expect(spot).not.toBeNull();
+  await page.mouse.dblclick(spot!.x, spot!.y);
+  await expect(notes).toHaveCount(before + 1);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(notes).toHaveCount(before);
+});
