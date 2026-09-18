@@ -1,0 +1,50 @@
+{
+  "baseSha": "0e57fe520d486568e90b674fbc6427e089871f1d",
+  "inputHashes": {
+    "train": "3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb",
+    "evalA": "d68ec63696ee1e88c2bb39c7ff21ae98e1dca4b60d9b762a680b33ac4019c911",
+    "frozen300": "1868ed3153ef7a212c72911f26f8aedb94997eb76e1e45f6df822f65ff9d7a2c"
+  },
+  "training": {
+    "rows": 12994,
+    "distinctShapes": 111,
+    "thresholds": {
+      "50": 23,
+      "80": 42,
+      "95": 61
+    }
+  },
+  "evalA": {
+    "rows": 210,
+    "distinctShapes": 45,
+    "thresholds": {
+      "50": 18,
+      "80": 29,
+      "95": 38
+    },
+    "shapeInTraining": 207
+  },
+  "frozen300": {
+    "rows": 300,
+    "distinctShapes": 5,
+    "thresholds": {
+      "50": 2,
+      "80": 4,
+      "95": 4
+    },
+    "shapeInTraining": 300
+  },
+  "frozenSourceRows": 2990,
+  "frozenSelectionIdsSha256": "2bec3e0d739b474cd128fee77b06a783188d2657bb5eee1a7ea1cb695a7d2f28",
+  "selected": {
+    "skills": 40,
+    "rows": 10030
+  },
+  "emptyRows": 250,
+  "huhWithCommands": [
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3672",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11970",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11971",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11972"
+  ]
+}

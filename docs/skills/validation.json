@@ -1,0 +1,405 @@
+{
+  "skills": [
+    {
+      "id": "sft-01-set-tempo",
+      "rows": 401,
+      "renderedExactly": 401,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 401,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-02-add-midi-clip",
+      "rows": 400,
+      "renderedExactly": 400,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 400,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-03-set-time-signature",
+      "rows": 400,
+      "renderedExactly": 400,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 400,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-04-add-note-8",
+      "rows": 394,
+      "renderedExactly": 394,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 394,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-05-split-clip",
+      "rows": 366,
+      "renderedExactly": 366,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 366,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-06-remove-note",
+      "rows": 300,
+      "renderedExactly": 300,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 300,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-07-move-clip",
+      "rows": 299,
+      "renderedExactly": 299,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 299,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-08-trim-clip",
+      "rows": 298,
+      "renderedExactly": 298,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 298,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-09-build-skeleton-from-clip",
+      "rows": 292,
+      "renderedExactly": 252,
+      "reproduced": 0,
+      "failed": 40,
+      "unverified": 252,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-10-duplicate-clip",
+      "rows": 276,
+      "renderedExactly": 276,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 276,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-11-move-section",
+      "rows": 252,
+      "renderedExactly": 252,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 252,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-12-set-key",
+      "rows": 248,
+      "renderedExactly": 248,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 248,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-13-set-master-volume",
+      "rows": 248,
+      "renderedExactly": 244,
+      "reproduced": 0,
+      "failed": 4,
+      "unverified": 244,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-14-set-clip-gain",
+      "rows": 244,
+      "renderedExactly": 244,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 244,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-15-add-test-tone-clip",
+      "rows": 240,
+      "renderedExactly": 240,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 240,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-16-save",
+      "rows": 240,
+      "renderedExactly": 240,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 240,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-17-rename-clip",
+      "rows": 236,
+      "renderedExactly": 236,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 236,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-18-set-track-type",
+      "rows": 236,
+      "renderedExactly": 236,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 236,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-19-redo",
+      "rows": 228,
+      "renderedExactly": 228,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 228,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-20-remove-section",
+      "rows": 228,
+      "renderedExactly": 228,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 228,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-21-undo",
+      "rows": 228,
+      "renderedExactly": 228,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 228,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-22-open-plugin-editor",
+      "rows": 224,
+      "renderedExactly": 224,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 224,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-23-set-input-monitor",
+      "rows": 224,
+      "renderedExactly": 224,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 224,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-24-set-master-pan",
+      "rows": 224,
+      "renderedExactly": 224,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 224,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-25-set-track-pan",
+      "rows": 217,
+      "renderedExactly": 217,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 217,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-26-remove-track",
+      "rows": 216,
+      "renderedExactly": 216,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 216,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-27-set-clip-mute",
+      "rows": 216,
+      "renderedExactly": 216,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 216,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-28-set-metronome",
+      "rows": 216,
+      "renderedExactly": 216,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 216,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-29-rename-track",
+      "rows": 213,
+      "renderedExactly": 213,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 213,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-30-create-annotation",
+      "rows": 212,
+      "renderedExactly": 212,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 212,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-31-create-section",
+      "rows": 212,
+      "renderedExactly": 212,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 212,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-32-rename-section",
+      "rows": 212,
+      "renderedExactly": 212,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 212,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-33-set-track-volume",
+      "rows": 212,
+      "renderedExactly": 212,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 212,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-34-remove-clip",
+      "rows": 204,
+      "renderedExactly": 204,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 204,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-35-set-transport",
+      "rows": 204,
+      "renderedExactly": 172,
+      "reproduced": 0,
+      "failed": 32,
+      "unverified": 172,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-36-load-drum-kit",
+      "rows": 201,
+      "renderedExactly": 201,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 201,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-37-create-track",
+      "rows": 200,
+      "renderedExactly": 200,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 200,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-38-arm-track",
+      "rows": 192,
+      "renderedExactly": 192,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 192,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-39-set-track-solo",
+      "rows": 189,
+      "renderedExactly": 189,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 189,
+      "passRate": 0,
+      "passes": false
+    },
+    {
+      "id": "sft-40-set-track-mute",
+      "rows": 188,
+      "renderedExactly": 188,
+      "reproduced": 0,
+      "failed": 0,
+      "unverified": 188,
+      "passRate": 0,
+      "passes": false
+    }
+  ],
+  "totalRows": 10030
+}
