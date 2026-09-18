@@ -52,6 +52,9 @@
 .v3-shell .btn.pri { background: var(--accent); color: #0B0C0C; border-color: var(--accent); font-weight: 600; }
 .v3-shell .btn.recb { background: var(--record); color: #fff; border-color: var(--record); font-weight: 600; }
 .v3-shell .btn.ghost { background: transparent; color: var(--fog-label); border-color: transparent; }
+.v3-shell .btn.ghost.on { color: var(--accent); }
+.v3-shell .mp-launcher-body { gap: 10px; }
+.v3-shell .mp-launcher-body .mp-field input, .v3-shell .mp-launcher-body .mp-join input { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
 .v3-shell .btn.sm { padding: 3px 8px; font-size: 10px; }
 .v3-shell .ibtn {
   width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent;
@@ -250,6 +253,11 @@
   border-radius: 3px; border: 1px solid #2A2E2E; align-self: flex-start;
 }
 .v3-shell .trk .hd .ctl { display: flex; gap: 3px; }
+/* Multiplayer: a peer's lock. Badge + dimmed header + disabled controls; the backend guard
+   refuses the edit either way, this is the read-only signal. */
+.v3-shell .trk .lock { font-size: 10px; line-height: 14px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); white-space: nowrap; max-width: 64px; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .trk[data-locked-by] .hd { opacity: .72; }
+.v3-shell .trk .hd .ctl button:disabled { opacity: .45; cursor: not-allowed; }
 .v3-shell .trk .hd .ctl button {
   font-size: 8px; letter-spacing: .5px; padding: 2px 5px; border-radius: 4px;
   background: var(--surface2); border: 1px solid var(--fog-line); color: var(--fog-label); cursor: pointer;
