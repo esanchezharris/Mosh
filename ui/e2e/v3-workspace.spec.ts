@@ -133,6 +133,7 @@ test("a note added in the shared PianoRoll lands on the clip and one undo remove
   await expect(notes).toHaveCount(before + 1);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(notes).toHaveCount(before);
+});
 
 test("a .mid in the Browser's MIDI tab lands as one clip on a new MIDI track, and one undo removes it", async ({ page }) => {
   await bootV3(page);
