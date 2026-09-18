@@ -186,7 +186,7 @@ bundle_service() {                              # $1 = installed app
   cp "$ROOT/service/server.py" "$ROOT/service/run.sh" \
      "$ROOT/service/quality_readout.py" "$ROOT/service/audio_io.py" \
      "$ROOT/service/brain_client.py" "$ROOT/service/clip_coverage.py" "$ROOT/service/stitch.py" \
-     "$ROOT/service/memprobe.py" "$ROOT/service/sa3_release.py" \
+     "$ROOT/service/memprobe.py" "$ROOT/service/sa3_release.py" "$ROOT/service/direct_render.py" \
      "$ROOT/service/setup-sa3.sh" "$SVC/" 2>/dev/null || true
   # FMS service modules ride whole-dir (imported in-process by server.py / the adapters;
   # venvs live OUTSIDE the tree at ~/Library/Mosh/venvs since #218, and the machine-local
