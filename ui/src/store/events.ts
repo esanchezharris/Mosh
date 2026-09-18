@@ -230,6 +230,9 @@ export function onWebrtcSignal(ev: MoshEvent): void {
   // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room. Video is
   // surfaced by the redesign AND the v2 shells; a shell with no video UI must NOT
   // silently negotiate / hold a peer connection (prime directive: flag-off == unchanged).
+  // Deliberately v2-only, not "modern shell": V3 mounts no video surface, so under V3 an
+  // inbound signal is dropped here (pinned by events.webrtcShellGate.test.ts). Widen this
+  // the day V3 grows a video room, together with that test (V3 parity brief §2).
   if (Boolean(useSettings.getState().get("redesignShell")) || isV2Active()) {
     const p = ev.payload as { from?: string; payload?: SignalMessage };
     if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);

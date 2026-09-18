@@ -16,6 +16,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const posture = useV3((s) => s.posture);
   const historyOpen = useV3((s) => s.historyOpen);
   const setHistoryOpen = useV3((s) => s.setHistoryOpen);
+  const mpOpen = useV3((s) => s.mpOpen);
+  const setMpOpen = useV3((s) => s.setMpOpen);
+  const mpActive = useStore((s) => s.mp.active);
   const bbs = secondsToBBSMap(tempoMapFrom(snapshot.session), t.position);
   const name = projectLabel(snapshot.session.editFile) || "untitled";
   const rec = !!t.recording;
@@ -60,6 +63,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         ) : null}
       </div>
       <div className="spacer" />
+      <button type="button" className={`btn ghost${mpActive ? " on" : ""}`} data-testid="v3-mp-trigger"
+        aria-haspopup="dialog" aria-expanded={mpOpen} title={mpActive ? "Session is shared — room code and roster" : "Start or join a multiplayer session"}
+        onClick={() => setMpOpen(!mpOpen)}>{mpActive ? "Shared" : "Invite"}</button>
       <button type="button" className="btn ghost" data-testid="v3-history"
         aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>History</button>
     </div>

@@ -3,10 +3,12 @@ import { pickFiles, pickSaveFile } from "../bridge";
 import { runAction } from "../menuActions";
 import { useStore } from "../store";
 import { isDrumClip } from "../ui/clipRenderers";
+import { lockOwnerOfTrack } from "../multiplayer/sync";
 import type { Clip, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { DrumsClip, MelodyClip } from "./midi/MidiClips";
+import { dropDrumBeat } from "./beats";
 
 function sessionBeats(snapshot: Snapshot): number {
   const tempo = snapshot.session.tempo ?? 120;
@@ -40,7 +42,15 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks);
   const selection = useStore((s) => s.selection);
+  const locks = useStore((s) => s.locksByLogicalId);
+  const selfPeer = useStore((s) => s.mp.selfPeer);
+  const peers = useStore((s) => s.peers);
   const setContext = useV3((s) => s.setContext);
+  // Multiplayer: a track a PEER holds is read-only here (the backend lock guard is the
+  // authority; this is the badge and the disabled controls, same as ui/Arrange.tsx).
+  const lockOwner = lockOwnerOfTrack(track, locks);
+  const lockedByOther = lockOwner !== null && lockOwner !== selfPeer;
+  const lockName = lockedByOther ? (peers[lockOwner]?.name || lockOwner) : null;
   const sel = selectedTrackId === track.id;
   const length = Math.max(1e-6, snapshot.session.length ?? 32);
   const clips = track.clips.filter((c) => !c.hidden);
@@ -50,18 +60,20 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
   }, [clips, ensurePeaks]);
 
   return (
-    <div className={`trk${sel ? " sel" : ""}`} data-testid="v3-track" data-track-id={track.id}>
+    <div className={`trk${sel ? " sel" : ""}`} data-testid="v3-track" data-track-id={track.id}
+      data-locked-by={lockedByOther ? lockOwner : undefined}>
       <div className="hd">
         <button type="button" className="track-name" aria-label={`Select track ${track.name}`} aria-pressed={sel}
           onClick={() => { useStore.getState().setSelectedTrack(track.id); useStore.getState().clearSelection(); }}><b>{track.name}</b></button>
         {(track.type === "midi" || track.type === "drum" || clips.some((c) => c.type === "midi"))
           ? <span className="midi-tag">MIDI</span> : null}
+        {lockName ? <span className="lock" data-testid="v3-track-lock" title={`Locked by ${lockName}`}>{lockName}</span> : null}
         <div className="ctl">
-          <button type="button" className={track.armed ? "arm" : ""} aria-label="Arm"
+          <button type="button" className={track.armed ? "arm" : ""} aria-label="Arm" disabled={lockedByOther}
             onClick={() => void exec("arm_track", { trackId: track.id, armed: !track.armed })}>R</button>
-          <button type="button" aria-pressed={!!track.mute} aria-label="Mute"
+          <button type="button" aria-pressed={!!track.mute} aria-label="Mute" disabled={lockedByOther}
             onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>M</button>
-          <button type="button" aria-pressed={!!track.solo} aria-label="Solo"
+          <button type="button" aria-pressed={!!track.solo} aria-label="Solo" disabled={lockedByOther}
             onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>S</button>
         </div>
       </div>
@@ -75,6 +87,7 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
             selected={selection.has(clip.id)}
             live={!!(recording && track.armed && clip.type === "wave")}
             peaks={peaks[clip.id]}
+            editable={!lockedByOther}
             onSelect={() => {
               useStore.getState().setSelectedTrack(track.id);
               useStore.getState().select([clip.id]);
@@ -88,7 +101,7 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
 }
 
 function ClipBody({
-  clip, length, beats, selected, live, peaks, onSelect, onContext,
+  clip, length, beats, selected, live, peaks, editable = true, onSelect, onContext,
 }: {
   clip: Clip;
   length: number;
@@ -96,6 +109,7 @@ function ClipBody({
   selected: boolean;
   live: boolean;
   peaks?: [number, number][];
+  editable?: boolean;
   onSelect: () => void;
   onContext: (x: number, y: number) => void;
 }) {
@@ -103,7 +117,7 @@ function ClipBody({
   const width = `${Math.max(2, (clip.length / length) * 100)}%`;
   const midi = clip.type === "midi";
   const drums = midi && isDrumClip(clip.notes);
-  const edit = () => { onSelect(); if (midi) useStore.getState().openPianoRoll(clip.id); };
+  const edit = () => { onSelect(); if (midi && editable) useStore.getState().openPianoRoll(clip.id); };
   return (
     <div className={`clip${selected ? " hl" : ""}`} style={{ left, width }}
       data-testid="v3-clip" data-clip-id={clip.id} role="button" tabIndex={0}
@@ -137,6 +151,8 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
       <div className="workspace-head" role="toolbar" aria-label="Tracks">
         <button type="button" className="btn sm" data-testid="v3-add-audio" onClick={() => run("insert_audio_track")}>+ Audio track</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" title="A drum track with the bundled kit and a one-bar beat at the playhead — one undo step"
+          onClick={() => void dropDrumBeat()}>+ Drum beat</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
       </div>
@@ -145,7 +161,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <Ruler beats={beats} startBar={1} />
       </div>
       <div className="tracks">
-        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, or import audio from the browser.</p></div>}
+        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat, or import audio from the browser.</p></div>}
         {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} beats={beats} />)}
       </div>
     </div>

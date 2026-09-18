@@ -18,6 +18,7 @@ interface V3ShellState {
   fileOpen: boolean;
   historyOpen: boolean;
   settingsOpen: boolean;
+  mpOpen: boolean;
   context: V3ContextMenu | null;
   setPane: (pane: V3Pane) => void;
   togglePane: (pane: Exclude<V3Pane, "none">) => void;
@@ -26,6 +27,7 @@ interface V3ShellState {
   setFileOpen: (open: boolean) => void;
   setHistoryOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setMpOpen: (open: boolean) => void;
   setContext: (ctx: V3ContextMenu | null) => void;
 }
 
@@ -36,13 +38,15 @@ export const useV3 = create<V3ShellState>((set, get) => ({
   fileOpen: false,
   historyOpen: false,
   settingsOpen: false,
+  mpOpen: false,
   context: null,
   setPane: (pane) => set({ pane }),
   togglePane: (pane) => set({ pane: get().pane === pane ? "none" : pane }),
   setPosture: (posture) => set({ posture, fileOpen: false }),
   setBrowserTab: (browserTab) => set({ browserTab }),
-  setFileOpen: (fileOpen) => set({ fileOpen, historyOpen: false, settingsOpen: false, context: null }),
-  setHistoryOpen: (historyOpen) => set({ historyOpen, fileOpen: false, settingsOpen: false, context: null }),
-  setSettingsOpen: (settingsOpen) => set({ settingsOpen, fileOpen: false, historyOpen: false, context: null }),
+  setFileOpen: (fileOpen) => set({ fileOpen, historyOpen: false, settingsOpen: false, mpOpen: false, context: null }),
+  setHistoryOpen: (historyOpen) => set({ historyOpen, fileOpen: false, settingsOpen: false, mpOpen: false, context: null }),
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen, fileOpen: false, historyOpen: false, mpOpen: false, context: null }),
+  setMpOpen: (mpOpen) => set({ mpOpen, fileOpen: false, historyOpen: false, settingsOpen: false, context: null }),
   setContext: (context) => set({ context, fileOpen: false, historyOpen: false }),
 }));

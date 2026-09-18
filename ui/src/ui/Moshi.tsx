@@ -8,7 +8,7 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { useIsV2 } from "../v2/shellFlag";
+import { useIsModernShell } from "../v2/shellFlag";
 import { DEFAULT_KEY } from "../musicalKey";
 import { AgentComposer } from "./AgentComposer";
 import { IconSpeaker, IconSpeakerMute } from "./icons";
@@ -293,12 +293,14 @@ export function Moshi() {
   }, [agentUtter]);
 
   const toggleVoice = useStore((s) => s.toggleVoice);
-  // In the redesign AND v2 shells the prompt lives in a dedicated bottom bar, so it's
-  // not mounted here — mounted in exactly one place either way (no double mount). Only
-  // the classic non-redesign layout owns the composer inside Moshi's dock.
+  // In the redesign, v2 AND v3 shells the prompt lives in a dedicated dock (v2 bottom bar,
+  // v3 MoshiDock), so it's not mounted here — mounted in exactly one place either way (no
+  // double mount). Only the classic non-redesign layout owns the composer inside Moshi's
+  // dock. V3 passes showMoshi={false} to the shared Mixer today, so this gate is a guard
+  // for any future V3 mount, not a live path (V3 parity brief §2).
   const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
-  const inV2 = useIsV2();
-  const ownComposer = !redesign && !inV2;
+  const inModernShell = useIsModernShell();
+  const ownComposer = !redesign && !inModernShell;
   const stateLabel = recording ? "● rec" : rendering ? "working…" : playing ? "listening" : "idle";
   // One-word mood derived from the same live state. `mood` keys the mount's
   // state-tinted glow (box-shadow only — no transform/filter on the canvas wrapper);

@@ -28,6 +28,7 @@ describe("settingHiddenForShell", () => {
     expect(settingHiddenForShell("v3", "Appearance", "skin")).toBe(true);
     expect(settingHiddenForShell("v3", "Layout", "redesignShell")).toBe(true);
     expect(settingHiddenForShell("v3", "Pro Tools", "protoolsDefaultFadeLengthMs")).toBe(true);
+    expect(settingHiddenForShell("v3", "Pro Tools", "anyFutureProToolsSetting")).toBe(true);
     expect(settingHiddenForShell("v3", "Layout", "liveDockHeight")).toBe(true);
     expect(settingHiddenForShell("v3", "Layout", "uiShell")).toBe(false);
     expect(settingHiddenForShell("v3", "Appearance", "colorway")).toBe(false);
