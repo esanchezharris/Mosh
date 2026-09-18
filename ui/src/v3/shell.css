@@ -230,9 +230,10 @@
   background: #101212; flex-shrink: 0; padding: 0 8px;
 }
 .v3-shell .hdr-spacer { width: 148px; flex-shrink: 0; margin-right: 6px; }
+.v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
 .v3-shell .ruler {
-  flex: 1; display: grid; grid-template-columns: repeat(var(--beats, 32), minmax(0, 1fr));
-  height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none;
+  display: grid; grid-template-columns: repeat(var(--beats, 32), minmax(0, 1fr));
+  height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none; will-change: transform;
 }
 .v3-shell .rn { font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); padding-left: 1px; }
 .v3-shell .rn.bar { color: #C8CBC6; font-weight: 600; }
@@ -242,9 +243,10 @@
   flex: 1; display: flex; flex-direction: column; gap: 5px; padding: 8px;
   min-height: 0; overflow: auto; background: var(--bg);
 }
-.v3-shell .trk { display: flex; gap: 6px; height: 72px; flex-shrink: 0; }
+.v3-shell .trk { display: flex; gap: 6px; height: 72px; flex-shrink: 0; width: max-content; min-width: 100%; }
 .v3-shell .trk .hd {
   width: 148px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px;
+  position: sticky; left: 0; z-index: 2;
   padding: 7px 8px; border-radius: 6px; background: #121414; border: 1px solid var(--fog-line);
 }
 .v3-shell .trk .hd b { font-size: 11px; font-weight: 500; }
@@ -273,9 +275,11 @@
 }
 .v3-shell .trk.sel .hd b { color: var(--accent); font-weight: 600; }
 .v3-shell .trk .lane {
-  flex: 1; position: relative; border-radius: 6px; background: var(--lane);
-  border: 1px solid #1A1E1E; overflow: hidden;
+  flex: none; position: relative; border-radius: 6px; background: var(--lane);
+  border: 1px solid #1A1E1E; overflow: hidden; box-sizing: border-box;
 }
+.v3-shell .clip.dragging { cursor: grabbing; }
+.v3-shell .workspace-empty { position: sticky; left: 0; }
 .v3-shell .trk.sel .lane { border-color: var(--accent); }
 .v3-shell .lane-grid {
   position: absolute; inset: 0; display: grid;

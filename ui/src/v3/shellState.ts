@@ -9,6 +9,8 @@ export interface V3ContextMenu {
   y: number;
   clipId: string;
   trackId: string;
+  /** Session seconds under the pointer when the menu opened (snapped) — for Split here. */
+  time?: number;
 }
 
 interface V3ShellState {

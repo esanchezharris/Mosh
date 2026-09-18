@@ -6,7 +6,7 @@ import { runAction } from "../menuActions";
 import type { Snapshot } from "../types";
 import { useV3 } from "./shellState";
 import { FileMenu } from "./FileMenu";
-import { IconClick, IconCountIn, IconLoop, IconSnap } from "./icons";
+import { IconClick, IconCountIn, IconLoop, IconSnap, IconZoomIn, IconZoomOut } from "./icons";
 
 export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
@@ -56,10 +56,20 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
           <IconClick />
         </button>
         {posture === "studio" ? (
-          <button type="button" className="ibtn" title="Snap" aria-label="Snap" aria-pressed={!!snap}
-            onClick={() => setSnap(!snap)}>
-            <IconSnap />
-          </button>
+          <>
+            <button type="button" className="ibtn" title="Snap" aria-label="Snap" aria-pressed={!!snap}
+              onClick={() => setSnap(!snap)}>
+              <IconSnap />
+            </button>
+            <button type="button" className="ibtn" title="Zoom out (⌘−)" aria-label="Zoom out" data-testid="v3-zoom-out"
+              onClick={() => void runAction("zoom_out", { store: useStore.getState(), pickFiles, pickSaveFile })}>
+              <IconZoomOut />
+            </button>
+            <button type="button" className="ibtn" title="Zoom in (⌘+)" aria-label="Zoom in" data-testid="v3-zoom-in"
+              onClick={() => void runAction("zoom_in", { store: useStore.getState(), pickFiles, pickSaveFile })}>
+              <IconZoomIn />
+            </button>
+          </>
         ) : null}
       </div>
       <div className="spacer" />

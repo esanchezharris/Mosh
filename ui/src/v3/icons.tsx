@@ -63,3 +63,18 @@ export function IconCountIn() {
     </svg>
   );
 }
+
+export function IconZoomIn() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 L14 14 M7 5 V9 M5 7 H9" strokeLinecap="round" />
+    </svg>
+  );
+}
+export function IconZoomOut() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 L14 14 M5 7 H9" strokeLinecap="round" />
+    </svg>
+  );
+}
