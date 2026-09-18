@@ -26,6 +26,7 @@ export default defineConfig({
   expect: { timeout: 7_000 },
   use: {
     baseURL,
+    channel: process.env.MOSH_E2E_CHANNEL, // Reuse an installed browser in offline local verification.
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

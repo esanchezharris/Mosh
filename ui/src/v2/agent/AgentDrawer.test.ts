@@ -1,8 +1,13 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTaskStore, type TaskView } from "../../agent/loop/taskStore";
 import { AgentDrawer } from "./AgentDrawer";
+import { undoNativeTask } from "../../agent/loop/nativeTask";
+vi.mock("../../agent/loop/nativeTask", async () => ({
+  ...await vi.importActual<typeof import("../../agent/loop/nativeTask")>("../../agent/loop/nativeTask"),
+  undoNativeTask: vi.fn(),
+}));
 
 function task(outcome?: TaskView["outcome"]): TaskView {
   return {
@@ -22,6 +27,7 @@ describe("AgentDrawer", () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement("div");
     document.body.appendChild(host);
@@ -72,5 +78,25 @@ describe("AgentDrawer", () => {
     act(() => useTaskStore.getState().setDrawerOpen(true));
     expect(host.querySelector('[data-testid="agent-drawer"]')).not.toBeNull();
     expect(host.querySelector('[role="log"]')).not.toBeNull();
+  });
+
+  it("shows an owned-undo refusal and retains the task's committed status", async () => {
+    const last = { ...task("done"), execution: { requestId: "request-1", projectId: "project", status: "committed" as const, appliedCount: 2 } };
+    vi.mocked(undoNativeTask).mockResolvedValue({ ok: false, message: "Task undo refused: newer manual work" });
+    render(null, last);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="agent-undo-task"]')!.click());
+    expect(undoNativeTask).toHaveBeenCalledWith(last.execution);
+    expect(host.querySelector('[data-testid="agent-undo-result"]')?.textContent).toContain("newer manual work");
+    expect(useTaskStore.getState().last?.execution?.status).toBe("committed");
+  });
+
+  it("updates the visible native disposition after a proven task undo", async () => {
+    const last = { ...task("done"), execution: { requestId: "request-1", projectId: "project", status: "committed" as const, appliedCount: 2 } };
+    vi.mocked(undoNativeTask).mockResolvedValue({ ok: true, message: "Task undone.", execution: { ...last.execution, status: "undone" } });
+    render(null, last);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="agent-undo-task"]')!.click());
+    expect(host.querySelector('[data-testid="agent-request-identity"]')?.textContent).toContain("undone");
+    expect(host.querySelector('[data-testid="agent-undo-result"]')?.textContent).toBe("Task undone.");
+    expect(host.querySelector('[data-testid="agent-undo-task"]')).toBeNull();
   });
 });

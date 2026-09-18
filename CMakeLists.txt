@@ -310,6 +310,7 @@ if (MOSH_BUILD_APP)
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
+        src/moshops/MoshOps.AgentRequest.cpp
         src/moshops/MoshOps.Lyrics.cpp
         src/moshops/MoshOps.Notes.cpp
         src/moshops/MoshOps.Live.cpp
@@ -320,6 +321,9 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.TempoProject.cpp
         src/moshops/MoshOps.Plugins.cpp
         src/moshops/MoshOps.Mixer.cpp
+        src/generative/DirectRenderJob.cpp
+        src/moshops/MoshOps.DirectDecision.cpp
+        src/moshops/MoshOps.DirectRender.cpp
         src/moshops/MoshOps.Generative.cpp
         src/moshops/MoshOps.Multiplayer.cpp
         src/moshops/MoshOps.ProjectIo.cpp

@@ -23,9 +23,11 @@ target_sources(MoshTests PRIVATE
     test_export_range.cpp
     test_export_dither.cpp
     test_plugin_editor_param_gesture.cpp
+    test_plugin_parameter_readback.cpp
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
+    test_render_artifacts.cpp
     test_migrations.cpp
     test_project_name.cpp
     test_safe_mode.cpp

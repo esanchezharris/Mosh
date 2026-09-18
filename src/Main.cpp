@@ -586,8 +586,11 @@ public:
         auto& bridge = mainWindow->shell().bridge();
         bridge.setCommandHandler  ([this] (const juce::var& cmd) { return moshOps->executeFromUi (cmd); });
         const auto browserSessionDir = engine->sessionDir();
-        bridge.setAsyncCommandHandler ([browserSessionDir] (const juce::var& cmd)
+        auto generativeRead = moshOps->generativeReadHandler();
+        bridge.setAsyncCommandHandler ([browserSessionDir, generativeRead] (const juce::var& cmd)
         {
+            if (cmd.getProperty ("command", {}).toString() != "list_directory")
+                return generativeRead (cmd);
             return MoshOps::executeFileBrowserReadOnly (
                 browserSessionDir, cmd, sampleFolderPlaces());
         });

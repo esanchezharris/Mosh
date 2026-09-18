@@ -1,4 +1,6 @@
 import { useEffect, type ReactNode } from "react";
+import { pickFiles, pickSaveFile } from "../bridge";
+import { runAction } from "../menuActions";
 import { useStore } from "../store";
 import { isDrumClip } from "../ui/clipRenderers";
 import type { Clip, Snapshot, Track } from "../types";
@@ -37,8 +39,7 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
   const recording = useStore((s) => s.transport.recording);
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks);
-  const selectedClipId = useV3((s) => s.selectedClipId);
-  const setSelectedClipId = useV3((s) => s.setSelectedClipId);
+  const selection = useStore((s) => s.selection);
   const setContext = useV3((s) => s.setContext);
   const sel = selectedTrackId === track.id;
   const length = Math.max(1e-6, snapshot.session.length ?? 32);
@@ -51,7 +52,8 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
   return (
     <div className={`trk${sel ? " sel" : ""}`} data-testid="v3-track" data-track-id={track.id}>
       <div className="hd">
-        <b>{track.name}</b>
+        <button type="button" className="track-name" aria-label={`Select track ${track.name}`} aria-pressed={sel}
+          onClick={() => { useStore.getState().setSelectedTrack(track.id); useStore.getState().clearSelection(); }}><b>{track.name}</b></button>
         {(track.type === "midi" || track.type === "drum" || clips.some((c) => c.type === "midi"))
           ? <span className="midi-tag">MIDI</span> : null}
         <div className="ctl">
@@ -63,16 +65,19 @@ function TrackRow({ track, snapshot, beats }: { track: Track; snapshot: Snapshot
             onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>S</button>
         </div>
       </div>
-      <div className="lane" onClick={() => useStore.getState().setSelectedTrack(track.id)}>
+      <div className="lane" onClick={() => {
+        useStore.getState().setSelectedTrack(track.id);
+        useStore.getState().clearSelection();
+      }}>
         <LaneGrid beats={beats} />
         {clips.map((clip) => (
           <ClipBody key={clip.id} clip={clip} length={length} beats={beats}
-            selected={selectedClipId === clip.id || (sel && selectedClipId == null)}
+            selected={selection.has(clip.id)}
             live={!!(recording && track.armed && clip.type === "wave")}
             peaks={peaks[clip.id]}
             onSelect={() => {
               useStore.getState().setSelectedTrack(track.id);
-              setSelectedClipId(clip.id);
+              useStore.getState().select([clip.id]);
             }}
             onContext={(x, y) => setContext({ x, y, clipId: clip.id, trackId: track.id })}
           />
@@ -98,11 +103,19 @@ function ClipBody({
   const width = `${Math.max(2, (clip.length / length) * 100)}%`;
   const midi = clip.type === "midi";
   const drums = midi && isDrumClip(clip.notes);
+  const edit = () => { onSelect(); if (midi) useStore.getState().openPianoRoll(clip.id); };
   return (
     <div className={`clip${selected ? " hl" : ""}`} style={{ left, width }}
-      data-testid="v3-clip" data-clip-id={clip.id}
+      data-testid="v3-clip" data-clip-id={clip.id} role="button" tabIndex={0}
+      title={midi ? "Double-click or press Enter to edit MIDI" : clip.name}
+      aria-label={`${clip.name}, ${clip.type === "wave" ? "audio" : "MIDI"} clip`} aria-pressed={selected}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (e.key === "Enter") edit(); else onSelect(); }
+      }}
+      onDoubleClick={(e) => { e.stopPropagation(); edit(); }}
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onContextMenu={(e) => { e.preventDefault(); onSelect(); onContext(e.clientX, e.clientY); }}>
+      <span className="clip-name" title={clip.name}>{clip.name}</span>
       {drums ? <DrumsClip notes={clip.notes} beats={beats} />
         : midi ? <MelodyClip notes={clip.notes} beats={beats} />
         : <SilhouetteWave peaks={peaks} selected={selected} live={live} beats={beats} />}
@@ -111,15 +124,28 @@ function ClipBody({
 }
 
 export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const selectedTrack = snapshot.tracks.find((track) => track.id === selectedTrackId);
+  const canAddMidi = !!selectedTrack && (selectedTrack.type === "midi" || selectedTrack.type === "drum"
+    || selectedTrack.clips.some((clip) => clip.type === "midi")
+    || selectedTrack.plugins?.some((plugin) => plugin.isInstrument));
+  const run = (action: "insert_audio_track" | "insert_midi_track" | "insert_midi_clip") => void runAction(action, { store: useStore.getState(), pickFiles, pickSaveFile });
   const beats = sessionBeats(snapshot);
   const tracks = snapshot.tracks.filter((t) => !t.isReturn && t.active !== false);
   return (
     <div className="main" data-testid="v3-arrangement">
+      <div className="workspace-head" role="toolbar" aria-label="Tracks">
+        <button type="button" className="btn sm" data-testid="v3-add-audio" onClick={() => run("insert_audio_track")}>+ Audio track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
+        <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
+      </div>
       <div className="arr-head">
         <div className="hdr-spacer" />
         <Ruler beats={beats} startBar={1} />
       </div>
       <div className="tracks">
+        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, or import audio from the browser.</p></div>}
         {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} beats={beats} />)}
       </div>
     </div>

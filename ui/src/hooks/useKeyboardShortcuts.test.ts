@@ -6,6 +6,8 @@ import { useStore } from "../store";
 import { nativeMenuPresent } from "../bridge";
 import type { CommandResult } from "../types";
 import { useSettings } from "../settings/store";
+import { useLive } from "../live/liveState";
+import { useV3 } from "../v3/shellState";
 
 const bridgeMock = vi.hoisted(() => ({
   eventHandlers: new Map<string, (raw: unknown) => void>(),
@@ -39,7 +41,9 @@ describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
     // These tests pin MOSH-bundle behavior; the live shell's default bundle
     // (ableton under uiShell "live") would otherwise change every gesture/feel result.
-    useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" } });
+    useSettings.setState({ values: { gestureTable: "mosh", keymap: "mosh" }, keyOverrides: {} });
+    useV3.setState({ settingsOpen: false });
+    useLive.setState({ settingsOpen: false });
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     execCalls.length = 0;
     bridgeMock.eventHandlers.clear();
@@ -59,7 +63,9 @@ describe("useKeyboardShortcuts", () => {
   });
 
   afterEach(() => {
-    useSettings.setState({ values: {} });
+    useSettings.setState({ values: {}, keyOverrides: {} });
+    useV3.setState({ settingsOpen: false });
+    useLive.setState({ settingsOpen: false });
     act(() => root.unmount());
     host.remove();
     useStore.setState({
@@ -86,6 +92,85 @@ describe("useKeyboardShortcuts", () => {
     await vi.waitFor(() =>
       expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } }),
     );
+  });
+
+  it.each(["mosh", "protools", "ableton"])("opens V3 Settings with Mod+, when the keymap is %s", (keymap) => {
+    // Given: V3 is active with a selected keymap and the native menu present.
+    useSettings.setState({ values: { uiShell: "v3", keymap } });
+    vi.mocked(nativeMenuPresent).mockReturnValue(true);
+    act(() => root.render(React.createElement(Harness)));
+
+    // When: the advertised Settings shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
+
+    // Then: only the V3 overlay opens.
+    expect(useV3.getState().settingsOpen).toBe(true);
+    expect(useLive.getState().settingsOpen).toBe(false);
+  });
+
+  it("closes V3 Settings when its shortcut is pressed again", () => {
+    // Given: V3 Settings is already open.
+    useSettings.setState({ values: { uiShell: "v3" } });
+    useV3.setState({ settingsOpen: true });
+    act(() => root.render(React.createElement(Harness)));
+
+    // When: the Settings shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
+
+    // Then: the same overlay closes.
+    expect(useV3.getState().settingsOpen).toBe(false);
+    expect(useLive.getState().settingsOpen).toBe(false);
+  });
+
+  it("keeps the V3 Settings shortcut rebound when an explicit key override exists", () => {
+    // Given: Settings has been rebound to a different chord.
+    useSettings.setState({ values: { uiShell: "v3", keymap: "mosh" }, keyOverrides: { mosh: { "key.settings": "Mod+Shift+," } } });
+    act(() => root.render(React.createElement(Harness)));
+
+    // When: the default shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
+
+    // Then: the default does not override the user's choice.
+    expect(useV3.getState().settingsOpen).toBe(false);
+  });
+
+  it("routes an explicit V3 Settings rebind to the V3 overlay", () => {
+    // Given: Settings has been rebound to a different chord.
+    useSettings.setState({ values: { uiShell: "v3", keymap: "mosh" }, keyOverrides: { mosh: { "key.settings": "Mod+Shift+," } } });
+    act(() => root.render(React.createElement(Harness)));
+
+    // When: the rebound shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, shiftKey: true, bubbles: true })));
+
+    // Then: it opens V3 Settings without changing the Live overlay.
+    expect(useV3.getState().settingsOpen).toBe(true);
+    expect(useLive.getState().settingsOpen).toBe(false);
+  });
+
+  it("preserves the Live Settings route when Live is active", () => {
+    // Given: Live uses its existing default shortcut.
+    useSettings.setState({ values: { uiShell: "live" } });
+    act(() => root.render(React.createElement(Harness)));
+
+    // When: the Settings shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
+
+    // Then: Live retains ownership.
+    expect(useLive.getState().settingsOpen).toBe(true);
+    expect(useV3.getState().settingsOpen).toBe(false);
+  });
+
+  it("does not add the V3 Settings shortcut to the classic shell", () => {
+    // Given: classic has no Settings binding in its default keymap.
+    useSettings.setState({ values: { uiShell: "classic", keymap: "mosh" } });
+    act(() => root.render(React.createElement(Harness)));
+
+    // When: the V3 default shortcut is pressed.
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", metaKey: true, bubbles: true })));
+
+    // Then: neither overlay changes.
+    expect(useLive.getState().settingsOpen).toBe(false);
+    expect(useV3.getState().settingsOpen).toBe(false);
   });
 
   it("dispatches Space from the focused empty Moshi prompt", async () => {

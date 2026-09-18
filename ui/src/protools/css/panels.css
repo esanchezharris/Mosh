@@ -529,6 +529,15 @@
 .pt-generative-drawer .gen-head { gap: 8px; }
 .pt-generative-drawer .nlabel { flex-basis: 88px; }
 .pt-generative-empty { padding: 12px; color: var(--pt-text-muted); background: var(--pt-inset); }
+.direct-reimagine { display: grid; gap: var(--pt-space-2); }
+.direct-reimagine-target { display: grid; gap: var(--pt-space-1); padding: var(--pt-space-2); background: var(--pt-inset); font-size: 11px; }
+.direct-reimagine-target span, .direct-reimagine-hint { color: var(--pt-text-muted); font-size: 11px; }
+.direct-reimagine-field { display: grid; gap: var(--pt-space-1); font-size: 12px; }
+.direct-reimagine-field input { box-sizing: border-box; min-width: 0; min-height: var(--pt-control-h); padding: var(--pt-space-1) var(--pt-space-2); border: 1px solid var(--pt-border); border-radius: 2px; color: var(--pt-text); background: var(--pt-inset); font: inherit; }
+.direct-reimagine .btn { min-height: var(--pt-control-h); }
+.direct-reimagine p { margin: 0; }
+.direct-reimagine .gen-actions button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
+.direct-reimagine :is(input, button):focus-visible { outline: 2px solid var(--pt-focus-ring); outline-offset: 2px; }
 .pt-wave-inspector {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(220px, 0.7fr);

@@ -10,6 +10,7 @@
 #include "engine/MoshEngine.h"
 #include "audio/LatencyCalibrationSession.h"
 #include "moshops/AgentTxn.h"
+#include "moshops/AgentRequest.h"
 #include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
 #include "plugins/mixer/TrackMutePlugin.h"
@@ -78,6 +79,8 @@ public:
     static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
                                                   const juce::var& command,
                                                   juce::Array<juce::File> sampleFolders = {});
+
+    std::function<juce::var (const juce::var&)> generativeReadHandler();
 
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
@@ -1052,7 +1055,21 @@ private:
     double       calibrationRate_ = 0.0;       // rate the in-flight sweep runs at
     bool         calibrationDetachedContext_ = false;   // we freed the playback context
     PluginHost  pluginHost;
-    GenerativeJobManager jobManager;
+    std::shared_ptr<GenerativeJobManager> jobManagerOwner_ = std::make_shared<GenerativeJobManager>();
+    GenerativeJobManager& jobManager = *jobManagerOwner_;
+    struct DirectRenderRequest;
+    struct DirectAudition;
+    std::map<juce::String, std::shared_ptr<DirectRenderRequest>> directRenders_;
+    std::map<juce::String, std::shared_ptr<DirectAudition>> directAuditions_;
+    juce::var createDirectRenderLayer (const juce::var&);
+    juce::var submitDirectRender (const juce::var&);
+    juce::var decideDirectRender (const juce::String&, const juce::var&);
+    void pollDirectRenders();
+    void cancelDirectRenders (const juce::String& reason);
+    void restoreDirectAuditions();
+    void prepareDirectCommand (const juce::var&);
+    void appendDirectRenderSnapshot (juce::DynamicObject&, te::Clip&, const juce::ValueTree&);
+
     TrainerRegistry      trainerRegistry;
     TrainingJobManager   trainingJobManager;
     EventSink   eventSink;
@@ -1202,6 +1219,24 @@ private:
     /** Called by recover_session / discard_recovery: T2's human-gated resolution of a
         crash-interrupted transaction. `provedPostState` = the journal tail was replayed. */
     void         resolveUnresolvedTxns (bool provedPostState);
+
+    std::map<juce::String, agentrequest::Record> agentRequests_;
+    juce::String agentEpoch_ = juce::Uuid().toString();
+    juce::String agentRestartCheck_;
+    juce::String activeAgentJournalRequest_;
+    juce::String agentProjectId() const;
+    void initAgentRequests();
+    bool persistAgentRequest (const agentrequest::Record& record);
+    bool removeAgentRecoveryRows (const agentrequest::Record& record);
+    juce::var agentRequestStatus (agentrequest::Record& record, bool replayed = false);
+    juce::var cmdAgentRequest (const juce::String& command, const juce::var& args);
+    juce::var cmdGetAgentContext (const juce::var& args);
+    juce::var cmdBeginAgentRequest (const juce::var& args);
+    juce::var cmdApplyAgentPatch (const juce::var& args);
+    juce::var cmdGetAgentRequest (const juce::var& args);
+    juce::var cmdCancelAgentRequest (const juce::var& args);
+    juce::var cmdUndoAgentRequest (const juce::var& args);
+    juce::var applyAgentPatch (agentrequest::Record& record, const juce::var& args);
 
     double      lastPresenceBroadcastMs = 0.0;
 

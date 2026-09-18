@@ -21,12 +21,23 @@ export type StepCommandResult = {
   readonly command: string;
   readonly ok: boolean;
   readonly error?: string;
+  readonly disposition?: "applied" | "refused" | "not_attempted" | "rolled_back" | "unconfirmed";
   /** The ids the command's result payload minted or named — a pick of
    *  {trackId, clipId, bus, busNumber, index, padId} from the raw `data`
    *  (loop/taskExec.ts pickResultIds), so the model can chain the next call on
    *  the REAL id instead of guessing (step-1 slice 4). Absent, not empty, when
    *  the payload carried none; the rest of `data` still never reaches the model. */
   readonly ids?: Readonly<Record<string, string | number>>;
+};
+
+export type AgentExecution = {
+  readonly requestId: string;
+  readonly projectId: string;
+  readonly status: "prepared" | "committed" | "cancelled" | "rolled_back" | "unresolved" | "undone" | "rejected";
+  readonly appliedCount: number;
+  readonly replayed?: boolean;
+  readonly inProgress?: boolean;
+  readonly error?: string;
 };
 
 /** One model step: what it said, what it tried, what actually happened. */
@@ -58,7 +69,7 @@ export type AgentEnv = {
   runBatch(
     label: string,
     calls: readonly AgentCommandCall[],
-  ): Promise<{ results: StepCommandResult[]; snapshot: Snapshot }>;
+  ): Promise<{ results: StepCommandResult[]; snapshot: Snapshot; execution?: AgentExecution }>;
 };
 
 export type AgentRunner = (

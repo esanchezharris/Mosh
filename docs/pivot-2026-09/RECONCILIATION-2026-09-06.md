@@ -459,3 +459,14 @@ Nothing below is a defect claim; each is an honest gap.
 
 Nothing above was fabricated to make a brief appear executable. **Documentation passing is not
 code or musical value passing.**
+
+## Addendum — owner mandate, 2026-09-08
+
+The owner authorized all tightly related repairs needed to close Producer v0 S3 on
+the selected bounded agent path, followed by model-independent scripted S4.
+Earlier diagnostic-only, one-repair and stop-for-another-prompt restrictions are
+superseded only for this milestone. Historical verdicts, the frozen minimal rack,
+owner-data protection and normal merge approval remain intact. No push, merge,
+installation, deployment, live model calls or owner-audio processing is authorized.
+The single implementation checkpoint is
+[S3-S4-EXECUTION-2026-09-08.md](S3-S4-EXECUTION-2026-09-08.md).

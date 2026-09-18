@@ -10,8 +10,20 @@ import { pickGenClip, isSectionScoped } from "./genClip";
 import { isTransformPreview } from "../capabilities";
 import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
+import { DirectReImagine } from "./DirectReImagine";
 
-export function GenDrawer({ track, selectedClipId }: { track: Track; selectedClipId?: string }) {
+export function GenDrawer({ track, selectedClipId, direct = false }: {
+  readonly track: Track; readonly selectedClipId?: string; readonly direct?: boolean;
+}) {
+  if (direct) {
+    const clip = track.clips.find((candidate) => candidate.id === selectedClipId && candidate.type === "wave" && !candidate.hidden);
+    return clip ? <DirectReImagine key={clip.id} clip={clip} track={track} />
+      : <div className="rack-empty" role="status">Select one audio clip to Re-Imagine.</div>;
+  }
+  return <LegacyGenDrawer track={track} selectedClipId={selectedClipId} />;
+}
+
+function LegacyGenDrawer({ track, selectedClipId }: { readonly track: Track; readonly selectedClipId?: string }) {
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const sa3Available = useStore((s) => s.sa3Available);

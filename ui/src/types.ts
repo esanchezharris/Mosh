@@ -5,12 +5,20 @@ export type RenderColor = { name: string; value: number };
 export type RenderLora = { name: string; value: number };   // LoRA rack: 0–100 UI strength
 export type RenderLayer = {
   id: string;
-  status: "empty" | "dirty" | "queued" | "rendering" | "ready" | "error" | "bypassed" | "frozen" | "bounced";
+  status: "empty" | "dirty" | "queued" | "rendering" | "ready" | "error" | "bypassed" | "frozen" | "bounced" | "cancelled";
   adapter: string;
   mode: string;
   seed: number;
   userKept: boolean;
   hasArtifact: boolean;
+  readonly decisionPolicy?: "explicit";
+  readonly hasPending?: boolean;
+  readonly audition?: "committed" | "source" | "result";
+  readonly jobId?: string;
+  readonly requestId?: string;
+  readonly sourceStart?: number;
+  readonly sourceDuration?: number;
+  readonly testFixture?: boolean;
   prompt?: string;
   nl?: number;
   colors?: RenderColor[];
@@ -368,6 +376,10 @@ export type PluginParam = {
   index: number;
   name: string;
   value: number;
+  display?: string;
+  unit?: string;
+  min?: number;
+  max?: number;
   automated?: boolean;
   points?: AutoPoint[];
   /** Stepped, not continuous: the engine snaps every applied value (including each

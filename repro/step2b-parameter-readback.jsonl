@@ -1,0 +1,22 @@
+{"command":"create_track","args":{"name":"Readback fixture"},"capture":{"T":"trackId"}}
+{"command":"load_builtin","args":{"trackId":"${T}","type":"highpass"},"capture":{"HP":"index"}}
+{"command":"load_builtin","args":{"trackId":"${T}","type":"compressor"},"capture":{"COMP":"index"}}
+{"command":"load_master_builtin","args":{"type":"highpass"},"capture":{"MASTER_HP":"index"}}
+{"command":"__snapshot","args":{"label":"defaults"}}
+{"command":"set_plugin_param","args":{"trackId":"${T}","index":"${HP}","paramIndex":0,"value":0.4}}
+{"command":"__snapshot","args":{"label":"set"}}
+{"command":"undo"}
+{"command":"__snapshot","args":{"label":"undo"}}
+{"command":"redo"}
+{"command":"__snapshot","args":{"label":"redo"}}
+{"command":"set_master_plugin_param","args":{"index":"${MASTER_HP}","paramIndex":0,"value":0.4}}
+{"command":"__snapshot","args":{"label":"master_set"}}
+{"command":"undo"}
+{"command":"__snapshot","args":{"label":"master_undo"}}
+{"command":"redo"}
+{"command":"__snapshot","args":{"label":"master_redo"}}
+{"command":"set_plugin_param","args":{"trackId":"${T}","index":"${HP}","paramIndex":999,"value":0.4}}
+{"command":"__snapshot","args":{"label":"invalid_unchanged"}}
+{"command":"save"}
+{"command":"reload"}
+{"command":"__snapshot","args":{"label":"reloaded"}}

@@ -53,6 +53,9 @@ import { ensureMemoryHydrated, poolsNonEmpty } from "../memory/hydrate";
 import { retrieveContext } from "../memory/retrieveContext";
 import { rememberPreferenceToolDoc } from "../memory/rememberPreference";
 import type { Snapshot } from "../../types";
+import { useProducerRack, validateProducerRack, producerRackPrompt, type ProducerRack } from "./producerRack";
+import { readAgentContext, nativeRequest } from "./nativeTask";
+import { executionPresentation } from "./boundedProposal";
 
 export const agenticLoopEnabled = (flag: string | undefined): boolean => flag === "1";
 export const loopAllowedFor = (flag: string | undefined, multiplayerActive: boolean): boolean =>
@@ -271,7 +274,10 @@ async function runCompactMelodyTask(
 }
 
 /** Run one agentic task end-to-end. Resolves when the task finishes (any outcome). */
-export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
+export async function runLoopTask(text: string, ui: TaskUi, options: { requestId?: string } = {}): Promise<LoopRun> {
+  const rack = useProducerRack.getState().rack;
+  if (rack) return runProducerTask(text, ui, rack, options.requestId);
+  if (options.requestId) throw new Error("Identified requests require a configured Producer rack");
   const store = useTaskStore.getState();
   const signal = store.begin(text);
   ui.utter("ACK_WORKING");
@@ -363,3 +369,83 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
 }
 
 export { undoAgentTask };
+
+const producerPending = new Map<string, { payload: string; promise: Promise<LoopRun> }>();
+
+function runProducerTask(text: string, ui: TaskUi, rack: ProducerRack, suppliedId?: string): Promise<LoopRun> {
+  const requestId = suppliedId ?? crypto.randomUUID();
+  const scope = text.trim() === "Keep that vocal tone and level. Make the room less obvious." ? "room" : "initial";
+  const payload = { ask: text, rack: { ...rack }, scope };
+  const serialized = JSON.stringify(payload);
+  const existing = producerPending.get(requestId);
+  if (existing && existing.payload === serialized) return existing.promise;
+  if (existing || producerPending.size || useTaskStore.getState().current) {
+    const snapshot = useStore.getState().snapshot;
+    if (!snapshot) return Promise.reject(new Error("No session snapshot available"));
+    const say = existing ? "Request identity conflicts with the running payload; nothing was applied by this delivery."
+      : "Another task is running; this request was not started.";
+    ui.say(say);
+    return Promise.resolve({ finalSnapshot: snapshot, transcript: [], stepCount: 0, deferred: true, outcome: "need_user", say });
+  }
+  const promise = Promise.resolve().then(async (): Promise<LoopRun> => {
+    const signal = useTaskStore.getState().begin(text, { requestId, projectId: rack.projectId });
+    ui.utter("ACK_WORKING");
+    let run: LoopRun;
+    let reserved = false;
+    let context: Awaited<ReturnType<typeof readAgentContext>> | undefined;
+    try {
+      context = await readAgentContext();
+      if (context.projectId !== rack.projectId) throw new Error("The configured rack belongs to another project; select this project's targets");
+      const binding = { requestId, projectId: context.projectId, payload };
+      const reservation = await nativeRequest("begin_agent_request", binding);
+      if (reservation.replayed || reservation.status !== "prepared") {
+        run = { finalSnapshot: context.snapshot, transcript: [], stepCount: 0, deferred: true,
+          ...executionPresentation(reservation, signal.aborted), execution: reservation };
+      } else {
+        reserved = true;
+        const snapshot = context.snapshot;
+        const validate = (calls: readonly AgentCommandCall[]) => validateProducerRack(snapshot, rack, calls, scope);
+        const rackError = validate([]);
+        if (rackError) throw new Error(rackError);
+        const executor = createTaskExecutor(text.slice(0, 48), { source: "producer_v0" }, {
+          signal, bounded: { requestId, payload, context, validate },
+        });
+        try {
+          run = await runAgentLoop({ ask: text }, {
+            chat: chatWithFallback, env: executor.env, signal, bounded: { validate },
+            systemPrompt: () => `${producerRackPrompt(rack, scope)}\nObserved controls: ${JSON.stringify(snapshot.tracks
+              .filter((track) => track.id === rack.leadTrackId || track.id === rack.roomTrackId)
+              .map((track) => ({ id: track.id, name: track.name, volumeDb: track.volumeDb,
+                highpass: track.id === rack.leadTrackId ? track.plugins?.find((plugin) => plugin.index === rack.pluginIndex) : undefined })))}`,
+            onProgress: (event) => useTaskStore.getState().progress(event),
+          });
+        } finally { await executor.close(); }
+        if (!run.execution) {
+          const execution = await nativeRequest("get_agent_request", binding);
+          run = { ...run, execution };
+        }
+      }
+    } catch (error) {
+      const snapshot = context?.snapshot ?? useStore.getState().snapshot;
+      if (!snapshot) {
+        useTaskStore.getState().finish({ outcome: "error", say: "Native session context unavailable; the request was not applied." });
+        throw error;
+      }
+      let execution;
+      if (reserved && context) {
+        try { execution = await nativeRequest("cancel_agent_request", { requestId, projectId: context.projectId }); }
+        catch { execution = { requestId, projectId: context.projectId, status: "unresolved" as const, appliedCount: 0 }; }
+      }
+      const reason = error instanceof Error ? error.message : "Request failed";
+      run = { finalSnapshot: snapshot, transcript: [], stepCount: 0, deferred: true, outcome: "error",
+        say: execution && execution.status !== "cancelled" ? executionPresentation(execution, signal.aborted).say
+          : `Request refused before application: ${reason}.`, error: reason, execution };
+    }
+    useTaskStore.getState().finish(run);
+    ui.say(run.say ?? null);
+    ui.utter(END_UTTER[run.outcome].intent, run.say);
+    return run;
+  }).finally(() => { producerPending.delete(requestId); });
+  producerPending.set(requestId, { payload: serialized, promise });
+  return promise;
+}

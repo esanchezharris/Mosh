@@ -1,5 +1,9 @@
 # Mosh pre-pivot run manifest
 
+> **General V3 repair, 2026-09-17:** [bounded workspace scope](docs/V3-WORKSPACE-SCOPE-2026-09-17.md) is a separate ordinary-UI verification pass; no new model execution.
+>
+> **Current direction, 2026-09-16:** [Direct SA3 Re-Imagine](docs/DIRECT-SA3-SCOPE-2026-09-16.md) supersedes the near-term agent and mixing-experiment priorities below. Those records are preserved and deferred, not prerequisites. Engineering safety and acceptance rules remain in force.
+
 This is a truthful checkpoint, not an active roadmap. The selected product
 baseline is origin/main through **7eb0d617** (PR #668). The annotated tag
 **pre-pivot-baseline-2026-08-23** identifies the final docs-only baseline after

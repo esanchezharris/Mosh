@@ -3113,7 +3113,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
           if (auto* arr = trk.getProperty ("plugins", var()).getArray())
             for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == cidx)
             { compFlagged = (bool) p.getProperty ("builtin", false);
-              compCategorised = p.getProperty ("category", var()).toString() == "Dynamics"; } }
+              compCategorised = p.getProperty ("category", var()).toString() == "Dynamics";
+              const auto parameters = p.getProperty ("params", var());
+              const auto threshold = parameters[0];
+              check (threshold.getProperty ("display", var()).toString().contains ("dB")
+                         && std::abs (threshold.getProperty ("display", var()).toString().getFloatValue() + 6.0f) < 0.1f,
+                     "compressor default threshold displays -6 dB");
+              check (! threshold.hasProperty ("min") && ! threshold.hasProperty ("max"),
+                     "compressor linear-gain threshold range is not published as dB");
+              check (! parameters[1].hasProperty ("min") && ! parameters[1].hasProperty ("max"),
+                     "compressor inverse-ratio range remains unavailable");
+              const double minima[] = { 0.3, 10.0, -10.0, -24.0 };
+              const double maxima[] = { 200.0, 300.0, 24.0, 24.0 };
+              for (int pi = 2; pi < 6; ++pi)
+                  check (parameters[pi].hasProperty ("min") && parameters[pi].hasProperty ("max")
+                             && std::abs ((double) parameters[pi]["min"] - minima[pi - 2]) < 0.001
+                             && std::abs ((double) parameters[pi]["max"] - maxima[pi - 2]) < 0.001,
+                         "compressor direct physical parameter " + String (pi) + " publishes its native range");
+            } }
         check (compFlagged, "built-in plugin flagged builtin=true in snapshot");
         check (compCategorised, "built-in plugin carries its category");
         if (cidx >= 0)
@@ -3276,6 +3293,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (hpLoad["data"].getProperty ("type", var()).toString() == "highpass",
                "load_builtin result reports type \"highpass\", not the raw Tracktion \"lowpass\"");
         auto hpEntry = trackBuiltin ("highpass");
+        const auto hpFrequency = hpEntry["params"][0];
+        check (hpFrequency["display"].toString() == "180 Hz", "track highpass readback displays the loaded 180 Hz");
+        check ((double) hpFrequency["min"] == 10.0 && (double) hpFrequency["max"] == 22000.0,
+               "track highpass readback supplies physical Hz limits");
         check (hpEntry.getProperty ("type", var()).toString() == "highpass", "snapshot plugin.type is \"highpass\"");
         check ((bool) hpEntry.getProperty ("builtin", false), "track highpass flagged builtin=true");
         check (hpEntry.getProperty ("category", var()).toString() == "Filter", "track highpass carries the Filter category");
@@ -3307,6 +3328,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const int hpIdxFinal = (int) hpEntryRedone.getProperty ("index", -1);
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "paramIndex", 0 }, { "value", 0.4 }}))),
                "set_plugin_param on the track highpass ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz",
+               "highpass normalized setter immediately updates physical readback");
+        check (ok (cmd (ops, "undo")), "undo highpass parameter readback change ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz",
+               "one undo restores highpass display to 180 Hz");
+        check (ok (cmd (ops, "redo")), "redo highpass parameter readback change ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz",
+               "redo restores highpass physical readback");
 
         // ── Master: highpass + softclip ─────────────────────────────────
         auto masterBuiltin = [&] (const String& type) -> var {
@@ -3323,6 +3352,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto hpMasterLoad = cmd (ops, "load_master_builtin", objN ({{ "type", "highpass" }}));
         check (ok (hpMasterLoad), "load_master_builtin (highpass) ok");
         auto hpMasterEntry = masterBuiltin ("highpass");
+        check (hpMasterEntry["params"][0]["display"].toString() == "180 Hz",
+               "master highpass readback displays the loaded 180 Hz");
+        check ((double) hpMasterEntry["params"][0]["min"] == 10.0
+                   && (double) hpMasterEntry["params"][0]["max"] == 22000.0,
+               "master highpass readback supplies physical Hz limits");
         check (hpMasterEntry.getProperty ("type", var()).toString() == "highpass", "master snapshot plugin.type is \"highpass\"");
         if (auto* lp = liveMasterLowPass ((int) hpMasterEntry.getProperty ("index", -1)))
         {
@@ -3384,6 +3418,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
+
+        const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
+        const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
+        check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
+        check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
+        check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
+                   && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,
+               "reloaded track highpass retains normalized value, display and physical limits");
+        check (masterBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz"
+                   && JSON::toString (masterBuiltin ("highpass")["params"]) == masterReadbackBeforeReload,
+               "reloaded master highpass retains normalized value, display and physical limits");
 
         // Leave the master bus as we found it: the next section ("Master bus plugins")
         // asserts it starts empty, and this section's redo'd highpass + softclip were
@@ -15490,9 +15535,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 }
             }
         };
-        auto canon = [&]() -> String
+        auto canonicalSnapshot = [&] (const var& snapshot, bool forPersistence) -> String
         {
-            auto s = ops.snapshot();
+            auto s = snapshot.clone();
             if (auto* o = s.getDynamicObject())
             {
                 o->removeProperty ("transport");
@@ -15513,14 +15558,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // overwritten, and a reload correctly re-derives 0.5. Comparing it across
             // save/reload compares a transient, exactly like `transport`/`dirty` above.
             // The `points` array IS the persisted truth and stays in the comparison.
-            std::function<void (var&)> dropAutomatedValues = [&dropAutomatedValues] (var& v)
+            std::function<void (var&)> dropAutomatedValues = [&dropAutomatedValues, forPersistence] (var& v)
             {
                 if (auto* arr = v.getArray())
                     for (auto& e : *arr) dropAutomatedValues (e);
                 else if (auto* o = v.getDynamicObject())
                 {
                     if (o->hasProperty ("automated") && (bool) o->getProperty ("automated"))
+                    {
                         o->removeProperty ("value");
+                        // Display follows that same live value across reload; undo still compares it.
+                        if (forPersistence) o->removeProperty ("display");
+                    }
                     for (auto& p : o->getProperties())
                     {
                         auto child = p.value;
@@ -15532,6 +15581,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             normNums (s);
             return JSON::toString (s, false);
         };
+        auto canon = [&]() -> String { return canonicalSnapshot (ops.snapshot(), false); };
         auto rid = [] (const var& r, const char* k) {
             return r.getProperty ("data", var()).getProperty (k, var()).toString(); };
 
@@ -15659,10 +15709,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // canonical equality: ANY non-serialized property among the mutated fields fails.
         for (const auto& mc : table)
             check (ok (cmd (ops, mc.name, mc.args)), (mc.name + " re-applied for persist").toRawUTF8());
-        const auto preSave = canon();
+        const auto rawPreSave = ops.snapshot();
+        const auto rawBeforeText = JSON::toString (rawPreSave);
+        const auto preSave = canonicalSnapshot (rawPreSave, true);
+        check (eng.sessionDir().getChildFile ("matrix-persist-before.json")
+                   .replaceWithText (rawBeforeText), "matrix raw before-save evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-before-canonical.json")
+                   .replaceWithText (preSave), "matrix canonical before-save evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-before-legacy.json")
+                   .replaceWithText (canonicalSnapshot (rawPreSave, false)), "matrix legacy before-save evidence written");
         check (ok (cmd (ops, "save")), "matrix save ok");
         check (ok (cmd (ops, "reload")), "matrix reload ok");
-        const auto postLoad = canon();
+        const auto rawPostLoad = ops.snapshot();
+        const auto rawAfterText = JSON::toString (rawPostLoad);
+        const auto postLoad = canonicalSnapshot (rawPostLoad, true);
+        check (eng.sessionDir().getChildFile ("matrix-persist-after.json")
+                   .replaceWithText (rawAfterText), "matrix raw after-reload evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-after-canonical.json")
+                   .replaceWithText (postLoad), "matrix canonical after-reload evidence written");
+        check (eng.sessionDir().getChildFile ("matrix-persist-after-legacy.json")
+                   .replaceWithText (canonicalSnapshot (rawPostLoad, false)), "matrix legacy after-reload evidence written");
         // A bare equality failure here is opaque — the same problem the golden-audio gate
         // solved with a feature vector. Print the first divergence (with a little context)
         // so a red run names the non-serialized field instead of just asserting inequality.
@@ -15677,9 +15743,216 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                       << "    loaded: ..." << postLoad.substring (from, i + 90) << "\n";
         }
         check (postLoad == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
+
+        auto eqParameterReadback = [&] (const var& snapshot, int paramIndex) -> var
+        {
+            const auto tracks = snapshot["tracks"];
+            for (int i = 0; i < tracks.size(); ++i)
+                if (tracks[i]["id"].toString() == mt)
+                {
+                    const auto plugins = tracks[i]["plugins"];
+                    for (int j = 0; j < plugins.size(); ++j)
+                        if ((int) plugins[j]["index"] == eqIx)
+                        {
+                            const auto params = plugins[j]["params"];
+                            if (paramIndex >= 0 && paramIndex < params.size()) return params[paramIndex];
+                        }
+                }
+            return {};
+        };
+        const auto beforeEq = eqParameterReadback (rawPreSave, 0);
+        const auto loadedEq = eqParameterReadback (rawPostLoad, 0);
+        // 1e-6 matches the matrix precision and accommodates float normalization round-trips.
+        constexpr double parameterTolerance = 1.0e-6;
+        check (std::abs ((double) beforeEq["value"] - 0.7) < parameterTolerance
+                 && beforeEq["display"].toString() == "14006 Hz",
+               "matrix automation fixture retains the explicit 0.7 / 14006 Hz before save");
+        check ((bool) beforeEq["automated"] && beforeEq["points"].size() == 1
+                 && std::abs ((double) beforeEq["points"][0]["v"] - 0.5) < parameterTolerance,
+               "matrix saved automation is a single constant 0.5 point");
+        check ((bool) loadedEq["automated"]
+                 && JSON::toString (loadedEq["points"]) == JSON::toString (beforeEq["points"]),
+               "matrix reload preserves automation presence and every point time/value");
+        check (std::abs ((double) loadedEq["value"] - 0.5) < parameterTolerance
+                 && loadedEq["display"].toString() == "10010 Hz",
+               "matrix immediate reload readback is 0.5 / 10010 Hz");
+
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "matrix evaluation seeks to zero seconds");
+        te::AutomatableParameter* evaluatedParameter = nullptr;
+        for (auto* track : te::getAudioTracks (eng.edit()))
+            if (track->itemID.toString() == mt && eqIx >= 0 && eqIx < track->pluginList.getPlugins().size())
+                if (auto* eq = dynamic_cast<te::EqualiserPlugin*> (track->pluginList.getPlugins()[eqIx].get()))
+                    evaluatedParameter = eq->loFreq.get();
+        check (evaluatedParameter != nullptr, "matrix reacquires native EQ frequency after reload");
+        if (evaluatedParameter != nullptr)
+            evaluatedParameter->updateToFollowCurve (eng.edit().getTransport().getPosition());
+        check (eng.edit().getTransport().getPosition().inSeconds() == 0.0
+                 && evaluatedParameter != nullptr
+                 && std::abs (evaluatedParameter->getCurrentNormalisedValue() - 0.5f) < parameterTolerance
+                 && evaluatedParameter->getCurrentValueAsString() == "10010 Hz",
+               "matrix EQ curve evaluated at zero is 0.5 and authoritative formatter reports 10010 Hz");
+        const auto evaluatedSnapshot = ops.snapshot();
+        const auto evaluatedEq = eqParameterReadback (evaluatedSnapshot, 0);
+        check (std::abs ((double) evaluatedEq["value"] - 0.5) < parameterTolerance
+                 && evaluatedEq["display"].toString() == "10010 Hz"
+                 && JSON::toString (evaluatedEq["points"]) == JSON::toString (beforeEq["points"]),
+               "matrix evaluated snapshot exposes the authoritative value/display and unchanged curve");
+        check (eng.sessionDir().getChildFile ("matrix-persist-evaluated.json")
+                   .replaceWithText (JSON::toString (evaluatedSnapshot)), "matrix evaluated raw evidence written");
+
+        for (const auto* field : { "t", "v" })
+        {
+            auto changed = rawPostLoad.clone();
+            const auto points = eqParameterReadback (changed, 0)["points"];
+            if (points.size() > 0)
+                if (auto* point = points[0].getDynamicObject()) point->setProperty (field, 0.25);
+            check (canonicalSnapshot (changed, true) != postLoad,
+                   (String ("matrix persistence detects a changed automation point ") + field).toRawUTF8());
+        }
+        for (const auto* field : { "value", "display" })
+        {
+            auto changed = rawPostLoad.clone();
+            auto nonAutomated = eqParameterReadback (changed, 1);
+            check (! (bool) nonAutomated["automated"] && nonAutomated.hasProperty (field),
+                   "matrix non-automated negative-control field exists");
+            if (auto* parameter = nonAutomated.getDynamicObject())
+                parameter->setProperty (field, String (field) == "value" ? var (0.25) : var ("changed"));
+            check (canonicalSnapshot (changed, true) != postLoad,
+                   (String ("matrix persistence detects a changed non-automated ") + field).toRawUTF8());
+        }
+        auto derivedChange = rawPostLoad.clone();
+        if (auto* parameter = eqParameterReadback (derivedChange, 0).getDynamicObject())
+            parameter->setProperty ("display", "changed");
+        check (canonicalSnapshot (derivedChange, true) == postLoad,
+               "matrix persistence alone excludes an automated current display");
+        check (canonicalSnapshot (derivedChange, false) != canonicalSnapshot (rawPostLoad, false),
+               "matrix undo comparison still detects an automated display change");
+        const auto metadata = objN ({ { "automated", true }, { "index", 0 }, { "name", "Fixture parameter" },
+                                     { "unit", "units" }, { "min", 0.0 }, { "max", 1.0 } });
+        for (const auto* field : { "automated", "index", "name", "unit", "min", "max" })
+        {
+            auto changed = metadata.clone();
+            changed.getDynamicObject()->removeProperty (field);
+            check (canonicalSnapshot (metadata, true) != canonicalSnapshot (changed, true),
+                   (String ("matrix persistence compares supplied stable field ") + field).toRawUTF8());
+        }
+        check (JSON::toString (rawPreSave) == rawBeforeText && JSON::toString (rawPostLoad) == rawAfterText
+                 && rawBeforeText == eng.sessionDir().getChildFile ("matrix-persist-before.json").loadFileAsString()
+                 && rawAfterText == eng.sessionDir().getChildFile ("matrix-persist-after.json").loadFileAsString(),
+               "matrix comparison copies leave raw snapshots and evidence unchanged");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
+    {
+        section ("S3-REQUEST: native bounded patch identity, ownership, stale refusal and partial failure");
+        const auto created = cmd (ops, "create_track", objN ({ { "name", "S3 request fixture" } }));
+        const auto requestTrackId = created["data"]["trackId"].toString();
+        check (requestTrackId.isNotEmpty(), "S3 request fixture exists");
+        const auto pre = agenttxn::fingerprint (ops.snapshot());
+        const auto context = cmd (ops, "get_agent_context")["data"];
+        auto request = [&] (const String& id) {
+            return objN ({ { "requestId", id }, { "projectId", context["projectId"] },
+                           { "payload", "S3 native fixture" } });
+        };
+        auto patch = [&] (const String& id, const var& observed, const Array<var>& commands) {
+            auto args = request (id);
+            args.getDynamicObject()->setProperty ("epoch", observed["epoch"]);
+            args.getDynamicObject()->setProperty ("revision", observed["revision"]);
+            args.getDynamicObject()->setProperty ("commands", commands);
+            return args;
+        };
+        auto level = [&] (double db) {
+            return objN ({ { "command", "set_track_volume" },
+                           { "args", objN ({ { "trackId", requestTrackId }, { "db", db } }) } });
+        };
+        const auto first = request ("s3-native-first");
+        check (ok (cmd (ops, "begin_agent_request", first)), "S3 reserve succeeds");
+        const auto inventory = cmd (ops, "get_agent_context")["data"]["requests"];
+        bool requestDiscovered = false;
+        for (int i = 0; i < inventory.size(); ++i)
+            if (inventory[i]["requestId"].toString() == "s3-native-first"
+                && inventory[i]["status"].toString() == "prepared") requestDiscovered = true;
+        check (requestDiscovered, "S3 interrupted requests can be discovered without a caller-supplied ID");
+        const auto concurrent = cmd (ops, "begin_agent_request", first);
+        check ((bool) concurrent["data"]["inProgress"] && (bool) concurrent["data"]["replayed"],
+               "S3 concurrent reservation identifies work already running");
+        const auto proposal = patch ("s3-native-first", context, { level (-6.0), level (3.0) });
+        const auto applied = cmd (ops, "apply_agent_patch", proposal);
+        check (ok (applied) && applied["data"]["status"].toString() == "committed"
+               && (int) applied["data"]["appliedCount"] == 2
+               && applied["data"]["results"].size() == 2, "S3 complete bounded patch reports both native results");
+        const auto committed = agenttxn::fingerprint (ops.snapshot());
+        check (committed != pre, "S3 committed patch has real effects");
+        const auto requestJournal = eng.sessionDir().getChildFile ("recovery-journal.jsonl");
+        check (requestJournal.loadFileAsString().contains ("s3-native-first"),
+               "S3 native patch retains tagged recovery journal coverage");
+        const auto replay = cmd (ops, "apply_agent_patch", proposal);
+        check (ok (replay) && (bool) replay["data"]["replayed"]
+               && agenttxn::fingerprint (ops.snapshot()) == committed,
+               "S3 terminal replay precedes now-stale context and performs no mutation");
+        auto conflict = first.clone();
+        conflict.getDynamicObject()->setProperty ("payload", "a different request");
+        check (! ok (cmd (ops, "begin_agent_request", conflict)), "S3 same ID different payload conflicts");
+        check (ok (cmd (ops, "set_track_volume", objN ({ { "trackId", requestTrackId }, { "db", -2.0 } }))),
+               "S3 ordinary manual edit works after native application returns");
+        const auto manual = agenttxn::fingerprint (ops.snapshot());
+        const auto journalWithManual = requestJournal.loadFileAsString();
+        check (! ok (cmd (ops, "undo_agent_request", first))
+               && agenttxn::fingerprint (ops.snapshot()) == manual,
+               "S3 task undo refuses a newer manual head and preserves it");
+        check (ok (cmd (ops, "undo")) && agenttxn::fingerprint (ops.snapshot()) == committed,
+               "S3 normal undo removes only newer manual edit");
+        eng.edit().getUndoManager().beginNewTransaction();
+        check (eng.edit().getUndoManager().getNumActionsInCurrentTransaction() == 0
+               && eng.edit().getUndoManager().canUndo()
+               && agenttxn::fingerprint (ops.snapshot()) == committed,
+               "S3 lazy timer boundary leaves the committed undo head intact with zero current actions");
+        check ((bool) cmd (ops, "get_agent_request", first)["data"]["undoable"],
+               "S3 exact task head remains undoable after a lazy transaction boundary");
+        check (ok (cmd (ops, "undo_agent_request", first)) && agenttxn::fingerprint (ops.snapshot()) == pre,
+               "S3 one owned undo restores entire two-command patch");
+        check (requestJournal.loadFileAsString() == agentrequest::removeOwnedJournalRows (
+                   journalWithManual, "s3-native-first", context["projectId"].toString()),
+               "S3 task undo removes only its journal rows and preserves unrelated manual history");
+        check (ok (cmd (ops, "undo_agent_request", first)) && agenttxn::fingerprint (ops.snapshot()) == pre,
+               "S3 repeated task undo removes no earlier work");
+
+        check (ok (cmd (ops, "begin_agent_request", request ("s3-native-stale"))), "S3 stale fixture reserved");
+        const auto stale = cmd (ops, "get_agent_context")["data"];
+        cmd (ops, "set_track_volume", objN ({ { "trackId", requestTrackId }, { "db", -1.0 } }));
+        const auto moved = agenttxn::fingerprint (ops.snapshot());
+        check (! ok (cmd (ops, "apply_agent_patch", patch ("s3-native-stale", stale, { level (-6.0) })))
+               && agenttxn::fingerprint (ops.snapshot()) == moved,
+               "S3 final native precondition rejects intervening manual change without mutation");
+        cmd (ops, "undo");
+
+        const auto partialRequest = request ("s3-native-partial");
+        check (ok (cmd (ops, "begin_agent_request", partialRequest)), "S3 partial fixture reserved");
+        const auto beforePartial = agenttxn::fingerprint (ops.snapshot());
+        const auto journalBeforePartial = requestJournal.loadFileAsString();
+        const auto invalid = objN ({ { "command", "set_track_volume" },
+                                    { "args", objN ({ { "trackId", "nonexistent" }, { "db", -6.0 } }) } });
+        const auto partial = cmd (ops, "apply_agent_patch", patch ("s3-native-partial",
+            cmd (ops, "get_agent_context")["data"], { level (-6.0), invalid }));
+        check (! ok (partial) && partial["data"]["status"].toString() == "rolled_back"
+               && (int) partial["data"]["appliedCount"] == 1 && partial["data"]["results"].size() == 2,
+               "S3 partial error preserves exact applied and failed native results");
+        check (agenttxn::fingerprint (ops.snapshot()) == beforePartial,
+               "S3 partial error rolls back exactly with no foreign work removed");
+        check (requestJournal.loadFileAsString() == journalBeforePartial,
+               "S3 proven rollback preserves earlier journal exactly and cannot resurrect its step");
+        const auto cancelRequest = request ("s3-native-cancel");
+        cmd (ops, "begin_agent_request", cancelRequest);
+        check (cmd (ops, "cancel_agent_request", cancelRequest)["data"]["status"].toString() == "cancelled",
+               "S3 cancellation before application records no effects");
+        const auto cancelled = cmd (ops, "apply_agent_patch", patch ("s3-native-cancel",
+            cmd (ops, "get_agent_context")["data"], { level (-6.0) }));
+        check (cancelled["data"]["status"].toString() == "cancelled"
+               && agenttxn::fingerprint (ops.snapshot()) == beforePartial,
+               "S3 late application after cancellation cannot mutate");
+        cmd (ops, "remove_track", objN ({ { "trackId", requestTrackId } }));
+    }
+
     // FS-B2a — the agent batch-TRANSACTION contract, against a REAL engine.
     // Spec: docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md, one section per acceptance
     // bullet. Runs after the undo matrix, so the fixture is a richly-mutated project —

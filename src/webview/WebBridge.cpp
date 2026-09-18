@@ -267,7 +267,8 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     // bounded read-only I/O, so dispatch it on a worker and resolve
                     // its native Promise back on the message thread. All mutations
                     // remain on the ordinary synchronous MoshOps seam below.
-                    if (safeName == "list_directory" && asyncCommandHandler != nullptr)
+                    if ((safeName == "list_directory" || safeName == "list_colors" || safeName == "list_loras")
+                        && asyncCommandHandler != nullptr)
                     {
                         auto handler = asyncCommandHandler;
                         const auto command = args[0];

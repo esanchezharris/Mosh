@@ -6,6 +6,7 @@ import { historyRows } from "../ui/commandLogHistory";
 import { useV3 } from "./shellState";
 import { useStore } from "../store";
 import type { CommandLog, CommandResult } from "../types";
+import { escapeStackDepth, pushEscapeHandler } from "../hooks/escapeStack";
 
 const log: CommandLog = {
   entries: [
@@ -20,6 +21,7 @@ const log: CommandLog = {
 describe("v3 History flyout", () => {
   let host: HTMLDivElement;
   let root: Root;
+  const originalExec = useStore.getState().exec;
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,6 +40,9 @@ describe("v3 History flyout", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+    useV3.setState({ historyOpen: false });
+    useStore.setState({ exec: originalExec });
+    expect(escapeStackDepth()).toBe(0);
   });
 
   it("renders historyRows from the command log", async () => {
@@ -51,5 +56,32 @@ describe("v3 History flyout", () => {
     expect(host.textContent).toContain(rows[0]!.entry.command);
     expect(host.textContent).toContain("Cmd+Z · click older");
     expect(host.querySelector('[data-testid="v3-history-undo"]')).not.toBeNull();
+  });
+
+  it("dismisses History when Escape is pressed", async () => {
+    await act(async () => root.render(React.createElement(HistoryFlyout)));
+
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+
+    expect(useV3.getState().historyOpen).toBe(false);
+    expect(host.querySelector('[data-testid="v3-history-flyout"]')).toBeNull();
+  });
+
+  it("leaves a newer overlay above History after the command log arrives", async () => {
+    let resolveLog: (result: CommandResult) => void = () => { throw new Error("History load did not start"); };
+    useStore.setState({ exec: () => new Promise((resolve) => { resolveLog = resolve; }) });
+    act(() => root.render(React.createElement(HistoryFlyout)));
+    const upperClose = vi.fn();
+    const pop = pushEscapeHandler(upperClose);
+    await act(async () => resolveLog({ ok: true, command: "get_command_log", data: log }));
+
+    try {
+      act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+
+      expect(upperClose).toHaveBeenCalledOnce();
+      expect(useV3.getState().historyOpen).toBe(true);
+    } finally {
+      pop();
+    }
   });
 });

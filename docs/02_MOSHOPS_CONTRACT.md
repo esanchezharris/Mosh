@@ -99,6 +99,21 @@ Hosted plugin snapshots/results include external-plugin diagnostics when Trackti
 
 ## Snapshot
 
+Plugin `params[]` entries add optional `display`, `unit`, `min`, and `max`.
+`value` and all setters remain normalized 0–1. `display` comes from the host's
+current-value formatter; a separately supplied label is appended once and also
+exposed as `unit`. Missing text or labels leave the respective field absent.
+A formatter may include units in `display` without supplying a separate `unit`.
+
+Physical endpoints are currently qualified only for native low/high-pass
+frequency and compressor attack, release, output gain, and sidechain gain.
+They come from the live parameter range, matched by native parameter identity.
+Other ranges are omitted, including external-plugin ranges and the builtin
+compressor's gain-domain threshold and inverse ratio. Neither endpoints nor
+display strings establish a conversion function: skew/custom mappings must use
+the processor's authoritative conversion. There is no physical-unit setter.
+The existing 16-parameter snapshot limit and all previous fields remain intact.
+
 ```jsonc
 {
   "schemaVersion": 1,

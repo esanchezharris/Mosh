@@ -1,4 +1,39 @@
-# Mosh pre-pivot baseline
+# Mosh current direction
+
+**2026-09-16:** Direct SA3 Re-Imagine is the active bounded implementation.
+See [the dated scope decision](DIRECT-SA3-SCOPE-2026-09-16.md) for its exact
+baseline, deferred work and acceptance boundary. The candidate implements the explicit-decision audio-clip loop. Exact candidate,
+binary, verification results and remaining acceptance gaps are recorded under
+`~/Library/Mosh/task-evidence/direct-sa3-reimagine-20260916/`. No installed-app
+or owner listening pass is claimed.
+
+The separately authorized reopen repair normalizes persisted seed/amount at the
+native request boundary and kept state at the snapshot boundary. Its regression
+reopens saved layers in fresh native processes and exercises the drawer's
+unchanged-control submission contract. Exact-candidate Release UI, gate and review
+evidence is recorded in that directory's `reopen-repair-20260916/` subdirectory.
+The earlier real-model render is retained; this repair does not repeat inference.
+
+**2026-09-17 V3 UI repair:** the existing inspector now opens the shared direct
+Re-Imagine tool on one explicit audio clip, with a pinned target, visible source
+names and controls fitted to the panel. V3 timeline selection uses the shared
+keyboard-edit selection. File exposes browser import, Save As and Export.
+Verification and screenshots live in the same evidence root under `v3-ui-20260917/`.
+No additional real-model generation is part of this repair.
+
+**2026-09-17 general V3 workspace repair:** the separate ordinary-UI pass repairs
+Mixer navigation, MIDI editor reachability, track selection, empty-session actions,
+count-in, keyboard overlays and Settings contrast under the shared light theme.
+It reuses existing shared components and commands.
+See [the bounded scope](V3-WORKSPACE-SCOPE-2026-09-17.md). Exact candidate, native
+screenshots, gate/review and limitations are recorded at
+`~/Library/Mosh/task-evidence/v3-general-ui-20260917/HANDOFF.md`.
+This pass does not run SA3 or runtime agents, install, merge or deploy.
+
+The pre-pivot ownership snapshot below is preserved as historical evidence.
+Older recording/mixing-agent and reconstruction priorities are deferred.
+
+## Historical pre-pivot baseline
 
 ## Snapshot identity
 

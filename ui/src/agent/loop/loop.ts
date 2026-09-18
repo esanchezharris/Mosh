@@ -20,6 +20,8 @@ import type { AgentEnv, AgentTaskRun, StepRecord } from "../loopSeam";
 import { buildLoopSystemPrompt, renderTaskContext, type TaskContextMode } from "./loopPrompt";
 import { parseLoopReply, type LoopReply, type PlanStep } from "./parse";
 import type { Snapshot } from "../../types";
+import type { AgentExecution } from "../loopSeam";
+import { runBoundedProposal } from "./boundedProposal";
 
 export type LoopBudgets = {
   /** Executed batches per task. */
@@ -56,6 +58,7 @@ export type LoopProgressEvent =
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 export type LoopDeps = {
+  bounded?: { validate: (calls: readonly AgentCommandCall[]) => string | null };
   chat: (messages: ChatMessage[]) => Promise<{ content: string; ms?: number }>;
   env: AgentEnv;
   budgets?: Partial<LoopBudgets>;
@@ -78,7 +81,7 @@ export type LoopDeps = {
   systemPrompt?: (snap: Snapshot | null, query?: string, memory?: string) => string;
 };
 
-export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string };
+export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string; execution?: AgentExecution };
 
 const countInvalid = (calls: readonly AgentCommandCall[]): number =>
   calls.filter((c) => validateCommand(c.command, (c.args ?? {}) as Record<string, unknown>) !== null).length;
@@ -118,6 +121,7 @@ const revisionOf = (s: Snapshot | null | undefined): number | undefined => {
 };
 
 export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promise<LoopRun> {
+  if (deps.bounded) return runBoundedProposal(task, deps);
   const b: LoopBudgets = { ...DEFAULT_LOOP_BUDGETS, ...deps.budgets };
   const now = deps.now ?? (() => Date.now());
   const t0 = now();

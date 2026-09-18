@@ -11,6 +11,7 @@
 #include "ClipGainEnvelope.h"
 #include "ExportRange.h"
 #include "ScanProgress.h"
+#include "PluginParameterReadback.h"
 #include "StemExport.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
@@ -38,6 +39,23 @@ using namespace juce;
 namespace
 {
     constexpr double kMinMidiNoteBeats = 0.0625;
+
+    std::optional<juce::Range<float>> pluginParameterPhysicalRange (te::Plugin& plugin,
+                                                                 te::AutomatableParameter& parameter)
+    {
+        if (auto* filter = dynamic_cast<te::LowPassPlugin*> (&plugin))
+            if (filter->frequency.get() == &parameter)
+                return parameter.getValueRange();
+
+        if (auto* compressor = dynamic_cast<te::CompressorPlugin*> (&plugin))
+            if (compressor->attackMs.parameter.get() == &parameter
+                || compressor->releaseMs.parameter.get() == &parameter
+                || compressor->outputDb.parameter.get() == &parameter
+                || compressor->sidechainDb.parameter.get() == &parameter)
+                return parameter.getValueRange();
+
+        return std::nullopt;
+    }
 
     juce::String pluginRackTopology (te::Edit& edit)
     {
@@ -298,6 +316,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     : eng (engineToUse), pluginHost (engineToUse.engine()),
       trainerRegistry (engineToUse.sessionDir())
 {
+    eng.beforePersist = [this] { restoreDirectAuditions(); };
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     // CAP-PRJ-005 — a per-process token scoping every history stamp. mosh-log.jsonl
     // outlives the process; the UndoManager does not. Without this, a line stamped
@@ -307,6 +326,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
     initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
+    initAgentRequests();
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     // Live-note audition: we ARE the wasted-message listener, registered for our whole
@@ -359,6 +379,10 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
 
 MoshOps::~MoshOps()
 {
+    eventSink = {};
+    cancelDirectRenders ("Application closing; inference may continue.");
+    restoreDirectAuditions();
+    eng.beforePersist = {};
     // Editor parameter mirrors capture this MoshOps instance. Cancel any in-flight
     // gesture and detach the listeners before other MoshOps members are destroyed.
     // MainWindow/the WebView bridge is already gone at this point, so teardown must not
@@ -380,6 +404,7 @@ MoshOps::~MoshOps()
 
 void MoshOps::timerCallback()
 {
+    pollDirectRenders();
     // Push a decimated transport delta while playing (and once on the
     // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
     auto& transport = eng.edit().getTransport();
@@ -594,7 +619,9 @@ juce::var MoshOps::execute (const juce::var& command)
             return early;   // refused or replayed: no dispatch, no mutation, no journal
     }
 
+    prepareDirectCommand (command);
     auto result = executeImpl (command);
+    pollDirectRenders();
 
     if (outermost)
         txnPostDispatch (result);
@@ -626,6 +653,11 @@ juce::var MoshOps::executeImpl (const juce::var& command)
 
     if (name.isEmpty())
         return errResult (name, "missing 'command'");
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[Identifier ("decisionPolicy")].toString() == "explicit"
+        && (name == "compile_render" || name == "render_ahead_arm" || name == "freeze_layer"
+            || name == "unfreeze_layer" || name == "bounce_layer_to_clip"))
+        return errResult (name, "Use Generate, audition, Keep or Reject for this direct Re-Imagine layer.");
+
 
     // MP-001 lock guard — the single chokepoint. When a multiplayer session is
     // active, reject any mutation to a track / clip / structure currently locked by
@@ -762,6 +794,12 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "batch_begin")       return cmdBatchBegin (args);
     if (name == "batch_end")         return cmdBatchEnd (args);
     if (name == "batch_status")      return cmdBatchStatus (args);      // FS-B2a
+    if (name == "get_agent_context")     return cmdGetAgentContext (args);
+    if (name == "begin_agent_request")   return cmdBeginAgentRequest (args);
+    if (name == "apply_agent_patch")     return cmdApplyAgentPatch (args);
+    if (name == "get_agent_request")     return cmdGetAgentRequest (args);
+    if (name == "cancel_agent_request")  return cmdCancelAgentRequest (args);
+    if (name == "undo_agent_request")    return cmdUndoAgentRequest (args);
     if (name == "batch_rollback")    return cmdBatchRollback (args);    // FS-B2a
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
@@ -1605,7 +1643,13 @@ void MoshOps::appendTxnLedger (const agenttxn::Record& record)
             lines.remove (lines.size() - 1);
         if (lines.size() > kMaxLedgerLines)
         {
-            lines.removeRange (0, lines.size() - kKeepLedgerLines);
+            int legacyCount = 0;
+            for (const auto& line : lines)
+                if (JSON::parse (line)["kind"].toString() != "agent_request") ++legacyCount;
+            for (int i = 0; i < lines.size() && legacyCount > kKeepLedgerLines;)
+                if (JSON::parse (lines[i])["kind"].toString() != "agent_request")
+                { lines.remove (i); --legacyCount; }
+                else ++i;
             txnLedgerFile.replaceWithText (lines.joinIntoString ("\n") + "\n");
         }
     }
@@ -3111,6 +3155,7 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         po->setProperty ("index", i);
         po->setProperty ("name", param->getParameterName());
         po->setProperty ("value", param->getCurrentNormalisedValue());
+        addPluginParameterReadback (*po, *param, pluginParameterPhysicalRange (p, *param));
         // CAP-AUT-006 — a stepped parameter (the mute gate is the first) is applied
         // through snapToState, so the editor must snap its points to the same states
         // instead of drawing a value the engine will never use. Only emitted when true,
@@ -3962,6 +4007,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     if (rl.isValid())
     {
         auto* r = new DynamicObject();
+        appendDirectRenderSnapshot (*r, c, rl);
         r->setProperty ("id", rl[ids::id]);
         r->setProperty ("status", rl[ids::status]);
         r->setProperty ("error", rl[ids::renderError]);   // "" unless status=="error"
@@ -3983,7 +4029,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);
-        r->setProperty ("userKept", rl[ids::userKept]);
+        r->setProperty ("userKept", (bool) rl[ids::userKept]);
         r->setProperty ("hasArtifact", mosh::resolveCacheArtifact (rl, eng.editFile().getParentDirectory()).existsAsFile());
         // The render's time scope (seconds). For a section-scoped render this is the
         // section's sub-range; for a whole-clip render it equals the clip span.
@@ -4176,6 +4222,8 @@ void MoshOps::emitSnapshotInvalidated()
 
 void MoshOps::emitProjectReplaced (const juce::String& reason)
 {
+    agentEpoch_ = juce::Uuid().toString();
+    txnFingerprintRevision_ = -1;
     auto* payload = new DynamicObject();
     payload->setProperty ("projectReplaced", true);
     payload->setProperty ("reason", reason);
@@ -4392,6 +4440,11 @@ void MoshOps::appendRecoveryJournal (const juce::String& name, const juce::var& 
     o->setProperty ("c", name);
     o->setProperty ("a", args);
     o->setProperty ("r", result.getProperty ("data", var()));  // assigned ids → id-rebinding on replay
+    if (activeAgentJournalRequest_.isNotEmpty())
+    {
+        o->setProperty ("agentRequestId", activeAgentJournalRequest_);
+        o->setProperty ("agentProjectId", agentProjectId());
+    }
     recoveryJournalFile.appendText (JSON::toString (var (o), true) + "\n");
 }
 

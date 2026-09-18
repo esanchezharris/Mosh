@@ -17,6 +17,7 @@
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
+#include "generative/AudioStaging.h"
 #include "state/Lyrics.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
@@ -179,66 +180,11 @@ bool MoshOps::resolveLorasKey (const juce::ValueTree& node, juce::String& lorasK
 // what computeFingerprint() claims. Pass [0, lengthInSeconds] for a whole clip. Returns
 // false (caller errors) if the source can't be read or the range is degenerate, so a
 // failed slice never silently renders the wrong audio.
-static bool stageWavRegionAt44k (const juce::File& sourceFile, double srcStartSec, double srcEndSec,
-                                 const juce::File& destWav)
-{
-    static constexpr double kStageSR   = 44100.0;
-    static constexpr int    kStageBits = 16;
-    static constexpr int    kStageCh   = 2;   // engine read_wav duplicates mono → stereo anyway
-
-    if (srcEndSec <= srcStartSec) return false;
-    juce::AudioFormatManager fm; fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (sourceFile));
-    if (reader == nullptr || reader->sampleRate <= 0.0) return false;
-
-    const double sr = reader->sampleRate;
-    const juce::int64 total = reader->lengthInSamples;
-    juce::int64 startSamp = juce::jlimit ((juce::int64) 0, total, (juce::int64) std::floor (srcStartSec * sr));
-    juce::int64 endSamp   = juce::jlimit (startSamp,       total, (juce::int64) std::ceil  (srcEndSec   * sr));
-    const int numSamps = (int) (endSamp - startSamp);
-    if (numSamps <= 0) return false;
-
-    const int srcNumCh = (int) juce::jmax ((unsigned) 1, reader->numChannels);
-    juce::AudioBuffer<float> srcBuf (srcNumCh, numSamps);
-    if (! reader->read (&srcBuf, 0, numSamps, startSamp, true, true)) return false;
-
-    const bool needResample = std::abs (sr - kStageSR) > 1.0e-6;
-    const double ratio = sr / kStageSR;   // > 1 downsamples (48k→44.1k)
-    // floor keeps outNum*ratio <= numSamps so the interpolator never reads past srcBuf
-    // (a sub-sample duration loss, inaudible). For a 44100 source ratio==1 → outNum==numSamps.
-    const int outNum = needResample
-        ? (int) std::floor ((double) numSamps * kStageSR / sr)
-        : numSamps;
-    if (outNum <= 0) return false;
-
-    juce::AudioBuffer<float> outBuf (kStageCh, outNum);
-    for (int ch = 0; ch < kStageCh; ++ch)
-    {
-        const int srcCh = juce::jmin (ch, srcNumCh - 1);   // mono → duplicate into L/R
-        if (needResample)
-        {
-            juce::LagrangeInterpolator interp;             // fresh per channel: zeroed history, deterministic
-            interp.process (ratio, srcBuf.getReadPointer (srcCh), outBuf.getWritePointer (ch), outNum);
-        }
-        else
-            outBuf.copyFrom (ch, 0, srcBuf, srcCh, 0, outNum);
-    }
-
-    destWav.deleteFile();
-    std::unique_ptr<juce::FileOutputStream> os (destWav.createOutputStream());
-    if (os == nullptr) return false;
-    juce::WavAudioFormat wav;
-    std::unique_ptr<juce::AudioFormatWriter> writer (
-        wav.createWriterFor (os.get(), kStageSR, (unsigned) kStageCh, kStageBits, {}, 0));
-    if (writer == nullptr) return false;
-    os.release();   // the writer owns the stream now
-    const bool wrote = writer->writeFromAudioSampleBuffer (outBuf, 0, outNum);
-    writer.reset(); // flush + close before the caller reads the file back
-    return wrote;
-}
 
 juce::var MoshOps::cmdCreateRenderLayer (const juce::var& args)
 {
+    if (args.getProperty ("decisionPolicy", {}).toString() == "explicit")
+        return createDirectRenderLayer (args);
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
     if (clip == nullptr) return errResult ("create_render_layer", "no clip: " + clipId);
@@ -278,6 +224,15 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("set_render_param", "no render layer");
 
+    if (node[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+    {
+        if (args.hasProperty ("mode") || args.hasProperty ("modelVariant") || args.hasProperty ("coverage") || args.hasProperty ("lab")
+            || args.hasProperty ("target") || args.hasProperty ("strength"))
+            return errResult ("set_render_param", "Direct Re-Imagine supports prompt, amount, seed and supported Colors/LoRAs only.");
+        if ((args.hasProperty ("nl") && (! std::isfinite ((double) args["nl"]) || (double) args["nl"] < 0.01 || (double) args["nl"] > 0.5))
+            || (args.hasProperty ("seed") && (! std::isfinite ((double) args["seed"]) || (double) args["seed"] < 0 || (double) args["seed"] > 2147483647.0 || std::floor ((double) args["seed"]) != (double) args["seed"])))
+            return errResult ("set_render_param", "Amount must be 0.01–0.5 and seed a nonnegative integer.");
+    }
     beginTxn ("set_render_param");
     auto params = node.getChildWithName (ids::PARAMS);
     if (args.hasProperty ("prompt")) params.setProperty (ids::prompt, args.getProperty ("prompt", ""), &undoManager());
@@ -611,6 +566,8 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
 
 juce::var MoshOps::cmdRenderLayer (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return submitDirectRender (args);
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
@@ -1297,6 +1254,8 @@ te::AudioTrack* MoshOps::findOrCreateHiddenRenderTrack()
 
 juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return decideDirectRender ("reset_render_layer", args);
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
     auto node = findRenderLayer (clipId);
@@ -1374,6 +1333,7 @@ void MoshOps::logKeptRenderLabels()
             if (c == nullptr) continue;
             auto rl = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
             if (! rl.isValid() || ! (bool) rl[ids::appliedInPlace]) continue;
+            if (rl[Identifier ("decisionPolicy")].toString() == "explicit") continue;
             if (rl[ids::status].toString() == "bypassed") continue;
             if ((bool) rl[kUserRejected]) continue;   // the producer said no to THIS take
             const auto layerId = rl[ids::id].toString();
@@ -1391,6 +1351,7 @@ void MoshOps::logKeptRenderLabels()
 // ── Phase 3 — reactive auto-re-render ────────────────────────────────────────
 void MoshOps::reactiveTouch (const juce::String& clipId)
 {
+    if (findRenderLayer (clipId)[juce::Identifier ("decisionPolicy")].toString() == "explicit") return;
     // Lane A — while this clip is Live-armed, render-ahead OWNS re-rendering: route a knob/edit touch
     // to a re-lay from the playhead forward (new params) instead of the debounced whole-clip fire.
     // Placed BEFORE the hasAudio guard so a hermetic run-script that armed Live still re-lays; in
@@ -2261,6 +2222,8 @@ juce::var MoshOps::cmdListRaveModels (const juce::var&)
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return decideDirectRender ("cancel_render", args);
     // GEN-WARMUP: cancelJob() now verifies (and retries once on) the /cancel acknowledgement
     // instead of firing-and-forgetting it — a POST that never reached a dead/killed service
     // used to look identical to a real cancel from here. Either way the render layer is
@@ -2282,6 +2245,8 @@ juce::var MoshOps::cmdCancelRender (const juce::var& args)
 
 juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return decideDirectRender ("accept_render", args);
     eng.saveIfDirty();   // A2 — pre-risky-op save (commits a generative render into the arrangement)
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto* clip = findClip (clipId);
@@ -2373,6 +2338,8 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
 
 juce::var MoshOps::cmdRejectRender (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return decideDirectRender ("reject_render", args);
     const auto clipId = args.getProperty ("clipId", var()).toString();
     auto node = findRenderLayer (clipId);
     if (! node.isValid()) return errResult ("reject_render", "no render layer");
@@ -2403,6 +2370,8 @@ juce::var MoshOps::cmdRejectRender (const juce::var& args)
 
 juce::var MoshOps::cmdBypassLayer (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return decideDirectRender ("bypass_layer", args);
     auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
     if (! node.isValid()) return errResult ("bypass_layer", "no render layer");
     const bool bypassed = (bool) args.getProperty ("bypassed", false);
@@ -2516,6 +2485,8 @@ juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
 
 juce::var MoshOps::cmdRemoveRenderLayer (const juce::var& args)
 {
+    if (findRenderLayer (args.getProperty ("clipId", {}).toString())[juce::Identifier ("decisionPolicy")].toString() == "explicit")
+        return decideDirectRender ("remove_render_layer", args);
     // Clear the MOSH_RENDERLAYER node off the clip (the genuine "remove" — reject_render
     // only marks the take dirty, it does NOT remove the layer). After this the clip has
     // no layer and create_render_layer succeeds again. Undoable (mirrors remove_plugin);

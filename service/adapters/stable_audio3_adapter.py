@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import wave
 
+from direct_render import DirectRenderError
+
 NL_MAX_RECOGNIZABLE = 0.5   # >0.5 stops resembling the source (re-imagine guard, 05 §6)
 NL_MIN = 0.01               # <0.01 is a near-identity encode round-trip → not worth a render
 
@@ -65,10 +67,12 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # service/
     from sa3 import engine as E
-    from sa3 import init_cache, qa
+    from sa3 import init_cache
     from colors import runtime as CR
 
     if not E.engine_available():
+        if params.get("decision_policy") == "explicit":
+            raise DirectRenderError("direct Re-Imagine requires the local MLX SA3 Medium backend")
         try:
             from adapters import stable_audio3_cuda as cuda
             if cuda.available():
@@ -92,6 +96,21 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     # promoting it to a real toggle later MUST fold the flag into the cache fingerprint.
     ortho_on = os.environ.get("MOSH_COLOR_ORTHO", "").strip().lower() not in ("", "0", "false", "no", "off")
     steers = CR.resolve_steers(colors, lab=lab, orthogonalize=ortho_on, with_envelopes=True)   # 4-tuples: (L, α, vec, envelope)
+
+    direct = params.get("decision_policy") == "explicit"
+    has_src = bool(input_wav) and os.path.exists(input_wav)
+    target_len = float(params.get("duration_s") or 0.0)
+    if target_len <= 0.0 and has_src:
+        import stitch
+        target_len = stitch.wav_duration(input_wav)
+    if direct:
+        if not has_src:
+            raise DirectRenderError("direct Re-Imagine requires staged source audio")
+        if not E.MIN_SECONDS <= target_len <= E.MAX_CONTIGUOUS:
+            raise DirectRenderError(f"direct Re-Imagine supports source lengths from {E.MIN_SECONDS:g} to {E.MAX_CONTIGUOUS:g} seconds")
+        source_rate, _, source_frames = _wav_meta(input_wav)
+        if abs(source_frames / float(source_rate) - target_len) > 1.0 / source_rate:
+            raise DirectRenderError("direct Re-Imagine duration differs from the staged source span")
 
     eng = E.get_engine()                                    # singleton; first call loads the model
 
@@ -119,8 +138,6 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             triggers.append(t)
     if triggers:
         prompt = ", ".join(triggers + ([prompt] if prompt else []))
-
-    has_src = bool(input_wav) and os.path.exists(input_wav)
 
     def _render_window(in_wav, out_wav, p):
         # ONE SA3 window (<= eng.SECONDS). Re-imagine when this window has a source + nl, else
@@ -159,14 +176,23 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     # so it renders in ONE smooth pass with no windowing seams. clip_coverage.render then takes the
     # single-pass path whenever the clip fits, and only stitches for clips past the ceiling. The
     # retarget is a cheap in-place reconfigure (no weight reload) — see engine.set_seconds.
-    target_len = float(params.get("duration_s") or 0.0)
-    if target_len <= 0.0 and has_src:
-        import stitch
-        target_len = stitch.wav_duration(input_wav)
     if target_len > 0.0:
         eng.set_seconds(target_len)
 
-    manifest = clip_coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
+    if direct:
+        manifest = _render_window(input_wav, output_wav, params)
+        manifest["coverage"] = "single"
+    else:
+        manifest = clip_coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
     # Best-effort QA on the FINAL (tiled/stitched) output (judges venv); never fails the render.
-    qa.augment_manifest(manifest, output_wav, source_wav=input_wav if has_src else None)
+    if direct:
+        manifest.update({"backend": "mlx", "model_variant": "sa3-medium",
+                         "request_id": params["request_id"], "source_sha256": params["source_sha256"],
+                         "decision_policy": "explicit", "evaluation": "disabled",
+                         "settings": {"prompt": prompt, "seed": seed, "nl": clamp_nl(params["nl"], False),
+                                      "lab": False, "colors": colors, "loras": params.get("loras") or [],
+                                      "duration_s": target_len, "steps": eng.STEPS}})
+    else:
+        from sa3 import qa
+        qa.augment_manifest(manifest, output_wav, source_wav=input_wav if has_src else None)
     return manifest

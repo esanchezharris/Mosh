@@ -13,6 +13,8 @@
 
 ---
 
+> **Active scope (2026-09-16):** [Direct SA3 Re-Imagine](docs/DIRECT-SA3-SCOPE-2026-09-16.md): select an audio clip, enter a prompt, generate, audition, Keep or Reject. Autonomous agent and mixing experiments are deferred.
+
 Import/record, arrange, host **VST3/AU plugins**, mix, and export — plus a generative
 tier: an offline "re-imagine" / timbre-transform render layer with semantic controls
 that works on any track (MIDI/drum clips auto-bounce to audio first). An in-app agent (**Moshi**) and

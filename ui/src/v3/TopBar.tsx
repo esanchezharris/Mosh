@@ -19,6 +19,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const bbs = secondsToBBSMap(tempoMapFrom(snapshot.session), t.position);
   const name = projectLabel(snapshot.session.editFile) || "untitled";
   const rec = !!t.recording;
+  const countIn = snapshot.session.countInBars ?? snapshot.session.project?.countInBars ?? 0;
   const clickOn = !!snapshot.session.metronome;
 
   return (
@@ -29,7 +30,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
           data-testid="v3-record"
           onClick={() => void useStore.getState().toggleRecord()} />
         <button type="button" aria-label={t.playing ? "Pause" : "Play"} data-testid="v3-play"
-          onClick={() => void exec("set_transport", { action: "toggle" })}>▶</button>
+          onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? "Ⅱ" : "▶"}</button>
         <button type="button" aria-label="Stop" data-testid="v3-stop"
           onClick={() => void exec("set_transport", { action: "stop" })}>■</button>
         <span className="time">{bbs}</span>
@@ -40,11 +41,13 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
           onClick={() => void runAction("loop_toggle", { store: useStore.getState(), pickFiles, pickSaveFile })}>
           <IconLoop />
         </button>
-        {posture === "booth" ? (
-          <button type="button" className="ibtn" title="Count-in" aria-label="Count-in">
-            <IconCountIn />
-          </button>
-        ) : null}
+        <label className="count-in" title="Count-in before recording">
+          <IconCountIn />
+          <select aria-label="Count-in" value={countIn}
+            onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
+            <option value={0}>Count-in off</option><option value={1}>1 bar</option><option value={2}>2 bars</option>
+          </select>
+        </label>
         <button type="button" className="ibtn" title="Click" aria-label="Click" aria-pressed={clickOn}
           onClick={() => void exec("set_metronome", { enabled: !clickOn })}>
           <IconClick />

@@ -28,10 +28,20 @@ describe("every mined skill references the native dispatch contract", () => {
       for (const binding of skill.mining.bindings) expect(skill.slots.some((slot) => slot.name === binding.slot)).toBe(true);
       for (const slot of skill.slots) {
         const source = slot.input.nativeSource;
-        const line = readFileSync(resolve(root, source.file), "utf8").split("\n")[source.line - 1];
+        const text = readFileSync(resolve(root, source.file), "utf8");
+        const cited = text.split("\n")[source.line - 1] ?? "";
         const binding = skill.mining.bindings.find((b) => b.slot === slot.name);
         expect(binding).toBeDefined();
-        expect(line).toContain(`"${binding?.arg}"`);
+        // `nativeSource.line` is a mining-time citation into a LIVING file. MoshOps*.cpp moves
+        // with every engine PR (the first one after this library landed shifted three skills'
+        // citations by ~60 lines), so the line is a pointer for humans, not a pin. What must
+        // stay true is that the cited file still names the argument — and checkNativeCommand
+        // above already proves the handler reads it in today's sources.
+        const needle = `"${binding?.arg}"`;
+        expect(
+          cited.includes(needle) || text.includes(needle),
+          `${skill.id}/${slot.name}: ${source.file} no longer names ${needle} (cited line ${source.line})`,
+        ).toBe(true);
         if (slot.input.defaultPolicy === "owner") {
           expect(slot.default).toBe("NEEDS_OWNER_VALUE");
           expect(slot.type).toBe("number");

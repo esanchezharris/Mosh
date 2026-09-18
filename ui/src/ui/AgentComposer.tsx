@@ -22,6 +22,8 @@ import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge"
 import { activeShell } from "../v2/shellFlag";
 import { matchIssueReport } from "../agent/issueRoute";
 import { IssueInbox } from "./IssueInbox";
+import { useProducerRack } from "../agent/loop/producerRack";
+import { ProducerRackSetup } from "./ProducerRackSetup";
 
 export function AgentComposer() {
   const agentBusy = useStore((s) => s.agentBusy);
@@ -32,6 +34,11 @@ export function AgentComposer() {
   const [say, setSay] = useState<string | null>(null);
   const [brainRuntime, setBrainRuntime] = useState<BrainRuntimeStatus | null>(null);
   const [inboxOpen, setInboxOpen] = useState(false);
+  // The Producer rack setup is a floating panel, like the Issue Inbox — not an inline
+  // block. The composer lives in the classic shell's 176px Moshi column, a vertically
+  // centred flex column with a fixed dock height: one extra summary line there overflowed
+  // the dock symmetrically (cap above the divider, composer below the host).
+  const [rackOpen, setRackOpen] = useState(false);
   useEffect(() => {
     void brainRuntimeStatus().then(setBrainRuntime).catch(() => setBrainRuntime({ state: "unavailable" }));
     return onEvent("brain_runtime", (payload) => setBrainRuntime(payload as BrainRuntimeStatus));
@@ -131,6 +138,11 @@ export function AgentComposer() {
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+      if (useProducerRack.getState().rack) {
+        if (!loopAllowed()) throw new Error("The Producer loop is unavailable in this session");
+        await runLoopTask(text, { say: setSay, utter: pushAgentUtter });
+        return;
+      }
 
       const issue = matchIssueReport(text);
       if (issue) {
@@ -243,6 +255,12 @@ export function AgentComposer() {
 
   return (
     <div className="agent-composer">
+      {rackOpen && loopAllowed() && (
+        <div className="producer-rack-pop" role="dialog" aria-label="Producer rack" data-testid="producer-rack-pop">
+          <div className="producer-rack-pop-head"><strong>Producer rack</strong><button type="button" onClick={() => setRackOpen(false)}>Close</button></div>
+          <ProducerRackSetup />
+        </div>
+      )}
       {inboxOpen && <IssueInbox onClose={() => setInboxOpen(false)} />}
       {brainRuntime && <div className={`agent-runtime ${brainRuntime.state}`} aria-live="polite"
         title={brainRuntime.error || brainRuntime.model || "Local brain"}>
@@ -250,6 +268,10 @@ export function AgentComposer() {
       </div>}
       {say && <div className="agent-say" role="status" aria-live="polite">{say}</div>}
       <button className="issue-inbox-button" onClick={() => setInboxOpen((v) => !v)}>Issues</button>
+      {loopAllowed() && (
+        <button type="button" className="issue-inbox-button producer-rack-button" data-testid="producer-rack-toggle"
+          aria-pressed={rackOpen} aria-expanded={rackOpen} onClick={() => setRackOpen((v) => !v)}>Rack</button>
+      )}
       <div className="agent-input">
         <input
           data-testid="agent-input"

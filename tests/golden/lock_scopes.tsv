@@ -15,6 +15,7 @@ agent_memory_read	Unguarded
 agent_memory_write	Unguarded
 all_notes_off	Unguarded
 analyze_lyrics	Track
+apply_agent_patch	Unguarded
 apply_choke	Clip
 apply_remote_track	Unguarded
 approve_training_source	Unguarded
@@ -28,6 +29,7 @@ batch_begin	Unguarded
 batch_end	Unguarded
 batch_rollback	Unguarded
 batch_status	Unguarded
+begin_agent_request	Unguarded
 block_plugin	Unguarded
 bounce_layer_to_clip	Clip
 bounce_track	Track
@@ -38,6 +40,7 @@ bypass_layer	Clip
 bypass_master_plugin	SessionGlobal
 bypass_plugin	Track
 calibrate_latency	Unguarded
+cancel_agent_request	Unguarded
 cancel_lyric_job	Track
 cancel_render	Clip
 cancel_training_job	Unguarded
@@ -78,6 +81,8 @@ fill_lyric_gap	Track
 freeze_layer	Clip
 freeze_track	Track
 generate_beat_recipe	SessionGlobal
+get_agent_context	Unguarded
+get_agent_request	Unguarded
 get_clip_peaks	Unguarded
 get_command_log	Unguarded
 get_lyric_corpus_stats	Unguarded
@@ -256,6 +261,7 @@ transform_velocities	Clip
 trim_clip	Clip
 unblock_plugin	Unguarded
 undo	Unguarded
+undo_agent_request	Unguarded
 unfreeze_layer	Clip
 unfreeze_track	Track
 ungroup_clip_group	Clip

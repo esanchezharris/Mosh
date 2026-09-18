@@ -6,7 +6,7 @@ import { useStore } from "../store";
 import type { Snapshot, Track } from "../types";
 import { Moshi } from "./Moshi";
 
-export function Mixer({ snapshot }: { snapshot: Snapshot }) {
+export function Mixer({ snapshot, showMoshi = true }: { snapshot: Snapshot; showMoshi?: boolean }) {
   const exec = useStore((s) => s.exec);
   const master = snapshot.master;
   const tracks = snapshot.tracks.filter((t) => !t.isReturn);
@@ -24,7 +24,7 @@ export function Mixer({ snapshot }: { snapshot: Snapshot }) {
           title="Master volume" onChange={(e) => void exec("set_master_volume", { db: Number(e.target.value) })} />
         <div className="strip-db tc">{(master?.volumeDb ?? 0).toFixed(1)} dB</div>
       </div>
-      <Moshi />
+      {showMoshi && <Moshi />}
     </div>
   );
 }
@@ -38,17 +38,18 @@ function Strip({ track }: { track: Track }) {
   return (
     <div className={`strip${selected ? " sel" : ""}`} data-testid="channel-strip" data-track-id={track.id} data-selected={selected}
       onPointerDown={() => setSelectedTrack(track.id)}>
-      <div className="strip-name" title={track.name}>{track.name}</div>
+      <button type="button" className="strip-name" title={track.name} aria-label={`Select track ${track.name}`} aria-pressed={selected}
+        onClick={() => setSelectedTrack(track.id)}>{track.name}</button>
       {fxCount > 0 && <div className="strip-fx">{fxCount} fx</div>}
       <input className="pan" type="range" min={-1} max={1} step={0.01} value={track.pan ?? 0}
-        title={`Pan ${(track.pan ?? 0).toFixed(2)}`} onChange={(e) => void exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })} />
+        aria-label={`${track.name} pan`} title={`Pan ${(track.pan ?? 0).toFixed(2)}`} onChange={(e) => void exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })} />
       <input className="fader" type="range" min={-48} max={6} step={0.5} value={track.volumeDb ?? 0}
-        title="Volume" onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
+        aria-label={`${track.name} volume`} title="Volume" onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
       <div className="strip-db tc">{(track.volumeDb ?? 0).toFixed(1)} dB</div>
       <div className="strip-ms">
-        <button className={`msx m${track.mute ? " on" : ""}`} data-state={track.mute ? "on" : "off"} aria-pressed={!!track.mute}
+        <button className={`msx m${track.mute ? " on" : ""}`} aria-label={`Mute ${track.name}`} data-state={track.mute ? "on" : "off"} aria-pressed={!!track.mute}
           onClick={(e) => { e.stopPropagation(); void exec("set_track_mute", { trackId: track.id, mute: !track.mute }); }}>M</button>
-        <button className={`msx s${track.solo ? " on" : ""}`} data-state={track.solo ? "on" : "off"} aria-pressed={!!track.solo}
+        <button className={`msx s${track.solo ? " on" : ""}`} aria-label={`Solo ${track.name}`} data-state={track.solo ? "on" : "off"} aria-pressed={!!track.solo}
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}>S</button>
       </div>
     </div>
