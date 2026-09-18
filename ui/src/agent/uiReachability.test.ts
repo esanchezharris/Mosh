@@ -102,7 +102,9 @@ function moduleGraph(entry: string, stopAt: readonly string[] = []): string[] {
   return [...seen];
 }
 
-// Pro Tools is the fresh-install default; v2 remains the complete general-purpose shell.
+// Pro Tools is the fresh-install default; v2 remains the complete general-purpose shell;
+// v3 is the candidate default (docs/V3-PARITY-BRIEF-2026-09-17.md) and joins the union so a
+// command it reaches counts, and one it lacks shows up as a gap against the parity gate.
 // Their union is the primary production surface. Live is a focused compatibility shell and
 // classic is legacy, so neither is allowed to mask a missing primary-shell affordance.
 // bridge.mock is the dev BACKEND (it implements every command); it is not in this graph,
@@ -111,6 +113,7 @@ const classicOnly = Object.keys(CLASSIC_ONLY_MODULES).map((p) => join(SRC, p));
 const PRIMARY_SHELL_ENTRIES = [
   join(SRC, "v2", "AppV2.tsx"),
   join(SRC, "protools", "AppProTools.tsx"),
+  join(SRC, "v3", "AppV3.tsx"),
 ];
 const graph = [...new Set(PRIMARY_SHELL_ENTRIES.flatMap((entry) => moduleGraph(entry, classicOnly)))];
 

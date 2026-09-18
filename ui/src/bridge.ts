@@ -182,7 +182,7 @@ export type BrainRuntimeStatus = {
   port?: number;
   error?: string;
   ms?: number;
-  preferredShell?: "live" | "protools" | "v2" | "classic";
+  preferredShell?: "live" | "protools" | "v2" | "classic" | "v3";
 };
 const BRAIN_RUNTIME_STATES: readonly BrainRuntimeState[] = [
   "off", "starting", "ready", "prewarming", "error", "unavailable",
@@ -202,8 +202,10 @@ export function parseBrainRuntimeStatus(value: unknown): BrainRuntimeStatus {
   if (typeof v.port === "number") out.port = v.port;
   if (typeof v.error === "string") out.error = v.error;
   if (typeof v.ms === "number") out.ms = v.ms;
-  if (v.preferredShell === "live" || v.preferredShell === "protools"
-      || v.preferredShell === "v2" || v.preferredShell === "classic") out.preferredShell = v.preferredShell;
+  // Every selectable shell (settings/schema.ts uiShell options); an unknown value is dropped so
+  // a stale or mistyped runtime preference can never route the UI to a shell that does not exist.
+  if (v.preferredShell === "live" || v.preferredShell === "protools" || v.preferredShell === "v2"
+      || v.preferredShell === "classic" || v.preferredShell === "v3") out.preferredShell = v.preferredShell;
   return out;
 }
 
