@@ -1367,7 +1367,11 @@ function params(names: string[], values: number[]): PluginParam[] {
   return names.map((name, index) => ({ index, name, value: values[index] ?? 0.5 }));
 }
 function mkBuiltinParams(type: string, isInstrument: boolean): PluginParam[] {
-  if (isInstrument) return [];
+  // The built-in 4OSC exposes a small patch surface (native load_preset reports paramsApplied: 8),
+  // so a preset's effect is observable here as it is in the engine. Other instruments stay bare.
+  if (isInstrument) return type === "4osc"
+    ? params(["Osc 1 Level", "Osc 2 Level", "Cutoff", "Resonance", "Attack", "Decay", "Sustain", "Release"], [0.8, 0.5, 0.6, 0.2, 0.05, 0.3, 0.7, 0.25])
+    : [];
   if (type === "moshAutoTune") return params(["Root", "Scale", "Retune", "Amount", "Range", "Mix", "Output"], [0, 0, 0.32, 0.35, 0.33, 1, 0.75]);
   if (type === "moshOTT") return params(["Amount", "Time", "Low Gain", "Mid Gain", "High Gain", "Mix", "Output"], [0.12, 0.24, 0.5, 0.5, 0.5, 1, 0.71]);
   if (type === "moshXFeedback") return params(["Sensitivity", "Max Cuts", "Max Depth", "Release", "Auto Suppress", "Mix", "Output"], [0.62, 0.5, 0.55, 0.38, 1, 0.8, 0.5]);
@@ -4877,8 +4881,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           ? "no Vital instrument on this track (a .vital preset only targets Vital)"
           : "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
       pushUndo();
-      invalidate();
       const preset = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
+      // Mirror native: a 4OSC preset rewrites the patch parameters. Deterministic per preset name
+      // so a readback proves the load landed and one undo proves it is one transaction.
+      if (!isVital) {
+        const seed = [...preset].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 997, 7);
+        inst.params.forEach((p, i) => { p.value = Number((((seed + i * 37) % 89) / 100).toFixed(2)); });
+      }
+      invalidate();
       return ok(command, isVital
         ? { plugin: inst.name, preset, note: "state sent; verify audibly (Vital applies patches asynchronously)" }
         : { plugin: "4osc", preset, paramsApplied: 8 });

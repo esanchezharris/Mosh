@@ -38,6 +38,35 @@ test("Settings colorway writes data-colorway", async ({ page }) => {
   await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", "violet");
 });
 
+test("the colorway reaches the accents: a selected clip's border follows violet, not fixed lime", async ({ page }) => {
+  await bootV3Page(page);
+  const clip = page.getByTestId("v3-clip").first();
+  // Chromium reports color-mix results in oklab; painting one pixel and reading it back gives
+  // sRGB bytes whatever the syntax.
+  const border = () => clip.evaluate((el) => {
+    const canvas = document.createElement("canvas"); canvas.width = 1; canvas.height = 1;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, 1, 1);
+    ctx.fillStyle = getComputedStyle(el).borderTopColor; ctx.fillRect(0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    return [d[0], d[1], d[2]];
+  });
+  await clip.click();
+  await expect(clip).toHaveClass(/hl/);
+  const lime = await border();
+  expect(Array.isArray(lime)).toBe(true);                                  // anti-vacuity: a real colour
+  const [lr, lg] = lime as number[];
+  expect(lg).toBeGreaterThan(lr);                                          // lime: green leads
+  await page.getByTestId("v3-file-trigger").click();
+  await page.getByTestId("v3-open-settings").click();
+  await page.locator('[data-testid="v3-colorway"][data-colorway="violet"]').click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", "violet");
+  await expect.poll(async () => JSON.stringify(await border())).not.toBe(JSON.stringify(lime));
+  const [, vg, vb] = (await border()) as number[];
+  expect(vb).toBeGreaterThan(vg);                                          // violet #B8A4FF: blue leads
+});
+
 test("File menu Templates enter Booth without a top toggle or RECORDING banner", async ({ page }) => {
   await bootV3Page(page);
   await page.getByTestId("v3-file-trigger").click();

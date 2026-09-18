@@ -221,7 +221,7 @@
 }
 .v3-shell .ricon svg { width: 16px; height: 16px; }
 .v3-shell .ricon.on {
-  color: var(--accent); background: rgba(198,245,66,.1); border-color: rgba(198,245,66,.35);
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .v3-shell .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -230,9 +230,10 @@
   background: #101212; flex-shrink: 0; padding: 0 8px;
 }
 .v3-shell .hdr-spacer { width: 148px; flex-shrink: 0; margin-right: 6px; }
+.v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
 .v3-shell .ruler {
-  flex: 1; display: grid; grid-template-columns: repeat(var(--beats, 32), minmax(0, 1fr));
-  height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none;
+  display: grid; grid-template-columns: repeat(var(--beats, 32), minmax(0, 1fr));
+  height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none; will-change: transform;
 }
 .v3-shell .rn { font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); padding-left: 1px; }
 .v3-shell .rn.bar { color: #C8CBC6; font-weight: 600; }
@@ -242,9 +243,10 @@
   flex: 1; display: flex; flex-direction: column; gap: 5px; padding: 8px;
   min-height: 0; overflow: auto; background: var(--bg);
 }
-.v3-shell .trk { display: flex; gap: 6px; height: 72px; flex-shrink: 0; }
+.v3-shell .trk { display: flex; gap: 6px; height: 72px; flex-shrink: 0; width: max-content; min-width: 100%; }
 .v3-shell .trk .hd {
   width: 148px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px;
+  position: sticky; left: 0; z-index: 2;
   padding: 7px 8px; border-radius: 6px; background: #121414; border: 1px solid var(--fog-line);
 }
 .v3-shell .trk .hd b { font-size: 11px; font-weight: 500; }
@@ -253,6 +255,10 @@
   border-radius: 3px; border: 1px solid #2A2E2E; align-self: flex-start;
 }
 .v3-shell .trk .hd .ctl { display: flex; gap: 3px; }
+.v3-shell .preset-pick { max-width: 100%; min-width: 0; font-size: 11px; padding: 2px 6px; background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+.v3-shell .pr .preset-pick { margin: 2px 0 4px; width: 100%; }
+.v3-shell .preset-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v3-shell .preset-row .nm { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Multiplayer: a peer's lock. Badge + dimmed header + disabled controls; the backend guard
    refuses the edit either way, this is the read-only signal. */
 .v3-shell .trk .lock { font-size: 10px; line-height: 14px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); white-space: nowrap; max-width: 64px; overflow: hidden; text-overflow: ellipsis; }
@@ -264,14 +270,16 @@
 }
 .v3-shell .trk .hd .ctl button.arm { color: var(--record); border-color: #5A2A26; }
 .v3-shell .trk.sel .hd {
-  border-color: var(--accent); background: #1C2414;
-  box-shadow: inset 0 1px 0 rgba(198,245,66,.2), 0 0 0 1px rgba(198,245,66,.35);
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .v3-shell .trk.sel .hd b { color: var(--accent); font-weight: 600; }
 .v3-shell .trk .lane {
-  flex: 1; position: relative; border-radius: 6px; background: var(--lane);
-  border: 1px solid #1A1E1E; overflow: hidden;
+  flex: none; position: relative; border-radius: 6px; background: var(--lane);
+  border: 1px solid #1A1E1E; overflow: hidden; box-sizing: border-box;
 }
+.v3-shell .clip.dragging { cursor: grabbing; }
+.v3-shell .workspace-empty { position: sticky; left: 0; }
 .v3-shell .trk.sel .lane { border-color: var(--accent); }
 .v3-shell .lane-grid {
   position: absolute; inset: 0; display: grid;
@@ -284,8 +292,8 @@
   background: #141818; border: 1px solid #252A2A; overflow: hidden; cursor: pointer;
 }
 .v3-shell .clip.hl {
-  border-color: rgba(198,245,66,.7); background: #263018;
-  box-shadow: inset 0 1px 0 rgba(198,245,66,.22);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 14%, var(--lane));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .v3-shell .cwave { width: 100%; height: 100%; }
 .v3-shell .cwave svg { display: block; width: 100%; height: 100%; }
@@ -320,7 +328,7 @@
   padding: 3px 8px; border-radius: 999px; border: 1px solid var(--fog-line);
   background: #101212; font-size: 9px; color: var(--fog-label); cursor: pointer;
 }
-.v3-shell .chip.on { border-color: rgba(198,245,66,.45); color: var(--accent); background: rgba(198,245,66,.1); }
+.v3-shell .chip.on { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .v3-shell .insp .pr {
   display: flex; flex-direction: column; gap: 6px; padding: 6px 7px; border-radius: 6px;
   background: var(--surface2); border: 1px solid var(--fog-line);
@@ -376,7 +384,7 @@
 .v3-shell .moshi-btn .ring {
   position: absolute; inset: 0; border-radius: 10px; border: 1.5px solid transparent;
 }
-.v3-shell .moshi-btn.listen .ring { border-color: rgba(198,245,66,.55); }
+.v3-shell .moshi-btn.listen .ring { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v3-shell .moshi-btn.busy, .v3-shell .moshi-btn:disabled { opacity: .45; cursor: default; }
 .v3-shell .moshi-host { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; }
 .v3-shell .field {
@@ -427,7 +435,7 @@
   display: flex; flex-direction: column; gap: 5px; padding: 7px; border-radius: 6px;
   background: var(--surface2); border: 1px solid var(--fog-line); cursor: pointer;
 }
-.v3-shell .take.kept { border-color: rgba(198,245,66,.5); background: #262C1C; }
+.v3-shell .take.kept { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface2)); }
 .v3-shell .body.booth-morph { animation: v3Booth .28s var(--ease-morph); }
 @keyframes v3Booth { from { opacity: .6; transform: scale(.985); } to { opacity: 1; transform: none; } }
 .v3-shell .recording-banner { display: none !important; }
