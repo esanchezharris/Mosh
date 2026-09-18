@@ -2,6 +2,8 @@
 
 > **General V3 repair, 2026-09-17:** [bounded workspace scope](docs/V3-WORKSPACE-SCOPE-2026-09-17.md) is a separate ordinary-UI verification pass; no new model execution.
 >
+> **V3 as default shell — gated, not yet:** [V3 parity brief](docs/V3-PARITY-BRIEF-2026-09-17.md) is the checklist that has to close before `uiShell` flips from Pro Tools to V3 (owner direction 2026-09-17: presets, drop-in/generated beats, vocal recording, smooth multiplayer, native plugin suite).
+>
 > **Current direction, 2026-09-16:** [Direct SA3 Re-Imagine](docs/DIRECT-SA3-SCOPE-2026-09-16.md) supersedes the near-term agent and mixing-experiment priorities below. Those records are preserved and deferred, not prerequisites. Engineering safety and acceptance rules remain in force.
 
 This is a truthful checkpoint, not an active roadmap. The selected product
