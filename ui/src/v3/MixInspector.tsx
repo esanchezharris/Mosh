@@ -13,7 +13,7 @@ function Fader({ label, value, min, max, step, display, onChange }: {
       <span className="nm">{label}</span>
       <input type="range" min={min} max={max} step={step} value={value}
         aria-label={label} onChange={(e) => onChange(Number(e.target.value))} />
-      <span className="v">{display}</span>
+      <span className="v" data-testid={`v3-fader-${label.toLowerCase()}`}>{display}</span>
     </label>
   );
 }
@@ -115,7 +115,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
               if (b.trackId === track.id) return null;
               const send = (track.sends ?? []).find((s) => s.bus === b.bus);
               return (
-                <div key={b.bus} className="send">
+                <div key={b.bus} className="send" data-testid="v3-send" data-bus={b.bus} data-send-db={send ? send.db : undefined}>
                   <span className="nm">{b.name}</span>
                   {send ? (
                     <>
@@ -125,12 +125,12 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
                       <span className="v">{send.db.toFixed(0)}</span>
                     </>
                   ) : (
-                    <button type="button" className="btn sm" onClick={() => void exec("add_send", { trackId: track.id, bus: b.bus, db: 0 })}>Add</button>
+                    <button type="button" className="btn sm" data-testid="v3-send-add" onClick={() => void exec("add_send", { trackId: track.id, bus: b.bus, db: 0 })}>Add</button>
                   )}
                 </div>
               );
             })}
-            <button type="button" className="btn sm" onClick={() => void exec("create_bus", {})}>+ Bus</button>
+            <button type="button" className="btn sm" data-testid="v3-add-bus" onClick={() => void exec("create_bus", {})}>+ Bus</button>
           </div>
         </details>
 
