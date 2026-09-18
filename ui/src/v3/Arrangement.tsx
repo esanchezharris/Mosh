@@ -7,6 +7,7 @@ import type { Clip, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { DrumsClip, MelodyClip } from "./midi/MidiClips";
+import { dropDrumBeat } from "./beats";
 
 function sessionBeats(snapshot: Snapshot): number {
   const tempo = snapshot.session.tempo ?? 120;
@@ -137,6 +138,8 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
       <div className="workspace-head" role="toolbar" aria-label="Tracks">
         <button type="button" className="btn sm" data-testid="v3-add-audio" onClick={() => run("insert_audio_track")}>+ Audio track</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" title="A drum track with the bundled kit and a one-bar beat at the playhead — one undo step"
+          onClick={() => void dropDrumBeat()}>+ Drum beat</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
       </div>
@@ -145,7 +148,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <Ruler beats={beats} startBar={1} />
       </div>
       <div className="tracks">
-        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, or import audio from the browser.</p></div>}
+        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat, or import audio from the browser.</p></div>}
         {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} beats={beats} />)}
       </div>
     </div>
