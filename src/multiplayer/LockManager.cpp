@@ -89,7 +89,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // Track-scoped: mutate exactly one track (args carry a trackId). Key = that
     // track's logicalId.
     static const std::set<juce::String> track {
-        "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "import_clip", "import_clip_data",
+        "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "import_clip", "import_clip_data", "import_midi_file",
         "create_track_group", "configure_track_group", "duplicate_track_group",
         "set_track_group_members", "set_track_group_enabled", "rename_track_group", "remove_track_group",
         "add_test_tone_clip", "set_track_volume", "set_track_pan", "set_track_mute",

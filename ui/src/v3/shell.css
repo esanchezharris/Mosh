@@ -531,3 +531,7 @@
 .v3-shell .pr-head .live-loopbar { background: var(--surface2); border-color: var(--line); }
 .v3-shell .pr-head .live-loopbar-readout { color: var(--muted); }
 .v3-shell .pr-head .live-loopbar-brace { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); }
+
+/* Browser rows that ACT (the MIDI tab's files import on click) are buttons, styled as rows. */
+.v3-shell button.br-row { display: block; width: 100%; text-align: left; background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; }
+.v3-shell button.br-row:hover { background: var(--surface2); }

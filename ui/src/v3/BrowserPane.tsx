@@ -7,7 +7,22 @@ import { useV3 } from "./shellState";
 
 function MidiBrowser() {
   const exec = useStore((s) => s.exec);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const snapshot = useStore((s) => s.snapshot);
   const [listing, setListing] = useState<DirListing | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  // Land onto the selected track when it can take MIDI (no wave audio on it); otherwise the
+  // engine creates a MIDI track named after the file. One command, one undo step.
+  const importFile = async (file: string) => {
+    const track = snapshot?.tracks.find((t) => t.id === selectedTrackId);
+    const onto = track && !track.clips.some((c) => c.type === "wave") ? track.id : undefined;
+    const r = await exec("import_midi_file", onto ? { file, trackId: onto } : { file }) as { ok: boolean; data?: { trackId?: string; clipId?: string; noteCount?: number }; error?: string };
+    if (!r.ok) { setMessage(r.error ?? "import failed"); return; }
+    setMessage(null);
+    const st = useStore.getState();
+    if (r.data?.trackId) st.setSelectedTrack(r.data.trackId);
+    if (r.data?.clipId) st.select([r.data.clipId]);
+  };
   useEffect(() => {
     void exec("list_directory", {}).then((r) => {
       if (r.ok && r.data) setListing(r.data as DirListing);
@@ -18,8 +33,10 @@ function MidiBrowser() {
     <div className="pane-list" data-testid="v3-midi-browser">
       {midi.length === 0 && <div className="set-hint" style={{ padding: 10 }}>No MIDI files in this folder.</div>}
       {midi.map((e) => (
-        <div key={e.path} className="br-row">{e.name}</div>
+        <button key={e.path} type="button" className="br-row" data-testid="v3-midi-file" title="Import as a MIDI clip"
+          onClick={() => void importFile(e.path)}>{e.name}</button>
       ))}
+      {message && <div className="set-hint" role="status" style={{ padding: 10 }}>{message}</div>}
     </div>
   );
 }
