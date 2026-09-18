@@ -1230,6 +1230,12 @@ private:
     bool removeAgentRecoveryRows (const agentrequest::Record& record);
     juce::var agentRequestStatus (agentrequest::Record& record, bool replayed = false);
     juce::var cmdAgentRequest (const juce::String& command, const juce::var& args);
+    juce::var cmdGetAgentContext (const juce::var& args);
+    juce::var cmdBeginAgentRequest (const juce::var& args);
+    juce::var cmdApplyAgentPatch (const juce::var& args);
+    juce::var cmdGetAgentRequest (const juce::var& args);
+    juce::var cmdCancelAgentRequest (const juce::var& args);
+    juce::var cmdUndoAgentRequest (const juce::var& args);
     juce::var applyAgentPatch (agentrequest::Record& record, const juce::var& args);
 
     double      lastPresenceBroadcastMs = 0.0;

@@ -199,6 +199,17 @@ var MoshOps::cmdAgentRequest (const String& command, const var& args)
     return applyAgentPatch (record, args);
 }
 
+// One dispatch entry per command (not a shared OR'd branch): the lock-scope ledger test,
+// the classification guard, the transactionSafe registry test and the coverage scoreboard
+// all parse single-name dispatch lines that end in a plain (args) call, and a multi-name
+// branch is invisible to every one of them.
+var MoshOps::cmdGetAgentContext (const var& args) { return cmdAgentRequest ("get_agent_context", args); }
+var MoshOps::cmdBeginAgentRequest (const var& args) { return cmdAgentRequest ("begin_agent_request", args); }
+var MoshOps::cmdApplyAgentPatch (const var& args) { return cmdAgentRequest ("apply_agent_patch", args); }
+var MoshOps::cmdGetAgentRequest (const var& args) { return cmdAgentRequest ("get_agent_request", args); }
+var MoshOps::cmdCancelAgentRequest (const var& args) { return cmdAgentRequest ("cancel_agent_request", args); }
+var MoshOps::cmdUndoAgentRequest (const var& args) { return cmdAgentRequest ("undo_agent_request", args); }
+
 var MoshOps::applyAgentPatch (agentrequest::Record& record, const var& args)
 {
     const auto patchDigest = agenttxn::digestOf (args["commands"]);

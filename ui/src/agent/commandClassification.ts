@@ -61,6 +61,15 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   // also why uiReachability.test.ts does not apply to them and UI_REACH_GAPS stays 0.
   batch_status: "read-only agent-transaction status — the harness's authority after a lost response, not a producer control",
   batch_rollback: "the harness's exact rollback of its own identified transaction — the producer's affordance is ordinary Undo",
+  // Producer bounded-request lifecycle (MoshOps.AgentRequest.cpp) — the native mirror of the
+  // batch_* plumbing above, driven by ui/src/agent/loop/nativeTask.ts, never by the model:
+  // the model proposes ordinary commands and the harness wraps them in one owned request.
+  get_agent_context: "read-only native task context (project id, epoch, revision, snapshot, request ledger) the harness freezes before a bounded patch",
+  begin_agent_request: "the harness reserves one owned request id in the native ledger before applying — not a producer control",
+  apply_agent_patch: "the harness applies its bounded patch as one native transaction — the inner commands are the ordinary catalog",
+  get_agent_request: "read-only request status — the harness's authority after a lost response, like batch_status",
+  cancel_agent_request: "the harness cancels or rolls back its own request — the producer's affordance is ordinary Undo",
+  undo_agent_request: "the harness undoes exactly its own committed request (undo-head ownership) — the producer's affordance is ordinary Undo",
   get_command_log: "read-only log inspector (CommandLog panel + taste distillation), not a musical tool",
   report_issue: "the deterministic typed/voice issue route records owner feedback before model routing; report text is never model-authored",
   list_issues: "read-only feed for the private Issue Inbox panel",

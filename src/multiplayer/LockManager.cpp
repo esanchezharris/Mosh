@@ -62,6 +62,12 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // agent transaction is open, MoshOps refuses every untagged mutation including a
         // peer's — a stricter guard than any lock, and a narrower window (one skill run).
         "batch_status", "batch_rollback",
+        // Producer bounded-request lifecycle — the same posture as batch_*: the two get_*
+        // commands are pure reads; begin/cancel/undo touch the request ledger and the
+        // caller-owned undo head; apply_agent_patch runs each inner command through the
+        // ordinary dispatch, so every inner mutation is classified on its own.
+        "get_agent_context", "begin_agent_request", "apply_agent_patch",
+        "get_agent_request", "cancel_agent_request", "undo_agent_request",
         "enable_track_meter", "disable_track_meter",
         "enable_all_meters", "set_audio_device", "retry_audio_device", "set_buffer_size", "set_audio_threads",
         "calibrate_latency",   // LAT-001 — machine/device ritual, never a track edit

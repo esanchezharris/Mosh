@@ -447,6 +447,29 @@ type MockTxn = {
   entries: MockTxnEntry[];
 };
 let mockTxn: MockTxn | null = null;
+
+// Producer bounded-request lifecycle — the mirror of MoshOps.AgentRequest.cpp. A request is
+// reserved (prepared), applied as ONE batch_* transaction, then committed / rolled back, and
+// may be undone only while it is still the undo head. Fail-closed like the engine: the same
+// refusals, the same identity checks, no invented success.
+type MockAgentRequest = {
+  requestId: string; projectId: string; status: string; appliedCount: number;
+  payloadDigest: string; patchDigest: string; transactionId: string;
+  results: CommandResult[]; historyDepth: number;
+};
+const mockAgentRequests = new Map<string, MockAgentRequest>();
+const MOCK_AGENT_PROJECT = "mock-project";
+const MOCK_AGENT_EPOCH = "mock-epoch";
+const MOCK_AGENT_ALLOWED = new Set(["set_track_volume", "set_plugin_param", "bypass_plugin"]);
+const mockAgentIdValid = (id: string): boolean => id.length > 0 && id.length <= 128 && /^[A-Za-z0-9_.-]+$/.test(id);
+function mockAgentRequestStatus(r: MockAgentRequest, replayed = false): Record<string, unknown> {
+  const undoable = r.status === "committed" && !inBatch && history.length > 0 && history.length === r.historyDepth;
+  return {
+    requestId: r.requestId, projectId: r.projectId, status: r.status, appliedCount: r.appliedCount,
+    undoable, replayed, inProgress: false,
+    ...(r.results.length ? { results: r.results.map((x) => ({ command: x.command, ok: x.ok, ...(x.error ? { error: x.error } : {}) })) } : {}),
+  };
+}
 let mockRevision = 0;
 
 /** The mock's stand-in for the engine's canonical fingerprint: the same idea (a stable
@@ -3470,6 +3493,99 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         return ok(command, { found: false, transactionId: txnId, revision: mockRevision });
       return ok(command, mockTxnStatusData(mockTxn));
     }
+    case "get_agent_context": {
+      const requests = [...mockAgentRequests.values()]
+        .filter((r) => r.projectId === MOCK_AGENT_PROJECT).map((r) => mockAgentRequestStatus(r));
+      return ok(command, { projectId: MOCK_AGENT_PROJECT, epoch: MOCK_AGENT_EPOCH, revision: mockRevision,
+                           snapshot: clone(snapshot), requests });
+    }
+    case "begin_agent_request":
+    case "get_agent_request":
+    case "cancel_agent_request":
+    case "undo_agent_request":
+    case "apply_agent_patch": {
+      const id = str(args.requestId);
+      const project = str(args.projectId);
+      if (!mockAgentIdValid(id) || !project) return err(command, "invalid_request_identity");
+      if (project !== MOCK_AGENT_PROJECT) return err(command, "project_conflict");
+      const hasPayload = "payload" in args;
+      const payloadDigest = sortedJson(args.payload ?? null);
+      let r = mockAgentRequests.get(id);
+      if (!r) {
+        if (command !== "begin_agent_request") return err(command, "unknown_request");
+        if (!hasPayload) return err(command, "payload_required");
+        for (const other of mockAgentRequests.values())
+          if (other.projectId === project && other.status === "unresolved")
+            return err(command, `unresolved_request: ${other.requestId}`);
+        r = { requestId: id, projectId: project, status: "prepared", appliedCount: 0, payloadDigest,
+              patchDigest: "", transactionId: "", results: [], historyDepth: -1 };
+        mockAgentRequests.set(id, r);
+        return ok(command, mockAgentRequestStatus(r));
+      }
+      if (hasPayload && r.payloadDigest !== payloadDigest) return err(command, "request_identity_conflict");
+      if (command === "get_agent_request") return ok(command, mockAgentRequestStatus(r));
+      if (command === "begin_agent_request") {
+        if (!hasPayload) return err(command, "payload_required");
+        return ok(command, mockAgentRequestStatus(r, true));
+      }
+      if (command === "cancel_agent_request") {
+        if (r.status === "prepared") r.status = "cancelled";
+        else if (r.status === "unresolved") r.status = "rolled_back";
+        return ok(command, mockAgentRequestStatus(r));
+      }
+      if (command === "undo_agent_request") {
+        if (r.status === "undone") return ok(command, mockAgentRequestStatus(r, true));
+        if (!mockAgentRequestStatus(r).undoable)
+          return err(command, "task_undo_not_owned: the task is not the current undoable unit");
+        r.status = "unresolved";
+        const undone = dispatch("undo", {});
+        if (!undone.ok || !(undone.data as { undone?: boolean } | undefined)?.undone)
+          return err(command, "task_undo_failed");
+        r.status = "undone";
+        return ok(command, mockAgentRequestStatus(r));
+      }
+      // apply_agent_patch — one owned batch_* transaction around the bounded commands.
+      if (!hasPayload) return err(command, "payload_required");
+      const patchDigest = sortedJson(args.commands ?? null);
+      if (r.patchDigest && r.patchDigest !== patchDigest) return err(command, "patch_identity_conflict");
+      if (r.status !== "prepared") return ok(command, mockAgentRequestStatus(r, true));
+      const refuse = (error: string): CommandResult => {
+        r!.status = "cancelled";
+        return { ...err(command, error), data: mockAgentRequestStatus(r!) };
+      };
+      if (inBatch) return refuse("transaction_already_open");
+      if (str(args.epoch) !== MOCK_AGENT_EPOCH || !("revision" in args) || num(args.revision, -1) !== mockRevision)
+        return refuse("stale_agent_context");
+      const commands = Array.isArray(args.commands) ? (args.commands as Record<string, unknown>[]) : null;
+      if (!commands || commands.length === 0 || commands.length > 6) return refuse("invalid_bounded_patch");
+      const manifest: Record<string, unknown>[] = [];
+      for (const [i, c] of commands.entries()) {
+        if (!c || typeof c !== "object" || !c.args || typeof c.args !== "object" || !MOCK_AGENT_ALLOWED.has(str(c.command)))
+          return refuse("unsupported_bounded_command");
+        manifest.push({ index: i, requestId: String(i), command: str(c.command) });
+      }
+      r.patchDigest = patchDigest;
+      r.transactionId = `request-${id}`;
+      const txnArgs = { transactionId: r.transactionId, name: "agent bounded patch", commands: manifest, turn_id: id };
+      const begin = dispatch("batch_begin", txnArgs);
+      if (!begin.ok) return refuse(begin.error ?? "batch_begin failed");
+      r.status = "applying";
+      let failed = false;
+      let failure = "";
+      for (const [i, c] of commands.entries()) {
+        const result = mockExecuteSync({ command: str(c.command), args: c.args as Record<string, unknown>,
+                                         transaction: { transactionId: r.transactionId, requestId: String(i), index: i } });
+        r.results.push(result);
+        if (result.ok) r.appliedCount += 1;
+        else { failed = true; failure = result.error ?? "command failed"; break; }
+      }
+      let finish = failed ? dispatch("batch_rollback", txnArgs) : dispatch("batch_end", txnArgs);
+      if (!failed && !finish.ok) { failed = true; failure = finish.error ?? "batch_end failed"; finish = dispatch("batch_rollback", txnArgs); }
+      r.status = failed ? (finish.ok ? "rolled_back" : "unresolved") : "committed";
+      r.historyDepth = history.length;
+      const response = failed ? err(command, failure) : ok(command);
+      return { ...response, data: mockAgentRequestStatus(r) };
+    }
     case "batch_rollback": {
       const txnId = str(args.transactionId);
       if (!txnId) return err(command, "missing 'transactionId'");
@@ -5176,6 +5292,10 @@ function mockTxnPreDispatch(
 }
 
 export function mockExecute<T = unknown>(command: unknown): Promise<T> {
+  return Promise.resolve(mockExecuteSync(command) as unknown as T);
+}
+
+function mockExecuteSync(command: unknown): CommandResult {
   const c = command as {
     command: string;
     args?: Record<string, unknown>;
@@ -5185,7 +5305,7 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
 
   // FS-B2a guard, before dispatch — so a refusal mutates nothing, exactly as in the engine.
   const early = mockTxnPreDispatch(c.command, c.args ?? {}, c.transaction);
-  if (early) return Promise.resolve(early as unknown as T);
+  if (early) return early;
 
   const admittedIndex = c.transaction && mockTxn
     ? mockTxn.entries.findIndex((e) => e.requestId === str(c.transaction!.requestId))
@@ -5234,7 +5354,7 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     });
     emitMuteAutomation();
   }
-  return Promise.resolve(res as unknown as T);
+  return res;
 }
 export function mockSnapshot<T = unknown>(): Promise<T> {
   // CAP-AUT-006 — mirror the native self-heal (ensureTrackMuteGate runs from
@@ -5275,6 +5395,7 @@ export function __resetMockForTests(): void {
   mockNextTxnId = 1;
   inBatch = false;
   mockTxn = null;          // FS-B2a — a leaked transaction would refuse the next test's mutations
+  mockAgentRequests.clear();
   mockRevision = 0;
   cmdLog.length = 0;
 }

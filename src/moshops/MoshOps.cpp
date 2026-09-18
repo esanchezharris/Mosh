@@ -794,10 +794,12 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "batch_begin")       return cmdBatchBegin (args);
     if (name == "batch_end")         return cmdBatchEnd (args);
     if (name == "batch_status")      return cmdBatchStatus (args);      // FS-B2a
-    if (name == "get_agent_context" || name == "begin_agent_request"
-        || name == "apply_agent_patch" || name == "get_agent_request"
-        || name == "cancel_agent_request" || name == "undo_agent_request")
-        return cmdAgentRequest (name, args);
+    if (name == "get_agent_context")     return cmdGetAgentContext (args);
+    if (name == "begin_agent_request")   return cmdBeginAgentRequest (args);
+    if (name == "apply_agent_patch")     return cmdApplyAgentPatch (args);
+    if (name == "get_agent_request")     return cmdGetAgentRequest (args);
+    if (name == "cancel_agent_request")  return cmdCancelAgentRequest (args);
+    if (name == "undo_agent_request")    return cmdUndoAgentRequest (args);
     if (name == "batch_rollback")    return cmdBatchRollback (args);    // FS-B2a
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
