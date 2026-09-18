@@ -250,6 +250,10 @@
   border-radius: 3px; border: 1px solid #2A2E2E; align-self: flex-start;
 }
 .v3-shell .trk .hd .ctl { display: flex; gap: 3px; }
+.v3-shell .preset-pick { max-width: 100%; min-width: 0; font-size: 11px; padding: 2px 6px; background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+.v3-shell .pr .preset-pick { margin: 2px 0 4px; width: 100%; }
+.v3-shell .preset-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v3-shell .preset-row .nm { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v3-shell .trk .hd .ctl button {
   font-size: 8px; letter-spacing: .5px; padding: 2px 5px; border-radius: 4px;
   background: var(--surface2); border: 1px solid var(--fog-line); color: var(--fog-label); cursor: pointer;

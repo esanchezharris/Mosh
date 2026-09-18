@@ -2,6 +2,7 @@ import { useStore } from "../store";
 import { ReImagineSection } from "./ReImagineSection";
 import { midiInputOptions, trackOutputOptions, currentTrackOutput, trackOutputPatch, waveInputOptions, currentTrackInput } from "../settings/routing";
 import type { Plugin, Snapshot } from "../types";
+import { PresetPicker } from "../ui/PresetPicker";
 import { useV3 } from "./shellState";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
@@ -31,6 +32,7 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           {plugin.enabled ? "on" : "off"}
         </button>
       </div>
+      {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId} />}
       {native && plugin.params.slice(0, 4).map((p) => (
         <label className="fader" key={p.index}>
           <span className="nm">{p.name}</span>

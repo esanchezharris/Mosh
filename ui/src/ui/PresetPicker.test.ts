@@ -1,0 +1,48 @@
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetMockForTests } from "../bridge.mock";
+import { useStore } from "../store";
+import type { Plugin } from "../types";
+import { PresetPicker, presetKeyFor } from "./PresetPicker";
+
+const plugin = (over: Partial<Plugin>): Plugin => ({
+  index: 0, name: "4OSC", type: "4osc", enabled: true, external: false, builtin: true, isInstrument: true, params: [], ...over,
+} as Plugin);
+
+describe("presetKeyFor", () => {
+  it("names the two loadable banks and nothing else", () => {
+    expect(presetKeyFor(plugin({}))).toBe("4osc");
+    expect(presetKeyFor(plugin({ builtin: false, name: "Vital", type: "vst3" }))).toBe("vital");
+    expect(presetKeyFor(plugin({ type: "sampler", name: "Sampler" }))).toBeNull();
+    expect(presetKeyFor(plugin({ builtin: false, name: "Serum 2", type: "vst3" }))).toBeNull();
+  });
+});
+
+describe("PresetPicker against the mock backend", () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  beforeEach(async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+  });
+  afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+
+  const flush = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); };
+
+  it("renders the 4OSC bank and nothing for the sampler (anti-vacuity: both branches)", async () => {
+    const trackId = useStore.getState().snapshot!.tracks[0].id;
+    await act(async () => root.render(React.createElement(PresetPicker, { plugin: plugin({}), trackId })));
+    await flush();
+    const select = host.querySelector('[data-testid="preset-pick"]') as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(select!.querySelectorAll("option").length).toBe(4);   // placeholder + 3 bundled 4osc presets
+    await act(async () => root.render(React.createElement(PresetPicker, { plugin: plugin({ type: "sampler", name: "Sampler" }), trackId })));
+    await flush();
+    expect(host.querySelector('[data-testid="preset-pick"]')).toBeNull();
+  });
+});
