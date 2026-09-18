@@ -143,6 +143,23 @@ relay/multiplayer → MP-two-mac.
 | MIDI-in | Connect a MIDI keyboard (picker from G11); play live, then record 2 bars. | Live notes sound with low latency; recorded notes land where played. If a MIDI *take* can't be recorded, that's a capability-matrix MISSING row — file it, don't shrug. | 4 | — |
 | MP-two-mac | Two Macs, one session: claim a track from Mac B, move a clip on Mac A. | Lock icon + live clip motion on both within ~1 s. | 5 | — |
 
+### V3 default-shell acceptance (owner; the last row of the V3 parity gate)
+
+*Row §5 of [docs/V3-PARITY-BRIEF-2026-09-17.md](V3-PARITY-BRIEF-2026-09-17.md). One real session on
+the built Release with the V3 shell selected, on the owner's Mac. Feel, audibility and latency are
+the owner's call; no gate above can close these. Record the pass inline and put the session's
+evidence (screenshots, the exported mixdown, notes) in
+`~/Library/Mosh/task-evidence/<YYYY-MM-DD>-v3-acceptance/`; the flip PR cites that directory.*
+
+| id | Steps | Expect | ~min | last-passed |
+| --- | --- | --- | --- | --- |
+| V3-beat | `+ Drum beat`, then ask the dock for a lofi sketch. | Both land audible drum tracks; one ⌘Z each reverts them whole. | 3 | — |
+| V3-vocal | Arm a track, count-in 1 bar, record two takes in the Booth, pick one, Keep. | Takes land where sung, the count-in is audible but excluded, Keep flattens, ⌘Z restores. | 5 | — |
+| V3-mix | Level/pan/mute/solo, insert 4OSC + a preset, + Bus and a send, zoom and drag a clip. | Every edit audible and one ⌘Z each; nothing feels laggy at 44.1 kHz / 512. | 5 | — |
+| V3-file | Save, close, reopen, export a mixdown; import a `.mid` from the Browser. | Reopen is identical; the export plays; the MIDI lands as one clip. | 3 | — |
+| V3-mp | Two Macs: Invite from A, join from B, claim a track on B, edit on A. | Lock badge and edits appear on both within ~1 s; Leave clears. | 5 | — |
+| V3-feel | Ten minutes of ordinary use in each colorway. | Nothing you would not ship as the first thing a new user sees. | 10 | — |
+
 ## Collaborator video — two machines (hardware-gated)
 
 The WebRTC + signaling layer is built and unit-tested (`ui/src/webrtc/*.test.ts`,
