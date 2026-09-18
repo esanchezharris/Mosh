@@ -1,8 +1,22 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import type { ClipTake, Snapshot } from "../types";
+import type { Clip, ClipTake, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
+
+/** The clip the Booth shows for a track: the take the lifecycle just landed, else the track's
+ *  comp (the clip carrying takes — a transport-toggle stop lands there without telling the
+ *  store), else its first wave clip, else its first clip. */
+export function boothClipFor(
+  track: Pick<Track, "clips"> | undefined,
+  lastTakeClipId: string | null,
+): Clip | undefined {
+  const clips = track?.clips ?? [];
+  return clips.find((c) => c.id === lastTakeClipId)
+    ?? clips.find((c) => (c.numTakes ?? c.takes?.length ?? 0) > 0)
+    ?? clips.find((c) => c.type === "wave")
+    ?? clips[0];
+}
 
 export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
@@ -18,9 +32,11 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   const track = snapshot.tracks.find((t) => t.id === selectedTrackId)
     ?? snapshot.tracks.find((t) => t.armed)
     ?? snapshot.tracks[0];
-  const clip = track?.clips.find((c) => c.id === lastTakeClipId)
-    ?? track?.clips.find((c) => c.type === "wave")
-    ?? track?.clips[0];
+  const clip = boothClipFor(track, lastTakeClipId);
+  // The store's keepTake / navTake act on lastTakeClipId, which only the recording lifecycle's
+  // stopRecord sets; the Record button here (and the transport's) stops through the transport
+  // toggle, which lands the take but leaves that id null. Drive the clip this view shows.
+  const viaLifecycle = !!clip && clip.id === lastTakeClipId;
 
   const [takes, setTakes] = useState<ClipTake[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -40,6 +56,21 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
     });
     return () => { cancelled = true; };
   }, [clip, exec, clip?.numTakes, clip?.currentTakeIndex, recording]);
+
+  const step = async (delta: number) => {
+    if (!clip) return;
+    if (viaLifecycle) { await navTake(delta); return; }
+    const next = Math.max(0, Math.min(takes.length - 1, currentIndex + delta));
+    if (next === currentIndex) return;
+    const r = await exec("set_current_take", { clipId: clip.id, takeIndex: next });
+    if (r.ok) await useStore.getState().refresh();
+  };
+  const keep = async () => {
+    if (!clip) return;
+    if (viaLifecycle) { await keepTake(); return; }
+    const r = await exec("keep_take", { clipId: clip.id });
+    if (r.ok) await useStore.getState().refresh();
+  };
 
   return (
     <div className="booth-stage" data-testid="v3-booth">
@@ -82,9 +113,9 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
         })}
         {takes.length > 0 && (
           <div className="row" style={{ display: "flex", gap: 6 }}>
-            <button type="button" className="btn sm" onClick={() => void navTake(-1)}>Prev</button>
-            <button type="button" className="btn sm" onClick={() => void navTake(1)}>Next</button>
-            <button type="button" className="btn pri sm" onClick={() => void keepTake()}>Keep</button>
+            <button type="button" className="btn sm" data-testid="v3-take-prev" onClick={() => void step(-1)}>Prev</button>
+            <button type="button" className="btn sm" data-testid="v3-take-next" onClick={() => void step(1)}>Next</button>
+            <button type="button" className="btn pri sm" data-testid="v3-take-keep" onClick={() => void keep()}>Keep</button>
           </div>
         )}
       </aside>
