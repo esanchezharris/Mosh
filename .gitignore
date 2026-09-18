@@ -121,8 +121,6 @@ scripts/compiler-eval/artifacts/
 /.tmp/
 /.vite/
 /_salvage/
-/skills
-/skills-lock.json
 /ui/.film/
 /docs/auto-loop/.merge-queue.lock
 
