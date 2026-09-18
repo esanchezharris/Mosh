@@ -1,0 +1,443 @@
+{
+  "schemaVersion": 1,
+  "id": "sft-12-set-key",
+  "name": "set-key",
+  "description": "Choose the song’s home note and scale so the project reflects its musical key.",
+  "examples": [
+    "Set the song key to C major.",
+    "Can you make this project in A minor?",
+    "Change the key to G.",
+    "Put the whole track in E flat major.",
+    "Let's set the session key to D minor.",
+    "Shift the project key to F# minor.",
+    "Make the key B major.",
+    "Set the song to C# minor, please.",
+    "Could you change this to F major?",
+    "I want the project key in A major."
+  ],
+  "slots": [
+    {
+      "name": "step1_mode",
+      "type": "string",
+      "required": false,
+      "description": "Which scale or mode should the song use?",
+      "source": "user",
+      "default": null,
+      "input": {
+        "kind": "choice_static",
+        "question": "Which scale or mode should the song use?",
+        "presenceQuestion": "Did the user say anything about this: Which scale or mode should the song use?",
+        "options": [
+          {
+            "value": "major",
+            "description": "Major scale"
+          },
+          {
+            "value": "minor",
+            "description": "Minor scale"
+          },
+          {
+            "value": "dorian",
+            "description": "Dorian mode"
+          },
+          {
+            "value": "mixolydian",
+            "description": "Mixolydian mode"
+          },
+          {
+            "value": "pentatonic",
+            "description": "Pentatonic scale"
+          },
+          {
+            "value": "chromatic",
+            "description": "Chromatic scale"
+          }
+        ],
+        "defaultPolicy": "omit",
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.TempoProject.cpp",
+          "line": 687
+        },
+        "notes": "Omission preserves the stored mode. Accepted modes are defined at MoshOps.TempoProject.cpp:530; the snapshot fallback minor is not a command default. Absence omits the argument; any documented native default is informational, never injected."
+      }
+    },
+    {
+      "name": "step1_tonic",
+      "type": "string",
+      "required": true,
+      "description": "Which tonic should the song use?",
+      "source": "user",
+      "default": null,
+      "input": {
+        "kind": "choice_static",
+        "question": "Which tonic should the song use?",
+        "options": [
+          {
+            "value": "C",
+            "description": "C natural"
+          },
+          {
+            "value": "C#",
+            "description": "C sharp"
+          },
+          {
+            "value": "Db",
+            "description": "D flat"
+          },
+          {
+            "value": "D",
+            "description": "D natural"
+          },
+          {
+            "value": "D#",
+            "description": "D sharp"
+          },
+          {
+            "value": "Eb",
+            "description": "E flat"
+          },
+          {
+            "value": "E",
+            "description": "E natural"
+          },
+          {
+            "value": "F",
+            "description": "F natural"
+          },
+          {
+            "value": "F#",
+            "description": "F sharp"
+          },
+          {
+            "value": "Gb",
+            "description": "G flat"
+          },
+          {
+            "value": "G",
+            "description": "G natural"
+          },
+          {
+            "value": "G#",
+            "description": "G sharp"
+          },
+          {
+            "value": "Ab",
+            "description": "A flat"
+          },
+          {
+            "value": "A",
+            "description": "A natural"
+          },
+          {
+            "value": "A#",
+            "description": "A sharp"
+          },
+          {
+            "value": "Bb",
+            "description": "B flat"
+          },
+          {
+            "value": "B",
+            "description": "B natural"
+          }
+        ],
+        "defaultPolicy": "required",
+        "nativeSource": {
+          "file": "src/moshops/MoshOps.TempoProject.cpp",
+          "line": 681
+        },
+        "notes": "Omission preserves the stored tonic. Accepted spellings are defined at MoshOps.TempoProject.cpp:525; the snapshot fallback A is not a command default."
+      }
+    }
+  ],
+  "template": {
+    "commands": [
+      {
+        "command": "set_key",
+        "args": {
+          "mode": "{step1_mode}",
+          "tonic": "{step1_tonic}"
+        }
+      }
+    ]
+  },
+  "preconditions": [],
+  "postconditions": [
+    {
+      "type": "command_effect",
+      "step": 1,
+      "command": "set_key"
+    }
+  ],
+  "provenance": [
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1977",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1978",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1979",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1980",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1981",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1982",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1983",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1984",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1985",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1986",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1987",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1988",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1989",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1990",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1991",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1992",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1993",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1994",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1995",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1996",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1997",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1998",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1999",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2000",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2001",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2002",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2003",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2004",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2005",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2006",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2007",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2008",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2009",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2010",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2011",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2012",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2013",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2014",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2015",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2016",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2750",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2751",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2752",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2753",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2754",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2755",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2756",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2757",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2953",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2954",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2955",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2956",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2957",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L2958",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3056",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3057",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3058",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3059",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3060",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3061",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3062",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3063",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6885",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6886",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6887",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6888",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6889",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6890",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6891",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6892",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6893",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6894",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6895",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6896",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6897",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6898",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6899",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6900",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6901",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6902",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6903",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6904",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6905",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6906",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6907",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6908",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6909",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6910",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6911",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6912",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6913",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6914",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6915",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6916",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6917",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6918",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6919",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6920",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6921",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6922",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6923",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6924",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6925",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6926",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6927",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6928",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6929",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6930",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6931",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6932",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6933",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6934",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6935",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6936",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6937",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6938",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6939",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6940",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6941",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6942",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6943",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6944",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6945",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6946",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6947",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6948",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6949",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6950",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6951",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6952",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6953",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6954",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6955",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6956",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6957",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6958",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6959",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6960",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6961",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6962",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6963",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6964",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6965",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6966",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6967",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6968",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6969",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6970",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6971",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6972",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6973",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6974",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6975",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6976",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6977",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6978",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6979",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6980",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6981",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6982",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6983",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6984",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6985",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6986",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6987",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6988",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6989",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6990",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6991",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6992",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6993",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6994",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6995",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6996",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6997",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6998",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L6999",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L7000",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L7001",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L7002",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L7003",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L7004",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9204",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9205",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9206",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9207",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9208",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9209",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9210",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9211",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9212",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9213",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9214",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9215",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9216",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9217",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9218",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9219",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9220",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9221",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9222",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9223",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9224",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9225",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9226",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9227",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9813",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9814",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9815",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9816",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9817",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9818",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9819",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9820",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9821",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9822",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9823",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9824",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9825",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9826",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9827",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9828",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9829",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L9830",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10122",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10123",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10124",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10125",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10126",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10127",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10128",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10129",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10130",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10131",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10132",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10133",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10134",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10135",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10136",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10137",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10138",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10139",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10140",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10141",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10142",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10143",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10144",
+    "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10145"
+  ],
+  "triggers": [],
+  "mining": {
+    "rank": 12,
+    "shape": [
+      "set_key"
+    ],
+    "rows": 248,
+    "bindings": [
+      {
+        "slot": "step1_mode",
+        "step": 1,
+        "arg": "mode"
+      },
+      {
+        "slot": "step1_tonic",
+        "step": 1,
+        "arg": "tonic"
+      }
+    ],
+    "undo": "none"
+  }
+}

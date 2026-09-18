@@ -1,0 +1,1054 @@
+{
+  "scope": "Native command/argument-name audit over every training row, plus HUH and null detection; not a complete semantic corpus audit.",
+  "issues": [
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1306",
+      "line": 1306,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L1316",
+      "line": 1316,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3284",
+      "line": 3284,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3290",
+      "line": 3290,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3291",
+      "line": 3291,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3297",
+      "line": 3297,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3298",
+      "line": 3298,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3302",
+      "line": 3302,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3375",
+      "line": 3375,
+      "shape": [
+        "sketch_beatbox",
+        "set_track_type"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3559",
+      "line": 3559,
+      "shape": [
+        "create_lyric_sheet"
+      ],
+      "reasons": [
+        "step 1: create_lyric_sheet: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3614",
+      "line": 3614,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3615",
+      "line": 3615,
+      "shape": [
+        "sketch_beatbox",
+        "move_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3617",
+      "line": 3617,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3666",
+      "line": 3666,
+      "shape": [
+        "set_lyric_constraint"
+      ],
+      "reasons": [
+        "step 1: set_lyric_constraint: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3672",
+      "line": 3672,
+      "shape": [
+        "bypass_layer"
+      ],
+      "reasons": [
+        "HUH intent contains executable commands"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3831",
+      "line": 3831,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L3845",
+      "line": 3845,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4172",
+      "line": 4172,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4222",
+      "line": 4222,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4406",
+      "line": 4406,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4429",
+      "line": 4429,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4872",
+      "line": 4872,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4873",
+      "line": 4873,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4874",
+      "line": 4874,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4902",
+      "line": 4902,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4903",
+      "line": 4903,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L4904",
+      "line": 4904,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10806",
+      "line": 10806,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10807",
+      "line": 10807,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10808",
+      "line": 10808,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10824",
+      "line": 10824,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10825",
+      "line": 10825,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10826",
+      "line": 10826,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10827",
+      "line": 10827,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10828",
+      "line": 10828,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10829",
+      "line": 10829,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10845",
+      "line": 10845,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10846",
+      "line": 10846,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10847",
+      "line": 10847,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10848",
+      "line": 10848,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10849",
+      "line": 10849,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10850",
+      "line": 10850,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10860",
+      "line": 10860,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10861",
+      "line": 10861,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L10862",
+      "line": 10862,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11079",
+      "line": 11079,
+      "shape": [
+        "sketch_beatbox",
+        "set_track_type"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11080",
+      "line": 11080,
+      "shape": [
+        "sketch_beatbox",
+        "set_track_type"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11081",
+      "line": 11081,
+      "shape": [
+        "sketch_beatbox",
+        "set_track_type"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11631",
+      "line": 11631,
+      "shape": [
+        "create_lyric_sheet"
+      ],
+      "reasons": [
+        "step 1: create_lyric_sheet: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11632",
+      "line": 11632,
+      "shape": [
+        "create_lyric_sheet"
+      ],
+      "reasons": [
+        "step 1: create_lyric_sheet: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11633",
+      "line": 11633,
+      "shape": [
+        "create_lyric_sheet"
+      ],
+      "reasons": [
+        "step 1: create_lyric_sheet: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11796",
+      "line": 11796,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11797",
+      "line": 11797,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11798",
+      "line": 11798,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11799",
+      "line": 11799,
+      "shape": [
+        "sketch_beatbox",
+        "move_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11800",
+      "line": 11800,
+      "shape": [
+        "sketch_beatbox",
+        "move_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11801",
+      "line": 11801,
+      "shape": [
+        "sketch_beatbox",
+        "move_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11805",
+      "line": 11805,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11806",
+      "line": 11806,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11807",
+      "line": 11807,
+      "shape": [
+        "sketch_beatbox"
+      ],
+      "reasons": [
+        "step 1: explicit null sketch_beatbox.bars"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11952",
+      "line": 11952,
+      "shape": [
+        "set_lyric_constraint"
+      ],
+      "reasons": [
+        "step 1: set_lyric_constraint: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11953",
+      "line": 11953,
+      "shape": [
+        "set_lyric_constraint"
+      ],
+      "reasons": [
+        "step 1: set_lyric_constraint: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11954",
+      "line": 11954,
+      "shape": [
+        "set_lyric_constraint"
+      ],
+      "reasons": [
+        "step 1: set_lyric_constraint: unknown native argument: sectionId"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11970",
+      "line": 11970,
+      "shape": [
+        "bypass_layer"
+      ],
+      "reasons": [
+        "HUH intent contains executable commands"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11971",
+      "line": 11971,
+      "shape": [
+        "bypass_layer"
+      ],
+      "reasons": [
+        "HUH intent contains executable commands"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L11972",
+      "line": 11972,
+      "shape": [
+        "bypass_layer"
+      ],
+      "reasons": [
+        "HUH intent contains executable commands"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12447",
+      "line": 12447,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12448",
+      "line": 12448,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12449",
+      "line": 12449,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12489",
+      "line": 12489,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12490",
+      "line": 12490,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12491",
+      "line": 12491,
+      "shape": [
+        "build_skeleton_from_clip"
+      ],
+      "reasons": [
+        "step 1: explicit null build_skeleton_from_clip.grid",
+        "step 1: explicit null build_skeleton_from_clip.wait"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12663",
+      "line": 12663,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12664",
+      "line": 12664,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12665",
+      "line": 12665,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12666",
+      "line": 12666,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12667",
+      "line": 12667,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12668",
+      "line": 12668,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12669",
+      "line": 12669,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12670",
+      "line": 12670,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12671",
+      "line": 12671,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12672",
+      "line": 12672,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12673",
+      "line": 12673,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12674",
+      "line": 12674,
+      "shape": [
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12891",
+      "line": 12891,
+      "shape": [
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12893",
+      "line": 12893,
+      "shape": [
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12894",
+      "line": 12894,
+      "shape": [
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "rowId": "sha256:3c4e2e8b2ecc3562404fb824aa0b7dd131bd908e936c946cc8d3507adbf071eb#L12895",
+      "line": 12895,
+      "shape": [
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note",
+        "set_note"
+      ],
+      "reasons": [
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 1: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 2: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 3: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 4: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 5: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 5: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 6: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 6: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 7: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 7: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565",
+        "step 8: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "step 8: set_note: unresolved native contract: src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    }
+  ],
+  "unresolvedNativeExtractions": [
+    {
+      "command": "configure_track_group",
+      "reasons": [
+        "src/moshops/MoshOps.Multiplayer.cpp:354:args: unsupported args.getDynamicObject at line 385",
+        "src/moshops/MoshOps.Multiplayer.cpp:354:args: unsupported argument use at line 360",
+        "src/moshops/MoshOps.Multiplayer.cpp:354:args: unsupported argument use at line 364"
+      ]
+    },
+    {
+      "command": "set_track_group_members",
+      "reasons": [
+        "src/moshops/MoshOps.Multiplayer.cpp:354:args: unsupported args.getDynamicObject at line 385",
+        "src/moshops/MoshOps.Multiplayer.cpp:354:args: unsupported argument use at line 360",
+        "src/moshops/MoshOps.Multiplayer.cpp:354:args: unsupported argument use at line 364"
+      ]
+    },
+    {
+      "command": "mark_take",
+      "reasons": [
+        "src/moshops/MoshOps.cpp:4162:payload: unresolved qualified helper e->setProperty at line 4168"
+      ]
+    },
+    {
+      "command": "write_automation_curve",
+      "reasons": [
+        "src/moshops/AutomationCurveWrite.h:115:args: unsupported args.getDynamicObject at line 127"
+      ]
+    },
+    {
+      "command": "set_note",
+      "reasons": [
+        "src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2559",
+        "src/moshops/MoshOps.cpp:2527:args: unsupported argument use at line 2565"
+      ]
+    },
+    {
+      "command": "compile_render",
+      "reasons": [
+        "src/moshops/MoshOps.Generative.cpp:342:args: unsupported argument use at line 354"
+      ]
+    },
+    {
+      "command": "list_directory",
+      "reasons": [
+        "src/moshops/MoshOps.ProjectIo.cpp:1343:args: unresolved qualified helper directory_listing::buildData at line 1355"
+      ]
+    },
+    {
+      "command": "import_training_source",
+      "reasons": [
+        "src/moshops/MoshOps.ProjectIo.cpp:240:args: unresolved qualified helper trainerRegistry.importSource at line 243"
+      ]
+    },
+    {
+      "command": "build_training_corpus",
+      "reasons": [
+        "src/moshops/MoshOps.ProjectIo.cpp:268:args: unresolved qualified helper trainerRegistry.buildCorpus at line 271"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "gates": [
+    {
+      "name": "TypeScript",
+      "command": "cd ui && npm run typecheck",
+      "status": "passed",
+      "details": "tsc --noEmit and tsc -p tsconfig.e2e.json exit 0; covers all new validator code.",
+      "evidence": "/Users/emiliosanchez-harris/Library/Mosh/task-evidence/skills-library-v1/typecheck.log"
+    },
+    {
+      "name": "Full Vitest",
+      "command": "cd ui && npm test",
+      "status": "passed",
+      "details": "475 files passed, 1 file skipped; 4852 tests passed, 1 skipped. All 164 new skillMining tests passed in this full run.",
+      "evidence": "/Users/emiliosanchez-harris/Library/Mosh/task-evidence/skills-library-v1/full-vitest.log"
+    },
+    {
+      "name": "Offline Python",
+      "command": "cd service/skills && python3 -m pytest -q",
+      "status": "passed",
+      "details": "196 tests passed, including legacy skills tests and new mined-schema tests.",
+      "evidence": "/Users/emiliosanchez-harris/Library/Mosh/task-evidence/skills-library-v1/python-tests.log"
+    },
+    {
+      "name": "CLI surface",
+      "command": "cd ui && npm exec -- tsx src/skillMining/cli.ts --help; measure; mine; validate; check; freeze; heldout; report; verify",
+      "status": "passed",
+      "details": "Help and complete workflow executed. Unknown option deliberately rejected with exit 1; this is expected bad-input behavior.",
+      "evidence": "/Users/emiliosanchez-harris/Library/Mosh/task-evidence/skills-library-v1/cli-invalid.log"
+    },
+    {
+      "name": "Deterministic regeneration",
+      "command": "cd ui && npm exec -- tsx src/skillMining/cli.ts check",
+      "status": "passed",
+      "details": "Two independent inventories agree; all 40 files regenerate byte-for-byte with complete provenance and verbatim examples. Frozen300 ID selection digest matches pinned measurement.",
+      "evidence": "determinism.json"
+    },
+    {
+      "name": "Freeze across held-out read",
+      "command": "cd ui && npm exec -- tsx src/skillMining/cli.ts verify",
+      "status": "passed",
+      "details": "Identical library/rules/evidence digest before and after held-out shape read: 95b3771e0ce51162a051e45009415e87ac045845ca77b20843c017a2d4a08c9a.",
+      "evidence": "FREEZE.json"
+    },
+    {
+      "name": "95% skill reproduction acceptance",
+      "command": "cd ui && npm exec -- tsx src/skillMining/cli.ts validate (before freeze)",
+      "status": "failed",
+      "details": "0/40 skills pass. Of 10030 selected rows, 9954 render exactly but lack authentic setup and remain unverified; 76 fail typed/choice/range validation. Zero rows have verified reproduction.",
+      "evidence": "row-validation.jsonl"
+    },
+    {
+      "name": "Held-out behavioral expressibility",
+      "command": "Read only against frozen library",
+      "status": "unverified",
+      "details": "Gold target arguments are absent. Candidate shape ceilings: evalA 167/210 one, +5 exactly two, 172/210 at most two; frozen300 299/300 one, +0 exactly two. Validated-subset ceiling is zero on both.",
+      "evidence": "heldout.json"
+    }
+  ],
+  "limits": "No native application, audio, service generation, router accuracy, or listening claim. No runtime edits, dependencies, training, deployment, PR, merge or follow-up tasks."
+}
