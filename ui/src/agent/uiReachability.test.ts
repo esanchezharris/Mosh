@@ -102,8 +102,8 @@ function moduleGraph(entry: string, stopAt: readonly string[] = []): string[] {
   return [...seen];
 }
 
-// Pro Tools is the fresh-install default; v2 remains the complete general-purpose shell;
-// v3 is the candidate default (docs/V3-PARITY-BRIEF-2026-09-17.md) and joins the union so a
+// V3 is the fresh-install default (docs/V3-PARITY-BRIEF-2026-09-17.md §6); Pro Tools was before
+// it and v2 remains the complete general-purpose shell; all three form the union so a
 // command it reaches counts, and one it lacks shows up as a gap against the parity gate.
 // Their union is the primary production surface. Live is a focused compatibility shell and
 // classic is legacy, so neither is allowed to mask a missing primary-shell affordance.

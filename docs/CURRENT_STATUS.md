@@ -64,7 +64,7 @@ The following product work was rebased, gated, and merged serially into main:
 | #666 | Mosh Re-Imagine VST3 | Bundle/host evidence is retained; real audio-track and by-ear acceptance remain pending. |
 | #668 | DAWN Bridge and Ableton Live 11 controller | Controller/bridge automation is retained; physical Live/iPhone/audio/Undo acceptance remains pending. |
 
-Fresh settings default to the **Pro Tools** shell. Live, v2, and classic stay
+Fresh settings default to the **V3** shell ("Mosh (v3)", since the V3 parity gate closed — docs/V3-PARITY-BRIEF-2026-09-17.md). Pro Tools, Live, v2, and classic stay
 selectable, and existing explicit preferences are retained. This is a UI
 configuration default, not a claim that any shell has completed physical
 producer acceptance.
