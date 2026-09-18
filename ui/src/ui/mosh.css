@@ -1456,6 +1456,20 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .issue-inbox-button { position:absolute; right:8px; top:6px; font-size:10px; background:transparent; border:none; color:var(--bone-dim); cursor:pointer; }
 .issue-inbox { position:absolute; right:8px; bottom:52px; z-index:50; width:min(520px,calc(100vw - 24px)); max-height:65vh; overflow:auto; padding:12px; background:#17181b; border:1px solid #484b52; border-radius:8px; box-shadow:0 12px 40px #000b; color:#eee; }
 .issue-inbox-head,.issue-tabs,.issue-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+/* Producer rack — the Issue Inbox pattern: a toggle in the composer's corner and a floating
+   panel, never an inline block (the classic Moshi column has no vertical room to give). */
+.producer-rack-button { right:52px; }
+.producer-rack-pop { position:absolute; right:8px; bottom:52px; z-index:50; width:min(420px,calc(100vw - 24px)); max-height:65vh; overflow:auto; padding:12px; background:#17181b; border:1px solid #484b52; border-radius:8px; box-shadow:0 12px 40px #000b; color:var(--bone); font-size:12px; display:grid; gap:8px; }
+.producer-rack-pop-head { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+/* The setup block itself renders inline in the v3 dock and inside the popover here: reset the
+   UA fieldset (groove) and text-input (inset) borders — nothing in a designed UI wants a bevel. */
+.producer-rack-setup { display:grid; gap:6px; font-size:12px; min-width:0; }
+.producer-rack-setup > summary { cursor:pointer; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--bone-dim); }
+.producer-rack-setup p { margin:0; font-size:11px; color:var(--bone-dim); }
+.producer-rack-setup fieldset { margin:0; padding:6px 8px; min-width:0; border:1px solid var(--ink-line); border-radius:6px; display:grid; gap:6px; }
+.producer-rack-setup legend { padding:0 4px; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--bone-dim); }
+.producer-rack-setup .pop-row { flex-wrap:wrap; }
+.producer-rack-setup .pop-row input, .producer-rack-setup .pop-row select { flex:1 1 120px; min-width:0; background:var(--ink); color:var(--bone); border:1px solid var(--ink-line); border-radius:6px; padding:3px 6px; font-size:11px; }
 .issue-inbox-head { justify-content:space-between; }
 .issue-tabs { margin:10px 0; }
 .issue-tabs button.active { color:#fff; border-color:#79a7ff; }

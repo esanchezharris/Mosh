@@ -110,7 +110,7 @@ export function ProducerRackSetup() {
     } finally { setBusy(false); }
   };
 
-  return <details data-testid="producer-rack-setup">
+  return <details className="producer-rack-setup" data-testid="producer-rack-setup">
     <summary>Producer rack {rack ? "configured" : "off"}</summary>
     <p>Choose the existing lead, its native high-pass, and the printed-room audio track. Compression is excluded.</p>
     <button className="btn" data-testid="producer-rack-read" disabled={busy || running} onClick={() => void read()}>Read current tracks</button>
