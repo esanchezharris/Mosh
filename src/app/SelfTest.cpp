@@ -8937,6 +8937,34 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (st.getProperty ("blockReason", var()).toString().contains ("No audio device"),
                    "loop_state: blockReason names the missing audio device headless");
             check (ops.snapshot().getProperty ("loop", var()).isObject(), "snapshot carries an additive loop block");
+
+            // ── phone presence is the ENGINE's verdict, and it is EMITTED ──
+            // The desktop Booth cannot work this out for itself: `phoneSeenMs` is
+            // Time::getMillisecondCounterHiRes(), milliseconds since this Mac booted, so a
+            // UI comparing it to its own epoch clock subtracts two unrelated numbers and
+            // reports "no phone" for ever. loop_state must therefore carry the ANSWER.
+            check (st.getProperty ("phoneConnected", var()).isBool(),
+                   "loop_state: phoneConnected is present and a bool");
+            check (! (bool) st.getProperty ("phoneConnected", true),
+                   "loop_state: phoneConnected is false before any phone has polled");
+        }
+        {
+            // A poll is what the phone endpoint does on every GET /api/state. One is
+            // enough to flip presence, and the flip must be visible BOTH through the
+            // command's own result and through the loop block snapshot() embeds — the
+            // Booth reads the latter, so a field that only ever appeared in the direct
+            // read would look right in a unit test and stay dark in the app.
+            auto polled = cmd (ops, "loop_state", args1 ("phonePoll", true));
+            check (ok (polled), "loop_state {phonePoll:true} ok");
+            check ((bool) polled["data"].getProperty ("phoneConnected", false),
+                   "loop_state: a poll makes phoneConnected true");
+            check ((bool) ops.snapshot().getProperty ("loop", var())
+                              .getProperty ("phoneConnected", false),
+                   "snapshot().loop.phoneConnected is true inside the presence window");
+            // …and the UNPOLLED read still reports the phone: presence is a window, not a
+            // per-call flag, so the Booth's own refresh does not knock the phone offline.
+            check ((bool) loopState().getProperty ("phoneConnected", false),
+                   "an ordinary loop_state read does not clear a live phone");
         }
 
         // ── the stopped-only cursor preferences ──

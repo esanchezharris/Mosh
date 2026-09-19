@@ -4,11 +4,17 @@ import type { LoopContribution, LoopState } from "../types";
 // (ui/src/phonepad/src/policy.ts) over the engine's LoopState, so a button is live on
 // the Booth exactly when the same button is live on the phone. Pure: no store, no DOM.
 //
-// Two differences from the pad's version, both structural rather than editorial:
-//   · there is no `connected` input — the Booth is the host, so the gate is the loop
-//     being engaged and this Mac being able to record at all (`blockReason`);
+// Three differences from the pad's version, all structural rather than editorial:
+//   · there is no `connected` / `hostAlive` input — the Booth IS the host, so both are
+//     trivially true here and the gate is simply the loop being engaged;
+//   · `blockReason` has no pad counterpart at all: the pad renders it as text above its
+//     buttons and never gates on it. It gates every action here EXCEPT stop, which
+//     matches the pad, where stop is unconditional once connected and engaged;
 //   · the engine nests recording/playing under `transport` (the phone endpoint flattens
 //     them before they reach a pad), so the readers below do that one hop.
+// loopPolicy.parity.test.ts runs one table of cases through both modules and asserts the
+// verdicts agree, so a change to either that is not mirrored fails there rather than
+// showing up as a button that is live on the phone and dark on the Mac.
 
 export const LOOP_ACTIONS = [
   "record", "keep", "again", "hear", "play_all", "stop", "navigate", "home", "lead_in",
@@ -50,9 +56,16 @@ export function loopTargetLabel(loop: LoopState | null | undefined, selected: st
 
 export function loopAvailable(action: LoopAction, context: LoopContext): boolean {
   const loop = context.loop;
-  // Nothing at all — including Stop — without a loop this Mac can actually drive.
-  if (!loop || !loop.engaged || (loop.blockReason ?? "") !== "") return false;
+  // Nothing at all — including Stop — without a loop: there is no transport to act on.
+  if (!loop || !loop.engaged) return false;
+  // STOP COMES BEFORE EVERY OTHER GATE, exactly as the pad's policy.ts has it: once the
+  // loop is engaged, stop is unconditionally available. It must survive a request in
+  // flight (`pending`) AND a Mac that says it cannot record (`blockReason`) — the
+  // interface can be unplugged mid-take, which is precisely when blockReason appears and
+  // precisely when the producer needs to stop a transport that is still rolling. A Stop
+  // greyed out by the very condition that made you want it is the worst button in a DAW.
   if (action === "stop") return true;
+  if ((loop.blockReason ?? "") !== "") return false;
   if (context.pending) return false;
   switch (action) {
     case "record": return !loopRecording(loop);

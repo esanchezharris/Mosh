@@ -698,7 +698,12 @@ export type LoopState = {
   reviewId: string | null;
   auditionedId: string | null;
   contributions: LoopContribution[];
-  /** Host clock reading at the phone's last poll (0 = no phone has ever polled). */
+  /** Whether a phone pad is attached RIGHT NOW, decided by the engine — the only side
+   *  that holds a clock `phoneSeenMs` is comparable to. Read this, never the stamp. */
+  phoneConnected?: boolean;
+  /** Host clock reading at the phone's last poll (0 = no phone has ever polled).
+   *  Diagnostic only: it is `Time::getMillisecondCounterHiRes()`, milliseconds since the
+   *  Mac booted, NOT epoch ms — subtracting it from `Date.now()` is meaningless. */
   phoneSeenMs?: number;
   /** Why this Mac cannot record right now; empty when it can. */
   blockReason?: string;

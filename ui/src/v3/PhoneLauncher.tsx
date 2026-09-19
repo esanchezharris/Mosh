@@ -19,6 +19,7 @@ export function PhoneLauncher() {
   const start = useStore((s) => s.startRemotePairing);
   const stop = useStore((s) => s.stopRemote);
   const lastError = useStore((s) => s.lastError);
+  const setLastError = useStore((s) => s.setLastError);
   const closeRef = useRef<HTMLButtonElement>(null);
   const startedRef = useRef(false);
   const close = useCallback(() => setOpen(false), [setOpen]);
@@ -29,12 +30,19 @@ export function PhoneLauncher() {
   // Start the server on open, ONCE. The native call binds the listener and mints the
   // token, so by the time `pairing` lands the server is already accepting — there is
   // nothing to poll for. A failed start is reported, not retried in a loop.
+  //
+  // Clear the GLOBAL error first. `lastError` is the whole app's one error slot, so a
+  // loop command that failed a minute ago is still in it when this dialog opens — and the
+  // body below renders any lastError as "Could not start the phone server: …". Without
+  // this the producer is sent hunting for a port conflict over a message about something
+  // else entirely. A real start failure re-sets it through the same slot a moment later.
   useEffect(() => {
     if (!open) { startedRef.current = false; return; }
     if (startedRef.current || pairing) return;
     startedRef.current = true;
+    setLastError(null);
     void start();
-  }, [open, pairing, start]);
+  }, [open, pairing, start, setLastError]);
 
   if (!open) return null;
   return (

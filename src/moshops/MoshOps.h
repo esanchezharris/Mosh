@@ -640,7 +640,10 @@ private:
     // ── MOSHI-LOOP internals (MoshOps.Loop.cpp) ──────────────────────────────────
     /** The whole loop as the phone sees it: {projectId, host, engaged, leadTrackId,
         takesTrackId, transport, phase, listening, currentId, lastId, reviewId,
-        auditionedId, contributions[], phoneSeenMs, blockReason}. Pure READ — it never
+        auditionedId, contributions[], phoneConnected, phoneSeenMs, blockReason}. It
+        reports phoneConnected rather than leaving the UI to compare phoneSeenMs (a
+        boot-relative Time::getMillisecondCounterHiRes reading) against a clock of its
+        own. Pure READ — it never
         adopts, stamps or emits, so snapshot() can embed it and every command can use it
         for the authority handshake without mutating the thing it is fingerprinting. */
     juce::var loopStateVar();

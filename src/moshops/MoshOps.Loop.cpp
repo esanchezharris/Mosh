@@ -306,6 +306,12 @@ juce::var MoshOps::loopStateVar()
     state->setProperty ("reviewId", optionalId (node.getProperty (ids::loopReviewId, var()).toString()));
     state->setProperty ("auditionedId", optionalId (loopAuditionedId_));
     state->setProperty ("contributions", contributions);
+    // The ANSWER, not the evidence. `phoneSeenMs` is a juce::Time::getMillisecondCounterHiRes
+    // reading — milliseconds since this Mac booted — so a UI that compares it to its own
+    // Date.now() epoch clock is subtracting two unrelated numbers and will never see a
+    // phone. Only this side owns a clock the stamp is comparable to, so this side decides.
+    // The stamp stays for diagnostics (and for the same-process native selftest).
+    state->setProperty ("phoneConnected", loopPhoneConnected_);
     state->setProperty ("phoneSeenMs", loopPhoneSeenMs_);
     // The one thing the pad cannot work out for itself: whether this Mac can record at
     // all right now. It renders this verbatim above the buttons.
@@ -326,11 +332,18 @@ void MoshOps::loopRefreshPhonePresence (bool polled)
     // the subtraction alone would report a phone that is not there.
     const bool connected = loopPhoneSeenMs_ > 0.0 && (now - loopPhoneSeenMs_) < kLoopPhoneWindowMs;
     if (connected == loopPhoneConnected_)
-        return;   // the common case: a poll two or three times a second changes nothing
+        return;   // the common case: a poll every 200 ms (5 Hz) changes nothing
 
     // Only the EDGE is an event. Emitting per poll would push a full loop payload and a
-    // snapshot re-pull several times a second for the life of the session — the same
-    // mistake the live-note audition path exists to avoid.
+    // snapshot re-pull five times a second for the life of the session — the same mistake
+    // the live-note audition path exists to avoid.
+    //
+    // THIS CONVERGES, including from snapshot(). snapshot() calls this before embedding
+    // the loop block, so an edge found there emits — and emitSnapshotInvalidated() makes
+    // the UI re-pull the snapshot, which calls this again. That second pass finds
+    // `connected == loopPhoneConnected_` (the flag was written before the emit) and
+    // returns at the line above, so the cycle is exactly one extra read deep and stops.
+    // The ordering below is what makes that true: assign FIRST, emit second.
     loopPhoneConnected_ = connected;
     emit ("loop", loopStateVar());
     emitSnapshotInvalidated();
@@ -589,10 +602,15 @@ juce::var MoshOps::loopWriteCursor (const juce::String& command, const juce::var
 // ── loop_state ───────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdLoopState (const juce::var& args)
 {
-    // A READ: no transaction, no JSONL line (the pad polls this two or three times a
-    // second — logging it would bury every real command in the console). The one thing it
-    // writes is IDENTITY for clips it has not seen before, with a null UndoManager, which
-    // is naming rather than editing.
+    // A READ: no transaction, no JSONL line (the pad polls this every 200 ms — 5 Hz, see
+    // the pad controller's poll timer — so logging it would bury every real command in the
+    // console within a minute). The one thing it writes is IDENTITY for clips it has not
+    // seen before, with a null UndoManager, which is naming rather than editing.
+    //
+    // DELIBERATELY UNGATED BY AUTHORITY. Every other loop_* command runs
+    // loopAuthorityRefusal() first; this one does not, because it is the read the phone
+    // uses to LEARN the current authority. Gating it would make a phone that has fallen
+    // out of date unable to ever find out what it fell out of date with.
     loopAdoptUnstampedClips();
     loopRefreshPhonePresence ((bool) args.getProperty ("phonePoll", false));
     return okResult ("loop_state", loopStateVar());

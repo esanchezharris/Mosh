@@ -18,7 +18,7 @@ function loopState(over: Partial<LoopState> = {}): LoopState {
     transport: { recording: false, playing: false, positionSec: 0 },
     listening: { qn: 8, bar: 3, entryQn: 8, leadQn: 4 },
     currentId: null, lastId: null, reviewId: null, auditionedId: null,
-    contributions: [], phoneSeenMs: 0, blockReason: "",
+    contributions: [], phoneConnected: false, phoneSeenMs: 0, blockReason: "",
     ...over,
   };
 }
@@ -107,9 +107,13 @@ describe("v3 Booth — the desktop recording pad", () => {
     expect(host.querySelector<HTMLButtonElement>('[data-testid="v3-loop-go"]')!.disabled).toBe(true);
   });
 
-  it("disables everything the Mac cannot do, and says why", () => {
+  it("disables everything the Mac cannot do EXCEPT Stop, and says why", () => {
     render(snapshot(loopState({ blockReason: "No audio device — recording is unavailable on this Mac" })));
-    for (const id of PADS) expect(pad(id)!.disabled, id).toBe(true);
+    // Stop stays live. blockReason can appear MID-TAKE (the interface unplugged, the
+    // driver falling over) with the transport still rolling, and that is exactly the
+    // moment the producer needs Stop. The phone pad has always worked this way.
+    expect(pad("v3-loop-stop")!.disabled, "v3-loop-stop").toBe(false);
+    for (const id of PADS.filter((p) => p !== "v3-loop-stop")) expect(pad(id)!.disabled, id).toBe(true);
     expect(host.textContent).toContain("No audio device");
   });
 
@@ -170,6 +174,35 @@ describe("v3 Booth — the desktop recording pad", () => {
     expect(host.textContent).toContain("Lead 4 qn");
     act(() => pad("v3-booth-phone")!.click());
     expect(useV3.getState().phoneOpen).toBe(true);
+  });
+
+  // A THROWN exec, not a {ok:false} one. `exec` rejects when the bridge itself fails — a
+  // dead WebView channel, a native call that threw before it could build an envelope —
+  // and the old run() only had try/finally, so the rejection escaped as an unhandled
+  // promise rejection: `pending` cleared, no note appeared, and the pad just went quiet.
+  // In the live room that is indistinguishable from a button that does nothing.
+  it("shows the reason in the status line when the bridge throws, instead of going silent", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (event: PromiseRejectionEvent) => { rejections.push(event.reason); event.preventDefault(); };
+    window.addEventListener("unhandledrejection", onRejection);
+    try {
+      useStore.setState({
+        exec: vi.fn(async () => { throw new Error("the engine channel is closed"); }),
+      });
+      render(snapshot(loopState({ lastId: "p1", contributions: [part("p1", "Part 1")] })));
+      await act(async () => { pad("v3-loop-keep")!.click(); });
+      await act(async () => { await Promise.resolve(); });
+
+      const note = host.querySelector('[data-testid="v3-booth-note"]');
+      expect(note, "a thrown exec must still leave a visible note").not.toBeNull();
+      expect(note!.getAttribute("role")).toBe("status");
+      expect(note!.textContent).toContain("the engine channel is closed");
+      // …and the pads come back: a throw must not strand `pending` true for ever.
+      expect(pad("v3-loop-keep")!.disabled).toBe(false);
+      expect(rejections, "the throw must be handled, not escape as an unhandled rejection").toEqual([]);
+    } finally {
+      window.removeEventListener("unhandledrejection", onRejection);
+    }
   });
 
   it("no longer drives the old take lane", () => {

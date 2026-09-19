@@ -62,6 +62,11 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   // Every loop command answers with a human `detail` — including the ones that committed
   // the edit but could not roll again ("Kept Part 2; recording did not restart: …"). Show
   // it: a half-applied result that reads as plain success is the one thing this line is for.
+  //
+  // `exec` can also THROW rather than answer {ok:false} — a dead WebView channel, a native
+  // call that failed before it could build an envelope. Without the catch that rejection
+  // escapes as an unhandled promise rejection: the button un-dims and nothing is said,
+  // which from the live room is indistinguishable from a pad that does nothing at all.
   const run = async (command: string, args: Record<string, unknown> = {}) => {
     setPending(true);
     try {
@@ -70,13 +75,15 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
       const detail = typeof data?.detail === "string" ? data.detail : null;
       setNote(result.ok ? detail : (result.error ?? `${command} failed`));
       if (result.ok) await useStore.getState().refresh();
+    } catch (error) {
+      setNote(`${command} failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setPending(false);
     }
   };
 
   const line = note ?? (loop?.blockReason || null);
-  const phoneLine = phoneStatusLine(loop, pairing, Date.now());
+  const phoneLine = phoneStatusLine(loop, pairing);
 
   return (
     <div className="booth-stage" data-testid="v3-booth">

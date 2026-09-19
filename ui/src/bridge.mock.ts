@@ -569,7 +569,7 @@ const MOCK_TXN_READS = new Set([
   // LoRA Lab audition — renders a candidate adapter to a file and mutates no Edit
   // state, so listening to takes stays possible while an agent transaction is open.
   "render_lora_take", "promote_lora_checkpoint",
-  // MOSHI-LOOP — the phone pad polls loop_state two or three times a second; blocking it
+  // MOSHI-LOOP — the phone pad polls loop_state every 200 ms (5 Hz); blocking it
   // for the length of a skill run would freeze the phone on stale state.
   "loop_state",
 ]);
@@ -1580,8 +1580,12 @@ function mockLoopState(): LoopState {
     reviewId: mockLoop.reviewId,
     auditionedId: mockLoop.auditionedId,
     contributions,
-    // No phone ever polls the mock, so this stays 0: the Booth's "Phone connected" line
-    // is honestly unreachable in dev rather than faked into looking live.
+    // No phone ever polls the mock, so the presence verdict stays false and the stamp
+    // stays 0: the Booth's "Phone connected" line is honestly unreachable in dev rather
+    // than faked into looking live. `phoneConnected` is the ENGINE's answer (the desktop
+    // never derives presence from the stamp, which is boot-relative, not epoch ms) — the
+    // mock mirrors the field so a shape drift here fails the same way it would natively.
+    phoneConnected: false,
     phoneSeenMs: 0,
     blockReason: snapshot.session.audioEnabled === false
       ? "No audio device — recording is unavailable on this Mac" : "",

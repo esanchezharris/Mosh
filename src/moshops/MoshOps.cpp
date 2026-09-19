@@ -3533,6 +3533,12 @@ juce::var MoshOps::snapshot()
     // MOSHI-LOOP — additive: the same loop block the phone polls, so the desktop Booth
     // renders from the snapshot it already has instead of a second poll of its own.
     // loopStateVar() is a pure read (adoption happens in loop_state, never here).
+    //
+    // The refresh below is what makes the Booth's "Phone connected" line go away on its
+    // own when the phone walks out of range: nothing else would notice the window
+    // expiring, because a departed phone by definition stops polling. It is
+    // edge-triggered, so the emit + emitSnapshotInvalidated it can fire re-enters here at
+    // most once more and then finds no edge — see loopRefreshPhonePresence.
     loopRefreshPhonePresence (false);
     root->setProperty ("loop", loopStateVar());
 

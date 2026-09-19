@@ -21,6 +21,7 @@ function loop(over: Partial<LoopState> = {}): LoopState {
     reviewId: null,
     auditionedId: null,
     contributions: [],
+    phoneConnected: false,
     phoneSeenMs: 0,
     blockReason: "",
     ...over,
@@ -63,9 +64,18 @@ describe("loopAvailable", () => {
     for (const action of LOOP_ACTIONS) expect(loopAvailable(action, none), action).toBe(false);
   });
 
-  it("disables everything while the Mac says it cannot record", () => {
+  it("disables everything EXCEPT stop while the Mac says it cannot record", () => {
     const blocked = ctx({ loop: loop({ blockReason: "No audio device — recording is unavailable on this Mac" }) });
-    for (const action of LOOP_ACTIONS) expect(loopAvailable(action, blocked), action).toBe(false);
+    // Stop is the one button that must never be dark on an engaged loop. The interface
+    // can vanish mid-take (a bus-powered box unplugged, a driver falling over), which is
+    // exactly when blockReason appears and exactly when the producer needs to stop the
+    // transport that is still rolling. The phone pad already works this way — its
+    // policy.ts returns true for stop the moment it is connected and engaged — so a
+    // disabled Stop here was also a divergence between the two surfaces.
+    expect(loopAvailable("stop", blocked)).toBe(true);
+    for (const action of LOOP_ACTIONS.filter((a) => a !== "stop")) {
+      expect(loopAvailable(action, blocked), action).toBe(false);
+    }
   });
 
   it("keeps stop available while every other action is held by a pending request", () => {

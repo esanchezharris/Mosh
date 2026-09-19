@@ -102,6 +102,28 @@ describe("v3 Phone launcher", () => {
     act(() => useStore.setState({ lastError: null }));
   });
 
+  // A stale `lastError` from an unrelated command — a loop verb that failed, a render
+  // that refused — is still sitting in the store when this dialog opens, and the dialog
+  // renders ANY lastError as "Could not start the phone server: …". The producer then
+  // reads a truthful error about something else as a phone-server failure and goes
+  // looking for a port conflict that does not exist. Clear it as the start begins.
+  it("clears a stale global error before starting, so it is not reported as a phone failure", async () => {
+    useStore.setState({ lastError: "set_send_level failed: no such send" });
+    start = vi.fn(() => new Promise<void>(() => {}));   // never settles: hold the starting state
+    useStore.setState({ startRemotePairing: start });
+
+    act(() => root.render(React.createElement(PhoneLauncher)));
+    expect(useStore.getState().lastError).toBeNull();
+    expect(host.querySelector('[data-testid="v3-phone-status"]')!.textContent)
+      .toBe("Starting the phone server…");
+
+    // …and a REAL failure still reports, so the clear is not just silencing the surface
+    await act(async () => { useStore.setState({ lastError: "port 47873 is in use" }); });
+    expect(host.querySelector('[data-testid="v3-phone-status"]')!.textContent)
+      .toBe("Could not start the phone server: port 47873 is in use");
+    act(() => useStore.setState({ lastError: null }));
+  });
+
   it("closes on Escape and leaves the escape stack empty", async () => {
     act(() => root.render(React.createElement(PhoneLauncher)));
     await flush();
