@@ -255,6 +255,7 @@ private:
                                            const juce::var& args);
     juce::var cmdImportClip     (const juce::var& args);
     juce::var cmdImportClipData (const juce::var& args);
+    juce::var cmdImportMidiFile (const juce::var& args);
     juce::var cmdAddTestTone    (const juce::var& args);
     juce::var cmdSetTransport   (const juce::var& args);
     juce::var cmdSetTempo       (const juce::var& args);

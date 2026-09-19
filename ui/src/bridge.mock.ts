@@ -4927,6 +4927,29 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── MIDI clips + notes (piano-roll) ──────────────────────────────────────
+    case "import_midi_file": {
+      // Mirrors MoshOps::cmdImportMidiFile (same guards and error strings). The mock has no file
+      // system, so a fixed one-bar riff stands in for the file's notes.
+      const file = str(args.file);
+      if (!file) return err(command, "missing 'file'");
+      const base = file.split("/").pop() ?? file;
+      if (!/\.(mid|midi)$/i.test(base)) return err(command, `not a Standard MIDI File: ${base}`);
+      let t = str(args.trackId) ? findTrack(str(args.trackId)) : null;
+      if (str(args.trackId) && !t) return err(command, "no track with that id");
+      if (t && t.clips.some((c) => c.type === "wave")) return err(command, "track holds wave audio — import MIDI onto a MIDI track");
+      pushUndo();
+      const created = !t;
+      if (!t) {
+        t = { id: nextTrackId(), index: snapshot.tracks.length, name: base.replace(/\.[^.]+$/, ""), type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [] };
+        snapshot.tracks.push(t);
+      }
+      ensureInstrument(t, false);
+      const notes: MidiNote[] = [60, 62, 64, 65, 67, 69, 71, 72].map((pitch, k) => ({ i: k, pitch, start: k * 0.5, length: 0.5, velocity: 100 }));
+      const beatSec = (4 / (snapshot.session.timeSigDenominator ?? 4)) * (60 / snapshot.session.tempo);
+      const c: Clip = { id: nextClipId(), name: str(args.name) || t.name, type: "midi", start: Math.max(0, num(args.startSeconds, 0)), length: 4 * beatSec, offset: 0, hasRenderLayer: false, notes };
+      t.clips.push(c); invalidate();
+      return ok(command, { clipId: c.id, trackId: t.id, noteCount: notes.length, createdTrack: created });
+    }
     case "add_midi_clip": {
       const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0]; if (!t) return err(command, "no track");
       pushUndo();
@@ -5467,6 +5490,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           { name: "kick.wav", path: path + "/kick.wav", isDir: false, size: 240000 },
           { name: "snare.wav", path: path + "/snare.wav", isDir: false, size: 180000 },
           { name: "vocal_take.wav", path: path + "/vocal_take.wav", isDir: false, size: 4200000 },
+          { name: "riff.mid", path: path + "/riff.mid", isDir: false, size: 1200 },
         ],
       });
     }

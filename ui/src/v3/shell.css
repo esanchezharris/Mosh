@@ -221,7 +221,7 @@
 }
 .v3-shell .ricon svg { width: 16px; height: 16px; }
 .v3-shell .ricon.on {
-  color: var(--accent); background: rgba(198,245,66,.1); border-color: rgba(198,245,66,.35);
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .v3-shell .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -270,8 +270,8 @@
 }
 .v3-shell .trk .hd .ctl button.arm { color: var(--record); border-color: #5A2A26; }
 .v3-shell .trk.sel .hd {
-  border-color: var(--accent); background: #1C2414;
-  box-shadow: inset 0 1px 0 rgba(198,245,66,.2), 0 0 0 1px rgba(198,245,66,.35);
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 20%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .v3-shell .trk.sel .hd b { color: var(--accent); font-weight: 600; }
 .v3-shell .trk .lane {
@@ -292,8 +292,8 @@
   background: #141818; border: 1px solid #252A2A; overflow: hidden; cursor: pointer;
 }
 .v3-shell .clip.hl {
-  border-color: rgba(198,245,66,.7); background: #263018;
-  box-shadow: inset 0 1px 0 rgba(198,245,66,.22);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 14%, var(--lane));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .v3-shell .cwave { width: 100%; height: 100%; }
 .v3-shell .cwave svg { display: block; width: 100%; height: 100%; }
@@ -328,7 +328,7 @@
   padding: 3px 8px; border-radius: 999px; border: 1px solid var(--fog-line);
   background: #101212; font-size: 9px; color: var(--fog-label); cursor: pointer;
 }
-.v3-shell .chip.on { border-color: rgba(198,245,66,.45); color: var(--accent); background: rgba(198,245,66,.1); }
+.v3-shell .chip.on { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .v3-shell .insp .pr {
   display: flex; flex-direction: column; gap: 6px; padding: 6px 7px; border-radius: 6px;
   background: var(--surface2); border: 1px solid var(--fog-line);
@@ -384,7 +384,7 @@
 .v3-shell .moshi-btn .ring {
   position: absolute; inset: 0; border-radius: 10px; border: 1.5px solid transparent;
 }
-.v3-shell .moshi-btn.listen .ring { border-color: rgba(198,245,66,.55); }
+.v3-shell .moshi-btn.listen .ring { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v3-shell .moshi-btn.busy, .v3-shell .moshi-btn:disabled { opacity: .45; cursor: default; }
 .v3-shell .moshi-host { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; }
 .v3-shell .field {
@@ -435,7 +435,7 @@
   display: flex; flex-direction: column; gap: 5px; padding: 7px; border-radius: 6px;
   background: var(--surface2); border: 1px solid var(--fog-line); cursor: pointer;
 }
-.v3-shell .take.kept { border-color: rgba(198,245,66,.5); background: #262C1C; }
+.v3-shell .take.kept { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface2)); }
 /* MOSHI-LOOP — the phone-pad dialog and the Booth's own pad. Existing tokens only. */
 .v3-shell .phone-body { align-items: center; gap: 10px; }
 .v3-shell .phone-qr { width: 240px; height: 240px; border-radius: var(--v2-radius-sm); }
@@ -568,3 +568,7 @@
 .v3-shell .pr-head .live-loopbar { background: var(--surface2); border-color: var(--line); }
 .v3-shell .pr-head .live-loopbar-readout { color: var(--muted); }
 .v3-shell .pr-head .live-loopbar-brace { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: var(--accent); }
+
+/* Browser rows that ACT (the MIDI tab's files import on click) are buttons, styled as rows. */
+.v3-shell button.br-row { display: block; width: 100%; text-align: left; background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; }
+.v3-shell button.br-row:hover { background: var(--surface2); }

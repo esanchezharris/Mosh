@@ -88,6 +88,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   loop_navigate: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
   loop_home: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
   loop_lead_in: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  import_midi_file: "the Browser's MIDI tab lands a .mid file as one clip; the model writes notes through add_midi_clip / add_note, never from files it cannot see",
   report_issue: "the deterministic typed/voice issue route records owner feedback before model routing; report text is never model-authored",
   list_issues: "read-only feed for the private Issue Inbox panel",
   update_issue: "owner triage state in the private Issue Inbox, not a musical edit",

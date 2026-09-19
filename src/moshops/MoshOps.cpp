@@ -782,6 +782,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "remove_annotation") return broadcastStructuralIfActive (name, args, cmdRemoveAnnotation (args));
     if (name == "remove_track")      return cmdRemoveTrack (args);
     if (name == "import_clip")       return cmdImportClip (args);
+    if (name == "import_midi_file")  return cmdImportMidiFile (args);
     if (name == "import_clip_data")  return cmdImportClipData (args);
     if (name == "add_test_tone_clip")return cmdAddTestTone (args);
     if (name == "set_transport")     return cmdSetTransport (args);
@@ -4445,7 +4446,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
 {
     static const juce::StringArray replayable {
         "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "set_track_icon", "move_track",
-        "import_clip", "add_test_tone_clip", "add_midi_clip",
+        "import_clip", "import_midi_file", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "consolidate_clips", "crop_clip", "bounce_track", "freeze_track", "unfreeze_track", "remove_clip", "rename_clip",
         "promote_take_region",
         "set_clip_mute", "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "relink_clip", "set_clip_warp",

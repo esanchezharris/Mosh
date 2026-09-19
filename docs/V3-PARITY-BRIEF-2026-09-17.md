@@ -104,6 +104,8 @@ sake — the matrix is the checklist, the count is a symptom.
 
 ## 5. Owner acceptance — the rows no gate can close
 
+The rows are in [docs/VERIFICATION.md](VERIFICATION.md) under "V3 default-shell acceptance" (V3-beat, V3-vocal, V3-mix, V3-file, V3-mp, V3-feel), with the evidence directory convention.
+
 One real session on the built Release, V3 selected, on the owner's Mac: drop in a beat, record
 a vocal with count-in, mix it, save, reopen, export, and run one multiplayer session with a
 second Mac. Feel, audibility and latency are the owner's call. Record it as a dated evidence

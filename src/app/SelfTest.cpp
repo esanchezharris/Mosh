@@ -694,6 +694,51 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         badFile.deleteFile();
     }
 
+    // 1c. import_midi_file (V3 parity brief row 12): a Standard MIDI File lands as ONE MIDI
+    // clip on a new MIDI track in one transaction; a non-MIDI file is refused before any
+    // mutation; one undo removes the track.
+    {
+        juce::MidiFile mf;
+        mf.setTicksPerQuarterNote (96);
+        juce::MidiMessageSequence seq;
+        for (int i = 0; i < 4; ++i)
+        {
+            seq.addEvent (juce::MidiMessage::noteOn (1, 60 + i, (juce::uint8) 100), i * 96.0);
+            seq.addEvent (juce::MidiMessage::noteOff (1, 60 + i), i * 96.0 + 48.0);
+        }
+        seq.updateMatchedPairs();
+        mf.addTrack (seq);
+        auto midFile = eng.sessionDir().getChildFile ("selftest-import.mid");
+        {
+            juce::FileOutputStream out (midFile);
+            out.setPosition (0); out.truncate();
+            mf.writeTo (out, 1);
+        }
+        const int before = tracks (ops);
+        auto imp = cmd (ops, "import_midi_file", args1 ("file", midFile.getFullPathName()));
+        check (ok (imp), "import_midi_file lands a MIDI clip");
+        check (tracks (ops) == before + 1, "import_midi_file created one track");
+        check ((int) imp["data"].getProperty ("noteCount", 0) == 4, "import_midi_file counted the file's 4 notes");
+        {
+            auto trk = firstTrack (ops);
+            int notesOnClip = -1;
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == imp["data"].getProperty ("clipId", var()).toString())
+                        notesOnClip = (int) c.getProperty ("notes", var()).size();
+            check (notesOnClip == 4, "the imported clip carries 4 notes in the snapshot");
+        }
+        cmd (ops, "undo");
+        check (tracks (ops) == before, "undo removes the imported MIDI track (one transaction)");
+        auto notMidi = eng.sessionDir().getChildFile ("selftest-not-midi.mid");
+        notMidi.replaceWithText ("this is plainly not a MIDI file");
+        auto badMidi = cmd (ops, "import_midi_file", args1 ("file", notMidi.getFullPathName()));
+        check (! ok (badMidi), "import_midi_file of a non-MIDI file fails");
+        check (tracks (ops) == before, "failed MIDI import created no stray track (no partial mutation)");
+        notMidi.deleteFile();
+        midFile.deleteFile();
+    }
+
     // 2. create_track
     auto r = cmd (ops, "create_track", args1 ("name", "Drums"));
     check (ok (r), "create_track ok");
