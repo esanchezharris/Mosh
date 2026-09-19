@@ -271,6 +271,90 @@ juce::var MoshOps::cmdImportClip (const juce::var& args)
                                   args);
 }
 
+// V3 parity brief row 12 — import a Standard MIDI File as ONE MIDI clip. Every track of the
+// file is merged onto one lane (type-0 and type-1 alike); splitting by instrument is a later
+// ask. Everything is validated BEFORE beginTxn — the import_clip lesson above: a bad file must
+// never leave an orphan track inside a failed command's transaction. Mirrored by the
+// bridge.mock.ts case (same error strings, a fixed riff standing in for the file's notes).
+juce::var MoshOps::cmdImportMidiFile (const juce::var& args)
+{
+    static const juce::String command ("import_midi_file");
+    const auto path = args.getProperty ("file", var()).toString();
+    if (path.isEmpty()) return errResult (command, "missing 'file'");
+    const File source (path);
+    if (! source.existsAsFile()) return errResult (command, "file not found: " + path);
+
+    juce::MidiFile midi;
+    {
+        juce::FileInputStream stream (source);
+        if (! stream.openedOk() || ! midi.readFrom (stream, true))
+            return errResult (command, "not a Standard MIDI File: " + source.getFileName());
+    }
+    const int timeFormat = midi.getTimeFormat();
+    if (timeFormat <= 0) return errResult (command, "SMPTE-timed MIDI files are not supported");
+    const double ticksPerBeat = (double) timeFormat;
+
+    struct NoteSpec { int pitch; double start; double length; int velocity; };
+    std::vector<NoteSpec> notes;
+    double endBeat = 0.0;
+    for (int t = 0; t < midi.getNumTracks(); ++t)
+    {
+        juce::MidiMessageSequence seq (*midi.getTrack (t));
+        seq.updateMatchedPairs();
+        for (int i = 0; i < seq.getNumEvents(); ++i)
+        {
+            auto* ev = seq.getEventPointer (i);
+            if (! ev->message.isNoteOn() || ev->noteOffObject == nullptr) continue;
+            const double start  = ev->message.getTimeStamp() / ticksPerBeat;
+            // 1/16 beat floor: the same kMinMidiNoteBeats add_note applies (MoshOps.cpp).
+            const double length = juce::jmax (0.0625, (ev->noteOffObject->message.getTimeStamp() - ev->message.getTimeStamp()) / ticksPerBeat);
+            notes.push_back ({ ev->message.getNoteNumber(), start, length, juce::jlimit (1, 127, (int) ev->message.getVelocity()) });
+            endBeat = juce::jmax (endBeat, start + length);
+        }
+    }
+    if (notes.empty()) return errResult (command, "no notes in " + source.getFileName());
+
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    te::AudioTrack* track = trackId.isNotEmpty() ? findTrack (trackId) : nullptr;
+    if (trackId.isNotEmpty() && track == nullptr) return errResult (command, "no track with that id");
+    if (track != nullptr)
+        for (auto* c : track->getClips())
+            if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
+                return errResult (command, juce::String (juce::CharPointer_UTF8 ("track holds wave audio \xe2\x80\x94 import MIDI onto a MIDI track")));
+
+    const double startSeconds = juce::jmax (0.0, (double) args.getProperty ("startSeconds", 0.0));
+    auto& ts = eng.edit().tempoSequence;
+    const auto startBeat = ts.toBeats (tracktion::TimePosition::fromSeconds (startSeconds));
+    const auto endTime   = ts.toTime (startBeat + tracktion::BeatDuration::fromBeats (std::ceil (endBeat)));
+    const auto name = args.getProperty ("name", source.getFileNameWithoutExtension()).toString();
+
+    beginTxn (command);
+    const bool created = track == nullptr;
+    if (created)
+    {
+        track = createAudioTrack (source.getFileNameWithoutExtension());
+        if (track == nullptr) return errResult (command, "no track");
+    }
+    ensureDefaultInstrument (*track, false);   // DRM-001: the notes must be audible; no wave clips here (checked above)
+    auto clip = track->insertMIDIClip (name, { tracktion::TimePosition::fromSeconds (startSeconds), endTime }, nullptr);
+    if (clip == nullptr) return errResult (command, "insertMIDIClip failed");
+    auto& sequence = clip->getSequence();
+    for (const auto& n : notes)
+        sequence.addNote (n.pitch, tracktion::BeatPosition::fromBeats (n.start),
+                          tracktion::BeatDuration::fromBeats (n.length), n.velocity, 0, &undoManager());
+    ensureTrackMeter (*track);
+    synchronisePlaybackGraph();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", clip->itemID.toString());
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("noteCount", (int) notes.size());
+    data->setProperty ("createdTrack", created);
+    logLine (command, args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult (command, var (data));
+}
+
 juce::var MoshOps::cmdImportClipData (const juce::var& args)
 {
     auto name = args.getProperty ("name", var()).toString();

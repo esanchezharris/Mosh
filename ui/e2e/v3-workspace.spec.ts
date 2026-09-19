@@ -134,3 +134,26 @@ test("a note added in the shared PianoRoll lands on the clip and one undo remove
   await page.keyboard.press("ControlOrMeta+z");
   await expect(notes).toHaveCount(before);
 });
+
+test("a .mid in the Browser's MIDI tab lands as one clip on a new MIDI track, and one undo removes it", async ({ page }) => {
+  await bootV3(page);
+  const tracks = page.getByTestId("v3-track");
+  const clips = page.getByTestId("v3-clip");
+  await expect(tracks.first()).toBeVisible();
+  const tracksBefore = await tracks.count();
+  const clipsBefore = await clips.count();
+  // with a WAVE track selected the engine creates a MIDI track; a MIDI-capable selection would take the clip itself
+  await page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" }).getByRole("button", { name: /^Select track/ }).click();
+  await page.getByTestId("v3-import-audio").click();
+  await page.getByTestId("v3-browser-midi").click();
+  const file = page.getByTestId("v3-midi-file").first();
+  await expect(file).toHaveText("riff.mid");                              // anti-vacuity: the listing is real
+  await file.click();
+  await expect(tracks).toHaveCount(tracksBefore + 1);
+  await expect(clips).toHaveCount(clipsBefore + 1);
+  await expect(tracks.last()).toContainText("riff");
+  await expect(tracks.last().locator(".midi-tag")).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(tracks).toHaveCount(tracksBefore);
+  await expect(clips).toHaveCount(clipsBefore);
+});

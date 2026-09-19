@@ -90,6 +90,7 @@ get_plugin_blocklist	Unguarded
 get_rhymes	Unguarded
 import_clip	Track
 import_clip_data	Track
+import_midi_file	Track
 import_lora_adapter	Unguarded
 import_training_source	Unguarded
 insert_tempo_change	SessionGlobal

@@ -53,18 +53,17 @@ test("the colorway reaches the accents: a selected clip's border follows violet,
   });
   await clip.click();
   await expect(clip).toHaveClass(/hl/);
+  // the clip's border-color TRANSITIONS from the base grey, so poll until the accent has landed
+  await expect.poll(async () => { const [r, g] = await border(); return g > r; }).toBe(true);   // lime: green leads
   const lime = await border();
   expect(Array.isArray(lime)).toBe(true);                                  // anti-vacuity: a real colour
-  const [lr, lg] = lime as number[];
-  expect(lg).toBeGreaterThan(lr);                                          // lime: green leads
   await page.getByTestId("v3-file-trigger").click();
   await page.getByTestId("v3-open-settings").click();
   await page.locator('[data-testid="v3-colorway"][data-colorway="violet"]').click();
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", "violet");
-  await expect.poll(async () => JSON.stringify(await border())).not.toBe(JSON.stringify(lime));
-  const [, vg, vb] = (await border()) as number[];
-  expect(vb).toBeGreaterThan(vg);                                          // violet #B8A4FF: blue leads
+  await expect.poll(async () => { const [, g, b] = await border(); return b > g; }).toBe(true);   // violet #B8A4FF: blue leads (after the transition)
+  expect(JSON.stringify(await border())).not.toBe(JSON.stringify(lime));
 });
 
 test("File menu Templates enter Booth without a top toggle or RECORDING banner", async ({ page }) => {
