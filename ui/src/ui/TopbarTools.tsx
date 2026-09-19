@@ -6,7 +6,6 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { useLoraLab } from "./dock/useLoraLab";
 import { useSettings } from "../settings/store";
@@ -23,6 +22,7 @@ import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { QrImage } from "./QrImage";
 import { isInModalLayer } from "../hooks/modalLayer";
 import { copyText } from "../clipboard";
 import type { MemoryRecord } from "../agent/memory/retrieveContext";
@@ -824,21 +824,23 @@ export function RemoteTool({ label, title, className, ariaLabel, testId }: ToolC
   );
 }
 
-// The QR the phone actually scans. DEFAULT is the Safari `webUrl` — it opens the
-// no-install DAWN pad at /web in mobile Safari, so a phone WITHOUT the native
-// MoshCompanion app can still drive the session. `pairingUrl` is a mosh:// deep
-// link that iOS cannot open unless that app is installed, which made the old
-// always-deep-link QR a dead end on an un-provisioned phone.
+// The QR the phone actually scans. DEFAULT is `padUrl` — the no-install Moshi phone pad
+// at /pad in mobile Safari, so a phone WITHOUT the native MoshCompanion app can still
+// drive the session. `pairingUrl` is a mosh:// deep link that iOS cannot open unless
+// that app is installed, which made the old always-deep-link QR a dead end on an
+// un-provisioned phone. The URL is printed as well as encoded: a producer whose camera
+// will not focus on the screen can type it.
 function PairingPanel({ pairing, onStop }: { pairing: RemotePairingInfo; onStop: () => void }) {
   const [useAppLink, setUseAppLink] = useState(false);
+  const url = useAppLink ? pairing.pairingUrl : pairing.padUrl;
   return (
     <>
-      <PairingQR url={useAppLink ? pairing.pairingUrl : pairing.webUrl} />
+      <QrImage url={url} size={160} className="remote-qr" alt="iPhone pairing QR" testId="remote-qr" />
       <div className="pop-note tc">
         {useAppLink ? "Opens the MoshCompanion app (must be installed)." : "Scan with the iPhone Camera \u2014 opens in Safari, no app needed."}
       </div>
       <div className="remote-code tc">{pairing.token.slice(0, 6).toUpperCase()}</div>
-      <div className="pop-note tc">{pairing.host}:{pairing.port}</div>
+      <div className="pop-note tc remote-url" data-testid="remote-url">{url}</div>
       <div className="pop-actions">
         <button className="btn" onClick={() => setUseAppLink((v) => !v)}>
           {useAppLink ? "Safari link" : "App link"}
@@ -847,14 +849,4 @@ function PairingPanel({ pairing, onStop }: { pairing: RemotePairingInfo; onStop:
       </div>
     </>
   );
-}
-
-function PairingQR({ url }: { url: string }) {
-  const [dataUrl, setDataUrl] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    void QRCode.toDataURL(url, { margin: 1, width: 160, color: { dark: "#0b0b0b", light: "#ccff23" } }).then((d) => { if (!cancelled) setDataUrl(d); });
-    return () => { cancelled = true; };
-  }, [url]);
-  return dataUrl ? <img className="remote-qr" src={dataUrl} alt="iPhone pairing QR" /> : null;
 }

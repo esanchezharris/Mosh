@@ -653,6 +653,57 @@ export type DirListing = {
 // mode ∈ voice.js SCALES — the two domains must match the voice module exactly.
 export type SessionKey = { tonic: string; mode: string };
 
+// MOSHI-LOOP — the Moshi recording loop's state, as MoshOps::loopStateVar() writes it
+// (src/moshops/MoshOps.Loop.cpp). It is embedded in the snapshot as `loop` AND returned
+// by loop_state, and the phone pad and the V3 Booth are two clients of the SAME model.
+//
+// One recorded pass. `label` is POSITIONAL ("Part 1", "Part 2" …) and renumbers when a
+// pass is deleted — only `id` is a stable handle. `keeper` means it was promoted to the
+// Lead track; `rejected` means the producer asked to redo it (the audio is muted, never
+// deleted). The engine-side ids and qn positions are optional because the phone endpoint
+// strips them before they reach a phone.
+export type LoopContribution = {
+  id: string;
+  label: string;
+  keeper: boolean;
+  rejected: boolean;
+  clipId?: string;
+  trackId?: string;
+  entryQn?: number;
+  startQn?: number;
+  endQn?: number;
+};
+
+export type LoopState = {
+  /** Identity for the phone's authority handshake (PhoneLoopEndpoint); the desktop, which
+   *  IS the host, never reads either. Present in the snapshot block all the same, because
+   *  this type is loopStateVar()'s object and not a desktop-shaped subset of it. */
+  projectId?: string;
+  host?: string;
+  /** Both the Lead and the Takes track resolve — nothing else is actionable without it. */
+  engaged: boolean;
+  /** setup_required | count_in | recording | auditioning | playing | idle. */
+  phase: string;
+  leadTrackId?: string;
+  takesTrackId?: string;
+  /** NESTED, exactly as loopStateVar() writes it. The phone endpoint flattens this for the
+   *  pad's own contract; the desktop reads the engine's shape (loopPolicy.ts's readers). */
+  transport: { recording: boolean; playing: boolean; positionSec: number };
+  /** Where the next pass starts listening. `entryQn` is null until a pass has entered —
+   *  which the UI renders differently from "enters at zero". */
+  listening: { qn: number; bar: number; entryQn: number | null; leadQn: number };
+  /** The in-flight pass while recording, else null. */
+  currentId: string | null;
+  lastId: string | null;
+  reviewId: string | null;
+  auditionedId: string | null;
+  contributions: LoopContribution[];
+  /** Host clock reading at the phone's last poll (0 = no phone has ever polled). */
+  phoneSeenMs?: number;
+  /** Why this Mac cannot record right now; empty when it can. */
+  blockReason?: string;
+};
+
 // CAP-TRN-005 — the metronome's sound, level and routing, read straight off
 // tracktion_engine's own click-track surface (te::Edit's CLICKTRACK child plus two
 // app-global PropertyStorage settings). Not a Mosh model: every field maps 1:1 to
@@ -994,6 +1045,8 @@ export type Snapshot = {
   trackGroupsSuspended?: boolean;
   audio?: AudioSelection;
   training?: TrainingState;
+  /** MOSHI-LOOP — the recording loop, additive. Absent on a backend that predates it. */
+  loop?: LoopState;
 };
 
 export type CommandResult<T = unknown> = {

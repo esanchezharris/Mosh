@@ -48,10 +48,14 @@ test("File menu Templates enter Booth without a top toggle or RECORDING banner",
   await expect(page.getByTestId("v3-arrangement")).toHaveCount(0);
   await expect(page.getByText("RECORDING", { exact: true })).toHaveCount(0);
   await expect(page.locator(".recording-banner")).toHaveCount(0);
-  await page.getByTestId("v3-booth-record").click();
+  // the Booth is the recording loop's pad now: pick a Lead, then roll
+  await page.getByTestId("v3-booth-setup").click();
+  await page.getByTestId("v3-loop-record").click();
+  await expect(page.getByTestId("v3-record")).toHaveClass(/on/);
   await expect(page.getByText("RECORDING", { exact: true })).toHaveCount(0);
   await expect(page.locator(".recording-banner")).toHaveCount(0);
   await expect(page.getByTestId("v3-moshi-dock")).toHaveAttribute("data-recording-safe", "true");
+  await page.getByTestId("v3-loop-stop").click();
   await page.getByTestId("v3-booth-studio").click();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 });

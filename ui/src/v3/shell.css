@@ -436,6 +436,35 @@
   background: var(--surface2); border: 1px solid var(--fog-line); cursor: pointer;
 }
 .v3-shell .take.kept { border-color: rgba(198,245,66,.5); background: #262C1C; }
+/* MOSHI-LOOP — the phone-pad dialog and the Booth's own pad. Existing tokens only. */
+.v3-shell .phone-body { align-items: center; gap: 10px; }
+.v3-shell .phone-qr { width: 240px; height: 240px; border-radius: var(--v2-radius-sm); }
+.v3-shell .phone-qr-wait {
+  width: 240px; height: 240px; border-radius: var(--v2-radius-sm);
+  background: var(--surface2); border: 1px solid var(--fog-line);
+}
+.v3-shell .phone-url {
+  font-size: var(--v2-fs-sm); color: var(--muted); text-align: center;
+  overflow-wrap: anywhere; user-select: all;
+}
+.v3-shell .booth-pads { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v3-shell .booth-pads .btn.on { border-color: var(--record); color: var(--record); }
+.v3-shell .booth-readout {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+  font-size: var(--v2-fs-base); color: var(--text);
+}
+.v3-shell .booth-forms { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.v3-shell .booth-forms label { display: flex; gap: 6px; align-items: center; }
+.v3-shell .booth-forms input.field { width: 72px; }
+.v3-shell .booth-phone-status { font-size: var(--v2-fs-sm); color: var(--muted); }
+.v3-shell .booth-parts {
+  width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px;
+  overflow: auto; padding: 10px; border-left: 1px solid rgba(255,255,255,.06); background: var(--insp);
+}
+.v3-shell .booth-parts .take { text-align: left; }
+.v3-shell .booth-parts .take.rejected { border-color: var(--line); color: var(--muted); opacity: .75; }
+.v3-shell .booth-parts .take.sel { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
+.v3-shell .booth-parts .take:disabled { cursor: default; opacity: .5; }
 .v3-shell .body.booth-morph { animation: v3Booth .28s var(--ease-morph); }
 @keyframes v3Booth { from { opacity: .6; transform: scale(.985); } to { opacity: 1; transform: none; } }
 .v3-shell .recording-banner { display: none !important; }

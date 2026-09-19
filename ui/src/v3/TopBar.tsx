@@ -18,6 +18,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const setHistoryOpen = useV3((s) => s.setHistoryOpen);
   const mpOpen = useV3((s) => s.mpOpen);
   const setMpOpen = useV3((s) => s.setMpOpen);
+  const phoneOpen = useV3((s) => s.phoneOpen);
+  const setPhoneOpen = useV3((s) => s.setPhoneOpen);
+  const phonePaired = useStore((s) => !!s.remoteStatus?.pairing);
   const mpActive = useStore((s) => s.mp.active);
   const bbs = secondsToBBSMap(tempoMapFrom(snapshot.session), t.position);
   const name = projectLabel(snapshot.session.editFile) || "untitled";
@@ -76,6 +79,10 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <button type="button" className={`btn ghost${mpActive ? " on" : ""}`} data-testid="v3-mp-trigger"
         aria-haspopup="dialog" aria-expanded={mpOpen} title={mpActive ? "Session is shared — room code and roster" : "Start or join a multiplayer session"}
         onClick={() => setMpOpen(!mpOpen)}>{mpActive ? "Shared" : "Invite"}</button>
+      <button type="button" className={`btn ghost${phonePaired ? " on" : ""}`} data-testid="v3-phone-trigger"
+        aria-haspopup="dialog" aria-expanded={phoneOpen}
+        title={phonePaired ? "The phone pad is running — show the QR" : "Pair an iPhone as a recording pad"}
+        onClick={() => setPhoneOpen(!phoneOpen)}>Phone</button>
       <button type="button" className="btn ghost" data-testid="v3-history"
         aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>History</button>
     </div>

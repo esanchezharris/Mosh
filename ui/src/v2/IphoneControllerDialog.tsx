@@ -5,28 +5,14 @@
 // mid-session, from the track you are about to sing on, and the old route (topbar
 // "iPhone" -> Start pairing) buried it away from that moment.
 //
-// The QR encodes `pairing.webUrl` — the no-install Safari pad at /web — NOT the
+// The QR encodes `pairing.padUrl` — the no-install Moshi phone pad at /pad — NOT the
 // `mosh://pair` deep link, which iOS cannot open unless the native MoshCompanion app
 // is installed. The host inside both URLs comes from RemoteCompanionServer::
 // pairingUrlHost(), which resolves to the LAN IPv4 precisely so the phone can reach it.
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import * as QRCode from "qrcode";
 import { useStore } from "../store";
-
-function Qr({ url }: { url: string }) {
-  const [dataUrl, setDataUrl] = useState("");
-  useEffect(() => {
-    let cancelled = false;
-    void QRCode.toDataURL(url, { margin: 1, width: 240, color: { dark: "#0b0b0b", light: "#ccff23" } })
-      .then((d) => { if (!cancelled) setDataUrl(d); })
-      .catch(() => { if (!cancelled) setDataUrl(""); });
-    return () => { cancelled = true; };
-  }, [url]);
-  return dataUrl
-    ? <img className="v2-iphone-qr" src={dataUrl} alt="iPhone controller pairing QR" data-testid="v2-iphone-qr" />
-    : <div className="v2-iphone-qr-wait" aria-hidden="true" />;
-}
+import { QrImage } from "../ui/QrImage";
 
 export function IphoneControllerDialog({ onClose }: { onClose: () => void }) {
   const remote = useStore((s) => s.remoteStatus);
@@ -67,11 +53,12 @@ export function IphoneControllerDialog({ onClose }: { onClose: () => void }) {
 
         {pairing ? (
           <>
-            <Qr url={pairing.webUrl} />
+            <QrImage url={pairing.padUrl} className="v2-iphone-qr" waitClassName="v2-iphone-qr-wait"
+              alt="iPhone controller pairing QR" testId="v2-iphone-qr" />
             <div className="v2-iphone-note">
               Scan with the iPhone Camera. Opens in Safari — no app to install.
             </div>
-            <div className="v2-iphone-url" data-testid="v2-iphone-url">{pairing.webUrl}</div>
+            <div className="v2-iphone-url" data-testid="v2-iphone-url">{pairing.padUrl}</div>
             <div className="v2-iphone-note v2-iphone-dim">
               Phone must be on the same Wi-Fi as this Mac.
             </div>

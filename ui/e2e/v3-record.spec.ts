@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { bootV3 } from "./helpers";
 
-// V3 parity brief row 4 — the recording loop V3 already wires (#702), pinned end to end against
-// the mock: arm from the track header, count-in from the top bar, record / stop in the Booth
-// (each stop lands a take), pick a take, Keep flattens the comp, one undo restores it.
-// Audibility, latency and a real input device are the owner's rows in docs/VERIFICATION.md.
+// V3 parity brief row 4, rewritten for the Moshi recording loop (the Booth is now the
+// desktop twin of the phone pad): pick a Lead, Put Me In, and every pass is PRESERVED —
+// Keep promotes one to the Lead track and rolls straight into the next, Again marks one
+// as a redo without deleting it, and one undo reverses that. Audibility, latency and a
+// real input device stay owner rows in docs/VERIFICATION.md.
 
 type MoshWindow = Window & { __moshStore?: { getState: () => { snapshot?: { session: { countInBars?: number } } } } };
 
@@ -26,7 +27,7 @@ test("count-in writes the engine setting and reads back through the snapshot", a
   await expect(select).toHaveValue("0");
 });
 
-test("arm, record twice, pick a take, Keep, undo — every step reads back", async ({ page }) => {
+test("set up a Lead, keep one pass and redo another — every pass is preserved, and undo reverses the redo", async ({ page }) => {
   await bootV3(page);
   await page.getByLabel("Count-in").selectOption("0");
 
@@ -39,38 +40,60 @@ test("arm, record twice, pick a take, Keep, undo — every step reads back", asy
   // the Booth follows the SELECTED track; arming alone does not select
   await keys.getByRole("button", { name: /^Select track/ }).click();
   await expect(page.getByTestId("v3-inspector")).toHaveAttribute("data-track-id", (await keys.getAttribute("data-track-id"))!);
+  await expect(page.locator('[data-testid="v3-track"]')).toHaveCount(3);   // anti-vacuity baseline
 
   await enterBooth(page);
-  const takes = page.getByTestId("v3-take");
-  await expect(takes).toHaveCount(0);                                   // anti-vacuity baseline
-  await expect(page.getByTestId("v3-takes")).toContainText("No takes yet");
+  const parts = page.getByTestId("v3-loop-part");
+  await expect(parts).toHaveCount(0);
+  await expect(page.getByTestId("v3-loop-record")).toHaveCount(0);         // nothing to press before a Lead
 
-  const record = page.getByTestId("v3-booth-record");
+  await page.getByTestId("v3-booth-setup").click();
+  await expect(page.getByTestId("v3-loop-record")).toBeEnabled();
+
+  // the takes lane really exists in the arrangement, named after the Lead
+  await page.getByTestId("v3-booth-studio").click();
+  await expect(page.locator('[data-testid="v3-track"]')).toHaveCount(4);
+  await expect(page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys · Takes" })).toHaveCount(1);
+  await enterBooth(page);
+
+  const record = page.getByTestId("v3-loop-record");
+  const stop = page.getByTestId("v3-loop-stop");
+  const transportRec = page.getByTestId("v3-record");
+
   await record.click();
-  await expect(page.getByTestId("v3-record")).toHaveClass(/on/);        // transport shows recording
-  await record.click();
-  await expect(page.getByTestId("v3-record")).not.toHaveClass(/on/);
-  await expect(takes).toHaveCount(1);                                   // the stop landed a take
-  await expect(takes.first()).toHaveClass(/kept/);
+  await expect(transportRec).toHaveClass(/on/);                            // transport shows recording
+  await stop.click();
+  await expect(transportRec).not.toHaveClass(/on/);
+  await expect(parts).toHaveCount(1);                                      // the pass was preserved
+  await expect(parts.first()).not.toHaveClass(/kept/);
+  await expect(parts.first()).toContainText("Part 1 · preserved");
 
   await record.click();
-  await record.click();
-  await expect(takes).toHaveCount(2);
-  await expect(takes.nth(1)).toHaveClass(/kept/);
-  await expect(takes.nth(0)).not.toHaveClass(/kept/);
+  await page.getByTestId("v3-loop-keep").click();
+  await expect(parts).toHaveCount(2);
+  await expect(parts.nth(1)).toHaveClass(/kept/);
+  await expect(parts.nth(1)).toContainText("Part 2 · kept");
+  await expect(transportRec).toHaveClass(/on/);                            // Keep rolls straight into the next pass
+  await stop.click();
+  await expect(transportRec).not.toHaveClass(/on/);
 
-  await takes.nth(0).click();                                           // set_current_take
-  await expect(takes.nth(0)).toHaveClass(/kept/);
-  await expect(takes.nth(1)).not.toHaveClass(/kept/);
+  await parts.first().click();                                             // select Part 1
+  await expect(page.getByTestId("v3-booth")).toContainText("Target · Part 1 · preserved");
+  await page.getByTestId("v3-loop-again").click();
+  await expect(parts.first()).toHaveClass(/rejected/);
+  await expect(parts.first()).toContainText("Part 1 · preserved redo");
+  await expect(transportRec).toHaveClass(/on/);                            // Again rolls back and rolls again
+  await stop.click();
+  await expect(transportRec).not.toHaveClass(/on/);
 
-  await page.getByTestId("v3-take-next").click();                       // Next: back to take 2
-  await expect(takes.nth(1)).toHaveClass(/kept/);
-  await page.getByTestId("v3-take-keep").click();                       // keep_take flattens
-  await expect(takes).toHaveCount(0);
-  await expect(page.getByTestId("v3-takes")).toContainText("No takes yet");
-
-  await page.keyboard.press("ControlOrMeta+z");                         // one undo restores the comp
-  await expect(takes).toHaveCount(2);
+  // ONE undo reverses the Again and nothing else: Part 1 stops being a redo, Part 2 stays
+  // kept, and the three passes captured before it are all still there. Landing a pass is a
+  // lifecycle event, not an undo step, so the Stop above did not consume this ⌘Z.
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(parts).toHaveCount(3);
+  await expect(parts.first()).not.toHaveClass(/rejected/);
+  await expect(parts.first()).toContainText("Part 1 · preserved");
+  await expect(parts.nth(1)).toHaveClass(/kept/);
 
   await page.getByTestId("v3-booth-studio").click();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
