@@ -9048,7 +9048,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             eventTypes.clear();
             auto keep = cmd (ops, "loop_keep", args1 ("targetId", passId));
             check (ok (keep), "loop_keep ok");
-            check (! (bool) keep["data"].getProperty ("applied", true), "loop_keep applied:false headless (no restart)");
+            // applied is "did the thing I pressed happen?", and Keep's primary effect is the
+            // clip edit — which commits with or without an interface. The restart is the
+            // SECONDARY outcome and is reported on its own, with its reason in the detail
+            // the phone shows. Reporting a committed keep as rejected would be a lie.
+            check ((bool) keep["data"].getProperty ("applied", false),
+                   "loop_keep applied:true headless — the keep itself committed");
+            check (! (bool) keep["data"].getProperty ("restarted", true),
+                   "loop_keep restarted:false headless (the transport could not roll)");
+            check (keep["data"].getProperty ("detail", var()).toString().contains ("did not restart")
+                       && keep["data"].getProperty ("detail", var()).toString().contains ("no audio"),
+                   "loop_keep's detail names the failed restart and its reason");
             check (keep["data"].getProperty ("keptId", var()).toString() == passId, "loop_keep names the kept pass");
             check (clipTrackId (passClipId) == leadId, "the kept clip now lives on the LEAD track");
             check (hadEvent ("loop"), "loop_keep emitted a loop event");
@@ -9076,6 +9086,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             auto again = cmd (ops, "loop_again", args1 ("targetId", passId));
             check (ok (again), "loop_again ok");
+            check ((bool) again["data"].getProperty ("applied", false),
+                   "loop_again applied:true headless — the reject itself committed");
+            check (! (bool) again["data"].getProperty ("restarted", true),
+                   "loop_again restarted:false headless");
+            check (again["data"].getProperty ("detail", var()).toString().contains ("did not restart"),
+                   "loop_again's detail names the failed restart");
             check (again["data"].getProperty ("rejectedId", var()).toString() == passId, "loop_again names the rejected pass");
             auto st = loopState();
             auto part = firstContribution (st);
@@ -9151,6 +9167,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        == JSON::toString (before.getProperty ("contributions", var())),
                    "every contribution survives a save/reload, ids and all");
             check (after.getProperty ("currentId", var()).isVoid(), "a project reload clears any in-flight capture");
+        }
+
+        // ── re-pointing the loop must DISARM the lane it is leaving ──
+        // Two armed takes tracks capture the same input twice, and the copy on the
+        // abandoned lane is never stamped and never appears in loop_state — an invisible
+        // duplicate recording. The old track itself is deliberately kept (it holds real
+        // audio), so the only thing that may change is its arming.
+        {
+            const auto oldTakesId = loopState().getProperty ("takesTrackId", var()).toString();
+            check (oldTakesId == takesId, "loop fixture: the loop is still on the first pairing");
+
+            const auto leadBId = cmd (ops, "create_track", args1 ("name", "Lead B"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            auto setupB = cmd (ops, "loop_setup", args1 ("trackId", leadBId));
+            check (ok (setupB), "loop_setup on a second lead ok");
+            check ((bool) setupB["data"].getProperty ("created", false), "…and it made its own takes track");
+            const auto newTakesId = setupB["data"].getProperty ("takesTrackId", var()).toString();
+            check (newTakesId.isNotEmpty() && newTakesId != oldTakesId, "the new pairing has a NEW takes track");
+            check (nameOfTrack (newTakesId) == "Lead B · Takes", "the new takes track is named after its lead");
+
+            auto after = loopState();
+            check (after.getProperty ("leadTrackId", var()).toString() == leadBId
+                       && after.getProperty ("takesTrackId", var()).toString() == newTakesId,
+                   "loop_state follows the re-point");
+            check (nameOfTrack (oldTakesId) == "Lead · Takes", "the abandoned takes track is KEPT (it holds real audio)");
+
+            // Headless there is no input instance, so no track can report armed:true in the
+            // snapshot either way (the whole recording section pins that). The provable
+            // half is that the disarm was actually ISSUED against the old lane — a JSONL
+            // arm_track line naming it with armed:false. Real arming is hardware-gated.
+            const auto armLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool disarmedOld = false, armedNew = false;
+            for (auto& ln : juce::StringArray::fromLines (armLog))
+            {
+                if (! ln.contains ("\"command\": \"arm_track\"")) continue;
+                if (ln.contains ("\"trackId\": \"" + oldTakesId + "\"") && ln.contains ("\"armed\": false")) disarmedOld = true;
+                if (ln.contains ("\"trackId\": \"" + newTakesId + "\"") && ln.contains ("\"armed\": true"))  armedNew = true;
+            }
+            check (disarmedOld, "re-pointing DISARMS the takes track it leaves behind");
+            check (armedNew, "…and arms the new one");
         }
     }
 

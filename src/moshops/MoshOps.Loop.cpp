@@ -49,6 +49,19 @@
 // transport (the track pairing, the keeper/rejected edit, the listening arithmetic) still
 // apply, which is what makes the loop provable in --selftest.
 //
+// WHAT `applied` MEANS, exactly: the command's PRIMARY effect landed. The phone turns
+// applied:false into a REJECTED receipt, so the field has to answer "did the thing I
+// pressed happen?" and nothing else.
+//   • loop_record / loop_hear / loop_play_all, and Keep's resume branch, exist ONLY to
+//     move the transport. Nothing rolled ⇒ applied:false + reason, which is honest.
+//   • loop_keep and loop_again primarily EDIT A CLIP — the keeper moves up to LEAD, the
+//     reject is muted on TAKES — and only then try to roll again. Once that edit has
+//     committed, the button did what it said, so applied is TRUE even with no interface
+//     in the building. The restart is reported separately as `restarted`, with its reason
+//     folded into `detail` ("Kept Part 2; recording did not restart: no audio device").
+//     Reporting those as rejected would tell the producer their keep did not happen while
+//     the clip sat on the lead track, which is the worst lie this surface can tell.
+//
 // AUTHORITY. The phone echoes back a fingerprint of everything it had on screen when the
 // producer chose. If the Mac has moved on, the request targets a state nobody saw, so it
 // is refused BEFORE any mutation (mosh::phoneloop::compatibleAuthority). Stop is
@@ -658,6 +671,14 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
         created = true;
     }
 
+    // Re-pointing the loop at a different lead leaves the OLD takes track behind — it
+    // holds real recorded audio, so it is never deleted. It must not stay record-enabled:
+    // two armed tracks capture the same input twice, and the copy on the abandoned lane
+    // is never stamped and never shows up in loop_state. An invisible duplicate recording
+    // is exactly the class of silent failure this surface exists to remove.
+    if (auto* previousTakes = findTrack (storedTakes); previousTakes != nullptr && previousTakes != takes)
+        cmdArmTrack (objectOf ({ { "trackId", previousTakes->itemID.toString() }, { "armed", false } }));
+
     // Arm TAKES, un-arm LEAD: the whole point of the pairing is that a new pass can never
     // land on top of something already kept. Both log their own JSONL line, the same way
     // cmdSetTransport lets cmdStopRecording log its own.
@@ -716,6 +737,7 @@ juce::var MoshOps::cmdLoopRecord (const juce::var& args)
     const bool applied = loopStartCapture (startQn, /*bypassCountIn=*/ false, reason);
 
     logLine (kName, args, true, {}, false);   // recording LIFECYCLE, never an undoable edit
+    emitSnapshotInvalidated();                // loopCurrent_ rides the snapshot's loop.currentId
     emit ("transport", transportToVar());
     emit ("loop", loopStateVar());
 
@@ -779,6 +801,7 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
         const bool applied = loopStartCapture (resumeQn, /*bypassCountIn=*/ false, reason);
 
         logLine (kName, args, true, {}, false);
+        emitSnapshotInvalidated();   // loopCurrent_ rides the snapshot's loop.currentId
         emit ("transport", transportToVar());
         emit ("loop", loopStateVar());
 
@@ -821,22 +844,25 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
     eng.markDirty();
 
     // Straight back in, with NO count-in: the producer is still singing.
-    const bool applied = loopStartCapture (listeningQn, /*bypassCountIn=*/ true, reason);
+    const bool restarted = loopStartCapture (listeningQn, /*bypassCountIn=*/ true, reason);
 
     logLine (kName, args, true, {}, true);
     emitSnapshotInvalidated();
     emit ("transport", transportToVar());
     emit ("loop", loopStateVar());
 
+    // applied:true — the KEEP is what the producer pressed, and it has committed. Whether
+    // the loop could roll again is a separate, secondary outcome (see the file header).
     auto* data = new DynamicObject();
     data->setProperty ("keptId", targetId);
     data->setProperty ("clipId", clip->itemID.toString());
     data->setProperty ("listeningQn", listeningQn);
     data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
-    data->setProperty ("applied", applied);
-    if (! applied) data->setProperty ("reason", reason);
+    data->setProperty ("applied", true);
+    data->setProperty ("restarted", restarted);
     return loopOk (kName, data, actionId,
-                   "Kept " + label + "; recording from bar " + String (loopQnToBar (listeningQn)));
+                   restarted ? "Kept " + label + "; recording from bar " + String (loopQnToBar (listeningQn))
+                             : "Kept " + label + "; recording did not restart: " + reason);
 }
 
 // ── loop_again ───────────────────────────────────────────────────────────────────────
@@ -906,21 +932,24 @@ juce::var MoshOps::cmdLoopAgain (const juce::var& args)
     eng.markDirty();
 
     juce::String reason;
-    const bool applied = loopStartCapture (entryQn, /*bypassCountIn=*/ true, reason);
+    const bool restarted = loopStartCapture (entryQn, /*bypassCountIn=*/ true, reason);
 
     logLine (kName, args, true, {}, changes);   // honest: no transaction ⇒ nothing to undo
     emitSnapshotInvalidated();
     emit ("transport", transportToVar());
     emit ("loop", loopStateVar());
 
+    // applied:true for the same reason Keep is — the REJECT is the primary effect, and by
+    // here it has committed (or was already true, which is the same outcome).
     auto* data = new DynamicObject();
     data->setProperty ("rejectedId", targetId);
     data->setProperty ("listeningQn", entryQn);
     data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
-    data->setProperty ("applied", applied);
-    if (! applied) data->setProperty ("reason", reason);
+    data->setProperty ("applied", true);
+    data->setProperty ("restarted", restarted);
     return loopOk (kName, data, actionId,
-                   "Redoing " + label + " from bar " + String (loopQnToBar (entryQn)));
+                   restarted ? "Redoing " + label + " from bar " + String (loopQnToBar (entryQn))
+                             : "Rejected " + label + "; recording did not restart: " + reason);
 }
 
 // ── loop_hear ────────────────────────────────────────────────────────────────────────
@@ -997,6 +1026,7 @@ juce::var MoshOps::cmdLoopPlayAll (const juce::var& args)
     loopAuditionedId_.clear();   // this is the whole arrangement, not one take
 
     logLine (kName, args, true, {}, false);
+    emitSnapshotInvalidated();   // loopAuditionedId_ rides the snapshot's loop.auditionedId
     emit ("transport", transportToVar());
     emit ("loop", loopStateVar());
 
