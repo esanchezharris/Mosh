@@ -506,6 +506,13 @@ if (MOSH_BUILD_APP)
         set_source_files_properties(src/files/MacFileBookmark.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework AVFoundation")
 
+        # SecRandomCopyBytes — the pairing token for the phone companion/pad
+        # (src/remote/RemoteCompanionProtocol.cpp). Without this the TU compiles and the
+        # link fails; with it the token comes from the system CSPRNG rather than a
+        # clock-seeded LCG. tests/CMakeLists.txt links the same framework because it
+        # compiles that same .cpp.
+        target_link_libraries(Mosh PRIVATE "-framework Security")
+
         # Native WKWebView media-capture permission delegate (collaborator video
         # getUserMedia) — Obj-C++ with ARC.
         target_sources(Mosh PRIVATE src/webview/WebViewCameraPermission.mm)

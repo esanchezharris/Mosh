@@ -149,6 +149,12 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_audio_devices
     juce::juce_recommended_config_flags)
 
+if (APPLE)
+    # SecRandomCopyBytes, for the RemoteCompanionProtocol.cpp compiled in above. Same
+    # framework the app links in the top-level CMakeLists.txt, same reason.
+    target_link_libraries(MoshTests PRIVATE "-framework Security")
+endif()
+
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
 add_test(NAME HarnessSessionShell
          COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)

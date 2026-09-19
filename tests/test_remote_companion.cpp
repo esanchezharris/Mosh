@@ -523,6 +523,30 @@ TEST_CASE ("pairing token is 64 lowercase hex characters the phone pad will acce
     REQUIRE (second.beginPairing ("192.168.1.24", 47873, 1000).token != issued.token);
 }
 
+// The token is the only thing between a stranger on the same Wi-Fi and the producer's
+// transport, so it is drawn from the platform CSPRNG (SecRandomCopyBytes on Apple). This
+// cannot prove randomness, but it CAN fail on the two ways a secure source goes wrong in
+// practice: a buffer nobody wrote (all zeroes, which the hex shape test above would pass
+// happily) and a source that returns the same block twice.
+TEST_CASE ("consecutive pairing tokens differ and are never an unwritten buffer", "[remote][pairing][pad]")
+{
+    RemoteCompanionProtocol protocol;
+    juce::StringArray seen;
+    for (int i = 0; i < 8; ++i)
+    {
+        const auto token = protocol.beginPairing ("192.168.1.24", 47873, 1000 + i).token;
+        REQUIRE (token.length() == 64);
+        REQUIRE (token.containsOnly ("0123456789abcdef"));
+        // An untouched `juce::uint8 bytes[32] = {}` renders as 64 zeroes. The same goes
+        // for an all-ff block from a driver returning a constant.
+        REQUIRE (token != juce::String::repeatedString ("0", 64));
+        REQUIRE (token != juce::String::repeatedString ("f", 64));
+        REQUIRE_FALSE (seen.contains (token));   // consecutive draws differ
+        seen.add (token);
+    }
+    REQUIRE (seen.size() == 8);
+}
+
 TEST_CASE ("pairing carries the pad url the QR code encodes", "[remote][pairing][pad]")
 {
     RemoteCompanionProtocol protocol;

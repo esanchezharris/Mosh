@@ -108,10 +108,26 @@ RemoteCompanionServer::RemoteCompanionServer (juce::File takeRoot)
       monitorStore (takeRoot.getSiblingFile ("diagnostics").getChildFile ("monitoring")),
       // Every phone action leaves as an ordinary MoshOps command carried onto the
       // message thread — the phone endpoint itself never touches the engine.
+      //
+      // 1500 ms, and the number is a CEILING, not a guess. stopServer() below gives this
+      // thread stopThread (2000) to wind up; at the old 5000 a phone action in flight
+      // when the producer hit Stop would still be waiting when that 2 s elapsed, so
+      // stopThread would fall through to killing the thread mid-wait. A timeout ABOVE
+      // the shutdown budget is an inversion: it converts an orderly stop into a forced
+      // one. 1500 also matches the pad's own GET abort budget (phonepad controller.ts
+      // :53) and sits under its POST budget (AbortSignal.timeout(2500), transport.ts
+      // :31), so the Mac always answers with a real receipt before the phone gives up on
+      // its own — the phone learns "cannot confirm", which is true, rather than seeing a
+      // bare network error it cannot tell from a dead Mac.
+      //
+      // The envelope text is load-bearing: on a timeout callOnMessageThread returns
+      // err ("message-thread call timed out"), and PhoneLoopEndpoint matches
+      // error.contains ("timed out") to report "cancelled" (cannot confirm) rather than
+      // "rejected" (did not happen). Changing the duration must not change that string.
       phoneLoop ([this] (const juce::var& command) {
           return callOnMessageThread ([this, command] {
               return commandHandler ? commandHandler (command) : juce::var();
-          }, 5000);
+          }, 1500);
       })
 {
 }
