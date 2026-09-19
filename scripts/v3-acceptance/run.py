@@ -483,7 +483,11 @@ def row_mp(ctx) -> Row:
         "Whether the ~1 s propagation feels live at the desk.",
     ])
     out = ctx.out / "mp"; out.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ); env.update({"MOSH_BIN": str(ctx.bin), "TAKE_SECONDS": "30", "ART": str(out / "dry-run")})
+    # The dry run defaults to relay port 8798, which another harness (or a stale relay) can
+    # hold — bind refused silently reads as "A never produced a room code". Pick a free one.
+    env = dict(os.environ); env.update({"MOSH_BIN": str(ctx.bin), "TAKE_SECONDS": "30", "ART": str(out / "dry-run"),
+                                        "PORT": V._service_port(8798)})
+    row.notes.append(f"local relay on 127.0.0.1:{env['PORT']}")
     try:
         proc = subprocess.run(["bash", str(REPO / "scripts/playtest/mp-two-window-dry-run.sh")], env=env,
                               capture_output=True, text=True, timeout=420, cwd=str(REPO))
