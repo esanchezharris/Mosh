@@ -3,6 +3,7 @@
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
+#include "../moshops/RecordingLanding.h"   // V3-vocal landing rule (pure)
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
@@ -10933,6 +10934,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Restore the default so later blocks/gates see a clean project.
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "set_count_in restore default (0/off) ok");
+
+        // V3-vocal landing rule (RecordingLanding.h): a count-in pre-roll is trimmed off the
+        // landed take; without a count-in the landing is left where Tracktion put it. The
+        // live half is `Mosh --v3-vocal-smoke` (needs a loopback device).
+        check (recording::shouldTrimLandedClipToPunchIn (true, 1.75, 4.0),
+               "count-in: a take landed at the pre-roll start (1.75 s) is trimmed to the punch-in (4.0 s)");
+        check (! recording::shouldTrimLandedClipToPunchIn (false, 3.995, 4.0),
+               "no count-in: the few-ms record-latency shift is NOT trimmed (alignment, not pre-roll)");
+        check (! recording::shouldTrimLandedClipToPunchIn (true, 4.0, 4.0),
+               "count-in: a take already at the punch-in is left alone");
+        check (! recording::shouldTrimLandedClipToPunchIn (true, 4.2, 4.0),
+               "count-in: a take that starts after the punch-in is never moved earlier");
     }
 
     // ─── CAP-TRN-005 — the metronome's sound, level and routing ───
@@ -17808,8 +17821,9 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
         return failures;
     std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
               << " block=" << device->getCurrentBufferSizeSamples() << "\n";
-    check (device->getActiveInputChannels().countNumberOfSetBits() > 0,
-           "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
+    // NB: MoshEngine activates the input side of the device lazily, on the first arm
+    // (activateAudioInput) — so "active input channel" is asserted after loop_setup below,
+    // and the loopback calibration runs after it too (it needs the input open).
 
     auto* mm = MessageManager::getInstanceWithoutCreating();
     auto pump = [mm] (int ms)
@@ -17822,6 +17836,8 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
         }
     };
     auto loopState = [&] { return cmd (ops, "loop_state")["data"]; };
+    double tolMs = 40.0;   // uncalibrated: a couple of device blocks
+    double measuredMs = -1.0;
     auto contributions = [&] (const var& st) -> Array<var>
     {
         Array<var> out;
@@ -17876,27 +17892,6 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
         return r;
     };
 
-    // ── 0. calibrate the loopback so landing positions are exact (LAT-001's method) ──
-    double tolMs = 40.0;   // uncalibrated: a couple of device blocks
-    double measuredMs = -1.0;
-    {
-        cmd (ops, "calibrate_latency", args1 ("action", "clear"));
-        auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
-        check (ok (start), "calibrate_latency start ok with a live device");
-        auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
-        const auto deadline = Time::getMillisecondCounter() + 12000;
-        while (Time::getMillisecondCounter() < deadline
-               && calState().getProperty ("state", var()).toString() == "running")
-            pump (100);
-        auto cal = calState();
-        const bool measured = cal.getProperty ("state", var()).toString() == "measured"
-                           && (bool) cal.getProperty ("applied", false);
-        check (measured, "loopback calibration measured and applied (landing tolerance 2 ms)");
-        if (measured) { tolMs = 2.0; measuredMs = (double) cal.getProperty ("ms", 0.0); }
-        std::cerr << "  ..   calibration: state=" << cal.getProperty ("state", var()).toString()
-                  << " ms=" << measuredMs << " tolerance=" << tolMs << " ms\n";
-    }
-
     // ── 1. the song: a guide tone DURING the count-in (2.5 s) and one AFTER the entry
     //       point (4.5 s). At 120 BPM bar 3 is qn 8 = 4.0 s; a 1-bar count-in rolls 2.0–4.0 s.
     //       Only the 4.5 s tone may appear in a take: that is what "excluded" means. ──
@@ -17924,6 +17919,28 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
     check (takesId.isNotEmpty() && takesId != leadId, "loop_setup paired a distinct Takes track");
     check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "off" }}))),
            "input monitoring OFF on Takes (the loopback carries only the guide, never itself)");
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0,
+           "arming opened an active input channel on the device (set MOSH_AUDIO_INPUT_DEVICE)");
+
+    // ── calibrate the loopback so landing positions are exact (LAT-001's method) ──
+    {
+        cmd (ops, "calibrate_latency", args1 ("action", "clear"));
+        auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
+        check (ok (start), "calibrate_latency start ok with a live device");
+        auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
+        const auto deadline = Time::getMillisecondCounter() + 12000;
+        while (Time::getMillisecondCounter() < deadline
+               && calState().getProperty ("state", var()).toString() == "running")
+            pump (100);
+        auto cal = calState();
+        const bool measured = cal.getProperty ("state", var()).toString() == "measured"
+                           && (bool) cal.getProperty ("applied", false);
+        check (measured, "loopback calibration measured and applied (landing tolerance 2 ms)");
+        if (measured) { tolMs = 2.0; measuredMs = (double) cal.getProperty ("ms", 0.0); }
+        std::cerr << "  ..   calibration: state=" << cal.getProperty ("state", var()).toString()
+                  << " ms=" << measuredMs << " tolerance=" << tolMs << " ms\n";
+    }
+
     {
         auto st = loopState();
         check ((double) st.getProperty ("listening", var()).getProperty ("qn", -1.0) == 8.0, "listening start is qn 8 (bar 3)");

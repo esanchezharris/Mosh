@@ -478,7 +478,9 @@ MoshOps::LoopFinalized MoshOps::loopFinalizeCapture()
                 {
                     // Identity, null UndoManager — see the file header. The entry is the
                     // qn the capture STARTED at, not where the clip happens to sit: a
-                    // count-in or a latency adjustment moves the clip, not the punch.
+                    // latency adjustment moves the clip by milliseconds, not the punch.
+                    // (The count-in pre-roll no longer moves it: cmdStopRecording trims a
+                    // landed clip to the punch-in — RecordingLanding.h, 2026-09-19.)
                     clip->state.setProperty (ids::moshLoopPassId, passId, nullptr);
                     clip->state.setProperty (ids::moshLoopEntryQn, entryQn, nullptr);
                     clip->state.setProperty (ids::moshLoopOrder, ++order, nullptr);
