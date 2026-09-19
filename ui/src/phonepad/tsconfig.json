@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM"],
+    "module": "ESNext", "moduleResolution": "Bundler",
+    "strict": true, "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true, "verbatimModuleSyntax": true,
+    "noFallthroughCasesInSwitch": true, "noPropertyAccessFromIndexSignature": true,
+    "forceConsistentCasingInFileNames": true, "isolatedModules": true,
+    "esModuleInterop": true, "skipLibCheck": true, "noEmit": true,
+    "noUnusedLocals": true, "noUnusedParameters": true
+  },
+  "include": ["src", "tests", "*.ts"]
+}

@@ -32,16 +32,41 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "off",
   },
-  projects: [{
-    name: "chromium",
-    use: {
-      ...devices["Desktop Chrome"],
-      // Collaborator-video tests: a fake camera so getUserMedia resolves with a real
-      // MediaStream and the permission prompt is auto-granted (headless, deterministic).
-      permissions: ["camera"],
-      launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // Collaborator-video tests: a fake camera so getUserMedia resolves with a real
+        // MediaStream and the permission prompt is auto-granted (headless, deterministic).
+        permissions: ["camera"],
+        launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+      },
     },
-  }],
+    // Moshi phone pad (ui/src/phonepad): a separate single-file bundle, not the React
+    // WebView UI. "phonepad-build" builds it once via build.setup.ts; "phonepad" then
+    // serves the built bundle from its own ephemeral loopback server (see
+    // tests/browser-harness.ts) and stubs /api/* with page.route. These specs never
+    // navigate to the webServer above, but Playwright still starts it once per run
+    // regardless of --project selection (same as for the chromium/e2e project).
+    {
+      name: "phonepad-build",
+      testDir: "./src/phonepad/tests",
+      testMatch: "build.setup.ts",
+    },
+    {
+      name: "phonepad",
+      testDir: "./src/phonepad/tests",
+      testMatch: "*.spec.ts",
+      dependencies: ["phonepad-build"],
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: process.env.MOSH_E2E_CHANNEL,
+        viewport: { width: 375, height: 812 },
+        screenshot: "only-on-failure",
+      },
+    },
+  ],
   // The dev lane serves through Vite with import.meta.env.DEV true, which arms the
   // react-scan / react-grab devtools that main.tsx imports. react-scan mounts a
   // full-viewport #react-scan-root that swallows pointer events, so every

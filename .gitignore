@@ -180,3 +180,4 @@ resources/trainer/
 # gate-native.json -> the exact CI failure.
 /gate-*.json
 /companion-dist/
+/phonepad-dist/
