@@ -1208,6 +1208,13 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                 beforeCaptureStates.set (id, captureStateForClip (*c));
             }
 
+    // The punch-in (where the producer pressed Record, AFTER any count-in) and whether a
+    // count-in was in force — read BEFORE stop, which is what recording::shouldTrimLanded
+    // ClipToPunchIn needs below. getTimeWhenStarted() is TransportControl's startTime,
+    // i.e. the punch-in, not the pre-roll start it actually rolled from.
+    const auto punchIn = transport.getTimeWhenStarted();
+    const bool countInActive = eng.edit().getNumCountInBeats() > 0;
+
     // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
     // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
     // playbackContext->stopRecording() -> applyRecording()), so the take clips exist in
@@ -1243,6 +1250,13 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                         // thread, bounded read; stored non-undoably like the take id above.
                         // Absent on anything not landed here (imports stay honestly unmeasured).
                         measureLandedClipPeak (*c);
+                        // V3-vocal: the count-in pre-roll is not part of the take (see
+                        // RecordingLanding.h). Front-trim through the clip's own state so the
+                        // trim rides the same undo step Tracktion's landing used.
+                        if (recording::shouldTrimLandedClipToPunchIn (countInActive,
+                                                                       c->getPosition().getStart().inSeconds(),
+                                                                       punchIn.inSeconds()))
+                            c->setStart (punchIn, /*preserveSync=*/ true, /*keepLength=*/ false);
                         landed.add (clipToVar (*c));
                         trackLanded = true;
                     }
