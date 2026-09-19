@@ -463,8 +463,8 @@ def row_vocal(ctx) -> Row:
             f"Mosh --v3-vocal-smoke passed every check ({summary.get('checks', '?')} checks) on {LOOPBACK_DEVICE}",
             {"rc": proc.returncode, "summary": summary, "failed": failed_lines})
     for key in ("take1", "take2"):
-        src = Path(summary.get(key, "") or "")
-        if src.exists():
+        src = Path(summary.get(key) or "/nonexistent")
+        if src.is_file():
             dst = out / f"{key}.wav"; shutil.copy2(src, dst); row.artifacts.append(str(dst))
             st = V.stats(str(dst))
             row.chk(st["rms"] > 0.001, f"{key} copied to evidence and is non-silent", st)

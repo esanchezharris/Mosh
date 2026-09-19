@@ -17919,6 +17919,12 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
     check (takesId.isNotEmpty() && takesId != leadId, "loop_setup paired a distinct Takes track");
     check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "off" }}))),
            "input monitoring OFF on Takes (the loopback carries only the guide, never itself)");
+    // Arming activated the input side, which RE-OPENS the device: the pointer read at the
+    // top is stale from here on (a use crashed this smoke's first run). Re-fetch it.
+    device = deviceManager.getCurrentAudioDevice();
+    check (device != nullptr, "the device is still open after arming (input side activated)");
+    if (device == nullptr)
+        return failures;
     check (device->getActiveInputChannels().countNumberOfSetBits() > 0,
            "arming opened an active input channel on the device (set MOSH_AUDIO_INPUT_DEVICE)");
 
@@ -18061,9 +18067,10 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
     {
         auto* o = new DynamicObject();
         o->setProperty ("sessionDir", eng.sessionDir().getFullPathName());
-        o->setProperty ("device", device->getName());
-        o->setProperty ("sampleRate", device->getCurrentSampleRate());
-        o->setProperty ("blockSize", device->getCurrentBufferSizeSamples());
+        device = deviceManager.getCurrentAudioDevice();
+        o->setProperty ("device", device != nullptr ? device->getName() : String());
+        o->setProperty ("sampleRate", device != nullptr ? device->getCurrentSampleRate() : 0.0);
+        o->setProperty ("blockSize", device != nullptr ? device->getCurrentBufferSizeSamples() : 0);
         o->setProperty ("calibratedMs", measuredMs);
         o->setProperty ("toleranceMs", tolMs);
         o->setProperty ("take1", take1.file);
