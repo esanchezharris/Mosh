@@ -1,13 +1,28 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { SampleBrowser } from "../ui/SampleBrowser";
-import { PluginDock } from "../v2/PluginBrowser";
+import { PresetPicker, presetKeyFor } from "../ui/PresetPicker";
 import type { DirListing } from "../types";
 import { useV3 } from "./shellState";
 
 function MidiBrowser() {
   const exec = useStore((s) => s.exec);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const snapshot = useStore((s) => s.snapshot);
   const [listing, setListing] = useState<DirListing | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  // Land onto the selected track when it can take MIDI (no wave audio on it); otherwise the
+  // engine creates a MIDI track named after the file. One command, one undo step.
+  const importFile = async (file: string) => {
+    const track = snapshot?.tracks.find((t) => t.id === selectedTrackId);
+    const onto = track && !track.clips.some((c) => c.type === "wave") ? track.id : undefined;
+    const r = await exec("import_midi_file", onto ? { file, trackId: onto } : { file }) as { ok: boolean; data?: { trackId?: string; clipId?: string; noteCount?: number }; error?: string };
+    if (!r.ok) { setMessage(r.error ?? "import failed"); return; }
+    setMessage(null);
+    const st = useStore.getState();
+    if (r.data?.trackId) st.setSelectedTrack(r.data.trackId);
+    if (r.data?.clipId) st.select([r.data.clipId]);
+  };
   useEffect(() => {
     void exec("list_directory", {}).then((r) => {
       if (r.ok && r.data) setListing(r.data as DirListing);
@@ -18,7 +33,35 @@ function MidiBrowser() {
     <div className="pane-list" data-testid="v3-midi-browser">
       {midi.length === 0 && <div className="set-hint" style={{ padding: 10 }}>No MIDI files in this folder.</div>}
       {midi.map((e) => (
-        <div key={e.path} className="br-row">{e.name}</div>
+        <button key={e.path} type="button" className="br-row" data-testid="v3-midi-file" title="Import as a MIDI clip"
+          onClick={() => void importFile(e.path)}>{e.name}</button>
+      ))}
+      {message && <div className="set-hint" role="status" style={{ padding: 10 }}>{message}</div>}
+    </div>
+  );
+}
+
+// Presets for the SELECTED track's instruments, through the same list_presets / load_preset seam
+// the inspector rows and the Rack use. Not an FX-preset library: an instrument with no
+// loadable format (Serum, the drum sampler) is named, not offered a picker that cannot work.
+function PresetsPane() {
+  const snapshot = useStore((s) => s.snapshot);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const track = snapshot?.tracks.find((t) => t.id === selectedTrackId) ?? snapshot?.tracks[0];
+  const instruments = (track?.plugins ?? []).filter((p) => p.isInstrument);
+  return (
+    <div className="pane-list" data-testid="v3-presets">
+      {!track && <div className="set-hint" style={{ padding: 10 }}>Select a track.</div>}
+      {track && instruments.length === 0 && (
+        <div className="set-hint" style={{ padding: 10 }}>{track.name} has no instrument. Add 4OSC from Plugins to get presets.</div>
+      )}
+      {track && instruments.map((p) => (
+        <div key={p.index} className="br-row preset-row" data-testid="v3-preset-row">
+          <span className="nm">{p.name}</span>
+          {presetKeyFor(p)
+            ? <PresetPicker plugin={p} trackId={track.id} />
+            : <span className="set-hint">no loadable presets</span>}
+        </div>
       ))}
     </div>
   );
@@ -39,12 +82,7 @@ export function BrowserPane() {
       </div>
       {tab === "files" && <div className="pane-list"><SampleBrowser /></div>}
       {tab === "midi" && <MidiBrowser />}
-      {tab === "presets" && (
-        <div className="pane-list" data-testid="v3-presets">
-          <p className="set-hint" style={{ padding: 10 }}>FX presets — browse only. Not an Inspector FX tab.</p>
-          <PluginDock />
-        </div>
-      )}
+      {tab === "presets" && <PresetsPane />}
     </aside>
   );
 }

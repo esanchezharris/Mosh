@@ -60,6 +60,19 @@ int runRecordHoldSmoke (MoshEngine&, MoshOps&);
     --live-audio-smoke's job). */
 int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
 
+/** V3-vocal — `Mosh --v3-vocal-smoke`: the Booth's recording loop (docs/PHONE_PAD.md) with a
+    REAL audio device and nobody at the mic. Pair MOSH_AUDIO_OUTPUT_DEVICE and
+    MOSH_AUDIO_INPUT_DEVICE with "BlackHole 2ch": a guide tone the engine plays comes straight
+    back as the "voice". Calibrates the loopback first (LAT-001), then: count-in 1 bar,
+    loop_record from bar 3, stop; loop_again (restarts capture live), stop; loop_keep; undo.
+    Asserts the count-in rolled and was EXCLUDED from the landed take (the take starts at the
+    entry point and its first onset is the tone played after it, not the one during the
+    pre-roll), both passes are non-silent WAVs on disk landing within the calibrated
+    tolerance, Again mutes and rejects, Keep moves the pass to LEAD audible, and undo reverses
+    the keep. Prints one "V3-VOCAL-SMOKE: {json}" line for scripts/v3-acceptance/run.py.
+    Proves nothing about AUDIBILITY or feel — those stay with the owner. */
+int runV3VocalSmoke (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

@@ -6,7 +6,7 @@ import { runAction } from "../menuActions";
 import type { Snapshot } from "../types";
 import { useV3 } from "./shellState";
 import { FileMenu } from "./FileMenu";
-import { IconClick, IconCountIn, IconLoop, IconSnap } from "./icons";
+import { IconClick, IconCountIn, IconLoop, IconSnap, IconZoomIn, IconZoomOut } from "./icons";
 
 export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
@@ -18,6 +18,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const setHistoryOpen = useV3((s) => s.setHistoryOpen);
   const mpOpen = useV3((s) => s.mpOpen);
   const setMpOpen = useV3((s) => s.setMpOpen);
+  const phoneOpen = useV3((s) => s.phoneOpen);
+  const setPhoneOpen = useV3((s) => s.setPhoneOpen);
+  const phonePaired = useStore((s) => !!s.remoteStatus?.pairing);
   const mpActive = useStore((s) => s.mp.active);
   const bbs = secondsToBBSMap(tempoMapFrom(snapshot.session), t.position);
   const name = projectLabel(snapshot.session.editFile) || "untitled";
@@ -56,16 +59,30 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
           <IconClick />
         </button>
         {posture === "studio" ? (
-          <button type="button" className="ibtn" title="Snap" aria-label="Snap" aria-pressed={!!snap}
-            onClick={() => setSnap(!snap)}>
-            <IconSnap />
-          </button>
+          <>
+            <button type="button" className="ibtn" title="Snap" aria-label="Snap" aria-pressed={!!snap}
+              onClick={() => setSnap(!snap)}>
+              <IconSnap />
+            </button>
+            <button type="button" className="ibtn" title="Zoom out (⌘−)" aria-label="Zoom out" data-testid="v3-zoom-out"
+              onClick={() => void runAction("zoom_out", { store: useStore.getState(), pickFiles, pickSaveFile })}>
+              <IconZoomOut />
+            </button>
+            <button type="button" className="ibtn" title="Zoom in (⌘+)" aria-label="Zoom in" data-testid="v3-zoom-in"
+              onClick={() => void runAction("zoom_in", { store: useStore.getState(), pickFiles, pickSaveFile })}>
+              <IconZoomIn />
+            </button>
+          </>
         ) : null}
       </div>
       <div className="spacer" />
       <button type="button" className={`btn ghost${mpActive ? " on" : ""}`} data-testid="v3-mp-trigger"
         aria-haspopup="dialog" aria-expanded={mpOpen} title={mpActive ? "Session is shared — room code and roster" : "Start or join a multiplayer session"}
         onClick={() => setMpOpen(!mpOpen)}>{mpActive ? "Shared" : "Invite"}</button>
+      <button type="button" className={`btn ghost${phonePaired ? " on" : ""}`} data-testid="v3-phone-trigger"
+        aria-haspopup="dialog" aria-expanded={phoneOpen}
+        title={phonePaired ? "The phone pad is running — show the QR" : "Pair an iPhone as a recording pad"}
+        onClick={() => setPhoneOpen(!phoneOpen)}>Phone</button>
       <button type="button" className="btn ghost" data-testid="v3-history"
         aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>History</button>
     </div>

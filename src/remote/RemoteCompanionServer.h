@@ -3,6 +3,7 @@
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include <functional>
+#include "PhoneLoopEndpoint.h"
 #include "RemoteCompanionProtocol.h"
 
 namespace mosh
@@ -39,6 +40,16 @@ public:
                                  const juce::String& path,
                                  const juce::var& body);
 
+    /** The phone-pad routes, which the 3-argument overload above cannot reach: they
+        authenticate from an `Authorization: Bearer` header rather than a `token`
+        field in the body, and they answer with a real HTTP status (401 on a bad
+        token) instead of the desktop companion's {ok,data} envelope. */
+    juce::var handleTestRequest (const juce::String& method,
+                                 const juce::String& path,
+                                 const juce::var& body,
+                                 const juce::String& bearerToken,
+                                 int* statusOut = nullptr);
+
     /** Exposes the same [1000,600000]ms clamp (absent -> 5000ms default) that
         /snapshot and /command apply to a caller-supplied `timeoutMs` before passing
         it to callOnMessageThread. See RemoteCompanionServer.cpp's timeoutMsFromBody
@@ -61,6 +72,10 @@ private:
     void run() override;
     void handleClient (std::unique_ptr<juce::StreamingSocket> client);
     juce::var handleRequest (const Request& request);
+    /** GET /api/state and POST /api/action: bearer-authenticated, and answering in
+        the phone's own JSON rather than the companion envelope. `status` carries the
+        HTTP code the phone reads (401 means "pair again", everything else does not). */
+    juce::var handleApiRequest (const Request& request, int& status);
 
     static bool parseRequest (juce::StreamingSocket& socket, Request& request);
     static juce::String readHeaders (juce::StreamingSocket& socket);
@@ -69,6 +84,7 @@ private:
     static void writeTextResponse (juce::StreamingSocket& socket, int statusCode,
                                    const juce::String& contentType, const juce::String& body);
     static juce::String webCompanionHtml();
+    static juce::String padHtml();
     static juce::String legacyWebCompanionHtml(); // inline fallback when the built page isn't staged
     static juce::var ok (juce::var data = {});
     static juce::var err (const juce::String& message);
@@ -87,6 +103,7 @@ private:
     RemoteMonitorStore monitorStore;
     CommandHandler commandHandler;
     SnapshotProvider snapshotProvider;
+    PhoneLoopEndpoint phoneLoop;
 
     mutable juce::CriticalSection lock;
     std::unique_ptr<juce::StreamingSocket> listener;

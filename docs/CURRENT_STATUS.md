@@ -93,6 +93,7 @@ producer acceptance.
 | Serum | BlackHole/Serum-family audible playback on the owner machine. |
 | Re-Imagine | Ableton audio-track Transfer, real SA3 rendering, Colours/LoRA by-ear comparison, physical A/B, Set reopen, shared-process observation, and model-release behavior. |
 | DAWN | Real Ableton Live 11 + iPhone reachability, recording behavior, routing preservation, audible playback, and Live Undo. |
+| Phone pad | Physical iPhone scan and same-Wi-Fi reachability for `/pad`, and audibility of Play All / Review and take placement by ear — see [`docs/PHONE_PAD.md`](PHONE_PAD.md). |
 | UI/DAW parity | Manual producer workflows beyond screenshots, browser checks, or host smoke. |
 
 Native gates, selftests, CTest, generated conformance reports, CI, dashboards,

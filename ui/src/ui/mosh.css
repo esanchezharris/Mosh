@@ -1044,6 +1044,8 @@ button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink
 .mem-kind { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; flex: 0 0 auto; }
 .btn.mem-del { padding: 2px 5px; min-width: 0; flex: 0 0 auto; }
 .remote-code { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.18em; text-align: center; color: var(--lime); }
+/* The pad URL under the QR: long, and typed by hand when a camera will not focus. */
+.remote-url { overflow-wrap: anywhere; user-select: all; }
 .remote-qr { width: 160px; height: 160px; align-self: center; border-radius: 8px; image-rendering: pixelated; }
 .cb-file { flex-direction: row; align-items: center; justify-content: space-between; }
 .cb-import { flex: 0 0 auto; }

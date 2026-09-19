@@ -13,7 +13,7 @@ viable without third-party plugins — and the rule recorded when V3 was first w
 | Kind | Gate definition plus a sequenced task list. Task 1 is bounded and can start now; the flip is the **last** task and is gated on §5 |
 | Default today | `ui/src/settings/schema.ts` → `uiShell` default `"protools"` (since 2026-08-09). V3 is selectable as "Mosh (v3)"; an existing explicit choice is always preserved |
 | Allowed writes | `ui/src/v3/**`, new `ui/e2e/v3-*.spec.ts`, the five v2-named gate sites in §2, `docs/` |
-| **Forbidden** | redesigning V3's look (DESIGN.md §1 stands), touching other shells' behaviour, any new engine command without the five registrations, any claim of audibility or feel from a gate |
+| **Forbidden** | redesigning V3's look (DESIGN.md §1 stands), touching other shells' behaviour, any new engine command without the eight registrations (enumerated in docs/PHONE_PAD.md), any claim of audibility or feel from a gate |
 | Owner input needed | §5 acceptance pass on a real session; nothing before that |
 
 **Why V3 is not the default today (evidence, not opinion).**
@@ -45,7 +45,7 @@ is built from scratch.
 | 1 | Empty session explains the starting actions; add audio/MIDI track; import audio | done (#702) | `v3-workspace.spec` | — |
 | 2 | **Drop in a beat**: load a drum kit, place a pattern, audition pads | absent | new `v3-beat.spec` (kit loads, pattern lands on a track, undo removes it) | `ui/src/ui/DrumPads.tsx`, `DrumSequencer.tsx`; `live/` mounts them |
 | 3 | **Generate a beat** from the Moshi dock (typed ask → clips on tracks → undo as one unit) | dock exists; not exercised | `v3-beat.spec` second half, through the mock loop | `agent-loop.spec` |
-| 4 | **Record a vocal**: arm, count-in, Booth, take navigation, keep | Booth + count-in wired (#702) | new `v3-record.spec` (arm state, count-in readback, take keep/undo); audibility stays owner-only | `protools-shell` "pre-roll and Punch" + Booth rows in `live-shell.spec` |
+| 4 | **Record a vocal**: arm, count-in, Booth, take navigation, keep | done — the Booth is now the recording loop itself (Put Me In / Keep / Again / Review / Play All / Stop, a contributions list, go-to-bar, lead-in) plus phone pairing (`docs/PHONE_PAD.md`) | `v3-record.spec` (loop story), `v3-phone.spec`, `PhoneLauncher.test`, `loopPolicy.test`, and the native `--selftest` `MOSHI-LOOP` section; audibility stays owner-only | `protools-shell` "pre-roll and Punch" + Booth rows in `live-shell.spec` |
 | 5 | MIDI edit in the shared PianoRoll, note undo | done (#702) | `v3-workspace.spec` + one added note-edit assertion | `protools-midi-editor.spec` |
 | 6 | **Mix**: level, pan, mute/solo, undo; sends to a return bus | Mixer done; sends = "advanced routing" gap | `v3-mix.spec`: strip edits + one send to an aux with readback | `protools-mix-window.spec`, "Sends route a track…" |
 | 7 | **Plugins and presets**: browse the native suite, insert, open editor, pick a preset | `PluginDock` (narrow catalog); no presets | `v3-plugins.spec`: insert a builtin, open editor, apply a preset, undo. Native-suite viability is a separate engine question (the builtin compressor does not compress — see `docs/pivot-2026-09`) | `ui/src/ui/Rack.tsx` presets; `v2/PluginBrowser` |
@@ -104,6 +104,8 @@ sake — the matrix is the checklist, the count is a symptom.
 
 ## 5. Owner acceptance — the rows no gate can close
 
+The rows are in [docs/VERIFICATION.md](VERIFICATION.md) under "V3 default-shell acceptance" (V3-beat, V3-vocal, V3-mix, V3-file, V3-mp, V3-feel), with the evidence directory convention.
+
 One real session on the built Release, V3 selected, on the owner's Mac: drop in a beat, record
 a vocal with count-in, mix it, save, reopen, export, and run one multiplayer session with a
 second Mac. Feel, audibility and latency are the owner's call. Record it as a dated evidence
@@ -124,6 +126,7 @@ set their shell explicitly, but any that relied on the default will surface here
 ## 7. What this brief does not authorise
 
 No new visual direction for V3 (its DESIGN.md is the contract); no engine changes beyond what a
-row strictly needs, and any new command carries all five registrations plus the mock case (the
-#702 repair is the worked example); no claim that the native plugin suite is musically viable —
-that is its own brief; no move of the default before §5 is on record.
+row strictly needs, and any new command carries all eight registrations, enumerated in
+docs/PHONE_PAD.md (the #702 repair is the worked example); no claim that the native
+plugin suite is musically viable — that is its own brief; no move of the default before
+§5 is on record.

@@ -8,7 +8,10 @@
 // plain browser, so the UI still renders during pure-web (Vite dev) work.
 
 import { getNativeFunction } from "./juce/index.js";
-import { MOCK_ENABLED, mockExecute, mockSnapshot, mockOnEvent } from "./bridge.mock";
+import {
+  MOCK_ENABLED, mockExecute, mockSnapshot, mockOnEvent,
+  mockRemoteStartPairing, mockRemoteStop, mockRemoteStatus,
+} from "./bridge.mock";
 
 type InitData = {
   __juce__functions?: string[];
@@ -87,6 +90,11 @@ export type RemotePairingInfo = {
   expiresAtMs: number;
   pairingUrl: string;
   webUrl: string;
+  /** The LAN-IP Safari URL of the Moshi phone pad: `http://<lan-ip>:<port>/pad#token=<hex>`.
+   *  This is what the QR encodes — never `pairingUrl` (a mosh:// deep link iOS cannot open
+   *  without the native companion app installed) and never a .local host, which an iPhone
+   *  does not resolve. The token rides in the FRAGMENT, so it never reaches an access log. */
+  padUrl: string;
 };
 
 export type RemoteStatus = {
@@ -242,19 +250,26 @@ export async function archivePair(row: unknown): Promise<void> {
   if (realNative()) await native("archive_pair")(row);
 }
 
+// The companion/phone-pad server. Native binds a real listener; the dev-mock stands in
+// for it so the QR surface — the one thing that decides whether a phone can reach this
+// Mac at all — is drivable in Vite dev and provable in e2e. Outside both (a production
+// `vite build` in a plain browser) there is no server to talk to, and these say so.
 export async function startRemotePairing(): Promise<RemoteResult<RemoteStatus>> {
-  if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
-  return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;
+  if (realNative()) return (await native("remote_start_pairing")({})) as RemoteResult<RemoteStatus>;
+  if (MOCK_ENABLED) return mockRemoteStartPairing();
+  return { ok: false, error: "remote companion unavailable in dev" };
 }
 
 export async function stopRemoteCompanion(): Promise<RemoteResult> {
-  if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
-  return (await native("remote_stop")({})) as RemoteResult;
+  if (realNative()) return (await native("remote_stop")({})) as RemoteResult;
+  if (MOCK_ENABLED) return mockRemoteStop();
+  return { ok: false, error: "remote companion unavailable in dev" };
 }
 
 export async function getRemoteStatus(): Promise<RemoteResult<RemoteStatus>> {
-  if (!realNative()) return { ok: false, error: "remote companion unavailable in dev" };
-  return (await native("remote_status")()) as RemoteResult<RemoteStatus>;
+  if (realNative()) return (await native("remote_status")()) as RemoteResult<RemoteStatus>;
+  if (MOCK_ENABLED) return mockRemoteStatus();
+  return { ok: false, error: "remote companion unavailable in dev" };
 }
 
 // Telemetry opt-in sync (privacy-first, default OFF — see docs/telemetry/PRIVACY.md

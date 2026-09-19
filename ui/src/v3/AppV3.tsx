@@ -17,6 +17,7 @@ import { Arrangement } from "./Arrangement";
 import { MixInspector } from "./MixInspector";
 import { MoshiDock } from "./MoshiDock";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { PhoneLauncher } from "./PhoneLauncher";
 import { HistoryFlyout } from "./HistoryFlyout";
 import { SettingsModal } from "./SettingsModal";
 import { BrowserPane } from "./BrowserPane";
@@ -85,6 +86,7 @@ export function AppV3() {
       <HistoryFlyout />
       {snapshot && <SettingsModal snapshot={snapshot} />}
       <MultiplayerLauncher />
+      <PhoneLauncher />
       <ContextMenu />
       <PianoRoll />
     </div>

@@ -130,7 +130,7 @@ probably belongs in `verify.py`, not this list.*
 
 **Triggers:** recording/input paths → REC rows · fades/crossfades → EAR-fades ·
 warp/stretch → EAR-warp · stems/export → EAR-stems · MIDI input → MIDI-in ·
-relay/multiplayer → MP-two-mac.
+relay/multiplayer → MP-two-mac · phone pad → PHONE rows.
 
 | id | Steps | Expect | ~min | last-passed |
 | --- | --- | --- | --- | --- |
@@ -142,6 +142,46 @@ relay/multiplayer → MP-two-mac.
 | EAR-stems | `export_stems` + `export_audio` the same song; import the stems to fresh tracks and A/B against the mixdown. | Indistinguishable by ear (the sample-level `sum≈mix` null lives in `verify.py`, automated). | 4 | — |
 | MIDI-in | Connect a MIDI keyboard (picker from G11); play live, then record 2 bars. | Live notes sound with low latency; recorded notes land where played. If a MIDI *take* can't be recorded, that's a capability-matrix MISSING row — file it, don't shrug. | 4 | — |
 | MP-two-mac | Two Macs, one session: claim a track from Mac B, move a clip on Mac A. | Lock icon + live clip motion on both within ~1 s. | 5 | — |
+| PHONE-pair | V3 → Phone; scan the QR with the iPhone Camera app on the same Wi-Fi. | Safari opens `/pad#token=…`; the banner reads IDLE (or SETUP NEEDED if no Lead/Takes pair exists yet) rather than PAIR PHONE, and the URL host is the Mac's LAN IP (never `.local`, never `pairingUrl`). | 2 | — |
+| PHONE-loop | From the phone: Put Me In / Keep / Again / Review Selected Take / Play All / Stop. | The Booth mirrors every action live; Lead and Takes clips land where expected and are audible. | 5 | — |
+| PHONE-recover | Background/foreground the phone page; drop Wi-Fi and reconnect; from the Booth's Phone modal, press Stop. | Background/foreground survives without a new scan; Wi-Fi drop/reconnect resumes polling; Stop in the modal ends the pairing and the pad falls back to a PAIR PHONE state — reloading the page then requires a fresh scan. | 3 | — |
+
+### V3 default-shell acceptance (owner; the last row of the V3 parity gate)
+
+*Row §5 of [docs/V3-PARITY-BRIEF-2026-09-17.md](V3-PARITY-BRIEF-2026-09-17.md). One real session on
+the built Release with the V3 shell selected, on the owner's Mac. Feel, audibility and latency are
+the owner's call; no gate above can close these. Record the pass inline and put the session's
+evidence (screenshots, the exported mixdown, notes) in
+`~/Library/Mosh/task-evidence/<YYYY-MM-DD>-v3-acceptance/`; the flip PR cites that directory.*
+
+| id | Steps | Expect | ~min | last-passed |
+| --- | --- | --- | --- | --- |
+| V3-beat | `+ Drum beat`, then ask the dock for a lofi sketch. | Both land audible drum tracks; one ⌘Z each reverts them whole. | 3 | — |
+| V3-vocal | Arm a track, count-in 1 bar, record two takes in the Booth, pick one, Keep. | Takes land where sung, the count-in is audible but excluded, Keep flattens, ⌘Z restores. | 5 | — |
+| V3-mix | Level/pan/mute/solo, insert 4OSC + a preset, + Bus and a send, zoom and drag a clip. | Every edit audible and one ⌘Z each; nothing feels laggy at 44.1 kHz / 512. | 5 | — |
+| V3-file | Save, close, reopen, export a mixdown; import a `.mid` from the Browser. | Reopen is identical; the export plays; the MIDI lands as one clip. | 3 | — |
+| V3-mp | Two Macs: Invite from A, join from B, claim a track on B, edit on A. | Lock badge and edits appear on both within ~1 s; Leave clears. | 5 | — |
+| V3-feel | Ten minutes of ordinary use in each colorway. | Nothing you would not ship as the first thing a new user sees. | 10 | — |
+
+**Automated half (2026-09-19).** `python3 scripts/v3-acceptance/run.py` runs, on this Mac
+against the real engine, every part of the six rows a machine can honestly close, and writes
+the evidence directory above (`REPORT.md`, `rows.json`, the renders, the takes, the
+screenshots). It exits 0 only when every row it ran passed; every check is one that would
+read differently if the feature were absent. What it proves, and what it leaves to the
+owner, row by row:
+
+| id | automated (the harness, real engine) | owner still owes (minutes with the artifacts) |
+| --- | --- | --- |
+| V3-beat | `add_drum_pattern` with no target lands a kit + one-bar pattern as one clip; the offline render has ≥ 6 drum onsets; one undo removes the track. The dock's lofi ask runs against the mock loop in `ui/e2e/v3-beat.spec.ts`. | Does the kit sound like a kit; one real ask to the dock with a live model. |
+| V3-vocal | `Mosh --v3-vocal-smoke` on the BlackHole loopback: the 1-bar count-in rolls (phase `count_in`) and is EXCLUDED from the take (the take starts at the entry point and its first sound is the guide played after it); two passes land as non-silent WAVs (the Again pass within the calibrated 2 ms; the count-in pass up to one device block early — a measured Tracktion placement quirk, reported as `take1OffsetMs`); Again rejects/mutes and restarts capture; Keep moves the pass to LEAD audible; undo reverses the keep. Copies of both takes are in the evidence dir. | Sing into a real mic: audibility, monitoring feel, latency at the desk. |
+| V3-mix | level, pan, mute, solo, a 4OSC preset, a send to a reverb bus and a clip move each change the rendered audio in the direction the edit implies, and one undo each returns the render to the baseline; `snapshot()` cost and an upper bound on per-command latency are measured. Zoom is `ui/e2e/v3-timeline.spec.ts`. | Whether it feels immediate at 44.1 kHz / 512. |
+| V3-file | `save_as` → `new_project` → `open_project` reproduces the project projection (names, clips, plugins, mixer); the exported mixdown is non-silent and the project's length; a generated `.mid` imports as one clip with four notes; undo removes it. | Play the export somewhere else. |
+| V3-mp | two real Mosh processes on this Mac over the local relay (`scripts/playtest/mp-two-window-dry-run.sh`): create/join, claim→commit, bus, group, late-join bootstrap, a multi-second take byte-identical on the peer; `--cloud` adds the cloud-relay smoke. The lock badge on V3 chrome is `ui/e2e/v3-multiplayer.spec.ts` against the mock peer. | A second physical Mac; whether ~1 s feels live. |
+| V3-feel | the whole V3 Playwright suite plus `ui/e2e/v3-acceptance-screens.spec.ts`: eight surfaces × four colorways screenshotted, accents proven distinct by pixel readback. | Flip the 32 PNGs; ten minutes of ordinary use per colorway if one looks wrong. |
+
+The harness closes the *engine* and *UI-on-mock* halves. The `last-passed` column stays the
+owner's: it is dated when the owner has done the right-hand column with the harness's
+artifacts, which is a listening session of minutes, not the original hour.
 
 ## Collaborator video — two machines (hardware-gated)
 

@@ -24,6 +24,12 @@ export function ContextMenu() {
         if (name) void exec("rename_clip", { clipId: ctx.clipId, name });
         close();
       }}><span>Rename</span></button>
+      {ctx.time !== undefined && (
+        <button type="button" className="mi" data-testid="v3-context-split"
+          onClick={() => { void exec("split_clip", { clipId: ctx.clipId, time: ctx.time }); close(); }}>
+          <span>Split here</span>
+        </button>
+      )}
       <button type="button" className="mi" onClick={() => { void exec("duplicate_clip", { clipId: ctx.clipId }); close(); }}>
         <span>Duplicate</span><kbd>⌘D</kbd>
       </button>
