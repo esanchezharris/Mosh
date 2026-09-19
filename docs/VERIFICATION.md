@@ -163,6 +163,26 @@ evidence (screenshots, the exported mixdown, notes) in
 | V3-mp | Two Macs: Invite from A, join from B, claim a track on B, edit on A. | Lock badge and edits appear on both within ~1 s; Leave clears. | 5 | — |
 | V3-feel | Ten minutes of ordinary use in each colorway. | Nothing you would not ship as the first thing a new user sees. | 10 | — |
 
+**Automated half (2026-09-19).** `python3 scripts/v3-acceptance/run.py` runs, on this Mac
+against the real engine, every part of the six rows a machine can honestly close, and writes
+the evidence directory above (`REPORT.md`, `rows.json`, the renders, the takes, the
+screenshots). It exits 0 only when every row it ran passed; every check is one that would
+read differently if the feature were absent. What it proves, and what it leaves to the
+owner, row by row:
+
+| id | automated (the harness, real engine) | owner still owes (minutes with the artifacts) |
+| --- | --- | --- |
+| V3-beat | `add_drum_pattern` with no target lands a kit + one-bar pattern as one clip; the offline render has ≥ 6 drum onsets; one undo removes the track. The dock's lofi ask runs against the mock loop in `ui/e2e/v3-beat.spec.ts`. | Does the kit sound like a kit; one real ask to the dock with a live model. |
+| V3-vocal | `Mosh --v3-vocal-smoke` on the BlackHole loopback: the 1-bar count-in rolls (phase `count_in`) and is EXCLUDED from the take (the take starts at the entry point and its first sound is the guide played after it); two passes land as non-silent WAVs within the calibrated tolerance; Again rejects/mutes and restarts capture; Keep moves the pass to LEAD audible; undo reverses the keep. Copies of both takes are in the evidence dir. | Sing into a real mic: audibility, monitoring feel, latency at the desk. |
+| V3-mix | level, pan, mute, solo, a 4OSC preset, a send to a reverb bus and a clip move each change the rendered audio in the direction the edit implies, and one undo each returns the render to the baseline; `snapshot()` cost and an upper bound on per-command latency are measured. Zoom is `ui/e2e/v3-timeline.spec.ts`. | Whether it feels immediate at 44.1 kHz / 512. |
+| V3-file | `save_as` → `new_project` → `open_project` reproduces the project projection (names, clips, plugins, mixer); the exported mixdown is non-silent and the project's length; a generated `.mid` imports as one clip with four notes; undo removes it. | Play the export somewhere else. |
+| V3-mp | two real Mosh processes on this Mac over the local relay (`scripts/playtest/mp-two-window-dry-run.sh`): create/join, claim→commit, bus, group, late-join bootstrap, a multi-second take byte-identical on the peer; `--cloud` adds the cloud-relay smoke. The lock badge on V3 chrome is `ui/e2e/v3-multiplayer.spec.ts` against the mock peer. | A second physical Mac; whether ~1 s feels live. |
+| V3-feel | the whole V3 Playwright suite plus `ui/e2e/v3-acceptance-screens.spec.ts`: eight surfaces × four colorways screenshotted, accents proven distinct by pixel readback. | Flip the 32 PNGs; ten minutes of ordinary use per colorway if one looks wrong. |
+
+The harness closes the *engine* and *UI-on-mock* halves. The `last-passed` column stays the
+owner's: it is dated when the owner has done the right-hand column with the harness's
+artifacts, which is a listening session of minutes, not the original hour.
+
 ## Collaborator video — two machines (hardware-gated)
 
 The WebRTC + signaling layer is built and unit-tested (`ui/src/webrtc/*.test.ts`,
