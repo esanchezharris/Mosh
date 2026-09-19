@@ -471,9 +471,10 @@ def row_vocal(ctx) -> Row:
         else:
             row.chk(False, f"{key} WAV exists on disk", str(src))
     if summary:
-        row.notes.append(f"calibrated loopback {summary.get('calibratedMs')} ms, landing tolerance {summary.get('toleranceMs')} ms; "
-                         f"take1 (count-in) landed {summary.get('take1OffsetMs')} ms from the guide, take2 (Again, no count-in) "
-                         f"{summary.get('take2OffsetMs')} ms — a count-in landing is up to one device block early (engine follow-up)")
+        ms = lambda k: round(float(summary.get(k) or 0.0), 2)
+        row.notes.append(f"calibrated loopback {ms('calibratedMs')} ms, landing tolerance {ms('toleranceMs')} ms; "
+                         f"take1 (count-in) landed {ms('take1OffsetMs')} ms from the guide, take2 (Again, no count-in) "
+                         f"{ms('take2OffsetMs')} ms — a count-in landing is up to one device block early (engine follow-up)")
     return row
 
 
