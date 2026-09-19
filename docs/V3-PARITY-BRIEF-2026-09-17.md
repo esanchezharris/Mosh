@@ -125,5 +125,6 @@ set their shell explicitly, but any that relied on the default will surface here
 
 No new visual direction for V3 (its DESIGN.md is the contract); no engine changes beyond what a
 row strictly needs, and any new command carries all eight registrations, enumerated in
-docs/PHONE_PAD.md (the #702 repair is the worked example); no claim that the native plugin suite is musically viable —
-that is its own brief; no move of the default before §5 is on record.
+docs/PHONE_PAD.md (the #702 repair is the worked example); no claim that the native
+plugin suite is musically viable — that is its own brief; no move of the default before
+§5 is on record.

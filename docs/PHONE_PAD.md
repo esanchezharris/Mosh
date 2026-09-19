@@ -93,9 +93,10 @@ an agent move), unguarded in the multiplayer lock manager, and classified in
 `TransactionSafe.h` per the table above.
 
 **A command needs eight registrations, not one.** The count has crept up as the surface
-grew — three, then five (`docs/V3-PARITY-BRIEF-2026-09-17.md:16,127`), then seven — so
-here is the list itself, which is what a future session should check against rather than
-a number:
+grew — three in `docs/rfc/003-lock-scope-golden-ledger.md`, five in the
+first-stranger-era notes, seven in `ui/src/agent/txnSafeRegistry.test.ts` — which is
+exactly why a number is the wrong shape for this rule. Here is the list itself, and it
+is what a future session should check against:
 
 | # | Where | What a miss looks like |
 |---|---|---|
