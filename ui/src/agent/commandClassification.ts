@@ -71,6 +71,23 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   cancel_agent_request: "the harness cancels or rolls back its own request — the producer's affordance is ordinary Undo",
   undo_agent_request: "the harness undoes exactly its own committed request (undo-head ownership) — the producer's affordance is ordinary Undo",
   get_command_log: "read-only log inspector (CommandLog panel + taste distillation), not a musical tool",
+
+  // ── MOSHI-LOOP — the phone-pad / Booth recording loop (src/moshops/MoshOps.Loop.cpp) ──
+  // Eleven commands the producer drives with a thumb on an iPhone in the live room or a
+  // finger on the desktop Booth while singing. There is no skill that sings, and a model
+  // that could press Record, Keep or Again would be editing a performance it cannot hear.
+  // loop_state is the pad's poll; the rest are the buttons.
+  loop_state: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_setup: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_record: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_keep: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_again: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_hear: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_play_all: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_stop: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_navigate: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_home: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
+  loop_lead_in: "Moshi phone pad / Booth recording loop; a performance gesture, never an agent move",
   report_issue: "the deterministic typed/voice issue route records owner feedback before model routing; report text is never model-authored",
   list_issues: "read-only feed for the private Issue Inbox panel",
   update_issue: "owner triage state in the private Issue Inbox, not a musical edit",

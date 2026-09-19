@@ -550,6 +550,25 @@ private:
     // into clips (te::EditPlaybackContext::applyRetrospectiveRecord). The one command in
     // this group that IS an Edit mutation, so unlike its neighbours it is undoable.
     juce::var cmdCaptureMidi (const juce::var& args);
+    // ── MOSHI-LOOP — the phone-pad / Booth recording loop (MoshOps.Loop.cpp) ─────
+    // The REAPER-parity "Put Me In / Keep / Again / Review / Play All / Stop" loop an
+    // iPhone in the live room and the desktop Booth both drive. loop_state is the read the
+    // pad polls; loop_setup is one undoable track insert; the four cursor commands are
+    // NON-undoable project preferences (the cmdSetCountIn template); the six transport
+    // verbs are recording LIFECYCLE, so — like stop_recording — they take no transaction of
+    // their own and degrade gracefully (ok + applied:false + reason) with no audio device.
+    // loop_keep and loop_again each open ONE undoable transaction for the clip they move.
+    juce::var cmdLoopState    (const juce::var& args);   // read (never logged); adopts unstamped passes
+    juce::var cmdLoopSetup    (const juce::var& args);   // one txn for the takes-track insert (undoable:false log)
+    juce::var cmdLoopRecord   (const juce::var& args);   // lifecycle
+    juce::var cmdLoopKeep     (const juce::var& args);   // lifecycle + one undoable txn
+    juce::var cmdLoopAgain    (const juce::var& args);   // lifecycle + one undoable txn
+    juce::var cmdLoopHear     (const juce::var& args);   // lifecycle
+    juce::var cmdLoopPlayAll  (const juce::var& args);   // lifecycle
+    juce::var cmdLoopStop     (const juce::var& args);   // lifecycle; never an error
+    juce::var cmdLoopNavigate (const juce::var& args);   // non-undoable preference
+    juce::var cmdLoopHome     (const juce::var& args);   // non-undoable preference
+    juce::var cmdLoopLeadIn   (const juce::var& args);   // non-undoable preference
     // LAT-001 — measured round-trip latency calibration (ported from Moshpit M005/M006).
     // { action: start | status | apply | cancel | clear }. `start` detaches the Edit from
     // the device (the export render's exclusivity dance), plays a sweep through the
@@ -617,6 +636,69 @@ private:
     // record-start and on project load, so a controller plugged in AFTER the setting was
     // made still honours it. A complete no-op headless (no devices to write to).
     void applyRecordOptionsToDevices();
+
+    // ── MOSHI-LOOP internals (MoshOps.Loop.cpp) ──────────────────────────────────
+    /** The whole loop as the phone sees it: {projectId, host, engaged, leadTrackId,
+        takesTrackId, transport, phase, listening, currentId, lastId, reviewId,
+        auditionedId, contributions[], phoneSeenMs, blockReason}. Pure READ — it never
+        adopts, stamps or emits, so snapshot() can embed it and every command can use it
+        for the authority handshake without mutating the thing it is fingerprinting. */
+    juce::var loopStateVar();
+    /** Stamps identity (pass id / entry / order, null UndoManager) onto any wave clip on
+        LEAD or TAKES that does not have it yet — the same backfill idiom as
+        mosh::takeidentity::backfill. Called by loop_state, so a clip dragged in by hand
+        becomes a contribution the phone can name. */
+    void loopAdoptUnstampedClips();
+    /** The clip carrying this pass id, anywhere in the edit, or nullptr. */
+    te::Clip* loopFindContribution (const juce::String& passId);
+    te::AudioTrack* loopLeadTrack();
+    te::AudioTrack* loopTakesTrack();
+    /** Starts a capture at startQn. `bypassCountIn` is what makes Keep and Again feel
+        continuous: the producer is already playing, so the pre-roll would be an
+        interruption. Returns false (with `reason` filled) when nothing could roll — no
+        audio device, no record-active input — and mints NO pass in that case. */
+    bool loopStartCapture (double startQn, bool bypassCountIn, juce::String& reason);
+    /** Plays (never records) from startQn. Same graceful-false contract as above. */
+    bool loopStartPlayback (double startQn, juce::String& reason);
+    struct LoopFinalized { bool landed = false; juce::String passId; juce::String clipId; };
+    /** Lands the current capture: a FRESH transaction, then stop_recording, then identity
+        on whatever landed and the "only the newest unkept take is audible" mute pass. */
+    LoopFinalized loopFinalizeCapture();
+    /** Records that the pad polled (or that its last poll has aged out) and emits once on
+        the transition — never per poll. Called from loop_state and from snapshot(). */
+    void loopRefreshPhonePresence (bool polled);
+    double loopQnToSeconds (double qn);
+    double loopSecondsToQn (double seconds);
+    int    loopQnToBar (double qn);          // 1-based, as displayed
+    double loopBarToQn (int bar);            // 1-based bar → quarter notes
+    /** "" when the request may proceed, else the one sentence the phone shows. Stop is
+        deliberately looser than the rest (phoneloop::compatibleAuthority's stopOnly). */
+    juce::String loopAuthorityRefusal (const juce::String& command, const juce::var& args);
+    /** "" when the cursor commands may proceed; the stopped-only refusal while rolling. */
+    juce::String loopMovingRefusal();
+    /** The phone's own requestId when it sent one (so a retried POST and its receipt name
+        the SAME action), else a fresh id for a desktop press. */
+    juce::String loopActionId (const juce::var& args);
+    /** "Part N" for a pass id, or "that take" — receipt copy, never an identifier. */
+    juce::String loopLabelFor (const juce::String& passId);
+    /** Stamps actionId + the human `detail` onto a loop result. Every loop command's
+        result carries both: the endpoint keys its receipt ledger on one and shows the
+        other verbatim. */
+    juce::var loopOk (const juce::String& command, juce::DynamicObject* data,
+                      const juce::String& actionId, const juce::String& detail);
+    /** The ONE write path behind loop_navigate / loop_home / loop_lead_in: null-UM
+        preference write, markDirty, undoable:false log, emit — the cmdSetCountIn template. */
+    juce::var loopWriteCursor (const juce::String& command, const juce::var& args,
+                               const juce::var& listeningQn, const juce::var& leadQn);
+    /** One recorded pass, in flight. Cleared by finalize and by a project replacement. */
+    struct LoopCapture { juce::String passId; double entryQn = 0; bool active = false; };
+    LoopCapture  loopCurrent_;
+    juce::String loopAuditionedId_;                              // the pass Review is soloing, if any
+    /** Per-PROCESS identity: a reload or a relaunch means the phone's authority is stale
+        even when the project id is unchanged. */
+    juce::String loopHostEpoch_ { juce::Uuid().toString() };
+    double loopPhoneSeenMs_ = 0.0;
+    bool   loopPhoneConnected_ = false;
     // LAT-001 — the resolved snapshot block { state, frames, sampleRate, ms, confidence,
     // measuredAt, inputDevice, outputDevice, method, deviceReportedSamples, appliedMs,
     // applied, stale, error }. Every key always present (the UI renders it cold).

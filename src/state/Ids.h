@@ -363,5 +363,44 @@ namespace mosh::ids
     // CAP-001 — the clip was adopted from crash residue (adopt_recording_residue).
     MOSH_DECLARE_ID (moshRecovered)
 
+    // ── MOSHI-LOOP — the phone-pad / Booth recording loop ────────────────────────
+    //
+    // The loop records onto a TAKES track ("<lead> · Takes") and moves keepers onto the
+    // LEAD track the producer picked. A "contribution" is one recorded pass: one wave
+    // clip carrying the three IDENTITY properties below plus the two STATE ones.
+    //
+    // IDENTITY (moshLoopPassId / moshLoopEntryQn / moshLoopOrder) is written ONCE, with a
+    // NULL UndoManager, the first time the loop sees the clip — exactly the posture of
+    // moshTakeId above and for the same reason: a pass id is a handle the phone is holding
+    // on screen, so an Undo that re-minted it would strand the take the producer is
+    // pointing at. Identity is not an edit, so it is not undoable, and it is never
+    // reassigned.
+    //
+    // STATE (moshLoopKeeper / moshLoopRejected) is the opposite: Keep and Again ARE edits,
+    // written WITH &undoManager() inside their own transaction, so one Cmd+Z puts a
+    // wrongly-rejected take back exactly as it was (the clip's mute and its track move
+    // ride the same transaction).
+    MOSH_DECLARE_ID (moshLoopPassId)     // string  — stable dashed uuid for one recorded pass (identity, null UM)
+    MOSH_DECLARE_ID (moshLoopEntryQn)    // double  — the qn the pass entered at (identity, null UM)
+    MOSH_DECLARE_ID (moshLoopOrder)      // int     — 1-based capture order; drives the "Part N" label (identity, null UM)
+    MOSH_DECLARE_ID (moshLoopKeeper)     // bool    — the producer kept it: it lives on LEAD and is audible (UNDOABLE)
+    MOSH_DECLARE_ID (moshLoopRejected)   // bool    — the producer said Again: muted on TAKES (UNDOABLE)
+
+    // MOSHI-LOOP — the project-level loop preferences. Same MOSH_PROJECT node and the
+    // same NON-undoable posture as countInBars/recOverdub above: where the producer is
+    // listening from, how much lead-in they want, and which pass the phone last spoke
+    // about are not session edits, so an Undo must not walk them back. They are written
+    // with a null UndoManager and AFTER any undoable write of the same command — a
+    // preference written into an otherwise-empty transaction is the G14 class, where the
+    // next Undo destroys the PREVIOUS edit instead.
+    MOSH_DECLARE_ID (loopLeadTrackId)    // string — the track the producer picked (keepers land here)
+    MOSH_DECLARE_ID (loopTakesTrackId)   // string — the auto-made "<lead> · Takes" capture track
+    MOSH_DECLARE_ID (loopListeningQn)    // double — where playback/recording starts (absent ⇒ 0)
+    MOSH_DECLARE_ID (loopLeadQn)         // double — remembered lead-in in quarter notes (absent ⇒ 8)
+    MOSH_DECLARE_ID (loopEntryQn)        // double — where the next pass enters (ABSENT ⇒ null, no pass yet)
+    MOSH_DECLARE_ID (loopPassCounter)    // int    — monotonic pass counter behind moshLoopOrder
+    MOSH_DECLARE_ID (loopLastId)         // string — the most recent contribution
+    MOSH_DECLARE_ID (loopReviewId)       // string — the pass the phone's Review button is pointed at
+
 #undef MOSH_DECLARE_ID
 } // namespace mosh::ids

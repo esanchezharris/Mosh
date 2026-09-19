@@ -568,6 +568,9 @@ const MOCK_TXN_READS = new Set([
   // LoRA Lab audition — renders a candidate adapter to a file and mutates no Edit
   // state, so listening to takes stays possible while an agent transaction is open.
   "render_lora_take", "promote_lora_checkpoint",
+  // MOSHI-LOOP — the phone pad polls loop_state two or three times a second; blocking it
+  // for the length of a skill run would freeze the phone on stale state.
+  "loop_state",
 ]);
 
 function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
@@ -611,7 +614,11 @@ const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "s
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
-  "report_issue", "list_issues", "update_issue", "export_issue", "attach_issue_file"]);  // accept_lyric_proposal IS undoable
+  "report_issue", "list_issues", "update_issue", "export_issue", "attach_issue_file",
+  // MOSHI-LOOP — the loop's preferences and transport verbs. loop_keep / loop_again are
+  // deliberately absent: each opens one real transaction over the clip it moves.
+  "loop_setup", "loop_navigate", "loop_home", "loop_lead_in",
+  "loop_record", "loop_stop", "loop_hear", "loop_play_all"]);  // accept_lyric_proposal IS undoable
 
 // AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
 // silently report success: for a MUTATING command that means the dev/e2e UI looks like
@@ -3489,6 +3496,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       mockTxn.failureCode = undefined;
       invalidate();
       return ok(command, mockTxnStatusData(mockTxn));
+    }
+    case "loop_state": {
+      // MOSHI-LOOP — a PLACEHOLDER so a dev-mode call does not hit the fail-closed
+      // default and read as "unknown command". The mock has no loop model yet, so it
+      // answers honestly: nothing is set up. Replaced by the full mock model with the
+      // pad's own UI.
+      return ok(command, {
+        projectId: "mock-project", host: "mock-host", engaged: false,
+        leadTrackId: "", takesTrackId: "",
+        transport: { recording: false, playing: false, positionSec: 0 },
+        phase: "setup_required",
+        listening: { qn: 0, bar: 1, entryQn: null, leadQn: 8 },
+        currentId: null, lastId: null, reviewId: null, auditionedId: null,
+        contributions: [], phoneSeenMs: 0, blockReason: "",
+      });
     }
     case "batch_status": {
       const txnId = str(args.transactionId);

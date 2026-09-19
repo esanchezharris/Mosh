@@ -133,6 +133,11 @@ inline Class classify (const juce::String& command, juce::String& reason)
         // state; nothing about them is in the Edit's undo history, so an undo inside a
         // skill's transaction would not put them back.
         "set_record_options",
+        // MOSHI-LOOP — loop_setup's track insert IS undoable, but the command also arms
+        // one track, un-arms another and stores the pairing, none of which the undo stack
+        // holds; the three cursor commands are project preferences on the MOSH_PROJECT
+        // node, exactly like set_count_in above.
+        "loop_setup", "loop_navigate", "loop_home", "loop_lead_in",
     };
     if (nonUndoable.count (command) > 0)
     {
@@ -178,6 +183,12 @@ inline Class classify (const juce::String& command, juce::String& reason)
         // manifest naming one command can describe. It is also a PERFORMANCE gesture —
         // there is no skill that plays a keyboard and then captures it.
         "capture_midi",
+        // MOSHI-LOOP — the six transport verbs of the phone-pad / Booth recording loop.
+        // Each one rolls, stops or lands the transport, and loop_keep/loop_again also
+        // restart capture on the way out, so their effect is not contained by any single
+        // edit transaction. They are a PERFORMANCE gesture besides: a producer presses
+        // them with a thumb while singing, and no skill sings.
+        "loop_record", "loop_keep", "loop_again", "loop_hear", "loop_play_all", "loop_stop",
     };
     if (lifecycle.count (command) > 0)
     {
@@ -230,6 +241,11 @@ inline const std::set<juce::String>& readOnlyDuringTransaction()
         // adapter to a file and mutates no Edit state, so a producer must still be able
         // to listen to takes while an agent skill holds a transaction open.
         "render_lora_take", "promote_lora_checkpoint",
+        // MOSHI-LOOP — the pad polls loop_state two or three times a second. Blocking it
+        // for the length of a skill run would freeze the phone on stale state with no way
+        // to tell that apart from a dead Mac. It opens no transaction; the only thing it
+        // writes is pass IDENTITY, with a null UndoManager.
+        "loop_state",
     };
     return reads;
 }

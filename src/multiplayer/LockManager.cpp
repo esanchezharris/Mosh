@@ -44,6 +44,14 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // CAP-001 — local file recovery: reads/renames under the project dir, never a track edit.
         "list_recording_residue", "adopt_recording_residue", "quarantine_recording_residue",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
+        // MOSHI-LOOP — the phone-pad / Booth recording loop. Same posture as
+        // set_transport/stop_recording directly above: these drive the LOCAL transport
+        // and the producer's own listening cursor, and the two that do edit a clip
+        // (loop_keep / loop_again) act on a pass the caller themselves just recorded onto
+        // their own takes track. Blocking any of them would leave a singer standing at a
+        // microphone unable to stop, which no lock is worth.
+        "loop_state", "loop_setup", "loop_record", "loop_keep", "loop_again", "loop_hear",
+        "loop_play_all", "loop_stop", "loop_navigate", "loop_home", "loop_lead_in",
         // CAP-PRJ-005 — jump_to_history is repeated undo/redo over the local Edit's own
         // UndoManager. Same posture as undo/redo directly above: it targets no single
         // track (the args name a history point, not a clip), so it contends for nothing

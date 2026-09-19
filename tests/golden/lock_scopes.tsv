@@ -122,6 +122,17 @@ load_master_plugin	SessionGlobal
 load_preset	Track
 load_plugin	Track
 load_rave_model	Track
+loop_again	Unguarded
+loop_hear	Unguarded
+loop_home	Unguarded
+loop_keep	Unguarded
+loop_lead_in	Unguarded
+loop_navigate	Unguarded
+loop_play_all	Unguarded
+loop_record	Unguarded
+loop_setup	Unguarded
+loop_state	Unguarded
+loop_stop	Unguarded
 mark_take	Unguarded
 move_annotation	SessionGlobal
 move_clip	Clip
