@@ -46,8 +46,8 @@ describe("defaultSettings", () => {
     for (const d of SETTINGS) expect(defs[d.id]).toEqual(d.default);
   });
 
-  it("uses Pro Tools for fresh settings", () => {
-    expect(defaultSettings().uiShell).toBe("protools");
+  it("uses V3 for fresh settings (the V3 parity gate closed — brief §6)", () => {
+    expect(defaultSettings().uiShell).toBe("v3");
   });
 
   it("defines the Pro Tools no-dialog fade defaults", () => {

@@ -56,7 +56,7 @@ describe("set + localStorage persistence round-trip", () => {
     });
   });
 
-  it("keeps an explicit existing Live preference when the fresh default is Pro Tools", () => {
+  it("keeps an explicit existing Live preference when the fresh default is V3", () => {
     savePersisted(localStorage, { template: null, values: { uiShell: "live" }, keyOverrides: {} });
     useSettings.setState({ template: null, values: {} });
 

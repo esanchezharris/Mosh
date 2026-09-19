@@ -62,7 +62,17 @@ describe("effectiveInteractionSetting — DAW shell defaults", () => {
     useSettings.setState(backup, true);
   });
 
-  it("fresh Pro Tools shell + no overrides → the Pro Tools bundle", () => {
+  it("fresh install (V3, no settings) + no overrides → the schema default (mosh), not a DAW bundle", () => {
+    // V3 is the fresh-install shell since the parity flip (settings/schema.ts); it carries
+    // no DAW keymap/gesture bundle of its own, so an untouched install resolves to the
+    // schema defaults exactly as v2/classic do.
+    expect(effectiveInteractionSetting("uiShell")).toBe("v3");
+    expect(effectiveInteractionSetting("keymap")).toBe("mosh");
+    expect(effectiveInteractionSetting("gestureTable")).toBe("mosh");
+  });
+
+  it("Pro Tools shell + no overrides → the Pro Tools bundle", () => {
+    useSettings.setState({ values: { uiShell: "protools" } });
     expect(effectiveInteractionSetting("keymap")).toBe("protools");
     expect(effectiveInteractionSetting("gestureTable")).toBe("protools");
     // …and the resolution reaches the ACTIVE bundle, not just the getter
@@ -94,7 +104,7 @@ describe("effectiveInteractionSetting — DAW shell defaults", () => {
 
   it("non-interaction ids pass straight through", () => {
     expect(effectiveInteractionSetting("feel.dragThreshold")).toBe(FEEL_DEFAULTS.dragThreshold);
-    expect(effectiveInteractionSetting("uiShell")).toBe("protools"); // the schema default itself
+    expect(effectiveInteractionSetting("uiShell")).toBe("v3"); // the schema default itself (fresh-install shell)
   });
 
   it("Pro Tools shell + unset interaction selectors → Pro Tools bundle", () => {

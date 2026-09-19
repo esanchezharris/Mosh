@@ -197,17 +197,19 @@ export const SETTINGS: SettingDef[] = [
     // variant of redesignShell: "classic" = the prior App; "v2" = the new Mosh shell;
     // "live" = the Live-12 Arrangement-View clone (ui/src/live); "protools" = the
     // Pro Tools Edit-Window-inspired shell (ui/src/protools). UI-local + reversible
-    // (flip back anytime, here or via the in-app toggle). PRO TOOLS is the DEFAULT for
-    // fresh settings as of the 2026-08-09 session-readiness cutover; existing explicit
-    // preferences remain persisted, and Live/v2/classic stay fully available. In
-    // dev/e2e a `?shell=` query-param overrides this per page-load (see v2/shellQuery.ts).
+    // (flip back anytime, here or via the in-app toggle). V3 ("Mosh (v3)") is the DEFAULT for
+    // fresh settings once the V3 parity gate closed (docs/V3-PARITY-BRIEF-2026-09-17.md §6;
+    // Pro Tools was the default from the 2026-08-09 session-readiness cutover until then).
+    // Existing explicit preferences remain persisted, and Pro Tools/Live/v2/classic stay
+    // fully available. In dev/e2e a `?shell=` query-param overrides this per page-load
+    // (see v2/shellQuery.ts).
     id: "uiShell",
     type: "enum",
-    default: "protools",
+    default: "v3",
     scope: "app",
     category: "Layout",
     label: "Interface",
-    help: "Which interface to use. “Pro Tools” is the fresh-install default; “Live (clone),” “Mosh,” and “Classic” remain available, and an existing choice is preserved.",
+    help: "Which interface to use. “Mosh (v3)” is the fresh-install default; “Pro Tools,” “Live (clone),” “Mosh,” and “Classic” remain available, and an existing choice is preserved.",
     constraints: {
       options: [
         { value: "classic", label: "Classic" },

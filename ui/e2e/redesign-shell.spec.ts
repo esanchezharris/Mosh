@@ -22,11 +22,15 @@ async function bootClassic(page: Page): Promise<void> {
   await expect(page.getByTestId("arrangement")).toBeVisible();
 }
 
-test("default (no settings): boots the Pro Tools shell", async ({ page }) => {
+test("default (no settings): boots the V3 shell; Pro Tools stays reachable by choice", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.clear()); // clean storage → schema defaults
   await page.goto("/");
-  // Pro Tools is the fresh-settings default. Live stays reachable via ?shell=live or
-  // the Interface setting; the classic redesign layout below seeds uiShell="classic".
+  // V3 is the fresh-settings default (the parity flip). Pro Tools, Live, v2 and classic
+  // stay reachable via ?shell= or the Interface setting; the classic redesign layout
+  // below seeds uiShell="classic".
+  await expect(page.getByTestId("v3-shell")).toBeVisible();
+  await expect(page.getByTestId("protools-shell")).toHaveCount(0);
+  await page.goto("/?shell=protools");
   await expect(page.getByTestId("protools-shell")).toBeVisible();
 });
 
