@@ -85,7 +85,7 @@ test.describe("V3-feel: every surface in every colorway", () => {
       await page.getByTestId("v3-templates").hover();
       await page.getByTestId("v3-template-booth").click();
       await expect(page.getByTestId("v3-booth")).toBeVisible();
-      await expect(page.getByTestId("v3-file-menu")).toHaveCount(0);   // the menu's fade must finish
+      await expect(page.getByTestId("v3-file-menu")).toHaveAttribute("aria-hidden", "true");   // the menu stays mounted; wait for it to hide
       await shot("07-booth");
       await page.getByTestId("v3-booth-studio").click();
       await expect(page.getByTestId("v3-arrangement")).toBeVisible();
