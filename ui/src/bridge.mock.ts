@@ -15,7 +15,8 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
@@ -568,6 +569,9 @@ const MOCK_TXN_READS = new Set([
   // LoRA Lab audition — renders a candidate adapter to a file and mutates no Edit
   // state, so listening to takes stays possible while an agent transaction is open.
   "render_lora_take", "promote_lora_checkpoint",
+  // MOSHI-LOOP — the phone pad polls loop_state every 200 ms (5 Hz); blocking it
+  // for the length of a skill run would freeze the phone on stale state.
+  "loop_state",
 ]);
 
 function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
@@ -611,7 +615,11 @@ const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "s
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
-  "report_issue", "list_issues", "update_issue", "export_issue", "attach_issue_file"]);  // accept_lyric_proposal IS undoable
+  "report_issue", "list_issues", "update_issue", "export_issue", "attach_issue_file",
+  // MOSHI-LOOP — the loop's preferences and transport verbs. loop_keep / loop_again are
+  // deliberately absent: each opens one real transaction over the clip it moves.
+  "loop_setup", "loop_navigate", "loop_home", "loop_lead_in",
+  "loop_record", "loop_stop", "loop_hear", "loop_play_all"]);  // accept_lyric_proposal IS undoable
 
 // AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
 // silently report success: for a MUTATING command that means the dev/e2e UI looks like
@@ -1456,6 +1464,244 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
   }
   invalidate();
   return { applied: true, discarded: false, clips: landed };
+}
+
+// ── MOSHI-LOOP: the recording loop's mock model ──────────────────────────────
+// The phone pad and the V3 Booth are two clients of the SAME eleven commands, so the
+// mock carries a real loop model rather than a stub — the Booth's whole story (set up a
+// Lead, roll, keep, redo, undo) is proved against this in e2e.
+//
+// UNDO POSTURE, mirroring the engine exactly. Everything a producer could want back
+// lives on the SNAPSHOT — which track a pass's clip sits on, its mute, and its keeper /
+// rejected marks — so the mock's whole-snapshot undo stack reverses loop_keep and
+// loop_again for free. The PREFERENCES below (the listening cursor, the lead-in, the
+// pass counter, the last / review / audition ids) are module state, which is how the
+// engine writes them too: with a null UndoManager, so an undo never rewinds where the
+// producer is listening from. Landing a pass is likewise NOT an undo step (the engine's
+// capture stop is a lifecycle event, and finalizeMockRecording takes the same posture) —
+// that is what lets one ⌘Z after a Stop still reverse the Again that preceded it.
+
+/** The engine's per-clip loop properties (state/Ids.h's moshLoop*), which the native
+ *  SNAPSHOT deliberately does not project — only `loop.contributions` does. Kept off the
+ *  shared Clip type for exactly that reason, and read back through this cast. */
+type MockLoopClip = Clip & {
+  moshLoopPassId?: string;
+  moshLoopOrder?: number;
+  moshLoopEntryQn?: number;
+  moshLoopKeeper?: boolean;
+  moshLoopRejected?: boolean;
+};
+const loopClip = (clip: Clip): MockLoopClip => clip as MockLoopClip;
+
+type MockLoopModel = {
+  leadTrackId: string;
+  takesTrackId: string;
+  listeningQn: number;
+  leadQn: number;
+  entryQn: number | null;
+  passCounter: number;
+  lastId: string | null;
+  reviewId: string | null;
+  auditionedId: string | null;
+  current: { passId: string; entryQn: number; order: number } | null;
+};
+const MOCK_LOOP_DEFAULT_LEAD_QN = 8;
+const MOCK_LOOP_HOST = "mock-host-epoch";
+const freshLoopModel = (): MockLoopModel => ({
+  leadTrackId: "", takesTrackId: "", listeningQn: 0, leadQn: MOCK_LOOP_DEFAULT_LEAD_QN,
+  entryQn: null, passCounter: 0, lastId: null, reviewId: null, auditionedId: null, current: null,
+});
+let mockLoop: MockLoopModel = freshLoopModel();
+let mockLoopActionSeq = 0;
+
+const loopQnPerBar = (): number => snapshot.session.timeSigNumerator ?? 4;
+const loopQnToSeconds = (qn: number): number => (qn * 60) / (snapshot.session.tempo || 120);
+const loopSecondsToQn = (sec: number): number => (sec * (snapshot.session.tempo || 120)) / 60;
+const loopQnToBar = (qn: number): number => 1 + qn / loopQnPerBar();
+const loopLeadTrack = (): Track | null => (mockLoop.leadTrackId ? findTrack(mockLoop.leadTrackId) : null);
+const loopTakesTrack = (): Track | null => (mockLoop.takesTrackId ? findTrack(mockLoop.takesTrackId) : null);
+const loopEngaged = (): boolean => loopLeadTrack() !== null && loopTakesTrack() !== null;
+
+/** Every stamped pass on the Lead and Takes tracks, in CAPTURE order — which is what
+ *  "Part N" means. A pass dragged earlier on the timeline has not renumbered history. */
+function loopPasses(): { clip: MockLoopClip; track: Track }[] {
+  const found: { clip: MockLoopClip; track: Track }[] = [];
+  for (const track of [loopLeadTrack(), loopTakesTrack()]) {
+    if (!track) continue;
+    for (const clip of track.clips) {
+      const stamped = loopClip(clip);
+      if (stamped.moshLoopPassId) found.push({ clip: stamped, track });
+    }
+  }
+  return found.sort((a, b) => (a.clip.moshLoopOrder ?? 0) - (b.clip.moshLoopOrder ?? 0));
+}
+
+const loopFind = (passId: string) =>
+  loopPasses().find((entry) => entry.clip.moshLoopPassId === passId) ?? null;
+
+function mockLoopState(): LoopState {
+  const lead = loopLeadTrack();
+  const takes = loopTakesTrack();
+  const engaged = lead !== null && takes !== null;
+  const recording = snapshot.transport.recording;
+  const playing = snapshot.transport.playing;
+  const contributions = (engaged ? loopPasses() : []).map((entry, index) => ({
+    id: entry.clip.moshLoopPassId ?? "",
+    clipId: entry.clip.id,
+    trackId: entry.track.id,
+    label: `Part ${index + 1}`,
+    keeper: entry.clip.moshLoopKeeper === true,
+    rejected: entry.clip.moshLoopRejected === true,
+    entryQn: entry.clip.moshLoopEntryQn ?? 0,
+    startQn: loopSecondsToQn(entry.clip.start),
+    endQn: loopSecondsToQn(entry.clip.start + entry.clip.length),
+  }));
+  return {
+    projectId: MOCK_AGENT_PROJECT,
+    host: MOCK_LOOP_HOST,
+    engaged,
+    leadTrackId: engaged ? lead!.id : "",
+    takesTrackId: engaged ? takes!.id : "",
+    transport: { recording, playing, positionSec: snapshot.transport.position },
+    phase: !engaged ? "setup_required"
+      : recording && snapshot.transport.position < loopQnToSeconds(mockLoop.current?.entryQn ?? 0) ? "count_in"
+      : recording ? "recording"
+      : playing && mockLoop.auditionedId ? "auditioning"
+      : playing ? "playing"
+      : "idle",
+    listening: {
+      qn: mockLoop.listeningQn,
+      bar: loopQnToBar(mockLoop.listeningQn),
+      entryQn: mockLoop.entryQn,
+      leadQn: mockLoop.leadQn,
+    },
+    currentId: mockLoop.current?.passId ?? null,
+    lastId: mockLoop.lastId,
+    reviewId: mockLoop.reviewId,
+    auditionedId: mockLoop.auditionedId,
+    contributions,
+    // No phone ever polls the mock, so the presence verdict stays false and the stamp
+    // stays 0: the Booth's "Phone connected" line is honestly unreachable in dev rather
+    // than faked into looking live. `phoneConnected` is the ENGINE's answer (the desktop
+    // never derives presence from the stamp, which is boot-relative, not epoch ms) — the
+    // mock mirrors the field so a shape drift here fails the same way it would natively.
+    phoneConnected: false,
+    phoneSeenMs: 0,
+    blockReason: snapshot.session.audioEnabled === false
+      ? "No audio device — recording is unavailable on this Mac" : "",
+  };
+}
+
+/** Rebuild snapshot.loop from the model. Called on every snapshot read and after every
+ *  loop command, exactly as the native side embeds loopStateVar() in snapshot(). */
+function syncLoopSnapshot(): void {
+  snapshot.loop = mockLoopState();
+}
+
+const loopActionId = (args: Record<string, unknown>): string =>
+  str(args.requestId) || `mock-loop-${++mockLoopActionSeq}`;
+
+function loopResult(
+  command: string,
+  args: Record<string, unknown>,
+  detail: string,
+  extra: Record<string, unknown> = {},
+  applied = true,
+): CommandResult {
+  syncLoopSnapshot();
+  return ok(command, { applied, actionId: loopActionId(args), detail, ...extra });
+}
+
+/** Land the in-flight pass on the Takes track and mute every older unkept pass, so the
+ *  newest take is the audible one. NOT an undo step — see the posture note above. */
+function loopFinalizeCapture(): MockLoopClip | null {
+  const current = mockLoop.current;
+  mockLoop.current = null;
+  const takes = loopTakesTrack();
+  if (!current || !takes) return null;
+  const clip = loopClip(waveClip(`pass-${current.order}`, loopQnToSeconds(current.entryQn), loopQnToSeconds(4)));
+  clip.moshLoopPassId = current.passId;
+  clip.moshLoopOrder = current.order;
+  clip.moshLoopEntryQn = current.entryQn;
+  clip.moshLoopKeeper = false;
+  clip.moshLoopRejected = false;
+  clip.mute = false;
+  for (const other of takes.clips) {
+    const stamped = loopClip(other);
+    if (!stamped.moshLoopPassId || stamped.moshLoopKeeper) continue;
+    stamped.mute = true;
+  }
+  takes.clips.push(clip);
+  mockLoop.lastId = current.passId;
+  mockLoop.reviewId = current.passId;
+  mockLoop.auditionedId = null;
+  return clip;
+}
+
+/** Mint the next pass and roll. Mirrors the engine's loopStartCapture: the transport is
+ *  recording AND playing, parked at the listening cursor. */
+function loopStartCapture(startQn: number): void {
+  mockLoop.passCounter += 1;
+  mockLoop.current = { passId: `mock-pass-${mockLoop.passCounter}`, entryQn: startQn, order: mockLoop.passCounter };
+  mockLoop.entryQn = startQn;
+  mockLoop.auditionedId = null;
+  snapshot.transport = { ...snapshot.transport, recording: true, playing: true, position: loopQnToSeconds(startQn) };
+  startPlayback();
+  emit("transport", snapshot.transport);
+  invalidate();
+}
+
+function loopStartPlayback(startQn: number): void {
+  snapshot.transport = { ...snapshot.transport, recording: false, playing: true, position: loopQnToSeconds(startQn) };
+  startPlayback();
+  emit("transport", snapshot.transport);
+  invalidate();
+}
+
+/** Move the listening cursor (and the stopped playhead that follows it). */
+function loopWriteCursor(qn: number): void {
+  mockLoop.listeningQn = Math.max(0, qn);
+  mockLoop.entryQn = mockLoop.listeningQn;
+  snapshot.transport = { ...snapshot.transport, position: loopQnToSeconds(mockLoop.listeningQn) };
+  emit("transport", snapshot.transport);
+  invalidate();
+}
+
+// ── the phone/companion server (remote_* natives) ────────────────────────────
+// A dev stand-in for RemoteCompanionServer so the QR surface — the one thing that decides
+// whether a phone can reach this Mac at all — is drivable in Vite dev and provable in
+// e2e. The URLs have the same SHAPE the native side mints (RemoteCompanionProtocol.cpp):
+// a LAN IPv4 host, and a padUrl whose token rides in the fragment.
+const MOCK_REMOTE_HOST = "192.168.1.80";
+const MOCK_REMOTE_PORT = 47873;
+const MOCK_REMOTE_TOKEN = "0123456789abcdef".repeat(4);   // 64 hex, like the real token
+const MOCK_REMOTE_TTL_MS = 15 * 60 * 1000;
+let mockRemote: RemoteStatus = { running: false, port: 0 };
+
+export function mockRemoteStartPairing(): RemoteResult<RemoteStatus> {
+  mockRemote = {
+    running: true,
+    port: MOCK_REMOTE_PORT,
+    pairing: {
+      host: MOCK_REMOTE_HOST,
+      port: MOCK_REMOTE_PORT,
+      token: MOCK_REMOTE_TOKEN,
+      expiresAtMs: Date.now() + MOCK_REMOTE_TTL_MS,
+      pairingUrl: "mosh://pair?payload=MOCK",
+      webUrl: `http://${MOCK_REMOTE_HOST}:${MOCK_REMOTE_PORT}/web?payload=MOCK`,
+      padUrl: `http://${MOCK_REMOTE_HOST}:${MOCK_REMOTE_PORT}/pad#token=${MOCK_REMOTE_TOKEN}`,
+    },
+  };
+  return { ok: true, data: mockRemote };
+}
+
+export function mockRemoteStop(): RemoteResult {
+  mockRemote = { running: false, port: 0 };
+  return { ok: true };
+}
+
+export function mockRemoteStatus(): RemoteResult<RemoteStatus> {
+  return { ok: true, data: mockRemote };
 }
 
 // Deterministic per-take peaks for the mock's list_takes (take-lanes wave) —
@@ -3490,6 +3736,170 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command, mockTxnStatusData(mockTxn));
     }
+    // ── MOSHI-LOOP ──────────────────────────────────────────────────────────
+    // The eleven commands the phone pad and the V3 Booth both drive. See the model
+    // above for the undo posture; the shapes mirror MoshOps.Loop.cpp's results.
+    case "loop_state": {
+      syncLoopSnapshot();
+      return ok(command, mockLoopState());
+    }
+    case "loop_setup": {
+      const requested = str(args.trackId);
+      let lead: Track | null = null;
+      if (requested) {
+        lead = findTrack(requested);
+        if (!lead) return err(command, "track not found: " + requested);
+      } else {
+        lead = snapshot.tracks.find((t) => t.armed && t.id !== mockLoop.takesTrackId) ?? loopLeadTrack();
+      }
+      if (!lead) return err(command, "no track to use as Lead — select or arm the one you sing on");
+      if (lead.id === mockLoop.takesTrackId)
+        return err(command, "that is the Takes track — pick the track you sing on");
+      if (mockLoop.leadTrackId === lead.id && loopTakesTrack() !== null)
+        return loopResult(command, args, `${lead.name} is already the Lead`,
+          { created: false, leadTrackId: lead.id, takesTrackId: mockLoop.takesTrackId });
+
+      pushUndo();
+      const takes: Track = {
+        id: nextTrackId(), index: snapshot.tracks.indexOf(lead) + 1, name: `${lead.name} · Takes`,
+        type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, armed: true, clips: [], plugins: [],
+      };
+      // Directly under the Lead, like the engine's move-into-the-same-transaction insert.
+      snapshot.tracks.splice(takes.index, 0, takes);
+      snapshot.tracks.forEach((t, i) => { t.index = i; });
+      lead.armed = false;                       // the Takes lane is what the mic feeds now
+      mockLoop.leadTrackId = lead.id;
+      mockLoop.takesTrackId = takes.id;
+      invalidate();
+      return loopResult(command, args, `Recording into ${takes.name}`,
+        { created: true, trackId: takes.id, leadTrackId: lead.id, takesTrackId: takes.id });
+    }
+    case "loop_record": {
+      if (!loopEngaged()) {
+        const setup = dispatch("loop_setup", {});
+        if (!setup.ok) return setup;
+      }
+      if (snapshot.transport.recording) return err(command, "Already recording — Stop first");
+      loopStartCapture(mockLoop.listeningQn);
+      return loopResult(command, args, `Rolling from bar ${loopQnToBar(mockLoop.listeningQn).toFixed(1)}`,
+        { passId: mockLoop.current?.passId ?? null });
+    }
+    case "loop_keep":
+    case "loop_again": {
+      if (!loopEngaged()) return err(command, "the loop is not set up — pick a Lead track first");
+      const keeping = command === "loop_keep";
+      const recording = snapshot.transport.recording;
+      const requested = str(args.targetId);
+      const currentId = mockLoop.current?.passId ?? "";
+      // Validate BEFORE finalizing, so a refusal mutates nothing (the engine's posture).
+      if (recording) {
+        if (requested && requested !== currentId)
+          return err(command, "finish this pass first — only the current recording can be kept while rolling");
+      } else {
+        const resolved = requested || mockLoop.lastId || "";
+        if (!resolved || !loopFind(resolved))
+          return err(command, keeping ? "no pass to keep" : "no pass to redo");
+      }
+      const landed = recording ? loopFinalizeCapture() : null;
+      const targetId = recording ? (landed?.moshLoopPassId ?? "") : (requested || mockLoop.lastId || "");
+      const found = targetId ? loopFind(targetId) : null;
+      if (!found) return loopResult(command, args, "the pass captured nothing", {}, false);
+
+      const lead = loopLeadTrack()!;
+      const takes = loopTakesTrack()!;
+      const destination = keeping ? lead : takes;
+      pushUndo();
+      if (found.track.id !== destination.id) {
+        found.track.clips = found.track.clips.filter((c) => c.id !== found.clip.id);
+        destination.clips.push(found.clip);
+      }
+      found.clip.moshLoopKeeper = keeping;
+      found.clip.moshLoopRejected = !keeping;
+      // A keeper is audible by definition; a redo is preserved but muted, never deleted.
+      found.clip.mute = !keeping;
+      if (keeping) {
+        const endQn = loopSecondsToQn(found.clip.start + found.clip.length);
+        mockLoop.listeningQn = Math.max(0, Math.max(mockLoop.listeningQn, endQn - mockLoop.leadQn));
+      } else {
+        mockLoop.listeningQn = Math.max(0, found.clip.moshLoopEntryQn ?? 0);
+      }
+      mockLoop.lastId = targetId;
+      mockLoop.reviewId = targetId;
+      // …and roll straight into the next pass. `applied` is the CLIP EDIT, which has
+      // already committed by here; whether the loop could roll again is the separate,
+      // secondary `restarted` (MoshOps.Loop.cpp). The mock's transport always rolls.
+      loopStartCapture(mockLoop.listeningQn);
+      const label = mockLoopState().contributions.find((part) => part.id === targetId)?.label ?? "that part";
+      const bar = loopQnToBar(mockLoop.listeningQn).toFixed(1);
+      return loopResult(command, args,
+        keeping ? `Kept ${label}; recording from bar ${bar}` : `Redoing ${label} from bar ${bar}`,
+        keeping
+          ? { keptId: targetId, clipId: found.clip.id, listeningQn: mockLoop.listeningQn,
+              currentId: mockLoop.current?.passId ?? null, restarted: true }
+          : { rejectedId: targetId, listeningQn: mockLoop.listeningQn,
+              currentId: mockLoop.current?.passId ?? null, restarted: true });
+    }
+    case "loop_hear": {
+      if (!loopEngaged()) return err(command, "the loop is not set up — pick a Lead track first");
+      const recording = snapshot.transport.recording;
+      const requested = str(args.targetId);
+      if (!recording && (!requested || !loopFind(requested)))
+        return err(command, "pick a part to review");
+      const landed = recording ? loopFinalizeCapture() : null;
+      const targetId = recording ? (landed?.moshLoopPassId ?? "") : requested;
+      const found = targetId ? loopFind(targetId) : null;
+      if (!found) return loopResult(command, args, "the pass captured nothing", {}, false);
+      mockLoop.auditionedId = targetId;
+      mockLoop.reviewId = targetId;
+      loopStartPlayback(found.clip.moshLoopEntryQn ?? 0);
+      return loopResult(command, args,
+        found.clip.moshLoopRejected
+          ? "Playing — this one stays muted in the mix until you Undo on the Mac"
+          : "Playing that part",
+        { targetId });
+    }
+    case "loop_play_all": {
+      if (!loopEngaged()) return err(command, "the loop is not set up — pick a Lead track first");
+      if (snapshot.transport.recording) loopFinalizeCapture();
+      loopStartPlayback(mockLoop.listeningQn);
+      mockLoop.auditionedId = null;
+      return loopResult(command, args, "Playing the song from the listening point");
+    }
+    case "loop_stop": {
+      // Never an error: Stop is the one thing that must always work.
+      if (snapshot.transport.recording) loopFinalizeCapture();
+      mockLoop.current = null;
+      stopPlayback();
+      snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+      emit("transport", snapshot.transport);
+      invalidate();
+      return loopResult(command, args, "Stopped");
+    }
+    case "loop_navigate": {
+      const bar = num(args.bar, 0);
+      if (!Number.isInteger(bar) || bar < 1 || bar > 1_000_000)
+        return err(command, "bar must be a whole number between 1 and 1000000");
+      if (snapshot.transport.recording || snapshot.transport.playing)
+        return err(command, "stop first — the cursor only moves while the transport is stopped");
+      loopWriteCursor((bar - 1) * loopQnPerBar());
+      return loopResult(command, args, `Listening from bar ${bar}`, { bar });
+    }
+    case "loop_home": {
+      if (snapshot.transport.recording || snapshot.transport.playing)
+        return err(command, "stop first — the cursor only moves while the transport is stopped");
+      loopWriteCursor(0);
+      return loopResult(command, args, "Listening from the top", { bar: 1 });
+    }
+    case "loop_lead_in": {
+      const leadQn = num(args.leadQn, -1);   // num() already rejects a non-finite value
+      if (leadQn < 0 || leadQn > 256)
+        return err(command, "leadQn must be between 0 and 256");
+      // A lead-in is how much run-up the NEXT pass gets — it is not a move, so it leaves
+      // the listening start and the playhead exactly where they are.
+      mockLoop.leadQn = leadQn;
+      invalidate();
+      return loopResult(command, args, `Lead-in ${leadQn} qn`, { leadQn });
+    }
     case "batch_status": {
       const txnId = str(args.transactionId);
       if (!txnId) return err(command, "missing 'transactionId'");
@@ -5395,6 +5805,9 @@ export function mockSnapshot<T = unknown>(): Promise<T> {
   // ensureTrackMeter, so every track that has a meter has a mute gate): fill the mixer
   // strip in for every track, whichever of the mock's many track factories made it.
   for (const t of snapshot.tracks) reconcileSendAutomationPlugins(t);
+  // MOSHI-LOOP — snapshot.loop is DERIVED, never stored: rebuilt from the model on every
+  // read, exactly as the native snapshot() embeds loopStateVar().
+  syncLoopSnapshot();
   return Promise.resolve(clone(snapshot) as unknown as T);
 }
 
@@ -5432,6 +5845,9 @@ export function __resetMockForTests(): void {
   mockAgentRequests.clear();
   mockRevision = 0;
   cmdLog.length = 0;
+  mockLoop = freshLoopModel();
+  mockLoopActionSeq = 0;
+  mockRemote = { running: false, port: 0 };
 }
 
 // Test-only: inject a synthetic "mosh_event" of the given type/payload straight

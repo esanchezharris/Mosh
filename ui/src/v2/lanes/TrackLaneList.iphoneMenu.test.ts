@@ -80,7 +80,7 @@ describe("v2 TrackLaneHeader — Set up iPhone controller", () => {
     expect(document.querySelector('[data-testid="v2-track-ctx"]'), "menu closes behind the dialog").toBeNull();
   });
 
-  it("renders the SAFARI url once pairing lands, never the mosh:// deep link", () => {
+  it("renders the PAD url once pairing lands, never the mosh:// deep link or the old /web page", () => {
     render([track()]);
     openMenu();
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="v2-track-ctx-iphone"]')!
@@ -95,6 +95,7 @@ describe("v2 TrackLaneHeader — Set up iPhone controller", () => {
             host: "192.168.1.80", port: 47873, token: "tok123456", expiresAtMs: 1,
             pairingUrl: "mosh://pair?payload=AAA",
             webUrl: "http://192.168.1.80:47873/web?payload=AAA",
+            padUrl: "http://192.168.1.80:47873/pad#token=tok123456",
           },
         },
       });
@@ -102,8 +103,11 @@ describe("v2 TrackLaneHeader — Set up iPhone controller", () => {
 
     const url = document.querySelector('[data-testid="v2-iphone-url"]')!;
     // A mosh:// QR is unopenable on a phone without the native companion app — the
-    // whole point of this surface is the no-install Safari pad.
-    expect(url.textContent).toBe("http://192.168.1.80:47873/web?payload=AAA");
-    expect(document.querySelector('[data-testid="v2-iphone-dialog"]')!.textContent).not.toContain("mosh://");
+    // whole point of this surface is the no-install Safari pad, which is now /pad.
+    expect(url.textContent).toContain("/pad#token=");
+    expect(url.textContent).toBe("http://192.168.1.80:47873/pad#token=tok123456");
+    const dialog = document.querySelector('[data-testid="v2-iphone-dialog"]')!;
+    expect(dialog.textContent).not.toContain("mosh://");
+    expect(dialog.textContent).not.toContain("/web");
   });
 });

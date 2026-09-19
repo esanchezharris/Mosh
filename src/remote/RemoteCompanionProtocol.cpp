@@ -1,11 +1,79 @@
+// _CRT_RAND_S must be defined BEFORE the first <stdlib.h> in the translation unit, and
+// the JUCE headers below pull that in — so this cannot move down with the other includes.
+#if defined (_MSC_VER)
+ #define _CRT_RAND_S
+ #include <cstdlib>
+#endif
+
 #include "RemoteCompanionProtocol.h"
 
+#include <atomic>
 #include <cmath>
+#include <cstddef>
+
+// JUCE_MAC / JUCE_WINDOWS only exist once a JUCE header has been seen, so the
+// platform-specific secure-random includes come after RemoteCompanionProtocol.h.
+#if JUCE_MAC || JUCE_IOS
+ #include <Security/SecRandom.h>
+#elif ! JUCE_WINDOWS
+ #include <cerrno>
+ #include <fcntl.h>
+ #include <unistd.h>
+#endif
 
 namespace mosh
 {
 namespace
 {
+    /** Fill `bytes` from the PLATFORM CSPRNG, or return false without touching a byte of
+        it. This is the pairing token: anything that can predict it can drive the
+        producer's transport and land takes in the session, so a PRNG seeded from the
+        clock is not an acceptable source. juce::Random::getSystemRandom() is exactly such
+        a PRNG — it is a 64-bit LCG whose default seed is derived from the millisecond
+        counter and a couple of process constants, so an attacker on the same LAN who
+        knows roughly when pairing started has a small space to search. */
+    bool fillSecureRandom (juce::uint8* bytes, size_t count)
+    {
+       #if JUCE_MAC || JUCE_IOS
+        return SecRandomCopyBytes (kSecRandomDefault, count, bytes) == errSecSuccess;
+       #elif defined (_MSC_VER)
+        // rand_s is RtlGenRandom behind a CRT entry point: a real CSPRNG, and unlike
+        // BCryptGenRandom it needs no extra import library on the link line.
+        for (size_t i = 0; i < count; ++i)
+        {
+            unsigned int value = 0;
+            if (rand_s (&value) != 0)
+                return false;
+            bytes[i] = (juce::uint8) (value & 0xffu);
+        }
+        return true;
+       #elif JUCE_WINDOWS
+        juce::ignoreUnused (bytes, count);
+        return false;   // no secure source wired for this toolchain
+       #else
+        // getentropy() is the kernel CSPRNG with no file descriptor to run out of, but it
+        // is absent on older glibc, so /dev/urandom stays as the second attempt. 32 bytes
+        // is far inside getentropy's 256-byte per-call ceiling.
+        #if defined (__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 25))
+        if (::getentropy (bytes, count) == 0)
+            return true;
+        #endif
+        const int fd = ::open ("/dev/urandom", O_RDONLY);
+        if (fd < 0)
+            return false;
+        size_t filled = 0;
+        while (filled < count)
+        {
+            const auto got = ::read (fd, bytes + filled, count - filled);
+            if (got > 0)             { filled += (size_t) got; continue; }
+            if (got < 0 && errno == EINTR) continue;
+            break;                   // 0 (impossible on urandom) or a real error
+        }
+        ::close (fd);
+        return filled == count;
+       #endif
+    }
+
     juce::String safeName (juce::String name)
     {
         name = name.trim();
@@ -38,6 +106,7 @@ RemotePairingInfo RemoteCompanionProtocol::beginPairing (const juce::String& hos
     pairing.expiresAtMs = nowMs + (ttlOverrideMs > 0 ? ttlOverrideMs : pairingTtlMs());
     pairing.pairingUrl = makePairingUrl (host, port, pairing.token);
     pairing.webUrl = makeWebUrl (host, port, pairing.token);
+    pairing.padUrl = makePadUrl (host, port, pairing.token);
     return pairing;
 }
 
@@ -57,11 +126,34 @@ void RemoteCompanionProtocol::clearPairing()
     pairing = {};
 }
 
+// 32 SECURE random bytes rendered as 64 lowercase hex characters.
+//
+// The bytes come from the platform CSPRNG (SecRandomCopyBytes on Apple, rand_s on MSVC,
+// getentropy / /dev/urandom elsewhere). juce::Random::getSystemRandom() survives only as
+// a loud last resort: it is a clock-seeded LCG, and this token is the ONLY thing between
+// a stranger on the same Wi-Fi and the producer's transport.
+//
+// The previous implementation concatenated two UNPADDED toHexString(int64) values,
+// so its output was 2-32 characters wide depending on how many leading zero nibbles
+// the two random numbers happened to carry. The phone pad refuses anything outside
+// /^[a-fA-F0-9]{32,128}$/ before it makes a request, so roughly one pairing in eight
+// produced a QR code the phone discarded in silence. Fixed width, fixed alphabet.
 juce::String RemoteCompanionProtocol::makeToken()
 {
-    auto& random = juce::Random::getSystemRandom();
-    return juce::String::toHexString (random.nextInt64())
-        + juce::String::toHexString (random.nextInt64());
+    juce::uint8 bytes[32] = {};
+    if (! fillSecureRandom (bytes, sizeof (bytes)))
+    {
+        // A degraded token still beats no pairing at all — the producer is standing in
+        // the live room holding a phone — but it is a security downgrade and must not be
+        // silent. Once per process: a per-pairing line would train everyone to ignore it.
+        static std::atomic<bool> warned { false };
+        if (! warned.exchange (true))
+            juce::Logger::writeToLog ("[remote] WARNING: the platform secure random source "
+                                      "failed; pairing tokens fall back to juce::Random "
+                                      "(predictable). Pair only on a trusted network.");
+        juce::Random::getSystemRandom().fillBitsRandomly (bytes, sizeof (bytes));
+    }
+    return juce::String::toHexString (bytes, (int) sizeof (bytes), 0).toLowerCase();
 }
 
 juce::String RemoteCompanionProtocol::makePairingPayload (const juce::String& host,
@@ -89,6 +181,16 @@ juce::String RemoteCompanionProtocol::makeWebUrl (const juce::String& host,
 {
     const auto payload = makePairingPayload (host, port, token);
     return "http://" + host + ":" + juce::String (port) + "/web?payload=" + juce::URL::addEscapeChars (payload, true);
+}
+
+// The token rides in the fragment, not the query: a fragment is never sent to the
+// server, so it cannot appear in a request line, an access log or a Referer header.
+// The pad page reads it from location.hash and then clears the hash.
+juce::String RemoteCompanionProtocol::makePadUrl (const juce::String& host,
+                                                  int port,
+                                                  const juce::String& token)
+{
+    return "http://" + host + ":" + juce::String (port) + "/pad#token=" + token;
 }
 
 RemotePhoneTakeStore::RemotePhoneTakeStore (juce::File rootDirectory)

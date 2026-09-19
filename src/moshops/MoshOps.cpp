@@ -847,6 +847,19 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "promote_take_region") return cmdPromoteTakeRegion (args);
     if (name == "keep_take")         return cmdKeepTake (args);
     if (name == "mark_take")         return cmdMarkTake (args);
+    // MOSHI-LOOP — the phone-pad / Booth recording loop. Eleven commands, all UI-only
+    // (a performance gesture, never an agent move); see MoshOps.Loop.cpp for the model.
+    if (name == "loop_state") return cmdLoopState (args);
+    if (name == "loop_setup") return cmdLoopSetup (args);
+    if (name == "loop_record") return cmdLoopRecord (args);
+    if (name == "loop_keep") return cmdLoopKeep (args);
+    if (name == "loop_again") return cmdLoopAgain (args);
+    if (name == "loop_hear") return cmdLoopHear (args);
+    if (name == "loop_play_all") return cmdLoopPlayAll (args);
+    if (name == "loop_stop") return cmdLoopStop (args);
+    if (name == "loop_navigate") return cmdLoopNavigate (args);
+    if (name == "loop_home") return cmdLoopHome (args);
+    if (name == "loop_lead_in") return cmdLoopLeadIn (args);
     if (name == "set_master_volume") return broadcastStructuralIfActive (name, args, cmdSetMasterVolume (args));
     if (name == "set_master_pan")    return broadcastStructuralIfActive (name, args, cmdSetMasterPan (args));
     // Master-bus plugins — mirror the per-track plugin commands one level up (see
@@ -3518,6 +3531,17 @@ juce::var MoshOps::snapshot()
     root->setProperty ("tracks", tracks);
     root->setProperty ("transport", transportToVar());
     root->setProperty ("controller", controllerToVar());
+    // MOSHI-LOOP — additive: the same loop block the phone polls, so the desktop Booth
+    // renders from the snapshot it already has instead of a second poll of its own.
+    // loopStateVar() is a pure read (adoption happens in loop_state, never here).
+    //
+    // The refresh below is what makes the Booth's "Phone connected" line go away on its
+    // own when the phone walks out of range: nothing else would notice the window
+    // expiring, because a departed phone by definition stops polling. It is
+    // edge-triggered, so the emit + emitSnapshotInvalidated it can fire re-enters here at
+    // most once more and then finds no edge — see loopRefreshPhonePresence.
+    loopRefreshPhonePresence (false);
+    root->setProperty ("loop", loopStateVar());
 
     // Lightweight current audio-device selection summary for the settings edit form
     // (duplicates session.sampleRate intentionally). Full lists stay on-demand.
@@ -4224,6 +4248,11 @@ void MoshOps::emitSnapshotInvalidated()
 void MoshOps::emitProjectReplaced (const juce::String& reason)
 {
     agentEpoch_ = juce::Uuid().toString();
+    // MOSHI-LOOP — a capture and an audition belong to the Edit that was open. The new
+    // one has different clips (and possibly none), so carrying either across would leave
+    // loop_state naming a pass that no longer exists.
+    loopCurrent_ = {};
+    loopAuditionedId_.clear();
     txnFingerprintRevision_ = -1;
     auto* payload = new DynamicObject();
     payload->setProperty ("projectReplaced", true);

@@ -248,3 +248,82 @@ describe("FS-B2a — the two new commands are registered in all three places", (
     expect(unguarded).toContain("batch_rollback");
   });
 });
+
+describe("Moshi loop commands are registered everywhere", () => {
+  // The Moshi recording loop (phone pad + desktop Booth) adds eleven commands, and a
+  // command in this repo needs EIGHT registrations, not one. The number has crept up as
+  // the surface grew (three → five → seven), so docs/PHONE_PAD.md now ENUMERATES them
+  // rather than asserting a count; this comment is the list in short form:
+  //   1. dispatch in src/moshops/MoshOps*.cpp
+  //   2. UI_ONLY_COMMANDS in ui/src/agent/commandClassification.ts
+  //   3. absence from AGENT_COMMAND_MAP in ui/src/agent/commands.ts
+  //   4. a TransactionSafe.h classification (nonUndoable / lifecycle / transactionSafe)
+  //   5. LockManager.cpp's `unguarded` set
+  //   6. the native lock-scope golden ledger, tests/test_multiplayer_lock_manager.cpp
+  //   7. a case in ui/src/bridge.mock.ts, or e2e and dev drive nothing
+  //   8. for a read that must survive an open transaction: readsDuringTxn (TransactionSafe.h)
+  //      paired with MOCK_TXN_READS (bridge.mock.ts) — loop_state, below
+  // Six of those are statically checkable from here; 6 is asserted natively. Missing any
+  // one of them is silent in every other test — an unclassified command inherits
+  // SessionGlobal by omission, an unlisted one fails closed inside an agent transaction —
+  // so they are pinned together.
+  const LOOP_COMMANDS = [
+    "loop_state", "loop_setup", "loop_record", "loop_keep", "loop_again", "loop_hear",
+    "loop_play_all", "loop_stop", "loop_navigate", "loop_home", "loop_lead_in",
+  ];
+  const LOOP_NON_UNDOABLE = ["loop_setup", "loop_navigate", "loop_home", "loop_lead_in"];
+  const LOOP_LIFECYCLE = [
+    "loop_record", "loop_keep", "loop_again", "loop_hear", "loop_play_all", "loop_stop",
+  ];
+
+  const nonUndoable = parseCppSet(txnSafeH, "static const std::set<juce::String> nonUndoable");
+  const lifecycle = parseCppSet(txnSafeH, "static const std::set<juce::String> lifecycle");
+  const lockManager = read("../../../src/multiplayer/LockManager.cpp");
+  const unguarded = parseCppSet(lockManager, "static const std::set<juce::String> unguarded");
+
+  it("parsed real TransactionSafe.h classification sets (guards against a silently-empty probe)", () => {
+    expect(nonUndoable.length).toBeGreaterThanOrEqual(10);
+    expect(lifecycle.length).toBeGreaterThanOrEqual(10);
+    expect(unguarded.length).toBeGreaterThanOrEqual(40);
+  });
+
+  it("all eleven dispatch in MoshOps*.cpp", () => {
+    const missing = LOOP_COMMANDS.filter((c) => !dispatch.has(c));
+    expect(missing, `loop command(s) with no dispatch entry: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("…are classified UI-only, never agent-callable", () => {
+    // A performance gesture: the producer presses it with a thumb on a phone or a finger
+    // on the Booth. There is no skill that sings, so the model must never fire one.
+    for (const command of LOOP_COMMANDS) {
+      expect(command in UI_ONLY_COMMANDS, `${command} is not in UI_ONLY_COMMANDS`).toBe(true);
+      expect(AGENT_COMMAND_MAP.has(command), `${command} must not be agent-callable`).toBe(false);
+      expect(UI_ONLY_COMMANDS[command].length).toBeGreaterThan(25);
+    }
+  });
+
+  it("…contend for nothing in multiplayer (LockManager unguarded)", () => {
+    const missing = LOOP_COMMANDS.filter((c) => !unguarded.includes(c));
+    expect(missing, `loop command(s) missing from LockManager's unguarded set: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("…carry the right TransactionSafe classification", () => {
+    // None is in registry(): the four preferences are not undoable, and the six transport
+    // verbs drive recording/playback, so no agent transaction may contain any of them.
+    const admitted = LOOP_COMMANDS.filter((c) => registry.includes(c));
+    expect(admitted, `loop command(s) wrongly admitted to the transactionSafe registry: ${admitted.join(", ")}`).toEqual([]);
+
+    const missingNonUndoable = LOOP_NON_UNDOABLE.filter((c) => !nonUndoable.includes(c));
+    expect(missingNonUndoable, `not classified NonUndoable: ${missingNonUndoable.join(", ")}`).toEqual([]);
+
+    const missingLifecycle = LOOP_LIFECYCLE.filter((c) => !lifecycle.includes(c));
+    expect(missingLifecycle, `not classified Lifecycle: ${missingLifecycle.join(", ")}`).toEqual([]);
+  });
+
+  it("…and loop_state stays readable while a transaction is open", () => {
+    // The pad polls it every 200 ms (5 Hz). Blocking it for the length of a skill
+    // run would freeze the phone on stale state with no way to tell that from a dead Mac.
+    expect(readsDuringTxn).toContain("loop_state");
+    expect(mockReads).toContain("loop_state");
+  });
+});

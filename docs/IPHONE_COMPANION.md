@@ -5,12 +5,15 @@ only DAW/audio/model engine. The iPhone controls MOSH, records phone mic takes,
 and can run hold-to-talk voice commands when on-device speech recognition is
 available.
 
-**The primary phone workflow is now the DAWN recording pad** (below, #239/#267)
-— a no-install web controller served at `/web` that drives the whole
-vocal-take loop from the phone. The native SwiftUI app remains the richer
-surface for mic takes and on-device speech.
+**The primary no-install phone workflow is now the Moshi phone pad**, served at
+`/pad` — see [`docs/PHONE_PAD.md`](PHONE_PAD.md) for what it is, where its code
+lives, the recording-loop model, build/test commands, and its owner-acceptance
+boundary. `/web` remains the DAWN Bridge (Ableton) page and the legacy Mosh-mode
+companion described below; it is untouched by the phone-pad work, and retiring it
+is a follow-up, not something this doc claims has happened. The native SwiftUI
+app remains the richer surface for mic takes and on-device speech.
 
-## DAWN Recording Pad (primary phone workflow)
+## DAWN Recording Pad (`/web`, legacy Mosh-mode companion)
 
 The phone recording-loop controller (PR #239, restyled in #267) ports the
 owner's DAWN workflow onto the companion server as the `/web` controller —
@@ -56,7 +59,10 @@ Remote endpoints are JSON over HTTP:
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | Server status, no mutation. |
-| `GET /web` | No-signing Safari companion shell — now the DAWN recording pad (see above); actions still require token. |
+| `GET /web` | No-signing Safari companion shell — the DAWN Bridge / legacy Mosh-mode controller (see above); actions still require token. |
+| `GET /pad` | The Moshi phone pad — see [`docs/PHONE_PAD.md`](PHONE_PAD.md). Public; the page itself carries no token, and its `/api/*` calls below still require the bearer. |
+| `GET /api/state` | Phone-pad recording-loop state poll. Requires `Authorization: Bearer <token>`; returns the pad's own JSON shape (`version, sessionId, phase, listening, contributions, receipts, …`), never the desktop `{ok,data}` envelope. |
+| `POST /api/action` | Phone-pad `loop_*` mutation (record/keep/again/hear/play_all/stop/navigate/home/lead_in). Requires `Authorization: Bearer <token>`; body is the pad's `Command` shape (`version, requestId, sessionId, projectId, authority, action, …`); returns `{version, receipt, state}`. |
 | `POST /snapshot` | Returns the MoshOps snapshot. |
 | `POST /command` | Executes one existing MoshOps command. |
 | `POST /events` | Polls queued MoshOps events since a sequence number. |

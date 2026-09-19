@@ -315,6 +315,7 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.Notes.cpp
         src/moshops/MoshOps.Live.cpp
         src/moshops/MoshOps.Record.cpp
+        src/moshops/MoshOps.Loop.cpp
         src/moshops/MoshOps.Clips.cpp
         src/moshops/MoshOps.Groups.cpp
         src/moshops/MoshOps.Tracks.cpp
@@ -362,6 +363,8 @@ if (MOSH_BUILD_APP)
         # iPhone companion remote control + phone-take ingest
         src/remote/RemoteCompanionProtocol.cpp
         src/remote/RemoteCompanionServer.cpp
+        src/remote/PhoneLoopProtocol.cpp
+        src/remote/PhoneLoopEndpoint.cpp
         # Skill Foundry Task 4 — engine-free native safe loader for certified skill
         # packages (see the file header for the security contract). Registered here
         # so the ordinary Mosh app build compiles it; tests/CMakeLists.txt also
@@ -502,6 +505,13 @@ if (MOSH_BUILD_APP)
         target_sources(Mosh PRIVATE src/files/MacFileBookmark.mm)
         set_source_files_properties(src/files/MacFileBookmark.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework AVFoundation")
+
+        # SecRandomCopyBytes — the pairing token for the phone companion/pad
+        # (src/remote/RemoteCompanionProtocol.cpp). Without this the TU compiles and the
+        # link fails; with it the token comes from the system CSPRNG rather than a
+        # clock-seeded LCG. tests/CMakeLists.txt links the same framework because it
+        # compiles that same .cpp.
+        target_link_libraries(Mosh PRIVATE "-framework Security")
 
         # Native WKWebView media-capture permission delegate (collaborator video
         # getUserMedia) — Obj-C++ with ARC.

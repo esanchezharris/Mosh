@@ -18,6 +18,9 @@ dist
 /playwright/.cache
 
 companion-dist
+phonepad-dist
+# phonepad Playwright specs write evidence/*.png relative to cwd (ui/)
+evidence
 # playwright visual gate — commit the baselines under visual/, ignore run output
 /visual-results
 e2e/.replay-artifacts/

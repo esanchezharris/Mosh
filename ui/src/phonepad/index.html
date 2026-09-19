@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Moshi local recording pad. Keep, redo, and review takes from your phone.">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#efe6d5">
+  <title>Moshi · Phone pad</title>
+</head>
+<body>
+  <main id="app" aria-label="Moshi recording pad">
+    <header id="banner">
+      <h1 id="state">PAIR PHONE</h1>
+      <div id="sub"><span id="bar-readout">bar —</span><br><span>MOSHI · LOCAL</span></div>
+    </header>
+    <section id="context" aria-label="Recording context">
+      <p id="target">Target · —</p><p id="entry">Entry — · Lead —</p>
+    </section>
+    <section id="pad" aria-label="Recording controls">
+      <button type="button" class="tile keep" id="keep" data-id="keep" disabled><span class="lbl">Keep</span><span class="sub" id="keep-sub">accept · roll again</span></button>
+      <button type="button" class="tile again" id="again" data-id="again" disabled><span class="lbl">Again</span><span class="sub" id="again-sub">Redo selected part</span></button>
+      <button type="button" class="tile hear" id="play-all" data-id="play all" disabled><span class="lbl">Play All</span><span class="sub">whole mix</span></button>
+      <button type="button" class="tile rec" id="record" data-id="record" disabled><span class="lbl">Put Me In</span><span class="sub">record at cursor</span></button>
+      <button type="button" class="tile stop" id="stop" data-id="stop" disabled><span class="lbl">Stop</span></button>
+      <div id="connection" aria-live="polite">Local control<br>same Wi-Fi</div>
+    </section>
+    <section id="takes-wrap" aria-label="Preserved recordings">
+      <label for="takes">Preserved takes</label>
+      <div class="take-row"><select id="takes" disabled><option value="">Select a take</option></select><button type="button" id="hear" disabled>Review Selected Take</button></div>
+    </section>
+    <form id="navigation" aria-label="Stopped bar navigation">
+      <button id="home" type="button" disabled>Start</button><label for="bar">Go to bar</label><input id="bar" type="number" min="1" max="1000000" step="1" inputmode="numeric" value="1" required disabled><button id="go" type="submit" disabled>Go</button>
+    </form>
+    <form id="lead-form" aria-label="Stopped review lead-in"><label for="lead">Lead-in (qn)</label><input id="lead" type="number" min="0" max="256" step="0.25" inputmode="decimal" value="4" required disabled><button id="set-lead" type="submit" disabled>Set</button></form>
+    <p id="status" role="status">Scan the pairing QR from Mosh on the same Wi-Fi.</p>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

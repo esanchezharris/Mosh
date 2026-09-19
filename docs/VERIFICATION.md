@@ -130,7 +130,7 @@ probably belongs in `verify.py`, not this list.*
 
 **Triggers:** recording/input paths → REC rows · fades/crossfades → EAR-fades ·
 warp/stretch → EAR-warp · stems/export → EAR-stems · MIDI input → MIDI-in ·
-relay/multiplayer → MP-two-mac.
+relay/multiplayer → MP-two-mac · phone pad → PHONE rows.
 
 | id | Steps | Expect | ~min | last-passed |
 | --- | --- | --- | --- | --- |
@@ -142,6 +142,9 @@ relay/multiplayer → MP-two-mac.
 | EAR-stems | `export_stems` + `export_audio` the same song; import the stems to fresh tracks and A/B against the mixdown. | Indistinguishable by ear (the sample-level `sum≈mix` null lives in `verify.py`, automated). | 4 | — |
 | MIDI-in | Connect a MIDI keyboard (picker from G11); play live, then record 2 bars. | Live notes sound with low latency; recorded notes land where played. If a MIDI *take* can't be recorded, that's a capability-matrix MISSING row — file it, don't shrug. | 4 | — |
 | MP-two-mac | Two Macs, one session: claim a track from Mac B, move a clip on Mac A. | Lock icon + live clip motion on both within ~1 s. | 5 | — |
+| PHONE-pair | V3 → Phone; scan the QR with the iPhone Camera app on the same Wi-Fi. | Safari opens `/pad#token=…`; the banner reads IDLE (or SETUP NEEDED if no Lead/Takes pair exists yet) rather than PAIR PHONE, and the URL host is the Mac's LAN IP (never `.local`, never `pairingUrl`). | 2 | — |
+| PHONE-loop | From the phone: Put Me In / Keep / Again / Review Selected Take / Play All / Stop. | The Booth mirrors every action live; Lead and Takes clips land where expected and are audible. | 5 | — |
+| PHONE-recover | Background/foreground the phone page; drop Wi-Fi and reconnect; from the Booth's Phone modal, press Stop. | Background/foreground survives without a new scan; Wi-Fi drop/reconnect resumes polling; Stop in the modal ends the pairing and the pad falls back to a PAIR PHONE state — reloading the page then requires a fresh scan. | 3 | — |
 
 ### V3 default-shell acceptance (owner; the last row of the V3 parity gate)
 

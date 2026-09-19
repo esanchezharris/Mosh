@@ -12,6 +12,7 @@
 #include "state/Migrations.h"
 #include "state/TrackIcons.h"
 #include "state/SafeMode.h"
+#include "remote/PhoneLoopProtocol.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
@@ -8869,6 +8870,419 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "arm_track", objN ({{ "trackId", rb }, { "armed", false }}))), "arm_track (wave) disarm after record-to-take ok");
     }
 
+    // ─── MOSHI-LOOP: the phone-pad / Booth recording loop (headless) ───
+    // The REAPER-parity loop the iPhone pad and the desktop Booth both drive: Put Me In
+    // (loop_record), Keep, Again, Review (hear), Play All, Stop, plus the stopped-only
+    // cursor preferences (navigate / home / lead_in).
+    //
+    // Headless (--selftest, no audio) every TRANSPORT step is a graceful no-op — ok,
+    // data.applied:false, a reason — exactly cmdStopRecording's posture. What IS provable
+    // here is everything that is not the transport: the LEAD/TAKES pairing, contribution
+    // identity and adoption, the keeper/rejected undo posture, the listening-start
+    // arithmetic, the authority handshake the phone depends on, and persistence across a
+    // save/reload. Real capture (a mic, a landed wave clip) is hardware-gated.
+    section ("MOSHI-LOOP: phone loop model (headless)");
+    {
+        auto& tempoSeq = eng.edit().tempoSequence;
+        auto qnToSec = [&] (double qn) {
+            return tempoSeq.toTime (tracktion::BeatPosition::fromBeats (qn)).inSeconds(); };
+        auto secToQn = [&] (double s) {
+            return tempoSeq.toBeats (tracktion::TimePosition::fromSeconds (s)).inBeats(); };
+        auto loopState = [&] { return cmd (ops, "loop_state")["data"]; };
+        auto listeningOf = [&] (const var& st) { return st.getProperty ("listening", var()); };
+        auto nameOfTrack = [&] (const String& id) {
+            return trackById (id).getProperty ("name", var()).toString(); };
+        // The clip var for a clipId, found across every track in the CURRENT snapshot —
+        // which is the point: "the keeper moved to LEAD" is only true if the snapshot
+        // says the clip now hangs off the lead track.
+        auto clipTrackId = [&] (const String& clipId) -> String {
+            auto snap = ops.snapshot();                      // keep the temporary alive
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                {
+                    auto cv = t.getProperty ("clips", var());
+                    if (auto* clips = cv.getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == clipId)
+                                return t.getProperty ("id", var()).toString();
+                }
+            return {};
+        };
+        auto clipMuted = [&] (const String& clipId) {
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                {
+                    auto cv = t.getProperty ("clips", var());
+                    if (auto* clips = cv.getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == clipId)
+                                return (bool) c.getProperty ("mute", false);
+                }
+            return false;
+        };
+        auto firstContribution = [&] (const var& st) {
+            auto cv = st.getProperty ("contributions", var());   // bound, never a temporary
+            return cv.isArray() && cv.size() > 0 ? cv[0] : var();
+        };
+        auto jsonlHas = [&] (const char* command, const char* undoable) {
+            const auto log = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            for (auto& ln : juce::StringArray::fromLines (log))
+                if (ln.contains (String ("\"command\": \"") + command + "\"")
+                    && ln.contains (String ("\"undoable\": ") + undoable))
+                    return true;
+            return false;
+        };
+
+        // ── setup: LEAD is the track the producer picks; TAKES is auto-made beneath it ──
+        const auto leadId = cmd (ops, "create_track", args1 ("name", "Lead"))["data"]
+                                .getProperty ("trackId", var()).toString();
+        check (leadId.isNotEmpty(), "loop fixture: Lead track created");
+        const int tracksBeforeSetup = tracks (ops);
+
+        auto setup = cmd (ops, "loop_setup", args1 ("trackId", leadId));
+        check (ok (setup), "loop_setup ok");
+        check ((bool) setup["data"].getProperty ("created", false), "loop_setup created the takes track");
+        const auto takesId = setup["data"].getProperty ("takesTrackId", var()).toString();
+        check (setup["data"].getProperty ("leadTrackId", var()).toString() == leadId,
+               "loop_setup reports the chosen lead track");
+        check (takesId.isNotEmpty() && takesId != leadId, "takesTrackId is a DIFFERENT track from the lead");
+        check (nameOfTrack (takesId) == "Lead · Takes", "the takes track is named \"<lead> · Takes\"");
+        check (tracks (ops) == tracksBeforeSetup + 1, "loop_setup added exactly one track");
+
+        // Idempotent: a second setup of the same lead neither creates nor duplicates.
+        auto setup2 = cmd (ops, "loop_setup", args1 ("trackId", leadId));
+        check (ok (setup2), "second loop_setup ok");
+        check (! (bool) setup2["data"].getProperty ("created", true), "second loop_setup created:false (idempotent)");
+        check (setup2["data"].getProperty ("takesTrackId", var()).toString() == takesId,
+               "second loop_setup keeps the same takes track");
+        check (tracks (ops) == tracksBeforeSetup + 1, "second loop_setup added no track");
+        check (jsonlHas ("loop_setup", "false"), "loop_setup logged undoable:false");
+
+        // ── the cold state the phone polls ──
+        {
+            auto st = loopState();
+            check ((bool) st.getProperty ("engaged", false), "loop_state: engaged once both tracks resolve");
+            check (st.getProperty ("phase", var()).toString() == "idle", "loop_state: phase is idle when stopped");
+            check (st.getProperty ("projectId", var()).toString().isNotEmpty(), "loop_state: projectId is non-empty");
+            check (st.getProperty ("host", var()).toString().isNotEmpty(), "loop_state: host epoch is non-empty");
+            check (st.getProperty ("leadTrackId", var()).toString() == leadId
+                       && st.getProperty ("takesTrackId", var()).toString() == takesId,
+                   "loop_state: reports the engaged pair");
+            const auto listening = listeningOf (st);
+            check ((double) listening.getProperty ("qn", -1.0) == 0.0, "loop_state: listening starts at qn 0");
+            check ((int) listening.getProperty ("bar", -1) == 1, "loop_state: listening starts at bar 1");
+            check ((double) listening.getProperty ("leadQn", -1.0) == 8.0, "loop_state: lead-in defaults to 8 qn");
+            check (listening.getProperty ("entryQn", var()).isVoid(), "loop_state: entryQn is null before any pass");
+            auto cv = st.getProperty ("contributions", var());
+            check (cv.isArray() && cv.size() == 0, "loop_state: no contributions yet");
+            check (st.getProperty ("currentId", var()).isVoid(), "loop_state: currentId null when not capturing");
+            check (st.getProperty ("blockReason", var()).toString().contains ("No audio device"),
+                   "loop_state: blockReason names the missing audio device headless");
+            check (ops.snapshot().getProperty ("loop", var()).isObject(), "snapshot carries an additive loop block");
+
+            // ── phone presence is the ENGINE's verdict, and it is EMITTED ──
+            // The desktop Booth cannot work this out for itself: `phoneSeenMs` is
+            // Time::getMillisecondCounterHiRes(), milliseconds since this Mac booted, so a
+            // UI comparing it to its own epoch clock subtracts two unrelated numbers and
+            // reports "no phone" for ever. loop_state must therefore carry the ANSWER.
+            check (st.getProperty ("phoneConnected", var()).isBool(),
+                   "loop_state: phoneConnected is present and a bool");
+            check (! (bool) st.getProperty ("phoneConnected", true),
+                   "loop_state: phoneConnected is false before any phone has polled");
+        }
+        {
+            // A poll is what the phone endpoint does on every GET /api/state. One is
+            // enough to flip presence, and the flip must be visible BOTH through the
+            // command's own result and through the loop block snapshot() embeds — the
+            // Booth reads the latter, so a field that only ever appeared in the direct
+            // read would look right in a unit test and stay dark in the app.
+            auto polled = cmd (ops, "loop_state", args1 ("phonePoll", true));
+            check (ok (polled), "loop_state {phonePoll:true} ok");
+            check ((bool) polled["data"].getProperty ("phoneConnected", false),
+                   "loop_state: a poll makes phoneConnected true");
+            check ((bool) ops.snapshot().getProperty ("loop", var())
+                              .getProperty ("phoneConnected", false),
+                   "snapshot().loop.phoneConnected is true inside the presence window");
+            // …and the UNPOLLED read still reports the phone: presence is a window, not a
+            // per-call flag, so the Booth's own refresh does not knock the phone offline.
+            check ((bool) loopState().getProperty ("phoneConnected", false),
+                   "an ordinary loop_state read does not clear a live phone");
+        }
+
+        // ── the stopped-only cursor preferences ──
+        {
+            auto nav = cmd (ops, "loop_navigate", args1 ("bar", 3));
+            check (ok (nav), "loop_navigate bar 3 ok");
+            const auto navListening = nav["data"].getProperty ("listening", var());
+            check ((double) navListening.getProperty ("qn", -1.0) == 8.0, "bar 3 is qn 8 (4/4)");
+            check ((int) navListening.getProperty ("bar", -1) == 3, "loop_navigate echoes the displayed bar");
+            check ((double) listeningOf (loopState()).getProperty ("qn", -1.0) == 8.0,
+                   "loop_state follows the navigate");
+
+            check (ok (cmd (ops, "loop_home")), "loop_home ok");
+            check ((double) listeningOf (loopState()).getProperty ("qn", -1.0) == 0.0, "loop_home returns to qn 0");
+
+            auto lead = cmd (ops, "loop_lead_in", args1 ("leadQn", 4.0));
+            check (ok (lead), "loop_lead_in 4 ok");
+            check ((double) listeningOf (loopState()).getProperty ("leadQn", -1.0) == 4.0, "lead-in is now 4 qn");
+            // The lead-in is how much run-up the NEXT pass gets, not a move: it must not
+            // jog the listening start (nor, on a fresh project, stamp an entry).
+            check ((double) listeningOf (loopState()).getProperty ("qn", -1.0) == 0.0,
+                   "loop_lead_in leaves the listening start alone");
+
+            check (! ok (cmd (ops, "loop_navigate", args1 ("bar", 0))), "loop_navigate bar 0 errors");
+            check (! ok (cmd (ops, "loop_lead_in", args1 ("leadQn", 300.0))), "loop_lead_in 300 errors");
+            check ((double) listeningOf (loopState()).getProperty ("leadQn", -1.0) == 4.0,
+                   "the refused lead-in mutated nothing");
+
+            check (jsonlHas ("loop_navigate", "false"), "loop_navigate logged undoable:false (preference)");
+            check (jsonlHas ("loop_home", "false"), "loop_home logged undoable:false (preference)");
+            check (jsonlHas ("loop_lead_in", "false"), "loop_lead_in logged undoable:false (preference)");
+        }
+
+        // ── Put Me In, headless: graceful no-op, and nothing is minted ──
+        {
+            eventTypes.clear();
+            auto rec = cmd (ops, "loop_record");
+            check (ok (rec), "loop_record ok (graceful headless)");
+            check (! (bool) rec["data"].getProperty ("applied", true), "loop_record applied:false headless");
+            check (rec["data"].getProperty ("reason", var()).toString().contains ("no audio"),
+                   "loop_record names the missing audio device");
+            check (rec["data"].getProperty ("currentId", var()).isVoid(),
+                   "loop_record mints no contribution when the transport never rolled");
+            check (loopState().getProperty ("currentId", var()).isVoid(), "loop_state agrees: nothing is capturing");
+            check (hadEvent ("loop"), "loop_record emitted a loop event");
+        }
+
+        // ── a contribution: an unstamped wave clip on TAKES is ADOPTED by loop_state ──
+        // Placed at bar 3 (qn 8) so the listening arithmetic below lands on a value that
+        // could not be the clamp, the previous listening start, or the entry by accident.
+        const auto passClipId = cmd (ops, "add_test_tone_clip",
+                                     objN ({{ "trackId", takesId }, { "seconds", 1.0 }, { "freq", 330.0 }}))
+                                    ["data"].getProperty ("clipId", var()).toString();
+        check (passClipId.isNotEmpty(), "loop fixture: a tone clip landed on the takes track");
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", passClipId }, { "start", qnToSec (8.0) }}))),
+               "loop fixture: the pass sits at bar 3");
+
+        String passId;
+        double passEntryQn = 0.0, passEndQn = 0.0;
+        {
+            auto st = loopState();
+            auto part = firstContribution (st);
+            passId = part.getProperty ("id", var()).toString();
+            check (st.getProperty ("contributions", var()).size() == 1, "loop_state lists exactly one contribution");
+            check (passId.length() == 36, "the adopted pass carries a 36-character dashed uuid");
+            check (part.getProperty ("clipId", var()).toString() == passClipId, "the contribution names its clip");
+            check (part.getProperty ("trackId", var()).toString() == takesId, "the contribution is on the takes track");
+            check (part.getProperty ("label", var()).toString() == "Part 1", "the first contribution is labelled Part 1");
+            check (! (bool) part.getProperty ("keeper", true), "a fresh contribution is not a keeper");
+            check (! (bool) part.getProperty ("rejected", true), "a fresh contribution is not rejected");
+            passEntryQn = (double) part.getProperty ("entryQn", -1.0);
+            passEndQn   = (double) part.getProperty ("endQn", -1.0);
+            check (std::abs (passEntryQn - 8.0) < 1.0e-6, "the adopted entry is the clip's own start in qn");
+            check (passEndQn > passEntryQn, "the contribution reports an end beyond its start");
+
+            // Adoption is WRITE-ONCE: polling again must not re-mint the identity the
+            // phone is holding on screen (the whole point of a stable pass id).
+            auto again = loopState();
+            check (firstContribution (again).getProperty ("id", var()).toString() == passId,
+                   "a second loop_state returns the SAME pass id (adoption is write-once)");
+            check (again.getProperty ("contributions", var()).size() == 1,
+                   "a second loop_state does not duplicate the contribution");
+        }
+
+        // Independent arithmetic: the clip's own snapshot span, converted here rather
+        // than read back out of the command that computed it.
+        double clipEndSec = 0.0;
+        {
+            auto snap = ops.snapshot();                      // keep the temporary alive
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracksArr = tv.getArray())
+                for (auto& t : *tracksArr)
+                {
+                    auto cv = t.getProperty ("clips", var());
+                    if (auto* clips = cv.getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == passClipId)
+                                clipEndSec = (double) c.getProperty ("start", 0.0)
+                                           + (double) c.getProperty ("length", 0.0);
+                }
+        }
+        check (std::abs (secToQn (clipEndSec) - passEndQn) < 1.0e-6,
+               "the reported endQn matches the clip's own span converted independently");
+
+        // ── Keep: the pass becomes a keeper on LEAD, and the listening start advances ──
+        const double expectedListening = juce::jmax (0.0, passEndQn - 4.0);
+        check (expectedListening > 0.0, "loop fixture: the keep arithmetic is not sitting on the clamp");
+        {
+            eventTypes.clear();
+            auto keep = cmd (ops, "loop_keep", args1 ("targetId", passId));
+            check (ok (keep), "loop_keep ok");
+            // applied is "did the thing I pressed happen?", and Keep's primary effect is the
+            // clip edit — which commits with or without an interface. The restart is the
+            // SECONDARY outcome and is reported on its own, with its reason in the detail
+            // the phone shows. Reporting a committed keep as rejected would be a lie.
+            check ((bool) keep["data"].getProperty ("applied", false),
+                   "loop_keep applied:true headless — the keep itself committed");
+            check (! (bool) keep["data"].getProperty ("restarted", true),
+                   "loop_keep restarted:false headless (the transport could not roll)");
+            check (keep["data"].getProperty ("detail", var()).toString().contains ("did not restart")
+                       && keep["data"].getProperty ("detail", var()).toString().contains ("no audio"),
+                   "loop_keep's detail names the failed restart and its reason");
+            check (keep["data"].getProperty ("keptId", var()).toString() == passId, "loop_keep names the kept pass");
+            check (clipTrackId (passClipId) == leadId, "the kept clip now lives on the LEAD track");
+            check (hadEvent ("loop"), "loop_keep emitted a loop event");
+            check (hadEvent ("snapshot_invalidated"), "loop_keep emitted snapshot_invalidated");
+
+            auto st = loopState();
+            check ((bool) firstContribution (st).getProperty ("keeper", false), "the kept pass reads back as a keeper");
+            check (st.getProperty ("lastId", var()).toString() == passId, "lastId names the kept pass");
+            check (st.getProperty ("reviewId", var()).toString() == passId, "reviewId names the kept pass");
+            check (std::abs ((double) listeningOf (st).getProperty ("qn", -1.0) - expectedListening) < 1.0e-6,
+                   "listening advanced to the kept end minus the lead-in");
+            check (std::abs ((double) listeningOf (st).getProperty ("entryQn", -1.0) - expectedListening) < 1.0e-6,
+                   "the entry follows the listening start after a keep");
+            check (jsonlHas ("loop_keep", "true"), "loop_keep logged undoable:true (it moved a clip)");
+        }
+
+        check (ok (cmd (ops, "undo")), "undo after loop_keep ok");
+        check (clipTrackId (passClipId) == takesId, "undo puts the clip back on the TAKES track");
+        check (! (bool) firstContribution (loopState()).getProperty ("keeper", true), "undo clears the keeper flag");
+        check (ok (cmd (ops, "redo")), "redo after loop_keep ok");
+        check (clipTrackId (passClipId) == leadId, "redo returns the clip to LEAD");
+        check ((bool) firstContribution (loopState()).getProperty ("keeper", false), "redo restores the keeper flag");
+
+        // ── Again: the pass is rejected, muted, and the loop rewinds to its entry ──
+        {
+            auto again = cmd (ops, "loop_again", args1 ("targetId", passId));
+            check (ok (again), "loop_again ok");
+            check ((bool) again["data"].getProperty ("applied", false),
+                   "loop_again applied:true headless — the reject itself committed");
+            check (! (bool) again["data"].getProperty ("restarted", true),
+                   "loop_again restarted:false headless");
+            check (again["data"].getProperty ("detail", var()).toString().contains ("did not restart"),
+                   "loop_again's detail names the failed restart");
+            check (again["data"].getProperty ("rejectedId", var()).toString() == passId, "loop_again names the rejected pass");
+            auto st = loopState();
+            auto part = firstContribution (st);
+            check ((bool) part.getProperty ("rejected", false), "the pass reads back as rejected");
+            check (! (bool) part.getProperty ("keeper", true), "a rejected pass is no longer a keeper");
+            check (clipMuted (passClipId), "the rejected clip is MUTED in the snapshot");
+            check (clipTrackId (passClipId) == takesId, "the rejected clip is back on the TAKES track");
+            check (std::abs ((double) listeningOf (st).getProperty ("qn", -1.0) - passEntryQn) < 1.0e-6,
+                   "listening rewound to the rejected pass's own entry");
+        }
+        check (ok (cmd (ops, "undo")), "undo after loop_again ok");
+        {
+            auto part = firstContribution (loopState());
+            check (! (bool) part.getProperty ("rejected", true), "undo clears the rejected flag");
+            check (! clipMuted (passClipId), "undo un-mutes the restored pass");
+        }
+
+        // ── the transport verbs never error, even with no device ──
+        {
+            auto stop = cmd (ops, "loop_stop");
+            check (ok (stop), "loop_stop ok headless");
+            check ((bool) stop["data"].getProperty ("applied", false), "loop_stop always applies (it is the panic button)");
+            check (stop["data"].getProperty ("detail", var()).toString().isNotEmpty(), "loop_stop carries a human detail");
+            check (ok (cmd (ops, "loop_stop")), "loop_stop is idempotent");
+
+            auto hear = cmd (ops, "loop_hear", args1 ("targetId", passId));
+            check (ok (hear), "loop_hear ok headless (never an error)");
+            check (! (bool) hear["data"].getProperty ("applied", true), "loop_hear applied:false headless");
+
+            auto all = cmd (ops, "loop_play_all");
+            check (ok (all), "loop_play_all ok headless (never an error)");
+            check (! (bool) all["data"].getProperty ("applied", true), "loop_play_all applied:false headless");
+
+            check (! ok (cmd (ops, "loop_keep", args1 ("targetId", "no-such-pass"))),
+                   "a target that no longer resolves is refused");
+        }
+
+        // ── the authority handshake the phone depends on ──
+        {
+            const double qnBefore = (double) listeningOf (loopState()).getProperty ("qn", -1.0);
+            auto stale = cmd (ops, "loop_navigate", objN ({{ "bar", 2 }, { "authority", "{}" }}));
+            check (! ok (stale), "a stale authority refuses the command");
+            check (stale["error"].toString().contains ("refresh"), "…and the refusal tells the phone to refresh");
+            check ((double) listeningOf (loopState()).getProperty ("qn", -1.0) == qnBefore,
+                   "the refused command mutated nothing");
+
+            // Stop is deliberately looser, but "{}" carries no project/host/lead/takes at
+            // all, so even the panic button refuses it.
+            check (! ok (cmd (ops, "loop_stop", args1 ("authority", "{}"))),
+                   "loop_stop refuses an authority with no project/host/lead/takes");
+
+            const auto fresh = mosh::phoneloop::authorityFor (loopState());
+            check (fresh.isNotEmpty(), "authorityFor produced a fingerprint");
+            check (ok (cmd (ops, "loop_stop", args1 ("authority", fresh))), "a fresh authority is accepted by loop_stop");
+            check (ok (cmd (ops, "loop_navigate", objN ({{ "bar", 2 }, { "authority",
+                          mosh::phoneloop::authorityFor (loopState()) }}))),
+                   "a fresh authority is accepted by loop_navigate");
+            check ((int) listeningOf (loopState()).getProperty ("bar", -1) == 2, "…and the navigate really moved");
+        }
+
+        // ── the loop survives a save/reload (identity and prefs are persisted state) ──
+        {
+            const auto before = loopState();
+            check (ok (cmd (ops, "save")), "save before the loop reload check ok");
+            check (ok (cmd (ops, "reload")), "reload for the loop persistence check ok");
+            const auto after = loopState();
+            check (after.getProperty ("leadTrackId", var()).toString() == before.getProperty ("leadTrackId", var()).toString()
+                       && after.getProperty ("takesTrackId", var()).toString() == before.getProperty ("takesTrackId", var()).toString(),
+                   "the LEAD/TAKES pairing survives a save/reload");
+            check (JSON::toString (listeningOf (after)) == JSON::toString (listeningOf (before)),
+                   "the listening start / lead-in survive a save/reload");
+            check (JSON::toString (after.getProperty ("contributions", var()))
+                       == JSON::toString (before.getProperty ("contributions", var())),
+                   "every contribution survives a save/reload, ids and all");
+            check (after.getProperty ("currentId", var()).isVoid(), "a project reload clears any in-flight capture");
+        }
+
+        // ── re-pointing the loop must DISARM the lane it is leaving ──
+        // Two armed takes tracks capture the same input twice, and the copy on the
+        // abandoned lane is never stamped and never appears in loop_state — an invisible
+        // duplicate recording. The old track itself is deliberately kept (it holds real
+        // audio), so the only thing that may change is its arming.
+        {
+            const auto oldTakesId = loopState().getProperty ("takesTrackId", var()).toString();
+            check (oldTakesId == takesId, "loop fixture: the loop is still on the first pairing");
+
+            const auto leadBId = cmd (ops, "create_track", args1 ("name", "Lead B"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            auto setupB = cmd (ops, "loop_setup", args1 ("trackId", leadBId));
+            check (ok (setupB), "loop_setup on a second lead ok");
+            check ((bool) setupB["data"].getProperty ("created", false), "…and it made its own takes track");
+            const auto newTakesId = setupB["data"].getProperty ("takesTrackId", var()).toString();
+            check (newTakesId.isNotEmpty() && newTakesId != oldTakesId, "the new pairing has a NEW takes track");
+            check (nameOfTrack (newTakesId) == "Lead B · Takes", "the new takes track is named after its lead");
+
+            auto after = loopState();
+            check (after.getProperty ("leadTrackId", var()).toString() == leadBId
+                       && after.getProperty ("takesTrackId", var()).toString() == newTakesId,
+                   "loop_state follows the re-point");
+            check (nameOfTrack (oldTakesId) == "Lead · Takes", "the abandoned takes track is KEPT (it holds real audio)");
+
+            // Headless there is no input instance, so no track can report armed:true in the
+            // snapshot either way (the whole recording section pins that). The provable
+            // half is that the disarm was actually ISSUED against the old lane — a JSONL
+            // arm_track line naming it with armed:false. Real arming is hardware-gated.
+            const auto armLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool disarmedOld = false, armedNew = false;
+            for (auto& ln : juce::StringArray::fromLines (armLog))
+            {
+                if (! ln.contains ("\"command\": \"arm_track\"")) continue;
+                if (ln.contains ("\"trackId\": \"" + oldTakesId + "\"") && ln.contains ("\"armed\": false")) disarmedOld = true;
+                if (ln.contains ("\"trackId\": \"" + newTakesId + "\"") && ln.contains ("\"armed\": true"))  armedNew = true;
+            }
+            check (disarmedOld, "re-pointing DISARMS the takes track it leaves behind");
+            check (armedNew, "…and arms the new one");
+        }
+    }
+
     // ─── MON-003: monitoring round-trip latency readout ───
     // Hardware input+output latency (getRecordAdjustment*) — the delay a performer
     // hears via software input monitoring. Needs only an open device (NOT a prepared
@@ -16585,6 +16999,58 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
     check (trackClips (firstTrack (ops)) == 1, "redo restored clip");
     check (ok (cmd (ops, "redo")), "redo render layer command ok");
     check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "redo restored render layer");
+
+    // ── MOSHI-LOOP: Keep is one undoable transaction over a clip that moved tracks ──
+    // The loop's one genuinely undoable command. Everything else it does — the listening
+    // start, the lead-in, the restart of capture — is a preference or a transport move, so
+    // the ONLY thing an undo has to put back is the clip: off the lead track, back onto
+    // takes, with the keeper flag cleared. (After a FINALIZED keep — one with a real landed
+    // take — undo is two steps, the loop_keep transaction and then loop_capture; headless
+    // nothing lands, so this is the single-step shape.)
+    {
+        const auto loopLead = cmd (ops, "create_track", args1 ("name", "Undo Loop Lead"))["data"]
+                                  .getProperty ("trackId", var()).toString();
+        auto loopSetup = cmd (ops, "loop_setup", args1 ("trackId", loopLead));
+        check (ok (loopSetup), "loop_setup ok");
+        const auto loopTakes = loopSetup["data"].getProperty ("takesTrackId", var()).toString();
+        check (loopTakes.isNotEmpty() && loopTakes != loopLead, "loop_setup made a distinct takes track");
+
+        const auto loopClip = cmd (ops, "add_test_tone_clip",
+                                   objN ({{ "trackId", loopTakes }, { "seconds", 0.25 }, { "freq", 330.0 }}))
+                                  ["data"].getProperty ("clipId", var()).toString();
+        check (loopClip.isNotEmpty(), "a pass landed on the takes track");
+
+        auto trackOfClip = [&ops, &loopClip]() -> String {
+            auto snap = ops.snapshot();                      // keep the temporary alive
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracksArr = tv.getArray())
+                for (auto& t : *tracksArr)
+                {
+                    auto cv = t.getProperty ("clips", var());
+                    if (auto* clips = cv.getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == loopClip)
+                                return t.getProperty ("id", var()).toString();
+                }
+            return {};
+        };
+
+        auto loopSt = cmd (ops, "loop_state")["data"];
+        const auto contributions = loopSt.getProperty ("contributions", var());   // bound, not a temporary
+        check (contributions.size() == 1, "loop_state adopted exactly one pass");
+        const auto loopPassId = contributions.size() == 1 ? contributions[0].getProperty ("id", var()).toString() : String();
+        check (loopPassId.isNotEmpty(), "the adopted pass has an id");
+        check (trackOfClip() == loopTakes, "the pass starts on the takes track");
+
+        check (ok (cmd (ops, "loop_keep", args1 ("targetId", loopPassId))), "loop_keep ok");
+        check (trackOfClip() == loopLead, "loop_keep moved the keeper to the lead track");
+
+        check (ok (cmd (ops, "undo")), "undo after loop_keep ok");
+        check (trackOfClip() == loopTakes, "one undo puts the keeper back on the takes track");
+
+        check (ok (cmd (ops, "redo")), "redo after loop_keep ok");
+        check (trackOfClip() == loopLead, "redo returns the keeper to the lead track");
+    }
 
     finishSection();
     std::cerr << "===== " << checks - failures << "/" << checks
