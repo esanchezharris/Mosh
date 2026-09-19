@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { phoneStatusLine } from "./phoneStatus";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { PHONE_PRESENCE_MS, phoneStatusLine } from "./phoneStatus";
 import type { RemotePairingInfo } from "../bridge";
 import type { LoopContribution, LoopState } from "../types";
 
@@ -88,5 +91,19 @@ describe("phoneStatusLine", () => {
     expect(phoneStatusLine(null, undefined)).toBeNull();
     // a live phone still reports even if the pairing has since been stopped
     expect(phoneStatusLine(loop({ phoneConnected: true }), null)).toBe("Phone connected · idle");
+  });
+});
+
+describe("the presence window this module documents", () => {
+  // PHONE_PRESENCE_MS is documentation now that the ENGINE decides presence — which is
+  // exactly how a documented constant rots. Re-derive the engine's own value at test
+  // time, the same idiom as txnSafeRegistry.test.ts, so the comment cannot drift from
+  // the code it describes without failing here.
+  it("is the same number the engine applies", () => {
+    const here = dirname(fileURLToPath(import.meta.url));   // ui/src/v3
+    const loopCpp = readFileSync(resolve(here, "../../../src/moshops/MoshOps.Loop.cpp"), "utf8");
+    const match = /kLoopPhoneWindowMs\s*=\s*([0-9.]+)/.exec(loopCpp);
+    expect(match, "kLoopPhoneWindowMs not found \u2014 this probe reads the wrong file").not.toBeNull();
+    expect(Number(match![1])).toBe(PHONE_PRESENCE_MS);
   });
 });
