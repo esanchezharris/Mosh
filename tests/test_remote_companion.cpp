@@ -498,3 +498,190 @@ TEST_CASE ("pairing url host is routable from another device", "[remote][pairing
                              && host.containsOnly ("0123456789.");
     REQUIRE ((looksIpv4 || host.endsWith (".local")));
 }
+
+// ---------------------------------------------------------------------------
+// Moshi phone pad (GET /pad, GET /api/state, POST /api/action)
+// ---------------------------------------------------------------------------
+
+// The pad page refuses any token that does not match /^[a-fA-F0-9]{32,128}$/ before
+// it will even try a request, and the old makeToken() concatenated two UNPADDED
+// String::toHexString(int64) values — 2 to 32 characters depending on how many
+// leading zero nibbles the two random numbers happened to have. Roughly one pairing
+// in eight produced a token the phone silently discarded, which presents as "the QR
+// code does not work" with nothing in any log. Pin the exact shape.
+TEST_CASE ("pairing token is 64 lowercase hex characters the phone pad will accept", "[remote][pairing][pad]")
+{
+    RemoteCompanionProtocol protocol;
+    const auto issued = protocol.beginPairing ("192.168.1.24", 47873, 1000);
+
+    REQUIRE (issued.token.length() == 64);
+    REQUIRE (issued.token.length() >= 32);   // the pad's regex floor
+    REQUIRE (issued.token.length() <= 128);  // and its ceiling
+    REQUIRE (issued.token.containsOnly ("0123456789abcdef"));
+
+    RemoteCompanionProtocol second;
+    REQUIRE (second.beginPairing ("192.168.1.24", 47873, 1000).token != issued.token);
+}
+
+TEST_CASE ("pairing carries the pad url the QR code encodes", "[remote][pairing][pad]")
+{
+    RemoteCompanionProtocol protocol;
+    const auto issued = protocol.beginPairing ("192.168.1.24", 47873, 1000, "abc123");
+
+    REQUIRE (issued.padUrl == "http://192.168.1.24:47873/pad#token=abc123");
+    // The fragment is the point: a token after '#' is never sent to the server in a
+    // request line and never lands in a proxy or server log.
+    REQUIRE (issued.padUrl.contains ("#token="));
+    REQUIRE (issued.webUrl.contains ("/web?payload=")); // unchanged
+    REQUIRE (issued.pairingUrl.startsWith ("mosh://pair"));
+}
+
+TEST_CASE ("phone pad url and token stay out of the untrusted health response", "[remote][pairing][pad]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("mosh-remote-pad-secrets-test");
+    root.deleteRecursively();
+
+    RemoteCompanionServer server (root);
+    auto pairingResult = startPairingOnFreePort (server);
+    REQUIRE ((bool) pairingResult.getProperty ("ok", false));
+
+    auto pairing = pairingResult.getProperty ("data", {}).getProperty ("pairing", {});
+    const auto token = pairing.getProperty ("token", {}).toString();
+    const auto padUrl = pairing.getProperty ("padUrl", {}).toString();
+    REQUIRE (token.isNotEmpty());
+    REQUIRE (padUrl.endsWith ("/pad#token=" + token));
+
+    const auto health = juce::JSON::toString (server.handleTestRequest ("GET", "/health", juce::var()));
+    REQUIRE (health.contains ("padUrl") == false);
+    REQUIRE (health.contains (token) == false);
+    server.stopServer();
+}
+
+TEST_CASE ("phone pad page is served publicly and carries no token", "[remote][pad]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("mosh-remote-pad-page-test");
+    root.deleteRecursively();
+
+    RemoteCompanionServer server (root);
+    auto pairingResult = startPairingOnFreePort (server);
+    REQUIRE ((bool) pairingResult.getProperty ("ok", false));
+    const auto token = pairingResult.getProperty ("data", {})
+                           .getProperty ("pairing", {})
+                           .getProperty ("token", {})
+                           .toString();
+
+    // No bearer: the page itself is public, exactly like /web. The token arrives in
+    // the URL fragment and only ever goes back out in an Authorization header.
+    const auto page = server.handleTestRequest ("GET", "/pad", juce::var(), "");
+    REQUIRE ((bool) page.getProperty ("ok", false));
+    const auto html = page.getProperty ("data", {}).getProperty ("html", {}).toString();
+    REQUIRE (html.isNotEmpty());
+    REQUIRE (html.containsIgnoreCase ("<html"));
+    REQUIRE_FALSE (html.contains (token));
+    server.stopServer();
+}
+
+TEST_CASE ("phone pad api demands the bearer token and maps actions onto loop commands", "[remote][pad][server]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("mosh-remote-pad-api-test");
+    root.deleteRecursively();
+
+    RemoteCompanionServer server (root);
+    juce::Array<juce::var> commands;
+    server.setCommandHandler ([&] (const juce::var& command) {
+        commands.add (command);
+        auto* data = new juce::DynamicObject();
+        data->setProperty ("projectId", "proj-1");
+        data->setProperty ("engaged", true);
+        data->setProperty ("phase", "idle");
+        auto* result = new juce::DynamicObject();
+        result->setProperty ("ok", true);
+        result->setProperty ("data", juce::var (data));
+        return juce::var (result);
+    });
+
+    auto countOf = [&commands] (const juce::String& name) {
+        int found = 0;
+        for (const auto& command : commands)
+            if (command.getProperty ("command", {}).toString() == name)
+                ++found;
+        return found;
+    };
+
+    auto pairingResult = startPairingOnFreePort (server);
+    REQUIRE ((bool) pairingResult.getProperty ("ok", false));
+    const auto token = pairingResult.getProperty ("data", {})
+                           .getProperty ("pairing", {})
+                           .getProperty ("token", {})
+                           .toString();
+    REQUIRE (token.isNotEmpty());
+
+    int status = 0;
+    const auto missing = server.handleTestRequest ("GET", "/api/state", juce::var(), "", &status);
+    REQUIRE (status == 401);
+    REQUIRE (commands.isEmpty());
+    REQUIRE (missing.getProperty ("error", {}).toString() == "Pair this phone again");
+    // Plain phone JSON, not the desktop companion's {ok,data} envelope.
+    REQUIRE (missing.getProperty ("ok", "sentinel").toString() == "sentinel");
+
+    const auto wrong = server.handleTestRequest ("GET", "/api/state", juce::var(), "deadbeef", &status);
+    REQUIRE (status == 401);
+    REQUIRE (commands.isEmpty());
+
+    const auto state = server.handleTestRequest ("GET", "/api/state", juce::var(), token, &status);
+    REQUIRE (status == 200);
+    REQUIRE (countOf ("loop_state") == 1);
+    REQUIRE ((bool) commands[0].getProperty ("args", {}).getProperty ("phonePoll", false));
+    REQUIRE ((int) state.getProperty ("version", 0) == 1);
+    const auto sessionId = state.getProperty ("sessionId", {}).toString();
+    REQUIRE (sessionId.isNotEmpty());
+
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("version", 1);
+    body->setProperty ("requestId", "req-1");
+    body->setProperty ("sessionId", sessionId);
+    body->setProperty ("projectId", "proj-1");
+    body->setProperty ("authority", state.getProperty ("authority", {}).toString());
+    body->setProperty ("action", "record");
+    const juce::var recordBody (body);
+
+    const auto accepted = server.handleTestRequest ("POST", "/api/action", recordBody, token, &status);
+    REQUIRE (status == 200);
+    REQUIRE (countOf ("loop_record") == 1);
+    REQUIRE (accepted.getProperty ("receipt", {}).getProperty ("requestId", {}).toString() == "req-1");
+
+    juce::var recorded;
+    for (const auto& command : commands)
+        if (command.getProperty ("command", {}).toString() == "loop_record")
+            recorded = command;
+    REQUIRE (recorded.getProperty ("args", {}).getProperty ("requestId", {}).toString() == "req-1");
+    REQUIRE (recorded.getProperty ("args", {}).getProperty ("projectId", {}).toString() == "proj-1");
+
+    // A retried POST (dropped response, phone re-sends) must not record a second take.
+    server.handleTestRequest ("POST", "/api/action", recordBody, token, &status);
+    REQUIRE (status == 200);
+    REQUIRE (countOf ("loop_record") == 1);
+
+    const auto unauthorisedAction = server.handleTestRequest ("POST", "/api/action", recordBody, "", &status);
+    REQUIRE (status == 401);
+    REQUIRE (unauthorisedAction.getProperty ("error", {}).toString() == "Pair this phone again");
+
+    const auto unknown = server.handleTestRequest ("GET", "/api/nope", juce::var(), token, &status);
+    REQUIRE (status == 404);
+    REQUIRE (unknown.getProperty ("error", {}).toString() == "Unknown endpoint");
+
+    const auto malformed = server.handleTestRequest ("POST", "/api/action", juce::var(), token, &status);
+    REQUIRE (status == 200); // a body the phone can read, not a transport failure
+    REQUIRE (malformed.getProperty ("error", {}).toString() == "Invalid JSON");
+
+    server.stopServer();
+}

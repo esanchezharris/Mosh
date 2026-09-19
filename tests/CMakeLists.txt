@@ -45,6 +45,10 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/agent/CertifiedSkillLoader.cpp
     test_annotations.cpp
     test_remote_companion.cpp
+    # Moshi phone pad transport (engine-free): the phone wire contract and the
+    # HTTP->MoshOps command mapper, exercised against a fake command executor.
+    test_phone_loop_protocol.cpp
+    test_phone_loop_endpoint.cpp
     test_recording_landing.cpp
     # CAP-001 — recording residue after an unclean exit (engine-free decisions).
     test_recording_residue.cpp
@@ -95,6 +99,8 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/multiplayer/TransferQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
+    ${CMAKE_SOURCE_DIR}/src/remote/PhoneLoopProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/remote/PhoneLoopEndpoint.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/files/DirectoryListing.cpp

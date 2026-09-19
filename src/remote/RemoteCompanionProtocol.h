@@ -19,6 +19,9 @@ struct RemotePairingInfo
     juce::int64 expiresAtMs = 0;
     juce::String pairingUrl;
     juce::String webUrl;
+    /** The Moshi phone pad page, with the bearer token in the URL FRAGMENT so it
+        never reaches the server in a request line (and so never lands in a log). */
+    juce::String padUrl;
 };
 
 class RemoteCompanionProtocol
@@ -43,6 +46,8 @@ private:
     static juce::String makePairingUrl (const juce::String& host, int port,
                                         const juce::String& token);
     static juce::String makeWebUrl (const juce::String& host, int port,
+                                    const juce::String& token);
+    static juce::String makePadUrl (const juce::String& host, int port,
                                     const juce::String& token);
 
     RemotePairingInfo pairing;

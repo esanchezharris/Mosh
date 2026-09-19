@@ -62,6 +62,16 @@ namespace
         return juce::jlimit (1000, 600000, propInt (body, "timeoutMs", 5000));
     }
 
+    /** The phone pad speaks its own JSON: a failure is a bare {error} it can render,
+        not the desktop companion's {ok:false,error} envelope (which its zod schema
+        would reject as a protocol error rather than a readable refusal). */
+    juce::var phoneError (const juce::String& message)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("error", message);
+        return juce::var (o);
+    }
+
     // Bind diagnostic. JUCE's createListener returns a bare bool and, on failure, runs a
     // cleanup shutdown()/close() that overwrites errno (ENOTCONN) before it returns — so the
     // real cause (e.g. EADDRINUSE) can't be read back here. Instead we probe the port
@@ -95,7 +105,14 @@ namespace
 RemoteCompanionServer::RemoteCompanionServer (juce::File takeRoot)
     : Thread ("Mosh Remote Companion"),
       takeStore (takeRoot),
-      monitorStore (takeRoot.getSiblingFile ("diagnostics").getChildFile ("monitoring"))
+      monitorStore (takeRoot.getSiblingFile ("diagnostics").getChildFile ("monitoring")),
+      // Every phone action leaves as an ordinary MoshOps command carried onto the
+      // message thread — the phone endpoint itself never touches the engine.
+      phoneLoop ([this] (const juce::var& command) {
+          return callOnMessageThread ([this, command] {
+              return commandHandler ? commandHandler (command) : juce::var();
+          }, 5000);
+      })
 {
 }
 
@@ -127,6 +144,7 @@ juce::var RemoteCompanionServer::startPairing (const juce::var& args)
     }
 
     const auto info = protocol.beginPairing (pairingUrlHost(), port, juce::Time::currentTimeMillis());
+    phoneLoop.resetSession(); // a new token means a new phone: drop stale receipts and replay barriers
     auto* data = new juce::DynamicObject();
     data->setProperty ("running", true);
     data->setProperty ("pairing", toVar (info));
@@ -158,6 +176,7 @@ juce::var RemoteCompanionServer::startLabFeed (const juce::String& token)
                                              token,
                                              24 * 60 * 60 * 1000LL);
     juce::ignoreUnused (info);
+    phoneLoop.resetSession();
     auto* data = new juce::DynamicObject();
     data->setProperty ("running", true);
     data->setProperty ("labFeed", true);
@@ -177,6 +196,7 @@ juce::var RemoteCompanionServer::stopServer()
     }
 
     stopThread (2000);
+    phoneLoop.resetSession();
     const juce::ScopedLock sl (lock);
     listener.reset();
     eventQueue.clear();
@@ -220,6 +240,41 @@ juce::var RemoteCompanionServer::handleTestRequest (const juce::String& method,
     request.path = path;
     request.body = juce::JSON::toString (body);
     return handleRequest (request);
+}
+
+juce::var RemoteCompanionServer::handleTestRequest (const juce::String& method,
+                                                    const juce::String& path,
+                                                    const juce::var& body,
+                                                    const juce::String& bearerToken,
+                                                    int* statusOut)
+{
+    Request request;
+    request.method = method;
+    request.path = path;
+    request.body = juce::JSON::toString (body);
+    request.authToken = bearerToken;
+
+    int status = 200;
+    juce::var result;
+
+    if (path.startsWith ("/api/"))
+    {
+        result = handleApiRequest (request, status);
+    }
+    else if (method == "GET" && path == "/pad")
+    {
+        auto* data = new juce::DynamicObject();
+        data->setProperty ("html", padHtml());
+        result = ok (juce::var (data));
+    }
+    else
+    {
+        result = handleRequest (request);
+    }
+
+    if (statusOut != nullptr)
+        *statusOut = status;
+    return result;
 }
 
 // Exposes the EXACT clamp function /snapshot and /command call, so Catch2 can pin the
@@ -268,10 +323,57 @@ void RemoteCompanionServer::handleClient (std::unique_ptr<juce::StreamingSocket>
         return;
     }
 
+    // The pad page is public exactly like /web: it carries no token, and the one it
+    // is opened with lives in the URL fragment, which never reaches this server.
+    if (request.method == "GET" && request.path == "/pad")
+    {
+        writeTextResponse (*client, 200, "text/html; charset=utf-8", padHtml());
+        return;
+    }
+
+    // The phone routes carry their own HTTP status. The legacy path below derives one
+    // from the error TEXT ("token" -> 401), which would hand the pad a 400 for a bad
+    // bearer and send it into "transport error" instead of "pair again".
+    if (request.path.startsWith ("/api/"))
+    {
+        int status = 200;
+        const auto body = handleApiRequest (request, status);
+        writeJsonResponse (*client, status, body);
+        return;
+    }
+
     const auto result = handleRequest (request);
     const int code = result.getProperty ("ok", false) ? 200
         : (result.getProperty ("error", {}).toString().containsIgnoreCase ("token") ? 401 : 400);
     writeJsonResponse (*client, code, result);
+}
+
+juce::var RemoteCompanionServer::handleApiRequest (const Request& request, int& status)
+{
+    status = 200;
+
+    {
+        const juce::ScopedLock sl (lock);
+        if (! protocol.authorize (request.authToken, juce::Time::currentTimeMillis()).ok)
+        {
+            status = 401;
+            return phoneError ("Pair this phone again");
+        }
+    }
+
+    if (request.method == "GET" && request.path == "/api/state")
+        return phoneLoop.state (status);
+
+    if (request.method == "POST" && request.path == "/api/action")
+    {
+        const auto body = juce::JSON::parse (request.body);
+        if (! body.isObject())
+            return phoneError ("Invalid JSON"); // a refusal the pad renders, still HTTP 200
+        return phoneLoop.action (body, status);
+    }
+
+    status = 404;
+    return phoneError ("Unknown endpoint");
 }
 
 juce::var RemoteCompanionServer::handleRequest (const Request& request)
@@ -510,6 +612,9 @@ void RemoteCompanionServer::writeJsonResponse (juce::StreamingSocket& socket,
     const auto headers = "HTTP/1.1 " + juce::String (statusCode) + " " + statusText (statusCode) + "\r\n"
         + "Content-Type: application/json\r\n"
         + "Access-Control-Allow-Origin: *\r\n"
+        // The phone polls /api/state continuously; a cached body would show it a
+        // state the Mac has already left behind.
+        + "Cache-Control: no-store\r\n"
         + "Connection: close\r\n"
         + "Content-Length: " + juce::String (json.getNumBytesAsUTF8()) + "\r\n\r\n";
     socket.write (headers.toRawUTF8(), (int) headers.getNumBytesAsUTF8());
@@ -547,6 +652,39 @@ juce::String RemoteCompanionServer::webCompanionHtml()
             return html;
     }
     return legacyWebCompanionHtml();
+}
+
+// The Moshi phone pad, staged into the bundle by the UI build exactly like the web
+// companion page above. The fallback is deliberately inert: no script, and above all
+// no token, because an unstaged build must not hand a phone a page that looks like
+// it is working.
+juce::String RemoteCompanionServer::padHtml()
+{
+    auto staged = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+                      .getChildFile ("Contents/Resources/companion/pad.html");      // macOS bundle
+    if (! staged.existsAsFile())
+        staged = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                     .getParentDirectory().getChildFile ("companion/pad.html");      // Windows/flat
+    if (staged.existsAsFile())
+    {
+        const auto html = staged.loadFileAsString();
+        if (html.isNotEmpty())
+            return html;
+    }
+
+    return R"HTML(<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mosh phone pad</title>
+</head>
+<body style="margin:0;padding:24px;background:#111318;color:#f4f1ea;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
+<h1 style="font-size:20px;margin:0 0 8px">Mosh phone pad is not staged in this build</h1>
+<p style="font-size:15px;color:#b8c1ca;margin:0">Rebuild Mosh with the companion UI to use the phone pad.</p>
+</body>
+</html>
+)HTML";
 }
 
 juce::String RemoteCompanionServer::legacyWebCompanionHtml()
@@ -792,6 +930,7 @@ juce::var RemoteCompanionServer::toVar (const RemotePairingInfo& info, bool incl
         o->setProperty ("token", info.token);
         o->setProperty ("pairingUrl", info.pairingUrl);
         o->setProperty ("webUrl", info.webUrl);
+        o->setProperty ("padUrl", info.padUrl);
     }
     return juce::var (o);
 }

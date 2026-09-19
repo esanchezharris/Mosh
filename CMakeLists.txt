@@ -362,6 +362,8 @@ if (MOSH_BUILD_APP)
         # iPhone companion remote control + phone-take ingest
         src/remote/RemoteCompanionProtocol.cpp
         src/remote/RemoteCompanionServer.cpp
+        src/remote/PhoneLoopProtocol.cpp
+        src/remote/PhoneLoopEndpoint.cpp
         # Skill Foundry Task 4 — engine-free native safe loader for certified skill
         # packages (see the file header for the security contract). Registered here
         # so the ordinary Mosh app build compiles it; tests/CMakeLists.txt also

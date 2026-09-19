@@ -38,6 +38,7 @@ RemotePairingInfo RemoteCompanionProtocol::beginPairing (const juce::String& hos
     pairing.expiresAtMs = nowMs + (ttlOverrideMs > 0 ? ttlOverrideMs : pairingTtlMs());
     pairing.pairingUrl = makePairingUrl (host, port, pairing.token);
     pairing.webUrl = makeWebUrl (host, port, pairing.token);
+    pairing.padUrl = makePadUrl (host, port, pairing.token);
     return pairing;
 }
 
@@ -57,11 +58,18 @@ void RemoteCompanionProtocol::clearPairing()
     pairing = {};
 }
 
+// 32 random bytes rendered as 64 lowercase hex characters.
+//
+// The previous implementation concatenated two UNPADDED toHexString(int64) values,
+// so its output was 2-32 characters wide depending on how many leading zero nibbles
+// the two random numbers happened to carry. The phone pad refuses anything outside
+// /^[a-fA-F0-9]{32,128}$/ before it makes a request, so roughly one pairing in eight
+// produced a QR code the phone discarded in silence. Fixed width, fixed alphabet.
 juce::String RemoteCompanionProtocol::makeToken()
 {
-    auto& random = juce::Random::getSystemRandom();
-    return juce::String::toHexString (random.nextInt64())
-        + juce::String::toHexString (random.nextInt64());
+    juce::uint8 bytes[32];
+    juce::Random::getSystemRandom().fillBitsRandomly (bytes, sizeof (bytes));
+    return juce::String::toHexString (bytes, (int) sizeof (bytes), 0).toLowerCase();
 }
 
 juce::String RemoteCompanionProtocol::makePairingPayload (const juce::String& host,
@@ -89,6 +97,16 @@ juce::String RemoteCompanionProtocol::makeWebUrl (const juce::String& host,
 {
     const auto payload = makePairingPayload (host, port, token);
     return "http://" + host + ":" + juce::String (port) + "/web?payload=" + juce::URL::addEscapeChars (payload, true);
+}
+
+// The token rides in the fragment, not the query: a fragment is never sent to the
+// server, so it cannot appear in a request line, an access log or a Referer header.
+// The pad page reads it from location.hash and then clears the hash.
+juce::String RemoteCompanionProtocol::makePadUrl (const juce::String& host,
+                                                  int port,
+                                                  const juce::String& token)
+{
+    return "http://" + host + ":" + juce::String (port) + "/pad#token=" + token;
 }
 
 RemotePhoneTakeStore::RemotePhoneTakeStore (juce::File rootDirectory)
