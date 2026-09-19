@@ -85,7 +85,10 @@ test.describe("V3-feel: every surface in every colorway", () => {
       await page.getByTestId("v3-templates").hover();
       await page.getByTestId("v3-template-booth").click();
       await expect(page.getByTestId("v3-booth")).toBeVisible();
-      await expect(page.getByTestId("v3-file-menu")).toHaveAttribute("aria-hidden", "true");   // the menu stays mounted; wait for it to hide
+      await expect(page.getByTestId("v3-file-menu")).toHaveAttribute("aria-hidden", "true");   // the menu stays mounted…
+      await expect.poll(() => page.getByTestId("v3-file-menu").evaluate((el) => {                // …and fades: wait for the fade
+        const cs = getComputedStyle(el); return cs.visibility === "hidden" || Number(cs.opacity) === 0 || cs.display === "none";
+      })).toBe(true);
       await shot("07-booth");
       await page.getByTestId("v3-booth-studio").click();
       await expect(page.getByTestId("v3-arrangement")).toBeVisible();

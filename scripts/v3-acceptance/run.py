@@ -550,6 +550,22 @@ def row_feel(ctx) -> Row:
 
 # ── report ──────────────────────────────────────────────────────────────────────────
 def write_report(ctx, rows: list[Row]) -> None:
+    # A partial run (--only / --skip) updates its rows in place and keeps the others from the
+    # previous rows.json, so REPORT.md always describes the whole directory.
+    prior = []
+    try:
+        prior = json.loads((ctx.out / "rows.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+    ran = {r.id for r in rows}
+    kept = [p for p in prior if p.get("id") not in ran]
+    if kept:
+        for p in kept:
+            k = Row(p["id"], p.get("title", ""), p.get("owner", []))
+            k.checks, k.artifacts, k.blocked = p.get("checks", []), p.get("artifacts", []), p.get("blocked")
+            k.notes = p.get("notes", []) + ["(from an earlier run in this directory; not re-run now)"]
+            rows.append(k)
+        rows.sort(key=lambda r: list(ROWS).index(r.id.replace("V3-", "")) if r.id.replace("V3-", "") in ROWS else 99)
     lines = [f"# V3 default-shell acceptance — automated evidence, {STAMP}", "",
              f"- repo `{REPO}` @ `{ctx.commit}`", f"- binary `{ctx.bin}` (built {ctx.bin_built})",
              f"- rows: {', '.join(r.id for r in rows)}; loopback device `{LOOPBACK_DEVICE}`", "",
