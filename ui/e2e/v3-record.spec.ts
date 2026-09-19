@@ -87,8 +87,20 @@ test("set up a Lead, keep one pass and redo another — every pass is preserved,
   await expect(transportRec).not.toHaveClass(/on/);
 
   // ONE undo reverses the Again and nothing else: Part 1 stops being a redo, Part 2 stays
-  // kept, and the three passes captured before it are all still there. Landing a pass is a
-  // lifecycle event, not an undo step, so the Stop above did not consume this ⌘Z.
+  // kept, and the three passes captured before it are all still there.
+  //
+  // WHAT THIS PINS IS THE MOCK. The dev/e2e backend's undo is a whole-snapshot stack
+  // (pushUndo() in ui/src/bridge.mock.ts), and its `loop_stop` does not push a step — so
+  // in the mock the Stop above genuinely did not consume this ⌘Z. Natively it is TWO
+  // steps, by design: `loop_stop` → loopFinalizeCapture() opens its own
+  // beginTxn ("loop_capture") before stopping (MoshOps.Loop.cpp), because Tracktion lands
+  // the recorded clip through the Edit's own UndoManager and would otherwise fold the
+  // landing into whatever transaction the previous command left at the head of the stack.
+  // So after a Stop that landed a real take, the first native ⌘Z removes that pass and the
+  // second reverses the Again. That native ordering is covered by `--selftest-undo` and
+  // written down in docs/PHONE_PAD.md; it is not knowable from this spec, which never
+  // reaches the engine. Do not "fix" the count below to match the engine — it is right
+  // about the backend it actually drives.
   await page.keyboard.press("ControlOrMeta+z");
   await expect(parts).toHaveCount(3);
   await expect(parts.first()).not.toHaveClass(/rejected/);

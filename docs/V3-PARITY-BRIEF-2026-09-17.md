@@ -13,7 +13,7 @@ viable without third-party plugins — and the rule recorded when V3 was first w
 | Kind | Gate definition plus a sequenced task list. Task 1 is bounded and can start now; the flip is the **last** task and is gated on §5 |
 | Default today | `ui/src/settings/schema.ts` → `uiShell` default `"protools"` (since 2026-08-09). V3 is selectable as "Mosh (v3)"; an existing explicit choice is always preserved |
 | Allowed writes | `ui/src/v3/**`, new `ui/e2e/v3-*.spec.ts`, the five v2-named gate sites in §2, `docs/` |
-| **Forbidden** | redesigning V3's look (DESIGN.md §1 stands), touching other shells' behaviour, any new engine command without the five registrations, any claim of audibility or feel from a gate |
+| **Forbidden** | redesigning V3's look (DESIGN.md §1 stands), touching other shells' behaviour, any new engine command without the eight registrations (enumerated in docs/PHONE_PAD.md), any claim of audibility or feel from a gate |
 | Owner input needed | §5 acceptance pass on a real session; nothing before that |
 
 **Why V3 is not the default today (evidence, not opinion).**
@@ -124,6 +124,6 @@ set their shell explicitly, but any that relied on the default will surface here
 ## 7. What this brief does not authorise
 
 No new visual direction for V3 (its DESIGN.md is the contract); no engine changes beyond what a
-row strictly needs, and any new command carries all five registrations plus the mock case (the
-#702 repair is the worked example); no claim that the native plugin suite is musically viable —
+row strictly needs, and any new command carries all eight registrations, enumerated in
+docs/PHONE_PAD.md (the #702 repair is the worked example); no claim that the native plugin suite is musically viable —
 that is its own brief; no move of the default before §5 is on record.

@@ -241,7 +241,7 @@ inline const std::set<juce::String>& readOnlyDuringTransaction()
         // adapter to a file and mutates no Edit state, so a producer must still be able
         // to listen to takes while an agent skill holds a transaction open.
         "render_lora_take", "promote_lora_checkpoint",
-        // MOSHI-LOOP — the pad polls loop_state two or three times a second. Blocking it
+        // MOSHI-LOOP — the pad polls loop_state every 200 ms (5 Hz). Blocking it
         // for the length of a skill run would freeze the phone on stale state with no way
         // to tell that apart from a dead Mac. It opens no transaction; the only thing it
         // writes is pass IDENTITY, with a null UndoManager.

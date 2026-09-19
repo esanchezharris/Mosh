@@ -251,11 +251,22 @@ describe("FS-B2a — the two new commands are registered in all three places", (
 
 describe("Moshi loop commands are registered everywhere", () => {
   // The Moshi recording loop (phone pad + desktop Booth) adds eleven commands, and a
-  // command in this repo needs SEVEN registrations, not one. Six of them are statically
-  // checkable from here; the seventh (the Catch2 lock-scope ledger) is asserted natively
-  // in tests/test_multiplayer_lock_manager.cpp. Missing any one of them is silent in
-  // every other test — an unclassified command inherits SessionGlobal by omission, an
-  // unlisted one fails closed inside an agent transaction — so they are pinned together.
+  // command in this repo needs EIGHT registrations, not one. The number has crept up as
+  // the surface grew (three → five → seven), so docs/PHONE_PAD.md now ENUMERATES them
+  // rather than asserting a count; this comment is the list in short form:
+  //   1. dispatch in src/moshops/MoshOps*.cpp
+  //   2. UI_ONLY_COMMANDS in ui/src/agent/commandClassification.ts
+  //   3. absence from AGENT_COMMAND_MAP in ui/src/agent/commands.ts
+  //   4. a TransactionSafe.h classification (nonUndoable / lifecycle / transactionSafe)
+  //   5. LockManager.cpp's `unguarded` set
+  //   6. the native lock-scope golden ledger, tests/test_multiplayer_lock_manager.cpp
+  //   7. a case in ui/src/bridge.mock.ts, or e2e and dev drive nothing
+  //   8. for a read that must survive an open transaction: readsDuringTxn (TransactionSafe.h)
+  //      paired with MOCK_TXN_READS (bridge.mock.ts) — loop_state, below
+  // Six of those are statically checkable from here; 6 is asserted natively. Missing any
+  // one of them is silent in every other test — an unclassified command inherits
+  // SessionGlobal by omission, an unlisted one fails closed inside an agent transaction —
+  // so they are pinned together.
   const LOOP_COMMANDS = [
     "loop_state", "loop_setup", "loop_record", "loop_keep", "loop_again", "loop_hear",
     "loop_play_all", "loop_stop", "loop_navigate", "loop_home", "loop_lead_in",
@@ -310,7 +321,7 @@ describe("Moshi loop commands are registered everywhere", () => {
   });
 
   it("…and loop_state stays readable while a transaction is open", () => {
-    // The pad polls it two or three times a second. Blocking it for the length of a skill
+    // The pad polls it every 200 ms (5 Hz). Blocking it for the length of a skill
     // run would freeze the phone on stale state with no way to tell that from a dead Mac.
     expect(readsDuringTxn).toContain("loop_state");
     expect(mockReads).toContain("loop_state");

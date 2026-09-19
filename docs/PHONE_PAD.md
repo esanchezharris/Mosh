@@ -54,6 +54,19 @@ transaction; navigation and lead-in are non-undoable preferences (Tracktion's
 `UndoManager` never sees them, matching the `set_count_in` posture elsewhere in
 MoshOps).
 
+**Undo after a landed pass is two steps, natively.** Tracktion inserts a recorded clip
+through the Edit's own `UndoManager`, so `loopFinalizeCapture()` opens its own
+`beginTxn ("loop_capture")` before stopping — otherwise the landing would join whatever
+transaction the previous command left at the head of the stack and one ⌘Z would take
+both. The consequence is deliberate: after a Stop or a Keep that landed a real take, the
+first ⌘Z removes that pass and the second reverses the edit before it. When nothing
+lands (a Stop during the count-in) the transaction is empty, and JUCE never pushes an
+empty transaction, so the history is exactly as it was — this is the G14 empty-transaction
+class, avoided deliberately. `--selftest-undo` covers the ordering. Note that
+`ui/e2e/v3-record.spec.ts` asserts a ONE-step undo: that spec drives the dev mock, whose
+undo is a whole-snapshot stack and whose `loop_stop` pushes no step. It is right about
+the backend it runs against and is not a claim about the engine.
+
 ### The eleven `loop_*` commands and their undo posture
 
 | Command | Posture | What it does |
@@ -77,9 +90,27 @@ or no audio device) — a committed keep is never reported as rejected.
 
 Every one of these eleven commands is registered UI-only (a performance gesture, not
 an agent move), unguarded in the multiplayer lock manager, and classified in
-`TransactionSafe.h` per the table above — the standard five registrations plus the
-mock case in `ui/src/bridge.mock.ts`, per `CLAUDE.md`'s "a new command needs five
-registrations" note.
+`TransactionSafe.h` per the table above.
+
+**A command needs eight registrations, not one.** The count has crept up as the surface
+grew — three, then five (`docs/V3-PARITY-BRIEF-2026-09-17.md:16,127`), then seven — so
+here is the list itself, which is what a future session should check against rather than
+a number:
+
+| # | Where | What a miss looks like |
+|---|---|---|
+| 1 | dispatch in `src/moshops/MoshOps*.cpp` | the command does not exist |
+| 2 | `UI_ONLY_COMMANDS` in `ui/src/agent/commandClassification.ts` | unclassified |
+| 3 | absent from `AGENT_COMMAND_MAP` (`ui/src/agent/commands.ts`) | a model can fire a performance gesture |
+| 4 | a `TransactionSafe.h` classification | fails closed inside an agent transaction |
+| 5 | `LockManager.cpp`'s `unguarded` set | inherits `SessionGlobal` by omission and contends in multiplayer |
+| 6 | the lock-scope golden ledger, `tests/test_multiplayer_lock_manager.cpp` | the scope decision is unpinned |
+| 7 | a case in `ui/src/bridge.mock.ts` | dev and e2e drive nothing |
+| 8 | `readsDuringTxn` + `MOCK_TXN_READS`, for a read that must survive an open transaction | the pad freezes on stale state for the length of a skill run |
+
+Only `loop_state` needs #8; the other ten stop at #7. All eight are pinned together by
+`ui/src/agent/txnSafeRegistry.test.ts` ("Moshi loop commands are registered everywhere"),
+except #6, which is asserted natively in its own Catch2 file.
 
 ## Build
 
@@ -162,11 +193,12 @@ remain owner acceptance:
   and take placement by ear are owner acceptance.** No gate, screenshot, or headless
   test can close these — see `docs/VERIFICATION.md` rows `PHONE-pair`, `PHONE-loop`,
   and `PHONE-recover`.
-- **A final fix wave is pending** that adds `phoneConnected` to the native loop
-  state. The engine already computes it internally (`loopPhoneConnected_`), but
-  `loopStateVar()` does not yet emit it and the desktop reads `phoneSeenMs` against
-  a clock (`Time::getMillisecondCounterHiRes()`, ms since boot) that is not
-  comparable to the wall-clock epoch ms the Booth's `phoneStatusLine` uses. Until
-  that lands, the Booth's "Phone connected" line is unreachable in the packaged app
-  and will read "Phone pad ready · scan the QR" even while a phone is actively
-  driving the loop.
+- **Phone presence is now the engine's verdict** (fix wave, landed). `loopStateVar()`
+  emits `phoneConnected`, and `ui/src/v3/phoneStatus.ts` reads it rather than comparing
+  `phoneSeenMs` to `Date.now()` — a comparison that could never be true, because
+  `phoneSeenMs` is `Time::getMillisecondCounterHiRes()` (ms since the Mac booted) and not
+  wall-clock epoch ms. The stamp remains in the payload as a diagnostic only; nothing may
+  decide on it. `--selftest` asserts the field is false cold, true after a
+  `loop_state {phonePoll:true}`, and true through `snapshot().loop` inside the same
+  3-second window. **Still owner-gated:** that a real iPhone's polling lights the line in
+  the packaged app remains a physical check — no headless test reaches a phone.
