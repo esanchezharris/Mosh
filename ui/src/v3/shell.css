@@ -332,11 +332,21 @@
   background: #101212; font-size: 9px; color: var(--fog-label); cursor: pointer;
 }
 .v3-shell .chip.on { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* `.pr` is ALSO the shared piano roll's root class (mosh.css: width/height from --pr-w/--pr-h,
+   1120×660). Without these resets every plugin card in the inspector was an editor-sized
+   box trailing off the right edge of the window (owner report, 2026-09-20). */
 .v3-shell .insp .pr {
   display: flex; flex-direction: column; gap: 6px; padding: 6px 7px; border-radius: 6px;
   background: var(--surface2); border: 1px solid var(--fog-line);
+  width: auto; height: auto; min-height: 0; max-width: 100%; min-width: 0; overflow: hidden;
+  color: var(--text); font-size: 10px;
 }
-.v3-shell .insp .pr .hdr { display: flex; align-items: center; gap: 6px; }
+.v3-shell .insp .pr .hdr { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.v3-shell .insp .pr .hdr .nm { flex: 1 1 auto; min-width: 0; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .insp .pr .hdr .kind { flex: 0 0 auto; font-size: 9px; letter-spacing: .06em; color: var(--muted); }
+.v3-shell .insp .pr .hdr .btn { flex: 0 0 auto; }
+.v3-shell .insp .pr .fader .nm { width: 64px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .insp .pr .fader .v { width: 36px; }
 .v3-shell .insp .pr.add {
   border-style: dashed; color: var(--muted); justify-content: center; align-items: center;
   font-size: 10px; padding: 7px; cursor: pointer; background: transparent;
