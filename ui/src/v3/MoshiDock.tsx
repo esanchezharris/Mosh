@@ -254,7 +254,7 @@ export function MoshiDock() {
         <button type="button" className={`moshi-btn${listening ? " listen" : ""}${agentBusy ? " busy" : ""}`}
           disabled={disabled} aria-label="Moshi" data-testid="v3-moshi-ring">
           <span className={`ring${clarify ? " clarify" : ""}`} />
-          <MoshiFace celebrateTick={celebrateTick} />
+          <MoshiFace celebrateTick={celebrateTick} mood={{ safe, busy: agentBusy, listening, clarify }} />
         </button>
         <input
           className={`field${clarify ? " clarify" : ""}`}
