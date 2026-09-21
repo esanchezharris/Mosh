@@ -15,7 +15,7 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -23,6 +23,9 @@ import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
 import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
 import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
+import { BUILTINS, mkParams, mkBuiltinParams, mkMoshFx } from "./mock/builtins";
+import { fixturePeaksForClip } from "./mock/fixturePeaks";
+import { portfolioSeed } from "./mock/portfolioSeed";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
@@ -188,8 +191,18 @@ function bassLine(bars: number): MidiNote[] {
 // ?mockNoInput=armed additionally pre-arms the first track — the
 // stale-armed-after-device-switch case (arm skipped, the refusal does the talking).
 const MOCK_NO_INPUT = new URLSearchParams(window.location.search).get("mockNoInput");
+// ?mockSeed=<name> selects a seeded session other than the 3-track default (see seedSnapshot).
+const MOCK_SEED = new URLSearchParams(window.location.search).get("mockSeed");
 
 function seedSnapshot(): Snapshot {
+  const base = defaultSeed();
+  // ?mockSeed=portfolio — the Song A showcase session (mock/portfolioSeed.ts): a real
+  // song's stems drawn from their fixture peaks, a full arrangement, buses and chains.
+  // Dev/e2e only, exactly like the other URL fixtures above.
+  return MOCK_SEED === "portfolio" ? portfolioSeed(base) : base;
+}
+
+function defaultSeed(): Snapshot {
   // Demo-accurate typed seed (dev/preview only): Drums = a drum step-grid (MIDI on a
   // drum track), Bass = MIDI note blocks, Keys = an audio waveform. 8s clips = 16 beats
   // = 4 bars at 120 BPM. Keep exactly 3 tracks (smoke asserts 3).
@@ -283,7 +296,7 @@ function seedSnapshot(): Snapshot {
 // scaffolding, no tracks, transport parked at zero. Reuses seedSnapshot for the
 // session shape so the two stay in lockstep.
 function emptySession(): Snapshot {
-  const s = seedSnapshot();
+  const s = defaultSeed();
   s.tracks = [];
   s.buses = [];
   s.sections = [];
@@ -1169,30 +1182,6 @@ function trainingState(): TrainingState {
   return snapshot.training as TrainingState;
 }
 
-// ── plugin / generative catalog (dev-mock only) ─────────────────────
-// Kept in lockstep with the NATIVE kBuiltins TYPE names (MoshOps.cpp) — the
-// Phase-A agent bench caught the drift: the mock accepted "eq" (native rejects
-// it; the real type is "4bandEq") and was missing compressor/sampler/chorus/
-// phaser/lowpass/pitchShifter entirely, so an agent following the real
-// list_builtins vocabulary failed only in dev/e2e. Display names stay the
-// mock's shorter forms where the UI already shows them.
-const BUILTINS = [
-  { type: "4osc", name: "4OSC", category: "Instruments", isInstrument: true, builtin: true as const },
-  { type: "sampler", name: "Sampler", category: "Instruments", isInstrument: true, builtin: true as const },
-  { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "4bandEq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "compressor", name: "Compressor", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "chorus", name: "Chorus", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "phaser", name: "Phaser", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "lowpass", name: "Low / High-Pass Filter", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "pitchShifter", name: "Pitch Shifter", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "moshAutoTune", name: "Mosh AutoTune", category: "Mosh FX", isInstrument: false, builtin: true as const },
-  { type: "moshOTT", name: "Mosh OTT", category: "Mosh FX", isInstrument: false, builtin: true as const },
-  { type: "moshXFeedback", name: "Mosh X-FDBK", category: "Mosh FX", isInstrument: false, builtin: true as const },
-  { type: "highpass", name: "High-Pass", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "softclip", name: "Mosh Soft Clipper", category: "Effects", isInstrument: false, builtin: true as const },
-];
 const VST3S = [
   { id: "vital", name: "Vital", format: "VST3", manufacturer: "Vital Audio", isInstrument: true },
   { id: "ott", name: "OTT", format: "VST3", manufacturer: "Xfer", isInstrument: false },
@@ -1367,39 +1356,6 @@ function findMasterPlugin(index: number): { idx: number } | null {
   const p = masterPlugins();
   if (index < 0 || index >= p.length) return null;
   return { idx: index };
-}
-function mkParams(n: number) {
-  return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
-}
-function params(names: string[], values: number[]): PluginParam[] {
-  return names.map((name, index) => ({ index, name, value: values[index] ?? 0.5 }));
-}
-function mkBuiltinParams(type: string, isInstrument: boolean): PluginParam[] {
-  // The built-in 4OSC exposes a small patch surface (native load_preset reports paramsApplied: 8),
-  // so a preset's effect is observable here as it is in the engine. Other instruments stay bare.
-  if (isInstrument) return type === "4osc"
-    ? params(["Osc 1 Level", "Osc 2 Level", "Cutoff", "Resonance", "Attack", "Decay", "Sustain", "Release"], [0.8, 0.5, 0.6, 0.2, 0.05, 0.3, 0.7, 0.25])
-    : [];
-  if (type === "moshAutoTune") return params(["Root", "Scale", "Retune", "Amount", "Range", "Mix", "Output"], [0, 0, 0.32, 0.35, 0.33, 1, 0.75]);
-  if (type === "moshOTT") return params(["Amount", "Time", "Low Gain", "Mid Gain", "High Gain", "Mix", "Output"], [0.12, 0.24, 0.5, 0.5, 0.5, 1, 0.71]);
-  if (type === "moshXFeedback") return params(["Sensitivity", "Max Cuts", "Max Depth", "Release", "Auto Suppress", "Mix", "Output"], [0.62, 0.5, 0.55, 0.38, 1, 0.8, 0.5]);
-  if (type === "highpass") return params(["Frequency"], [0.34]);   // 180 Hz within the 10-22000 Hz native range
-  if (type === "softclip") return params(["Drive", "Ceiling"], [0.25, 0.958]);   // 6 dB drive, -0.5 dBFS ceiling
-  return mkParams(4);
-}
-function mkMoshFx(type: string): MoshFxReadout | undefined {
-  if (type === "moshAutoTune") return { kind: "autotune", inputHz: 449.0, targetHz: 440.0, correctionCents: -34.4, confidence: 0.91 };
-  if (type === "moshOTT") return { kind: "ott", amount: 0.12, timeMs: 120.0 };
-  if (type !== "moshXFeedback") return undefined;
-  return {
-    kind: "feedback",
-    candidates: [
-      { frequencyHz: 1260, score: 0.82, depthDb: 5.5 },
-      { frequencyHz: 2510, score: 0.74, depthDb: 4.2 },
-      { frequencyHz: 3875, score: 0.61, depthDb: 3.4 },
-    ],
-    activeCuts: [],
-  };
 }
 
 // ── command dispatch ─────────────────────────────────────────────────────────
@@ -4050,7 +4006,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "get_clip_peaks": {
       const f = findClip(str(args.clipId));
       const buckets = Math.max(8, Math.min(2000, num(args.buckets, 800)));
-      const peaks = makePeaks(f?.clip ?? null, buckets);
+      // A fixture-backed clip (mock/portfolioSeed.ts) draws its REAL stem envelope;
+      // everything else keeps the synthetic waveform.
+      const peaks = (f && fixturePeaksForClip(f.clip, buckets)) ?? makePeaks(f?.clip ?? null, buckets);
       return ok(command, { peaks });
     }
     // file_peaks / audition — sample-browser thumbnail + preview seam. The mock can't

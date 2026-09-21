@@ -64,3 +64,83 @@ test("Split here in the context menu splits at the pointer's snapped time and on
   await page.keyboard.press("ControlOrMeta+z");
   await expect(clips).toHaveCount(1);
 });
+
+// ── playhead, ruler seek, sections (2026-09-21) ─────────────────────────────────────────
+type TransportWindow = Window & { __moshStore?: { getState: () => {
+  pxPerSec: number; setPxPerSec: (v: number) => void; transport: { position: number };
+  exec: (c: string, a?: Record<string, unknown>) => Promise<unknown>;
+} } };
+const position = (page: Parameters<typeof bootV3>[0]) =>
+  page.evaluate(() => (window as unknown as TransportWindow).__moshStore!.getState().transport.position);
+const seek = (page: Parameters<typeof bootV3>[0], sec: number) =>
+  page.evaluate((s) => (window as unknown as TransportWindow).__moshStore!.getState().exec("set_transport", { position: s }), sec);
+
+test("the playhead line follows the transport on the shared zoom, and the ruler seeks on click", async ({ page }) => {
+  await bootV3(page);
+  const playhead = page.getByTestId("v3-playhead");
+  const marker = page.getByTestId("v3-ruler-marker");
+  const lane = page.locator('[data-testid="v3-track"]').first().locator(".lane");
+  const laneX = (await lane.boundingBox())!.x;
+  // The line is 2 px wide, centred on the position (margin-left −1): x + 1 is the position.
+  const headPx = async () => Math.round((await playhead.boundingBox())!.x + 1 - laneX);
+  expect(await headPx()).toBe(0);                                             // parked at 0
+  await seek(page, 2);
+  await expect.poll(headPx).toBe(160);                                        // 2 s × 80 px
+  await expect.poll(async () => Math.round((await marker.boundingBox())!.x + 5 - laneX)).toBe(160);   // the ruler marker agrees
+  await page.getByTestId("v3-zoom-in").click();
+  await expect.poll(headPx).toBe(200);                                        // 2 s × 100 px — zoom moves it
+  await page.getByTestId("v3-zoom-out").click();
+  await expect.poll(headPx).toBe(160);
+
+  // Ruler click → seek on the beat grid (0.5 s at 120 BPM): bar 3 starts at 4 s = 320 px.
+  const ruler = page.getByTestId("v3-ruler");
+  await ruler.click({ position: { x: 320 + 3, y: 10 } });
+  await expect.poll(() => position(page)).toBe(4);
+  await expect.poll(headPx).toBe(320);
+
+  // Under 14 px per beat cell the ruler drops its ".2 .3 .4" labels (bars stay). The lane never
+  // narrows below the viewport, so the 16 s seed needs more beats to get there: 400 BPM makes
+  // 107 cells, and at 20 px/s they are ~10 px each.
+  await expect(ruler).toHaveAttribute("data-beat-labels", "1");
+  await page.evaluate(async () => {
+    const st = (window as unknown as TransportWindow).__moshStore!.getState();
+    await st.exec("set_tempo", { bpm: 400 }); st.setPxPerSec(20);
+  });
+  await expect(ruler).toHaveAttribute("data-beat-labels", "0");
+  await expect(ruler.locator(".rn.bar").first()).toHaveText("1");
+  await expect(ruler.locator(".rn.beat").first()).toHaveText("");
+});
+
+test("sections render over the ruler from the snapshot and a click jumps the transport there", async ({ page }) => {
+  await bootV3(page);
+  const secs = page.getByTestId("v3-section");
+  await expect(secs).toHaveCount(3);                                          // the seed's Intro / Verse / Hook
+  await expect(secs.nth(0)).toHaveText("Intro");
+  await expect(secs.nth(1)).toHaveText("Verse");
+  const intro = (await secs.nth(0).boundingBox())!;
+  const verse = (await secs.nth(1).boundingBox())!;
+  expect(Math.round(intro.width)).toBe(320);                                  // 8 beats × 0.5 s × 80 px
+  expect(Math.round(verse.width)).toBe(640);                                  // 16 beats
+  expect(Math.round(verse.x - intro.x)).toBe(320);                            // Verse starts where Intro ends
+  const lane = page.locator('[data-testid="v3-track"]').first().locator(".lane");
+  expect(Math.round(intro.x - (await lane.boundingBox())!.x)).toBe(0);        // the strip sits on the lane scale
+  await secs.nth(1).click();
+  await expect.poll(() => position(page)).toBe(4);                            // beat 8 at 120 BPM
+  await expect.poll(async () => Math.round((await page.getByTestId("v3-playhead").boundingBox())!.x + 1 - (await lane.boundingBox())!.x)).toBe(320);
+});
+
+test("mute and solo state are visible on the track header, and a muted lane sits back", async ({ page }) => {
+  await bootV3(page);
+  const keys = page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" });
+  const mute = keys.getByRole("button", { name: "Mute" });
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  const before = await mute.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await mute.click();
+  await expect(mute).toHaveAttribute("aria-pressed", "true");
+  await expect(keys).toHaveAttribute("data-mute", "true");
+  await expect.poll(() => mute.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(before);   // the lit state is painted
+  await expect(keys.locator(".lane")).toHaveCSS("opacity", "0.55");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await expect(keys).not.toHaveAttribute("data-mute", "true");
+});
