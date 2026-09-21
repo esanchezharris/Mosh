@@ -28,6 +28,26 @@ TEST_CASE ("owner runtime config accepts an exact local-only model", "[owner-run
     REQUIRE (cfg.validationError().isEmpty());
 }
 
+TEST_CASE ("owner runtime preferredShell accepts every bootable shell, v3 included, and rejects an unknown one", "[owner-runtime]")
+{
+    auto make = [] (const char* shell)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("enabled", true);
+        o->setProperty ("modelPath", "/tmp/a3b-r5-4bit-hd");
+        o->setProperty ("pythonRuntime", "/tmp/python3");
+        o->setProperty ("preferredShell", shell);
+        return OwnerRuntimeConfig::fromVar (juce::var (o));
+    };
+    for (const char* shell : { "live", "protools", "v2", "classic", "v3" })
+    {
+        INFO (shell);
+        REQUIRE (make (shell).preferredShell == shell);
+        REQUIRE (make (shell).validationError().isEmpty());
+    }
+    REQUIRE (make ("v4").validationError() == "owner runtime preferredShell is invalid");
+}
+
 TEST_CASE ("owner runtime config fails closed for remote or missing model paths", "[owner-runtime]")
 {
     auto* remote = new juce::DynamicObject();

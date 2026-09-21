@@ -67,8 +67,11 @@ String OwnerRuntimeConfig::validationError() const
         return "owner runtime modelPath must be an absolute local path";
     if (pythonRuntimeRaw.isEmpty() || ! File::isAbsolutePath (pythonRuntimeRaw))
         return "owner runtime pythonRuntime must be an absolute local path";
+    // The shells the UI can boot (ui/src/v2/shellQuery.ts ShellId). v3 joined on the
+    // parity flip (PR #716): the owner's Finder config pins the boot shell through
+    // App.tsx, so a validator that lagged the UI silently kept the owner on v2.
     if (preferredShell.isNotEmpty() && preferredShell != "live" && preferredShell != "protools"
-        && preferredShell != "v2" && preferredShell != "classic")
+        && preferredShell != "v2" && preferredShell != "classic" && preferredShell != "v3")
         return "owner runtime preferredShell is invalid";
     return {};
 }
