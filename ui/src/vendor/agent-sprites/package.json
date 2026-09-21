@@ -1,0 +1,39 @@
+{
+  "name": "agent-sprites",
+  "version": "0.2.0",
+  "description": "Drop-in splat agent sprites \u2014 clock-free engine, canvas, SVG, React.",
+  "license": "UNLICENSED",
+  "main": "index.cjs",
+  "module": "index.esm.js",
+  "types": "index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "engine.js",
+    "index.cjs",
+    "index.esm.js",
+    "index.mjs",
+    "index.d.ts",
+    "react"
+  ],
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.esm.js",
+      "require": "./index.cjs"
+    },
+    "./react": {
+      "types": "./react/index.d.ts",
+      "import": "./react/index.js",
+      "default": "./react/index.js"
+    },
+    "./engine.js": "./engine.js"
+  },
+  "peerDependencies": {
+    "react": ">=17"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

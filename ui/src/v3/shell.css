@@ -408,8 +408,9 @@
 }
 .v3-shell .moshi-btn.listen .ring { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v3-shell .moshi-btn.busy, .v3-shell .moshi-btn:disabled { opacity: .45; cursor: default; }
+/* The splat sits on a quiet tile so its ink body reads on the dark dock (its paper is transparent). */
 .v3-shell .moshi-host { width: 64px; height: 64px; border-radius: 16px; overflow: hidden; background: var(--surface2); box-shadow: inset 0 0 0 1px var(--fog-line); }
-.v3-shell .moshi-host canvas { display: block; width: 100%; height: 100%; }
+.v3-shell .moshi-host canvas { display: block; width: 64px; height: 64px; }
 .v3-shell .field {
   flex: 1; min-height: 36px; padding: 8px 16px; border-radius: 999px;
   background: rgba(28,31,31,.72); border: 1px solid #3A4040; color: var(--text); font-size: 12px;
