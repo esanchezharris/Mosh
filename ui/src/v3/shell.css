@@ -400,7 +400,7 @@
 .v3-shell .prompt { flex-shrink: 0; display: flex; flex-direction: column; border-top: 1px solid var(--fog-line); background: #121414; }
 .v3-shell .adock { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
 .v3-shell .moshi-btn {
-  position: relative; width: 52px; height: 52px; flex-shrink: 0; border: none;
+  position: relative; width: 64px; height: 64px; flex-shrink: 0; border: none;
   background: transparent; padding: 0; cursor: pointer; border-radius: 14px;
 }
 .v3-shell .moshi-btn .ring {
@@ -408,7 +408,7 @@
 }
 .v3-shell .moshi-btn.listen .ring { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v3-shell .moshi-btn.busy, .v3-shell .moshi-btn:disabled { opacity: .45; cursor: default; }
-.v3-shell .moshi-host { width: 52px; height: 52px; border-radius: 14px; overflow: hidden; background: var(--surface2); }
+.v3-shell .moshi-host { width: 64px; height: 64px; border-radius: 16px; overflow: hidden; background: var(--surface2); box-shadow: inset 0 0 0 1px var(--fog-line); }
 .v3-shell .moshi-host canvas { display: block; width: 100%; height: 100%; }
 .v3-shell .field {
   flex: 1; min-height: 36px; padding: 8px 16px; border-radius: 999px;
