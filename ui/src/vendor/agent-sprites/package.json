@@ -6,7 +6,9 @@
   "main": "index.cjs",
   "module": "index.esm.js",
   "types": "index.d.ts",
-  "sideEffects": false,
+  "sideEffects": [
+    "./engine.js"
+  ],
   "files": [
     "engine.js",
     "index.cjs",
@@ -35,5 +37,6 @@
     "react": {
       "optional": true
     }
-  }
+  },
+  "_mosh": "engine.js is a UMD that attaches AgentSprites to the global; it MUST stay a side effect or Rollup drops it from the production bundle (the empty dock tile of 2026-09-20)."
 }
