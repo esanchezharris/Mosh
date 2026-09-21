@@ -134,7 +134,9 @@
   animation: v3ModalIn .22s var(--ease-menu) both;
 }
 @keyframes v3ModalIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+.v3-shell .modal.glass { color: var(--text); }
 .v3-shell .modal-hd { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }
+.v3-shell .modal-hd b { color: var(--text); font-size: 14px; }
 .v3-shell .icon-x { border: none; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
 .v3-shell .modal-body { padding: 4px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
 .v3-shell .set-sec { display: flex; flex-direction: column; gap: 8px; }
@@ -158,9 +160,10 @@
 .v3-shell .swatch.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 .v3-shell .side-pane {
-  width: 220px; flex-shrink: 0; display: flex; flex-direction: column;
-  background: var(--rail); border-right: 1px solid var(--fog-line); min-height: 0;
+  width: 320px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--rail); border-right: 1px solid var(--fog-line); min-height: 0; overflow: hidden;
 }
+.v3-shell .side-pane > * { min-width: 0; }
 .v3-shell .pane-hd { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; }
 .v3-shell .pane-tabs { display: flex; gap: 6px; }
 .v3-shell .pane-tabs button {
@@ -367,6 +370,15 @@
 .v3-shell .direct-reimagine .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .v3-shell .btn:disabled { opacity: .45; cursor: default; }
 .v3-shell :is(button, input, select, [role="button"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Native <select>s (count-in, output/input routing, buffer) wear the shell instead of the
+   OS's white popup button — the one light element on an otherwise dark surface. */
+.v3-shell select {
+  appearance: none; -webkit-appearance: none; color: var(--text); background-color: var(--surface2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 22px 3px 8px; font: inherit; font-size: 11px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238a9090' stroke-width='1.5'/></svg>");
+  background-repeat: no-repeat; background-position: right 7px center; cursor: pointer;
+}
+.v3-shell select:disabled { opacity: .5; cursor: default; }
 .v3-shell .clip-name { position: absolute; inset: 2px 5px auto; z-index: 1; font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v3-shell .clip .cwave { padding-top: 16px; }
 .v3-shell .fader input[type="range"], .v3-shell .fader select { min-width: 0; width: 100%; }
@@ -378,15 +390,16 @@
 .v3-shell .prompt { flex-shrink: 0; display: flex; flex-direction: column; border-top: 1px solid var(--fog-line); background: #121414; }
 .v3-shell .adock { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
 .v3-shell .moshi-btn {
-  position: relative; width: 36px; height: 36px; flex-shrink: 0; border: none;
-  background: transparent; padding: 0; cursor: pointer; border-radius: 10px;
+  position: relative; width: 52px; height: 52px; flex-shrink: 0; border: none;
+  background: transparent; padding: 0; cursor: pointer; border-radius: 14px;
 }
 .v3-shell .moshi-btn .ring {
-  position: absolute; inset: 0; border-radius: 10px; border: 1.5px solid transparent;
+  position: absolute; inset: 0; border-radius: 14px; border: 1.5px solid transparent; pointer-events: none;
 }
 .v3-shell .moshi-btn.listen .ring { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v3-shell .moshi-btn.busy, .v3-shell .moshi-btn:disabled { opacity: .45; cursor: default; }
-.v3-shell .moshi-host { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; }
+.v3-shell .moshi-host { width: 52px; height: 52px; border-radius: 14px; overflow: hidden; background: var(--surface2); }
+.v3-shell .moshi-host canvas { display: block; width: 100%; height: 100%; }
 .v3-shell .field {
   flex: 1; min-height: 36px; padding: 8px 16px; border-radius: 999px;
   background: rgba(28,31,31,.72); border: 1px solid #3A4040; color: var(--text); font-size: 12px;
@@ -415,9 +428,36 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .v3-shell .prompt.safe { opacity: .45; pointer-events: none; }
+.v3-shell .producer-rack-setup { padding: 6px 12px 0; }
+.v3-shell .producer-rack-setup > summary {
+  font-size: 10px; letter-spacing: .04em; text-transform: none; color: var(--muted); list-style: none;
+}
+.v3-shell .producer-rack-setup > summary::-webkit-details-marker { display: none; }
+.v3-shell .producer-rack-setup > summary::before { content: "›"; display: inline-block; margin-right: 5px; transition: transform .15s; }
+.v3-shell .producer-rack-setup[open] > summary::before { transform: rotate(90deg); }
 .v3-shell .prompt.safe .field { color: var(--muted); }
 .v3-shell .side-pane .v2-pdock { min-height: 0; flex: 1; padding: 0 8px 8px; }
-.v3-shell .side-pane .v2-pdock-title { display: none; }
+.v3-shell .side-pane .v2-pdock-title, .v3-shell .side-pane .v2-pdock-subtitle { display: none; }
+.v3-shell .side-pane .v2-pdock-intro { gap: 6px; }
+.v3-shell .side-pane .v2-pb-row { padding-left: 8px; }
+.v3-shell .side-pane .sb-browser, .v3-shell .side-pane .sb-row { min-width: 0; max-width: 100%; }
+/* The shared Sounds browser wears the shell: its rows are classic `.plugin-row`s (bone
+   cards); here they become quiet dark rows, and its captions read on --rail. */
+.v3-shell .side-pane .sb-title, .v3-shell .side-pane .sb-location-label, .v3-shell .side-pane .sb-search-label, .v3-shell .side-pane .pg-label { color: var(--fog-label); }
+.v3-shell .side-pane .sb-subtitle { color: var(--muted); }
+.v3-shell .side-pane .sb-browser .plugin-row {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--fog-line); border-radius: 7px; box-shadow: none;
+}
+.v3-shell .side-pane .sb-browser .plugin-row:hover { border-color: var(--line); background: var(--surface2); }
+.v3-shell .side-pane .sb-browser .plugin-row .pr-name, .v3-shell .side-pane .sb-row-title { color: var(--text); font-weight: 500; }
+.v3-shell .side-pane .sb-row-meta, .v3-shell .side-pane .sb-row-affordance, .v3-shell .side-pane .sb-section-count { color: var(--muted); }
+.v3-shell .side-pane .sb-row-icon { color: var(--accent); }
+.v3-shell .side-pane .sb-search, .v3-shell .side-pane .sb-browser input[type="search"], .v3-shell .side-pane .sb-browser input[type="text"] {
+  background: rgba(0,0,0,.28); color: var(--text); border: 1px solid var(--fog-line); border-radius: 7px;
+}
+.v3-shell .side-pane .sb-browser .btn { background: var(--surface2); color: var(--text); border: 1px solid var(--fog-line); }
+.v3-shell .side-pane .sb-browser .btn.cb-import { background: color-mix(in srgb, var(--accent) 18%, var(--surface2)); }
+.v3-shell .side-pane .sb-audition, .v3-shell .side-pane .sb-audition-label { color: var(--text); }
 .v3-shell .bigwave { min-height: 180px; }
 
 .v3-shell .booth-stage { display: flex; flex: 1; min-height: 0; }
