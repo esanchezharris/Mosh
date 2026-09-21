@@ -95,3 +95,18 @@ test("Ask Moshi field is a dock, not a chat thread", async ({ page }) => {
   await expect(page.getByTestId("agent-drawer")).toHaveCount(0);
   await expect(page.locator(".agent-composer")).toHaveCount(0);
 });
+
+test("the dock's Moshi is the splat: a live canvas with painted pixels, not a placeholder", async ({ page }) => {
+  await bootV3Page(page);
+  const host = page.getByTestId("v3-moshi-face");
+  await expect(host).toHaveAttribute("data-live", "true");
+  await expect(host.locator("canvas")).toHaveAttribute("data-state", "idle");
+  // Anti-vacuity: count opaque pixels in the canvas — a blank canvas would read 0, the
+  // old two-dot SVG had no canvas at all.
+  await expect.poll(() => host.locator("canvas").evaluate((c) => {
+    const el = c as HTMLCanvasElement; const ctx = el.getContext("2d"); if (!ctx) return -1;
+    const d = ctx.getImageData(0, 0, el.width, el.height).data; let n = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++;
+    return n;
+  })).toBeGreaterThan(400);
+});
