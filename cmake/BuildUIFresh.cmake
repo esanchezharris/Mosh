@@ -62,10 +62,20 @@ if (MODE STREQUAL "build")
         file(READ "${buildModeStamp}" previousBuildModeFlags)
         string(STRIP "${previousBuildModeFlags}" previousBuildModeFlags)
     endif()
+    # Vendored engines are plain .js (ui/src/vendor/*.js) and a vendored package.json can
+    # change how Rollup tree-shakes them (its sideEffects field): both must count as source,
+    # or a stale ui/dist ships — the empty V3 dock tile of 2026-09-20 was exactly that.
     file(GLOB_RECURSE uiSources
          "${MOSH_UI_DIR}/src/*.ts"
          "${MOSH_UI_DIR}/src/*.tsx"
-         "${MOSH_UI_DIR}/src/*.css")
+         "${MOSH_UI_DIR}/src/*.css"
+         "${MOSH_UI_DIR}/src/*.js"
+         "${MOSH_UI_DIR}/src/*.mjs"
+         "${MOSH_UI_DIR}/src/*.jsx"
+         "${MOSH_UI_DIR}/src/*.json"
+         "${MOSH_UI_DIR}/index.html"
+         "${MOSH_UI_DIR}/vite.config.ts"
+         "${MOSH_UI_DIR}/package.json")
     newest_mtime (srcMt ${uiSources}
                   "${MOSH_UI_DIR}/package.json"
                   "${MOSH_UI_DIR}/package-lock.json"
