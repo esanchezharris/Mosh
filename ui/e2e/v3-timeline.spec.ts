@@ -183,3 +183,27 @@ test("one grid: lane marks, ruler ticks and the playhead share pixel columns; it
   await expect(page.locator('[data-testid="v3-ruler"] .rn.bar').nth(1)).toHaveText("3");
   expect(await x(tick(8))).toBeCloseTo(await x(mark(8)), 1);
 });
+
+test("one hairline separates adjacent tracks, centred in the gap between rows", async ({ page }) => {
+  await bootV3(page);
+  const rows = page.locator('[data-testid="v3-track"]');
+  const sep = (i: number) => rows.nth(i).evaluate((el) => {
+    const cs = getComputedStyle(el, "::before");
+    return { content: cs.content, height: cs.height, top: cs.top };
+  });
+  expect((await sep(0)).content).toBe("none");                   // nothing above the first track
+  const s1 = await sep(1);
+  expect(s1.content).not.toBe("none");
+  expect(s1.height).toBe("1px");
+  // Centred in the 5 px gap: the line sits between the previous row's bottom and this row's top.
+  const [a, b] = [(await rows.nth(0).boundingBox())!, (await rows.nth(1).boundingBox())!];
+  const lineY = b.y + parseFloat(s1.top);
+  expect(lineY).toBeGreaterThan(a.y + a.height);
+  expect(lineY + 1).toBeLessThanOrEqual(b.y);
+  // Nothing else in the gap: every lane is exactly its row's height (a global `.lane` height rule
+  // once made lanes 4 px taller, so their grid marks poked out under the sticky headers).
+  for (let i = 0; i < 3; i++) {
+    const [row, lane] = [(await rows.nth(i).boundingBox())!, (await rows.nth(i).locator(".lane").boundingBox())!];
+    expect(lane.height).toBe(row.height);
+  }
+});

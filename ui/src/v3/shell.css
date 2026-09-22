@@ -280,7 +280,9 @@
 }
 .v3-shell .trk.sel .hd b { color: var(--accent); font-weight: 600; }
 .v3-shell .trk .lane {
-  flex: none; position: relative; border-radius: 6px; background: var(--lane);
+  /* height: auto — the classic shell's global `.lane { height: var(--lane-h) }` (ui/mosh.css) leaked
+     in and made lanes 4 px taller than their row, so grid marks peeked into the row gap. */
+  flex: none; position: relative; height: auto; border-radius: 6px; background: var(--lane);
   /* The border stays for geometry (LANE_LEFT_PX counts it) but draws nothing: a visible lane edge
      6 px from the clip's own border read as a double line, and in lime on the selected track. */
   border: 1px solid transparent; overflow: hidden; box-sizing: border-box;
@@ -681,3 +683,9 @@
 .v3-shell input[type="range"].rng::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
 .v3-shell input[type="range"].rng::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
 .v3-shell input[type="range"].rng::-moz-range-thumb { width: 10px; height: 4px; border: 0; border-radius: 2px; background: var(--accent); }
+/* One hairline between adjacent tracks, centred in the 5 px row gap and spanning the whole row. */
+.v3-shell .rows > .trk { position: relative; }
+.v3-shell .rows > .trk + .trk::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 1px;
+  background: var(--grid-bar); pointer-events: none;
+}
