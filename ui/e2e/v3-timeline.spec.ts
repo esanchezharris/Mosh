@@ -80,7 +80,7 @@ test("the playhead line follows the transport on the shared zoom, and the ruler 
   const playhead = page.getByTestId("v3-playhead");
   const marker = page.getByTestId("v3-ruler-marker");
   const lane = page.locator('[data-testid="v3-track"]').first().locator(".lane");
-  const laneX = (await lane.boundingBox())!.x;
+  const laneX = (await lane.boundingBox())!.x + 1;                       // lane CONTENT starts inside its 1 px border (where clips and grid marks are)
   // The line is 2 px wide, centred on the position (margin-left −1): x + 1 is the position.
   const headPx = async () => Math.round((await playhead.boundingBox())!.x + 1 - laneX);
   expect(await headPx()).toBe(0);                                             // parked at 0
@@ -108,7 +108,7 @@ test("the playhead line follows the transport on the shared zoom, and the ruler 
   });
   await expect(ruler).toHaveAttribute("data-beat-labels", "0");
   await expect(ruler.locator(".rn.bar").first()).toHaveText("1");
-  await expect(ruler.locator(".rn.beat").first()).toHaveText("");
+  await expect(ruler.locator(".rn.beat")).toHaveCount(0);
 });
 
 test("sections render over the ruler from the snapshot and a click jumps the transport there", async ({ page }) => {
@@ -123,10 +123,10 @@ test("sections render over the ruler from the snapshot and a click jumps the tra
   expect(Math.round(verse.width)).toBe(640);                                  // 16 beats
   expect(Math.round(verse.x - intro.x)).toBe(320);                            // Verse starts where Intro ends
   const lane = page.locator('[data-testid="v3-track"]').first().locator(".lane");
-  expect(Math.round(intro.x - (await lane.boundingBox())!.x)).toBe(0);        // the strip sits on the lane scale
+  expect(Math.round(intro.x - ((await lane.boundingBox())!.x + 1))).toBe(0);  // the strip sits on the lane scale (content origin, inside the border)
   await secs.nth(1).click();
   await expect.poll(() => position(page)).toBe(4);                            // beat 8 at 120 BPM
-  await expect.poll(async () => Math.round((await page.getByTestId("v3-playhead").boundingBox())!.x + 1 - (await lane.boundingBox())!.x)).toBe(320);
+  await expect.poll(async () => Math.round((await page.getByTestId("v3-playhead").boundingBox())!.x + 1 - ((await lane.boundingBox())!.x + 1))).toBe(320);
 });
 
 test("mute and solo state are visible on the track header, and a muted lane sits back", async ({ page }) => {
@@ -145,29 +145,31 @@ test("mute and solo state are visible on the track header, and a muted lane sits
   await expect(keys).not.toHaveAttribute("data-mute", "true");
 });
 
-test("the ruler, the lane grid and a clip's own grid share one beat scale at every zoom", async ({ page }) => {
+test("one grid: lane marks, ruler ticks and the playhead share pixel columns; clips draw no grid", async ({ page }) => {
   await bootV3(page);
   const lane = page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" }).locator(".lane");
-  const cells = lane.locator('[data-testid="v3-lane-grid"] i');
+  const mark = (beat: number) => lane.locator(`[data-testid="v3-lane-grid"] i[data-beat="${beat}"]`);
+  const tick = (beat: number) => page.locator(`[data-testid="v3-ruler"] .tick[data-beat="${beat}"]`);
+  const x = async (l: ReturnType<typeof mark>) => (await l.boundingBox())!.x;
   const clip = chords(page);
-  const laneX = (await lane.boundingBox())!.x + 1;                       // the lane's 1 px border
-  // 120 BPM at 80 px/s: a beat is 40 px. Cell 4 starts 160 px in; so does the 2 s clip.
-  expect(Math.round((await cells.nth(4).boundingBox())!.x - laneX)).toBe(160);
-  expect(Math.round((await cells.nth(4).boundingBox())!.width)).toBe(40);
-  expect(Math.round((await clip.boundingBox())!.x - laneX)).toBe(160);
-  // The clip's canvas spans its border box, so its beat lines land on the lane's pixels.
-  const svg = clip.locator("svg");
-  expect(Math.round((await svg.boundingBox())!.x - (await clip.boundingBox())!.x)).toBe(0);
-  expect(Math.round((await svg.boundingBox())!.width - (await clip.boundingBox())!.width)).toBe(0);
-  // 6 s = 12 beats from beat 4: 13 beat lines, bars at beats 4 · 8 · 12 · 16 (the session's bars).
-  await expect(svg.locator('line[stroke="#3A4040"], line[stroke="#7A8282"]')).toHaveCount(13);
-  await expect(svg.locator('line[stroke="#7A8282"]')).toHaveCount(4);
-  const ruler = page.getByTestId("v3-ruler");
-  expect(Math.round((await ruler.locator(".rn").nth(4).boundingBox())!.width)).toBe(40);
-  // Zoomed out to 20 px/s a beat is 10 px — the grid keeps beat-sized cells instead of
-  // stretching the session's 32 cells across the viewport (that read as ~34 px cells).
+  // 120 BPM at 80 px/s: a beat is 40 px. The 2 s clip starts exactly on beat 4's mark.
+  expect(await x(mark(4)) - await x(mark(0))).toBeCloseTo(160, 1);
+  expect(await x(clip)).toBeCloseTo(await x(mark(4)), 1);
+  expect(await x(tick(4))).toBeCloseTo(await x(mark(4)), 1);               // the ruler lines up with the lanes
+  expect(await x(tick(0))).toBeCloseTo(await x(mark(0)), 1);
+  await seek(page, 2);                                                      // the playhead sits on beat 4 too
+  await expect.poll(async () => { const b = (await page.getByTestId("v3-playhead").boundingBox())!; return Math.abs(b.x + b.width / 2 - (await x(mark(4)) + 0.5)); }).toBeLessThan(0.6);
+  // Clips are content only: no grid lines inside any clip.
+  await expect(page.locator('[data-testid="v3-clip"] line')).toHaveCount(0);
+  // Beat marks at 40 px, bar marks every bar; marks are 1 px and on device pixels.
+  await expect(lane.locator('[data-testid="v3-lane-grid"] i.beat').first()).toBeAttached();
+  expect((await mark(4).boundingBox())!.width).toBe(1);
+  // Zoomed out to 20 px/s a beat is 10 px: beat marks and beat labels go, bars thin to every 2nd (40 px bars).
   await page.evaluate(() => (window as unknown as TransportWindow).__moshStore!.getState().setPxPerSec(20));
-  await expect.poll(async () => Math.round((await cells.nth(4).boundingBox())!.width)).toBe(10);
-  expect(Math.round((await ruler.locator(".rn").nth(4).boundingBox())!.width)).toBe(10);
-  expect(await cells.count()).toBeGreaterThan(32);
+  await expect(lane.locator('[data-testid="v3-lane-grid"] i.beat')).toHaveCount(0);
+  await expect(page.getByTestId("v3-ruler")).toHaveAttribute("data-beat-labels", "0");
+  await expect(mark(4)).toHaveCount(0);                                     // bar 2 is skipped…
+  await expect(mark(8)).toHaveCount(1);                                     // …bar 3 is kept
+  await expect(page.locator('[data-testid="v3-ruler"] .rn.bar').nth(1)).toHaveText("3");
+  expect(await x(tick(8))).toBeCloseTo(await x(mark(8)), 1);
 });

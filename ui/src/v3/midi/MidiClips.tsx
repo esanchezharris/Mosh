@@ -1,16 +1,8 @@
 import type { MidiNote } from "../../types";
 import { V3_DRUM_LANES, v3DrumLane } from "./drums";
-import { clipGridLines } from "../timeline";
 
-/** The clip's grid at the session's beats (bars flagged by the ruler's bars, not the clip's start). */
-function Grid({ startBeat, beats, w, h }: { startBeat: number; beats: number; w: number; h: number }) {
-  return <>{clipGridLines(startBeat, beats).map((g, k) => (
-    <line key={k} x1={g.x * w} y1={0} x2={g.x * w} y2={h}
-      stroke={g.bar ? "#7A8282" : "#3A4040"} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-  ))}</>;
-}
-
-export function DrumsClip({ notes, beats = 32, startBeat = 0 }: { notes?: MidiNote[]; beats?: number; startBeat?: number }) {
+// Content only: the lane grid is the arrangement's one grid, so clips draw notes/hits and no lines.
+export function DrumsClip({ notes, beats = 32 }: { notes?: MidiNote[]; beats?: number }) {
   const w = 640;
   const h = 48;
   const cell = w / beats;
@@ -22,7 +14,6 @@ export function DrumsClip({ notes, beats = 32, startBeat = 0 }: { notes?: MidiNo
   return (
     <div className="cwave midi" data-testid="v3-drums-midi">
       <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-        <Grid startBeat={startBeat} beats={beats} w={w} h={h} />
         {rows.map((row) => row.hits.map((n) => {
           const x = n.start * cell + 0.6;
           const nw = Math.max(2, n.length * cell - 1.2);
@@ -38,7 +29,7 @@ export function DrumsClip({ notes, beats = 32, startBeat = 0 }: { notes?: MidiNo
   );
 }
 
-export function MelodyClip({ notes, beats = 32, startBeat = 0 }: { notes?: MidiNote[]; beats?: number; startBeat?: number }) {
+export function MelodyClip({ notes, beats = 32 }: { notes?: MidiNote[]; beats?: number }) {
   const w = 640;
   const h = 48;
   const cell = w / beats;
@@ -54,7 +45,6 @@ export function MelodyClip({ notes, beats = 32, startBeat = 0 }: { notes?: MidiN
   return (
     <div className="cwave midi" data-testid="v3-melody-midi">
       <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-        <Grid startBeat={startBeat} beats={beats} w={w} h={h} />
         {ns.map((n) => {
           const y = h - ((n.pitch - lo + 1) / span) * h;
           return (

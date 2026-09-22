@@ -94,7 +94,6 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
               peaks={shownClipId ? peaks[shownClipId] : undefined}
               selected
               live={recording}
-              beats={32}
               className="cwave bigwave"
             />
           </div>

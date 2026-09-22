@@ -31,8 +31,9 @@ export function clipBox(box: TimeBox, pxPerSec: number): { left: number; width: 
 // ── playhead / sections / ruler (2026-09-21) ────────────────────────────────────────────
 // All on the same pxPerSec scale as the clips, so the three never disagree at any zoom.
 
-/** Where lane content starts inside the `.rows` stack: the 148 px sticky header + its 6 px gap. */
-export const LANE_LEFT_PX = 148 + 6;
+/** Where lane CONTENT starts inside the `.rows` stack: the 148 px sticky header, its 6 px gap, and
+ *  the lane's 1 px border (clips and grid marks are positioned inside that border). */
+export const LANE_LEFT_PX = 148 + 6 + 1;
 
 /** The playhead's x inside the `.rows` stack for a transport position (seconds). */
 export function playheadLeftPx(positionSec: number, pxPerSec: number): number {
@@ -55,10 +56,7 @@ export function sectionBox(section: BeatSpan, tempo: number | undefined, pxPerSe
   };
 }
 
-/** The ".2 .3 .4" beat labels need ~18 px per beat to read; below that the ruler shows bar numbers only. */
-export function beatLabelsVisible(pxPerBeat: number): boolean {
-  return pxPerBeat >= 18;
-}
+
 
 /** A ruler click at lane-relative `x` → session seconds at this zoom (clamped at the start). */
 export function secondsAtLaneX(x: number, pxPerSec: number): number {
@@ -88,19 +86,31 @@ export function clipBeats(box: TimeBox, tempo: number | undefined): { startBeat:
   return { startBeat: box.start * beatsPerSec, lengthBeats: box.length * beatsPerSec };
 }
 
-export type GridLine = { x: number; bar: boolean };
+// ── the grid (2026-09-22) ───────────────────────────────────────────────────────────────
+// ONE set of marks, computed here and drawn by the lane grid and the ruler alike, each snapped
+// to a device pixel so every row and the ruler land on the same physical column. Clips draw
+// no grid of their own (owner decision: content only, as in Logic / Ableton).
 
-/** The absolute beat lines that fall inside a clip, as fractions of its width (0..1), bar
- *  lines flagged by the SESSION's bars — so a clip that starts mid-bar still draws the bars
- *  where the ruler has them. */
-export function clipGridLines(startBeat: number, lengthBeats: number): GridLine[] {
-  const out: GridLine[] = [];
-  if (!(lengthBeats > 0) || !Number.isFinite(startBeat)) return out;
-  const eps = 1e-6;
-  for (let b = Math.ceil(startBeat - eps); b <= startBeat + lengthBeats + eps; b++) {
-    const x = (b - startBeat) / lengthBeats;
-    if (x < -eps || x > 1 + eps) continue;
-    out.push({ x: Math.min(1, Math.max(0, x)), bar: ((b % 4) + 4) % 4 === 0 });
+/** What the grid shows at this zoom: beat marks (and their ".2 .3 .4" labels) only when a beat
+ *  is at least 20 px, and bars thinned to every 2nd or 4th when a bar gets narrower than 48 px. */
+export function gridDensity(beatPx: number): { beats: boolean; barStep: 1 | 2 | 4 } {
+  const barPx = beatPx * 4;
+  return { beats: beatPx >= 20, barStep: barPx >= 48 ? 1 : barPx * 2 >= 48 ? 2 : 4 };
+}
+
+export type GridMark = { beat: number; x: number; bar: boolean; barNo: number };
+
+/** The visible marks across `beats` beats, x in lane px snapped to 1/dpr. */
+export function gridMarks(beats: number, beatPx: number, dpr = 1): GridMark[] {
+  const out: GridMark[] = [];
+  if (!(beatPx > 0) || !(beats > 0)) return out;
+  const d = gridDensity(beatPx);
+  const px = Math.max(1, dpr);
+  for (let k = 0; k < beats; k++) {
+    const bar = k % 4 === 0;
+    const barNo = Math.floor(k / 4) + 1;
+    if (bar ? (barNo - 1) % d.barStep !== 0 : !d.beats) continue;
+    out.push({ beat: k, x: Math.round(k * beatPx * px) / px, bar, barNo });
   }
   return out;
 }

@@ -7,6 +7,9 @@
   --line: #3A4040;
   --fog-line: #2A2E2E;
   --grid: #3A4040;
+  /* The arrangement grid: quiet enough to read through, bars about twice the beats. */
+  --grid-bar: color-mix(in srgb, var(--text) 11%, transparent);
+  --grid-beat: color-mix(in srgb, var(--text) 5%, transparent);
   --accent: #C6F542;
   --agentic: #8FE0C0;
   --record: #E0342C;

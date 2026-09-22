@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { pickFiles, pickSaveFile } from "../bridge";
 import { runAction } from "../menuActions";
 import { useStore } from "../store";
@@ -10,7 +10,7 @@ import { liveFeel, liveGestureTable } from "../interaction/config";
 import { passedDragThreshold } from "../interaction/feel";
 import { EditorAction as EA, type Mods } from "../interaction/actions";
 import { pushEscapeHandler } from "../hooks/escapeStack";
-import { beatLabelsVisible, beatPx, clipBeats, clipBox, gridBeatCount, laneContentPx, secondsAtLaneX } from "./timeline";
+import { beatPx, clipBeats, clipBox, gridBeatCount, gridDensity, gridMarks, laneContentPx, secondsAtLaneX, type GridMark } from "./timeline";
 import { Playhead, RulerMarker } from "./Playhead";
 import { SectionStrip } from "./SectionStrip";
 import { lockOwnerOfTrack } from "../multiplayer/sync";
@@ -27,37 +27,38 @@ const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).
 const MIN_LEN = 0.05;
 type DragKind = "move" | "trim-l" | "trim-r";
 
-function Ruler({ beats, widthPx, pxPerSec, beatWidth, startBar = 1 }: { beats: number; widthPx: number; pxPerSec: number; beatWidth: number; startBar?: number }) {
+function Ruler({ marks, widthPx, pxPerSec, beatLabels }: { marks: GridMark[]; widthPx: number; pxPerSec: number; beatLabels: boolean }) {
   const exec = useStore((s) => s.exec);
   const snapTime = useStore((s) => s.snapTime);
-  // Zoomed out, the ".2 .3 .4" labels would pile up: keep the cells (the grid) and drop the text.
-  const labels = beatLabelsVisible(beatWidth);
-  const cells: ReactNode[] = [];
-  for (let i = 0; i < beats; i++) {
-    const beat = (i % 4) + 1;
-    if (beat === 1) cells.push(<span key={i} className="rn bar">{startBar + Math.floor(i / 4)}</span>);
-    else cells.push(<span key={i} className="rn beat">{labels ? `.${beat}` : ""}</span>);
-  }
   // Click-to-seek, as v2's lane ruler: the pointer's x on the lane scale, snapped to the grid.
   const seek = (e: React.MouseEvent<HTMLDivElement>) => {
     const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
     void exec("set_transport", { position: snapTime(secondsAtLaneX(x, pxPerSec)) });
   };
+  // The ruler draws the SAME marks as the lanes (gridMarks): a tick at each one on the bottom
+  // edge, the bar number / beat label just right of it. Zoomed out the marks thin themselves.
   return (
-    <div className="ruler" style={{ ["--beats" as string]: String(beats), ["--beat-px" as string]: `${beatWidth}px`, width: widthPx }} data-testid="v3-ruler"
-      data-beat-labels={labels ? "1" : "0"} title="Click to move the playhead" onClick={seek}>{cells}</div>
-  );
-}
-
-function LaneGrid({ beats, beatWidth }: { beats: number; beatWidth: number }) {
-  return (
-    <div className="lane-grid" style={{ ["--cells" as string]: String(beats), ["--beat-px" as string]: `${beatWidth}px` }} aria-hidden="true" data-testid="v3-lane-grid">
-      {Array.from({ length: beats }, (_, i) => <i key={i} />)}
+    <div className="ruler" style={{ width: widthPx }} data-testid="v3-ruler"
+      data-beat-labels={beatLabels ? "1" : "0"} title="Click to move the playhead" onClick={seek}>
+      {marks.map((m) => (
+        <span key={m.beat} className="rmark" style={{ left: m.x }}>
+          <i className={`tick${m.bar ? " bar" : ""}`} data-beat={m.beat} />
+          <span className={`rn ${m.bar ? "bar" : "beat"}`}>{m.bar ? m.barNo : `.${(m.beat % 4) + 1}`}</span>
+        </span>
+      ))}
     </div>
   );
 }
 
-function TrackRow({ track, snapshot, beats, lanePx, pxPerSec, beatWidth }: { track: Track; snapshot: Snapshot; beats: number; lanePx: number; pxPerSec: number; beatWidth: number }) {
+function LaneGrid({ marks }: { marks: GridMark[] }) {
+  return (
+    <div className="lane-grid" aria-hidden="true" data-testid="v3-lane-grid">
+      {marks.map((m) => <i key={m.beat} className={m.bar ? "bar" : "beat"} data-beat={m.beat} style={{ left: m.x }} />)}
+    </div>
+  );
+}
+
+function TrackRow({ track, snapshot, marks, lanePx, pxPerSec }: { track: Track; snapshot: Snapshot; marks: GridMark[]; lanePx: number; pxPerSec: number }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const recording = useStore((s) => s.transport.recording);
@@ -103,7 +104,7 @@ function TrackRow({ track, snapshot, beats, lanePx, pxPerSec, beatWidth }: { tra
         useStore.getState().setSelectedTrack(track.id);
         useStore.getState().clearSelection();
       }}>
-        <LaneGrid beats={beats} beatWidth={beatWidth} />
+        <LaneGrid marks={marks} />
         {clips.map((clip) => (
           <ClipBody key={clip.id} clip={clip} pxPerSec={pxPerSec} tempo={tempo}
             selected={selection.has(clip.id)}
@@ -146,8 +147,8 @@ function ClipBody({
   const escDispose = useRef<(() => void) | null>(null);
   const shown = preview ?? { start: clip.start, length: clip.length, offset: clip.offset };
   const { left, width } = clipBox(shown, pxPerSec);
-  // The clip's grid follows the drag preview too, so its lines stay on the session's beats.
-  const { startBeat, lengthBeats } = clipBeats(shown, tempo);
+  // Notes are laid out on the clip's exact beat length (it follows the drag preview too).
+  const { lengthBeats } = clipBeats(shown, tempo);
   const midi = clip.type === "midi";
   const drums = midi && isDrumClip(clip.notes);
   const edit = () => { onSelect(); if (midi && editable) useStore.getState().openPianoRoll(clip.id); };
@@ -218,9 +219,9 @@ function ClipBody({
       onClick={(e) => { e.stopPropagation(); }}
       onContextMenu={(e) => { e.preventDefault(); onSelect(); onContext(e.clientX, e.clientY, snapTime(timeAt(e))); }}>
       <span className="clip-name" title={clip.name}>{clip.name}</span>
-      {drums ? <DrumsClip notes={clip.notes} beats={lengthBeats} startBeat={startBeat} />
-        : midi ? <MelodyClip notes={clip.notes} beats={lengthBeats} startBeat={startBeat} />
-        : <SilhouetteWave peaks={peaks} selected={selected} live={live} beats={lengthBeats} startBeat={startBeat} />}
+      {drums ? <DrumsClip notes={clip.notes} beats={lengthBeats} />
+        : midi ? <MelodyClip notes={clip.notes} beats={lengthBeats} />
+        : <SilhouetteWave peaks={peaks} selected={selected} live={live} />}
     </div>
   );
 }
@@ -250,7 +251,10 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     return () => ro.disconnect();
   }, []);
   const lanePx = laneContentPx(snapshot.session, pxPerSec, viewportPx);
-  const beats = gridBeatCount(snapshot.session, pxPerSec, lanePx);   // cells across the lane, on the beat scale
+  const beats = gridBeatCount(snapshot.session, pxPerSec, lanePx);   // beats across the lane
+  // One set of grid marks for every lane and the ruler, snapped to this display's pixels.
+  const marks = gridMarks(beats, beatWidth, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
+  const beatLabels = gridDensity(beatWidth).beats;
   const onScroll = () => {
     if (rulerRef.current && scrollerRef.current) rulerRef.current.style.transform = `translateX(${-scrollerRef.current.scrollLeft}px)`;
   };
@@ -269,7 +273,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <div className="ruler-clip">
           <div className="ruler-scroll" ref={rulerRef} style={{ width: lanePx }}>
             <SectionStrip sections={snapshot.sections} tempo={snapshot.session.tempo} pxPerSec={pxPerSec} />
-            <Ruler beats={beats} widthPx={lanePx} pxPerSec={pxPerSec} beatWidth={beatWidth} startBar={1} />
+            <Ruler marks={marks} widthPx={lanePx} pxPerSec={pxPerSec} beatLabels={beatLabels} />
             {tracks.length > 0 && <RulerMarker />}
           </div>
         </div>
@@ -277,7 +281,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
       <div className="tracks" ref={scrollerRef} onScroll={onScroll}>
         {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat, or import audio from the browser.</p></div>}
         <div className="rows">
-          {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} beats={beats} lanePx={lanePx} pxPerSec={pxPerSec} beatWidth={beatWidth} />)}
+          {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} marks={marks} lanePx={lanePx} pxPerSec={pxPerSec} />)}
           {tracks.length > 0 && <Playhead />}
         </div>
       </div>
