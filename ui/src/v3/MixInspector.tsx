@@ -3,6 +3,7 @@ import { ReImagineSection } from "./ReImagineSection";
 import { midiInputOptions, trackOutputOptions, currentTrackOutput, trackOutputPatch, waveInputOptions, currentTrackInput } from "../settings/routing";
 import type { Plugin, Snapshot } from "../types";
 import { PresetPicker } from "../ui/PresetPicker";
+import { Range } from "./Range";
 import { useV3 } from "./shellState";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
@@ -12,7 +13,7 @@ function Fader({ label, value, min, max, step, display, onChange }: {
   return (
     <label className="fader">
       <span className="nm">{label}</span>
-      <input type="range" min={min} max={max} step={step} value={value}
+      <Range min={min} max={max} step={step} value={value}
         aria-label={label} onChange={(e) => onChange(Number(e.target.value))} />
       <span className="v" data-testid={`v3-fader-${label.toLowerCase()}`}>{display}</span>
     </label>
@@ -36,7 +37,7 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
       {native && plugin.params.slice(0, 4).map((p) => (
         <label className="fader" key={p.index}>
           <span className="nm">{p.name}</span>
-          <input type="range" min={0} max={1} step={0.01} value={p.value}
+          <Range min={0} max={1} step={0.01} value={p.value} aria-label={p.name}
             onChange={(e) => void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
           <span className="v">{p.value.toFixed(2)}</span>
         </label>
@@ -121,7 +122,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
                   <span className="nm">{b.name}</span>
                   {send ? (
                     <>
-                      <input type="range" min={-60} max={6} step={0.5} value={send.db}
+                      <Range min={-60} max={6} step={0.5} value={send.db}
                         aria-label={`${b.name} send`}
                         onChange={(e) => void exec("set_send_level", { trackId: track.id, bus: b.bus, db: Number(e.target.value) })} />
                       <span className="v">{send.db.toFixed(0)}</span>

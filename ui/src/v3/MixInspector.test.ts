@@ -49,6 +49,17 @@ describe("v3 Mix inspector", () => {
     host.remove();
   });
 
+  it("draws its sliders as the knob-less V3 range (.rng with the fill published as --pct)", () => {
+    act(() => root.render(React.createElement(MixInspector, { snapshot: snapshot() })));
+    const vol = host.querySelector<HTMLInputElement>('input[aria-label="Vol"]')!;
+    expect(vol.type).toBe("range");
+    expect(vol.classList.contains("rng")).toBe(true);
+    expect(vol.style.getPropertyValue("--pct")).toBe("90.91%");      // 0 dB inside −60..6
+    const pan = host.querySelector<HTMLInputElement>('input[aria-label="Pan"]')!;
+    expect(pan.style.getPropertyValue("--pct")).toBe("50.00%");      // centre
+    expect(host.querySelectorAll('input[type="range"]:not(.rng)')).toHaveLength(0);
+  });
+
   it("is Mix-only stacked sections with no FX/Lyrics tabs", () => {
     act(() => root.render(React.createElement(MixInspector, { snapshot: snapshot() })));
     expect(host.querySelector('[data-testid="v3-inspector"]')).not.toBeNull();

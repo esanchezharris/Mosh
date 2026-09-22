@@ -656,3 +656,24 @@
 /* Every slider in the shell follows the colorway. The Sends rows (and any future range input)
    used to fall back to the browser's default blue because only .fader inputs set this. */
 .v3-shell input[type="range"] { accent-color: var(--accent); }
+/* The V3 slider (.rng, ui/src/v3/Range.tsx): no knob — the value is a line that ends in a
+   rounded cap. The input publishes --pct; the track paints the fill up to it and the thumb,
+   sized to the line, is the cap (so the drag target stays where the line ends). */
+.v3-shell input[type="range"].rng {
+  -webkit-appearance: none; appearance: none; height: 16px; margin: 0; padding: 0;
+  background: transparent; cursor: pointer;
+}
+.v3-shell input[type="range"].rng:focus-visible { outline: none; }
+.v3-shell input[type="range"].rng::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) 0, var(--accent) var(--pct, 0%), var(--line) var(--pct, 0%), var(--line) 100%);
+}
+.v3-shell input[type="range"].rng::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 10px; height: 4px; border: 0; border-radius: 2px;
+  background: var(--accent); margin-top: 0;
+}
+.v3-shell input[type="range"].rng:hover::-webkit-slider-runnable-track,
+.v3-shell input[type="range"].rng:focus-visible::-webkit-slider-runnable-track { filter: brightness(1.12); }
+.v3-shell input[type="range"].rng::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
+.v3-shell input[type="range"].rng::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+.v3-shell input[type="range"].rng::-moz-range-thumb { width: 10px; height: 4px; border: 0; border-radius: 2px; background: var(--accent); }
