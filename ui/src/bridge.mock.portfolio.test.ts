@@ -15,7 +15,7 @@ describe("portfolio seed — the Song A session", () => {
     const { mockSnapshot } = await import("./bridge.mock");
     const base = await mockSnapshot<Snapshot>();
     const s = portfolioSeed(base);
-    expect(rows(s).map((t) => t.name)).toEqual(["Beat", "Drums", "808", "Lead", "Double", "Backgrounds", "Ref"]);
+    expect(rows(s).map((t) => t.name)).toEqual(["Gtr A", "Drums", "808", "Lead", "Double", "Backgrounds", "Ref"]);
     expect(s.buses?.map((b) => b.name)).toEqual(["Reverb", "Delay"]);
     for (const b of s.buses!) expect(s.tracks.find((t) => t.id === b.trackId)?.returnBus).toBe(b.bus);
     const lead = rows(s)[3];
