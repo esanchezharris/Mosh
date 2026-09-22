@@ -55,12 +55,52 @@ export function sectionBox(section: BeatSpan, tempo: number | undefined, pxPerSe
   };
 }
 
-/** The ".2 .3 .4" beat labels need ~18 px per cell to read; below that the ruler shows bar numbers only. */
-export function beatLabelsVisible(laneWidthPx: number, beats: number): boolean {
-  return beats > 0 && laneWidthPx / beats >= 18;
+/** The ".2 .3 .4" beat labels need ~18 px per beat to read; below that the ruler shows bar numbers only. */
+export function beatLabelsVisible(pxPerBeat: number): boolean {
+  return pxPerBeat >= 18;
 }
 
 /** A ruler click at lane-relative `x` → session seconds at this zoom (clamped at the start). */
 export function secondsAtLaneX(x: number, pxPerSec: number): number {
   return Math.max(0, x / pxPerSec);
+}
+
+// ── one beat scale for the ruler, the lane grid and every clip grid (2026-09-22) ─────────
+// The ruler and the lane grid used to divide their own element widths into equal cells (each
+// width off by a border or a ceil), and a clip stretched a rounded beat count over its inner
+// box. Three slightly different scales — lines drifted a few pixels along a long clip. Now
+// everything is placed at beatPx multiples from the lane's origin.
+
+/** Pixels per beat at this tempo and zoom. */
+export function beatPx(tempo: number | undefined, pxPerSec: number): number {
+  return (60 / (tempo ?? 120)) * pxPerSec;
+}
+
+/** Grid cells across the lane: the whole session, and enough to fill a lane wider than it. */
+export function gridBeatCount(session: Snapshot["session"], pxPerSec: number, lanePx: number): number {
+  const bp = beatPx(session.tempo, pxPerSec);
+  return Math.max(sessionBeatCount(session), bp > 0 ? Math.ceil(lanePx / bp) : 0);
+}
+
+/** A clip's span in beats (exact, not rounded) at the session tempo. */
+export function clipBeats(box: TimeBox, tempo: number | undefined): { startBeat: number; lengthBeats: number } {
+  const beatsPerSec = (tempo ?? 120) / 60;
+  return { startBeat: box.start * beatsPerSec, lengthBeats: box.length * beatsPerSec };
+}
+
+export type GridLine = { x: number; bar: boolean };
+
+/** The absolute beat lines that fall inside a clip, as fractions of its width (0..1), bar
+ *  lines flagged by the SESSION's bars — so a clip that starts mid-bar still draws the bars
+ *  where the ruler has them. */
+export function clipGridLines(startBeat: number, lengthBeats: number): GridLine[] {
+  const out: GridLine[] = [];
+  if (!(lengthBeats > 0) || !Number.isFinite(startBeat)) return out;
+  const eps = 1e-6;
+  for (let b = Math.ceil(startBeat - eps); b <= startBeat + lengthBeats + eps; b++) {
+    const x = (b - startBeat) / lengthBeats;
+    if (x < -eps || x > 1 + eps) continue;
+    out.push({ x: Math.min(1, Math.max(0, x)), bar: ((b % 4) + 4) % 4 === 0 });
+  }
+  return out;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANE_LEFT_PX, beatLabelsVisible, clipBeatCount, clipBox, laneContentPx, playheadLeftPx, secondsAtLaneX, sectionBox, sectionStartSec, sessionBeatCount } from "./timeline";
+import { LANE_LEFT_PX, beatLabelsVisible, beatPx, clipBeatCount, clipBeats, clipBox, clipGridLines, gridBeatCount, laneContentPx, playheadLeftPx, secondsAtLaneX, sectionBox, sectionStartSec, sessionBeatCount } from "./timeline";
 
 describe("V3 timeline geometry", () => {
   it("maps seconds to pixels through pxPerSec, with a grab floor", () => {
@@ -32,12 +32,31 @@ describe("V3 playhead / sections / ruler geometry", () => {
     expect(sectionBox({ startBeat: 1, endBeat: 1 }, 120, 80).width).toBe(2);
     expect(sectionStartSec({ startBeat: 8, endBeat: 24 }, 120)).toBe(4);
   });
-  it("hides beat labels once a beat cell is narrower than 18 px", () => {
-    expect(beatLabelsVisible(1280, 32)).toBe(true);    // 40 px cells (80 px/s at 120 BPM)
-    expect(beatLabelsVisible(320, 32)).toBe(false);    // 10 px cells (20 px/s)
-    expect(beatLabelsVisible(528, 32)).toBe(false);    // 16.5 px cells (40 px/s at 145 BPM) — bars only
-    expect(beatLabelsVisible(576, 32)).toBe(true);     // exactly 18
-    expect(beatLabelsVisible(0, 0)).toBe(false);
+  it("hides beat labels once a beat is narrower than 18 px", () => {
+    expect(beatLabelsVisible(40)).toBe(true);      // 80 px/s at 120 BPM
+    expect(beatLabelsVisible(10)).toBe(false);     // 20 px/s
+    expect(beatLabelsVisible(16.55)).toBe(false);  // 40 px/s at 145 BPM — bars only
+    expect(beatLabelsVisible(18)).toBe(true);      // exactly 18
+    expect(beatLabelsVisible(0)).toBe(false);
+  });
+  it("puts the ruler, the lane grid and the clip grids on one beat scale", () => {
+    expect(beatPx(120, 80)).toBe(40);
+    expect(beatPx(145, 40)).toBeCloseTo(16.5517, 3);
+    expect(gridBeatCount({ length: 16, tempo: 120 } as never, 80, 1280)).toBe(32);   // the session fills the lane
+    expect(gridBeatCount({ length: 16, tempo: 120 } as never, 20, 1100)).toBe(110);  // a lane wider than the session keeps its beat cells (was 32 cells of 34 px)
+    expect(clipBeats({ start: 2, length: 6 }, 120)).toEqual({ startBeat: 4, lengthBeats: 12 });
+    expect(clipBeats({ start: 1.5, length: 1.7 }, 120).lengthBeats).toBeCloseTo(3.4, 9);    // exact, never rounded
+  });
+  it("draws a clip's grid at the session's beats, bars where the ruler has them", () => {
+    const onGrid = clipGridLines(4, 12);                     // beats 4..16
+    expect(onGrid).toHaveLength(13);
+    expect(onGrid[0]).toEqual({ x: 0, bar: true });
+    expect(onGrid[12]).toEqual({ x: 1, bar: true });
+    expect(onGrid.filter((l) => l.bar).map((l) => l.x)).toEqual([0, 4 / 12, 8 / 12, 1]);
+    const midBar = clipGridLines(1.5, 4);                    // beats 2,3,4,5 inside 1.5..5.5
+    expect(midBar.map((l) => l.x)).toEqual([0.125, 0.375, 0.625, 0.875]);
+    expect(midBar.map((l) => l.bar)).toEqual([false, false, true, false]);   // beat 4 is the bar
+    expect(clipGridLines(0, 0)).toEqual([]);
   });
   it("maps a ruler click back to seconds and clamps at zero", () => {
     expect(secondsAtLaneX(160, 80)).toBe(2);

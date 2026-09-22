@@ -144,3 +144,30 @@ test("mute and solo state are visible on the track header, and a muted lane sits
   await expect(mute).toHaveAttribute("aria-pressed", "false");
   await expect(keys).not.toHaveAttribute("data-mute", "true");
 });
+
+test("the ruler, the lane grid and a clip's own grid share one beat scale at every zoom", async ({ page }) => {
+  await bootV3(page);
+  const lane = page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" }).locator(".lane");
+  const cells = lane.locator('[data-testid="v3-lane-grid"] i');
+  const clip = chords(page);
+  const laneX = (await lane.boundingBox())!.x + 1;                       // the lane's 1 px border
+  // 120 BPM at 80 px/s: a beat is 40 px. Cell 4 starts 160 px in; so does the 2 s clip.
+  expect(Math.round((await cells.nth(4).boundingBox())!.x - laneX)).toBe(160);
+  expect(Math.round((await cells.nth(4).boundingBox())!.width)).toBe(40);
+  expect(Math.round((await clip.boundingBox())!.x - laneX)).toBe(160);
+  // The clip's canvas spans its border box, so its beat lines land on the lane's pixels.
+  const svg = clip.locator("svg");
+  expect(Math.round((await svg.boundingBox())!.x - (await clip.boundingBox())!.x)).toBe(0);
+  expect(Math.round((await svg.boundingBox())!.width - (await clip.boundingBox())!.width)).toBe(0);
+  // 6 s = 12 beats from beat 4: 13 beat lines, bars at beats 4 · 8 · 12 · 16 (the session's bars).
+  await expect(svg.locator('line[stroke="#3A4040"], line[stroke="#7A8282"]')).toHaveCount(13);
+  await expect(svg.locator('line[stroke="#7A8282"]')).toHaveCount(4);
+  const ruler = page.getByTestId("v3-ruler");
+  expect(Math.round((await ruler.locator(".rn").nth(4).boundingBox())!.width)).toBe(40);
+  // Zoomed out to 20 px/s a beat is 10 px — the grid keeps beat-sized cells instead of
+  // stretching the session's 32 cells across the viewport (that read as ~34 px cells).
+  await page.evaluate(() => (window as unknown as TransportWindow).__moshStore!.getState().setPxPerSec(20));
+  await expect.poll(async () => Math.round((await cells.nth(4).boundingBox())!.width)).toBe(10);
+  expect(Math.round((await ruler.locator(".rn").nth(4).boundingBox())!.width)).toBe(10);
+  expect(await cells.count()).toBeGreaterThan(32);
+});
