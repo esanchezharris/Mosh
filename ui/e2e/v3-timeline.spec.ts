@@ -145,7 +145,7 @@ test("mute and solo state are visible on the track header, and a muted lane sits
   await expect(keys).not.toHaveAttribute("data-mute", "true");
 });
 
-test("one grid: lane marks, ruler ticks and the playhead share pixel columns; clips draw no grid", async ({ page }) => {
+test("one grid: lane marks, ruler ticks and the playhead share pixel columns; it shows through clips", async ({ page }) => {
   await bootV3(page);
   const lane = page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" }).locator(".lane");
   const mark = (beat: number) => lane.locator(`[data-testid="v3-lane-grid"] i[data-beat="${beat}"]`);
@@ -159,8 +159,18 @@ test("one grid: lane marks, ruler ticks and the playhead share pixel columns; cl
   expect(await x(tick(0))).toBeCloseTo(await x(mark(0)), 1);
   await seek(page, 2);                                                      // the playhead sits on beat 4 too
   await expect.poll(async () => { const b = (await page.getByTestId("v3-playhead").boundingBox())!; return Math.abs(b.x + b.width / 2 - (await x(mark(4)) + 0.5)); }).toBeLessThan(0.6);
-  // Clips are content only: no grid lines inside any clip.
+  // Clips draw no grid of their own; their body is translucent so the lane's marks show through
+  // (Ableton-style) — the same marks, so they cannot drift.
   await expect(page.locator('[data-testid="v3-clip"] line')).toHaveCount(0);
+  const clipAlpha = await clip.evaluate((el) => {
+    const c = document.createElement("canvas"); c.width = c.height = 1; const g = c.getContext("2d")!;
+    g.fillStyle = getComputedStyle(el).backgroundColor; g.fillRect(0, 0, 1, 1); return g.getImageData(0, 0, 1, 1).data[3];
+  });
+  expect(clipAlpha).toBeLessThan(64);
+  // No visible lane edge (it read as a double line next to the clip border, lime when selected).
+  await page.getByRole("button", { name: "Select track Keys" }).click();
+  await expect(lane).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+  await expect(lane).toHaveCSS("border-bottom-color", "rgba(0, 0, 0, 0)");
   // Beat marks at 40 px, bar marks every bar; marks are 1 px and on device pixels.
   await expect(lane.locator('[data-testid="v3-lane-grid"] i.beat').first()).toBeAttached();
   expect((await mark(4).boundingBox())!.width).toBe(1);

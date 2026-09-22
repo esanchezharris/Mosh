@@ -281,21 +281,25 @@
 .v3-shell .trk.sel .hd b { color: var(--accent); font-weight: 600; }
 .v3-shell .trk .lane {
   flex: none; position: relative; border-radius: 6px; background: var(--lane);
-  border: 1px solid #1A1E1E; overflow: hidden; box-sizing: border-box;
+  /* The border stays for geometry (LANE_LEFT_PX counts it) but draws nothing: a visible lane edge
+     6 px from the clip's own border read as a double line, and in lime on the selected track. */
+  border: 1px solid transparent; overflow: hidden; box-sizing: border-box;
 }
 .v3-shell .clip.dragging { cursor: grabbing; }
 .v3-shell .workspace-empty { position: sticky; left: 0; }
-.v3-shell .trk.sel .lane { border-color: var(--accent); }
+
 /* The one grid: 1 px marks at device-pixel-snapped x (gridMarks), behind opaque clips. */
 .v3-shell .lane-grid { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
 .v3-shell .lane-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--grid-beat); }
 .v3-shell .lane-grid i.bar { background: var(--grid-bar); }
 .v3-shell .clip {
   position: absolute; top: 6px; bottom: 6px; z-index: 1; border-radius: 5px;
-  background: #141818; border: 1px solid #252A2A; overflow: hidden; cursor: pointer;
+  /* Ableton-style: the clip body is translucent so the lane's grid shows through it — the same
+     marks as the empty lane, so they cannot misalign. Waveforms and notes paint over it. */
+  background: color-mix(in srgb, var(--text) 5%, transparent); border: 1px solid #252A2A; overflow: hidden; cursor: pointer;
 }
 .v3-shell .clip.hl {
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 14%, var(--lane));
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .v3-shell .cwave { width: 100%; height: 100%; }
