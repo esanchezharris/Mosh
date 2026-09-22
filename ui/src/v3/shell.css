@@ -653,3 +653,6 @@
    the 6 px gap on its right) showed a sliver of whatever clip had scrolled under it. */
 .v3-shell .trk .hd::before { content: ""; position: absolute; top: -1px; bottom: -1px; right: calc(100% + 1px); width: 8px; background: var(--bg); }
 .v3-shell .trk .hd::after { content: ""; position: absolute; top: -1px; bottom: -1px; left: calc(100% + 1px); width: 6px; background: var(--bg); }
+/* Every slider in the shell follows the colorway. The Sends rows (and any future range input)
+   used to fall back to the browser's default blue because only .fader inputs set this. */
+.v3-shell input[type="range"] { accent-color: var(--accent); }

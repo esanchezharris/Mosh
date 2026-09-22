@@ -17,6 +17,8 @@ import { join } from "node:path";
  */
 const ENABLED = process.env.MOSH_PORTFOLIO_SHOT === "1";
 const OUT = process.env.MOSH_PORTFOLIO_OUT ?? join(homedir(), "Library", "Mosh", "task-evidence", "2026-09-21-portfolio-shot");
+/** Which colorways to frame (comma-separated); one PNG each: mosh-shell-<colorway>.png. */
+const COLORWAYS = (process.env.MOSH_PORTFOLIO_COLORWAYS ?? "lime").split(",").map((c) => c.trim()).filter(Boolean);
 const BAR_SEC = 240 / 145;
 const barSec = (bar: number) => (bar - 1) * BAR_SEC;
 
@@ -38,15 +40,15 @@ test.describe("portfolio screenshot", () => {
   test.skip(!ENABLED, "set MOSH_PORTFOLIO_SHOT=1 to capture");
   test.use({ viewport: { width: 1512, height: 817 }, deviceScaleFactor: 2 });
 
-  test("V3 shell on the Song A session at 1512×817 @2x", async ({ page }) => {
+  for (const colorway of COLORWAYS) test(`V3 shell on the Song A session at 1512×817 @2x — ${colorway}`, async ({ page }) => {
     test.setTimeout(90_000);
     mkdirSync(OUT, { recursive: true });
-    await page.addInitScript(() => {
+    await page.addInitScript((cw) => {
       window.localStorage.clear();
-      window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: { colorway: "lime" }, keyOverrides: {} }));
-    });
+      window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: { colorway: cw }, keyOverrides: {} }));
+    }, colorway);
     await page.goto("/?shell=v3&mockSeed=portfolio");
-    await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", "lime");
+    await expect(page.getByTestId("v3-shell")).toHaveAttribute("data-colorway", colorway);
     await expect(page.getByTestId("v3-arrangement")).toBeVisible();
     await expect(page.getByTestId("v3-track")).toHaveCount(7);
     await expect(page.getByTestId("v3-section")).toHaveCount(7);
@@ -78,6 +80,12 @@ test.describe("portfolio screenshot", () => {
     await expect(page.getByTestId("v3-inspector")).toHaveAttribute("data-track-id", "pf-lead");
     await expect(page.getByTestId("v3-plugin")).toHaveCount(3);
     await expect(page.getByTestId("v3-send")).toHaveCount(2);
+    // Every slider in the inspector follows the colorway (the Sends rows used to render the
+    // browser's default blue): accent-color resolves to a colour, never "auto".
+    const accents = await page.locator('[data-testid="v3-inspector"] input[type="range"]').evaluateAll((els) => els.map((el) => getComputedStyle(el).accentColor));
+    expect(accents.length).toBeGreaterThan(4);
+    for (const a of accents) expect(a).not.toBe("auto");
+    expect(new Set(accents).size).toBe(1);
 
     // Ask Moshi for something real: a relative send move on the selected track. The studio
     // skill runs set_send_level in the mock (−12 → −9 dB) and the dock says what it did.
@@ -104,7 +112,7 @@ test.describe("portfolio screenshot", () => {
     const scroller = await page.locator(".v3-shell .tracks").boundingBox();
     expect(rows!.y + rows!.height).toBeLessThanOrEqual(scroller!.y + scroller!.height + 0.5);
 
-    const path = join(OUT, "mosh-shell.png");
+    const path = join(OUT, `mosh-shell-${colorway}.png`);
     await page.screenshot({ path, fullPage: false });
     console.log(`wrote ${path}`);
   });
