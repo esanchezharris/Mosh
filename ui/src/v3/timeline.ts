@@ -31,9 +31,9 @@ export function clipBox(box: TimeBox, pxPerSec: number): { left: number; width: 
 // ── playhead / sections / ruler (2026-09-21) ────────────────────────────────────────────
 // All on the same pxPerSec scale as the clips, so the three never disagree at any zoom.
 
-/** Where lane CONTENT starts inside the `.rows` stack: the 148 px sticky header, its 6 px gap, and
- *  the lane's 1 px border (clips and grid marks are positioned inside that border). */
-export const LANE_LEFT_PX = 148 + 6 + 1;
+/** Where lane CONTENT starts inside the `.rows` stack: the 154 px sticky header (it meets its lane,
+ *  no gap) and the lane's 1 px border (clips and grid marks are positioned inside that border). */
+export const LANE_LEFT_PX = 154 + 1;
 
 /** The playhead's x inside the `.rows` stack for a transport position (seconds). */
 export function playheadLeftPx(positionSec: number, pxPerSec: number): number {

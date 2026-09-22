@@ -276,7 +276,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   const [viewportPx, setViewportPx] = useState(1100);
   useLayoutEffect(() => {
     const el = scrollerRef.current; if (!el) return;
-    const measure = () => setViewportPx(Math.max(200, el.clientWidth - 8 * 2 - 148 - 6));
+    const measure = () => setViewportPx(Math.max(200, el.clientWidth - 8 * 2 - 154));
     measure();
     if (typeof ResizeObserver === "undefined") return;   // jsdom
     const ro = new ResizeObserver(measure); ro.observe(el);

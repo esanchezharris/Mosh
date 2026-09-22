@@ -21,7 +21,7 @@ describe("V3 timeline geometry", () => {
 
 describe("V3 playhead / sections / ruler geometry", () => {
   it("places the playhead on the lane scale, never left of the lane", () => {
-    expect(LANE_LEFT_PX).toBe(155);   // header 148 + gap 6 + the lane's 1 px border
+    expect(LANE_LEFT_PX).toBe(155);   // header 154 (meets its lane) + the lane's 1 px border
     expect(playheadLeftPx(0, 80)).toBe(LANE_LEFT_PX);
     expect(playheadLeftPx(2, 80)).toBe(LANE_LEFT_PX + 160);
     expect(playheadLeftPx(2, 100)).toBe(LANE_LEFT_PX + 200);   // zoom moves it (anti-vacuity)

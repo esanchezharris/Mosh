@@ -236,3 +236,16 @@ test("the corner left of the ruler holds the timeline's grid, snap and zoom cont
   await corner.getByTestId("v3-zoom-in").click();
   await expect(page.getByTestId("v3-arrangement")).toHaveAttribute("data-px-per-sec", "100");
 });
+
+test("the header column meets the lanes and the ruler: no dead strip between them", async ({ page }) => {
+  await bootV3(page);
+  const row = page.locator('[data-testid="v3-track"]').first();
+  const [hd, lane] = [(await row.locator(".hd").boundingBox())!, (await row.locator(".lane").boundingBox())!];
+  const corner = (await page.getByTestId("v3-timeline-corner").boundingBox())!;
+  const ruler = (await page.getByTestId("v3-ruler").boundingBox())!;
+  const right = (b: { x: number; width: number }) => b.x + b.width;
+  expect(right(hd)).toBeCloseTo(lane.x, 1);                 // header box touches its lane (was a 6 px gap)
+  expect(right(corner)).toBeCloseTo(right(hd), 1);          // the corner box ends where the headers end
+  expect(ruler.x).toBeCloseTo(lane.x + 1, 1);               // the ruler starts where lane content does
+  expect(ruler.x - right(corner)).toBeLessThanOrEqual(1.01); // …with at most the lane's 1 px edge between
+});
