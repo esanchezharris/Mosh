@@ -207,3 +207,32 @@ test("one hairline separates adjacent tracks, centred in the gap between rows", 
     expect(lane.height).toBe(row.height);
   }
 });
+
+test("the corner left of the ruler holds the timeline's grid, snap and zoom controls", async ({ page }) => {
+  await bootV3(page);
+  const corner = page.getByTestId("v3-timeline-corner");
+  await expect(corner).toBeVisible();
+  // The controls live here now, not in the top bar.
+  await expect(corner.getByTestId("v3-zoom-in")).toBeVisible();
+  await expect(corner.getByTestId("v3-zoom-out")).toBeVisible();
+  await expect(page.getByTestId("v3-topbar").getByRole("button", { name: "Snap" })).toHaveCount(0);
+  // It sits exactly over the track headers, so the ruler still starts where lane content does.
+  const [c, hd] = [(await corner.boundingBox())!, (await page.locator('[data-testid="v3-track"] .hd').first().boundingBox())!];
+  expect(Math.round(c.x)).toBe(Math.round(hd.x));
+  expect(Math.round(c.width)).toBe(Math.round(hd.width));
+  // Grid division: a real control over the store's snapDivision (1/4 by default).
+  type W = Window & { __moshStore?: { getState: () => { snap: boolean; snapDivision: string } } };
+  const st = () => page.evaluate(() => { const s = (window as unknown as W).__moshStore!.getState(); return { snap: s.snap, div: s.snapDivision }; });
+  const grid = corner.getByRole("combobox", { name: "Grid" });
+  await expect(grid).toHaveValue("1/4");
+  await grid.selectOption("1/8");
+  await expect.poll(async () => (await st()).div).toBe("1/8");
+  const snap = corner.getByRole("button", { name: "Snap" });
+  await expect(snap).toHaveAttribute("aria-pressed", "true");
+  await snap.click();
+  await expect.poll(async () => (await st()).snap).toBe(false);
+  await expect(snap).toHaveAttribute("aria-pressed", "false");
+  // Zoom from the corner moves the shared zoom.
+  await corner.getByTestId("v3-zoom-in").click();
+  await expect(page.getByTestId("v3-arrangement")).toHaveAttribute("data-px-per-sec", "100");
+});

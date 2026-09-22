@@ -232,7 +232,19 @@
   display: flex; align-items: stretch; border-bottom: 1px solid var(--fog-line);
   background: #101212; flex-shrink: 0; padding: 0 8px;
 }
-.v3-shell .hdr-spacer { width: 148px; flex-shrink: 0; margin-right: 7px; }   /* 6 px gap + the lane's 1 px border: the ruler starts where lane content does */
+/* The corner over the track headers: the timeline's snap / grid / zoom. 148 px like the headers,
+   + 7 px (6 px gap + the lane's 1 px border) so the ruler starts where lane content does. */
+.v3-shell .tl-corner {
+  width: 148px; flex-shrink: 0; margin-right: 7px; display: flex; align-items: center; gap: 3px;
+  padding: 0 2px; border-right: 1px solid var(--fog-line);
+}
+.v3-shell .tl-corner .ibtn { width: 24px; height: 24px; }
+.v3-shell .tl-corner .ibtn svg { width: 14px; height: 14px; }
+.v3-shell .tl-corner .tl-sp { flex: 1; }
+.v3-shell .tl-corner .grid-div {
+  height: 22px; padding: 0 4px; font-size: 10px; font-family: ui-monospace, monospace;
+  color: var(--text); background: var(--surface2); border: 1px solid var(--fog-line); border-radius: 5px;
+}
 .v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
 /* The ruler draws the lanes' own grid marks (gridMarks): a tick on the bottom edge at each mark,
    the label just right of it. Absolutely placed, so it cannot drift from the lanes. */

@@ -19,6 +19,8 @@ import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { DrumsClip, MelodyClip } from "./midi/MidiClips";
 import { dropDrumBeat } from "./beats";
+import { IconSnap, IconZoomIn, IconZoomOut } from "./icons";
+import { SNAP_DIVISIONS, type SnapDiv } from "../time";
 
 const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
   ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!(e.metaKey || e.ctrlKey) });
@@ -46,6 +48,36 @@ function Ruler({ marks, widthPx, pxPerSec, beatLabels }: { marks: GridMark[]; wi
           <span className={`rn ${m.bar ? "bar" : "beat"}`}>{m.bar ? m.barNo : `.${(m.beat % 4) + 1}`}</span>
         </span>
       ))}
+    </div>
+  );
+}
+
+const DIV_LABEL: Record<SnapDiv, string> = { bar: "Bar", "1/4": "1/4", "1/8": "1/8", "1/16": "1/16", "1/32": "1/32" };
+
+/** The corner over the track headers, left of the sections and ruler: the timeline's own view
+ *  controls — snap on/off, the grid division clips snap to, and zoom — next to the thing they act on. */
+function TimelineCorner() {
+  const snap = useStore((s) => s.snap);
+  const setSnap = useStore((s) => s.setSnap);
+  const snapDivision = useStore((s) => s.snapDivision);
+  const setSnapDivision = useStore((s) => s.setSnapDivision);
+  const zoom = (action: "zoom_in" | "zoom_out") => void runAction(action, { store: useStore.getState(), pickFiles, pickSaveFile });
+  return (
+    <div className="tl-corner" data-testid="v3-timeline-corner" role="toolbar" aria-label="Timeline view">
+      <button type="button" className="ibtn" title="Snap to grid" aria-label="Snap" aria-pressed={!!snap} onClick={() => setSnap(!snap)}>
+        <IconSnap />
+      </button>
+      <select className="grid-div" aria-label="Grid" title="Grid: what clips and the playhead snap to" value={snapDivision}
+        onChange={(e) => setSnapDivision(e.target.value as SnapDiv)}>
+        {SNAP_DIVISIONS.map((d) => <option key={d} value={d}>{DIV_LABEL[d]}</option>)}
+      </select>
+      <span className="tl-sp" />
+      <button type="button" className="ibtn" title="Zoom out (⌘−)" aria-label="Zoom out" data-testid="v3-zoom-out" onClick={() => zoom("zoom_out")}>
+        <IconZoomOut />
+      </button>
+      <button type="button" className="ibtn" title="Zoom in (⌘+)" aria-label="Zoom in" data-testid="v3-zoom-in" onClick={() => zoom("zoom_in")}>
+        <IconZoomIn />
+      </button>
     </div>
   );
 }
@@ -269,7 +301,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
       </div>
       <div className="arr-head">
-        <div className="hdr-spacer" />
+        <TimelineCorner />
         <div className="ruler-clip">
           <div className="ruler-scroll" ref={rulerRef} style={{ width: lanePx }}>
             <SectionStrip sections={snapshot.sections} tempo={snapshot.session.tempo} pxPerSec={pxPerSec} />
