@@ -22,6 +22,9 @@ describe("V3 colorway tokens", () => {
     expect(V3_COLORWAYS).toHaveLength(4);
     expect(colorwayAttr("nope")).toBe("lime");
   });
+  it("every range input in the shell follows --accent (the Sends sliders once rendered the browser's blue)", () => {
+    expect(css).toMatch(/\.v3-shell input\[type="range"\]\s*\{[^}]*accent-color:\s*var\(--accent\)/);
+  });
   it("accent-derived rules use color-mix on --accent (a count floor so a rewrite cannot silently drop them)", () => {
     expect((css.match(/color-mix\(in srgb, var\(--accent\)/g) ?? []).length).toBeGreaterThanOrEqual(12);
   });
