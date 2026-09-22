@@ -235,7 +235,7 @@
 .v3-shell .hdr-spacer { width: 148px; flex-shrink: 0; margin-right: 6px; }
 .v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
 .v3-shell .ruler {
-  display: grid; grid-template-columns: repeat(var(--beats, 32), minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(var(--beats, 32), var(--beat-px, minmax(0, 1fr)));
   height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none; will-change: transform;
 }
 .v3-shell .rn { font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); padding-left: 1px; }
@@ -286,7 +286,7 @@
 .v3-shell .trk.sel .lane { border-color: var(--accent); }
 .v3-shell .lane-grid {
   position: absolute; inset: 0; display: grid;
-  grid-template-columns: repeat(var(--cells, 32), 1fr); pointer-events: none; z-index: 0;
+  grid-template-columns: repeat(var(--cells, 32), var(--beat-px, 1fr)); pointer-events: none; z-index: 0;
 }
 .v3-shell .lane-grid i { border-right: 1px solid var(--grid); opacity: .55; }
 .v3-shell .lane-grid i:nth-child(4n) { border-right-color: #5A6262; opacity: .9; }
@@ -677,3 +677,7 @@
 .v3-shell input[type="range"].rng::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
 .v3-shell input[type="range"].rng::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
 .v3-shell input[type="range"].rng::-moz-range-thumb { width: 10px; height: 4px; border: 0; border-radius: 2px; background: var(--accent); }
+/* One beat scale (2026-09-22): ruler cells and lane-grid cells are exactly --beat-px wide, and a
+   clip's canvas spans its BORDER box so its grid and notes sit on the same beat pixels as the
+   lane behind it (the 1 px border used to compress a long clip's grid by a couple of pixels). */
+.v3-shell .clip > .cwave { position: absolute; top: -1px; right: -1px; bottom: -1px; left: -1px; width: auto; height: auto; }
