@@ -244,7 +244,8 @@ function ClipBody({
       title={midi ? "Double-click or press Enter to edit MIDI" : clip.name}
       aria-label={`${clip.name}, ${clip.type === "wave" ? "audio" : "MIDI"} clip`} aria-pressed={selected}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (e.key === "Enter") edit(); else onSelect(); }
+        // Enter only: Space bubbles to the app keymap (play/pause), so Space after a clip click plays.
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); edit(); }
       }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={cancelDrag}
       onDoubleClick={(e) => { e.stopPropagation(); edit(); }}
