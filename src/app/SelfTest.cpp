@@ -9228,6 +9228,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! (bool) rec["data"].getProperty ("applied", true), "loop_record applied:false headless");
             check (rec["data"].getProperty ("reason", var()).toString().contains ("no audio"),
                    "loop_record names the missing audio device");
+            // demo B5: the Booth shows `detail`; it must never claim a take is rolling.
+            check (rec["data"].getProperty ("detail", var()).toString().startsWith ("Not recording: ")
+                       && rec["data"].getProperty ("detail", var()).toString().contains ("no audio"),
+                   "loop_record's detail says 'Not recording: <reason>' when nothing rolled (got '"
+                       + rec["data"].getProperty ("detail", var()).toString() + "')");
             check (rec["data"].getProperty ("currentId", var()).isVoid(),
                    "loop_record mints no contribution when the transport never rolled");
             check (loopState().getProperty ("currentId", var()).isVoid(), "loop_state agrees: nothing is capturing");
@@ -9370,10 +9375,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             auto hear = cmd (ops, "loop_hear", args1 ("targetId", passId));
             check (ok (hear), "loop_hear ok headless (never an error)");
             check (! (bool) hear["data"].getProperty ("applied", true), "loop_hear applied:false headless");
+            check (hear["data"].getProperty ("detail", var()).toString().startsWith ("Not playing: "),
+                   "loop_hear's detail says 'Not playing: <reason>' when nothing rolled (got '"
+                       + hear["data"].getProperty ("detail", var()).toString() + "')");
 
             auto all = cmd (ops, "loop_play_all");
             check (ok (all), "loop_play_all ok headless (never an error)");
             check (! (bool) all["data"].getProperty ("applied", true), "loop_play_all applied:false headless");
+            check (all["data"].getProperty ("detail", var()).toString().startsWith ("Not playing: "),
+                   "loop_play_all's detail says 'Not playing: <reason>' when nothing rolled (got '"
+                       + all["data"].getProperty ("detail", var()).toString() + "')");
+
+            // Keep on an ALREADY-kept take while stopped is "go again from here" — the
+            // resume branch. Headless it cannot roll, and its detail must say so.
+            check ((bool) firstContribution (loopState()).getProperty ("keeper", false),
+                   "resume fixture: the pass is a keeper again after undoing Again");
+            auto resume = cmd (ops, "loop_keep", args1 ("targetId", passId));
+            check (ok (resume) && ! (bool) resume["data"].getProperty ("applied", true),
+                   "loop_keep on a kept take (resume) is ok with applied:false headless");
+            check (resume["data"].getProperty ("detail", var()).toString().startsWith ("Not recording: "),
+                   "loop_keep's resume detail says 'Not recording: <reason>' when nothing rolled (got '"
+                       + resume["data"].getProperty ("detail", var()).toString() + "')");
 
             check (! ok (cmd (ops, "loop_keep", args1 ("targetId", "no-such-pass"))),
                    "a target that no longer resolves is refused");

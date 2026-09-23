@@ -766,7 +766,11 @@ juce::var MoshOps::cmdLoopRecord (const juce::var& args)
     if (! applied) data->setProperty ("reason", reason);
     data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
     data->setProperty ("entryQn", startQn);
-    return loopOk (kName, data, actionId, "Recording from bar " + String (loopQnToBar (startQn)));
+    // The Booth and the phone show `detail` as-is, so it must never claim a take is
+    // rolling when the transport never started (e.g. no audio device).
+    return loopOk (kName, data, actionId,
+                   applied ? "Recording from bar " + String (loopQnToBar (startQn))
+                           : "Not recording: " + reason);
 }
 
 // ── loop_keep ────────────────────────────────────────────────────────────────────────
@@ -833,7 +837,8 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
         data->setProperty ("applied", applied);
         if (! applied) data->setProperty ("reason", reason);
         return loopOk (kName, data, actionId,
-                       "Resumed recording from bar " + String (loopQnToBar (resumeQn)));
+                       applied ? "Resumed recording from bar " + String (loopQnToBar (resumeQn))
+                               : "Not recording: " + reason);
     }
 
     const auto label = loopLabelFor (targetId);
@@ -1019,8 +1024,9 @@ juce::var MoshOps::cmdLoopHear (const juce::var& args)
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", reason);
     return loopOk (kName, data, actionId,
-                   rejected ? "Playing " + label + " — rejected take stays muted; restore it with Undo on the Mac"
-                            : "Playing " + label + " from bar " + String (loopQnToBar (entryQn)));
+                   ! applied ? "Not playing: " + reason
+                   : rejected ? "Playing " + label + " — rejected take stays muted; restore it with Undo on the Mac"
+                              : "Playing " + label + " from bar " + String (loopQnToBar (entryQn)));
 }
 
 // ── loop_play_all ────────────────────────────────────────────────────────────────────
@@ -1055,7 +1061,8 @@ juce::var MoshOps::cmdLoopPlayAll (const juce::var& args)
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", reason);
     return loopOk (kName, data, actionId,
-                   "Playing from bar " + String (loopQnToBar (startQn)) + " (rejected takes muted)");
+                   applied ? "Playing from bar " + String (loopQnToBar (startQn)) + " (rejected takes muted)"
+                           : "Not playing: " + reason);
 }
 
 // ── loop_stop ────────────────────────────────────────────────────────────────────────
