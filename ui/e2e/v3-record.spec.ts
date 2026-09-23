@@ -110,3 +110,64 @@ test("set up a Lead, keep one pass and redo another — every pass is preserved,
   await page.getByTestId("v3-booth-studio").click();
   await expect(page.getByTestId("v3-arrangement")).toBeVisible();
 });
+
+// The demo's vocal moment from an EMPTY session with only a drum beat on it: the Booth must
+// not offer the drum track as the Lead (a kept vocal would land behind its sampler), so it
+// offers "Add a Vocal track" instead — create_track then loop_setup. Once engaged, "Hear
+// myself" reads the Takes track's monitor mode back from the SNAPSHOT and writes it through
+// set_input_monitor, and the engineering readouts sit behind a collapsed Details.
+type BoothWindow = Window & { __moshStore?: { getState: () => {
+  snapshot?: { tracks: { id: string; name: string; type?: string; monitor?: string }[]; loop?: { takesTrackId?: string } };
+  exec: (command: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown }>;
+  refresh: () => Promise<void>;
+  setSelectedTrack: (id: string | null) => void;
+} } };
+
+test("from a drum-only session the Booth adds a Vocal track as Lead, and Hear myself round-trips the monitor mode", async ({ page }) => {
+  await bootV3(page);
+  await page.evaluate(async () => {
+    const store = (window as unknown as BoothWindow).__moshStore!;
+    await store.getState().exec("new_project", {});
+    const drums = await store.getState().exec("create_track", { name: "Drums", type: "drum" });
+    await store.getState().refresh();
+    store.getState().setSelectedTrack((drums.data as { trackId: string }).trackId);   // what + Drum beat leaves selected
+  });
+  const tracks = page.locator('[data-testid="v3-track"]');
+  await expect(tracks).toHaveCount(1);                                                // anti-vacuity baseline
+
+  await enterBooth(page);
+  const setup = page.getByTestId("v3-booth-setup");
+  await expect(setup).toHaveText("Add a Vocal track");
+  await expect(page.getByTestId("v3-booth-phone")).toHaveCount(0);                   // no phone paired
+  await setup.click();
+  await expect(page.getByTestId("v3-loop-record")).toBeEnabled();
+
+  const monitorOf = () => page.evaluate(() => {
+    const state = (window as unknown as BoothWindow).__moshStore!.getState();
+    const takesId = state.snapshot?.loop?.takesTrackId;
+    return state.snapshot?.tracks.find((t) => t.id === takesId)?.monitor ?? null;
+  });
+  const hear = page.getByTestId("v3-booth-monitor");
+  await expect(hear).toHaveText("Hear myself: On");
+  await expect(hear).toHaveAttribute("aria-pressed", "true");
+  await expect(hear).toHaveAttribute("title", "Monitoring applies to the whole input device");
+  await hear.click();
+  await expect(hear).toHaveText("Hear myself: Off");
+  await expect(hear).toHaveAttribute("aria-pressed", "false");
+  expect(await monitorOf()).toBe("off");
+  await hear.click();
+  await expect(hear).toHaveText("Hear myself: On");
+  expect(await monitorOf()).toBe("automatic");
+
+  // the readouts are one click away, not on the shared screen
+  const details = page.getByTestId("v3-booth-details");
+  await expect(details).not.toHaveAttribute("open", "");
+  await expect(page.getByTestId("v3-loop-bar")).toBeHidden();
+  await details.locator("summary").click();
+  await expect(page.getByTestId("v3-loop-bar")).toBeVisible();
+
+  await page.getByTestId("v3-booth-studio").click();
+  await expect(tracks).toHaveCount(3);
+  expect(await page.evaluate(() => (window as unknown as BoothWindow).__moshStore!.getState().snapshot?.tracks.map((t) => t.name)))
+    .toEqual(["Drums", "Vocal", "Vocal · Takes"]);
+});

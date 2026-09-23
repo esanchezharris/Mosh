@@ -16,7 +16,11 @@ export function presetKeyFor(plugin: Pick<Plugin, "builtin" | "type" | "name">):
   return /vital/i.test(plugin.name) ? "vital" : null;
 }
 
-export function PresetPicker({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+export function PresetPicker({ plugin, trackId, onLoaded }: {
+  plugin: Plugin; trackId: string;
+  /** Called once the engine ACCEPTED a load (V3 names the loaded preset); optional. */
+  onLoaded?: (preset: { name: string; file: string }) => void;
+}) {
   const exec = useStore((s) => s.exec);
   const [presets, setPresets] = useState<{ name: string; file: string }[] | null>(null);
   const key = presetKeyFor(plugin);
@@ -35,7 +39,11 @@ export function PresetPicker({ plugin, trackId }: { plugin: Plugin; trackId: str
       title="Load a preset" aria-label={`Load a preset onto ${plugin.name}`}
       onChange={(e) => {
         const file = e.target.value;
-        if (file) void exec("load_preset", { trackId, index: plugin.index, file });
+        if (!file) return;
+        const picked = presets.find((p) => p.file === file);
+        void Promise.resolve(exec("load_preset", { trackId, index: plugin.index, file })).then((r) => {
+          if (r?.ok && picked) onLoaded?.({ name: picked.name, file: picked.file });
+        });
       }}>
       <option value="" disabled>Presets…</option>
       {presets.map((p) => <option key={p.file} value={p.file}>{p.name}</option>)}

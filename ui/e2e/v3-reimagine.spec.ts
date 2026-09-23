@@ -25,6 +25,18 @@ for (const width of [900, 1440]) {
     await expect(page.getByTestId("gen-source")).toHaveAttribute("aria-pressed", "true");
     await page.getByTestId("gen-accept").click();
     await expect(page.getByTestId("gen-status")).toHaveText("Result kept");
+    // Generate again with the seed left alone must not re-run seed 17: it steps to 18, the
+    // field shows it, and that is what reaches the engine.
+    await expect(page.getByTestId("gen-render")).toHaveText("Generate again");
+    await expect(page.getByTestId("gen-seed-input")).toHaveValue("17");
+    await page.getByTestId("gen-render").click();
+    await expect(page.getByTestId("gen-seed-input")).toHaveValue("18");
+    await expect(page.getByTestId("gen-accept")).toBeEnabled();
+    const seeds = await page.evaluate(() => ((window as unknown as { __moshCmdTrace?: { command: string; args: { seed?: number } }[] }).__moshCmdTrace ?? [])
+      .filter((entry) => entry.command === "set_render_param").map((entry) => entry.args.seed));
+    expect(seeds).toEqual([17, 18]);
+    await page.getByTestId("gen-accept").click();
+    await expect(page.getByTestId("gen-status")).toHaveText("Result kept");
     await expect(page.locator(".direct-reimagine .nlabel")).toHaveCSS("color", "rgb(242, 238, 230)");
     const inspector = page.getByTestId("v3-inspector");
     expect(await inspector.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);

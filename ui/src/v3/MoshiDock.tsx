@@ -14,14 +14,26 @@ import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
 import { matchIssueReport } from "../agent/issueRoute";
 import { activeShell } from "../v2/shellFlag";
-import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge";
+import { brainRuntimeStatus, nativeMenuPresent, onEvent, type BrainRuntimeStatus } from "../bridge";
 import { IconArrowUp, IconMic } from "../ui/icons";
 import { MoshiFace } from "./MoshiFace";
 import { useProducerRack } from "../agent/loop/producerRack";
-import { ProducerRackSetup } from "../ui/ProducerRackSetup";
+import { useTaskStore } from "../agent/loop/taskStore";
+import { formatElapsed, taskProgress } from "./agentTask";
 
 export function recordingDisablesDock(recording: boolean): boolean {
   return recording;
+}
+
+// A greeting or a "what can you do" gets a local, deterministic reply (no model, no skill, no
+// engine command) that points at asks the dock handles instantly. Full-string anchored, so
+// "hey moshi, make the drums louder" still goes to the normal path.
+const GREETING = /^(?:hi|hey|hello|yo|hiya)(?:[,\s]+moshi)?[\s!.?]*$/i;
+const HELP = /^(?:help|what can you do\??|what do you do\??)$/i;
+export const DOCK_HELLO = "hey! try 'set the tempo to 90' or 'turn the drums down 3 dB'";
+export function dockGreetingReply(text: string): string | null {
+  const t = text.trim();
+  return GREETING.test(t) || HELP.test(t) ? DOCK_HELLO : null;
 }
 
 export function MoshiDock() {
@@ -43,6 +55,25 @@ export function MoshiDock() {
   const voiceRef = useRef<DockVoice | null>(null);
   const holdTimer = useRef<number | undefined>(undefined);
   const pttRef = useRef(false);
+  // A7 — the live agent task (read-only). Stop flips the task's abort signal; the loop honours
+  // it between steps, so "Stopping…" stays up until the task actually ends (current === null).
+  // Keyed on the signal object so the next task always starts un-stopped.
+  const task = useTaskStore((s) => s.current);
+  const taskSignal = useTaskStore((s) => s.signal);
+  const [stoppedSignal, setStoppedSignal] = useState<{ aborted: boolean } | null>(null);
+  const stopping = task !== null && taskSignal !== null && stoppedSignal === taskSignal;
+  const [, setTick] = useState(0);
+  const taskLive = task !== null;
+  useEffect(() => {
+    if (!taskLive) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [taskLive]);
+  const stopTask = () => {
+    const tasks = useTaskStore.getState();
+    tasks.requestStop();
+    setStoppedSignal(tasks.signal);
+  };
 
   useEffect(() => {
     void brainRuntimeStatus().then(setBrainRuntime).catch(() => setBrainRuntime({ state: "unavailable" }));
@@ -118,12 +149,20 @@ export function MoshiDock() {
 
   const run = async (text: string, source: "typed" | "push_to_talk" = "typed") => {
     if (!text || useStore.getState().agentBusy || recordingDisablesDock(useStore.getState().transport.recording)) return;
-    setInput(""); setSay(null); setChoices([]); setAgentBusy(true);
+    const runStartedAt = Date.now();
+    // A new ask retires the previous receipt: a stale change set would hide this ask's reply.
+    setInput(""); setSay(null); setAgentChangeSet(null); setChoices([]); setAgentBusy(true);
     try {
       const st = useStore.getState();
       if (useProducerRack.getState().rack) {
         if (!loopAllowed()) throw new Error("The Producer loop is unavailable in this session");
         await runLoopTask(text, { say: setSay, utter: pushAgentUtter });
+        return;
+      }
+      const hello = dockGreetingReply(text);
+      if (hello) {
+        pendingSkillToken.current = null;   // a new turn abandons any hidden clarification
+        setSay(hello); pushAgentUtter("DONE", hello);
         return;
       }
       const issue = matchIssueReport(text);
@@ -198,6 +237,11 @@ export function MoshiDock() {
       setSay(skill.say);
       pushAgentUtter("HUH", skill.say);
     } catch {
+      // A loop task that threw before finish() would leave the view (and every button gated on
+      // a live task) stuck on "Working". Its transaction already closed (runTask's finally), so
+      // end the view of the task THIS ask started.
+      const tasks = useTaskStore.getState();
+      if (tasks.current && tasks.current.startedAt >= runStartedAt) tasks.finish({ outcome: "error" });
       setSay("hmm — that broke");
       pushAgentUtter("UHOH");
     } finally {
@@ -226,12 +270,25 @@ export function MoshiDock() {
   };
 
   const disabled = safe || agentBusy;
+  // The packaged app strips the speech-recognition usage string, so dictation can never work
+  // there; the mic is a dev-lane (Vite) affordance only.
+  const showMic = !nativeMenuPresent();
   const clarify = choices.length > 0 && !safe;
   const receipt = !safe && changeSet && changeSet.entries.length > 0 ? changeSet : null;
 
   return (
     <div className={`prompt${safe ? " safe" : ""}`} data-testid="v3-moshi-dock" data-recording-safe={safe || undefined}>
-      {!safe && loopAllowed() && <ProducerRackSetup />}
+      {task && (
+        <div className="receipt task" data-testid="v3-moshi-task" role="status">
+          <span>
+            {stopping ? "Stopping after this step… · " : `Working · ${taskProgress(task)} · `}
+            <span aria-hidden="true">{formatElapsed(Date.now() - task.startedAt)}</span>
+          </span>
+          <button type="button" className="btn sm" data-testid="v3-moshi-stop" disabled={stopping} onClick={stopTask}>
+            Stop
+          </button>
+        </div>
+      )}
       {receipt && (
         <div className="receipt" data-testid="v3-receipt" role="status">
           <span>{receipt.entries[0]?.summary ?? receipt.label}</span>
@@ -259,13 +316,14 @@ export function MoshiDock() {
         <input
           className={`field${clarify ? " clarify" : ""}`}
           data-testid="v3-moshi-field"
+          data-owns-edit-keys=""
           value={input}
           placeholder={safe ? "recording…" : listening ? "listening…" : agentBusy ? "thinking…" : "Ask Moshi"}
           disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && input.trim()) void run(input.trim()); }}
         />
-        <button
+        {showMic && <button
           type="button"
           className={`ibtn${listening ? " on" : ""}`}
           data-testid="v3-moshi-mic"
@@ -295,7 +353,7 @@ export function MoshiDock() {
           }}
         >
           <IconMic size={16} />
-        </button>
+        </button>}
         <button type="button" className="btn pri sm" data-testid="v3-moshi-send"
           disabled={disabled || !input.trim()} onClick={() => void run(input.trim())} aria-label="Send">
           <IconArrowUp size={13} />

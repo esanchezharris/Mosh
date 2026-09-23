@@ -18,7 +18,8 @@ import type { Clip, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { DrumsClip, MelodyClip } from "./midi/MidiClips";
-import { dropDrumBeat } from "./beats";
+import { dropChords, dropDrumBeat } from "./beats";
+import { useAgentTaskLive } from "./agentTask";
 import { IconSnap, IconZoomIn, IconZoomOut } from "./icons";
 import { SNAP_DIVISIONS, type SnapDiv } from "../time";
 
@@ -244,7 +245,8 @@ function ClipBody({
       title={midi ? "Double-click or press Enter to edit MIDI" : clip.name}
       aria-label={`${clip.name}, ${clip.type === "wave" ? "audio" : "MIDI"} clip`} aria-pressed={selected}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (e.key === "Enter") edit(); else onSelect(); }
+        // Enter only: Space bubbles to the app keymap (play/pause), so Space after a clip click plays.
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); edit(); }
       }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={cancelDrag}
       onDoubleClick={(e) => { e.stopPropagation(); edit(); }}
@@ -266,6 +268,14 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     || selectedTrack.plugins?.some((plugin) => plugin.isInstrument));
   const run = (action: "insert_audio_track" | "insert_midi_track" | "insert_midi_clip") => void runAction(action, { store: useStore.getState(), pickFiles, pickSaveFile });
   const pxPerSec = useStore((s) => s.pxPerSec);
+  // While Moshi holds an open undo transaction a click that edits would fold into the agent's
+  // undo step, so every edit button here waits. Two windows: a loop task (useTaskStore.current,
+  // one transaction for the whole task) and a dock batch (runAgentBatch: fast path, studio
+  // skills, section rework), which holds a native batch with agentBusy set and no task live.
+  const taskLive = useAgentTaskLive();
+  const agentBusy = useStore((s) => s.agentBusy);
+  const editLocked = taskLive || agentBusy;
+  const locked = (what: string) => `Moshi is working — ${what} when it finishes`;
   const beatWidth = beatPx(snapshot.session.tempo, pxPerSec);
   const tracks = snapshot.tracks.filter((t) => !t.isReturn && t.active !== false);
   // Lanes are laid out in px at the shared zoom (store.pxPerSec — the scale v2 and Pro Tools
@@ -293,11 +303,23 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   return (
     <div className="main" data-testid="v3-arrangement" data-px-per-sec={pxPerSec}>
       <div className="workspace-head" role="toolbar" aria-label="Tracks">
-        <button type="button" className="btn sm" data-testid="v3-add-audio" onClick={() => run("insert_audio_track")}>+ Audio track</button>
-        <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
-        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" title="A drum track with the bundled kit and a one-bar beat at the playhead — one undo step"
+        <button type="button" className="btn sm" data-testid="v3-add-audio" disabled={editLocked}
+          title={editLocked ? locked("add a track") : undefined}
+          onClick={() => run("insert_audio_track")}>+ Audio track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-midi" disabled={editLocked}
+          title={editLocked ? locked("add a track") : undefined}
+          onClick={() => run("insert_midi_track")}>+ MIDI track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" disabled={editLocked}
+          title={editLocked ? locked("add a beat")
+            : "A drum track with the bundled kit: fills the loop while Loop is on, else four bars from bar 1 in an empty session or from the bar at the playhead — one undo step"}
           onClick={() => void dropDrumBeat()}>+ Drum beat</button>
-        <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
+        <button type="button" className="btn sm" data-testid="v3-add-chords" disabled={editLocked}
+          title={editLocked ? locked("add chords")
+            : "A Keys track with a four-bar chord progression (Am, F, C, G) — opens its presets; one undo step"}
+          onClick={() => void dropChords()}>+ Chords</button>
+        <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi || editLocked}
+          title={editLocked ? locked("add a clip") : canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"}
+          onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
       </div>
       <div className="arr-head">
@@ -311,7 +333,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         </div>
       </div>
       <div className="tracks" ref={scrollerRef} onScroll={onScroll}>
-        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat, or import audio from the browser.</p></div>}
+        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat or a chord progression, or import audio from the browser.</p></div>}
         <div className="rows">
           {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} marks={marks} lanePx={lanePx} pxPerSec={pxPerSec} />)}
           {tracks.length > 0 && <Playhead />}

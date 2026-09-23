@@ -78,4 +78,23 @@ describe("v3 Mix inspector", () => {
     act(() => btn!.click());
     expect(calls).toContainEqual({ command: "open_plugin_editor", args: { trackId: "t1", index: 0 } });
   });
+
+  it("a native plugin's parameter rows read the engine's display text (units), not the raw 0-1 value", () => {
+    const snap = snapshot();
+    const eq = {
+      index: 1, name: "Level", type: "volume", enabled: true, external: false, builtin: true, isInstrument: false,
+      params: [
+        { index: 0, name: "Level 1", value: 0.85, display: "-3.2 dB" },
+        { index: 1, name: "Pan", value: 0.5 },                         // no display text: the value stays
+      ],
+    } as unknown as Plugin;
+    snap.tracks[0]!.plugins = [...(snap.tracks[0]!.plugins ?? []), eq];
+    useStore.setState({ snapshot: snap });
+    act(() => root.render(React.createElement(MixInspector, { snapshot: snap })));
+    const row = host.querySelector<HTMLElement>('[data-testid="v3-plugin"][data-plugin-index="1"]');
+    expect(row).not.toBeNull();
+    const values = [...row!.querySelectorAll(".fader .v")].map((el) => el.textContent);
+    expect(values).toEqual(["-3.2 dB", "0.50"]);
+    expect(row!.textContent).not.toContain("0.85");
+  });
 });

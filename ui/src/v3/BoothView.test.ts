@@ -6,8 +6,17 @@ import { useV3 } from "./shellState";
 import { useStore } from "../store";
 import type { CommandResult, LoopContribution, LoopState, Snapshot, Track } from "../types";
 
-const track = (id: string, name: string): Track =>
-  ({ id, index: 0, name, type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [] }) as unknown as Track;
+const track = (id: string, name: string, over: Partial<Track> = {}): Track =>
+  ({ id, index: 0, name, type: "audio", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [], ...over }) as unknown as Track;
+const midiClip = (id: string) => ({ id, name: "beat", type: "midi", start: 0, length: 8, offset: 0 });
+const waveClip = (id: string) => ({ id, name: "vox", type: "wave", start: 0, length: 8, offset: 0 });
+const instrument = (name: string) => ({ index: 0, name, type: name.toLowerCase(), enabled: true, external: false, isInstrument: true, params: [] });
+const effect = (name: string) => ({ index: 1, name, type: name.toLowerCase(), enabled: true, external: false, isInstrument: false, params: [] });
+// What `+ Drum beat` leaves behind: a drum-typed track with a sampler and a MIDI clip, SELECTED.
+const drums = (over: Partial<Track> = {}) =>
+  track("21", "Drums", { type: "drum", isInstrument: true, clips: [midiClip("c21")] as Track["clips"], plugins: [instrument("Sampler")] as Track["plugins"], ...over });
+const pairing = { host: "192.168.1.9", port: 8792, token: "ab".repeat(16), expiresAtMs: 0,
+  pairingUrl: "mosh://pair", webUrl: "http://192.168.1.9:8792/web", padUrl: "http://192.168.1.9:8792/pad#token=abab" };
 
 const part = (id: string, label: string, over: Partial<LoopContribution> = {}): LoopContribution =>
   ({ id, label, keeper: false, rejected: false, clipId: `c-${id}`, trackId: "11", ...over });
@@ -23,14 +32,20 @@ function loopState(over: Partial<LoopState> = {}): LoopState {
   };
 }
 
-function snapshot(loop?: LoopState): Snapshot {
+function snapshotWith(tracks: Track[], loop?: LoopState): Snapshot {
   return {
     schemaVersion: 1,
     session: { sampleRate: 48000, tempo: 120, length: 16 },
-    tracks: [track("11", "Keys"), track("12", "Keys · Takes")],
+    tracks,
     transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
     ...(loop ? { loop } : {}),
   } as unknown as Snapshot;
+}
+function snapshot(loop?: LoopState, takesMonitor?: Track["monitor"]): Snapshot {
+  return snapshotWith([
+    track("11", "Keys"),
+    track("12", "Keys · Takes", takesMonitor ? { monitor: takesMonitor } : {}),
+  ], loop);
 }
 
 const PADS = ["v3-loop-record", "v3-loop-keep", "v3-loop-again", "v3-loop-hear", "v3-loop-play-all", "v3-loop-stop"];
@@ -168,6 +183,7 @@ describe("v3 Booth — the desktop recording pad", () => {
   });
 
   it("opens the phone dialog and reads the listening cursor back", () => {
+    useStore.setState({ remoteStatus: { running: true, port: 8792, pairing } });
     render(snapshot(loopState()));
     expect(host.textContent).toContain("bar 3");
     expect(host.textContent).toContain("Entry 8 qn");
@@ -203,6 +219,176 @@ describe("v3 Booth — the desktop recording pad", () => {
     } finally {
       window.removeEventListener("unhandledrejection", onRejection);
     }
+  });
+
+  // ── A15: the Lead is never a drum, MIDI or instrument track ───────────────────────────
+  describe("Lead candidates", () => {
+    const setupText = () => pad("v3-booth-setup")!.textContent;
+
+    it("skips the selected Drums track (what `+ Drum beat` leaves selected) for the audio track", async () => {
+      useStore.setState({ selectedTrackId: "21" });
+      render(snapshotWith([drums(), track("22", "Vox")]));
+      expect(setupText()).toBe("Use Vox as Lead");
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls).toEqual([{ command: "loop_setup", args: { trackId: "22" } }]);
+    });
+
+    it.each([
+      ["a drum-typed track", track("31", "Kit", { type: "drum" })],
+      ["a midi-typed track", track("31", "Synth", { type: "midi" })],
+      ["an audio track holding a MIDI clip", track("31", "Beat", { clips: [midiClip("c31")] as Track["clips"] })],
+      ["an instrument track with no plugin rows (the mock's Bass)", track("31", "Bass", { isInstrument: true })],
+      ["a track whose plugins include an instrument", track("31", "Pad", { plugins: [effect("EQ"), instrument("4OSC")] as Track["plugins"] })],
+      ["a group track", track("31", "Group", { type: "group", isGroup: true })],
+      ["a return track", track("31", "Reverb", { isReturn: true, returnBus: 1 })],
+    ])("never offers %s", (_label, excluded) => {
+      useStore.setState({ selectedTrackId: "31" });
+      render(snapshotWith([excluded, track("32", "Vox", { clips: [waveClip("c32")] as Track["clips"] })]));
+      expect(setupText()).toBe("Use Vox as Lead");
+      render(snapshotWith([excluded]));
+      expect(setupText()).toBe("Add a Vocal track");
+    });
+
+    it("never offers a leftover Takes track as the Lead", () => {
+      useStore.setState({ selectedTrackId: "12" });
+      render(snapshotWith([track("12", "Vox · Takes"), track("11", "Vox")], loopState({ engaged: false, takesTrackId: "12" })));
+      expect(setupText()).toBe("Use Vox as Lead");
+    });
+
+    it("prefers the selected candidate, then an armed one, then the first", () => {
+      const tracks = [drums(), track("41", "Keys"), track("42", "Vox", { armed: true })];
+      useStore.setState({ selectedTrackId: "41" });
+      render(snapshotWith(tracks));
+      expect(setupText()).toBe("Use Keys as Lead");
+      useStore.setState({ selectedTrackId: "21" });
+      render(snapshotWith(tracks));
+      expect(setupText()).toBe("Use Vox as Lead");
+      useStore.setState({ selectedTrackId: null });
+      render(snapshotWith([drums(), track("41", "Keys"), track("42", "Vox")]));
+      expect(setupText()).toBe("Use Keys as Lead");
+    });
+
+    it("with no candidate, Add a Vocal track creates one and makes it the Lead", async () => {
+      useStore.setState({
+        selectedTrackId: "21",
+        exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+          calls.push({ command, args });
+          return command === "create_track"
+            ? { ok: true, command, data: { trackId: "51", type: "audio", isInstrument: false } }
+            : { ok: true, command };
+        }),
+      });
+      render(snapshotWith([drums()]));
+      expect(setupText()).toBe("Add a Vocal track");
+      expect(pad("v3-booth-setup")!.disabled).toBe(false);
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls).toEqual([
+        { command: "create_track", args: { name: "Vocal" } },
+        { command: "loop_setup", args: { trackId: "51" } },
+      ]);
+    });
+
+    it("a failed create_track stops there and says why", async () => {
+      useStore.setState({
+        exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+          calls.push({ command, args });
+          return { ok: false, command, error: "insert failed" };
+        }),
+      });
+      render(snapshotWith([]));
+      expect(setupText()).toBe("Add a Vocal track");
+      await act(async () => { pad("v3-booth-setup")!.click(); });
+      expect(calls.map((c) => c.command)).toEqual(["create_track"]);
+      expect(host.querySelector('[data-testid="v3-booth-note"]')!.textContent).toContain("insert failed");
+    });
+  });
+
+  // ── A14: Hear myself — read from the snapshot, written through set_input_monitor ─────
+  describe("Hear myself", () => {
+    const monitor = () => pad("v3-booth-monitor");
+
+    it("is not offered before the loop is set up", () => {
+      render(snapshot());
+      expect(monitor()).toBeNull();
+    });
+
+    it("reads the takes track's monitor mode and turns it off", async () => {
+      render(snapshot(loopState(), "automatic"));
+      expect(monitor()!.textContent).toBe("Hear myself: On");
+      expect(monitor()!.getAttribute("aria-pressed")).toBe("true");
+      expect(monitor()!.title).toBe("Monitoring applies to the whole input device");
+      await act(async () => { monitor()!.click(); });
+      expect(calls).toEqual([{ command: "set_input_monitor", args: { trackId: "12", mode: "off" } }]);
+    });
+
+    it("turns it back to automatic from off", async () => {
+      render(snapshot(loopState(), "off"));
+      expect(monitor()!.textContent).toBe("Hear myself: Off");
+      expect(monitor()!.getAttribute("aria-pressed")).toBe("false");
+      await act(async () => { monitor()!.click(); });
+      expect(calls).toEqual([{ command: "set_input_monitor", args: { trackId: "12", mode: "automatic" } }]);
+    });
+
+    it("treats 'on' as on", () => {
+      render(snapshot(loopState(), "on"));
+      expect(monitor()!.textContent).toBe("Hear myself: On");
+    });
+
+    it("never flips on its own: the label follows the SNAPSHOT, not the click", async () => {
+      render(snapshot(loopState(), "automatic"));
+      await act(async () => { monitor()!.click(); });
+      render(snapshot(loopState(), "automatic"));          // the engine did not change it
+      expect(monitor()!.textContent).toBe("Hear myself: On");
+      render(snapshot(loopState(), "off"));                // the engine did
+      expect(monitor()!.textContent).toBe("Hear myself: Off");
+    });
+
+    it("says why when the engine could not apply it", async () => {
+      useStore.setState({
+        exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+          calls.push({ command, args });
+          return { ok: true, command, data: { trackId: "12", mode: "off", applied: false, reason: "no input device" } };
+        }),
+      });
+      render(snapshot(loopState(), "automatic"));
+      await act(async () => { monitor()!.click(); });
+      expect(host.querySelector('[data-testid="v3-booth-note"]')!.textContent).toContain("no input device");
+    });
+  });
+
+  // ── A22: engineering readouts and the Phone button stay out of the way ────────────────
+  describe("progressive disclosure", () => {
+    it("keeps the readout and the lead-in / go-to-bar forms in a collapsed Details", () => {
+      render(snapshot(loopState()));
+      const details = host.querySelector<HTMLDetailsElement>('[data-testid="v3-booth-details"]');
+      expect(details).not.toBeNull();
+      expect(details!.tagName).toBe("DETAILS");
+      expect(details!.open).toBe(false);
+      expect(details!.querySelector("summary")!.textContent).toBe("Details");
+      for (const id of ["v3-loop-target", "v3-loop-home", "v3-loop-bar", "v3-loop-go", "v3-loop-lead", "v3-loop-set-lead"])
+        expect(details!.querySelector(`[data-testid="${id}"]`), id).not.toBeNull();
+      expect(details!.textContent).toContain("Entry 8 qn");
+      // …and none of it is outside the Details
+      const outside = host.cloneNode(true) as HTMLElement;
+      outside.querySelector('[data-testid="v3-booth-details"]')!.remove();
+      expect(outside.textContent).not.toContain("Lead-in qn");
+      expect(outside.textContent).not.toContain("Go to bar");
+      expect(outside.textContent).not.toContain("Entry");
+      // the pads themselves are NOT hidden
+      expect(details!.querySelector('[data-testid="v3-loop-record"]')).toBeNull();
+      expect(pad("v3-loop-record")).not.toBeNull();
+    });
+
+    it("shows the Phone button only once a phone is paired or connected", () => {
+      render(snapshot(loopState()));
+      expect(pad("v3-booth-phone")).toBeNull();
+      useStore.setState({ remoteStatus: { running: true, port: 8792, pairing } });
+      render(snapshot(loopState()));
+      expect(pad("v3-booth-phone")).not.toBeNull();
+      useStore.setState({ remoteStatus: null });
+      render(snapshot(loopState({ phoneConnected: true })));
+      expect(pad("v3-booth-phone")).not.toBeNull();
+    });
   });
 
   it("no longer drives the old take lane", () => {

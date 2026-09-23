@@ -39,9 +39,16 @@ test("Phone pairs to the LAN-IP Safari pad, never to mosh:// or a .local host", 
   await expect(trigger).not.toHaveClass(/\bon\b/);
 });
 
-test("the Booth's own Phone button opens the same dialog", async ({ page }) => {
+test("the Booth's own Phone button appears once a phone is paired, and opens the same dialog", async ({ page }) => {
   await bootV3(page);
   await enterBooth(page);
+  // Until a phone is paired the Booth keeps the button off the screen; the TopBar pairs one.
+  await expect(page.getByTestId("v3-booth-phone")).toHaveCount(0);
+  await page.getByTestId("v3-phone-trigger").click();
+  await expect(page.getByTestId("v3-phone-url")).toHaveText(PAD_URL);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("v3-phone-modal")).toHaveCount(0);
+
   await page.getByTestId("v3-booth-phone").click();
   await expect(page.getByTestId("v3-phone-modal")).toBeVisible();
   await expect(page.getByTestId("v3-phone-url")).toHaveText(PAD_URL);

@@ -65,6 +65,66 @@ test("Split here in the context menu splits at the pointer's snapped time and on
   await expect(clips).toHaveCount(1);
 });
 
+// ── the clip context menu (demo readiness, 2026-09-23) ─────────────────────────────────
+// WKWebView implements neither window.confirm nor window.prompt (confirm → false, prompt → null),
+// so every menu item must act without a JS dialog. Playwright auto-DISMISSES dialogs, which is
+// the same answer the packaged app gets — a dialog here reads as "the item did nothing".
+type FrozenWindow = Window & { __moshStore?: { getState: () => { snapshot?: { tracks: { name: string; frozen?: boolean }[] } } } };
+const frozenOf = (page: Parameters<typeof bootV3>[0], name: string) =>
+  page.evaluate((n) => (window as unknown as FrozenWindow).__moshStore!.getState().snapshot!.tracks.find((t) => t.name === n)?.frozen === true, name);
+const openClipMenu = async (page: Parameters<typeof bootV3>[0], clip: ReturnType<Parameters<typeof bootV3>[0]["locator"]>) => {
+  const b = (await clip.boundingBox())!;
+  await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2, { button: "right" });
+  const menu = page.getByTestId("v3-context");
+  await expect(menu).toBeVisible();
+  return menu;
+};
+
+test("context menu Delete removes the clip with no dialog, and one undo restores it", async ({ page }) => {
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => { dialogs.push(d.type()); void d.dismiss(); });
+  await bootV3(page);
+  const clips = page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" }).getByTestId("v3-clip");
+  await expect(clips).toHaveCount(1);
+  const menu = await openClipMenu(page, clips.first());
+  await menu.getByTestId("v3-context-delete").click();
+  await expect(clips).toHaveCount(0);
+  await expect(menu).toHaveCount(0);
+  expect(dialogs).toEqual([]);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(clips).toHaveCount(1);
+});
+
+test("context menu Bounce lands a new track (mode newTrack), one undo removes it; there is no Rename", async ({ page }) => {
+  await bootV3(page);
+  const tracks = page.getByTestId("v3-track");
+  const keys = tracks.filter({ hasText: "Keys" });
+  const before = await tracks.count();
+  let menu = await openClipMenu(page, keys.getByTestId("v3-clip").first());
+  await menu.getByRole("button", { name: /Bounce/ }).click();
+  await expect(tracks).toHaveCount(before + 1);       // the mock refuses a bounce without a mode, like the engine
+  await expect(tracks.filter({ hasText: "Keys (bounce)" })).toHaveCount(1);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(tracks).toHaveCount(before);
+  menu = await openClipMenu(page, keys.getByTestId("v3-clip").first());
+  await expect(menu.getByTestId("v3-context-bounce")).toHaveText(/Bounce to new track/);
+  await expect(menu.getByRole("button", { name: /Duplicate/ })).toBeVisible();   // the menu is populated (anti-vacuity)
+  await expect(menu.getByRole("button", { name: /Rename/ })).toHaveCount(0);   // window.prompt is dead in WKWebView
+});
+
+test("context menu Freeze freezes the track, then the same row reads Unfreeze and thaws it", async ({ page }) => {
+  await bootV3(page);
+  const keys = page.locator('[data-testid="v3-track"]').filter({ hasText: "Keys" });
+  expect(await frozenOf(page, "Keys")).toBe(false);
+  let menu = await openClipMenu(page, keys.getByTestId("v3-clip").first());
+  await menu.getByTestId("v3-context-freeze").click();
+  await expect.poll(() => frozenOf(page, "Keys")).toBe(true);
+  menu = await openClipMenu(page, keys.getByTestId("v3-clip").first());
+  await expect(menu.getByTestId("v3-context-freeze")).toHaveText("Unfreeze");
+  await menu.getByTestId("v3-context-freeze").click();
+  await expect.poll(() => frozenOf(page, "Keys")).toBe(false);
+});
+
 // ── playhead, ruler seek, sections (2026-09-21) ─────────────────────────────────────────
 type TransportWindow = Window & { __moshStore?: { getState: () => {
   pxPerSec: number; setPxPerSec: (v: number) => void; transport: { position: number };

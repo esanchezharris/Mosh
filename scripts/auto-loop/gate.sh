@@ -127,6 +127,10 @@ run_selftest_x3() {
     if [ -z "$first_n" ]; then first_n="$n"; elif [ "$n" != "$first_n" ]; then deterministic=false; fi
     [ "$f" -gt "$SELFTEST_FMAX" ] 2>/dev/null && SELFTEST_FMAX="$f"
     [ "$a" -gt "$SELFTEST_AMAX" ] 2>/dev/null && SELFTEST_AMAX="$a"
+    # A failing run's log is copied to $AL_HOME/selftest-logs/ before it is deleted, so the
+    # failing check can be named later (the tally above never says which). Copy only — the
+    # verdict is already decided; see keep_failed_selftest_log in lib.sh.
+    keep_failed_selftest_log "$log" "$rc" "$f" "$HEAD_SHA" "$i" "$a" >/dev/null
     rm -f "$log"
   done
   # build JSON array of the three N's
@@ -217,6 +221,7 @@ run_harness_selftests() {
   run_step "memory_preflight_selftest" bash tests/memory-preflight-test.sh
   run_step "harness_deps_freshness" bash scripts/auto-loop/deps-freshness-selftest.sh
   run_step "harness_port_ownership" bash scripts/auto-loop/port-ownership-selftest.sh
+  run_step "harness_selftest_log_keep" bash scripts/auto-loop/selftest-log-keep-selftest.sh
   run_step "cmake_preset_bundle_metadata" bash tests/cmake-preset-bundle-metadata-test.sh
   run_step "tracktion_patch_stack" bash tests/apply-tracktion-patch-test.sh
 }

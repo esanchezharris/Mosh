@@ -21,11 +21,53 @@ const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveF
 // Space must be handled right here — see MenuController.cpp's transportPlayPause.
 const NATIVE_MENU_ACTIONS = new Set<string>([EA.UNDO, EA.REDO, EA.CUT, EA.COPY, EA.PASTE, EA.SAVE]);
 
+// An EMPTY Moshi prompt passes Space to the transport (nothing to type yet). The classic/v2
+// composer is `.agent-composer`; the V3 dock field is `v3-moshi-field`.
 const emptyAgentPromptSpace = (target: EventTarget | null, action: string): boolean =>
   action === EA.PLAY_PAUSE &&
   target instanceof HTMLInputElement &&
-  !!target.closest(".agent-composer") &&
+  (!!target.closest(".agent-composer") || target.matches('[data-testid="v3-moshi-field"]')) &&
   target.value.trim() === "";
+
+// A focused range slider owns its arrows (a fader nudge) but has no Space behaviour of its
+// own, so play/pause passes through — Space after touching a fader plays. Range ONLY:
+// checkbox and radio toggle natively on Space, and this hook is shared by every shell.
+const rangeSliderSpace = (target: EventTarget | null, action: string): boolean =>
+  action === EA.PLAY_PAUSE && target instanceof HTMLInputElement && target.type === "range";
+
+// Native-menu Edit actions (⌘Z/⇧⌘Z/⌘X/⌘C/⌘V in the packaged app arrive as mosh_menu events,
+// not keydowns, so the editable-target guard in onKey never sees them). While a text field
+// that OWNS its edit keys has focus they belong to the field: no session undo/redo and no clip
+// cut/copy/paste. A field owns them when it sits inside the V3 shell (AppV3's `.v3-shell`
+// root) or opts in with `data-owns-edit-keys` (the V3 dock field, and the Re-Imagine prompt
+// and seed, which Pro Tools shares). Every other shell keeps main's behaviour: its inputs
+// commit on Enter and keep focus, so the menu's ⌘Z must still undo that edit.
+const TEXT_EDIT_MENU_ACTIONS = new Set<string>(["undo", "redo", "cut", "copy", "paste"]);
+const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "number", "tel", "password"]);
+const OWNS_EDIT_KEYS = ".v3-shell, [data-owns-edit-keys]";
+
+/** True while a text-entry element owns focus (range sliders and checkboxes are NOT text). */
+function textEntryFocused(el: Element | null = document.activeElement): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(el.type.toLowerCase());
+  return el.isContentEditable || el.getAttribute("contenteditable") === "true" || el.getAttribute("contenteditable") === "";
+}
+
+/** A focused text-entry element that owns the native-menu Edit actions (see above). */
+function editKeysOwnedByField(el: Element | null = document.activeElement): boolean {
+  return textEntryFocused(el) && !!el?.closest(OWNS_EDIT_KEYS);
+}
+
+/** Best effort only: WKWebView may ignore script-issued execCommand (and jsdom has none).
+ *  What matters is the early return in the caller — the session is never touched. Paste
+ *  is a no-op (script paste needs clipboard access the WebView does not grant). */
+function textFieldEdit(action: string): void {
+  if (action === "paste") return;
+  try {
+    if (typeof document.execCommand === "function") document.execCommand(action);
+  } catch { /* ignored — the field keeps its text */ }
+}
 
 const nativeButtonActivation = (target: EventTarget | null, event: KeyboardEvent): boolean =>
   target instanceof HTMLButtonElement
@@ -83,7 +125,9 @@ export function useKeyboardShortcuts() {
       // to window. The DOM focus owner is still authoritative: inspector controls keep
       // their arrows until focus actually returns to the arrangement.
       const keyboardOwner = isEditableTarget(e.target) ? e.target : document.activeElement;
-      if (isEditableTarget(keyboardOwner) && !emptyAgentPromptSpace(keyboardOwner, action)) return;
+      if (isEditableTarget(keyboardOwner)
+        && !emptyAgentPromptSpace(keyboardOwner, action)
+        && !rangeSliderSpace(keyboardOwner, action)) return;
       // Enter and Space activate a focused native button. Let the browser synthesize
       // its click instead of also running a mapped DAW command (Pro Tools maps Enter
       // to Return-to-Zero). Custom clip buttons stop propagation in their own key
@@ -259,6 +303,10 @@ export function useKeyboardShortcuts() {
       const p = (raw ?? {}) as { action?: ActionId; file?: string };
       if (!p.action) return;
       if (forwardNativeEditAction(p.action)) return;
+      if (TEXT_EDIT_MENU_ACTIONS.has(p.action) && editKeysOwnedByField()) {
+        textFieldEdit(p.action);
+        return;
+      }
       void runAction(p.action, ctx(), p.file ? { file: p.file } : {});
     });
   }, []);
