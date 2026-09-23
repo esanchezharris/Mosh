@@ -5206,9 +5206,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // the mock, but the same result shape and the same failure modes.
     case "list_presets": {
       const lib = [
+        // the five bundled 4OSC patches (resources/presets/4osc/*.json)
         { plugin: "4osc", name: "mosh-bass", file: "/presets/4osc/mosh-bass.json", source: "bundled" },
+        { plugin: "4osc", name: "mosh-keys", file: "/presets/4osc/mosh-keys.json", source: "bundled" },
         { plugin: "4osc", name: "mosh-lead", file: "/presets/4osc/mosh-lead.json", source: "bundled" },
         { plugin: "4osc", name: "mosh-pad", file: "/presets/4osc/mosh-pad.json", source: "bundled" },
+        { plugin: "4osc", name: "mosh-pluck", file: "/presets/4osc/mosh-pluck.json", source: "bundled" },
         { plugin: "vital", name: "user-patch", file: "/presets/vital/user-patch.vital", source: "user" },
       ];
       const filter = str(args.plugin, "").toLowerCase();

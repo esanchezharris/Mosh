@@ -16,7 +16,12 @@ import { SampleThumb } from "./SampleThumb";
 
 const baseName = (p: string) => p.split("/").pop() ?? p;
 
-export function SampleBrowser() {
+export type SampleBrowserProps = { hidePaths?: boolean };
+
+/** hidePaths (V3, on a screen share): names only — the path bar shows the folder's name, rows drop
+ *  their full-path meta line and tooltips carry names, never an absolute home path. Default off,
+ *  so every other shell keeps the full paths. */
+export function SampleBrowser({ hidePaths = false }: SampleBrowserProps) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -131,15 +136,15 @@ export function SampleBrowser() {
         </button>
         <div className="sb-location-copy">
           <span className="sb-location-label">Current folder</span>
-          <span className="pop-note sb-path" title={listing?.path}>
-            {loading ? "Loading sounds..." : (listing?.path ?? "Loading sounds...")}
+          <span className="pop-note sb-path" title={hidePaths ? undefined : listing?.path}>
+            {loading ? "Loading sounds..." : listing ? (hidePaths ? baseName(listing.path) || listing.path : listing.path) : "Loading sounds..."}
           </span>
         </div>
         <button className="btn" type="button" data-testid="sample-browser-choose-files"
           onClick={() => void chooseFiles()}>Choose files…</button>
         <AddSampleFolderButton navigate={async (path) => navigate(path)} />
       </div>
-      <SamplePlaces listing={listing} loading={loading}
+      <SamplePlaces listing={listing} loading={loading} hidePaths={hidePaths}
         navigate={async (path) => navigate(path)} />
       <label className="sb-search-field">
         <span className="sb-search-label">Search sounds</span>
@@ -159,12 +164,12 @@ export function SampleBrowser() {
             <span className="sb-section-count">{Math.min(recents.length, 6)}</span>
           </div>
           {recents.slice(0, 6).map((p) => (
-            <div key={p} className="plugin-row cb-file" draggable onDragStart={onDragStart(p)} title={p}>
+            <div key={p} className="plugin-row cb-file" draggable onDragStart={onDragStart(p)} title={hidePaths ? baseName(p) : p}>
               {auditionBtn(p)}
               <span className="sb-row-icon" aria-hidden><IconWaveform size={14} /></span>
               <div className="pr-name sb-row-copy">
                 <span className="sb-row-title">{baseName(p)}</span>
-                <span className="sb-row-meta">{p}</span>
+                {!hidePaths && <span className="sb-row-meta">{p}</span>}
               </div>
               {sketchBtn(p)}
               <button className="btn cb-import" onClick={() => void onImport(p)}>Import</button>
@@ -185,11 +190,11 @@ export function SampleBrowser() {
               <span className="sb-section-count">{dirs.length}</span>
             </div>
             {dirs.map((d) => (
-              <button key={d.path} className="plugin-row" disabled={loading} onClick={() => void navigate(d.path)} title={d.path}>
+              <button key={d.path} className="plugin-row" disabled={loading} onClick={() => void navigate(d.path)} title={hidePaths ? d.name : d.path}>
                 <span className="sb-row-icon" aria-hidden><IconFolder size={14} /></span>
                 <div className="pr-name sb-row-copy">
                   <span className="sb-row-title">{d.name}</span>
-                  <span className="sb-row-meta">{d.path}</span>
+                  {!hidePaths && <span className="sb-row-meta">{d.path}</span>}
                 </div>
                 <span className="pr-folder sb-row-affordance" aria-hidden="true">Open</span>
               </button>
@@ -215,7 +220,7 @@ export function SampleBrowser() {
                 <SampleThumb path={f.path} />
                 <div className="pr-name sb-row-copy">
                   <span className="sb-row-title">{f.name}</span>
-                  <span className="sb-row-meta">{f.path}</span>
+                  {!hidePaths && <span className="sb-row-meta">{f.path}</span>}
                 </div>
                 {sketchBtn(f.path)}
                 <button className="btn cb-import" onClick={() => void onImport(f.path)}>Import</button>

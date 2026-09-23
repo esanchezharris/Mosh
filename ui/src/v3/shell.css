@@ -707,3 +707,12 @@
 .v3-shell .receipt.task > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v3-shell .receipt.task .btn { flex-shrink: 0; }
 /* demo-fixes:keys-dock end */
+
+/* demo-fixes:arrange begin */
+/* Presets pane: the instrument's name over the preset that is on it (A24). */
+.v3-shell .preset-row .preset-id { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.v3-shell .preset-row .preset-now {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* demo-fixes:arrange end */
