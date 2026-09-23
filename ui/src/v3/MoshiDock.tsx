@@ -14,14 +14,24 @@ import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { routeAsk } from "../agent/loop/router";
 import { matchIssueReport } from "../agent/issueRoute";
 import { activeShell } from "../v2/shellFlag";
-import { brainRuntimeStatus, onEvent, type BrainRuntimeStatus } from "../bridge";
+import { brainRuntimeStatus, nativeMenuPresent, onEvent, type BrainRuntimeStatus } from "../bridge";
 import { IconArrowUp, IconMic } from "../ui/icons";
 import { MoshiFace } from "./MoshiFace";
 import { useProducerRack } from "../agent/loop/producerRack";
-import { ProducerRackSetup } from "../ui/ProducerRackSetup";
 
 export function recordingDisablesDock(recording: boolean): boolean {
   return recording;
+}
+
+// A greeting or a "what can you do" gets a local, deterministic reply (no model, no skill, no
+// engine command) that points at asks the dock handles instantly. Full-string anchored, so
+// "hey moshi, make the drums louder" still goes to the normal path.
+const GREETING = /^(?:hi|hey|hello|yo|hiya)(?:[,\s]+moshi)?[\s!.?]*$/i;
+const HELP = /^(?:help|what can you do\??|what do you do\??)$/i;
+export const DOCK_HELLO = "hey! try 'set the tempo to 90' or 'turn the drums down 3 dB'";
+export function dockGreetingReply(text: string): string | null {
+  const t = text.trim();
+  return GREETING.test(t) || HELP.test(t) ? DOCK_HELLO : null;
 }
 
 export function MoshiDock() {
@@ -118,12 +128,19 @@ export function MoshiDock() {
 
   const run = async (text: string, source: "typed" | "push_to_talk" = "typed") => {
     if (!text || useStore.getState().agentBusy || recordingDisablesDock(useStore.getState().transport.recording)) return;
-    setInput(""); setSay(null); setChoices([]); setAgentBusy(true);
+    // A new ask retires the previous receipt: a stale change set would hide this ask's reply.
+    setInput(""); setSay(null); setAgentChangeSet(null); setChoices([]); setAgentBusy(true);
     try {
       const st = useStore.getState();
       if (useProducerRack.getState().rack) {
         if (!loopAllowed()) throw new Error("The Producer loop is unavailable in this session");
         await runLoopTask(text, { say: setSay, utter: pushAgentUtter });
+        return;
+      }
+      const hello = dockGreetingReply(text);
+      if (hello) {
+        pendingSkillToken.current = null;   // a new turn abandons any hidden clarification
+        setSay(hello); pushAgentUtter("DONE", hello);
         return;
       }
       const issue = matchIssueReport(text);
@@ -226,12 +243,14 @@ export function MoshiDock() {
   };
 
   const disabled = safe || agentBusy;
+  // The packaged app strips the speech-recognition usage string, so dictation can never work
+  // there; the mic is a dev-lane (Vite) affordance only.
+  const showMic = !nativeMenuPresent();
   const clarify = choices.length > 0 && !safe;
   const receipt = !safe && changeSet && changeSet.entries.length > 0 ? changeSet : null;
 
   return (
     <div className={`prompt${safe ? " safe" : ""}`} data-testid="v3-moshi-dock" data-recording-safe={safe || undefined}>
-      {!safe && loopAllowed() && <ProducerRackSetup />}
       {receipt && (
         <div className="receipt" data-testid="v3-receipt" role="status">
           <span>{receipt.entries[0]?.summary ?? receipt.label}</span>
@@ -265,7 +284,7 @@ export function MoshiDock() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && input.trim()) void run(input.trim()); }}
         />
-        <button
+        {showMic && <button
           type="button"
           className={`ibtn${listening ? " on" : ""}`}
           data-testid="v3-moshi-mic"
@@ -295,7 +314,7 @@ export function MoshiDock() {
           }}
         >
           <IconMic size={16} />
-        </button>
+        </button>}
         <button type="button" className="btn pri sm" data-testid="v3-moshi-send"
           disabled={disabled || !input.trim()} onClick={() => void run(input.trim())} aria-label="Send">
           <IconArrowUp size={13} />
