@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import type { Snapshot } from "../types";
+import type { CommandResult, LoopState, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import {
@@ -26,6 +26,27 @@ const PADS = [
   { action: "play_all", command: "loop_play_all", testId: "v3-loop-play-all", label: "Play All", primary: false },
   { action: "stop", command: "loop_stop", testId: "v3-loop-stop", label: "Stop", primary: false },
 ] as const satisfies readonly { action: LoopAction; command: string; testId: string; label: string; primary: boolean }[];
+
+/** A track the loop may use as the Lead — the audio track a voice lands on. Never a drum,
+ *  MIDI or instrument track (the sampler/synth would silence a kept vocal), never a group,
+ *  return, or the loop's own Takes lane. `isInstrument` is checked at the TRACK level too:
+ *  an instrument track can carry no plugin rows at all (the dev mock's Bass is one). */
+export function isLeadCandidate(t: Track, loop: LoopState | null | undefined): boolean {
+  return !t.isGroup && !t.isReturn && t.id !== loop?.takesTrackId
+    && t.type !== "drum" && t.type !== "midi"
+    && !t.clips.some((c) => c.type === "midi")
+    && !t.isInstrument
+    && !(t.plugins ?? []).some((p) => p.isInstrument);
+}
+
+/** The selected track if it can be the Lead, else an armed candidate, else the first. */
+export function pickLeadTrack(tracks: readonly Track[], selectedTrackId: string | null | undefined,
+  loop: LoopState | null | undefined): Track | undefined {
+  const candidates = tracks.filter((t) => isLeadCandidate(t, loop));
+  return candidates.find((t) => t.id === selectedTrackId)
+    ?? candidates.find((t) => t.armed)
+    ?? candidates[0];
+}
 
 export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   const loop = snapshot.loop;
@@ -55,9 +76,11 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
     if (selected && !loop?.contributions.some((part) => part.id === selected)) setSelected(null);
   }, [loop, selected]);
 
-  const leadTrack = snapshot.tracks.find((t) => t.id === selectedTrackId)
-    ?? snapshot.tracks.find((t) => t.armed)
-    ?? snapshot.tracks[0];
+  const leadTrack = pickLeadTrack(snapshot.tracks, selectedTrackId, loop);
+  // Monitoring is read from the SNAPSHOT (the engine resets it to automatic at every launch,
+  // so local state would lie after a relaunch) and belongs to the shared input device.
+  const takesTrack = loop?.engaged ? snapshot.tracks.find((t) => t.id === loop.takesTrackId) : undefined;
+  const hearingMyself = takesTrack ? takesTrack.monitor !== "off" : false;
 
   // Every loop command answers with a human `detail` — including the ones that committed
   // the edit but could not roll again ("Kept Part 2; recording did not restart: …"). Show
@@ -67,7 +90,7 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   // call that failed before it could build an envelope. Without the catch that rejection
   // escapes as an unhandled promise rejection: the button un-dims and nothing is said,
   // which from the live room is indistinguishable from a pad that does nothing at all.
-  const run = async (command: string, args: Record<string, unknown> = {}) => {
+  const run = async (command: string, args: Record<string, unknown> = {}): Promise<CommandResult | null> => {
     setPending(true);
     try {
       const result = await exec(command, args);
@@ -75,11 +98,31 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
       const detail = typeof data?.detail === "string" ? data.detail : null;
       setNote(result.ok ? detail : (result.error ?? `${command} failed`));
       if (result.ok) await useStore.getState().refresh();
+      return result;
     } catch (error) {
       setNote(`${command} failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
     } finally {
       setPending(false);
     }
+  };
+
+  // No track can be the Lead (an empty session, or only the drum beat): make one. Two
+  // existing commands, create_track then loop_setup, so each stays its own undo step.
+  const addVocalTrack = async () => {
+    const created = await run("create_track", { name: "Vocal" });
+    if (!created?.ok) return;
+    const trackId = (created.data as { trackId?: unknown } | undefined)?.trackId;
+    if (typeof trackId !== "string" || !trackId) { setNote("create_track did not name the new track"); return; }
+    await run("loop_setup", { trackId });
+  };
+
+  const toggleHearMyself = async () => {
+    if (!loop?.takesTrackId) return;
+    const result = await run("set_input_monitor", { trackId: loop.takesTrackId, mode: hearingMyself ? "off" : "automatic" });
+    const data = result?.ok ? result.data as { applied?: unknown; reason?: unknown } | undefined : undefined;
+    if (data?.applied === false)
+      setNote(`Monitoring unchanged: ${typeof data.reason === "string" && data.reason ? data.reason : "the engine did not apply it"}`);
   };
 
   const line = note ?? (loop?.blockReason || null);
@@ -104,9 +147,9 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
             <div className="set-hint">
               Pick the track you sing on, and Moshi keeps a Takes lane beside it. Nothing is recorded over.
             </div>
-            <button type="button" className="btn pri" data-testid="v3-booth-setup" disabled={!leadTrack || pending}
-              onClick={() => void run("loop_setup", { trackId: leadTrack?.id })}>
-              {leadTrack ? `Use ${leadTrack.name} as Lead` : "Add a track first"}
+            <button type="button" className="btn pri" data-testid="v3-booth-setup" disabled={pending}
+              onClick={() => void (leadTrack ? run("loop_setup", { trackId: leadTrack.id }) : addVocalTrack())}>
+              {leadTrack ? `Use ${leadTrack.name} as Lead` : "Add a Vocal track"}
             </button>
           </div>
         ) : (
@@ -127,45 +170,62 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
               ))}
             </div>
 
-            <div className="booth-readout">
-              <span data-testid="v3-loop-target">Target · {loopTargetLabel(loop, selected)}</span>
-              <span className="set-hint">
-                bar {loop.listening.bar.toFixed(1)} · Entry {loop.listening.entryQn === null ? "—" : `${loop.listening.entryQn} qn`}
-                {" "}· Lead {loop.listening.leadQn} qn
-              </span>
-            </div>
-
-            <div className="booth-forms">
-              <button type="button" className="btn sm" data-testid="v3-loop-home"
-                disabled={!loopAvailable("home", context)} onClick={() => void run("loop_home")}>Start</button>
-              <label className="set-hint">
-                Go to bar
-                <input className="field" type="number" min={1} value={bar} data-testid="v3-loop-bar"
-                  disabled={!loopAvailable("navigate", context)} onChange={(e) => setBar(e.target.value)} />
-              </label>
-              <button type="button" className="btn sm" data-testid="v3-loop-go"
-                disabled={!loopAvailable("navigate", context)}
-                onClick={() => void run("loop_navigate", { bar: Number(bar) })}>Go</button>
-              <label className="set-hint">
-                Lead-in qn
-                <input className="field" type="number" min={0} max={256}
-                  value={leadIn === "" ? String(loop.listening.leadQn) : leadIn} data-testid="v3-loop-lead"
-                  disabled={!loopAvailable("lead_in", context)} onChange={(e) => setLeadIn(e.target.value)} />
-              </label>
-              <button type="button" className="btn sm" data-testid="v3-loop-set-lead"
-                disabled={!loopAvailable("lead_in", context)}
-                onClick={() => void run("loop_lead_in", { leadQn: Number(leadIn === "" ? loop.listening.leadQn : leadIn) })}>
-                Set
+            <div className="booth-monitor-row">
+              <button type="button" className={`btn${hearingMyself ? " on" : ""}`} data-testid="v3-booth-monitor"
+                aria-pressed={hearingMyself} disabled={!takesTrack || pending}
+                title="Monitoring applies to the whole input device"
+                onClick={() => void toggleHearMyself()}>
+                Hear myself: {hearingMyself ? "On" : "Off"}
               </button>
             </div>
+
+            {/* Engineering readouts stay one click away: useful to a producer steering
+                passes, noise on a shared screen. */}
+            <details className="booth-details" data-testid="v3-booth-details">
+              <summary>Details</summary>
+              <div className="booth-readout">
+                <span data-testid="v3-loop-target">Target · {loopTargetLabel(loop, selected)}</span>
+                <span className="set-hint">
+                  bar {loop.listening.bar.toFixed(1)} · Entry {loop.listening.entryQn === null ? "—" : `${loop.listening.entryQn} qn`}
+                  {" "}· Lead {loop.listening.leadQn} qn
+                </span>
+              </div>
+
+              <div className="booth-forms">
+                <button type="button" className="btn sm" data-testid="v3-loop-home"
+                  disabled={!loopAvailable("home", context)} onClick={() => void run("loop_home")}>Start</button>
+                <label className="set-hint">
+                  Go to bar
+                  <input className="field" type="number" min={1} value={bar} data-testid="v3-loop-bar"
+                    disabled={!loopAvailable("navigate", context)} onChange={(e) => setBar(e.target.value)} />
+                </label>
+                <button type="button" className="btn sm" data-testid="v3-loop-go"
+                  disabled={!loopAvailable("navigate", context)}
+                  onClick={() => void run("loop_navigate", { bar: Number(bar) })}>Go</button>
+                <label className="set-hint">
+                  Lead-in qn
+                  <input className="field" type="number" min={0} max={256}
+                    value={leadIn === "" ? String(loop.listening.leadQn) : leadIn} data-testid="v3-loop-lead"
+                    disabled={!loopAvailable("lead_in", context)} onChange={(e) => setLeadIn(e.target.value)} />
+                </label>
+                <button type="button" className="btn sm" data-testid="v3-loop-set-lead"
+                  disabled={!loopAvailable("lead_in", context)}
+                  onClick={() => void run("loop_lead_in", { leadQn: Number(leadIn === "" ? loop.listening.leadQn : leadIn) })}>
+                  Set
+                </button>
+              </div>
+            </details>
           </>
         )}
 
         <div className="row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button type="button" className="btn ghost" data-testid="v3-booth-studio"
             onClick={() => setPosture("studio")}>← Studio</button>
-          <button type="button" className={`btn ghost${pairing ? " on" : ""}`} data-testid="v3-booth-phone"
-            onClick={() => setPhoneOpen(true)}>Phone</button>
+          {/* Only once a phone is paired or attached — until then the TopBar's Phone pairs one. */}
+          {phoneLine && (
+            <button type="button" className={`btn ghost${pairing ? " on" : ""}`} data-testid="v3-booth-phone"
+              onClick={() => setPhoneOpen(true)}>Phone</button>
+          )}
           {phoneLine && <span className="booth-phone-status" data-testid="v3-booth-phone-status">{phoneLine}</span>}
         </div>
         {line && <div className="set-hint" role="status" data-testid="v3-booth-note">{line}</div>}

@@ -701,3 +701,22 @@
   content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 1px;
   background: var(--grid-bar); pointer-events: none;
 }
+
+/* demo-fixes:booth-reimagine begin */
+/* Booth: "Hear myself" toggle (reads the takes track's snapshot monitor mode) and the
+   collapsed Details that hold the listening readout and the lead-in / go-to-bar forms. */
+.v3-shell .booth-monitor-row { display: flex; gap: 8px; align-items: center; }
+.v3-shell .booth-monitor-row .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.v3-shell .booth-details > summary {
+  cursor: pointer; list-style: none; width: max-content;
+  font-size: var(--v2-fs-sm); color: var(--muted);
+}
+.v3-shell .booth-details > summary::-webkit-details-marker { display: none; }
+.v3-shell .booth-details > summary::before { content: "›"; display: inline-block; margin-right: 5px; transition: transform .15s; }
+.v3-shell .booth-details[open] > summary::before { transform: rotate(90deg); }
+.v3-shell .booth-details > .booth-readout,
+.v3-shell .booth-details > .booth-forms { margin-top: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .v3-shell .booth-details > summary::before { transition: none; }
+}
+/* demo-fixes:booth-reimagine end */
