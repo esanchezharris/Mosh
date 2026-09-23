@@ -48,6 +48,8 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   await expect(page.getByTestId("v3-preset-current")).toHaveText("mosh-pad");
   await panePicker.blur();                                  // ⌘Z is ignored while a form control has focus
   await page.keyboard.press("ControlOrMeta+z");            // the pane pick is its own undo step
+  // the label names what is ON the instrument: once ⌘Z reverted the load it cannot vouch for it
+  await expect(page.getByTestId("v3-preset-current")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(fader).toHaveValue(before);

@@ -62,6 +62,11 @@ export type TimeRange = { start: number; end: number };
 export type State = {
   snapshot: Snapshot | null;
   projectEpoch: number;
+  // Bumps after every successful undo / redo / jump_to_history that goes through exec (the
+  // menus, keys, History and the agent all do), so UI-local state that mirrors an edit — V3's
+  // "preset loaded on this instrument" label — can drop what the history move may have
+  // reverted. View state only: never a command, never crosses the bridge.
+  historyEpoch: number;
   projectTransitioning: boolean;
   connected: boolean;
   lastError: string | null;
@@ -371,6 +376,9 @@ async function stopRecording(
   return { kind: "reviewing", review };
 }
 
+/** Commands that move the session along its undo timeline (see State.historyEpoch). */
+const HISTORY_MOVES = new Set(["undo", "redo", "jump_to_history"]);
+
 async function refreshSnapshot(
   get: StateGet,
   set: StateSet,
@@ -443,6 +451,7 @@ export const useStore = create<State>((set, get, api) => ({
 
   snapshot: null,
   projectEpoch: 0,
+  historyEpoch: 0,
   projectTransitioning: false,
   connected: isNative(),
   lastError: null,
@@ -539,6 +548,7 @@ export const useStore = create<State>((set, get, api) => ({
       }
     }
     recordSessionCommand(command, args, res.ok);
+    if (res.ok && HISTORY_MOVES.has(command)) set((state) => ({ historyEpoch: state.historyEpoch + 1 }));
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {
       // A success clears a stale transient error — but never the persistent version
