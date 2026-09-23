@@ -9,9 +9,13 @@ import { useTaskStore, type TaskView } from "../agent/loop/taskStore";
 //
 // A live task is only one of the two windows. A Moshi dock ask that runs through
 // runAgentBatch (fast path, studio skills, section rework) holds a native batch while
-// store.agentBusy is true and NO task is live. So an edit button gates on both:
+// store.agentBusy is true and NO task is live. So an edit button gates on both. Call both
+// hooks unconditionally (a `useA() || useB()` short-circuit would skip a hook and break
+// React's hook order when a task starts):
 //
-//   const editLocked = useAgentTaskLive() || useStore((s) => s.agentBusy);
+//   const taskLive = useAgentTaskLive();
+//   const agentBusy = useStore((s) => s.agentBusy);
+//   const editLocked = taskLive || agentBusy;
 //   <button disabled={editLocked} …>+ Drum beat</button>
 //
 // The Arrangement toolbar does this for all of its edit buttons (+ Audio track, + MIDI track,
