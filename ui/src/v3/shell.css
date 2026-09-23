@@ -232,13 +232,28 @@
   display: flex; align-items: stretch; border-bottom: 1px solid var(--fog-line);
   background: #101212; flex-shrink: 0; padding: 0 8px;
 }
-.v3-shell .hdr-spacer { width: 148px; flex-shrink: 0; margin-right: 6px; }
-.v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
-.v3-shell .ruler {
-  display: grid; grid-template-columns: repeat(var(--beats, 32), var(--beat-px, minmax(0, 1fr)));
-  height: 20px; align-items: center; overflow: hidden; background: var(--top); border: none; will-change: transform;
+/* The corner over the track headers: the timeline's snap / grid / zoom. 154 px like the headers
+   (which now meet their lanes — no gap), + 1 px for the lane's border so the ruler starts where
+   lane content does. */
+.v3-shell .tl-corner {
+  width: 154px; flex-shrink: 0; margin-right: 1px; display: flex; align-items: center; gap: 3px;
+  padding: 0 2px; border-right: 1px solid var(--fog-line);
 }
-.v3-shell .rn { font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); padding-left: 1px; }
+.v3-shell .tl-corner .ibtn { width: 24px; height: 24px; }
+.v3-shell .tl-corner .ibtn svg { width: 14px; height: 14px; }
+.v3-shell .tl-corner .tl-sp { flex: 1; }
+.v3-shell .tl-corner .grid-div {
+  height: 22px; padding: 0 4px; font-size: 10px; font-family: ui-monospace, monospace;
+  color: var(--text); background: var(--surface2); border: 1px solid var(--fog-line); border-radius: 5px;
+}
+.v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
+/* The ruler draws the lanes' own grid marks (gridMarks): a tick on the bottom edge at each mark,
+   the label just right of it. Absolutely placed, so it cannot drift from the lanes. */
+.v3-shell .ruler { position: relative; height: 20px; overflow: hidden; background: var(--top); border: none; }
+.v3-shell .rmark { position: absolute; top: 0; bottom: 0; width: 0; }
+.v3-shell .rmark .tick { position: absolute; left: 0; bottom: 0; width: 1px; height: 4px; background: var(--grid-bar); }
+.v3-shell .rmark .tick.bar { height: 8px; background: color-mix(in srgb, var(--text) 30%, transparent); }
+.v3-shell .rn { position: absolute; left: 4px; top: 3px; white-space: nowrap; font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); }
 .v3-shell .rn.bar { color: #C8CBC6; font-weight: 600; }
 .v3-shell .rn.beat { color: #5A6060; font-size: 8px; }
 
@@ -246,9 +261,9 @@
   flex: 1; display: flex; flex-direction: column; gap: 5px; padding: 8px;
   min-height: 0; overflow: auto; background: var(--bg);
 }
-.v3-shell .trk { display: flex; gap: 6px; height: 72px; flex-shrink: 0; width: max-content; min-width: 100%; }
+.v3-shell .trk { display: flex; gap: 0; height: 72px; flex-shrink: 0; width: max-content; min-width: 100%; }
 .v3-shell .trk .hd {
-  width: 148px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px;
+  width: 154px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px;
   position: sticky; left: 0; z-index: 2;
   padding: 7px 8px; border-radius: 6px; background: #121414; border: 1px solid var(--fog-line);
 }
@@ -278,24 +293,28 @@
 }
 .v3-shell .trk.sel .hd b { color: var(--accent); font-weight: 600; }
 .v3-shell .trk .lane {
-  flex: none; position: relative; border-radius: 6px; background: var(--lane);
-  border: 1px solid #1A1E1E; overflow: hidden; box-sizing: border-box;
+  /* height: auto — the classic shell's global `.lane { height: var(--lane-h) }` (ui/mosh.css) leaked
+     in and made lanes 4 px taller than their row, so grid marks peeked into the row gap. */
+  flex: none; position: relative; height: auto; border-radius: 6px; background: var(--lane);
+  /* The border stays for geometry (LANE_LEFT_PX counts it) but draws nothing: a visible lane edge
+     6 px from the clip's own border read as a double line, and in lime on the selected track. */
+  border: 1px solid transparent; overflow: hidden; box-sizing: border-box;
 }
 .v3-shell .clip.dragging { cursor: grabbing; }
 .v3-shell .workspace-empty { position: sticky; left: 0; }
-.v3-shell .trk.sel .lane { border-color: var(--accent); }
-.v3-shell .lane-grid {
-  position: absolute; inset: 0; display: grid;
-  grid-template-columns: repeat(var(--cells, 32), var(--beat-px, 1fr)); pointer-events: none; z-index: 0;
-}
-.v3-shell .lane-grid i { border-right: 1px solid var(--grid); opacity: .55; }
-.v3-shell .lane-grid i:nth-child(4n) { border-right-color: #5A6262; opacity: .9; }
+
+/* The one grid: 1 px marks at device-pixel-snapped x (gridMarks), behind opaque clips. */
+.v3-shell .lane-grid { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.v3-shell .lane-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--grid-beat); }
+.v3-shell .lane-grid i.bar { background: var(--grid-bar); }
 .v3-shell .clip {
   position: absolute; top: 6px; bottom: 6px; z-index: 1; border-radius: 5px;
-  background: #141818; border: 1px solid #252A2A; overflow: hidden; cursor: pointer;
+  /* Ableton-style: the clip body is translucent so the lane's grid shows through it — the same
+     marks as the empty lane, so they cannot misalign. Waveforms and notes paint over it. */
+  background: color-mix(in srgb, var(--text) 5%, transparent); border: 1px solid #252A2A; overflow: hidden; cursor: pointer;
 }
 .v3-shell .clip.hl {
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 14%, var(--lane));
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .v3-shell .cwave { width: 100%; height: 100%; }
@@ -652,7 +671,6 @@
 /* The sticky header sticks at the scroller's padding edge, so the 8 px padding on its left (and
    the 6 px gap on its right) showed a sliver of whatever clip had scrolled under it. */
 .v3-shell .trk .hd::before { content: ""; position: absolute; top: -1px; bottom: -1px; right: calc(100% + 1px); width: 8px; background: var(--bg); }
-.v3-shell .trk .hd::after { content: ""; position: absolute; top: -1px; bottom: -1px; left: calc(100% + 1px); width: 6px; background: var(--bg); }
 /* Every slider in the shell follows the colorway. The Sends rows (and any future range input)
    used to fall back to the browser's default blue because only .fader inputs set this. */
 .v3-shell input[type="range"] { accent-color: var(--accent); }
@@ -677,7 +695,9 @@
 .v3-shell input[type="range"].rng::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
 .v3-shell input[type="range"].rng::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
 .v3-shell input[type="range"].rng::-moz-range-thumb { width: 10px; height: 4px; border: 0; border-radius: 2px; background: var(--accent); }
-/* One beat scale (2026-09-22): ruler cells and lane-grid cells are exactly --beat-px wide, and a
-   clip's canvas spans its BORDER box so its grid and notes sit on the same beat pixels as the
-   lane behind it (the 1 px border used to compress a long clip's grid by a couple of pixels). */
-.v3-shell .clip > .cwave { position: absolute; top: -1px; right: -1px; bottom: -1px; left: -1px; width: auto; height: auto; }
+/* One hairline between adjacent tracks, centred in the 5 px row gap and spanning the whole row. */
+.v3-shell .rows > .trk { position: relative; }
+.v3-shell .rows > .trk + .trk::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 1px;
+  background: var(--grid-bar); pointer-events: none;
+}

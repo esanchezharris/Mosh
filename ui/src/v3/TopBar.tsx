@@ -6,14 +6,11 @@ import { runAction } from "../menuActions";
 import type { Snapshot } from "../types";
 import { useV3 } from "./shellState";
 import { FileMenu } from "./FileMenu";
-import { IconClick, IconCountIn, IconLoop, IconSnap, IconZoomIn, IconZoomOut } from "./icons";
+import { IconClick, IconCountIn, IconLoop } from "./icons";
 
 export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const t = useStore((s) => s.transport);
-  const snap = useStore((s) => s.snap);
-  const setSnap = useStore((s) => s.setSnap);
-  const posture = useV3((s) => s.posture);
   const historyOpen = useV3((s) => s.historyOpen);
   const setHistoryOpen = useV3((s) => s.setHistoryOpen);
   const mpOpen = useV3((s) => s.mpOpen);
@@ -58,22 +55,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
           onClick={() => void exec("set_metronome", { enabled: !clickOn })}>
           <IconClick />
         </button>
-        {posture === "studio" ? (
-          <>
-            <button type="button" className="ibtn" title="Snap" aria-label="Snap" aria-pressed={!!snap}
-              onClick={() => setSnap(!snap)}>
-              <IconSnap />
-            </button>
-            <button type="button" className="ibtn" title="Zoom out (⌘−)" aria-label="Zoom out" data-testid="v3-zoom-out"
-              onClick={() => void runAction("zoom_out", { store: useStore.getState(), pickFiles, pickSaveFile })}>
-              <IconZoomOut />
-            </button>
-            <button type="button" className="ibtn" title="Zoom in (⌘+)" aria-label="Zoom in" data-testid="v3-zoom-in"
-              onClick={() => void runAction("zoom_in", { store: useStore.getState(), pickFiles, pickSaveFile })}>
-              <IconZoomIn />
-            </button>
-          </>
-        ) : null}
+        {/* Snap, grid division and zoom live in the timeline corner (Arrangement.tsx) now. */}
       </div>
       <div className="spacer" />
       <button type="button" className={`btn ghost${mpActive ? " on" : ""}`} data-testid="v3-mp-trigger"

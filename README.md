@@ -21,7 +21,7 @@ that works on any track (MIDI/drum clips auto-bounce to audio first). An in-app 
 2-player multiplayer ride on the same command spine.
 
 <p align="center">
-  <img src="assets/app-arrange.png" width="820" alt="Mosh — arrange view with drum, audio, and MIDI tracks and the Ask Moshi bar">
+  <img src="assets/app-arrange.png" width="820" alt="Mosh arrange view on a real session: guitar, drums, 808 and vocal tracks with waveforms and MIDI, sections over the ruler, the lead vocal's chain and sends in the inspector, and Moshi's reply in the Ask Moshi bar">
 </p>
 
 > **macOS / Apple Silicon (arm64) is canonical.** A Windows + NVIDIA/CUDA build is an

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANE_LEFT_PX, beatLabelsVisible, beatPx, clipBeatCount, clipBeats, clipBox, clipGridLines, gridBeatCount, laneContentPx, playheadLeftPx, secondsAtLaneX, sectionBox, sectionStartSec, sessionBeatCount } from "./timeline";
+import { LANE_LEFT_PX, beatPx, clipBeatCount, clipBeats, clipBox, gridBeatCount, gridDensity, gridMarks, laneContentPx, playheadLeftPx, secondsAtLaneX, sectionBox, sectionStartSec, sessionBeatCount } from "./timeline";
 
 describe("V3 timeline geometry", () => {
   it("maps seconds to pixels through pxPerSec, with a grab floor", () => {
@@ -21,6 +21,7 @@ describe("V3 timeline geometry", () => {
 
 describe("V3 playhead / sections / ruler geometry", () => {
   it("places the playhead on the lane scale, never left of the lane", () => {
+    expect(LANE_LEFT_PX).toBe(155);   // header 154 (meets its lane) + the lane's 1 px border
     expect(playheadLeftPx(0, 80)).toBe(LANE_LEFT_PX);
     expect(playheadLeftPx(2, 80)).toBe(LANE_LEFT_PX + 160);
     expect(playheadLeftPx(2, 100)).toBe(LANE_LEFT_PX + 200);   // zoom moves it (anti-vacuity)
@@ -32,13 +33,6 @@ describe("V3 playhead / sections / ruler geometry", () => {
     expect(sectionBox({ startBeat: 1, endBeat: 1 }, 120, 80).width).toBe(2);
     expect(sectionStartSec({ startBeat: 8, endBeat: 24 }, 120)).toBe(4);
   });
-  it("hides beat labels once a beat is narrower than 18 px", () => {
-    expect(beatLabelsVisible(40)).toBe(true);      // 80 px/s at 120 BPM
-    expect(beatLabelsVisible(10)).toBe(false);     // 20 px/s
-    expect(beatLabelsVisible(16.55)).toBe(false);  // 40 px/s at 145 BPM — bars only
-    expect(beatLabelsVisible(18)).toBe(true);      // exactly 18
-    expect(beatLabelsVisible(0)).toBe(false);
-  });
   it("puts the ruler, the lane grid and the clip grids on one beat scale", () => {
     expect(beatPx(120, 80)).toBe(40);
     expect(beatPx(145, 40)).toBeCloseTo(16.5517, 3);
@@ -47,17 +41,27 @@ describe("V3 playhead / sections / ruler geometry", () => {
     expect(clipBeats({ start: 2, length: 6 }, 120)).toEqual({ startBeat: 4, lengthBeats: 12 });
     expect(clipBeats({ start: 1.5, length: 1.7 }, 120).lengthBeats).toBeCloseTo(3.4, 9);    // exact, never rounded
   });
-  it("draws a clip's grid at the session's beats, bars where the ruler has them", () => {
-    const onGrid = clipGridLines(4, 12);                     // beats 4..16
-    expect(onGrid).toHaveLength(13);
-    expect(onGrid[0]).toEqual({ x: 0, bar: true });
-    expect(onGrid[12]).toEqual({ x: 1, bar: true });
-    expect(onGrid.filter((l) => l.bar).map((l) => l.x)).toEqual([0, 4 / 12, 8 / 12, 1]);
-    const midBar = clipGridLines(1.5, 4);                    // beats 2,3,4,5 inside 1.5..5.5
-    expect(midBar.map((l) => l.x)).toEqual([0.125, 0.375, 0.625, 0.875]);
-    expect(midBar.map((l) => l.bar)).toEqual([false, false, true, false]);   // beat 4 is the bar
-    expect(clipGridLines(0, 0)).toEqual([]);
+  it("thins the grid with zoom: beats from 20 px, bars every 1/2/4", () => {
+    expect(gridDensity(40)).toEqual({ beats: true, barStep: 1 });
+    expect(gridDensity(19.9)).toEqual({ beats: false, barStep: 1 });   // bar 79.6 px
+    expect(gridDensity(16.55)).toEqual({ beats: false, barStep: 1 });  // 145 BPM at 40 px/s: bars only
+    expect(gridDensity(10)).toEqual({ beats: false, barStep: 2 });     // bar 40 px
+    expect(gridDensity(5)).toEqual({ beats: false, barStep: 4 });      // bar 20 px
   });
+  it("emits the visible marks, snapped to device pixels", () => {
+    const m = gridMarks(8, 40, 1);
+    expect(m.map((g) => g.beat)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(m.filter((g) => g.bar).map((g) => [g.x, g.barNo])).toEqual([[0, 1], [160, 2]]);
+    const frac = gridMarks(8, 16.5517, 2);                              // bars only; x on a half pixel
+    expect(frac.map((g) => g.x)).toEqual([0, 66]);                      // 66.2068 → 66 at DPR 2 (132/2)
+    expect(gridMarks(8, 16.5517, 1).map((g) => g.x)).toEqual([0, 66]);
+    expect(gridMarks(4, 16.8, 2).length).toBe(1);
+    expect(gridMarks(32, 10, 2).map((g) => g.barNo)).toEqual([1, 3, 5, 7]);   // every 2nd bar
+    expect(gridMarks(32, 5, 2).map((g) => g.barNo)).toEqual([1, 5]);          // every 4th
+    expect(gridMarks(0, 40)).toEqual([]);
+    expect(gridMarks(8, 0)).toEqual([]);
+  });
+
   it("maps a ruler click back to seconds and clamps at zero", () => {
     expect(secondsAtLaneX(160, 80)).toBe(2);
     expect(secondsAtLaneX(-5, 80)).toBe(0);

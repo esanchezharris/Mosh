@@ -102,8 +102,8 @@ export function portfolioTracks(): Track[] {
   seq = 0;
   const base = { volumeDb: 0, pan: 0, mute: false, solo: false };
   return [
-    { id: "pf-beat", index: 0, name: "Beat", type: "audio", ...base, volumeDb: -2,
-      clips: [wave("intro", "beat", 1, 3), wave("beat A", "beat", 4, 24), wave("break", "beat", 25, 27),
+    { id: "pf-beat", index: 0, name: "Gtr A", type: "audio", ...base, volumeDb: -2,
+      clips: [wave("intro", "beat", 1, 3), wave("Gtr A", "beat", 4, 24), wave("break", "beat", 25, 27),
         wave("beat B", "beat", 28, 48), wave("break", "beat", 49, 51), wave("outro", "beat", 52, 56)],
       plugins: chain("4bandEq") },
     { id: "pf-drums", index: 1, name: "Drums", type: "drum", ...base, volumeDb: -4, isInstrument: true,
