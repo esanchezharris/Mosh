@@ -39,6 +39,18 @@ void MoshOps::restoreDirectAuditions()
     directAuditions_.clear();
 }
 
+bool MoshOps::autosaveTick()
+{
+    // The timer's save would run beforePersist → restoreDirectAuditions and flip a live
+    // Source/Result audition back to committed mid-listen. Postpone instead: the next
+    // tick after the audition ends saves (the session stays dirty until then).
+    if (! directAuditions_.empty()) return false;
+    for (const auto& [id, entry] : directRenders_)
+        if (entry->work.purpose == DirectRenderJob::Purpose::decisionValidation && entry->decision == "result")
+            return false;   // a Result audition is being validated and will start on success
+    return eng.saveIfDirty();
+}
+
 void MoshOps::cancelDirectRenders (const String& reason)
 {
     for (auto& [id, entry] : directRenders_)

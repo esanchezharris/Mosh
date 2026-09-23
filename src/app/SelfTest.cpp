@@ -9709,6 +9709,60 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "save");
     }
 
+    // ─── Project safety: the auto-save TIMER waits out a Direct audition (demo B4) ───
+    // Every save runs beforePersist → restoreDirectAuditions, and a Direct render marks the
+    // session dirty, so within 30 s of Generate the timer's saveIfDirty used to flip a
+    // Source/Result audition back to committed while the producer was listening.
+    // MoshOps::autosaveTick() is what Main.cpp's timer now calls: it postpones (never
+    // drops) the save while an audition or a result validation is live. Explicit ⌘S,
+    // save-on-quit and project switches still restore committed material first.
+    section ("Project safety: autosave waits for a Direct audition (demo B4)");
+    {
+        const auto at = cmd (ops, "create_track", args1 ("name", "AuditionProbe"))["data"]
+                            .getProperty ("trackId", var()).toString();
+        const auto acid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", at }, { "seconds", 1.0 }, { "freq", 220.0 }}))
+                              ["data"].getProperty ("clipId", var()).toString();
+        check (at.isNotEmpty() && acid.isNotEmpty(), "audition fixture: a track with one tone clip");
+        const auto auditionOf = [&] () -> String {
+            auto trk = trackById (at);   // keep the track alive while its clips array is read
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == acid)
+                        return c.getProperty ("renderLayer", var()).getProperty ("audition", var()).toString();
+            return {};
+        };
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", acid }, { "decisionPolicy", "explicit" },
+                                                           { "adapter", "stable_audio3" }, { "mode", "reimagine" },
+                                                           { "modelVariant", "sa3-medium" }}))),
+               "audition fixture: an explicit (Direct) SA3 render layer on the clip");
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", acid }, { "audition", "source" }}))),
+               "bypass_layer {audition:'source'} starts a Source audition (no render needed)");
+        check (auditionOf() == "source", "the snapshot layer reads audition 'source'");
+
+        eng.markDirty();   // what render_layer / any edit leaves behind before the timer fires
+        check (! ops.autosaveTick(), "autosaveTick does NOT save while a Direct audition is live");
+        check (eng.isDirty(), "...the save is postponed, not dropped (the session stays dirty)");
+        check (auditionOf() == "source", "...and the Source audition survives the timer tick");
+
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", acid }, { "audition", "committed" }}))),
+               "ending the audition (bypass_layer committed) ok");
+        check (auditionOf() == "committed", "the layer is back on committed material");
+        check (ops.autosaveTick(), "autosaveTick saves on the first tick after the audition ends");
+        check (! eng.isDirty(), "...and leaves the session clean");
+
+        // Why the timer needed its own entry point: the pre-B4 timer body (saveIfDirty)
+        // restores committed material mid-audition. Kept as a witness, so a future
+        // "simplify back to saveIfDirty" shows up here.
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", acid }, { "audition", "source" }}))),
+               "witness: a second Source audition");
+        eng.markDirty();
+        check (eng.saveIfDirty() && auditionOf() == "committed",
+               "witness: a plain saveIfDirty (the pre-B4 timer body) ends the audition, which autosaveTick avoids");
+
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", at))), "audition fixture teardown");
+        cmd (ops, "save");
+    }
+
     // ─── Project safety: reopen last project on relaunch (gap 2) ───
     // Relaunch always loaded the fixed session.tracktionedit, never the project the user
     // last worked in (no Recent list either). The fix persists session/last-project.json

@@ -699,7 +699,14 @@ public:
         // Edit is dirty, so a window-close or crash never loses more than ~30s of work.
         // Save-on-quit (shutdown) is the belt-and-suspenders. GUI-only — headless
         // harnesses return/quit before reaching here, so the timer is never armed.
-        autoSave.onTick = [this] { if (engine != nullptr) engine->saveIfDirty(); };
+        // The timer goes through MoshOps::autosaveTick so it waits out a Direct Re-Imagine
+        // audition instead of restoring committed audio under the producer's ears. Explicit
+        // Save, save-on-quit (shutdown below) and project switches are unchanged.
+        autoSave.onTick = [this]
+        {
+            if (moshOps != nullptr)      moshOps->autosaveTick();
+            else if (engine != nullptr)  engine->saveIfDirty();
+        };
         autoSave.startTimer (30000);
 
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native
