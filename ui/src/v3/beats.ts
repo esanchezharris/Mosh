@@ -2,6 +2,7 @@ import { useStore } from "../store";
 import { barPosAt, barPosToSec, barSeconds, meterAt, tempoMapFrom } from "../time";
 import { useV3 } from "./shellState";
 import { usePresetMemory } from "./presetMemory";
+import { agentTaskLive } from "./agentTask";
 
 // V3 parity brief rows 2–3: "drop in a beat" is ONE command. add_drum_pattern with no target
 // creates a drum track, loads the bundled kit and tiles the one-bar pattern across a
@@ -61,11 +62,25 @@ async function loopRegionToClip(start: number, length: number): Promise<void> {
   await st.exec("set_transport", { loop: !!t.looping, loopStart: start, loopEnd: start + length });
 }
 
+// One drop at a time. + Drum beat and + Chords stay enabled while their own promise runs, so a
+// double click would otherwise run the drop twice: two Drums tracks (two undo steps), or a second
+// + Chords colliding with the first click's own open batch. The flag is set synchronously on
+// the call (before the drop's first await) and cleared when the drop settles, even on a throw.
+// A call made while another drop is in flight does nothing and resolves null.
+let dropInFlight = false;
+async function oneDropAtATime<T>(drop: () => Promise<T>): Promise<T | null> {
+  if (dropInFlight) return null;
+  dropInFlight = true;
+  try { return await drop(); } finally { dropInFlight = false; }
+}
+
 /** Drop the default beat: one add_drum_pattern (dropBars bars at dropStart — BEAT_BARS, or the
  *  loop with Loop ON), then select the new clip — the editor stays CLOSED so Loop and Play are
  *  reachable at once (double-click or Enter opens it). Returns null and leaves lastError set
- *  when the engine refuses. */
-export async function dropDrumBeat(): Promise<DroppedBeat | null> {
+ *  when the engine refuses; resolves null without doing anything while another drop runs. */
+export const dropDrumBeat = (): Promise<DroppedBeat | null> => oneDropAtATime(dropDrumBeatNow);
+
+async function dropDrumBeatNow(): Promise<DroppedBeat | null> {
   const s = useStore.getState();
   const start = dropStart(s);
   const r = await s.exec("add_drum_pattern", {
@@ -112,9 +127,12 @@ export function chordNotes(beatsPerBar: number): { pitch: number; start: number;
  *  add_note with the whole progression → load_preset of the bundled Keys patch, best effort (a
  *  missing or refused preset keeps the chords). Then the new track is selected and the Browser
  *  opens on its Presets tab. The preset list is read BEFORE the batch (read-only), so the batch
- *  holds edits only. While another batch is open (a running Moshi task) it refuses instead of
- *  folding the user's click into the agent's undo step. */
-export async function dropChords(): Promise<DroppedChords | null> {
+ *  holds edits only. While another batch is open it refuses instead of folding the user's click
+ *  into that batch's undo step, and names Moshi as the cause only while a Moshi task is live.
+ *  Resolves null without doing anything while another drop runs. */
+export const dropChords = (): Promise<DroppedChords | null> => oneDropAtATime(dropChordsNow);
+
+async function dropChordsNow(): Promise<DroppedChords | null> {
   const s = useStore.getState();
   const exec = s.exec as unknown as Exec;
   const start = dropStart(s);
@@ -127,7 +145,9 @@ export async function dropChords(): Promise<DroppedChords | null> {
 
   const begin = await exec("batch_begin", { name: "Add chords" });
   if (!begin.ok) {
-    s.setLastError("Moshi is still working — add chords when it finishes");
+    s.setLastError(agentTaskLive()
+      ? "Moshi is still working — add chords when it finishes"
+      : "+ Chords: another edit is still open — try again when it finishes");
     return null;
   }
   let trackId = "", clipId = "", noteCount = 0, preset: string | null = null, failure: string | null = null;

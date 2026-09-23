@@ -4,6 +4,7 @@ import { __resetMockForTests } from "../bridge.mock";
 import { barPosToSec, barSeconds, meterFrom, tempoMapFrom } from "../time";
 import { CHORD_PROGRESSION, dropChords } from "./beats";
 import { useV3 } from "./shellState";
+import { useTaskStore } from "../agent/loop/taskStore";
 import type { CommandResult } from "../types";
 
 // A20 — "+ Chords": a Keys track with a four-bar, four-chord progression in ONE undo step,
@@ -153,11 +154,13 @@ describe("dropChords against the mock backend", () => {
 
   it("refuses (creates nothing) while another batch — a running Moshi task — holds the transaction", async () => {
     expect((await st().exec("batch_begin", { name: "agent" })).ok).toBe(true);
+    useTaskStore.setState({ current: { ask: "build a beat", phase: "stepping", plan: [], steps: [], startedAt: Date.now() } });
     const before = st().snapshot!.tracks.length;
     const dropped = await dropChords();
+    useTaskStore.setState({ current: null });
     expect(dropped).toBeNull();
     expect(calls.some((c) => c.command === "create_track")).toBe(false);
-    expect(st().lastError).toMatch(/busy|working|wait/i);
+    expect(st().lastError).toMatch(/Moshi is still working/);
     await st().exec("batch_end", {});
     await st().refresh();
     expect(st().snapshot!.tracks.length).toBe(before);
