@@ -6,7 +6,7 @@ import { useStore } from "../store";
 import { nativeMenuPresent, requestMicrophonePermission } from "../bridge";
 import { runStudioSkillV1 } from "../agent/skillFoundry/runtime";
 import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
-import { useTaskStore } from "../agent/loop/taskStore";
+import { useTaskStore, type TaskView } from "../agent/loop/taskStore";
 import { useProducerRack } from "../agent/loop/producerRack";
 import type { ChangeSet } from "../agent/executor";
 
@@ -50,6 +50,15 @@ async function ask(host: HTMLElement, text: string): Promise<void> {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
 }
+
+const liveTask = (over: Partial<TaskView> = {}): TaskView => ({
+  ask: "build me a lofi sketch",
+  phase: "stepping",
+  plan: [{ goal: "drums" }, { goal: "keys" }],
+  steps: [{ goal: "drums", commands: [], results: [], running: true }],
+  startedAt: Date.now() - 12_000,
+  ...over,
+});
 
 describe("v3 Moshi dock", () => {
   let host: HTMLDivElement;
@@ -166,6 +175,75 @@ describe("v3 Moshi dock", () => {
     root = createRoot(host);
     await mount();
     expect(host.querySelector('[data-testid="v3-moshi-mic"]')).not.toBeNull();
+  });
+
+  it("A7: a live task shows step i/N with a ticking elapsed time, and Stop flips the task's abort signal", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(new Date("2026-09-23T12:00:00Z"));
+    await mount();
+    expect(host.querySelector('[data-testid="v3-moshi-task"]')).toBeNull();
+
+    const signal = { aborted: false };
+    act(() => useTaskStore.setState({ current: liveTask({ startedAt: Date.now() - 12_000 }), signal }));
+    const line = () => host.querySelector('[data-testid="v3-moshi-task"]');
+    expect(line()?.getAttribute("role")).toBe("status");
+    expect(line()?.textContent).toContain("Working · step 1/2 · 0:12");
+
+    act(() => { vi.advanceTimersByTime(3_000); });
+    expect(line()?.textContent).toContain("0:15");
+
+    // more steps than the plan (a repair): N follows max(plan, steps)
+    act(() => useTaskStore.setState({ current: liveTask({
+      startedAt: Date.now() - 15_000,
+      steps: [
+        { goal: "drums", commands: [], results: [], running: false },
+        { goal: "keys", commands: [], results: [], running: false },
+        { goal: "repair", commands: [], results: [], running: true },
+      ],
+    }) }));
+    expect(line()?.textContent).toContain("step 3/3");
+
+    const stop = host.querySelector<HTMLButtonElement>('[data-testid="v3-moshi-stop"]');
+    if (!stop) throw new Error("Stop is missing");
+    await act(async () => { stop.click(); });
+    expect(signal.aborted).toBe(true);
+    expect(line()?.textContent).toContain("Stopping after this step…");
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="v3-moshi-stop"]')?.disabled).toBe(true);
+
+    // still stopping while the step finishes (another progress event re-renders)
+    act(() => useTaskStore.setState({ current: liveTask({ startedAt: Date.now() - 16_000, phase: "finalizing" }) }));
+    expect(line()?.textContent).toContain("Stopping after this step…");
+
+    act(() => useTaskStore.setState({ current: null, signal: null }));
+    expect(line()).toBeNull();
+
+    // the next task starts un-stopped
+    act(() => useTaskStore.setState({ current: liveTask(), signal: { aborted: false } }));
+    expect(line()?.textContent).toContain("Working");
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="v3-moshi-stop"]')?.disabled).toBe(false);
+  });
+
+  it("A7: the planning phase reads as planning, not step 0/0", async () => {
+    await mount();
+    act(() => useTaskStore.setState({ current: liveTask({ phase: "planning", plan: [], steps: [], startedAt: Date.now() - 3_000 }), signal: { aborted: false } }));
+    const text = host.querySelector('[data-testid="v3-moshi-task"]')?.textContent ?? "";
+    expect(text).toContain("Working · planning · 0:03");
+    expect(text).not.toContain("0/0");
+  });
+
+  it("A7: a loop task that throws does not leave the dock stuck on Working", async () => {
+    vi.stubEnv("VITE_MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP", "1");
+    // The Producer-rack route sends the ask straight to runLoopTask.
+    useProducerRack.setState({ rack: { projectId: "p", leadTrackId: "a", roomTrackId: "b", pluginIndex: 0 } });
+    vi.mocked(runLoopTask).mockImplementationOnce(async (text) => {
+      useTaskStore.getState().begin(text);
+      throw new Error("snapshot read failed");
+    });
+    await mount();
+    await ask(host, "make it warmer");
+    expect(runLoopTask).toHaveBeenCalledOnce();
+    expect(useTaskStore.getState().current).toBeNull();
+    expect(host.querySelector('[data-testid="v3-moshi-task"]')).toBeNull();
   });
 
   it("A8: a greeting gets a local, deterministic reply and never reaches the skill or the engine", async () => {

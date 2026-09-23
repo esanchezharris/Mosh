@@ -18,6 +18,8 @@ import { brainRuntimeStatus, nativeMenuPresent, onEvent, type BrainRuntimeStatus
 import { IconArrowUp, IconMic } from "../ui/icons";
 import { MoshiFace } from "./MoshiFace";
 import { useProducerRack } from "../agent/loop/producerRack";
+import { useTaskStore } from "../agent/loop/taskStore";
+import { formatElapsed, taskProgress } from "./agentTask";
 
 export function recordingDisablesDock(recording: boolean): boolean {
   return recording;
@@ -53,6 +55,25 @@ export function MoshiDock() {
   const voiceRef = useRef<DockVoice | null>(null);
   const holdTimer = useRef<number | undefined>(undefined);
   const pttRef = useRef(false);
+  // A7 — the live agent task (read-only). Stop flips the task's abort signal; the loop honours
+  // it between steps, so "Stopping…" stays up until the task actually ends (current === null).
+  // Keyed on the signal object so the next task always starts un-stopped.
+  const task = useTaskStore((s) => s.current);
+  const taskSignal = useTaskStore((s) => s.signal);
+  const [stoppedSignal, setStoppedSignal] = useState<{ aborted: boolean } | null>(null);
+  const stopping = task !== null && taskSignal !== null && stoppedSignal === taskSignal;
+  const [, setTick] = useState(0);
+  const taskLive = task !== null;
+  useEffect(() => {
+    if (!taskLive) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [taskLive]);
+  const stopTask = () => {
+    const tasks = useTaskStore.getState();
+    tasks.requestStop();
+    setStoppedSignal(tasks.signal);
+  };
 
   useEffect(() => {
     void brainRuntimeStatus().then(setBrainRuntime).catch(() => setBrainRuntime({ state: "unavailable" }));
@@ -128,6 +149,7 @@ export function MoshiDock() {
 
   const run = async (text: string, source: "typed" | "push_to_talk" = "typed") => {
     if (!text || useStore.getState().agentBusy || recordingDisablesDock(useStore.getState().transport.recording)) return;
+    const runStartedAt = Date.now();
     // A new ask retires the previous receipt: a stale change set would hide this ask's reply.
     setInput(""); setSay(null); setAgentChangeSet(null); setChoices([]); setAgentBusy(true);
     try {
@@ -215,6 +237,11 @@ export function MoshiDock() {
       setSay(skill.say);
       pushAgentUtter("HUH", skill.say);
     } catch {
+      // A loop task that threw before finish() would leave the view (and every button gated on
+      // a live task) stuck on "Working". Its transaction already closed (runTask's finally), so
+      // end the view of the task THIS ask started.
+      const tasks = useTaskStore.getState();
+      if (tasks.current && tasks.current.startedAt >= runStartedAt) tasks.finish({ outcome: "error" });
       setSay("hmm — that broke");
       pushAgentUtter("UHOH");
     } finally {
@@ -251,6 +278,17 @@ export function MoshiDock() {
 
   return (
     <div className={`prompt${safe ? " safe" : ""}`} data-testid="v3-moshi-dock" data-recording-safe={safe || undefined}>
+      {task && (
+        <div className="receipt task" data-testid="v3-moshi-task" role="status">
+          <span>
+            {stopping ? "Stopping after this step… · " : `Working · ${taskProgress(task)} · `}
+            <span aria-hidden="true">{formatElapsed(Date.now() - task.startedAt)}</span>
+          </span>
+          <button type="button" className="btn sm" data-testid="v3-moshi-stop" disabled={stopping} onClick={stopTask}>
+            Stop
+          </button>
+        </div>
+      )}
       {receipt && (
         <div className="receipt" data-testid="v3-receipt" role="status">
           <span>{receipt.entries[0]?.summary ?? receipt.label}</span>
