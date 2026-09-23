@@ -178,7 +178,10 @@ void MenuController::getCommandInfo (juce::CommandID commandID, juce::Applicatio
         case fileSave:    result.setInfo ("Save", "Save the project", "File", 0);              result.addDefaultKeypress ('s', cmd); break;
         case fileSaveAs:  result.setInfo ("Save As" + ell, "Save a portable copy", "File", 0); result.addDefaultKeypress ('s', cmdShift); break;
         case fileExport:  result.setInfo ("Export Audio" + ell, "Export the mix", "File", 0);  result.addDefaultKeypress ('r', cmdShift); break;   // ⇧⌘R, like Live — ⌘E is Split (Edit › Split)
-        case fileClose:   result.setInfo ("Close", "Close the window", "File", 0);             result.addDefaultKeypress ('w', cmd); break;
+        // Close: NO ⌘W key-equivalent. Closing the (only) main window quits Mosh, and ⌘W is
+        // the muscle-memory "close this tab/panel" chord, so it quit the app mid-session.
+        // The menu item stays; ⌘Q still quits.
+        case fileClose:   result.setInfo ("Close", "Close the window", "File", 0);             break;
 
         case editUndo:    result.setInfo ("Undo", "Undo the last change", "Edit", 0);          result.addDefaultKeypress ('z', cmd); break;
         case editRedo:    result.setInfo ("Redo", "Redo the last change", "Edit", 0);          result.addDefaultKeypress ('z', cmdShift); break;
