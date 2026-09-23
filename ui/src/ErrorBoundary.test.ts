@@ -87,4 +87,37 @@ describe("ErrorBoundary — a render error never blanks the window", () => {
     expect(buttonNamed("Try again")).not.toBeNull();
     expect(buttonNamed("Reload interface")).not.toBeNull();
   });
+
+  // Review fix 5: the fallback now shows in every shell, on top of `body { background: var(--ink) }`,
+  // which is near-white in the light theme. With a transparent container the #eaeaea heading and
+  // the transparent "Reload interface" button were close to invisible there. The fallback paints
+  // its own opaque ground so its colours read the same in both themes.
+  const rgb = (css: string): [number, number, number] => {
+    const m = css.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+    if (!m) throw new Error(`not an opaque rgb() colour: "${css}"`);
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+  };
+  const luminance = ([r, g, b]: [number, number, number]) => {
+    const lin = (c: number) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(rgb(a)), luminance(rgb(b))].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+
+  it("paints its own opaque ground, with readable text and buttons on it in either theme", () => {
+    act(() => root.render(React.createElement(ErrorBoundary, { onReload: vi.fn() }, React.createElement(Flaky))));
+    const box = host.querySelector<HTMLElement>('[data-testid="ui-error-boundary"]')!;
+    const ground = box.style.backgroundColor;
+    expect(ground, "an opaque background on the container itself").toMatch(/^rgb\(/);
+    expect(box.style.minHeight, "it covers the window, not just its own text").toBe("100vh");
+    expect(contrast(box.style.color, ground)).toBeGreaterThanOrEqual(7);
+    const reload = buttonNamed("Reload interface")!;
+    // a transparent button shows the container's ground behind its text
+    const reloadGround = reload.style.backgroundColor === "transparent" ? ground : reload.style.backgroundColor;
+    expect(contrast(reload.style.color, reloadGround)).toBeGreaterThanOrEqual(7);
+    const retry = buttonNamed("Try again")!;
+    expect(contrast(retry.style.color, retry.style.backgroundColor)).toBeGreaterThanOrEqual(7);
+  });
 });

@@ -10,7 +10,10 @@ import React from "react";
 // reads as a crash, and the session is not what broke.
 //
 // Styles are inline on purpose: this renders at the root, where no shell stylesheet is
-// guaranteed to have applied (the thing that threw may be the shell itself).
+// guaranteed to have applied (the thing that threw may be the shell itself). For the same
+// reason it paints its OWN opaque dark ground over the whole window instead of relying on the
+// page's: every shell shows it, and in the light theme `body { background: var(--ink) }` is
+// near-white, where light text on a transparent container is close to invisible.
 
 type Props = { children?: React.ReactNode; onReload?: () => void };
 type State = { error: Error | null };
@@ -38,26 +41,29 @@ export class ErrorBoundary extends React.Component<Props, State> {
     if (!error) return this.props.children;
     return (
       <div role="alert" data-testid="ui-error-boundary"
-        style={{ padding: 32, maxWidth: 640, fontFamily: "system-ui, sans-serif", color: "#eaeaea", lineHeight: 1.45 }}>
-        <h3 style={{ margin: "0 0 16px", fontSize: 17, fontWeight: 600 }}>
-          Something in the interface broke — your session is safe; the engine keeps it.
-        </h3>
-        <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-          <button type="button" onClick={this.tryAgain} autoFocus
-            style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#eaeaea", color: "#111", fontWeight: 600, cursor: "pointer" }}>
-            Try again
-          </button>
-          <button type="button" onClick={this.reload}
-            style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #666", background: "transparent", color: "#eaeaea", cursor: "pointer" }}>
-            Reload interface
-          </button>
+        style={{ minHeight: "100vh", boxSizing: "border-box", padding: 32, backgroundColor: "#111",
+          fontFamily: "system-ui, sans-serif", color: "#eaeaea", lineHeight: 1.45 }}>
+        <div style={{ maxWidth: 640 }}>
+          <h3 style={{ margin: "0 0 16px", fontSize: 17, fontWeight: 600 }}>
+            Something in the interface broke — your session is safe; the engine keeps it.
+          </h3>
+          <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+            <button type="button" onClick={this.tryAgain} autoFocus
+              style={{ padding: "8px 16px", borderRadius: 8, border: "none", backgroundColor: "#eaeaea", color: "#111", fontWeight: 600, cursor: "pointer" }}>
+              Try again
+            </button>
+            <button type="button" onClick={this.reload}
+              style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #666", backgroundColor: "transparent", color: "#eaeaea", cursor: "pointer" }}>
+              Reload interface
+            </button>
+          </div>
+          <details style={{ fontSize: 12, color: "#9a9a9a" }}>
+            <summary style={{ cursor: "pointer" }}>Technical details</summary>
+            <pre style={{ whiteSpace: "pre-wrap", color: "#ff8a8a", fontSize: 12, marginTop: 8 }}>
+              {String(error.stack || error)}
+            </pre>
+          </details>
         </div>
-        <details style={{ fontSize: 12, color: "#9a9a9a" }}>
-          <summary style={{ cursor: "pointer" }}>Technical details</summary>
-          <pre style={{ whiteSpace: "pre-wrap", color: "#ff8a8a", fontSize: 12, marginTop: 8 }}>
-            {String(error.stack || error)}
-          </pre>
-        </details>
       </div>
     );
   }
