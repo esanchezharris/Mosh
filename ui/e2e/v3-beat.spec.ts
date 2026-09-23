@@ -5,7 +5,19 @@ import { bootV3 } from "./helpers";
 // Moshi dock (the deterministic loop script; the brain proxy is unreachable under Playwright).
 // Never join a multiplayer room in this file — an active session disables the loop.
 
-type MoshWindow = Window & { __moshStore?: { getState: () => { snapshot?: { tracks: { id: string; type?: string; clips: { id: string; notes?: unknown[] }[] }[] } } } };
+type MoshWindow = Window & { __moshStore?: { getState: () => {
+  snapshot?: { session: { tempo: number }; tracks: { id: string; type?: string; clips: { id: string; notes?: unknown[] }[] }[] };
+  transport: { position: number; looping?: boolean; loopStart: number; loopEnd: number };
+  exec: (c: string, a?: Record<string, unknown>) => Promise<unknown>;
+} } };
+const store = (page: Parameters<typeof bootV3>[0]) => ({
+  tempo: () => page.evaluate(() => (window as unknown as MoshWindow).__moshStore!.getState().snapshot!.session.tempo),
+  loop: () => page.evaluate(() => {
+    const t = (window as unknown as MoshWindow).__moshStore!.getState().transport;
+    return { looping: !!t.looping, loopStart: t.loopStart, loopEnd: t.loopEnd };
+  }),
+  seek: (sec: number) => page.evaluate((s) => (window as unknown as MoshWindow).__moshStore!.getState().exec("set_transport", { position: s }), sec),
+});
 const noteCount = (page: Parameters<typeof bootV3>[0], clipId: string) =>
   page.evaluate((id) => {
     const snap = (window as unknown as MoshWindow).__moshStore?.getState().snapshot;
@@ -13,7 +25,7 @@ const noteCount = (page: Parameters<typeof bootV3>[0], clipId: string) =>
     return -1;
   }, clipId);
 
-test("+ Drum beat lands a drum track with a played clip, opens the pads editor, and one undo removes it", async ({ page }) => {
+test("+ Drum beat lands a four-bar drum clip, selects it with no editor modal, and one undo removes it", async ({ page }) => {
   await bootV3(page);
   const tracks = page.getByTestId("v3-track");
   const clips = page.getByTestId("v3-clip");
@@ -26,18 +38,41 @@ test("+ Drum beat lands a drum track with a played clip, opens the pads editor, 
   await expect(clips).toHaveCount(clipsBefore + 1);
   const newTrack = tracks.last();
   await expect(newTrack.locator(".midi-tag")).toBeVisible();
-  const clipId = await newTrack.getByTestId("v3-clip").first().getAttribute("data-clip-id");
+  const clip = newTrack.getByTestId("v3-clip").first();
+  const clipId = await clip.getAttribute("data-clip-id");
   expect(clipId).toBeTruthy();
-  expect(await noteCount(page, clipId!), "the clip carries the pattern's notes (anti-vacuity)").toBeGreaterThan(8);
-  // the shared editor opened on the drum clip and draws its notes
-  const editorNotes = page.getByTestId("pr-note");
-  expect(await editorNotes.count()).toBeGreaterThan(8);
-  await page.keyboard.press("Escape");
-  await expect(editorNotes).toHaveCount(0);
+  // four bars at the session tempo (8 s at the mock's 120 BPM), the one-bar pattern tiled x4
+  const barSec = (4 * 60) / await store(page).tempo();
+  expect(Number(await clip.getAttribute("data-clip-length"))).toBeCloseTo(4 * barSec, 6);
+  expect(await noteCount(page, clipId!), "14 hits per bar x 4 bars (anti-vacuity)").toBe(56);
+  // selected, and NO modal: the Drum Machine editor stays closed so Loop / Play are reachable
+  await expect(clip).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+  await expect(page.getByTestId("pr-note")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(tracks).toHaveCount(tracksBefore);
   await expect(clips).toHaveCount(clipsBefore);
+});
+
+test("in an empty session + Drum beat lands at bar 1 and sets the loop region to the clip; Loop then arms exactly it", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-file-trigger").click();
+  await page.getByRole("menuitem", { name: "New Session" }).click();
+  await expect(page.getByTestId("v3-track")).toHaveCount(0);
+  await store(page).seek(5.3);                                   // a playhead past bar 1 (anti-vacuity)
+  expect(await store(page).loop()).toEqual({ looping: false, loopStart: 0, loopEnd: 0 });
+
+  await page.getByTestId("v3-add-drum-beat").click();
+  const clip = page.getByTestId("v3-clip");
+  await expect(clip).toHaveCount(1);
+  expect(Number(await clip.getAttribute("data-clip-start"))).toBe(0);
+  const len = Number(await clip.getAttribute("data-clip-length"));
+  expect(len).toBeCloseTo((4 * 4 * 60) / await store(page).tempo(), 6);
+  await expect.poll(() => store(page).loop()).toEqual({ looping: false, loopStart: 0, loopEnd: len });
+
+  await page.getByTestId("v3-topbar").getByRole("button", { name: "Loop", exact: true }).click();
+  await expect.poll(() => store(page).loop()).toEqual({ looping: true, loopStart: 0, loopEnd: len });
 });
 
 test("a lofi ask in the Moshi dock lands a drum track, and one undo reverts the task", async ({ page }) => {

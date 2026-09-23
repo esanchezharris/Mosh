@@ -295,7 +295,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
       <div className="workspace-head" role="toolbar" aria-label="Tracks">
         <button type="button" className="btn sm" data-testid="v3-add-audio" onClick={() => run("insert_audio_track")}>+ Audio track</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
-        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" title="A drum track with the bundled kit and a one-bar beat at the playhead — one undo step"
+        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" title="A drum track with the bundled kit and a four-bar beat — from bar 1 in an empty session, else from the bar at the playhead — one undo step"
           onClick={() => void dropDrumBeat()}>+ Drum beat</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
