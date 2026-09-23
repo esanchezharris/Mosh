@@ -1,6 +1,7 @@
 import { useStore } from "../store";
 import { barPosAt, barPosToSec, barSeconds, meterAt, tempoMapFrom } from "../time";
 import { useV3 } from "./shellState";
+import { usePresetMemory } from "./presetMemory";
 
 // V3 parity brief rows 2–3: "drop in a beat" is ONE command. add_drum_pattern with no target
 // creates a drum track, loads the bundled kit and tiles the one-bar pattern across a
@@ -131,6 +132,11 @@ export async function dropChords(): Promise<DroppedChords | null> {
   }
   await useStore.getState().refresh();
   const st = useStore.getState();
+  if (preset) {
+    // name the loaded patch in the Presets pane (the 4OSC the engine put on the new track)
+    const synth = st.snapshot?.tracks.find((t) => t.id === trackId)?.plugins?.find((p) => p.isInstrument);
+    if (synth) usePresetMemory.getState().remember(trackId, synth.index, preset);
+  }
   st.setSelectedTrack(trackId);
   st.select([clipId]);
   const shell = useV3.getState();

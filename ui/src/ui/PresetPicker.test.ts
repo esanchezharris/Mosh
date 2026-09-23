@@ -45,4 +45,32 @@ describe("PresetPicker against the mock backend", () => {
     await flush();
     expect(host.querySelector('[data-testid="preset-pick"]')).toBeNull();
   });
+
+  it("reports onLoaded only for a load the engine ACCEPTED", async () => {
+    const { exec, refresh } = useStore.getState();
+    const made = await exec("create_track", { name: "Synth" }) as { data?: { trackId?: string } };
+    await exec("add_midi_clip", { trackId: made.data!.trackId });  // an instrument-less track gets the default 4OSC
+    await refresh();
+    const tracks = useStore.getState().snapshot!.tracks;
+    const withSynth = tracks.find((t) => (t.plugins ?? []).some((p) => p.isInstrument && p.builtin));
+    const bare = tracks.find((t) => !(t.plugins ?? []).some((p) => p.isInstrument));
+    expect(withSynth).toBeTruthy();                                // both branches exist (anti-vacuity)
+    expect(bare).toBeTruthy();
+    const onLoaded = vi.fn();
+    const pick = async (trackId: string) => {
+      await act(async () => root.render(React.createElement(PresetPicker, { plugin: plugin({}), trackId, onLoaded })));
+      await flush();
+      const select = host.querySelector('[data-testid="preset-pick"]') as HTMLSelectElement;
+      await act(async () => {
+        select.value = "/presets/4osc/mosh-bass.json";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await flush();
+    };
+    await pick(bare!.id);                                           // the engine refuses: no instrument
+    expect(onLoaded).not.toHaveBeenCalled();
+    await pick(withSynth!.id);
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenCalledWith({ name: "mosh-bass", file: "/presets/4osc/mosh-bass.json" });
+  });
 });

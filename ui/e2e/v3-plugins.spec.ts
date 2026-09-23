@@ -35,11 +35,19 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   await picker.selectOption({ label: "mosh-bass" });
   await expect(fader).not.toHaveValue(before);              // readback: the preset moved the patch
 
-  // the Browser's Presets tab offers the same picker for the selected track
+  // the Browser's Presets tab offers the same picker for the selected track, and names the sound
+  // that is on (the picker itself snaps back to "Presets…" after every pick)
   await page.getByTestId("v3-import-audio").click();
   await page.getByTestId("v3-browser-presets").click();
   await expect(page.getByTestId("v3-preset-row")).toHaveCount(1);
-  await expect(page.getByTestId("v3-presets").getByTestId("preset-pick")).toBeVisible();
+  const panePicker = page.getByTestId("v3-presets").getByTestId("preset-pick");
+  await expect(panePicker).toBeVisible();
+  await expect(panePicker).toHaveValue("");
+  await expect(page.getByTestId("v3-preset-current")).toHaveText("mosh-bass");
+  await panePicker.selectOption({ label: "mosh-pad" });
+  await expect(page.getByTestId("v3-preset-current")).toHaveText("mosh-pad");
+  await panePicker.blur();                                  // ⌘Z is ignored while a form control has focus
+  await page.keyboard.press("ControlOrMeta+z");            // the pane pick is its own undo step
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(fader).toHaveValue(before);

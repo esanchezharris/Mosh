@@ -4,6 +4,7 @@ import { SampleBrowser } from "../ui/SampleBrowser";
 import { PresetPicker, presetKeyFor } from "../ui/PresetPicker";
 import type { DirListing } from "../types";
 import { useV3 } from "./shellState";
+import { presetKey, usePresetMemory } from "./presetMemory";
 
 function MidiBrowser() {
   const exec = useStore((s) => s.exec);
@@ -49,6 +50,8 @@ function PresetsPane() {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const track = snapshot?.tracks.find((t) => t.id === selectedTrackId) ?? snapshot?.tracks[0];
   const instruments = (track?.plugins ?? []).filter((p) => p.isInstrument);
+  const loaded = usePresetMemory((s) => s.byKey);
+  const remember = usePresetMemory((s) => s.remember);
   return (
     <div className="pane-list" data-testid="v3-presets">
       {!track && <div className="set-hint" style={{ padding: 10 }}>Select a track.</div>}
@@ -57,9 +60,16 @@ function PresetsPane() {
       )}
       {track && instruments.map((p) => (
         <div key={p.index} className="br-row preset-row" data-testid="v3-preset-row">
-          <span className="nm">{p.name}</span>
+          <span className="preset-id">
+            <span className="nm">{p.name}</span>
+            {loaded[presetKey(track.id, p.index)] && (
+              <span className="preset-now" data-testid="v3-preset-current" title="The preset loaded on this instrument">
+                {loaded[presetKey(track.id, p.index)]}
+              </span>
+            )}
+          </span>
           {presetKeyFor(p)
-            ? <PresetPicker plugin={p} trackId={track.id} />
+            ? <PresetPicker plugin={p} trackId={track.id} onLoaded={(pr) => remember(track.id, p.index, pr.name)} />
             : <span className="set-hint">no loadable presets</span>}
         </div>
       ))}

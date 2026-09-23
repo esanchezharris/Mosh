@@ -5,6 +5,7 @@ import type { Plugin, Snapshot } from "../types";
 import { PresetPicker } from "../ui/PresetPicker";
 import { Range } from "./Range";
 import { useV3 } from "./shellState";
+import { usePresetMemory } from "./presetMemory";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -33,7 +34,8 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           {plugin.enabled ? "on" : "off"}
         </button>
       </div>
-      {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId} />}
+      {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
+        onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
       {native && plugin.params.slice(0, 4).map((p) => (
         <label className="fader" key={p.index}>
           <span className="nm">{p.name}</span>

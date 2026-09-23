@@ -47,6 +47,7 @@ test("+ Chords from an empty session: a Keys track with 12 notes over 4 bars, Pr
   await expect(page.getByTestId("v3-browser-presets")).toHaveClass(/\bon\b/);
   await expect(page.getByTestId("v3-preset-row")).toHaveCount(1);
   await expect(page.getByTestId("v3-presets").getByTestId("preset-pick")).toBeVisible();
+  await expect(page.getByTestId("v3-preset-current")).toHaveText(/keys/i);   // the Keys patch is on
   await expect(page.getByTestId("v3-inspector")).toHaveAttribute("data-track-id", keys.id);
 
   await page.keyboard.press("ControlOrMeta+z");

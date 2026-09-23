@@ -701,3 +701,12 @@
   content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 1px;
   background: var(--grid-bar); pointer-events: none;
 }
+
+/* demo-fixes:arrange begin */
+/* Presets pane: the instrument's name over the preset that is on it (A24). */
+.v3-shell .preset-row .preset-id { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.v3-shell .preset-row .preset-now {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* demo-fixes:arrange end */
