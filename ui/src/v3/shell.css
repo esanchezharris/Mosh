@@ -701,3 +701,9 @@
   content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 1px;
   background: var(--grid-bar); pointer-events: none;
 }
+/* demo-fixes:keys-dock begin */
+/* The Moshi task line: progress + elapsed on the left, Stop on the right. */
+.v3-shell .receipt.task { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; font-variant-numeric: tabular-nums; }
+.v3-shell .receipt.task > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .receipt.task .btn { flex-shrink: 0; }
+/* demo-fixes:keys-dock end */

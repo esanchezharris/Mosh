@@ -579,4 +579,180 @@ describe("useKeyboardShortcuts", () => {
 
     expect(execCalls).toContainEqual({ command: "open_project", args: { file: "/recent/native.mosh" } });
   });
+
+  // ── demo readiness (2026-09-23) ─────────────────────────────────────────────────
+  // A2: a focused slider keeps its arrows (test above) but not Space — Space after a fader
+  // move plays. Checkbox/radio keep their native Space toggle in every shell.
+  const flushQueue = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const toggle = { command: "set_transport", args: { action: "toggle" } };
+
+  it("A2: Space plays while a range slider owns focus", async () => {
+    act(() => root.render(React.createElement(Harness)));
+    const slider = document.createElement("input");
+    slider.type = "range";
+    document.body.appendChild(slider);
+    slider.focus();
+    const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+
+    act(() => { slider.dispatchEvent(event); });
+    await flushQueue();
+
+    const focused = document.activeElement;
+    slider.remove();
+    expect(focused).toBe(slider);
+    expect(execCalls).toContainEqual(toggle);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it.each(["checkbox", "radio"])("A2: Space stays with a focused %s (native toggle, no transport)", async (type) => {
+    act(() => root.render(React.createElement(Harness)));
+    const box = document.createElement("input");
+    box.type = type;
+    document.body.appendChild(box);
+    box.focus();
+    const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+
+    act(() => { box.dispatchEvent(event); });
+    await flushQueue();
+
+    box.remove();
+    expect(execCalls).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  function v3DockField(value: string): { dock: HTMLDivElement; field: HTMLInputElement } {
+    const dock = document.createElement("div");
+    dock.setAttribute("data-testid", "v3-moshi-dock");
+    const field = document.createElement("input");
+    field.setAttribute("data-testid", "v3-moshi-field");
+    field.value = value;
+    dock.appendChild(field);
+    document.body.appendChild(dock);
+    field.focus();
+    return { dock, field };
+  }
+
+  it("A2: Space from the focused EMPTY V3 dock field plays", async () => {
+    act(() => root.render(React.createElement(Harness)));
+    const { dock, field } = v3DockField("");
+    const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+
+    act(() => { field.dispatchEvent(event); });
+    await flushQueue();
+
+    dock.remove();
+    expect(execCalls).toContainEqual(toggle);
+    expect(event.defaultPrevented).toBe(true);   // no stray space typed into the field
+  });
+
+  it("A2: Space types into the V3 dock field once it has text", async () => {
+    act(() => root.render(React.createElement(Harness)));
+    const { dock, field } = v3DockField("turn the");
+    const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+
+    act(() => { field.dispatchEvent(event); });
+    await flushQueue();
+
+    dock.remove();
+    expect(execCalls).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  // A9: in the packaged app ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V arrive as native-menu events, not keydowns. While
+  // a text field has focus they must not touch the session or the clip clipboard.
+  const menu = (action: string) => act(() => { bridgeMock.eventHandlers.get("mosh_menu")?.({ action }); });
+
+  function focusText(tag: "input" | "textarea", type = "text", value = "abc"): HTMLElement {
+    const el = document.createElement(tag);
+    if (el instanceof HTMLInputElement) el.type = type;
+    el.value = value;
+    document.body.appendChild(el);
+    el.focus();
+    return el;
+  }
+
+  it.each([
+    ["a text input", "input", "text", "abc"],
+    ["an empty text input", "input", "text", ""],
+    ["a search input", "input", "search", "kick"],
+    ["a number input", "input", "number", "90"],
+    ["a textarea", "textarea", "text", "notes"],
+  ] as const)("A9: native-menu Undo/Redo with %s focused performs no session undo", async (_label, tag, type, value) => {
+    act(() => root.render(React.createElement(Harness)));
+    const el = focusText(tag, type, value);
+
+    menu("undo");
+    menu("redo");
+    await flushQueue();
+
+    const focused = document.activeElement;
+    el.remove();
+    expect(focused).toBe(el);
+    expect(execCalls.map((c) => c.command)).not.toContain("undo");
+    expect(execCalls.map((c) => c.command)).not.toContain("redo");
+  });
+
+  it("A9: native-menu Undo with a range slider focused still undoes the session (fader case)", async () => {
+    act(() => root.render(React.createElement(Harness)));
+    const slider = document.createElement("input");
+    slider.type = "range";
+    document.body.appendChild(slider);
+    slider.focus();
+
+    menu("undo");
+    await vi.waitFor(() => expect(execCalls).toContainEqual({ command: "undo", args: undefined }));
+    slider.remove();
+  });
+
+  const clipFixture = () => {
+    const clip = { id: "clip-1", name: "Hook", type: "block", start: 2, length: 2 };
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      selectedTrackId: "t1",
+      clipboard: null,
+      transport: { playing: false, recording: false, position: 6, looping: false, loopStart: 0, loopEnd: 0 },
+      snapshot: { session: {}, tracks: [{ id: "t1", clips: [clip] }] } as unknown as import("../types").Snapshot,
+    });
+  };
+
+  it("A9: native-menu Copy/Cut with a text field focused never copy or cut the selected clip", async () => {
+    clipFixture();
+    act(() => root.render(React.createElement(Harness)));
+    const el = focusText("input", "text", "turn the drums");
+
+    menu("copy");
+    menu("cut");
+    await flushQueue();
+
+    el.remove();
+    expect(useStore.getState().clipboard).toBeNull();
+    expect(useStore.getState().selection.has("clip-1")).toBe(true);
+    expect(execCalls.map((c) => c.command)).not.toContain("remove_clip");
+  });
+
+  it("A9: native-menu Paste into an EMPTY focused text field pastes no clip", async () => {
+    clipFixture();
+    act(() => root.render(React.createElement(Harness)));
+    act(() => useStore.getState().copySelection());
+    expect(useStore.getState().clipboard?.clips.map((c) => c.clip.id)).toEqual(["clip-1"]);   // a clip IS on the clipboard
+    const el = focusText("input", "text", "");
+
+    menu("paste");
+    await flushQueue();
+
+    el.remove();
+    expect(execCalls.map((c) => c.command)).not.toContain("paste_clip");
+  });
+
+  it("A9: native-menu Copy then Paste with no text field focused still copy and paste the clip", async () => {
+    clipFixture();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    act(() => root.render(React.createElement(Harness)));
+
+    menu("copy");
+    expect(useStore.getState().clipboard?.clips.map((c) => c.clip.id)).toEqual(["clip-1"]);
+    menu("paste");
+    await vi.waitFor(() => expect(execCalls.map((c) => c.command)).toContain("paste_clip"));
+  });
+
 });
