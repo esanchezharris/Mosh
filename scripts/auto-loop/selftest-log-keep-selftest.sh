@@ -5,7 +5,8 @@
 # known run-3-only signature: failed_max:1, nonzero_exit "r3:rc=1") failed, the gate JSON
 # recorded only the tally, so the failing check's NAME was unrecoverable. The gate now copies
 # a failing run's log to $AL_HOME/selftest-logs/<head12>-r<i>.log before deleting it. This
-# pins: which runs are kept (rc≠0 or failed≠0, including the crashed "-1" tally), the name
+# pins: which runs are kept (rc≠0, failed≠0 including the crashed "-1" tally, or a JUCE
+# assertion count ≠0 — the gate fails a run on any of them), the name
 # and content of the copy, that the caller's log is untouched, that a copy failure is never
 # an error, and that the directory stays bounded.
 #
@@ -25,6 +26,10 @@ FAILED=0
 ok()   { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILED=1; }
 
+# written BEFORE $LOG: the last check below treats any *.log newer than $LOG outside the keep
+# dir as a stray write by the helper
+ASSERT_LOG="$SANDBOX/assert.log"
+printf 'JUCE Assertion failure in juce_AudioProcessor.cpp:123\n3752 checks passed, 0 failed\n' > "$ASSERT_LOG"
 LOG="$SANDBOX/run.log"
 printf '  FAIL [loop] loop_record names the missing audio device\n3751 checks passed, 1 failed\n' > "$LOG"
 
@@ -43,6 +48,16 @@ grep -q '^  FAIL \[loop\] loop_record' "$KEEP/0123456789ab-r3.log" && ok "the FA
 # ── a non-zero exit with 0 failed checks is kept too ──────────────────────────────
 out="$(keep_failed_selftest_log "$LOG" 139 0 "$SHA" 2)"
 [ -n "$out" ] && [ -f "$KEEP/0123456789ab-r2.log" ] && ok "rc=139 failed=0 is kept" || fail "a crashed exit was not kept"
+
+# ── a run that fails ONLY on a JUCE assertion (rc=0, 0 failed checks) is kept ─────────
+# run_selftest_x3 fails such a run (a>0), so its log must survive to name the assertion.
+rm -f "$KEEP/0123456789ab-r2.log"
+out="$(keep_failed_selftest_log "$ASSERT_LOG" 0 0 "$SHA" 2 1)"
+[ "$out" = "$KEEP/0123456789ab-r2.log" ] && ok "asserts=1 (rc=0 failed=0) is kept" || fail "an assertion-only failure was not kept: '$out'"
+grep -q 'JUCE Assertion' "$KEEP/0123456789ab-r2.log" 2>/dev/null && ok "the assertion text is recoverable" || fail "assertion text missing from the copy"
+rm -f "$KEEP/0123456789ab-r2.log"
+out="$(keep_failed_selftest_log "$ASSERT_LOG" 0 0 "$SHA" 2 0)"
+[ -z "$out" ] && [ ! -e "$KEEP/0123456789ab-r2.log" ] && ok "asserts=0 with rc=0 failed=0 keeps nothing" || fail "a clean run with asserts=0 was kept: $out"
 
 # ── a run that died before its summary (tally -1) is kept ─────────────────────────
 rm -f "$KEEP/0123456789ab-r1.log"

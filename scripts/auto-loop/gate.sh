@@ -130,7 +130,7 @@ run_selftest_x3() {
     # A failing run's log is copied to $AL_HOME/selftest-logs/ before it is deleted, so the
     # failing check can be named later (the tally above never says which). Copy only — the
     # verdict is already decided; see keep_failed_selftest_log in lib.sh.
-    keep_failed_selftest_log "$log" "$rc" "$f" "$HEAD_SHA" "$i" >/dev/null
+    keep_failed_selftest_log "$log" "$rc" "$f" "$HEAD_SHA" "$i" "$a" >/dev/null
     rm -f "$log"
   done
   # build JSON array of the three N's
