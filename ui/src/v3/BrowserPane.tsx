@@ -90,7 +90,7 @@ export function BrowserPane() {
           <button type="button" className={tab === "presets" ? "on" : ""} data-testid="v3-browser-presets" onClick={() => setTab("presets")}>Presets</button>
         </span>
       </div>
-      {tab === "files" && <div className="pane-list"><SampleBrowser /></div>}
+      {tab === "files" && <div className="pane-list"><SampleBrowser hidePaths /></div>}
       {tab === "midi" && <MidiBrowser />}
       {tab === "presets" && <PresetsPane />}
     </aside>
