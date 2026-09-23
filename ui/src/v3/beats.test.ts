@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseDrumPattern } from "../ui/drumPatternUtil";
 import { useStore } from "../store";
 import { __resetMockForTests } from "../bridge.mock";
 import { barPosToSec, barSeconds, meterFrom, tempoMapFrom } from "../time";
 import { DEFAULT_DRUM_BEAT, dropDrumBeat } from "./beats";
+import type { CommandResult } from "../types";
 
 const ONE_BAR_HITS = (() => {
   const parsed = parseDrumPattern(DEFAULT_DRUM_BEAT, 16, 0, 100);
@@ -131,6 +132,46 @@ describe("V3 default beat", () => {
       const offClip = clipOf(off!.trackId, off!.clipId);
       expect(offClip.start).toBeCloseTo(barPosToSec(map, 5), 9);
       expect(offClip.length).toBeCloseTo(4 * barSeconds(meter), 6);
+    });
+
+    // Review fix 7: the region write sends only {loopStart, loopEnd}. It used to carry
+    // `loop: !!store.transport.looping`, read from a store the Loop toggle's transport event may
+    // not have reached yet, so it could turn Loop back off right after the owner turned it on.
+    describe("the loop-region write never touches the Loop flag", () => {
+      const originalExec = useStore.getState().exec;
+      afterEach(() => { useStore.setState({ exec: originalExec }); });
+
+      it("sends only {loopStart, loopEnd}, and a Loop turned on in the engine but not yet in the store stays on", async () => {
+        await st().exec("new_project", {});
+        await st().refresh();
+        expect(st().transport.looping).toBe(false);
+        expect(st().transport.loopEnd - st().transport.loopStart).toBeLessThanOrEqual(1e-6);  // no region: the write happens
+        const real = st().exec;
+        const regionWrites: Record<string, unknown>[] = [];
+        useStore.setState({
+          exec: (async (command: string, args?: Record<string, unknown>, ...rest: unknown[]) => {
+            const forward = (c: string, a?: Record<string, unknown>) =>
+              (real as (...x: unknown[]) => Promise<CommandResult>)(c, a, ...rest);
+            if (command === "set_transport" && args && "loopStart" in args) {
+              regionWrites.push(args);
+              // the owner's Loop click lands in the engine just before this write; the store
+              // has not heard about it yet (its transport event is still in flight)
+              await forward("set_transport", { loop: true });
+            }
+            return forward(command, args);
+          }) as typeof real,
+        });
+        const dropped = await dropDrumBeat();
+        expect(dropped).not.toBeNull();
+        expect(regionWrites).toHaveLength(1);
+        expect(Object.keys(regionWrites[0]!).sort()).toEqual(["loopEnd", "loopStart"]);
+        await st().refresh();
+        const clip = clipOf(dropped!.trackId, dropped!.clipId);
+        const t = st().transport;
+        expect(t.looping).toBe(true);
+        expect(t.loopStart).toBeCloseTo(clip.start, 9);
+        expect(t.loopEnd).toBeCloseTo(clip.start + clip.length, 9);
+      });
     });
   });
 });

@@ -52,14 +52,15 @@ export function dropBars(s: Pick<Store, "snapshot" | "transport">): number {
 }
 
 /** With no loop region yet (loopEnd <= loopStart — how a fresh session boots), make the region
- *  the dropped clip so the TopBar Loop arms exactly it. Only the region: `loop` rides along
- *  unchanged because the mock (like the brace) applies loopStart/loopEnd only when the flag is
- *  present, and the engine sets the range independently of it. An existing region is left alone. */
+ *  the dropped clip so the TopBar Loop arms exactly it. Only the region: {loopStart, loopEnd}
+ *  and no `loop` flag — the engine (and the mock) set the range whenever both bounds are
+ *  present, and a flag read from the store could be stale and turn Loop back off right after
+ *  the owner turned it on. An existing region is left alone. */
 async function loopRegionToClip(start: number, length: number): Promise<void> {
   const st = useStore.getState();
   const t = st.transport;
   if ((t.loopEnd ?? 0) - (t.loopStart ?? 0) > 1e-6 || !(length > 0)) return;
-  await st.exec("set_transport", { loop: !!t.looping, loopStart: start, loopEnd: start + length });
+  await st.exec("set_transport", { loopStart: start, loopEnd: start + length });
 }
 
 // One drop at a time. + Drum beat and + Chords stay enabled while their own promise runs, so a

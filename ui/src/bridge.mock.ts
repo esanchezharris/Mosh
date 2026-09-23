@@ -624,6 +624,17 @@ const listeners = new Map<string, Set<Listener>>();
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number; txn: string }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
+/** set_transport's loop fields, as MoshOps::cmdSetTransport applies them: `loop` sets the flag,
+ *  and loopStart/loopEnd set the range whenever BOTH are present, independently of the flag.
+ *  (The mock's older form — a `loop` flag carrying either bound on its own — still applies.) */
+function applyMockLoopArgs(next: Transport, args: Record<string, unknown>): void {
+  if ("loop" in args) next.looping = Boolean(args.loop);
+  if (("loopStart" in args && "loopEnd" in args) || "loop" in args) {
+    next.loopStart = num(args.loopStart, next.loopStart);
+    next.loopEnd = num(args.loopEnd, next.loopEnd);
+  }
+}
+
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
@@ -1698,11 +1709,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         const next = { ...snapshot.transport };
         if (action === "to_start") next.position = 0;
         if ("position" in args) next.position = Math.max(0, num(args.position));
-        if ("loop" in args) {
-          next.looping = Boolean(args.loop);
-          next.loopStart = num(args.loopStart, next.loopStart);
-          next.loopEnd = num(args.loopEnd, next.loopEnd);
-        }
+        applyMockLoopArgs(next, args);
         snapshot.transport = next;
         emit("transport", snapshot.transport);
         return ok(command, snapshot.transport);
@@ -1764,7 +1771,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // direct field sets: position / loop
       const next: Transport = { ...t };
       if ("position" in args) { next.position = Math.max(0, num(args.position)); mockInsertMarker = next.position; }
-      if ("loop" in args) { next.looping = Boolean(args.loop); next.loopStart = num(args.loopStart, t.loopStart); next.loopEnd = num(args.loopEnd, t.loopEnd); }
+      applyMockLoopArgs(next, args);
       snapshot.transport = next;
       emit("transport", snapshot.transport);
       return ok(command, snapshot.transport);
