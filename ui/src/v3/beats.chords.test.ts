@@ -113,6 +113,28 @@ describe("dropChords against the mock backend", () => {
     expect(st().snapshot!.tracks.length).toBe(before);
   });
 
+  it("a preset load that throws still keeps the chords (best effort)", async () => {
+    override = (c) => { if (c === "load_preset") throw new Error("vst gone"); return null; };
+    const dropped = await dropChords();
+    expect(dropped).not.toBeNull();
+    expect(dropped!.preset).toBeNull();
+    expect(st().snapshot!.tracks.find((t) => t.id === dropped!.trackId)!.clips[0]!.notes?.length).toBe(12);
+  });
+
+  it("a command that fails or throws mid-batch leaves no half-built part (the owned batch is undone)", async () => {
+    const before = st().snapshot!.tracks.map((t) => t.id);
+    override = (c) => { if (c === "add_note") throw new Error("bridge dropped"); return null; };
+    await expect(dropChords()).resolves.toBeNull();
+    await st().refresh();
+    expect(st().snapshot!.tracks.map((t) => t.id)).toEqual(before);
+    expect(st().lastError).toMatch(/Chords.*bridge dropped/);
+    expect(calls.some((c) => c.command === "create_track")).toBe(true);    // it really got that far (anti-vacuity)
+    override = (c) => (c === "add_note" ? { ok: false, command: c, error: "not a midi clip" } : null);
+    await expect(dropChords()).resolves.toBeNull();
+    await st().refresh();
+    expect(st().snapshot!.tracks.map((t) => t.id)).toEqual(before);
+  });
+
   it("refuses (creates nothing) while another batch — a running Moshi task — holds the transaction", async () => {
     expect((await st().exec("batch_begin", { name: "agent" })).ok).toBe(true);
     const before = st().snapshot!.tracks.length;

@@ -117,9 +117,14 @@ export async function dropChords(): Promise<DroppedChords | null> {
     if (!n.ok) { failure = n.error ?? "could not write the chords"; return null; }
     noteCount = Number((n.data as { noteCount?: number } | undefined)?.noteCount ?? 0);
     if (keys) {
-      const lp = await exec("load_preset", { trackId, file: keys.file });
-      if (lp.ok) preset = keys.name;
+      try {
+        const lp = await exec("load_preset", { trackId, file: keys.file });
+        if (lp.ok) preset = keys.name;
+      } catch { /* best effort: the chords stay on the default patch */ }
     }
+  } catch (e) {
+    failure = e instanceof Error ? e.message : String(e);
+    return null;
   } finally {
     await exec("batch_end", {});
     // A half-built part is worse on stage than none: undo the batch we own (it holds at least the
