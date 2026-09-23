@@ -12,18 +12,42 @@ export const DEFAULT_DRUM_BEAT = "kick: x...x...x...x...; snare: ....x.......x..
 
 /** Bars a dropped part spans — an integer (the native parser truncates, and caps at 16). */
 export const BEAT_BARS = 4;
+/** The most bars add_drum_pattern tiles (DrumPattern.h, drumPatternUtil: bars 1-16). */
+const MAX_DROP_BARS = 16;
 
 export type DroppedBeat = { trackId: string; clipId: string; noteCount: number };
 
 type Store = ReturnType<typeof useStore.getState>;
 
-/** Where a dropped part starts: bar 1 in an empty session (nothing to line up with, and the
- *  frozen source stays exactly BEAT_BARS long), otherwise the bar at or before the playhead. */
+/** The loop region while Loop is ON and the region is not collapsed, else null. */
+function armedLoop(s: Pick<Store, "transport">): { start: number; end: number } | null {
+  const t = s.transport;
+  if (!t.looping) return null;
+  const start = t.loopStart ?? 0, end = t.loopEnd ?? 0;
+  return end - start > 1e-6 ? { start: Math.max(0, start), end } : null;
+}
+
+/** Where a dropped part starts. With Loop ON: the loop start — a playhead that has been cycling
+ *  the loop sits on an arbitrary bar, and a part dropped there lands partly or wholly outside
+ *  the loop (fixCheck A1). Otherwise bar 1 in an empty session (nothing to line up with, and the
+ *  frozen source stays exactly BEAT_BARS long), else the bar at or before the playhead. */
 export function dropStart(s: Pick<Store, "snapshot" | "transport">): number {
+  const loop = armedLoop(s);
+  if (loop) return loop.start;
   const tracks = s.snapshot?.tracks ?? [];
   if (!tracks.some((t) => t.clips.length > 0)) return 0;
   const map = tempoMapFrom(s.snapshot?.session);
   return Math.max(0, barPosToSec(map, Math.floor(barPosAt(map, s.transport.position ?? 0) + 1e-6)));
+}
+
+/** Bars a dropped beat spans: with Loop ON the loop's length in bars (rounded, 1-16) so the
+ *  tiled beat fills the loop; otherwise BEAT_BARS. */
+export function dropBars(s: Pick<Store, "snapshot" | "transport">): number {
+  const loop = armedLoop(s);
+  if (!loop) return BEAT_BARS;
+  const map = tempoMapFrom(s.snapshot?.session);
+  const bars = Math.round(barPosAt(map, loop.end) - barPosAt(map, loop.start));
+  return Math.min(MAX_DROP_BARS, Math.max(1, bars));
 }
 
 /** With no loop region yet (loopEnd <= loopStart — how a fresh session boots), make the region
@@ -37,14 +61,15 @@ async function loopRegionToClip(start: number, length: number): Promise<void> {
   await st.exec("set_transport", { loop: !!t.looping, loopStart: start, loopEnd: start + length });
 }
 
-/** Drop the default beat: one add_drum_pattern (BEAT_BARS bars at dropStart), then select the
- *  new clip — the editor stays CLOSED so Loop and Play are reachable at once (double-click or
- *  Enter opens it). Returns null and leaves lastError set when the engine refuses. */
+/** Drop the default beat: one add_drum_pattern (dropBars bars at dropStart — BEAT_BARS, or the
+ *  loop with Loop ON), then select the new clip — the editor stays CLOSED so Loop and Play are
+ *  reachable at once (double-click or Enter opens it). Returns null and leaves lastError set
+ *  when the engine refuses. */
 export async function dropDrumBeat(): Promise<DroppedBeat | null> {
   const s = useStore.getState();
   const start = dropStart(s);
   const r = await s.exec("add_drum_pattern", {
-    pattern: DEFAULT_DRUM_BEAT, name: "Drums", start, bars: BEAT_BARS,
+    pattern: DEFAULT_DRUM_BEAT, name: "Drums", start, bars: dropBars(s),
   }) as { ok: boolean; data?: Partial<DroppedBeat>; error?: string };
   if (!r.ok || !r.data?.trackId || !r.data.clipId) return null;
   const { trackId, clipId } = r.data;
@@ -83,7 +108,7 @@ export function chordNotes(beatsPerBar: number): { pitch: number; start: number;
 }
 
 /** + Chords: ONE batch (one undo step) — create_track "Keys" → add_midi_clip (BEAT_BARS bars at the
- *  + Drum beat start rule; the engine loads the default 4OSC onto the instrument-less track) →
+ *  + Drum beat start rule, so at the loop start while Loop is on; the engine loads the default 4OSC onto the instrument-less track) →
  *  add_note with the whole progression → load_preset of the bundled Keys patch, best effort (a
  *  missing or refused preset keeps the chords). Then the new track is selected and the Browser
  *  opens on its Presets tab. The preset list is read BEFORE the batch (read-only), so the batch

@@ -302,7 +302,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
         <button type="button" className="btn sm" data-testid="v3-add-drum-beat" disabled={taskLive}
           title={taskLive ? "Moshi is working — add a beat when it finishes"
-            : "A drum track with the bundled kit and a four-bar beat — from bar 1 in an empty session, else from the bar at the playhead — one undo step"}
+            : "A drum track with the bundled kit: fills the loop while Loop is on, else four bars from bar 1 in an empty session or from the bar at the playhead — one undo step"}
           onClick={() => void dropDrumBeat()}>+ Drum beat</button>
         <button type="button" className="btn sm" data-testid="v3-add-chords" disabled={taskLive}
           title={taskLive ? "Moshi is working — add chords when it finishes"

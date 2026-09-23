@@ -91,5 +91,46 @@ describe("V3 default beat", () => {
       const t = st().transport;
       expect([t.looping, t.loopStart, t.loopEnd]).toEqual([true, 2, 6]);
     });
+
+    // fixCheck A1: with Loop ON the beat belongs IN the loop. The bar under a playhead that has
+    // been cycling the loop is arbitrary, so a beat dropped there lands partly or wholly outside
+    // the loop and the loop plays silence where it should play the new part.
+    it("with Loop ON, drops at the loop start and spans the loop — a mid-loop playhead does not move it", async () => {
+      const map = tempoMapFrom(st().snapshot!.session);
+      const meter = meterFrom(st().snapshot!.session);
+      await st().exec("set_transport", { loop: true, loopStart: barPosToSec(map, 2), loopEnd: barPosToSec(map, 4) });
+      await st().exec("set_transport", { position: barPosToSec(map, 3.4) });
+      await st().refresh();
+      expect(st().transport.looping).toBe(true);                                   // anti-vacuity: Loop is on
+      expect(st().transport.position).toBeCloseTo(barPosToSec(map, 3.4), 9);     // and the playhead is mid-loop
+      expect(st().snapshot!.tracks.some((t) => t.clips.length > 0)).toBe(true);  // not the empty-session rule
+      const dropped = await dropDrumBeat();
+      expect(dropped).not.toBeNull();
+      const clip = clipOf(dropped!.trackId, dropped!.clipId);
+      expect(clip.start).toBeCloseTo(barPosToSec(map, 2), 9);
+      expect(clip.length).toBeCloseTo(2 * barSeconds(meter), 6);
+      expect(clip.notes?.length).toBe(2 * ONE_BAR_HITS);
+    });
+
+    it("with Loop ON over more than 16 bars the beat caps at 16 (the engine's limit); Loop OFF keeps the playhead rule", async () => {
+      const map = tempoMapFrom(st().snapshot!.session);
+      const meter = meterFrom(st().snapshot!.session);
+      await st().exec("set_transport", { loop: true, loopStart: 0, loopEnd: barPosToSec(map, 20) });
+      await st().refresh();
+      const long = await dropDrumBeat();
+      expect(long).not.toBeNull();
+      const clip = clipOf(long!.trackId, long!.clipId);
+      expect(clip.start).toBe(0);
+      expect(clip.length).toBeCloseTo(16 * barSeconds(meter), 6);
+      // the same region with Loop OFF: back to four bars at the bar under the playhead
+      await st().exec("set_transport", { loop: false, loopStart: 0, loopEnd: barPosToSec(map, 20) });
+      await st().exec("set_transport", { position: barPosToSec(map, 5.5) });
+      await st().refresh();
+      expect(st().transport.looping).toBe(false);
+      const off = await dropDrumBeat();
+      const offClip = clipOf(off!.trackId, off!.clipId);
+      expect(offClip.start).toBeCloseTo(barPosToSec(map, 5), 9);
+      expect(offClip.length).toBeCloseTo(4 * barSeconds(meter), 6);
+    });
   });
 });

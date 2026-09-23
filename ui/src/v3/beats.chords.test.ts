@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../store";
 import { __resetMockForTests } from "../bridge.mock";
-import { barSeconds, meterFrom } from "../time";
+import { barPosToSec, barSeconds, meterFrom, tempoMapFrom } from "../time";
 import { CHORD_PROGRESSION, dropChords } from "./beats";
 import { useV3 } from "./shellState";
 import type { CommandResult } from "../types";
@@ -98,6 +98,22 @@ describe("dropChords against the mock backend", () => {
     await st().refresh();
     const empty = await dropChords();
     expect(at(empty!.trackId)).toBe(0);
+  });
+
+  it("with Loop ON the chords start at the loop start, not at the bar under a mid-loop playhead", async () => {
+    // The demo presses + Chords while the drum loop plays: the playhead is anywhere in bars 1-4.
+    const map = tempoMapFrom(st().snapshot!.session);
+    await st().exec("set_transport", { loop: true, loopStart: 0, loopEnd: barPosToSec(map, 4) });
+    await st().exec("set_transport", { position: barPosToSec(map, 2.5) });
+    await st().refresh();
+    expect(st().transport.looping).toBe(true);                                   // anti-vacuity: Loop is on
+    expect(st().transport.position).toBeCloseTo(barPosToSec(map, 2.5), 9);     // the playhead is mid-loop
+    expect(st().snapshot!.tracks.some((t) => t.clips.length > 0)).toBe(true);  // not the empty-session rule
+    const dropped = await dropChords();
+    expect(dropped).not.toBeNull();
+    const clip = st().snapshot!.tracks.find((t) => t.id === dropped!.trackId)!.clips[0]!;
+    expect(clip.start).toBe(0);
+    expect(clip.length).toBeCloseTo(4 * barSeconds(meterFrom(st().snapshot!.session)), 6);
   });
 
   it("keeps the chords when there is no Keys preset (best effort) — still one undo step", async () => {
