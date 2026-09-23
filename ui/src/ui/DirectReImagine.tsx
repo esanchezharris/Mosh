@@ -1,7 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { Clip, RenderLayer, Track } from "../types";
+import type { Clip, CommandResult, RenderLayer, Track } from "../types";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
+
+const MAX_SEED = 2147483647;
+
+// When each render began, keyed by the engine's requestId (render_layer answers with it,
+// and the layer carries it while queued/rendering). Module-level so the clock survives the
+// inspector closing and reopening mid-render — GenDrawer keys this component on the clip.
+// A render this UI started is stamped with its Generate CLICK (the submit itself can take
+// a cold service spawn); one it did not start (a Keep validation, another surface) is
+// stamped when first seen. Elapsed time is the only claim made: no expected duration is
+// shown, because none has been measured.
+const renderStartedAt = new Map<string, number>();
+function rememberStart(requestId: string, at: number) {
+  if (renderStartedAt.has(requestId)) return;
+  renderStartedAt.set(requestId, at);
+  if (renderStartedAt.size > 64) {
+    const oldest = renderStartedAt.keys().next().value;
+    if (oldest !== undefined) renderStartedAt.delete(oldest);
+  }
+}
+function elapsedLabel(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
 
 function resultStatus(layer: RenderLayer | undefined): string {
   if (!layer) return "Ready to generate";
@@ -29,14 +52,18 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   const [prompt, setPrompt] = useState(layer?.prompt ?? "");
   const [nl, setNl] = useState(layer?.nl ?? 0.4);
   const [seed, setSeed] = useState(String(layer?.seed ?? 0));
+  // True once the user edits the seed field; a typed seed is always sent exactly as typed.
+  const [seedTyped, setSeedTyped] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [clickedAt, setClickedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const active = useRef(false);
   const latestLayer = useRef(layer);
   latestLayer.current = layer;
   useEffect(() => { void loadColors(true); }, [loadColors]);
   useEffect(() => {
-    setPrompt(layer?.prompt ?? ""); setNl(layer?.nl ?? 0.4); setSeed(String(layer?.seed ?? 0));
+    setPrompt(layer?.prompt ?? ""); setNl(layer?.nl ?? 0.4); setSeed(String(layer?.seed ?? 0)); setSeedTyped(false);
   }, [layer?.id, layer?.prompt, layer?.nl, layer?.seed]);
   useEffect(() => {
     active.current = true;
@@ -60,29 +87,58 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   const unsupported = clip.loopEnabled || clip.reversed || clip.autoTempo;
   const sourceStart = layer?.sourceStart ?? clip.offset;
   const sourceDuration = layer?.sourceDuration ?? clip.length;
-  const command = async (name: string, args: Record<string, unknown>) => {
-    if (!current()) return false;
+  const commandResult = async (name: string, args: Record<string, unknown>): Promise<CommandResult | null> => {
+    if (!current()) return null;
     const result = await exec(name, args);
-    if (!current()) return false;
+    if (!current()) return null;
     if (!result.ok) setError(result.error || "The operation could not be completed.");
-    return result.ok;
+    return result;
   };
+  const command = async (name: string, args: Record<string, unknown>) => (await commandResult(name, args))?.ok === true;
   const generate = async () => {
     if (busy || unavailable || legacy || unsupported || !validSeed) return;
+    // "Generate again" with a seed nobody touched would re-run the identical render: step
+    // it by one and SHOW the new value. A typed seed (even the same number) is a deliberate
+    // choice and goes exactly as typed.
+    const hadResult = !!layer && (layer.hasArtifact || layer.userKept || hasPending);
+    const nextSeed = hadResult && !seedTyped && Number(seed) === layer.seed
+      ? (layer.seed + 1) % (MAX_SEED + 1)
+      : Number(seed);
+    if (String(nextSeed) !== seed) setSeed(String(nextSeed));
+    const started = Date.now();
+    setClickedAt(started); setNow(started);
     setSubmitting(true); setError(null);
     try {
       if (!layer && !await command("create_render_layer", {
         clipId: clip.id, decisionPolicy: "explicit", adapter: "stable_audio3", mode: "reimagine", modelVariant: "sa3-medium",
       })) return;
-      if (!await command("set_render_param", { clipId: clip.id, prompt, nl, seed: Number(seed) })) return;
-      await command("render_layer", { clipId: clip.id });
+      if (!await command("set_render_param", { clipId: clip.id, prompt, nl, seed: nextSeed })) return;
+      const rendered = await commandResult("render_layer", { clipId: clip.id });
+      const requestId = rendered?.ok ? (rendered.data as { requestId?: unknown } | undefined)?.requestId : undefined;
+      if (typeof requestId === "string" && requestId) rememberStart(requestId, started);
     } catch (reason) {
       if (!(reason instanceof Error)) throw reason;
       if (current()) setError(reason.message);
     } finally {
-      if (current()) setSubmitting(false);
+      if (current()) { setSubmitting(false); setClickedAt(null); }
     }
   };
+  // A render already running whose start this UI never saw: count from first sight. The
+  // real time, not `now` — that state only ticks while a clock is showing, so it can be
+  // minutes stale here. (Idempotent: a stamp is written once per requestId.)
+  if (running && layer?.requestId) rememberStart(layer.requestId, Date.now());
+  const startedAt = submitting ? clickedAt
+    : running && layer?.requestId ? renderStartedAt.get(layer.requestId) ?? null
+    : null;
+  const ticking = startedAt !== null;
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  const statusText = submitting ? "Submitting" : resultStatus(layer);
+  const statusLine = startedAt !== null ? `${statusText} · ${elapsedLabel(now - startedAt)}` : statusText;
   const audition = layer?.audition ?? "committed";
   return <div className="gen direct-reimagine" data-testid="generative" data-render-status={layer?.status ?? "empty"}>
     <div className="gen-head">
@@ -103,7 +159,11 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
       {unavailable && <div className="gen-service-status" role="status" data-testid="gen-service-unavailable">
         <span>{serviceState === "idle" || serviceState === "warming" ? "Checking local SA3 service…"
           : serviceError || (explicitDecisions !== true
-            ? "The local service does not support direct Re-Imagine. Use the matching Mosh service, then retry."
+            ? (serviceState === "ready"
+              // The service answered, but without direct render: the shared helper, which
+              // GenerativeJobManager prefers over the bundled service, predates this Mosh.
+              ? "The Re-Imagine helper in ~/Library/Application Support/Mosh/ReImagine/service is older than this Mosh (no direct render). Refresh it, then press Retry."
+              : "The local service does not support direct Re-Imagine. Use the matching Mosh service, then retry.")
             : "Local SA3 is unavailable. Check that its service and model are available, then retry.")}</span>
         <button className="btn" type="button" onClick={() => void loadColors(true)}>Retry</button>
       </div>}
@@ -120,12 +180,12 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
       </label>
       <label className="direct-reimagine-field">Seed
         <input type="number" min={0} max={2147483647} step={1} data-testid="gen-seed-input"
-          value={seed} disabled={busy} aria-invalid={!validSeed} onChange={(event) => setSeed(event.target.value)} />
+          value={seed} disabled={busy} aria-invalid={!validSeed} onChange={(event) => { setSeed(event.target.value); setSeedTyped(true); }} />
       </label>
       {!validSeed && <p role="alert">Enter a whole-number seed from 0 to 2147483647.</p>}
       {unsupported && <p role="alert">Use an ordinary audio clip without looping, reverse or tempo warp for this workflow.</p>}
       <div className="gen-service-status" role={layer?.status === "error" ? "alert" : "status"} data-testid="gen-status">
-        {submitting ? "Submitting…" : resultStatus(layer)}
+        {statusLine}
       </div>
       {error && <div className="gen-service-error" role="alert">{error}</div>}
       <div className="gen-actions">

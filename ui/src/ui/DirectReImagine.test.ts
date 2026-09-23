@@ -188,4 +188,143 @@ describe("direct Re-Imagine", () => {
     expect(button("gen-accept").disabled).toBe(true);
   });
 
+  // ── A11: "Generate again" must not silently re-run the same seed ─────────────────────
+  const sentSeed = () => {
+    const call = exec.mock.calls.find(([name]) => name === "set_render_param");
+    if (!call) throw new Error("set_render_param was not sent");
+    return (call[1] as { seed: number }).seed;
+  };
+
+  it("Generate again with an untouched seed sends seed+1 and shows it in the field", async () => {
+    render(clip(layer({ hasPending: false, userKept: true, seed: 0 })));
+    expect(button("gen-render").textContent).toBe("Generate again");
+    expect(input("gen-seed-input").value).toBe("0");                      // baseline
+    await act(async () => button("gen-render").click());
+    expect(sentSeed()).toBe(1);
+    expect(input("gen-seed-input").value, "the advanced seed is visible, not hidden").toBe("1");
+  });
+
+  it("Discard pending and generate also advances an untouched seed", async () => {
+    render(clip(layer({ hasPending: true, seed: 41 })));
+    expect(button("gen-render").textContent).toBe("Discard pending and generate");
+    await act(async () => button("gen-render").click());
+    expect(sentSeed()).toBe(42);
+  });
+
+  it("a typed seed is sent exactly as typed — even when it equals the layer's seed", async () => {
+    render(clip(layer({ hasPending: false, userKept: true, seed: 5 })));
+    edit("gen-seed-input", ""); edit("gen-seed-input", "5");             // select-all, retype the same number
+    await act(async () => button("gen-render").click());
+    expect(sentSeed(), "retyping the same seed is a deliberate reproduce").toBe(5);
+
+    exec.mockClear();
+    act(() => root.render(null));
+    render(clip(layer({ hasPending: false, userKept: true, seed: 5 })));
+    edit("gen-seed-input", "1234");
+    await act(async () => button("gen-render").click());
+    expect(sentSeed()).toBe(1234);
+  });
+
+  it("wraps the advanced seed at the top of the valid range", async () => {
+    render(clip(layer({ hasPending: false, userKept: true, seed: 2147483647 })));
+    await act(async () => button("gen-render").click());
+    expect(sentSeed()).toBe(0);
+  });
+
+  it("the first Generate on a layer with no result sends the layer's seed unchanged", async () => {
+    render(clip(layer({ status: "empty", hasArtifact: false, hasPending: false, userKept: false, seed: 7 })));
+    expect(button("gen-render").textContent).toBe("Generate");
+    await act(async () => button("gen-render").click());
+    expect(sentSeed()).toBe(7);
+  });
+
+  // ── A12: elapsed time on the status, clock from the Generate CLICK ────────────────────
+  describe("elapsed time", () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+    const status = () => host.querySelector('[data-testid="gen-status"]')!.textContent ?? "";
+    const tick = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
+    const running = (over: Partial<RenderLayer>) =>
+      clip(layer({ hasPending: false, userKept: true, requestId: "request-two", ...over }));
+
+    it("counts from the click through Submitting, Queued and Running, with no expected-time claim", async () => {
+      // render_layer answers only after 3 s (a cold service spawn): the clock must already run.
+      let answer: (() => void) | null = null;
+      exec.mockImplementation((command: string) => command === "render_layer"
+        ? new Promise<CommandResult>((resolve) => { answer = () => resolve({ ok: true, command, data: { requestId: "request-two", status: "queued" } }); })
+        : Promise.resolve({ ok: true, command }));
+      render(clip(layer({ hasPending: false, userKept: true, requestId: "request-one" })));
+      expect(status()).toBe("Result kept");                               // baseline: no clock at rest
+
+      await act(async () => { button("gen-render").click(); });
+      expect(status()).toBe("Submitting · 0:00");
+      tick(3000);
+      expect(status()).toBe("Submitting · 0:03");
+      await act(async () => { answer!(); });
+
+      render(running({ status: "queued" }));
+      expect(status(), "the clock started at the click, not when the job queued").toBe("Queued · 0:03");
+      tick(20_000);
+      expect(status()).toBe("Queued · 0:23");
+      render(running({ status: "rendering" }));
+      expect(status()).toBe("Running · 0:23");
+      tick(61_000);
+      expect(status()).toBe("Running · 1:24");
+      expect(status()).not.toMatch(/usually|minute|expect|remaining/i);
+
+      render(running({ status: "ready", hasPending: true }));
+      expect(status()).toBe("Result ready to audition");
+      tick(5000);
+      expect(status()).toBe("Result ready to audition");
+    });
+
+    it("keeps the click-time clock across the drawer closing and reopening mid-render", async () => {
+      exec.mockImplementation(async (command: string) => command === "render_layer"
+        ? { ok: true, command, data: { requestId: "request-two", status: "queued" } }
+        : { ok: true, command });
+      render(clip(layer({ hasPending: false, userKept: true, requestId: "request-one" })));
+      await act(async () => { button("gen-render").click(); });
+      render(running({ status: "rendering" }));
+      tick(9000);
+      expect(status()).toBe("Running · 0:09");
+
+      act(() => root.render(null));                                       // inspector closed
+      tick(4000);
+      render(running({ status: "rendering" }));                           // …and reopened
+      expect(status()).toBe("Running · 0:13");
+    });
+
+    it("a render it did not start counts from when it was first seen", () => {
+      render(running({ status: "rendering", requestId: "request-foreign" }));
+      expect(status()).toBe("Running · 0:00");
+      tick(2000);
+      expect(status()).toBe("Running · 0:02");
+    });
+
+    it("first sight is stamped with the real time, not a clock left idle since mount", () => {
+      render(running({ status: "ready", requestId: "request-old" }));   // idle for a minute
+      tick(60_000);
+      render(running({ status: "queued", requestId: "request-validate" }));
+      expect(status()).toBe("Queued · 0:00");
+      tick(4000);
+      expect(status()).toBe("Queued · 0:04");
+    });
+  });
+
+  // ── A13: name the out-of-date helper as the cause ─────────────────────────────────────
+  it.each([false, undefined])("names the out-of-date Re-Imagine helper when the service is up but lacks direct render (%s)", (supported) => {
+    useStore.setState({ explicitRenderDecision: supported, genServiceState: "ready" }); render();
+    const line = host.querySelector('[data-testid="gen-service-unavailable"]')!.textContent ?? "";
+    expect(line).toContain("The Re-Imagine helper in ~/Library/Application Support/Mosh/ReImagine/service is older than this Mosh (no direct render). Refresh it, then press Retry.");
+  });
+
+  it("keeps the service's own error and the SA3-missing copy for their own causes", () => {
+    useStore.setState({ explicitRenderDecision: undefined, genServiceState: "error", genServiceError: "list_colors failed: connection refused" }); render();
+    expect(host.querySelector('[data-testid="gen-service-unavailable"]')!.textContent).toContain("connection refused");
+    expect(host.querySelector('[data-testid="gen-service-unavailable"]')!.textContent).not.toContain("older than this Mosh");
+
+    act(() => root.render(null));
+    useStore.setState({ explicitRenderDecision: true, sa3Available: false, genServiceState: "ready", genServiceError: null }); render();
+    expect(host.querySelector('[data-testid="gen-service-unavailable"]')!.textContent).toContain("Local SA3 is unavailable");
+  });
 });
