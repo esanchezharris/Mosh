@@ -18,7 +18,8 @@ import type { Clip, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
 import { SilhouetteWave } from "./waves/SilhouetteWave";
 import { DrumsClip, MelodyClip } from "./midi/MidiClips";
-import { dropDrumBeat } from "./beats";
+import { dropChords, dropDrumBeat } from "./beats";
+import { useTaskStore } from "../agent/loop/taskStore";
 import { IconSnap, IconZoomIn, IconZoomOut } from "./icons";
 import { SNAP_DIVISIONS, type SnapDiv } from "../time";
 
@@ -266,6 +267,9 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     || selectedTrack.plugins?.some((plugin) => plugin.isInstrument));
   const run = (action: "insert_audio_track" | "insert_midi_track" | "insert_midi_clip") => void runAction(action, { store: useStore.getState(), pickFiles, pickSaveFile });
   const pxPerSec = useStore((s) => s.pxPerSec);
+  // A running Moshi task holds ONE open undo transaction: a click that edits now would fold into
+  // the agent's undo step, so the one-click part drops wait for it to end.
+  const taskLive = useTaskStore((s) => s.current !== null);
   const beatWidth = beatPx(snapshot.session.tempo, pxPerSec);
   const tracks = snapshot.tracks.filter((t) => !t.isReturn && t.active !== false);
   // Lanes are laid out in px at the shared zoom (store.pxPerSec — the scale v2 and Pro Tools
@@ -297,6 +301,10 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
         <button type="button" className="btn sm" data-testid="v3-add-drum-beat" title="A drum track with the bundled kit and a four-bar beat — from bar 1 in an empty session, else from the bar at the playhead — one undo step"
           onClick={() => void dropDrumBeat()}>+ Drum beat</button>
+        <button type="button" className="btn sm" data-testid="v3-add-chords" disabled={taskLive}
+          title={taskLive ? "Moshi is working — add chords when it finishes"
+            : "A Keys track with a four-bar chord progression (Am, F, C, G) — opens its presets; one undo step"}
+          onClick={() => void dropChords()}>+ Chords</button>
         <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
       </div>
@@ -311,7 +319,7 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
         </div>
       </div>
       <div className="tracks" ref={scrollerRef} onScroll={onScroll}>
-        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat, or import audio from the browser.</p></div>}
+        {tracks.length === 0 && <div className="workspace-empty"><b>Start your session</b><p>Add an audio track to record, a MIDI track to write notes, drop in a drum beat or a chord progression, or import audio from the browser.</p></div>}
         <div className="rows">
           {tracks.map((t) => <TrackRow key={t.id} track={t} snapshot={snapshot} marks={marks} lanePx={lanePx} pxPerSec={pxPerSec} />)}
           {tracks.length > 0 && <Playhead />}
