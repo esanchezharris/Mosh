@@ -659,17 +659,32 @@ describe("useKeyboardShortcuts", () => {
   });
 
   // A9: in the packaged app ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V arrive as native-menu events, not keydowns. While
-  // a text field has focus they must not touch the session or the clip clipboard.
+  // a V3 text field (or a field that opts in with data-owns-edit-keys) has focus they must not
+  // touch the session or the clip clipboard. Other shells keep main's behaviour: their inputs
+  // commit on Enter and KEEP focus, so ⌘Z from the menu must still undo that edit.
   const menu = (action: string) => act(() => { bridgeMock.eventHandlers.get("mosh_menu")?.({ action }); });
 
-  function focusText(tag: "input" | "textarea", type = "text", value = "abc"): HTMLElement {
+  type Where = "v3" | "opt-in" | "other-shell";
+  function focusText(tag: "input" | "textarea", type = "text", value = "abc", where: Where = "v3"): HTMLElement {
     const el = document.createElement(tag);
     if (el instanceof HTMLInputElement) el.type = type;
     el.value = value;
-    document.body.appendChild(el);
+    if (where === "v3") {
+      // the V3 root (AppV3.tsx) is .v3-shell; the field sits a few levels inside it
+      const shell = document.createElement("div");
+      shell.className = "v3-shell";
+      const pane = document.createElement("div");
+      pane.appendChild(el);
+      shell.appendChild(pane);
+      document.body.appendChild(shell);
+    } else {
+      if (where === "opt-in") el.setAttribute("data-owns-edit-keys", "");
+      document.body.appendChild(el);
+    }
     el.focus();
     return el;
   }
+  const removeField = (el: HTMLElement) => (el.closest(".v3-shell") ?? el).remove();
 
   it.each([
     ["a text input", "input", "text", "abc"],
@@ -677,7 +692,7 @@ describe("useKeyboardShortcuts", () => {
     ["a search input", "input", "search", "kick"],
     ["a number input", "input", "number", "90"],
     ["a textarea", "textarea", "text", "notes"],
-  ] as const)("A9: native-menu Undo/Redo with %s focused performs no session undo", async (_label, tag, type, value) => {
+  ] as const)("A9: native-menu Undo/Redo with %s focused in V3 performs no session undo", async (_label, tag, type, value) => {
     act(() => root.render(React.createElement(Harness)));
     const el = focusText(tag, type, value);
 
@@ -686,10 +701,49 @@ describe("useKeyboardShortcuts", () => {
     await flushQueue();
 
     const focused = document.activeElement;
-    el.remove();
+    removeField(el);
     expect(focused).toBe(el);
     expect(execCalls.map((c) => c.command)).not.toContain("undo");
     expect(execCalls.map((c) => c.command)).not.toContain("redo");
+  });
+
+  it("A9: a field outside V3 that opts in (data-owns-edit-keys, e.g. the shared Re-Imagine prompt) is guarded too", async () => {
+    act(() => root.render(React.createElement(Harness)));
+    const el = focusText("input", "text", "warm tape", "opt-in");
+    expect(el.closest(".v3-shell")).toBeNull();   // anti-vacuity: guarded by the attribute alone
+
+    menu("undo");
+    menu("redo");
+    await flushQueue();
+
+    removeField(el);
+    expect(execCalls.map((c) => c.command)).not.toContain("undo");
+    expect(execCalls.map((c) => c.command)).not.toContain("redo");
+  });
+
+  it.each([
+    ["a Pro Tools track-name input", "input", "text", "Lead Vox"],
+    ["a Pro Tools clip-gain number input", "input", "number", "-3"],
+  ] as const)("A9 scope: native-menu Undo/Redo with %s focused (another shell) still undo/redo the session, as on main", async (_label, tag, type, value) => {
+    act(() => root.render(React.createElement(Harness)));
+    const el = focusText(tag, type, value, "other-shell");
+
+    menu("undo");
+    await vi.waitFor(() => expect(execCalls.map((c) => c.command)).toContain("undo"));
+    menu("redo");
+    await vi.waitFor(() => expect(execCalls.map((c) => c.command)).toContain("redo"));
+    removeField(el);
+  });
+
+  it("A9 scope: native-menu Copy with a text field focused in another shell still copies the selected clip, as on main", async () => {
+    clipFixture();
+    act(() => root.render(React.createElement(Harness)));
+    const el = focusText("input", "text", "Lead Vox", "other-shell");
+
+    menu("copy");
+
+    removeField(el);
+    expect(useStore.getState().clipboard?.clips.map((c) => c.clip.id)).toEqual(["clip-1"]);
   });
 
   it("A9: native-menu Undo with a range slider focused still undoes the session (fader case)", async () => {
@@ -724,7 +778,7 @@ describe("useKeyboardShortcuts", () => {
     menu("cut");
     await flushQueue();
 
-    el.remove();
+    removeField(el);
     expect(useStore.getState().clipboard).toBeNull();
     expect(useStore.getState().selection.has("clip-1")).toBe(true);
     expect(execCalls.map((c) => c.command)).not.toContain("remove_clip");
@@ -740,7 +794,7 @@ describe("useKeyboardShortcuts", () => {
     menu("paste");
     await flushQueue();
 
-    el.remove();
+    removeField(el);
     expect(execCalls.map((c) => c.command)).not.toContain("paste_clip");
   });
 

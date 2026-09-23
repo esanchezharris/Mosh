@@ -168,7 +168,7 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
         <button className="btn" type="button" onClick={() => void loadColors(true)}>Retry</button>
       </div>}
       <label className="direct-reimagine-field">Prompt
-        <input className="gen-compile-input" data-testid="gen-prompt" value={prompt} disabled={busy}
+        <input className="gen-compile-input" data-testid="gen-prompt" data-owns-edit-keys="" value={prompt} disabled={busy}
           placeholder="Describe the sound to generate" onChange={(event) => setPrompt(event.target.value)} />
       </label>
       <label className="nparam" title="Generation strength. Notes, lyrics and timing are not guaranteed to be preserved.">
@@ -179,7 +179,7 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
         <span className="nval">{nlToAmount(nl, false)}</span>
       </label>
       <label className="direct-reimagine-field">Seed
-        <input type="number" min={0} max={2147483647} step={1} data-testid="gen-seed-input"
+        <input type="number" min={0} max={2147483647} step={1} data-testid="gen-seed-input" data-owns-edit-keys=""
           value={seed} disabled={busy} aria-invalid={!validSeed} onChange={(event) => { setSeed(event.target.value); setSeedTyped(true); }} />
       </label>
       {!validSeed && <p role="alert">Enter a whole-number seed from 0 to 2147483647.</p>}

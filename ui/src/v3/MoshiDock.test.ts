@@ -270,4 +270,8 @@ describe("v3 Moshi dock", () => {
       expect(dockGreetingReply(real), real).toBeNull();
   });
 
+  it("A9 scope: the dock field opts in to owning ⌘Z/⌘X/⌘C/⌘V from the native menu", async () => {
+    await mount();
+    expect(host.querySelector('[data-testid="v3-moshi-field"]')?.hasAttribute("data-owns-edit-keys")).toBe(true);
+  });
 });

@@ -316,6 +316,7 @@ export function MoshiDock() {
         <input
           className={`field${clarify ? " clarify" : ""}`}
           data-testid="v3-moshi-field"
+          data-owns-edit-keys=""
           value={input}
           placeholder={safe ? "recording…" : listening ? "listening…" : agentBusy ? "thinking…" : "Ask Moshi"}
           disabled={disabled}

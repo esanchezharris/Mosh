@@ -37,9 +37,14 @@ const rangeSliderSpace = (target: EventTarget | null, action: string): boolean =
 
 // Native-menu Edit actions (⌘Z/⇧⌘Z/⌘X/⌘C/⌘V in the packaged app arrive as mosh_menu events,
 // not keydowns, so the editable-target guard in onKey never sees them). While a text field
-// has focus they belong to the field: no session undo/redo and no clip cut/copy/paste.
+// that OWNS its edit keys has focus they belong to the field: no session undo/redo and no clip
+// cut/copy/paste. A field owns them when it sits inside the V3 shell (AppV3's `.v3-shell`
+// root) or opts in with `data-owns-edit-keys` (the V3 dock field, and the Re-Imagine prompt
+// and seed, which Pro Tools shares). Every other shell keeps main's behaviour: its inputs
+// commit on Enter and keep focus, so the menu's ⌘Z must still undo that edit.
 const TEXT_EDIT_MENU_ACTIONS = new Set<string>(["undo", "redo", "cut", "copy", "paste"]);
 const TEXT_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "number", "tel", "password"]);
+const OWNS_EDIT_KEYS = ".v3-shell, [data-owns-edit-keys]";
 
 /** True while a text-entry element owns focus (range sliders and checkboxes are NOT text). */
 function textEntryFocused(el: Element | null = document.activeElement): boolean {
@@ -47,6 +52,11 @@ function textEntryFocused(el: Element | null = document.activeElement): boolean 
   if (el instanceof HTMLTextAreaElement) return true;
   if (el instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(el.type.toLowerCase());
   return el.isContentEditable || el.getAttribute("contenteditable") === "true" || el.getAttribute("contenteditable") === "";
+}
+
+/** A focused text-entry element that owns the native-menu Edit actions (see above). */
+function editKeysOwnedByField(el: Element | null = document.activeElement): boolean {
+  return textEntryFocused(el) && !!el?.closest(OWNS_EDIT_KEYS);
 }
 
 /** Best effort only: WKWebView may ignore script-issued execCommand (and jsdom has none).
@@ -293,7 +303,7 @@ export function useKeyboardShortcuts() {
       const p = (raw ?? {}) as { action?: ActionId; file?: string };
       if (!p.action) return;
       if (forwardNativeEditAction(p.action)) return;
-      if (TEXT_EDIT_MENU_ACTIONS.has(p.action) && textEntryFocused()) {
+      if (TEXT_EDIT_MENU_ACTIONS.has(p.action) && editKeysOwnedByField()) {
         textFieldEdit(p.action);
         return;
       }

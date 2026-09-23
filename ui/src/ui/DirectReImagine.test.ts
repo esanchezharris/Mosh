@@ -327,4 +327,11 @@ describe("direct Re-Imagine", () => {
     useStore.setState({ explicitRenderDecision: true, sa3Available: false, genServiceState: "ready", genServiceError: null }); render();
     expect(host.querySelector('[data-testid="gen-service-unavailable"]')!.textContent).toContain("Local SA3 is unavailable");
   });
+
+  it("A9 scope: the prompt and seed fields opt in to owning ⌘Z/⌘X/⌘C/⌘V (they are shared with Pro Tools)", () => {
+    render();
+    expect(input("gen-prompt").hasAttribute("data-owns-edit-keys")).toBe(true);
+    expect(input("gen-seed-input").hasAttribute("data-owns-edit-keys")).toBe(true);
+    expect(input("gen-nl").hasAttribute("data-owns-edit-keys"), "a range slider is not a text field").toBe(false);
+  });
 });
