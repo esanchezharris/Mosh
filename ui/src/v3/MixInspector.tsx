@@ -39,7 +39,7 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           <span className="nm">{p.name}</span>
           <Range min={0} max={1} step={0.01} value={p.value} aria-label={p.name}
             onChange={(e) => void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
-          <span className="v">{p.value.toFixed(2)}</span>
+          <span className="v">{p.display ?? p.value.toFixed(2)}</span>
         </label>
       ))}
       {!native && (
