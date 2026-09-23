@@ -274,6 +274,28 @@ parse_selftest_tally() {
 # (already "0" on no match) and ignore the exit code instead.
 count_juce_asserts() { local c; c="$(grep -c 'JUCE Assertion' "$1" 2>/dev/null)"; printf '%s\n' "${c:-0}"; }
 
+# ── keep a failing selftest run's log ────────────────────────────────────────────
+# run_selftest_x3 deletes each --selftest run's log once it is tallied. When one run of three
+# fails (the known run-3-only signature: failed_max:1, nonzero_exit "r3:rc=1"), the tally
+# never says WHICH check failed. Copy that run's log to
+# "$AL_HOME/selftest-logs/<head12>-r<i>.log" first, so the "  FAIL [section] …" line can be
+# read later. COPY ONLY: the caller decides the verdict, nothing here can change it, and every
+# failure path returns 0. Bounded to the newest $SELFTEST_LOG_KEEP_MAX logs.
+# keep_failed_selftest_log <log> <rc> <failed> <head-sha> <run-index> — echoes the kept path.
+SELFTEST_LOG_KEEP_MAX=40
+keep_failed_selftest_log() {
+  local log="$1" rc="$2" failed="$3" sha="$4" i="$5" dir dest
+  if [ "$rc" = "0" ] && [ "$failed" = "0" ]; then return 0; fi
+  dir="$AL_HOME/selftest-logs"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  dest="$dir/${sha:0:12}-r$i.log"
+  cp -f "$log" "$dest" 2>/dev/null || return 0
+  { ls -1t "$dir"/*.log 2>/dev/null | tail -n +$((SELFTEST_LOG_KEEP_MAX + 1)) \
+      | while IFS= read -r old; do rm -f "$old"; done; } || true
+  printf '%s\n' "$dest"
+  return 0
+}
+
 # ── ui dependency freshness (the shared-node_modules drift trap) ──────────────────
 # new-worktree.sh SYMLINKS each worktree's ui/node_modules to a SHARED cache when the
 # lockfile matches at creation time. A later merged PR can then change ui/package-lock.json
