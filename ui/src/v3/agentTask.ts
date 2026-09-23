@@ -5,13 +5,17 @@ import { useTaskStore, type TaskView } from "../agent/loop/taskStore";
 // While a Moshi loop task runs it keeps ONE native undo transaction open from its first
 // command until the task ends (taskExec.ts), and Stop is only honoured between steps. Any
 // edit the owner makes in that window is folded into Moshi's undo step, so a later ⌘Z
-// would take the owner's work with it. V3 buttons that make an edit disable themselves
-// while a task is live:
+// would take the owner's work with it.
 //
-//   const taskLive = useAgentTaskLive();
-//   <button disabled={taskLive} …>+ Drum beat</button>
+// A live task is only one of the two windows. A Moshi dock ask that runs through
+// runAgentBatch (fast path, studio skills, section rework) holds a native batch while
+// store.agentBusy is true and NO task is live. So an edit button gates on both:
 //
-// `+ Drum beat` uses it today; `+ Chords` and `+ Generate beat` should adopt the same hook.
+//   const editLocked = useAgentTaskLive() || useStore((s) => s.agentBusy);
+//   <button disabled={editLocked} …>+ Drum beat</button>
+//
+// The Arrangement toolbar does this for all of its edit buttons (+ Audio track, + MIDI track,
+// + Drum beat, + Chords, + MIDI clip). `+ Generate beat` (A19) should adopt the same gate.
 
 /** True while an agent task is live (useTaskStore.current !== null). Re-renders on change. */
 export const useAgentTaskLive = (): boolean => useTaskStore((s) => s.current !== null);

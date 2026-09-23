@@ -268,9 +268,14 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     || selectedTrack.plugins?.some((plugin) => plugin.isInstrument));
   const run = (action: "insert_audio_track" | "insert_midi_track" | "insert_midi_clip") => void runAction(action, { store: useStore.getState(), pickFiles, pickSaveFile });
   const pxPerSec = useStore((s) => s.pxPerSec);
-  // A running Moshi task holds ONE open undo transaction: a click that edits now would fold into
-  // the agent's undo step, so the one-click part drops wait for it to end.
+  // While Moshi holds an open undo transaction a click that edits would fold into the agent's
+  // undo step, so every edit button here waits. Two windows: a loop task (useTaskStore.current,
+  // one transaction for the whole task) and a dock batch (runAgentBatch: fast path, studio
+  // skills, section rework), which holds a native batch with agentBusy set and no task live.
   const taskLive = useAgentTaskLive();
+  const agentBusy = useStore((s) => s.agentBusy);
+  const editLocked = taskLive || agentBusy;
+  const locked = (what: string) => `Moshi is working — ${what} when it finishes`;
   const beatWidth = beatPx(snapshot.session.tempo, pxPerSec);
   const tracks = snapshot.tracks.filter((t) => !t.isReturn && t.active !== false);
   // Lanes are laid out in px at the shared zoom (store.pxPerSec — the scale v2 and Pro Tools
@@ -298,17 +303,23 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
   return (
     <div className="main" data-testid="v3-arrangement" data-px-per-sec={pxPerSec}>
       <div className="workspace-head" role="toolbar" aria-label="Tracks">
-        <button type="button" className="btn sm" data-testid="v3-add-audio" onClick={() => run("insert_audio_track")}>+ Audio track</button>
-        <button type="button" className="btn sm" data-testid="v3-add-midi" onClick={() => run("insert_midi_track")}>+ MIDI track</button>
-        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" disabled={taskLive}
-          title={taskLive ? "Moshi is working — add a beat when it finishes"
+        <button type="button" className="btn sm" data-testid="v3-add-audio" disabled={editLocked}
+          title={editLocked ? locked("add a track") : undefined}
+          onClick={() => run("insert_audio_track")}>+ Audio track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-midi" disabled={editLocked}
+          title={editLocked ? locked("add a track") : undefined}
+          onClick={() => run("insert_midi_track")}>+ MIDI track</button>
+        <button type="button" className="btn sm" data-testid="v3-add-drum-beat" disabled={editLocked}
+          title={editLocked ? locked("add a beat")
             : "A drum track with the bundled kit: fills the loop while Loop is on, else four bars from bar 1 in an empty session or from the bar at the playhead — one undo step"}
           onClick={() => void dropDrumBeat()}>+ Drum beat</button>
-        <button type="button" className="btn sm" data-testid="v3-add-chords" disabled={taskLive}
-          title={taskLive ? "Moshi is working — add chords when it finishes"
+        <button type="button" className="btn sm" data-testid="v3-add-chords" disabled={editLocked}
+          title={editLocked ? locked("add chords")
             : "A Keys track with a four-bar chord progression (Am, F, C, G) — opens its presets; one undo step"}
           onClick={() => void dropChords()}>+ Chords</button>
-        <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi} title={canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"} onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
+        <button type="button" className="btn sm" data-testid="v3-add-midi-clip" disabled={!canAddMidi || editLocked}
+          title={editLocked ? locked("add a clip") : canAddMidi ? "Add one bar at the playhead" : "Select a MIDI track first"}
+          onClick={() => run("insert_midi_clip")}>+ MIDI clip</button>
         <button type="button" className="btn sm" data-testid="v3-import-audio" onClick={() => { useV3.getState().setPane("browser"); useV3.getState().setBrowserTab("files"); }}>Import audio…</button>
       </div>
       <div className="arr-head">
