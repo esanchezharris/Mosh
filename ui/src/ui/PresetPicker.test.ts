@@ -40,7 +40,7 @@ describe("PresetPicker against the mock backend", () => {
     await flush();
     const select = host.querySelector('[data-testid="preset-pick"]') as HTMLSelectElement | null;
     expect(select).not.toBeNull();
-    expect(select!.querySelectorAll("option").length).toBe(4);   // placeholder + 3 bundled 4osc presets
+    expect(select!.querySelectorAll("option").length).toBe(6);   // placeholder + the 5 bundled 4osc presets
     await act(async () => root.render(React.createElement(PresetPicker, { plugin: plugin({ type: "sampler", name: "Sampler" }), trackId })));
     await flush();
     expect(host.querySelector('[data-testid="preset-pick"]')).toBeNull();
