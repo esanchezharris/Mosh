@@ -6139,13 +6139,145 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // otherwise the next undo destroys the PREVIOUS edit's neighbour instead
             // of the edit itself. Sequence: real edit → failed load → undo must
             // revert exactly the real edit.
-            cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "volumeDb", -6.0 }}));
+            // (The arg is "db"; this line used to pass "volumeDb", which set_track_volume
+            // ignores, so the check below read 0 dB whether or not the undo was right.)
+            check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -6.0 }}))),
+                   "G14 fixture: a prior edit (volume -6 dB)");
+            check (std::abs ((double) trackById (mt).getProperty ("volumeDb", -999.0) + 6.0) < 0.01,
+                   "G14 fixture: the prior edit really moved the fader (the undo check is not vacuous)");
             check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", "/nonexistent/nope.json" }}))),
                    "load_preset errors on a missing file");
             cmd (ops, "undo");
             check ([&] { const double v = (double) trackById (mt).getProperty ("volumeDb", -999.0);
                          return v > -0.01 && v < 0.01; }(),
                    "undo after a FAILED preset load reverts the prior edit (no empty-txn G14 trap)");
+
+            // The live te::FourOscPlugin on the preset target. Wave shape, per-osc unison,
+            // filter type and slope are plain CachedValues FourOscVoice reads every block
+            // (not AutomatableParameters), so reading them back IS reading what renders;
+            // the params half is read from each parameter's CURRENT value, never from its
+            // attached CachedValue (the cachedvalue-write trap).
+            const auto fourOscOn = [&] (const String& tid) -> te::FourOscPlugin* {
+                for (auto* t : te::getAudioTracks (eng.edit()))
+                    if (t->itemID.toString() == tid)
+                        for (auto* p : t->pluginList.getPlugins())
+                            if (auto* f = dynamic_cast<te::FourOscPlugin*> (p))
+                                return f;
+                return nullptr;
+            };
+
+            // ── demo B1: the 4OSC voicing keys (waveShapes / filterType / filterSlope / oscVoices) ──
+            auto* fosc = fourOscOn (mt);
+            check (fosc != nullptr, "voicing: the preset target exposes its te::FourOscPlugin");
+            const auto volOf = [&] { return (double) trackById (mt).getProperty ("volumeDb", -999.0); };
+            if (fosc != nullptr && fosc->oscParams.size() == 4)
+            {
+                struct Voicing { int shape[4]; int voices[4]; int type; int slope; };
+                const auto voicingNow = [&] {
+                    Voicing v {};
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        v.shape[i]  = fosc->oscParams[i]->waveShapeValue.get();
+                        v.voices[i] = fosc->oscParams[i]->voicesValue.get();
+                    }
+                    v.type  = fosc->filterTypeValue.get();
+                    v.slope = fosc->filterSlopeValue.get();
+                    return v;
+                };
+                const auto same = [] (const Voicing& a, const Voicing& b) {
+                    for (int i = 0; i < 4; ++i)
+                        if (a.shape[i] != b.shape[i] || a.voices[i] != b.voices[i]) return false;
+                    return a.type == b.type && a.slope == b.slope;
+                };
+                const auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory);
+                juce::Array<juce::File> tmpFiles;
+                const auto writePreset = [&] (const char* leaf, const char* json) {
+                    auto f = tmpDir.getChildFile (leaf);
+                    f.replaceWithText (json);
+                    tmpFiles.add (f);
+                    return f.getFullPathName();
+                };
+                const auto full = writePreset ("selftest-voicing-full.json",
+                    R"({"waveShapes":[3,2,0,0],"filterType":1,"filterSlope":24,"oscVoices":[2,1,1,1],)"
+                    R"("params":{"Filter Freq":0.61,"Amp Release":0.3}})");
+                const auto voicingOnly = writePreset ("selftest-voicing-only.json",
+                    R"({"waveShapes":[4,3],"filterType":2,"filterSlope":12})");
+
+                // A real prior edit that no voicing undo may eat.
+                const Voicing pre = voicingNow();
+                const int polyphonyBefore = fosc->voicesValue.get();
+                check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -3.0 }}))),
+                       "voicing fixture: a prior edit (volume -3 dB)");
+                check (std::abs (volOf() + 3.0) < 0.01, "voicing fixture: the prior edit really moved the fader");
+
+                auto ld = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", full }}));
+                check (ok (ld), "load_preset accepts top-level waveShapes / filterType / filterSlope / oscVoices");
+                check ((int) ld["data"].getProperty ("waveShapesApplied", -1) == 4
+                         && (int) ld["data"].getProperty ("oscVoicesApplied", -1) == 4
+                         && (int) ld["data"].getProperty ("filterType", -1) == 1
+                         && (int) ld["data"].getProperty ("filterSlope", -1) == 24,
+                       "load_preset reports the voicing it applied");
+                check (fosc->oscParams[0]->waveShapeValue.get() == 3 && fosc->oscParams[1]->waveShapeValue.get() == 2
+                         && fosc->oscParams[2]->waveShapeValue.get() == 0 && fosc->oscParams[3]->waveShapeValue.get() == 0,
+                       "osc wave shapes read back 3 (saw), 2 (square), 0, 0 from the store the voice renders");
+                check (fosc->filterTypeValue.get() == 1 && fosc->filterSlopeValue.get() == 24,
+                       "filterType 1 (low-pass) and filterSlope 24 read back");
+                check (fosc->oscParams[0]->voicesValue.get() == 2 && fosc->oscParams[1]->voicesValue.get() == 1,
+                       "per-oscillator unison (oscVoices) reads back 2, 1");
+                check (fosc->voicesValue.get() == polyphonyBefore,
+                       "oscVoices never touches the plugin's polyphony voicesValue");
+                check ((int) fosc->state.getProperty ("waveShape1", -1) == 3
+                         && (int) fosc->state.getProperty ("filterType", -1) == 1
+                         && (int) fosc->state.getProperty ("voices1", -1) == 2,
+                       "the voicing is in the plugin state the Edit saves (waveShape1 / filterType / voices1)");
+                check (std::abs (fosc->filterFreq->getCurrentValue() - fosc->filterFreq->valueRange.convertFrom0to1 (0.61f)) < 1.0e-3f,
+                       "the params half lands on the AutomatableParameter the voice reads (Filter Freq current value)");
+                check (! same (voicingNow(), pre), "voicing fixture: the load really changed the voicing (the undo check is not vacuous)");
+
+                check (ok (cmd (ops, "undo")), "undo the voicing load");
+                check (same (voicingNow(), pre), "ONE undo reverts every voicing key (shapes, voices, filter type and slope)");
+                check (std::abs (volOf() + 3.0) < 0.01, "...and only the load: the prior volume edit survives");
+
+                // The SAME voicing-only preset twice, then ONE undo: the first load must
+                // survive. With no params to replay, a CachedValue write of identical values
+                // records nothing, and the undo would then eat load #1 (G14).
+                check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", voicingOnly }}))),
+                       "a voicing-only preset (no params) loads");
+                const Voicing once = voicingNow();
+                check (once.shape[0] == 4 && once.shape[1] == 3 && once.type == 2 && once.slope == 12,
+                       "the voicing-only preset applied (triangle, saw, high-pass, 12 dB/oct)");
+                check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", voicingOnly }}))),
+                       "the same voicing-only preset loads a second time");
+                check (ok (cmd (ops, "undo")), "undo the second identical load");
+                check (same (voicingNow(), once), "load x2 + undo x1 keeps the FIRST load's voicing (no empty transaction)");
+                check (ok (cmd (ops, "undo")), "undo the first identical load");
+                check (same (voicingNow(), pre), "the second undo reverts the first load");
+                check (std::abs (volOf() + 3.0) < 0.01, "the prior volume edit is intact after both voicing undos");
+
+                // Out-of-range voicing is refused BEFORE any transaction: nothing changes and
+                // the next undo still reverts the prior volume edit.
+                const std::pair<const char*, const char*> bad[] = {
+                    { "selftest-voicing-bad-shape.json",  R"({"waveShapes":[9],"params":{"Filter Freq":0.5}})" },
+                    { "selftest-voicing-bad-type.json",   R"({"filterType":5})" },
+                    { "selftest-voicing-bad-slope.json",  R"({"filterSlope":18})" },
+                    { "selftest-voicing-bad-voices.json", R"({"oscVoices":[3]})" },
+                    { "selftest-voicing-bad-array.json",  R"({"waveShapes":"saw"})" },
+                    { "selftest-voicing-bad-float.json",  R"({"waveShapes":[1.5]})" },
+                };
+                const float filterFreqBeforeBad = fosc->filterFreq->getCurrentValue();
+                int refused = 0;
+                for (const auto& [leaf, json] : bad)
+                    if (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", writePreset (leaf, json) }})))) ++refused;
+                check (refused == 6, "out-of-range voicing is refused: shape 9, filterType 5, slope 18, 3 unison voices, a non-array, 1.5 ("
+                                     + juce::String (refused) + "/6)");
+                check (same (voicingNow(), pre), "a refused preset changes nothing");
+                check (std::abs (fosc->filterFreq->getCurrentValue() - filterFreqBeforeBad) < 1.0e-6f,
+                       "a refused preset's params are not applied either (all-or-nothing)");
+                cmd (ops, "undo");
+                check (std::abs (volOf()) < 0.01, "undo after the refused loads reverts the PRIOR edit (no transaction was opened)");
+
+                for (auto& f : tmpFiles) f.deleteFile();
+            }
 
             cmd (ops, "remove_track", args1 ("trackId", mt));
         }
