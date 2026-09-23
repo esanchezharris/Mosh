@@ -6166,6 +6166,50 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 return nullptr;
             };
 
+            // ── demo B2: every bundled 4OSC patch is a real, voiced, short-tailed patch ──
+            // (Before the re-voice, every file rendered as a bare sine: the loader dropped
+            // the wave shapes and never enabled the filter, and two files named noise.)
+            {
+                auto* bf = fourOscOn (mt);
+                check (bf != nullptr && bf->oscParams.size() == 4, "bank fixture: the target carries a 4-oscillator 4OSC");
+                juce::StringArray names;
+                juce::String why;
+                bool allLoad = true, noUnknown = true, filtered = true, osc1Voiced = true, noNoise = true,
+                     shortRelease = true, unisonCapped = true;
+                for (auto& p : foscBundled)
+                {
+                    const auto name = p.getProperty ("name", var()).toString();
+                    names.add (name);
+                    auto r = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", p.getProperty ("file", var()) }}));
+                    if (! ok (r)) { allLoad = false; why << name << ": load failed; "; continue; }
+                    if (r["data"].hasProperty ("unknownParams"))
+                    { noUnknown = false; why << name << ": unknown " << r["data"].getProperty ("unknownParams", var()).toString() << "; "; }
+                    const int ft = (int) r["data"].getProperty ("filterType", 0);
+                    if (bf == nullptr || bf->oscParams.size() != 4) { allLoad = false; continue; }
+                    if (ft < 1 || ft > 4 || bf->filterTypeValue.get() == 0)
+                    { filtered = false; why << name << ": filterType " << ft << "; "; }
+                    const int s1 = bf->oscParams[0]->waveShapeValue.get();
+                    if (s1 < 1 || s1 > 4) { osc1Voiced = false; why << name << ": osc1 shape " << s1 << "; "; }
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        if (bf->oscParams[i]->waveShapeValue.get() == 5) { noNoise = false; why << name << ": osc" << (i + 1) << " noise; "; }
+                        if (bf->oscParams[i]->voicesValue.get() > 2)     { unisonCapped = false; why << name << ": osc" << (i + 1) << " unison; "; }
+                    }
+                    if (bf->ampRelease->getCurrentValue() > 0.5f)
+                    { shortRelease = false; why << name << ": release " << (double) bf->ampRelease->getCurrentValue() << " s; "; }
+                }
+                names.sort (true);
+                check (names.joinIntoString (",") == "Bass,Keys,Lead,Pad,Pluck",
+                       "the bundled 4OSC bank is exactly Keys, Bass, Pad, Lead, Pluck (got " + names.joinIntoString (",") + ")");
+                check (allLoad, "every bundled 4OSC patch loads " + why);
+                check (noUnknown, "no bundled 4OSC patch reports unknownParams " + why);
+                check (filtered, "every bundled 4OSC patch switches the filter on (filterType 1..4) " + why);
+                check (osc1Voiced, "every bundled 4OSC patch gives oscillator 1 a real wave (not none/noise) " + why);
+                check (noNoise, "no bundled 4OSC patch uses the noise wave " + why);
+                check (unisonCapped, "no bundled 4OSC patch asks for more than 2 unison voices " + why);
+                check (shortRelease, "every bundled 4OSC patch releases in <= 0.5 s (Amp Release current value) " + why);
+            }
+
             // ── demo B1: the 4OSC voicing keys (waveShapes / filterType / filterSlope / oscVoices) ──
             auto* fosc = fourOscOn (mt);
             check (fosc != nullptr, "voicing: the preset target exposes its te::FourOscPlugin");

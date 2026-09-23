@@ -18,10 +18,10 @@ async function loadedSynth(): Promise<{ trackId: string; index: number }> {
   expect((await st().exec("load_builtin", { trackId, type: "4osc" })).ok).toBe(true);
   await st().refresh();
   const synth = st().snapshot!.tracks[1]!.plugins!.find((p) => p.type === "4osc")!;
-  expect((await st().exec("load_preset", { trackId, index: synth.index, file: "/presets/4osc/mosh-bass.json" })).ok).toBe(true);
+  expect((await st().exec("load_preset", { trackId, index: synth.index, file: "/presets/4osc/Bass.json" })).ok).toBe(true);
   await st().refresh();
-  usePresetMemory.getState().remember(trackId, synth.index, "mosh-bass");
-  expect(labels()[presetKey(trackId, synth.index)]).toBe("mosh-bass");   // anti-vacuity: the label is up
+  usePresetMemory.getState().remember(trackId, synth.index, "Bass");
+  expect(labels()[presetKey(trackId, synth.index)]).toBe("Bass");   // anti-vacuity: the label is up
   return { trackId, index: synth.index };
 }
 
@@ -42,12 +42,12 @@ describe("the Presets pane label forgets what it can no longer vouch for", () =>
   it("redo and a History jump clear it too", async () => {
     const a = await loadedSynth();
     await st().exec("undo");
-    usePresetMemory.getState().remember(a.trackId, a.index, "mosh-bass");
+    usePresetMemory.getState().remember(a.trackId, a.index, "Bass");
     expect((await st().exec("redo")).ok).toBe(true);
     expect(labels()).toEqual({});
-    usePresetMemory.getState().remember(a.trackId, a.index, "mosh-bass");
+    usePresetMemory.getState().remember(a.trackId, a.index, "Bass");
     expect((await st().exec("jump_to_history", { txn: "not-a-stamp" })).ok).toBe(false);   // a refused jump moved nothing
-    expect(labels()[presetKey(a.trackId, a.index)]).toBe("mosh-bass");
+    expect(labels()[presetKey(a.trackId, a.index)]).toBe("Bass");
   });
 
   it("a project change forgets every label (track ids repeat across fresh Edits)", async () => {
