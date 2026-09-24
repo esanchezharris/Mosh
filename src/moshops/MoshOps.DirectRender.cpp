@@ -50,6 +50,46 @@ void MoshOps::cancelDirectRenders (const String& reason)
     directRenders_.clear();
 }
 
+// FINDINGS.md #7 (2026-09-23 demo walkthrough) — "Keep is not undoable". Root cause:
+// accept_render's decision validation runs on a background thread (Thread::launch) in
+// every interactive case, so ONE user click of "Keep" produces a "queued" phase (this
+// dispatch, no mutation yet) and a LATER "applied" phase (the next timerCallback's
+// pollDirectRenders(), which opens the actual Tracktion transaction). undo/redo/etc.
+// used to CANCEL any in-flight decision here in prepareDirectCommand() before the real
+// undo ran -- if the cancel landed before the validation finished, Keep silently never
+// applied at all, and the undo instead reverted whatever OLDER transaction happened to
+// be on top. Making accept_render fully synchronous was considered and rejected: decision
+// validation (a clonefile snapshot + two SHA256 reads of the pending source/result audio)
+// measured ~2.7s for a 200s clip via scripts/verify-hardware/direct_render_harness.py
+// (JUCE's SHA256 is far slower than a hardware-accelerated one) -- execute_command runs on
+// the UI thread, so that would freeze the whole app on every Keep click for anything but a
+// very short clip. Instead: block briefly and COMPLETE the pending accept first, then let
+// the command proceed against the now-consistent, fully-applied history. This is safe
+// specifically because "accept" decision validation is bounded, local-only (no network, no
+// external service, no long-running model job) and therefore guaranteed to finish quickly.
+// A "result" (audition preview) validation or a real generation job is NOT waited for here
+// -- those still cancel exactly as before, since they are not a user's committed decision.
+void MoshOps::completePendingAcceptDecisions()
+{
+    bool anyPending = false;
+    for (auto& [id, entry] : directRenders_)
+        if (entry->work.purpose == DirectRenderJob::Purpose::decisionValidation && entry->decision == "accept")
+            anyPending = true;
+    if (! anyPending) return;
+    const auto deadline = Time::getMillisecondCounterHiRes() + 6000.0;
+    for (;;)
+    {
+        bool stillPending = false;
+        for (auto& [id, entry] : directRenders_)
+            if (entry->work.purpose == DirectRenderJob::Purpose::decisionValidation && entry->decision == "accept"
+                && ! entry->work.finished.load())
+                stillPending = true;
+        if (! stillPending || Time::getMillisecondCounterHiRes() >= deadline) break;
+        Thread::sleep (2);
+    }
+    pollDirectRenders();   // apply whatever just finished, synchronously, before the caller proceeds
+}
+
 void MoshOps::prepareDirectCommand (const var& command)
 {
     const auto name = command.getProperty ("command", {}).toString();
@@ -58,7 +98,10 @@ void MoshOps::prepareDirectCommand (const var& command)
     restoreDirectAuditions();
     if (name == "undo" || name == "redo" || name == "jump_to_history" || name == "open_project"
         || name == "new_project" || name == "save_as" || name == "reload" || name == "recover_session")
+    {
+        completePendingAcceptDecisions();
         cancelDirectRenders ("Result application cancelled by undo or project change. Inference may continue.");
+    }
 }
 
 var MoshOps::submitDirectRender (const var& args)
