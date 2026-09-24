@@ -1258,7 +1258,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
             return errResult ("batch_begin", "a batch is already open");
         const auto label = args.getProperty ("name", var ("agent edit")).toString();
         beginUndoTransaction (label);
-        inBatch = true;
+        setInBatch (true);
         batchTurnId_ = turnIdOf (args);   // step-1 slice 6 — stamps this line and every line through batch_end
         logLine ("batch_begin", args, true, {}, false);
         return okResult ("batch_begin");
@@ -1341,7 +1341,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
     // stack completely untouched — which is what lets rollback distinguish "we own a
     // non-empty head" from "there is nothing of ours to undo".
     beginUndoTransaction (record->label);
-    inBatch = true;
+    setInBatch (true);
     txn_ = std::move (record);
     batchTurnId_ = turnIdOf (args);   // step-1 slice 6 — same sibling stamp as the legacy mode
 
@@ -1359,7 +1359,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
         // ── LEGACY MODE (unchanged) ──
         if (! inBatch)
             return errResult ("batch_end", "no batch is open");
-        inBatch = false;
+        setInBatch (false);
         logLine ("batch_end", args, true, {}, false);
         batchTurnId_.clear();   // step-1 slice 6 — batch_end is the turn's last stamped line
         emitSnapshotInvalidated();
@@ -1403,7 +1403,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
     {
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeUndoHeadMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_end",
@@ -1416,7 +1416,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
         // outside the one mutation path. Refuse rather than commit an unprovable edit.
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeFingerprintMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_end",
@@ -1427,14 +1427,14 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
     {
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeFingerprintMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_end",
                           agenttxn::codeFingerprintMismatch() + ": edit revision went backwards");
     }
 
-    inBatch        = false;
+    setInBatch (false);
     txn_->status   = agenttxn::statusCommitted();
     txn_->failureCode.clear();
     logLine ("batch_end", args, true, {}, false);
@@ -1522,7 +1522,7 @@ juce::var MoshOps::cmdBatchRollback (const juce::var& args)
     {
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeUndoHeadMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_rollback",
@@ -1537,7 +1537,7 @@ juce::var MoshOps::cmdBatchRollback (const juce::var& args)
         ++editRevision_;
         emitSnapshotInvalidated();
     }
-    inBatch = false;
+    setInBatch (false);
 
     // Exactness check: the session must be back at the captured pre-state.
     const auto now = txnFingerprint();
@@ -2265,7 +2265,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
         // strands an empty drum track + altered tempo). Reuse the batch flag the agent uses
         // (beginTxn skips its own beginNewTransaction while inBatch); respect an outer batch.
         const bool ownBatch = ! inBatch;
-        if (ownBatch) { beginUndoTransaction ("sketch_beatbox"); inBatch = true; }
+        if (ownBatch) { beginUndoTransaction ("sketch_beatbox"); setInBatch (true); }
 
         juce::Array<var> emitted;
 
@@ -2289,7 +2289,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
           clipId = r.getProperty ("data", var()).getProperty ("clipId", var()).toString();
           emitted.add (recordOp ("add_midi_clip", av)); }
 
-        if (ownBatch) inBatch = false;
+        if (ownBatch) setInBatch (false);
 
         // §6 training byproduct — append the session tuple (RETAIN the user's own audio
         // ref: it is clean, owned provenance). Cheap to log now, expensive to reconstruct.
@@ -2396,7 +2396,7 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     if (ownBatch)
     {
         beginUndoTransaction ("generate_beat_recipe");
-        inBatch = true;
+        setInBatch (true);
     }
 
     juce::NamedValueSet refs;
@@ -2447,7 +2447,7 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     }
 
     if (ownBatch)
-        inBatch = false;
+        setInBatch (false);
 
     if (failure.isNotEmpty())
     {
