@@ -73,6 +73,18 @@ int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
     Proves nothing about AUDIBILITY or feel — those stay with the owner. */
 int runV3VocalSmoke (MoshEngine&, MoshOps&);
 
+/** V3-booth — `Mosh --v3-booth-smoke`: the Booth exactly as the V3 UI drives it, on the same
+    BlackHole loopback as --v3-vocal-smoke. Where that smoke navigates to bar 3 and reads
+    loop_state (which adopts any unstamped clip), this one follows the buttons: "Add a Vocal
+    track" (create_track, then loop_setup on a Lead with NO input device), "Hear myself: Off",
+    "Put Me In" from bar 1 with no navigate, and then the three ways a producer ends a take:
+    the Booth's Stop pad (loop_stop), the TopBar stop (set_transport stop) and Space
+    (set_transport toggle). After each one it reads the SNAPSHOT's loop block (what the Booth
+    renders) and asserts the pass registered as a Part: one more contribution, idle, no
+    capture in flight, lastId naming it, the older unkept pass muted. Then Keep acts on it.
+    Prints one "V3-BOOTH-SMOKE: {json}" line for scripts/v3-acceptance/run.py. */
+int runV3BoothSmoke (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

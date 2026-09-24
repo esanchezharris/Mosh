@@ -317,7 +317,7 @@ juce::var MoshOps::loopStateVar()
     // all right now. It renders this verbatim above the buttons.
     state->setProperty ("blockReason", eng.audioReady()
                                            ? String()
-                                           : String ("No audio device — recording is unavailable on this Mac"));
+                                           : String (juce::CharPointer_UTF8 ("No audio device \xe2\x80\x94 recording is unavailable on this Mac")));
     return var (state);
 }
 
@@ -408,7 +408,7 @@ bool MoshOps::loopStartCapture (double startQn, bool bypassCountIn, juce::String
     if (! anyRecordActive)
     {
         applyCountInToEdit();
-        reason = "no armed track with a usable input — arm a track and pick an input in Settings > Audio";
+        reason = juce::String (juce::CharPointer_UTF8 ("no armed track with a usable input \xe2\x80\x94 arm a track and pick an input in Settings > Audio"));
         return false;
     }
 
@@ -443,7 +443,7 @@ bool MoshOps::loopStartPlayback (double startQn, juce::String& reason)
     return true;
 }
 
-MoshOps::LoopFinalized MoshOps::loopFinalizeCapture()
+MoshOps::LoopFinalized MoshOps::loopFinalizeCapture (const juce::var& stopArgs)
 {
     LoopFinalized out;
     if (! loopCurrent_.active)
@@ -458,8 +458,14 @@ MoshOps::LoopFinalized MoshOps::loopFinalizeCapture()
     // previous command left at the head of the stack and one Undo would take both. When
     // nothing lands the transaction stays empty, which JUCE never pushes — so a stop
     // during the count-in leaves the undo history exactly as it found it.
+    //
+    // stopRecordingAndLand, NOT cmdStopRecording: the latter is what routes a TopBar stop
+    // HERE while a pass is in flight, so calling it would come straight back.
     beginTxn ("loop_capture");
-    const auto stopped = cmdStopRecording (var (new DynamicObject()));
+    const auto stopArgsObject = stopArgs.isObject() ? stopArgs : var (new DynamicObject());
+    const auto stopped = stopRecordingAndLand (stopArgsObject,
+                                               (bool) stopArgsObject.getProperty ("discardRecordings", false));
+    out.stopResult = stopped;
     loopCurrent_ = {};
 
     auto* takes = loopTakesTrack();
@@ -658,7 +664,7 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
     // The takes track is the loop's own scratch lane. Promoting it to LEAD would make the
     // keepers and the rejects the same track and there would be no way back.
     if (lead->itemID.toString() == storedTakes)
-        return errResult (kName, "That is the takes track — pick the track you are singing onto");
+        return errResult (kName, juce::String (juce::CharPointer_UTF8 ("That is the takes track \xe2\x80\x94 pick the track you are singing onto")));
 
     auto* takes = findTrack (storedTakes);
     const bool alreadyPaired = takes != nullptr && storedLead == lead->itemID.toString();
@@ -667,7 +673,7 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
     if (! alreadyPaired)
     {
         beginTxn (kName);
-        takes = createAudioTrack (lead->getName() + " · Takes");
+        takes = createAudioTrack (lead->getName() + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 Takes")));
         if (takes == nullptr)
         {
             logLine (kName, args, false, "insert failed", true);
@@ -720,7 +726,7 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
     data->setProperty ("created", created);
     data->setProperty ("armed", (bool) armed.getProperty ("data", var()).getProperty ("applied", false));
     return loopOk (kName, data, actionId,
-                   created ? "Ready — takes land on \"" + takes->getName() + "\""
+                   created ? juce::String (juce::CharPointer_UTF8 ("Ready \xe2\x80\x94 takes land on \"")) + takes->getName() + "\""
                            : "Already set up on \"" + lead->getName() + "\"");
 }
 
@@ -1025,7 +1031,7 @@ juce::var MoshOps::cmdLoopHear (const juce::var& args)
     if (! applied) data->setProperty ("reason", reason);
     return loopOk (kName, data, actionId,
                    ! applied ? "Not playing: " + reason
-                   : rejected ? "Playing " + label + " — rejected take stays muted; restore it with Undo on the Mac"
+                   : rejected ? "Playing " + label + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 rejected take stays muted; restore it with Undo on the Mac"))
                               : "Playing " + label + " from bar " + String (loopQnToBar (entryQn)));
 }
 

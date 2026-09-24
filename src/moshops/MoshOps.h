@@ -350,8 +350,13 @@ private:
     juce::var cmdQuarantineRecordingResidue (const juce::var& args);
     juce::var recordingResidueToVar();
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
-    // KEEPING takes, drain the async clip-add, return the landed clip ids.
+    // KEEPING takes, drain the async clip-add, return the landed clip ids. EVERY recording
+    // stop goes through here (set_transport stop/toggle/record/to_start, stop_recording),
+    // so a Booth pass in flight is finalized as a pass whichever button ended it.
     juce::var cmdStopRecording  (const juce::var& args);
+    // The stop + landing itself, with no knowledge of the Booth loop. Only
+    // cmdStopRecording and loopFinalizeCapture call it.
+    juce::var stopRecordingAndLand (const juce::var& args, bool discard);
     // Take lanes (audio): expose Tracktion's native take tree — list/select/keep.
     juce::var cmdListTakes      (const juce::var& args);
     juce::var cmdSetCurrentTake (const juce::var& args);
@@ -673,10 +678,11 @@ private:
     bool loopStartCapture (double startQn, bool bypassCountIn, juce::String& reason);
     /** Plays (never records) from startQn. Same graceful-false contract as above. */
     bool loopStartPlayback (double startQn, juce::String& reason);
-    struct LoopFinalized { bool landed = false; juce::String passId; juce::String clipId; };
-    /** Lands the current capture: a FRESH transaction, then stop_recording, then identity
-        on whatever landed and the "only the newest unkept take is audible" mute pass. */
-    LoopFinalized loopFinalizeCapture();
+    struct LoopFinalized { bool landed = false; juce::String passId; juce::String clipId; juce::var stopResult; };
+    /** Lands the current capture: a FRESH transaction, then the stop (stopRecordingAndLand
+        with `stopArgs`, whose result is returned as stopResult), then identity on whatever
+        landed and the "only the newest unkept take is audible" mute pass. */
+    LoopFinalized loopFinalizeCapture (const juce::var& stopArgs = juce::var());
     /** Records that the pad polled (or that its last poll has aged out) and emits once on
         the transition — never per poll. Called from loop_state and from snapshot(). */
     void loopRefreshPhonePresence (bool polled);

@@ -83,6 +83,15 @@ the backend it runs against and is not a claim about the engine.
 | `loop_home` | non-undoable preference | Moves the listening start to the project beginning; stopped-only. |
 | `loop_lead_in {leadQn}` | non-undoable preference | Sets the run-up (0..256 quarter notes) for the *next* pass; leaves the listening start untouched. |
 
+**A pass is finalized however it ends** (2026-09-23). The TopBar stop, Space, Transport ›
+Play/Pause and an agent's `set_transport` all end a capture through `stop_recording`
+(`cmdStopRecording`), and while a pass is in flight that now runs the same finalize
+`loop_stop` does: its own `loop_capture` transaction, the pass id stamped on the landed
+clip, `lastId`/`reviewId` moved to it, and the older unkept pass muted. Before that, only
+`loop_stop` did, so a take ended from the TopBar landed audibly on Takes but never became
+a Part in the Booth (which renders `snapshot().loop`, a pure read that never adopts).
+`Mosh --v3-booth-smoke` pins all three stops on a loopback.
+
 `loop_keep` / `loop_again` report `applied:true` once the clip edit itself has
 committed, with a separate `data.restarted` bool and a `detail` that says plainly
 when the clip landed but the transport could not roll into the next take (headless,

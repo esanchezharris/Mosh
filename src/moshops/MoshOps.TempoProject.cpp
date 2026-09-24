@@ -138,7 +138,7 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
             if (inst != nullptr && inst->isRecordingActive()) { anyRecordActive = true; break; }
         if (! anyRecordActive)
         {
-            const juce::String reason = "no armed track with a usable input — arm a track and pick an input in Settings > Audio";
+            const juce::String reason = juce::String (juce::CharPointer_UTF8 ("no armed track with a usable input \xe2\x80\x94 arm a track and pick an input in Settings > Audio"));
             logLine ("set_transport", args, false, reason, false);
             return errResult ("set_transport", reason);
         }
@@ -710,7 +710,7 @@ static_assert (static_cast<int> (te::Edit::CountIn::none)   == 0
             && static_cast<int> (te::Edit::CountIn::oneBar) == 1
             && static_cast<int> (te::Edit::CountIn::twoBar) == 2,
                "mosh::countin's {0,1,2} bars domain assumes te::Edit::CountIn's "
-               "none/oneBar/twoBar == 0/1/2 — update the cast in applyCountInToEdit "
+               "none/oneBar/twoBar == 0/1/2 -- update the cast in applyCountInToEdit "
                "if tracktion_engine ever renumbers this enum");
 
 void MoshOps::applyCountInToEdit()
