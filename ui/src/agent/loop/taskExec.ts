@@ -71,8 +71,11 @@ const MELODY_REQUEST = /\b(?:melody|melodic)\b/i;
 // them and break those tests. EXPLICIT_EMPTY_TRACK_REQUEST below is the
 // narrower opt-out this design still wants: if the ask itself says the track
 // should stay empty/for later, skip the repair entirely for this task.
-const MELODIC_TRACK_NAME_RE = /\b(?:keys?|piano|synth|pad|lead|bass|chords?|melody|melodic|guitar|strings?|organ|rhodes|wurlitzer)\b/i;
-const EXPLICIT_EMPTY_TRACK_REQUEST = /\b(?:empty|blank|placeholder)\b|\bfor (?:me|you) to (?:record|play|fill|write)\b|\brecord into (?:it|this|that)\b/i;
+// "lead" is deliberately absent: the Booth's vocal lane is "Lead", and an empty
+// vocal/mic track is a recording destination, never a failed melodic part.
+const MELODIC_TRACK_NAME_RE = /\b(?:keys?|piano|synth|pad|bass|chords?|melody|melodic|guitar|strings?|organ|rhodes|wurlitzer)\b/i;
+const RECORDING_TRACK_NAME_RE = /\b(?:vocals?|vox|voice|mic|takes?)\b/i;
+const EXPLICIT_EMPTY_TRACK_REQUEST = /\b(?:empty|blank|placeholder)\b|\bfor (?:me|you) to (?:record|play|fill|write)\b|\brecord into (?:it|this|that)\b|\b(?:record(?:ing)?|sing(?:ing)?|vocals?|vox|mic|live)\b/i;
 
 // FINDINGS.md #4 -- the same task's add_drum_pattern passed the EXISTING Drums
 // track's id with no clipId, and bridge.mock.ts's add_drum_pattern (mirroring
@@ -315,7 +318,7 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       liveSnapshot ??= await getSnapshot();
       const track = liveSnapshot.tracks.find((t) => t.id === trackId);
       if (!track || track.clips.length > 0) continue;
-      if (!MELODIC_TRACK_NAME_RE.test(track.name)) continue;
+      if (!MELODIC_TRACK_NAME_RE.test(track.name) || RECORDING_TRACK_NAME_RE.test(track.name)) continue;
       await exec("remove_track", { trackId });
     }
   }

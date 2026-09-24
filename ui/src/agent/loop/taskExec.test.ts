@@ -248,6 +248,22 @@ describe("createTaskExecutor — guards from the 2026-09-23 real-app walkthrough
     expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
   });
 
+  it("keeps an empty lead-vocal track: a recording destination is not a failed melodic part", async () => {
+    const t = createTaskExecutor("lead vocal", { utterance: "add a lead vocal track" });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Lead Vocal", type: "audio" } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
+  it("keeps an empty melodic-named track when the ask is about recording into it", async () => {
+    const t = createTaskExecutor("bass track", { utterance: "add a bass track so I can record my bass" });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Bass", type: "audio" } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
   it("generate_beat_recipe (the fast-path reroute's target) adds a NEW track and never touches an existing Drums track/clip", async () => {
     // Coordinator review point: the fast-path reroute to generate_beat_recipe is only safe if
     // the recipe command itself cannot clobber the user's existing material the way the
