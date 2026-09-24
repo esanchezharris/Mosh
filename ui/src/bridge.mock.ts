@@ -1389,6 +1389,22 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
       reason: "not recording",
     };
   }
+  // A Booth pass in flight is finalized AS a pass however the take ends -- the TopBar stop,
+  // Space, a bare stop_recording -- exactly as MoshOps::cmdStopRecording does since
+  // 2026-09-23. Otherwise it would land here as an anonymous take the Booth never lists.
+  const boothPass = mockLoop.current !== null;
+  if (boothPass && !discardRecordings) {
+    const landed = loopFinalizeCapture();
+    stopPlayback();
+    snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+    emit("transport", snapshot.transport);
+    syncLoopSnapshot();
+    invalidate();
+    return landed
+      ? { applied: true, discarded: false, clips: [{ id: landed.id }] }
+      : { applied: false, discarded: false, clips: [], reason: "no take captured (no live input)" };
+  }
+  if (boothPass) mockLoop.current = null;   // discarded: nothing lands, nothing in flight
   stopPlayback();
   snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
   emit("transport", snapshot.transport);
@@ -1700,8 +1716,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
   switch (command) {
     case "set_transport": {
       const action = str(args.action);
+      // Mirrors recording::shouldFinalizeBeforeTransportAction: "continue" (Shift+Space) is a
+      // stop while recording, and a stop that skips the finalize leaves a Booth pass unlisted.
       const shouldFinalize = snapshot.transport.recording
-        && (action === "stop" || action === "toggle" || action === "record" || action === "to_start");
+        && (action === "stop" || action === "toggle" || action === "continue"
+            || action === "record" || action === "to_start");
       if (shouldFinalize) {
         const stopped = finalizeMockRecording(false);
         if (!stopped.applied) return err(command, stopped.reason ?? "could not land recording take");
@@ -3744,8 +3763,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       if (snapshot.transport.recording) return err(command, "Already recording — Stop first");
       loopStartCapture(mockLoop.listeningQn);
+      // currentId + entryQn: the engine's loop_record data shape (MoshOps.Loop.cpp).
       return loopResult(command, args, `Rolling from bar ${loopQnToBar(mockLoop.listeningQn).toFixed(1)}`,
-        { passId: mockLoop.current?.passId ?? null });
+        { passId: mockLoop.current?.passId ?? null, currentId: mockLoop.current?.passId ?? null,
+          entryQn: mockLoop.listeningQn });
     }
     case "loop_keep":
     case "loop_again": {

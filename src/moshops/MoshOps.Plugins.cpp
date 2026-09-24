@@ -721,7 +721,7 @@ juce::var MoshOps::cmdLoadPlugin (const juce::var& args)
         if (hasWaveClips)
             return errResult ("load_plugin",
                 desc.name
-                + " is an instrument — instruments go on instrument tracks (⇧⌘T), not audio tracks");
+                + juce::String (juce::CharPointer_UTF8 (" is an instrument \xe2\x80\x94 instruments go on instrument tracks (\xe2\x87\xa7\xe2\x8c\x98T), not audio tracks")));
     }
 
     // A2 — persist any unsaved work BEFORE an op that can crash the process in-place
@@ -1118,7 +1118,7 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
     // that asked for AU was told it had scanned — the failure mode that hid this gap.
     if (format == "au" && ! includeAU)
         return errResult ("rescan_plugins",
-                          "Audio Unit scanning is off — pass allowAU:true (or set MOSH_SCAN_AU=1)");
+                          juce::String (juce::CharPointer_UTF8 ("Audio Unit scanning is off \xe2\x80\x94 pass allowAU:true (or set MOSH_SCAN_AU=1)")));
 
     // wait:true keeps the legacy cheap VST3 pre-pass for an AU sweep. deepVst3:true
     // instead keeps module loading in the isolated worker, even when AU stays off.

@@ -350,8 +350,16 @@ private:
     juce::var cmdQuarantineRecordingResidue (const juce::var& args);
     juce::var recordingResidueToVar();
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
-    // KEEPING takes, drain the async clip-add, return the landed clip ids.
+    // KEEPING takes, drain the async clip-add, return the landed clip ids. Every recording
+    // stop a producer presses goes through here (set_transport stop/toggle/continue/record/
+    // to_start, stop_recording), so a Booth pass in flight is finalized as a pass whichever
+    // button ended it. Stops that bypass it (export/stems/bounce, a loop toggle) are covered
+    // only by loopForgetStaleCapture: the take lands unstamped, never as a Part.
     juce::var cmdStopRecording  (const juce::var& args);
+    // The stop + landing itself, with no knowledge of the Booth loop. Only
+    // cmdStopRecording, loopFinalizeCapture and cmdLoopStop (for a take the loop did not
+    // start: recording::loopStopRoute's landTake) call it.
+    juce::var stopRecordingAndLand (const juce::var& args, bool discard);
     // Take lanes (audio): expose Tracktion's native take tree — list/select/keep.
     juce::var cmdListTakes      (const juce::var& args);
     juce::var cmdSetCurrentTake (const juce::var& args);
@@ -575,7 +583,7 @@ private:
     juce::var cmdLoopAgain    (const juce::var& args);   // lifecycle + one undoable txn
     juce::var cmdLoopHear     (const juce::var& args);   // lifecycle
     juce::var cmdLoopPlayAll  (const juce::var& args);   // lifecycle
-    juce::var cmdLoopStop     (const juce::var& args);   // lifecycle; never an error
+    juce::var cmdLoopStop     (const juce::var& args);   // lifecycle; never an error; ends ANY recording (recording::loopStopRoute)
     juce::var cmdLoopNavigate (const juce::var& args);   // non-undoable preference
     juce::var cmdLoopHome     (const juce::var& args);   // non-undoable preference
     juce::var cmdLoopLeadIn   (const juce::var& args);   // non-undoable preference
@@ -673,10 +681,26 @@ private:
     bool loopStartCapture (double startQn, bool bypassCountIn, juce::String& reason);
     /** Plays (never records) from startQn. Same graceful-false contract as above. */
     bool loopStartPlayback (double startQn, juce::String& reason);
-    struct LoopFinalized { bool landed = false; juce::String passId; juce::String clipId; };
-    /** Lands the current capture: a FRESH transaction, then stop_recording, then identity
-        on whatever landed and the "only the newest unkept take is audible" mute pass. */
-    LoopFinalized loopFinalizeCapture();
+    struct LoopFinalized { bool landed = false; juce::String passId; juce::String clipId; juce::var stopResult; };
+    /** Lands the current capture: a FRESH transaction, then the stop (stopRecordingAndLand
+        with `stopArgs`, whose result is returned as stopResult), then identity on whatever
+        landed and the "only the newest unkept take is audible" mute pass. */
+    LoopFinalized loopFinalizeCapture (const juce::var& stopArgs = juce::var());
+    /** A pass is in flight only while the transport is recording it. A stop that never
+        reaches cmdStopRecording -- export/stems/bounce detaching the Edit, Tracktion's own
+        stopIfRecording on a loop toggle, a device drop -- lands the take unstamped and leaves
+        loopCurrent_ naming a capture that is gone; the next ordinary take would then be
+        finalized AS that pass (its id, its entry bar). Forgets such a capture; returns true
+        when it did. Called at the top of cmdSetTransport, cmdStopRecording and cmdLoopStop:
+        the commands that can start an ordinary take or end one. The loop_* starts
+        (loop_record, loop_keep, loop_again) do not need it -- loopStartCapture overwrites
+        loopCurrent_ when it rolls -- and their results name the capture through
+        loopCurrentIdVar(), which ignores a stale pass. loop_hear / loop_play_all only play. */
+    bool loopForgetStaleCapture();
+    /** The pass id of the capture in flight, or void: loopCurrent_ only while the transport
+        is recording. The one gate behind snapshot.loop's / loop_state's currentId and the
+        currentId of every loop_* result, so a start that did not roll never names a pass. */
+    juce::var loopCurrentIdVar();
     /** Records that the pad polled (or that its last poll has aged out) and emits once on
         the transition — never per poll. Called from loop_state and from snapshot(). */
     void loopRefreshPhonePresence (bool polled);

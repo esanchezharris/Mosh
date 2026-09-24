@@ -156,6 +156,45 @@ describe("v3 Booth — the desktop recording pad", () => {
     expect(note!.textContent).toBe("Kept Part 1; recording did not restart: no audio device");
   });
 
+  // 2026-09-23 real-app walkthrough: the TopBar's stop (aria-label "Stop", first in the DOM)
+  // ended a Booth take, and the Booth kept saying "Recording from bar 1" over a stopped
+  // transport. The note is the LAST pad's answer; once the take is over and no pad of ours is
+  // in flight, it no longer describes anything.
+  it("drops a 'Recording from bar 1' note when something outside the Booth stops the take", async () => {
+    useStore.setState({
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        calls.push({ command, args });
+        return { ok: true, command, data: { applied: true, currentId: "p1", detail: "Recording from bar 1" } };
+      }),
+    });
+    render(snapshot(loopState()));
+    await act(async () => { pad("v3-loop-record")!.click(); });
+    expect(host.querySelector('[data-testid="v3-booth-note"]')!.textContent).toBe("Recording from bar 1");
+    render(snapshot(loopState({ phase: "recording", currentId: "p1",
+      transport: { recording: true, playing: true, positionSec: 1 } })));
+    expect(host.querySelector('[data-testid="v3-booth-note"]')!.textContent).toBe("Recording from bar 1");
+    // The TopBar stop: the engine lands the pass and the snapshot goes idle with Part 1.
+    render(snapshot(loopState({ lastId: "p1", contributions: [part("p1", "Part 1", { trackId: "12" })] })));
+    expect(host.querySelector('[data-testid="v3-booth-note"]')).toBeNull();
+  });
+
+  it("keeps the Stop pad's own answer: the take ends while that command is still in flight", async () => {
+    const idle = snapshot(loopState({ lastId: "p1", contributions: [part("p1", "Part 1", { trackId: "12" })] }));
+    useStore.setState({
+      exec: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        calls.push({ command, args });
+        return { ok: true, command, data: { applied: true, stoppedRecording: true, detail: "Stopped" } };
+      }),
+      // run() awaits refresh() BEFORE it clears `pending`, so the stopped snapshot arrives mid-command.
+      refresh: vi.fn(async () => { root.render(React.createElement(BoothView, { snapshot: idle })); }),
+    });
+    render(snapshot(loopState({ phase: "recording", currentId: "p1",
+      transport: { recording: true, playing: true, positionSec: 5 } })));
+    await act(async () => { pad("v3-loop-stop")!.click(); });
+    expect(calls).toEqual([{ command: "loop_stop", args: {} }]);
+    expect(host.querySelector('[data-testid="v3-booth-note"]')!.textContent).toBe("Stopped");
+  });
+
   it("lists the contributions, marks what happened to them, and selects on click", async () => {
     render(snapshot(loopState({
       lastId: "p2",

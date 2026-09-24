@@ -770,7 +770,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "playback context allocated (audio attached)");
     }
     else
-        std::cerr << "  ..   (no-audio headless run — live-playback checks done via the GUI)\n";
+        std::cerr << "  ..   (no-audio headless run -- live-playback checks done via the GUI)\n";
     cmd (ops, "set_transport", args1 ("action", "stop"));
     auto seekArgs = new DynamicObject(); seekArgs->setProperty ("position", 1.0);
     cmd (ops, "set_transport", var (seekArgs));
@@ -831,7 +831,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     cmd (ops, "redo");
     check (tracks (ops) == batchBase + 2, "one redo restores the whole batch");
     cmd (ops, "undo");
-    check (tracks (ops) == batchBase, "batch undone again — clean state for Stage 2");
+    check (tracks (ops) == batchBase, "batch undone again -- clean state for Stage 2");
 
     // Issue #532 — a legacy Moshi batch around an AUDIO-clip move must leave exactly
     // one user-visible history step. The native UI refreshes the snapshot and may
@@ -1080,7 +1080,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (linesSinceMark == 4,
                "4 COMMAND-LOG LINES since the mark (set_metronome, create_track, set_transport, rename_track)");
         check (distinctTxnsSinceMark == 2,
-               "…but only 2 UNDO TRANSACTIONS — the log and the undo stack do not line up");
+               "...but only 2 UNDO TRANSACTIONS -- the log and the undo stack do not line up");
         check (hUndo.getUndoDescriptions().size() - markDepth == 2,
                "the UndoManager itself agrees: 2 transactions, not 4 (counting log lines would overshoot by 2)");
         check (tipTxn != markTxn, "the tip is a different history point from the mark");
@@ -1099,7 +1099,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Stated again in pieces, so a failure is diagnosable rather than a wall of JSON —
         // and so the specific overshoot a line-counting implementation produces is named.
         check (trackNamed ("HJ-B"),
-               "HJ-B (created BEFORE the mark) survives — undoing 4 log lines would have destroyed it");
+               "HJ-B (created BEFORE the mark) survives -- undoing 4 log lines would have destroyed it");
         check (! trackNamed ("HJ-C"), "HJ-C (created after the mark) is gone");
         check (trackNamed ("HJ-A") && ! trackNamed ("HJ-A2"), "the post-mark rename is undone");
         // …and the non-undoable command in the middle is deliberately NOT rolled back:
@@ -1111,7 +1111,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // ── FORWARD again: until a new edit replaces them, the points ahead are still reachable. ──
         auto forward = cmd (ops, "jump_to_history", args1 ("txn", tipTxn));
         check (ok (forward), "jump_to_history forward to the tip ok");
-        check ((int) forward["data"].getProperty ("redone", -1) == 2, "…by redoing exactly 2 transactions");
+        check ((int) forward["data"].getProperty ("redone", -1) == 2, "...by redoing exactly 2 transactions");
         check (editState() == tipState, "jumping forward restores the tip snapshot exactly");
 
         // ── THE SILENT-DIVERGENCE GUARD: a point that is GONE must REFUSE, not land elsewhere. ──
@@ -1125,10 +1125,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto afterNewEditState = editState();
         auto stale = cmd (ops, "jump_to_history", args1 ("txn", tipTxn));
         check (! ok (stale),
-               "a point overwritten by a later edit REFUSES the jump — it does not silently land elsewhere");
+               "a point overwritten by a later edit REFUSES the jump -- it does not silently land elsewhere");
         check (editState() == afterNewEditState, "the refused jump moved nothing at all");
         check (trackNamed ("HJ-D") && trackNamed ("HJ-B") && ! trackNamed ("HJ-C"),
-               "…confirmed on the tracks: HJ-D and HJ-B present, HJ-C still gone");
+               "...confirmed on the tracks: HJ-D and HJ-B present, HJ-C still gone");
 
         // The read surface agrees with the refusal, so the UI can grey the row out
         // BEFORE the producer clicks it rather than only after.
@@ -1144,7 +1144,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 }
         }
         check (markRestorable, "get_command_log lists the still-reachable mark in restorableTxns");
-        check (! tipRestorable, "get_command_log does NOT list the overwritten tip — the UI can grey it before the click");
+        check (! tipRestorable, "get_command_log does NOT list the overwritten tip -- the UI can grey it before the click");
 
         // ── Argument validation + cross-session safety. ──
         check (! ok (cmd (ops, "jump_to_history", var (new DynamicObject()))),
@@ -1154,7 +1154,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (cmd (ops, "jump_to_history", args1 ("txn", markTxn.upToLastOccurrenceOf (":", true, false) + "nonsense"))),
                "a malformed stamp refuses rather than parsing to 0 and undoing everything");
         check (ok (cmd (ops, "jump_to_history", args1 ("txn", markTxn))),
-               "…and a live stamp still works after those refusals");
+               "...and a live stamp still works after those refusals");
 
         // The stamp reaches the file, not just the in-memory projection.
         {
@@ -1187,20 +1187,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             const int depthBeforeEvict = hUndo.getUndoDescriptions().size();
             check (ok (cmd (ops, "create_track", args1 ("name", "HJ-S3"))), "CAP-PRJ-005 saturation fixture S3 (evicts S1)");
             check (hUndo.getUndoDescriptions().size() == depthBeforeEvict,
-                   "the undo DEPTH did not change across the eviction — counting alone cannot see the new transaction");
+                   "the undo DEPTH did not change across the eviction -- counting alone cannot see the new transaction");
 
             const auto s3Txn = cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
                                    .getProperty ("currentTxn", var()).toString();
             check (s3Txn != s2Txn,
-                   "…yet S3 got its OWN history point, not S2's (the eviction did not silently rename a transaction)");
+                   "...yet S3 got its OWN history point, not S2's (the eviction did not silently rename a transaction)");
 
             auto satJump = cmd (ops, "jump_to_history", args1 ("txn", s2Txn));
             check (ok (satJump), "jumping to the pre-eviction point still works");
-            check ((int) satJump["data"].getProperty ("undone", -1) == 1, "…by undoing exactly 1 transaction");
+            check ((int) satJump["data"].getProperty ("undone", -1) == 1, "...by undoing exactly 1 transaction");
             check (trackNamed ("HJ-S2") && ! trackNamed ("HJ-S3"),
-                   "…and lands on S2: HJ-S2 present, HJ-S3 gone");
+                   "...and lands on S2: HJ-S2 present, HJ-S3 gone");
             check (! ok (cmd (ops, "jump_to_history", args1 ("txn", s1Txn))),
-                   "the EVICTED point refuses (dropped off the bottom of the history — not restorable, and it says so)");
+                   "the EVICTED point refuses (dropped off the bottom of the history -- not restorable, and it says so)");
 
             for (auto& n : { "HJ-S1", "HJ-S2", "HJ-S3" })
             {
@@ -1251,12 +1251,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     cmd (ops, "create_track", objN ({ { "name", "Prov Agent" } }));
     check (ok (cmd (ops, "batch_end")), "AGT-PROV agent turn closes");
     cmd (ops, "undo");
-    check (tracks (ops) == batchBase, "AGT-PROV agent turn undone — state unchanged");
+    check (tracks (ops) == batchBase, "AGT-PROV agent turn undone -- state unchanged");
 
     // (b) A DIRECT UI action — a mouse move, no ask behind it.
     cmd (ops, "create_track", objN ({ { "name", "Prov Direct" } }));
     cmd (ops, "undo");
-    check (tracks (ops) == batchBase, "AGT-PROV direct action undone — state unchanged");
+    check (tracks (ops) == batchBase, "AGT-PROV direct action undone -- state unchanged");
 
     // (c) An UNSERVED ask: the brain planned nothing / everything was rejected. The
     // marker pair runs with no commands between. beginNewTransaction only sets a flag
@@ -1319,14 +1319,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
       check (! innerArgs.hasProperty ("utterance") && ! innerArgs.hasProperty ("turn_id"),
              "AGT-PROV the batch's own command line carries NO utterance (marker only)"); }
     check (provUtteranceLines == 1,
-           "AGT-PROV the utterance appears on exactly ONE line — the marker, not every command");
+           "AGT-PROV the utterance appears on exactly ONE line -- the marker, not every command");
 
     check (provDirect.isObject(), "AGT-PROV the direct (non-agent) create_track reached the JSONL");
     { const auto directArgs = provDirect.getProperty ("args", var());
       check (! directArgs.hasProperty ("utterance"),
-             "AGT-PROV a DIRECT UI action's line has NO utterance key — absent, not empty");
+             "AGT-PROV a DIRECT UI action's line has NO utterance key -- absent, not empty");
       check (! directArgs.hasProperty ("turn_id"),
-             "AGT-PROV a DIRECT UI action's line has NO turn_id — the log stays honest"); }
+             "AGT-PROV a DIRECT UI action's line has NO turn_id -- the log stays honest"); }
 
     check (provEmpty.isObject(), "AGT-PROV the UNSERVED ask reached the JSONL despite zero commands");
     check (provEmpty.getProperty ("args", var()).getProperty ("utterance", var()).toString() == provEmptyAsk,
@@ -1389,7 +1389,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Hermetic: unwind the remaining four edits (the -10.25 batch, -9.25, -8.25, -7.25).
         for (int i = 0; i < 4; ++i) cmd (ops, "undo");
         check (std::abs ((double) firstTrack (ops).getProperty ("volumeDb", 0.0) - s1Vol0) < 0.01,
-               "STEP1-PROV every edit undone — the fader is back where it started");
+               "STEP1-PROV every edit undone -- the fader is back where it started");
 
         // Read the lines this section wrote back off disk.
         var lNative, lAgent, lUi, lBegin, lInner, lEnd, lAfter, lUndo;
@@ -1815,7 +1815,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     if (nPlugins == 0)
     {
-        std::cerr << "  (no VST3s available — skipping host checks; commands compiled+dispatch ok)\n";
+        std::cerr << "  (no VST3s available -- skipping host checks; commands compiled+dispatch ok)\n";
     }
     else
     {
@@ -2183,7 +2183,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_transport", args1 ("action", "continue"));  // ⇧Space: play from current
         setPos (9.0);
         cmd (ops, "set_transport", args1 ("action", "stop"));
-        check (std::abs (pos() - 9.0) < 0.01, "⇧Space stop LEAVES the playhead where it halted");
+        check (std::abs (pos() - 9.0) < 0.01, "Shift+Space stop LEAVES the playhead where it halted");
         cmd (ops, "set_transport", args1 ("action", "play"));      // marker := 9
         cmd (ops, "set_transport", args1 ("action", "toggle"));    // stop via toggle
         check (std::abs (pos() - 9.0) < 0.01, "toggle-stop returns to the marker too");
@@ -2582,7 +2582,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "trimmed clip measures the QUIET region's ~-20 dBFS peak, not the loud transient outside its "
                    "span (FAILS against the old whole-file scan, which would report ~-0.92 dBFS here)");
             check (std::abs ((double) clipById (spanCid).getProperty ("gainDb", 0.0) - 20.0) < 0.5,
-                   "trimmed clip's normalize gain targets the audible (quiet) peak, ~+20 dB — not ~+0.9 dB");
+                   "trimmed clip's normalize gain targets the audible (quiet) peak, ~+20 dB -- not ~+0.9 dB");
 
             // Trim to the EXACT-SILENCE gap [0.5s, 1.0s) — the audible SPAN is silent even
             // though the source file as a whole isn't. Still the existing clean "silent"
@@ -2820,7 +2820,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! muteAutoFor (plain).isObject(),
                    "CAP-AUT-006: a track with no mute curve is absent from the rail");
             check (muteAutoFor (mt).isObject(),
-                   "CAP-AUT-006: …while the automated track is still on it");
+                   "CAP-AUT-006: ...while the automated track is still on it");
 
             // And it drops off the rail when the curve goes, so the button releases.
             {
@@ -2840,7 +2840,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // filtered out of that. It stays LAZY (ensureVolumePlugin, on the first fader
         // touch): materialising it eagerly would insert a pan-law gain stage into every
         // track's chain, which is not a byte-neutral thing to do to the render goldens.
-        check (! mixerPluginVar (mt, "volume").isObject(), "CAP-AUT-006: the fader is still lazy — no fader until touched");
+        check (! mixerPluginVar (mt, "volume").isObject(), "CAP-AUT-006: the fader is still lazy -- no fader until touched");
         cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -3.0 }}));
         {
             auto fader = mixerPluginVar (mt, "volume");
@@ -3657,7 +3657,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (ok (cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}))), "remove_master_plugin (real VST3) ok");
             }
             else
-                std::cerr << "  (no hostable VST3 available — skipping load_master_plugin/pluginId check)\n";
+                std::cerr << "  (no hostable VST3 available -- skipping load_master_plugin/pluginId check)\n";
         }
 
         // cleanup — leave the master bus clean for later sections/demos.
@@ -3757,7 +3757,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", 3 }, { "bypassed", true }}))),
                "bypass at index == boundary is rejected");
         check (! ok (cmd (ops, "remove_master_plugin", objN ({{ "index", 3 }}))),
-               "remove at index == boundary is rejected — the tap can't be deleted via the user command surface");
+               "remove at index == boundary is rejected -- the tap can't be deleted via the user command surface");
         check (physicalCount() == 4, "the tap survived every boundary-index command attempt");
         // ...and boundary - 1 (the LAST visible plugin, delay) still resolves correctly —
         // the guard isn't over-conservative either.
@@ -3791,7 +3791,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "4bandEq" }}))), "4bandEq loaded (4th visible plugin)");
         check (masterOrder() == StringArray ({ "compressor", "reverb", "delay", "4bandEq" }), "the 4th visible plugin appended before the tap");
         check (physicalCount() == 5, "physical list now has 5 (4 visible + the tap)");
-        check (physicalTypeAt (4) == tapType, "the tap was pushed to index 4 — still physically last");
+        check (physicalTypeAt (4) == tapType, "the tap was pushed to index 4 -- still physically last");
         check (masterPlugins().size() == 4, "master.plugins still excludes the (now index-4) tap");
 
         // Make room — the master bus caps at 4 VISIBLE plugins regardless of the tap
@@ -3836,7 +3836,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             if (! plugins.isEmpty())
                 plugins.getLast()->deleteFromParent();
         }
-        check (eng.edit().getMasterPluginList().getPlugins().isEmpty(), "synthetic internal plugin cleaned up — master bus fully empty for later sections");
+        check (eng.edit().getMasterPluginList().getPlugins().isEmpty(), "synthetic internal plugin cleaned up -- master bus fully empty for later sections");
     }
 
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
@@ -4523,7 +4523,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto noPrompt = cmd (ops, "render_lora_take", objN ({{ "seed", 1 }}));
         check (! ok (noPrompt), "render_lora_take without a prompt fails");
         check (noPrompt.getProperty ("error", var()).toString().contains ("prompt"),
-               "…and says which argument is missing");
+               "...and says which argument is missing");
 
         auto blankPrompt = cmd (ops, "render_lora_take", objN ({{ "prompt", "   " }}));
         check (! ok (blankPrompt), "a whitespace-only prompt is rejected too (trimmed, not just non-empty)");
@@ -4535,7 +4535,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                             objN ({{ "prompt", "rage trap instrumental" }, { "sourceClipId", "clip-that-does-not-exist" }}));
         check (! ok (badClip), "render_lora_take with an unknown source clip fails");
         check (badClip.getProperty ("error", var()).toString().contains ("source clip not found"),
-               "…naming the clip problem, NOT the service (validation runs before the spawn)");
+               "...naming the clip problem, NOT the service (validation runs before the spawn)");
 
         // A MIDI clip is a legitimate thing to point at and an illegitimate source:
         // the model is audio→audio, and the Lab does not auto-bounce (render_layer
@@ -4550,7 +4550,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                 objN ({{ "prompt", "rage trap instrumental" }, { "sourceClipId", labMidiId }}));
             check (! ok (midiSrc), "render_lora_take refuses a MIDI clip as an audition source");
             check (midiSrc.getProperty ("error", var()).toString().contains ("audio clip"),
-                   "…explaining it needs audio, not just 'invalid'");
+                   "...explaining it needs audio, not just 'invalid'");
         }
 
         // It must never open an undo transaction: an audition is not an edit, and a
@@ -4569,7 +4569,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto noSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "name", "keeper" }}));
         check (! ok (noSource), "promote_lora_checkpoint without a source fails");
         check (noSource.getProperty ("error", var()).toString().contains ("source"),
-               "…naming the missing argument");
+               "...naming the missing argument");
 
         auto blankSource = cmd (ops, "promote_lora_checkpoint", objN ({{ "source", "   " }}));
         check (! ok (blankSource), "promote_lora_checkpoint with a blank source fails");
@@ -5076,7 +5076,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                                           { "format", "wav" }, { "bitDepth", 32 }}));
             check (ok (exp32), "export_audio wav 32-bit ok");
             check (exp32["data"].getProperty ("dither", var()).toString() == "none",
-                   "32-bit float export reports dither none (not a reduction — stays byte-identical)");
+                   "32-bit float export reports dither none (not a reduction -- stays byte-identical)");
             f32.deleteFile();
         }
 
@@ -5192,7 +5192,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (std::abs ((double) expCustom["data"].getProperty ("seconds", -1.0) - 2.0) < 0.05, "G1: custom seconds~=2");
         const juce::int64 bytesCustom = (juce::int64) expCustom["data"].getProperty ("bytes", 0);
         check (bytesCustom > 0 && bytesCustom < bytesFull,
-               "G1: custom (2s) render is SMALLER than full (4s) render — proves only the range rendered");
+               "G1: custom (2s) render is SMALLER than full (4s) render -- proves only the range rendered");
 
         // range:'loop' renders the transport loop region.
         check (ok (cmd (ops, "set_transport", objN ({{ "loopStart", 0.5 }, { "loopEnd", 2.5 }}))),
@@ -5233,7 +5233,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (std::abs ((double) expInclude["data"].getProperty ("endAllowance", -1.0) - 2.0) < 0.05, "G1: tail=include endAllowance~=2");
         const juce::int64 bytesInclude = (juce::int64) expInclude["data"].getProperty ("bytes", 0);
         check (bytesInclude > bytesCut,
-               "G1: tail=include (reverb ringing) produces MORE audio than tail=cut — the tail is actually captured");
+               "G1: tail=include (reverb ringing) produces MORE audio than tail=cut -- the tail is actually captured");
 
         // Clean up the temp export files.
         for (auto* nm : { "g1-full.wav", "g1-custom.wav", "g1-loop.wav", "g1-tail-cut.wav", "g1-tail-include.wav" })
@@ -5330,7 +5330,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
     else
     {
-        std::cerr << "  ..   (Serum2.vst3 not installed — skipping Serum-specific local gate)\n";
+        std::cerr << "  ..   (Serum2.vst3 not installed -- skipping Serum-specific local gate)\n";
     }
 
     // --- G7: per-track stem export (common zero point) ---------------------------
@@ -5475,7 +5475,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 // this threshold easily; a full-mix regression would read ~0.0 here.
                 check (diffRms > 0.05,
                        "stem A and stem B are genuinely DIFFERENT signals, i.e. actually "
-                       "isolated per-track — not both secretly the full mix (diffRms="
+                       "isolated per-track -- not both secretly the full mix (diffRms="
                        + String (diffRms, 4) + ")");
             }
         }
@@ -6376,7 +6376,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             File dir (demoDir); dir.createDirectory();
             beatFile.copyFileTo (dir.getChildFile ("mosh-drum-beat.wav"));
-            std::cerr << "  ..   kept rendered beat → " << dir.getChildFile ("mosh-drum-beat.wav").getFullPathName() << "\n";
+            std::cerr << "  ..   kept rendered beat -> " << dir.getChildFile ("mosh-drum-beat.wav").getFullPathName() << "\n";
         }
 
         silentFile.deleteFile();
@@ -6711,13 +6711,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "accept_render", args1 ("clipId", scid))), "accept SA3 render -> lands on the neural lane");
     }
     else
-        std::cerr << "  ..   (SA3 self-test skipped — set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
+        std::cerr << "  ..   (SA3 self-test skipped -- set MOSH_SELFTEST_SA3=1 to exercise the real model)\n";
 
     // --- Audio→MIDI (Basic Pitch): GATED on MOSH_SELFTEST_TRANSCRIBE (needs the
     //     transcribe venv + service; ~3s inference, so opt in explicitly). ---
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_TRANSCRIBE", "0") == "1")
     {
-        section ("Audio→MIDI: real Basic Pitch transcription");
+        section ("Audio->MIDI: real Basic Pitch transcription");
         auto tct = cmd (ops, "create_track", args1 ("name", "TC"))["data"].getProperty ("trackId", var()).toString();
         auto ttn = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tct }, { "seconds", 2.0 }, { "freq", 220.0 }}));
         const auto wcid = ttn["data"].getProperty ("clipId", var()).toString();
@@ -6736,7 +6736,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (newTrack["clips"][0].getProperty ("notes", var()).size() > 0, "MIDI clip carries the transcribed notes");
     }
     else
-        std::cerr << "  ..   (transcribe self-test skipped — set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)\n";
+        std::cerr << "  ..   (transcribe self-test skipped -- set MOSH_SELFTEST_TRANSCRIBE=1 to exercise Basic Pitch)\n";
 
     // --- Sketch Phase 0 (beatbox → drum MoshOps): GATED on MOSH_SELFTEST_SKETCH (needs
     //     the sketch venv + service + the committed fixture WAVs; point MOSH_SKETCH_FIXTURE_DIR
@@ -6744,7 +6744,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     //     editable clip, the tempo is set, and the transduction is byte-identical across runs. ---
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SKETCH", "0") == "1")
     {
-        section ("Sketch: beatbox WAV → drum MoshOps (real librosa transduction)");
+        section ("Sketch: beatbox WAV -> drum MoshOps (real librosa transduction)");
         juce::File fixDir (SystemStats::getEnvironmentVariable ("MOSH_SKETCH_FIXTURE_DIR", {}));
         const auto boombap = fixDir.getChildFile ("boombap_90.wav");
         const auto trap    = fixDir.getChildFile ("trap_140.wav");
@@ -6847,7 +6847,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
     else
-        std::cerr << "  ..   (sketch self-test skipped — set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)\n";
+        std::cerr << "  ..   (sketch self-test skipped -- set MOSH_SELFTEST_SKETCH=1 + MOSH_SKETCH_FIXTURE_DIR to exercise the beatbox transduction)\n";
 
     // Settle the generative service's async backlog before the downstream pure-command
     // blocks. The Tier-B render jobs above cancel in-flight HTTP requests whose completion
@@ -7082,7 +7082,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // ...and an explicit 0 is the same thing, not a small swing.
             auto rB = cmd (ops, "quantize_notes", objN ({ { "clipId", cA }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", 0.0 } }));
             check (ok (rB) && (int) rB["data"].getProperty ("moved", -1) == 0 && lands (cA, STRAIGHT),
-                   "swing:0 is exactly straight — 0 is the neutral value, not a small swing");
+                   "swing:0 is exactly straight -- 0 is the neutral value, not a small swing");
 
             // The behaviour itself: delay the odd subdivisions, leave the on-beats alone.
             const auto cC = swClip (STRAIGHT);
@@ -7098,7 +7098,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             const auto cD = swClip (STRAIGHT);
             cmd (ops, "quantize_notes", objN ({ { "clipId", cD }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", 10000.0 } }));
             check (lands (cD, SWUNG),
-                   "swing clamps at 100 (MPC 75%) — an over-driven value never pushes an off-beat onto the next on-beat");
+                   "swing clamps at 100 (MPC 75%) -- an over-driven value never pushes an off-beat onto the next on-beat");
 
             const auto cE = swClip (STRAIGHT);
             auto rE = cmd (ops, "quantize_notes", objN ({ { "clipId", cE }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", -75.0 } }));
@@ -7185,7 +7185,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               const int base[] = { 40, 80, 100, 127 };
               for (int i = 0; i < 4 && inRange; ++i)
                   inRange = run1[i] >= std::max (1, base[i] - 26) && run1[i] <= std::min (127, base[i] + 26);
-              check (inRange, "randomize stays within ±amount (clamped)"); }
+              check (inRange, "randomize stays within +/-amount (clamped)"); }
             cmd (ops, "undo", objN ({}));
             check (ok (cmd (ops, "transform_velocities", objN ({{ "clipId", vc }, { "mode", "randomize" }, { "amount", 25 }}))),
                    "transform_velocities randomize replay ok");
@@ -7349,7 +7349,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                          && std::get<1> (r1[i]) == std::get<1> (fx[i])
                          && std::abs (std::get<3> (r1[i]) - std::get<3> (fx[i])) <= 11
                          && std::get<3> (r1[i]) >= 1 && std::get<3> (r1[i]) <= 127;
-              check (inRange, "humanize: timing within ±(amount% of a 16th), velocity within ±amount, pitches/lengths untouched"); }
+              check (inRange, "humanize: timing within +/-(amount% of a 16th), velocity within +/-amount, pitches/lengths untouched"); }
             check (! matchNotes (run1, fixture), "humanize actually moved something");
             undoRestores ("undo after humanize ok");
             check (ok (cmd (ops, "transform_notes", objN ({{ "clipId", nc }, { "mode", "humanize" }, { "amount", 10 }}))),
@@ -7987,7 +7987,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── consolidate_clips — the WAVE path (⌘J on audio) ───
     // Two tone clips + a gap render through the track's chain into one WAV clip
     // at the span start; mixed MIDI+audio sets and unselected-overlaps refuse.
-    section ("consolidate_clips — audio");
+    section ("consolidate_clips -- audio");
     {
         auto wavPeak = [] (const juce::File& f) {
             juce::AudioFormatManager fm;
@@ -8073,7 +8073,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // set_clip_loop's MIDI branch: content-relative seconds → beats at the clip's
     // tempo; the repeat is proven through an offline bounce's onset count, not
     // asserted from state alone.
-    section ("set_clip_loop — MIDI");
+    section ("set_clip_loop -- MIDI");
     {
         // Tail-energy profile, not onset counting: a looped render carries energy
         // all the way to the file's end; an unlooped one-note render is silent in
@@ -8129,7 +8129,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // quarter (measured 0.0 exactly; the 4OSC release ends ~0.6s in). Anything
         // hot here means another track leaked into the render — the toBitSet bug.
         check (baselineProfile.second < 0.01,
-               "midi loop: bounce ISOLATION — the unlooped baseline's last quarter is silent"
+               "midi loop: bounce ISOLATION -- the unlooped baseline's last quarter is silent"
                " (tail=" + juce::String (baselineProfile.second, 6) + ", neighbor tone stayed out)");
         cmd (ops, "undo");   // undo the baseline bounce (MIDI clip returns)
         check (! ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", lc }, { "enabled", true }, { "start", 0.0 }, { "length", 0.0 }}))),
@@ -8157,7 +8157,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && loopedProfile.second > juce::jmax (baselineProfile.second * 1.1, 0.02),
                "midi loop: the render REPEATS the notes (last-quarter energy"
                " tail=" + juce::String (loopedProfile.second, 6)
-               + " > max(1.1× baseline=" + juce::String (baselineProfile.second, 6) + ", 0.02))");
+               + " > max(1.1x baseline=" + juce::String (baselineProfile.second, 6) + ", 0.02))");
         cmd (ops, "undo");   // undo the bounce (the MIDI clip returns)
         cmd (ops, "undo");   // undo the loop set
         check (! trackById (lt)["clips"][0].hasProperty ("midiLoopStartBeats"),
@@ -8388,7 +8388,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // return-track name reverting while the bus name doesn't = the old partial-undo bug).
         check (ok (cmd (ops, "undo")), "undo after rename_bus ok");
         check (hasBusNamed ("Plate") && returnTrackName (bus0) == "Plate",
-               "undo does NOT revert rename_bus — bus name AND return-track name both stay (non-undoable, no partial-undo)");
+               "undo does NOT revert rename_bus -- bus name AND return-track name both stay (non-undoable, no partial-undo)");
         cmd (ops, "rename_bus", objN ({{ "bus", bus0 }, { "name", "Reverb" }}));   // restore for downstream remove_bus
 
         const int busesNow = buses().size();
@@ -8727,7 +8727,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     else distinct = s != firstPeaks;
                 }
             check (withPeaks == 2, "EVERY take carries a non-empty peaks array (additive)");
-            check (shapesOk, "take peaks are [min,max] pairs — the main-lane shape");
+            check (shapesOk, "take peaks are [min,max] pairs -- the main-lane shape");
             check (distinct, "the two takes' peaks DIFFER (220 Hz vs 880 Hz sources)");
 
             auto takeClipSnapshot = [&ops, &toneA]() -> juce::var
@@ -8979,7 +8979,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             {
                 const auto clip = idClipSnapshot();
                 check (clip.getProperty ("takeIds", var()).size() == 2,
-                       "the refused Keep attempts mutated nothing — both takes remain");
+                       "the refused Keep attempts mutated nothing -- both takes remain");
             }
 
             // Keep the SECOND take by its stable id (current selection is still index 0 /
@@ -9029,7 +9029,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (takes4.size() == 2, "reload preserves both takes");
                 check (takes4[0].getProperty ("id", var()).toString() == lId0
                            && takes4[1].getProperty ("id", var()).toString() == lId1,
-                       "reload preserves the EXACT same ids — no regeneration");
+                       "reload preserves the EXACT same ids -- no regeneration");
             }
         }
 
@@ -9229,7 +9229,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (setup["data"].getProperty ("leadTrackId", var()).toString() == leadId,
                "loop_setup reports the chosen lead track");
         check (takesId.isNotEmpty() && takesId != leadId, "takesTrackId is a DIFFERENT track from the lead");
-        check (nameOfTrack (takesId) == "Lead · Takes", "the takes track is named \"<lead> · Takes\"");
+        check (nameOfTrack (takesId) == juce::String (juce::CharPointer_UTF8 ("Lead \xc2\xb7 Takes")),
+               "the takes track is named \"<lead> <middle dot> Takes\"");
+        // N3 (2026-09-23 walkthrough): the Booth prints this detail verbatim, and it read
+        // "Ready \xc3\xa2<ctrl><ctrl> takes land on" -- a raw UTF-8 literal on the LEFT of `+`
+        // went through juce::String's ASCII constructor. Compare against real UTF-8.
+        const auto setupDetail = setup["data"].getProperty ("detail", var()).toString();
+        check (setupDetail == juce::String (juce::CharPointer_UTF8 ("Ready \xe2\x80\x94 takes land on \"Lead \xc2\xb7 Takes\"")),
+               "loop_setup's detail is well-formed UTF-8 (got: " + setupDetail + ")");
         check (tracks (ops) == tracksBeforeSetup + 1, "loop_setup added exactly one track");
 
         // Idempotent: a second setup of the same lead neither creates nor duplicates.
@@ -9411,7 +9418,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // SECONDARY outcome and is reported on its own, with its reason in the detail
             // the phone shows. Reporting a committed keep as rejected would be a lie.
             check ((bool) keep["data"].getProperty ("applied", false),
-                   "loop_keep applied:true headless — the keep itself committed");
+                   "loop_keep applied:true headless -- the keep itself committed");
             check (! (bool) keep["data"].getProperty ("restarted", true),
                    "loop_keep restarted:false headless (the transport could not roll)");
             check (keep["data"].getProperty ("detail", var()).toString().contains ("did not restart")
@@ -9445,7 +9452,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             auto again = cmd (ops, "loop_again", args1 ("targetId", passId));
             check (ok (again), "loop_again ok");
             check ((bool) again["data"].getProperty ("applied", false),
-                   "loop_again applied:true headless — the reject itself committed");
+                   "loop_again applied:true headless -- the reject itself committed");
             check (! (bool) again["data"].getProperty ("restarted", true),
                    "loop_again restarted:false headless");
             check (again["data"].getProperty ("detail", var()).toString().contains ("did not restart"),
@@ -9509,7 +9516,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             const double qnBefore = (double) listeningOf (loopState()).getProperty ("qn", -1.0);
             auto stale = cmd (ops, "loop_navigate", objN ({{ "bar", 2 }, { "authority", "{}" }}));
             check (! ok (stale), "a stale authority refuses the command");
-            check (stale["error"].toString().contains ("refresh"), "…and the refusal tells the phone to refresh");
+            check (stale["error"].toString().contains ("refresh"), "...and the refusal tells the phone to refresh");
             check ((double) listeningOf (loopState()).getProperty ("qn", -1.0) == qnBefore,
                    "the refused command mutated nothing");
 
@@ -9524,7 +9531,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "loop_navigate", objN ({{ "bar", 2 }, { "authority",
                           mosh::phoneloop::authorityFor (loopState()) }}))),
                    "a fresh authority is accepted by loop_navigate");
-            check ((int) listeningOf (loopState()).getProperty ("bar", -1) == 2, "…and the navigate really moved");
+            check ((int) listeningOf (loopState()).getProperty ("bar", -1) == 2, "...and the navigate really moved");
         }
 
         // ── the loop survives a save/reload (identity and prefs are persisted state) ──
@@ -9557,16 +9564,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                      .getProperty ("trackId", var()).toString();
             auto setupB = cmd (ops, "loop_setup", args1 ("trackId", leadBId));
             check (ok (setupB), "loop_setup on a second lead ok");
-            check ((bool) setupB["data"].getProperty ("created", false), "…and it made its own takes track");
+            check ((bool) setupB["data"].getProperty ("created", false), "...and it made its own takes track");
             const auto newTakesId = setupB["data"].getProperty ("takesTrackId", var()).toString();
             check (newTakesId.isNotEmpty() && newTakesId != oldTakesId, "the new pairing has a NEW takes track");
-            check (nameOfTrack (newTakesId) == "Lead B · Takes", "the new takes track is named after its lead");
+            check (nameOfTrack (newTakesId) == juce::String (juce::CharPointer_UTF8 ("Lead B \xc2\xb7 Takes")), "the new takes track is named after its lead");
 
             auto after = loopState();
             check (after.getProperty ("leadTrackId", var()).toString() == leadBId
                        && after.getProperty ("takesTrackId", var()).toString() == newTakesId,
                    "loop_state follows the re-point");
-            check (nameOfTrack (oldTakesId) == "Lead · Takes", "the abandoned takes track is KEPT (it holds real audio)");
+            check (nameOfTrack (oldTakesId) == juce::String (juce::CharPointer_UTF8 ("Lead \xc2\xb7 Takes")), "the abandoned takes track is KEPT (it holds real audio)");
 
             // Headless there is no input instance, so no track can report armed:true in the
             // snapshot either way (the whole recording section pins that). The provable
@@ -9581,7 +9588,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 if (ln.contains ("\"trackId\": \"" + newTakesId + "\"") && ln.contains ("\"armed\": true"))  armedNew = true;
             }
             check (disarmedOld, "re-pointing DISARMS the takes track it leaves behind");
-            check (armedNew, "…and arms the new one");
+            check (armedNew, "...and arms the new one");
         }
     }
 
@@ -9925,15 +9932,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "save_as", args1 ("file", legacyProbe.getFullPathName()))),
                    "save_as to an explicit .tracktionedit path is honoured verbatim");
             check (legacyProbe.existsAsFile() && legacyProbe.getSize() > 0,
-                   "…and wrote a real project file at that exact path");
-            check (eng.editFile() == legacyProbe, "…adopting it as the backing file");
+                   "...and wrote a real project file at that exact path");
+            check (eng.editFile() == legacyProbe, "...adopting it as the backing file");
 
             check (ok (cmd (ops, "new_project", args1 ("name", "away-from-legacy"))), "swap away from the legacy project");
             check (ok (cmd (ops, "open_project", args1 ("file", legacyProbe.getFullPathName()))),
                    "a pre-rename .tracktionedit project still opens");
             check (eng.editFile().hasFileExtension ("tracktionedit"),
-                   "…and stays a .tracktionedit (never silently migrated)");
-            check (ok (cmd (ops, "save")), "…and still saves in place");
+                   "...and stays a .tracktionedit (never silently migrated)");
+            check (ok (cmd (ops, "save")), "...and still saves in place");
         }
 
         // (c) new_project records itself as last + appears in the snapshot Recent list,
@@ -10788,7 +10795,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // args now carry the user's own words on an agent turn's batch_begin marker,
             // so widening this window would put user speech on a surface that was only
             // ever meant to show command names. Absence here is the whole guarantee.
-            check (! sawArgs, "get_command_log projects NO args — user utterances never reach this window");
+            check (! sawArgs, "get_command_log projects NO args -- user utterances never reach this window");
             // READ-ONLY proof: get_command_log never logs itself.
             check (! sawGetCommandLog, "get_command_log is READ-ONLY: it does NOT appear in the log it returns");
         }
@@ -11025,7 +11032,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         check (ok (cmd (ops, "remove_track", args1 ("trackId", rtId))), "A2/remove_track: remove ok");
         check (journalLines() == 1,
-               "A2/remove_track: pre-teardown autosave truncated the create_track entry — only "
+               "A2/remove_track: pre-teardown autosave truncated the create_track entry -- only "
                "remove_track's own journal entry remains (would be 2 without the guard)");
     }
 
@@ -11133,7 +11140,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (mosh::safemode::quarantineTarget (suspects) == "HarnessCrasher",
                "FS-T2: a lone suspect is the quarantine target");
         check (mosh::safemode::quarantineTarget ({ "A", "B" }).isEmpty(),
-               "FS-T2: several candidates ⇒ NO quarantine (never blocklist on a guess)");
+               "FS-T2: several candidates => NO quarantine (never blocklist on a guess)");
 
         check (mosh::safemode::scrubThirdPartyPlugins (edit) == 1, "FS-T2: scrub removes the third-party node");
         check (mosh::safemode::collectThirdPartyPlugins (edit).empty(), "FS-T2: no third-party nodes remain");
@@ -12475,7 +12482,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (exact (annotationBeat ("late"), 24.0), "insert-time undo: the downstream annotation restored");
             auto lr = loopRange();
             check (lr.size() == 2 && exact (lr[0], 6.0) && exact (lr[1], 10.0),
-                   "insert-time undo: the LOOP REGION is restored too (it is not in the Edit's undo history — SetLoopRangeAction puts it back)");
+                   "insert-time undo: the LOOP REGION is restored too (it is not in the Edit's undo history -- SetLoopRangeAction puts it back)");
         }
 
         // (3) SCOPED — trackIds moves only those tracks. The project-global structures
@@ -14175,7 +14182,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // before its first save) deterministically — WITHOUT this the rewrite resolves fine and
     // the section passes even on the buggy code, i.e. it would not actually guard the fix.
     {
-        section ("Multiplayer: export after commit (by-hash ref resolves — guards the export hang)");
+        section ("Multiplayer: export after commit (by-hash ref resolves -- guards the export hang)");
 
         check (ok (cmd (ops, "new_project", args1 ("name", "mp-export-selftest"))), "new_project (mp export isolation) ok");
 
@@ -15168,7 +15175,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             const auto nfTrivialElapsedMs = juce::Time::getMillisecondCounterHiRes() - nfT1;
             check (nfTrivialElapsedMs < 400.0,
                    "no-freeze: the trivial command was ALSO fast ("
-                       + juce::String (nfTrivialElapsedMs, 1) + "ms) — the message thread stayed free");
+                       + juce::String (nfTrivialElapsedMs, 1) + "ms) -- the message thread stayed free");
 
             auto* nfMm = juce::MessageManager::getInstanceWithoutCreating();
             bool nfCommitted = false;
@@ -15212,7 +15219,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             auto syncCommit = cmd (syncOps, "mp_commit_track", args1 ("trackId", syncTrackId));
             check (ok (syncCommit), "sync-switch: mp_commit_track ok");
             check (syncCommit.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "committed",
-                   "sync-switch: status is \"committed\" (synchronous), NOT \"uploading\" — the kill switch reverted the async path");
+                   "sync-switch: status is \"committed\" (synchronous), NOT \"uploading\" -- the kill switch reverted the async path");
 
             auto syncRefs = syncCommit.getProperty ("data", juce::var()).getProperty ("audioRefs", juce::var());
             const auto syncHash = (syncRefs.isArray() && syncRefs.size() > 0) ? syncRefs[0].getProperty ("hash", juce::var()).toString() : juce::String();
@@ -16333,7 +16340,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // and MP lock behavior (LockManager::classify fails CLOSED to SessionGlobal by
     // design; per-command lock conduct is test_multiplayer_locks' lane).
     {
-        section ("matrix: undo — every declared mutating command restores on ONE undo");
+        section ("matrix: undo -- every declared mutating command restores on ONE undo");
 
         // Canonical snapshot: strip the volatile subtrees so string equality means
         // STATE equality (transport rides its own rail; dirty flips on save/undo), and
@@ -16531,7 +16538,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (canon() == s0, (mc.name + " ONE undo restores the canonical snapshot").toRawUTF8());
         }
 
-        section ("matrix: persist — the fully-mutated state survives save/reload");
+        section ("matrix: persist -- the fully-mutated state survives save/reload");
         // Re-apply the whole table cumulatively (no undo), then save → reload and demand
         // canonical equality: ANY non-serialized property among the mutated fields fails.
         for (const auto& mc : table)
@@ -16898,7 +16905,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto openStatus = txnStatus (ops, t3);
         check (txnField (openStatus, "status") == "open", "transaction still open for the check");
         check ((bool) openStatus["data"].getProperty ("canCommit", false),
-               "commit WOULD be legal — the postcondition is the only thing stopping it");
+               "commit WOULD be legal -- the postcondition is the only thing stopping it");
         // The harness evaluates its postcondition here and (in this fixture) rejects.
         auto rolled3 = cmd (ops, "batch_rollback", objN ({ { "transactionId", t3 } }));
         check (ok (rolled3), "rollback of a successful-but-rejected transaction ok");
@@ -16918,7 +16925,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                  txnManifest ({ { "rq-a", "set_track_volume" } }));
         check (ok (b4again), "retried begin with an identical manifest is idempotent");
         check ((bool) b4again["data"].getProperty ("replayed", false), "the retry is marked replayed");
-        check (txnField (b4again, "status") == "open", "…and did not open a second transaction");
+        check (txnField (b4again, "status") == "open", "...and did not open a second transaction");
         const auto pre4 = txnField (b4, "preFingerprint");
 
         // (2) A lost COMMAND response: retry the same requestId with the same envelope.
@@ -16928,19 +16935,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto retry = txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -9.0 } }),
                              t4, "rq-a", 0);
         check (ok (retry), "the retried command returns the recorded result");
-        check ((bool) retry.getProperty ("replayed", false), "…marked replayed");
+        check ((bool) retry.getProperty ("replayed", false), "...marked replayed");
         // A `replayed` flag proves nothing on its own. THIS is the assertion that matters:
         check (txnField (txnStatus (ops, t4), "fingerprint") == fpAfterOnce,
                "the retry applied NOTHING (fingerprint unchanged)");
         check ((int) txnStatus (ops, t4)["data"].getProperty ("applied", -1) == 1,
-               "…and did not double-count the step");
+               "...and did not double-count the step");
 
         // (3) A retry whose content silently changed must be REJECTED, not replayed.
         auto conflict = txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -9.5 } }),
                                t4, "rq-a", 0);
         check (! ok (conflict), "a reused requestId with different args is rejected");
         check (conflict.getProperty ("error", var()).toString().contains ("request_envelope_conflict"),
-               "…naming request_envelope_conflict");
+               "...naming request_envelope_conflict");
         check (txnField (txnStatus (ops, t4), "fingerprint") == fpAfterOnce,
                "the rejected retry mutated nothing");
 
@@ -16949,7 +16956,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (e4), "commit ok");
         auto e4again = cmd (ops, "batch_end", objN ({ { "transactionId", t4 } }));
         check (ok (e4again), "repeated commit is idempotent");
-        check ((bool) e4again["data"].getProperty ("replayed", false), "…marked replayed");
+        check ((bool) e4again["data"].getProperty ("replayed", false), "...marked replayed");
         check (txnField (e4again, "fingerprint") == txnField (e4, "fingerprint"),
                "the repeated commit changed nothing");
         // (5) A command retry arriving AFTER commit still replays rather than re-applying.
@@ -16958,7 +16965,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (postCommitRetry) && (bool) postCommitRetry.getProperty ("replayed", false),
                "a post-commit retry of a recorded step replays");
         check (txnField (txnStatus (ops, t4), "fingerprint") == fpAfterOnce,
-               "…and applied nothing");
+               "...and applied nothing");
         cmd (ops, "undo");   // put the fixture back
         check (txnField (txnStatus (ops, t4), "fingerprint") == pre4,
                "undo of the committed transaction returns to its pre-state");
@@ -16975,7 +16982,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto made = txnCmd (ops, "create_track", objN ({ { "name", "Replay Probe" } }),
                             t4b, "rq-t", 0);
         check (ok (made), "create_track applied once");
-        check (tracks (ops) == tracksBefore + 1, "…adding exactly one track");
+        check (tracks (ops) == tracksBefore + 1, "...adding exactly one track");
         const auto madeId = made["data"].getProperty ("trackId", var()).toString();
         auto madeAgain = txnCmd (ops, "create_track", objN ({ { "name", "Replay Probe" } }),
                                  t4b, "rq-t", 0);
@@ -16983,10 +16990,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (tracks (ops) == tracksBefore + 1,
                "THE DOUBLE-APPLY CHECK: a retried create_track added NO second track");
         check (madeAgain["data"].getProperty ("trackId", var()).toString() == madeId,
-               "…and returned the SAME track id, not a new one");
+               "...and returned the SAME track id, not a new one");
         check (ok (cmd (ops, "batch_rollback", objN ({ { "transactionId", t4b } }))),
                "additive transaction rolled back");
-        check (tracks (ops) == tracksBefore, "…removing the probe track exactly");
+        check (tracks (ops) == tracksBefore, "...removing the probe track exactly");
 
         section ("TXN-FOREIGN: untagged local and relay mutations are refused mid-transaction");
 
@@ -17000,18 +17007,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto foreign = cmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.4 } }));
         check (! ok (foreign), "an untagged local mutation is refused while a transaction is open");
         check (foreign.getProperty ("error", var()).toString().contains ("transaction_in_progress"),
-               "…naming transaction_in_progress");
+               "...naming transaction_in_progress");
         check (txnField (txnStatus (ops, t5), "fingerprint") == fpOpen,
                "the refused mutation changed nothing");
         check (txnField (txnStatus (ops, t5), "status") == "open",
-               "…and did not move the transaction's own state");
+               "...and did not move the transaction's own state");
 
         // A tagged call for a DIFFERENT transaction id.
         auto wrongId = txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -1.0 } }),
                                "some-other-txn", "rq-a", 0);
         check (! ok (wrongId), "a call tagged for another transaction is refused");
         check (wrongId.getProperty ("error", var()).toString().contains ("unknown_transaction"),
-               "…naming unknown_transaction");
+               "...naming unknown_transaction");
 
         // A read stays available (the exclusion window bounds mutation, not reading).
         check (ok (cmd (ops, "list_plugins")), "a read-only command still works while open");
@@ -17027,7 +17034,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                   t5b, "rq-b", 1);
         check (! ok (outOfOrder), "step 1 before step 0 is refused");
         check (outOfOrder.getProperty ("error", var()).toString().contains ("manifest_mismatch"),
-               "…naming manifest_mismatch");
+               "...naming manifest_mismatch");
         // An EXTRA call not in the manifest at all.
         auto extra = txnCmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.2 } }),
                              t5b, "rq-not-in-manifest", 0);
@@ -17039,7 +17046,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto afterClose = cmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.4 } }));
         check (ok (afterClose), "the same untagged mutation succeeds after the transaction closes");
         check (std::abs ((double) trackById (tid).getProperty ("pan", 0.0) - 0.4) < 0.01,
-               "…and really landed");
+               "...and really landed");
         cmd (ops, "undo");
 
         section ("TXN-IDENTITY: ids are idempotent only for identical envelopes");
@@ -17052,7 +17059,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                  txnManifest ({ { "rq-a", "set_track_pan" } }));
         check (! ok (mutated), "the same id with a different manifest is a hard error");
         check (mutated.getProperty ("error", var()).toString().contains ("transaction_identity_conflict"),
-               "…naming transaction_identity_conflict");
+               "...naming transaction_identity_conflict");
         // Same id, different skill NAME → also a different identity.
         auto renamed = txnBegin (ops, t6, "other_skill",
                                  txnManifest ({ { "rq-a", "set_track_volume" } }));
@@ -17062,7 +17069,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                 txnManifest ({ { "rq-a", "set_track_volume" } }));
         check (! ok (second), "a second transaction while one is unresolved is a hard error");
         check (second.getProperty ("error", var()).toString().contains ("transaction_already_open"),
-               "…naming transaction_already_open");
+               "...naming transaction_already_open");
         check (txnField (txnStatus (ops, t6), "status") == "open",
                "none of those refusals disturbed the open transaction");
         cmd (ops, "batch_rollback", objN ({ { "transactionId", t6 } }));
@@ -17075,11 +17082,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // which the harness treats as unprovable rather than as success.
         auto unknown = txnStatus (ops, "txn-never-existed");
         check (ok (unknown), "batch_status answers for an unknown id");
-        check ((bool) unknown["data"].getProperty ("found", true) == false, "…with found:false");
+        check ((bool) unknown["data"].getProperty ("found", true) == false, "...with found:false");
         auto rollbackUnknown = cmd (ops, "batch_rollback", objN ({ { "transactionId", "txn-never-existed" } }));
         check (! ok (rollbackUnknown), "rollback of an unknown id is refused");
         check (rollbackUnknown.getProperty ("error", var()).toString().contains ("unknown_transaction"),
-               "…and performs NO generic undo");
+               "...and performs NO generic undo");
 
         section ("TXN-PREFLIGHT: unsafe commands are rejected before any mutation");
 
@@ -17101,10 +17108,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! ok (rejected),
                    (juce::String ("manifest preflight rejects ") + u.command + " (" + u.why + ")").toRawUTF8());
             check (rejected.getProperty ("error", var()).toString().contains (u.code),
-                   (juce::String ("…naming ") + u.code + " for " + u.command).toRawUTF8());
+                   (juce::String ("...naming ") + u.code + " for " + u.command).toRawUTF8());
             // No transaction may exist afterwards — a rejection must leave nothing open.
             check ((bool) txnStatus (ops, id)["data"].getProperty ("found", true) == false,
-                   (juce::String ("…and opened no transaction for ") + u.command).toRawUTF8());
+                   (juce::String ("...and opened no transaction for ") + u.command).toRawUTF8());
         }
         // A malformed manifest is rejected the same way, before any registry lookup.
         for (const auto& bad : { objN ({ { "transactionId", "txn-bad-1" }, { "name", "s" } }),
@@ -17121,7 +17128,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                               { "rq-b", "set_metronome" } }));
         check (! ok (mixed), "one unsafe step rejects the WHOLE manifest");
         check ((bool) txnStatus (ops, "txn-preflight-mixed")["data"].getProperty ("found", true) == false,
-               "…and opens no transaction");
+               "...and opens no transaction");
         check (ok (cmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.1 } }))),
                "an ordinary mutation still works after a rejected manifest (nothing was left open)");
         cmd (ops, "undo");
@@ -17150,14 +17157,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (b7), "begin ok");
         auto emptyRollback = cmd (ops, "batch_rollback", objN ({ { "transactionId", t7 } }));
         check (ok (emptyRollback), "rolling back an empty transaction succeeds");
-        check (txnField (emptyRollback, "status") == "rolled_back", "…reporting rolled_back");
+        check (txnField (emptyRollback, "status") == "rolled_back", "...reporting rolled_back");
         check (trackById (tid).getProperty ("name", var()).toString() == "TXN Head Sentinel",
-               "…WITHOUT undoing the previous edit (the G14 trap)");
+               "...WITHOUT undoing the previous edit (the G14 trap)");
         // And the sentinel is genuinely undoable — so "it survived" means the rollback chose
         // not to undo it, not that undo was broken for everyone.
         check (ok (cmd (ops, "undo")), "the sentinel edit IS undoable");
         check (trackById (tid).getProperty ("name", var()).toString() != "TXN Head Sentinel",
-               "…proven by undoing it explicitly");
+               "...proven by undoing it explicitly");
         cmd (ops, "redo");
 
         section ("TXN-3CMD: a three-command transaction commits and rolls back exactly");
@@ -17175,7 +17182,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                                           { "type", "compressor" } }), t9, "rq-a", 0);
         check (ok (loaded), "step 0 (load_builtin) applied");
         const int pluginIndex = (int) loaded["data"].getProperty ("index", -1);
-        check (pluginIndex >= 0, "…and reported its rack index");
+        check (pluginIndex >= 0, "...and reported its rack index");
         check (ok (txnCmd (ops, "set_plugin_param", objN ({ { "trackId", tid },
                                                            { "index", pluginIndex },
                                                            { "paramIndex", 0 },
@@ -17221,9 +17228,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ledger.existsAsFile(), "the transaction ledger exists under ~/Library/Mosh/session");
         const auto ledgerText = ledger.loadFileAsString();
         check (ledgerText.contains ("txn-commit-0001"), "it records a committed transaction's id");
-        check (ledgerText.contains ("\"status\": \"committed\""), "…and its committed status");
-        check (ledgerText.contains ("\"status\": \"rolled_back\""), "…and a rolled-back status");
-        check (ledgerText.contains ("\"status\": \"failed\""), "…and a failed status");
+        check (ledgerText.contains ("\"status\": \"committed\""), "...and its committed status");
+        check (ledgerText.contains ("\"status\": \"rolled_back\""), "...and a rolled-back status");
+        check (ledgerText.contains ("\"status\": \"failed\""), "...and a failed status");
         check (ledgerText.contains ("\"v\": 1"), "every record carries the ledger schema version");
         // The SUPPRESSION assertions. These are only meaningful because the transactions
         // above really did carry args worth leaking — set_track_volume's db, a trackId, a
@@ -17253,7 +17260,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "batch_rollback", objN ({ { "transactionId", orphan } }))),
                "the orphan is resolved by an exact rollback");
         check (unresolvedIdsInLedger (ledger).isEmpty(),
-               "…leaving nothing unresolved for the next launch");
+               "...leaving nothing unresolved for the next launch");
 
         // Clean up the fixture track so the harness leaves the session as it found it.
         cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
@@ -17289,8 +17296,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (allowedResult),
               "generate_beat_recipe applies an allowed program (create_track + set_track_volume)");
         check ((int) allowedResult["data"].getProperty ("appliedCount", 0) == 2,
-              "…both steps applied: create_track, then the set_track_volume headroom trim");
-        check (tracks (ops) == tracksBefore + 1, "…and the track it created is really there");
+              "...both steps applied: create_track, then the set_track_volume headroom trim");
+        check (tracks (ops) == tracksBefore + 1, "...and the track it created is really there");
 
         // Clean up the fixture track so the harness leaves the session as it found it.
         {
@@ -17300,7 +17307,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     if (tv.getProperty ("name", var()).toString() == "SelfTest Recipe Track")
                         cmd (ops, "remove_track", objN ({ { "trackId", tv.getProperty ("id", var()) } }));
         }
-        check (tracks (ops) == tracksBefore, "…and cleanup leaves the track count as found");
+        check (tracks (ops) == tracksBefore, "...and cleanup leaves the track count as found");
 
         Array<var> disallowedSteps;
         disallowedSteps.add (objN ({ { "command", var ("create_track") },
@@ -17318,9 +17325,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (disallowedResult),
               "generate_beat_recipe REJECTS a program containing a disallowed command");
         check (disallowedResult.getProperty ("error", var()).toString().contains ("disallowed command"),
-              "…and the error names it \"disallowed command\"");
+              "...and the error names it \"disallowed command\"");
         check (tracks (ops) == tracksBefore,
-              "…and the create_track step it DID apply was undone along with the rest of the batch");
+              "...and the create_track step it DID apply was undone along with the rest of the batch");
     }
 
     finishSection();
@@ -18351,7 +18358,7 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
             check (take1.onsetEditSec >= 0.0 && take1.onsetEditSec > guideInCountInSec + 1.0
                        && std::abs (take1.onsetEditSec - guideInTakeSec) * 1000.0 <= countInTolMs,
                    "pass 1's first sound is the 4.5 s guide within one block + tolerance (onset " + String (take1.onsetEditSec, 4)
-                       + " s, " + String ((take1.onsetEditSec - guideInTakeSec) * 1000.0, 1) + " ms) — the 2.5 s count-in tone is absent");
+                       + " s, " + String ((take1.onsetEditSec - guideInTakeSec) * 1000.0, 1) + " ms) -- the 2.5 s count-in tone is absent");
         }
     }
 
@@ -18448,6 +18455,372 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
         o->setProperty ("checks", checks);
         o->setProperty ("failures", failures);
         std::cout << "V3-VOCAL-SMOKE: " << JSON::toString (var (o), true).toStdString() << std::endl;
+    }
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+// -- V3-booth -- the Booth's OWN path (2026-09-23 real-app walkthrough, finding N2). -----
+// --v3-vocal-smoke passed while the installed app's Booth never listed a single Part. It
+// navigates to bar 3 first, and it reads loop_state, whose read ADOPTS any unstamped clip
+// on Lead/Takes -- while the V3 Booth renders snapshot.loop and never polls loop_state.
+// This smoke presses what the V3 UI presses, in the order it presses it, and reads only
+// what the Booth reads. ASCII-only literals: see tests/test_utf8_literals.cpp.
+int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh V3-booth smoke (the Booth's own UI path on a loopback) =====\n";
+    section ("V3-booth live: Add a Vocal track, Put Me In from bar 1, stop by pad / TopBar / Space, Keep");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (20);
+            else Thread::sleep (20);
+        }
+    };
+    // What the Booth renders: snapshot.loop. NEVER loop_state in this smoke (see above).
+    auto boothLoop = [&] { return ops.snapshot().getProperty ("loop", var()); };
+    auto partsOf = [] (const var& loop) -> Array<var>
+    {
+        Array<var> out;
+        auto cv = loop.getProperty ("contributions", var());   // bound, never a temporary
+        if (auto* arr = cv.getArray())
+            for (auto& c : *arr) out.add (c);
+        return out;
+    };
+    auto clipById = [&] (const String& clipId) -> var
+    {
+        auto snap = ops.snapshot();
+        auto tv = snap.getProperty ("tracks", var());
+        if (auto* tracks = tv.getArray())
+            for (auto& t : *tracks)
+            {
+                auto cv = t.getProperty ("clips", var());
+                if (auto* clips = cv.getArray())
+                    for (auto& c : *clips)
+                        if (c.getProperty ("id", var()).toString() == clipId)
+                            return c;
+            }
+        return {};
+    };
+    auto peakOf = [] (const var& clip) -> double
+    {
+        const File src (clip.getProperty ("sourceFile", var()).toString());
+        AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<AudioFormatReader> reader (src.existsAsFile() ? fm.createReaderFor (src) : nullptr);
+        if (reader == nullptr || reader->lengthInSamples <= 0)
+            return -1.0;
+        AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
+        reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+        return buf.getMagnitude (0, buf.getNumSamples());
+    };
+
+    // -- the song under the take: a guide the engine plays, looped back as the "voice". Both
+    //    tones sit inside a two-bar take from bar 1 (120 BPM: a bar is 2 s). --
+    check (ok (cmd (ops, "set_tempo", args1 ("bpm", 120.0))), "set_tempo 120 (a bar is 2 s)");
+    {
+        auto guide = cmd (ops, "create_track", args1 ("name", "Guide"));
+        check (ok (guide), "create_track Guide ok");
+        const auto guideId = guide["data"].getProperty ("trackId", var()).toString();
+        for (double at : { 0.5, 2.5 })
+        {
+            auto tone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", guideId }, { "seconds", 0.5 }, { "freq", 440.0 }}));
+            check (ok (tone), "add_test_tone_clip (guide) ok");
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", tone["data"].getProperty ("clipId", var()) }, { "start", at }}))),
+                   "guide tone placed at " + String (at, 1) + " s");
+        }
+    }
+
+    // -- "Add a Vocal track" (BoothView.addVocalTrack): create_track, then loop_setup. The
+    //    Lead has NO input device of its own, so loop_setup has nothing to copy to Takes. --
+    auto created = cmd (ops, "create_track", args1 ("name", "Vocal"));
+    check (ok (created), "create_track Vocal ok");
+    const auto vocalId = created["data"].getProperty ("trackId", var()).toString();
+    auto setup = cmd (ops, "loop_setup", args1 ("trackId", vocalId));
+    check (ok (setup) && (bool) setup["data"].getProperty ("armed", false), "loop_setup ok and the Takes track is armed on the live input");
+    const auto takesId = setup["data"].getProperty ("takesTrackId", var()).toString();
+    check (takesId.isNotEmpty() && takesId != vocalId, "loop_setup paired a distinct Takes track");
+    const auto setupDetail = setup["data"].getProperty ("detail", var()).toString();
+    check (setupDetail == String (CharPointer_UTF8 ("Ready \xe2\x80\x94 takes land on \"Vocal \xc2\xb7 Takes\"")),
+           "the Booth's setup line is well-formed UTF-8 (got: " + setupDetail + ")");
+    // "Hear myself: Off" (BoothView.toggleHearMyself) on the Takes track.
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "off" }}))), "Hear myself: Off");
+    // Arming activated the input side, which RE-OPENS the device: re-fetch the pointer.
+    device = deviceManager.getCurrentAudioDevice();
+    check (device != nullptr && device->getActiveInputChannels().countNumberOfSetBits() > 0,
+           "arming opened an active input channel on the device (set MOSH_AUDIO_INPUT_DEVICE)");
+    if (device == nullptr)
+        return failures;
+    {
+        auto loop = boothLoop();
+        check ((bool) loop.getProperty ("engaged", false), "snapshot.loop is engaged (the Booth shows its pads)");
+        check (partsOf (loop).isEmpty(), "no Parts before the first take");
+        check ((double) loop.getProperty ("listening", var()).getProperty ("qn", -1.0) == 0.0,
+               "the listening start is bar 1 (no navigate)");
+    }
+
+    // -- one pass: Put Me In, let it roll, end it the way `how` says, read snapshot.loop --
+    StringArray takeFiles;
+    StringArray passIds;
+    auto pass = [&] (const String& how, int countInBars, std::function<var()> stop, int expectedParts)
+    {
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", countInBars))), how + ": count-in " + String (countInBars) + " bar(s)");
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), how + ": Put Me In applied");
+        check (rec["data"].getProperty ("detail", var()).toString() == "Recording from bar 1", how + ": Put Me In records from bar 1");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), how + ": a pass is in flight");
+        pump (countInBars * 2000 + 4200);   // the count-in, then two bars of take
+        check (boothLoop().getProperty ("phase", var()).toString() == "recording", how + ": phase is recording before the stop");
+        check (ok (stop()), how + ": the stop itself succeeded");
+        pump (300);
+
+        auto loop = boothLoop();
+        const auto parts = partsOf (loop);
+        check (parts.size() == expectedParts,
+               how + ": the take registered as Part " + String (expectedParts) + " (the Booth lists " + String (parts.size()) + ")");
+        check (loop.getProperty ("phase", var()).toString() == "idle",
+               how + ": phase is idle after the stop (got " + loop.getProperty ("phase", var()).toString() + ")");
+        check (loop.getProperty ("currentId", var()).toString().isEmpty(), how + ": no capture is left in flight");
+        check (loop.getProperty ("lastId", var()).toString() == passId, how + ": lastId names this pass (what Keep/Again/Review target)");
+        var mine;
+        for (auto& p : parts)
+            if (p.getProperty ("id", var()).toString() == passId)
+                mine = p;
+        check (mine.isObject(), how + ": this pass is one of the Parts");
+        if (mine.isObject())
+        {
+            check (mine.getProperty ("trackId", var()).toString() == takesId, how + ": the Part lives on Vocal Takes");
+            const auto clip = clipById (mine.getProperty ("clipId", var()).toString());
+            const double peak = peakOf (clip);
+            check (peak > 0.05, how + ": the Part is a non-silent WAV on disk (peak " + String (peak, 3) + ")");
+            check (! (bool) clip.getProperty ("mute", false), how + ": the newest unkept Part is audible");
+            takeFiles.add (clip.getProperty ("sourceFile", var()).toString());
+        }
+        // "Only the newest unkept pass is audible" (loopFinalizeCapture's mute pass).
+        for (auto& p : parts)
+            if (p.getProperty ("id", var()).toString() != passId
+                && ! (bool) p.getProperty ("keeper", false) && ! (bool) p.getProperty ("rejected", false))
+                check ((bool) clipById (p.getProperty ("clipId", var()).toString()).getProperty ("mute", false),
+                       how + ": the earlier unkept " + p.getProperty ("label", var()).toString() + " is muted");
+        passIds.add (passId);
+    };
+
+    pass ("Stop pad", 1, [&]
+    {
+        auto r = cmd (ops, "loop_stop");
+        check (r["data"].getProperty ("detail", var()).toString() == "Stopped", "Stop pad: the Booth reads \"Stopped\"");
+        return r;
+    }, 1);
+    pass ("TopBar stop", 1, [&] { return cmd (ops, "set_transport", args1 ("action", "stop")); }, 2);
+    // Shift+Space (Live's Continue Playback, keymap -> set_transport {action:"continue"}). While
+    // recording it is a stop, but it used to skip the finalize: the pass landed unstamped and
+    // stayed "in flight" (review of PR #730, 2026-09-23).
+    pass ("Shift+Space", 0, [&] { return cmd (ops, "set_transport", args1 ("action", "continue")); }, 3);
+    pass ("Space", 0, [&] { return cmd (ops, "set_transport", args1 ("action", "toggle")); }, 4);
+
+    // -- Keep can act on a take the TopBar/Space ended: it moves to the Vocal (Lead) track,
+    //    audible, and capture rolls again with no count-in (loop_keep's contract). --
+    {
+        const auto target = passIds[passIds.size() - 1];
+        auto keep = cmd (ops, "loop_keep", args1 ("targetId", target));
+        check (ok (keep) && (bool) keep["data"].getProperty ("applied", false), "Keep acts on the take Space ended");
+        pump (600);
+        check (ok (cmd (ops, "loop_stop")), "Stop pad after Keep ok");
+        pump (300);
+        auto loop = boothLoop();
+        var kept;
+        for (auto& p : partsOf (loop))
+            if (p.getProperty ("id", var()).toString() == target)
+                kept = p;
+        check (kept.isObject() && (bool) kept.getProperty ("keeper", false), "the Space-ended pass is the keeper");
+        check (kept.getProperty ("trackId", var()).toString() == vocalId, "the keeper moved to the Vocal track");
+        const auto keptClip = clipById (kept.getProperty ("clipId", var()).toString());
+        check (keptClip.isObject() && ! (bool) keptClip.getProperty ("mute", false), "the keeper is audible");
+        check (loop.getProperty ("phase", var()).toString() == "idle", "idle after the final stop");
+    }
+
+    // -- A stop that BYPASSES the finalize must not leave the pass "in flight". export_audio,
+    //    export_stems and the bounce stop the transport directly to detach the Edit for the
+    //    render, and none of them reach cmdStopRecording. Before 2026-09-23 the pass they ended
+    //    stayed loopCurrent_, the Booth kept naming it as the capture in flight, and the NEXT
+    //    ordinary take (TopBar Record, then Stop) was stamped as that old pass -- its id and
+    //    entry bar -- so Again rewound to the wrong place. The checks after the export are
+    //    relative to the state it leaves, so they hold whether or not a later change makes an
+    //    export finalize the pass first. (A loop toggle mid-take is another such stop --
+    //    Tracktion's stopIfRecording -- but with no loop range set, as here, Tracktion lands it
+    //    through UIBehaviour::showWarningAlert's modal "Recording" alert, which hangs a smoke.) --
+    {
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "bypassed stop: count-in off");
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "bypassed stop: Put Me In applied");
+        check (rec["data"].getProperty ("currentId", var()).toString().isNotEmpty(), "bypassed stop: a pass is in flight");
+        pump (1500);
+        const auto exportFile = eng.sessionDir().getChildFile ("v3-booth-bypassed-stop.wav");
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}))),
+               "bypassed stop: export_audio mid-take is accepted");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "bypassed stop: the export ended the recording");
+        check (boothLoop().getProperty ("currentId", var()).toString().isEmpty(),
+               "bypassed stop: the Booth does not name a pass in flight once nothing is recording");
+        const auto mid = boothLoop();
+        const int partsMid = partsOf (mid).size();
+        const auto lastMid = mid.getProperty ("lastId", var()).toString();
+
+        // A Booth start that could NOT roll must not name the pass the export ended as the
+        // capture in flight. loop_record / loop_keep / loop_again reported currentId from
+        // loopCurrent_ alone, while snapshot.loop gates it on the transport recording, so the
+        // result and the snapshot disagreed and the Booth marked "Not recording: ..." as rolling
+        // (review of PR #730, round 3). Disarming Takes makes loopStartCapture refuse
+        // (REC-NO-INPUT) with the stale pass still in loopCurrent_.
+        {
+            // The export freed the playback context, and with no input instances arm_track
+            // has nothing to disarm (ok, applied:false); the next start would rebuild the
+            // context from the saved destinations, still armed. Rebuild it first.
+            eng.ensurePlaybackContext();
+            auto disarm = cmd (ops, "arm_track", objN ({{ "trackId", takesId }, { "armed", false }}));
+            check (ok (disarm) && (bool) disarm["data"].getProperty ("applied", false),
+                   "bypassed stop: Takes disarmed, so the next Booth start cannot capture");
+            auto rec2 = cmd (ops, "loop_record");
+            check (ok (rec2) && ! (bool) rec2["data"].getProperty ("applied", true),
+                   "bypassed stop: Put Me In with nothing armed does not roll");
+            check (rec2["data"].getProperty ("currentId", var()).toString().isEmpty(),
+                   "bypassed stop: loop_record that did not roll names no pass in flight (got '"
+                       + rec2["data"].getProperty ("currentId", var()).toString() + "')");
+            const auto keeperId = passIds[passIds.size() - 1];   // kept above: Keep on it resumes
+            auto keep2 = cmd (ops, "loop_keep", args1 ("targetId", keeperId));
+            check (ok (keep2) && ! (bool) keep2["data"].getProperty ("applied", true),
+                   "bypassed stop: Keep (resume) with nothing armed does not roll");
+            check (keep2["data"].getProperty ("currentId", var()).toString().isEmpty(),
+                   "bypassed stop: loop_keep that did not roll names no pass in flight (got '"
+                       + keep2["data"].getProperty ("currentId", var()).toString() + "')");
+            auto again2 = cmd (ops, "loop_again", args1 ("targetId", passIds[0]));
+            check (ok (again2) && ! (bool) again2["data"].getProperty ("restarted", true),
+                   "bypassed stop: Again with nothing armed rejects the take but does not roll");
+            check (again2["data"].getProperty ("currentId", var()).toString().isEmpty(),
+                   "bypassed stop: loop_again that did not roll names no pass in flight (got '"
+                       + again2["data"].getProperty ("currentId", var()).toString() + "')");
+            check (! eng.edit().getTransport().isRecording(), "bypassed stop: nothing is recording after the refused starts");
+            auto rearm = cmd (ops, "arm_track", objN ({{ "trackId", takesId }, { "armed", true }}));
+            check (ok (rearm) && (bool) rearm["data"].getProperty ("applied", false), "bypassed stop: Takes re-armed on the live input");
+        }
+
+        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "bypassed stop: TopBar Record starts an ordinary take");
+        pump (1500);
+        check (eng.edit().getTransport().isRecording(), "bypassed stop: the ordinary take is rolling");
+        check (boothLoop().getProperty ("currentId", var()).toString().isEmpty(),
+               "bypassed stop: the ordinary take is not the old pass");
+        check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "bypassed stop: TopBar Stop ok");
+        pump (300);
+        const auto after = boothLoop();
+        check (partsOf (after).size() == partsMid,
+               "bypassed stop: the ordinary take is not stamped as a Part (" + String (partsMid) + " before, "
+               + String (partsOf (after).size()) + " after)");
+        check (after.getProperty ("lastId", var()).toString() == lastMid, "bypassed stop: lastId did not move to the old pass");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "bypassed stop: nothing in flight after the ordinary stop");
+        check (after.getProperty ("phase", var()).toString() == "idle", "bypassed stop: idle at the end");
+    }
+
+    // -- The Stop pad is the panic button: it ends ANY recording, not only a pass the loop
+    //    started. The Booth shows phase "recording" and its Stop pad for a take the TopBar
+    //    started, and the phone's Stop is always live once the loop is engaged. Before
+    //    2026-09-23 loop_stop sent every recording to the pass finalize, which returns at
+    //    once when no pass is in flight: the transport kept recording while the receipt said
+    //    "Stopped before recording began" (review of PR #730, round 3). --
+    {
+        auto clipsOn = [&] (const String& trackId) -> Array<var>
+        {
+            Array<var> out;
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("id", var()).toString() == trackId)
+                    {
+                        auto cv = t.getProperty ("clips", var());
+                        if (auto* clips = cv.getArray())
+                            for (auto& c : *clips) out.add (c);
+                    }
+            return out;
+        };
+        const auto before = boothLoop();
+        const int partsBefore = partsOf (before).size();
+        const auto lastBefore = before.getProperty ("lastId", var()).toString();
+        StringArray takesBefore;
+        for (auto& c : clipsOn (takesId))
+            takesBefore.add (c.getProperty ("id", var()).toString());
+
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "panic stop: playhead to bar 1 (the guide is under the take)");
+        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "panic stop: TopBar Record starts an ordinary take");
+        pump (3200);
+        check (eng.edit().getTransport().isRecording(), "panic stop: the ordinary take is rolling");
+        check (boothLoop().getProperty ("phase", var()).toString() == "recording",
+               "panic stop: the Booth shows phase recording (its Stop pad is live)");
+
+        auto stop = cmd (ops, "loop_stop");
+        pump (300);
+        check (ok (stop) && (bool) stop["data"].getProperty ("applied", false), "panic stop: loop_stop ok");
+        check (! eng.edit().getTransport().isRecording(), "panic stop: the Stop pad ended a take the TopBar started");
+        check ((bool) stop["data"].getProperty ("stoppedRecording", false), "panic stop: the receipt says it stopped a recording");
+        check ((bool) stop["data"].getProperty ("landed", false), "panic stop: the receipt says a take landed");
+        check (stop["data"].getProperty ("detail", var()).toString() == "Stopped",
+               "panic stop: the Booth reads \"Stopped\" (got \"" + stop["data"].getProperty ("detail", var()).toString() + "\")");
+
+        var fresh;
+        for (auto& c : clipsOn (takesId))
+            if (! takesBefore.contains (c.getProperty ("id", var()).toString()))
+                fresh = c;
+        check (fresh.isObject(), "panic stop: the take landed on Vocal Takes");
+        if (fresh.isObject())
+        {
+            const double peak = peakOf (fresh);
+            check (peak > 0.05, "panic stop: the landed take is a non-silent WAV on disk (peak " + String (peak, 3) + ")");
+        }
+        const auto after = boothLoop();
+        check (after.getProperty ("phase", var()).toString() == "idle",
+               "panic stop: idle after the Stop pad (got " + after.getProperty ("phase", var()).toString() + ")");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "panic stop: nothing in flight");
+        // Not a Booth pass: it lands like any TopBar take (unstamped), so the Booth's Parts and
+        // lastId do not move. The phone's loop_state read adopts it later; that is its contract.
+        check (partsOf (after).size() == partsBefore, "panic stop: an ordinary take is not stamped as a pass");
+        check (after.getProperty ("lastId", var()).toString() == lastBefore, "panic stop: lastId did not move");
+
+        // Leave the process stoppable whatever the checks above found: a harness that exits
+        // mid-recording can hang in Tracktion's modal "Recording" alert.
+        if (eng.edit().getTransport().isRecording())
+            cmd (ops, "set_transport", args1 ("action", "stop"));
+    }
+
+    // One machine-readable line for scripts/v3-acceptance/run.py.
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("sessionDir", eng.sessionDir().getFullPathName());
+        device = deviceManager.getCurrentAudioDevice();
+        o->setProperty ("device", device != nullptr ? device->getName() : String());
+        o->setProperty ("parts", partsOf (boothLoop()).size());
+        Array<var> files;
+        for (auto& f : takeFiles) files.add (f);
+        o->setProperty ("takes", files);
+        o->setProperty ("checks", checks);
+        o->setProperty ("failures", failures);
+        std::cout << "V3-BOOTH-SMOKE: " << JSON::toString (var (o), true).toStdString() << std::endl;
     }
     std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
     return failures;
@@ -18580,7 +18953,7 @@ int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
     check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
     if (! eng.hasAudio())
     {
-        std::cerr << "  !!   no audio device — this harness cannot run. "
+        std::cerr << "  !!   no audio device -- this harness cannot run. "
                      "Check MOSH_AUDIO_OUTPUT_DEVICE / system audio.\n";
     std::cerr << "===== " << checks - failures << "/" << checks
               << " live-MIDI-capture checks passed, " << failures << " failed =====\n";

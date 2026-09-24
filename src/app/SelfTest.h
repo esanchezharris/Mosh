@@ -73,6 +73,22 @@ int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
     Proves nothing about AUDIBILITY or feel — those stay with the owner. */
 int runV3VocalSmoke (MoshEngine&, MoshOps&);
 
+/** V3-booth — `Mosh --v3-booth-smoke`: the Booth exactly as the V3 UI drives it, on the same
+    BlackHole loopback as --v3-vocal-smoke. Where that smoke navigates to bar 3 and reads
+    loop_state (which adopts any unstamped clip), this one follows the buttons: "Add a Vocal
+    track" (create_track, then loop_setup on a Lead with NO input device), "Hear myself: Off",
+    "Put Me In" from bar 1 with no navigate, and then the four ways a producer ends a take:
+    the Booth's Stop pad (loop_stop), the TopBar stop (set_transport stop), Shift+Space
+    (set_transport continue) and Space (set_transport toggle). After each one it reads the
+    SNAPSHOT's loop block (what the Booth renders) and asserts the pass registered as a Part:
+    one more contribution, idle, no capture in flight, lastId naming it, the older unkept pass
+    muted. Then Keep acts on it. Then a take ended by a stop that bypasses the finalize (an
+    export mid-take) must leave nothing in flight: neither a Booth start that cannot roll
+    (Takes disarmed) nor the next ordinary take may name or inherit the old pass. Last, the
+    Stop pad must end a take the TopBar started (loop_stop is the panic button).
+    Prints one "V3-BOOTH-SMOKE: {json}" line for scripts/v3-acceptance/run.py. */
+int runV3BoothSmoke (MoshEngine&, MoshOps&);
+
 /** Chords stress — `Mosh --chords-stress`: the V3 '+ Chords' batch, create_track, a 4OSC
     insert, a load_preset and an add_send (on a persistent bus), each followed by undo,
     looped with a REAL device (pair with MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch"),

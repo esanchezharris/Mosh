@@ -170,10 +170,10 @@ namespace mosh::audiostartup
     inline juce::String timeoutMessage (const juce::String& device, int timeoutMs)
     {
         return "Audio device " + device + " did not open within "
-             + juce::String (timeoutMs / 1000.0, 1) + "s. Running WITHOUT audio — "
+             + juce::String (timeoutMs / 1000.0, 1) + juce::String (juce::CharPointer_UTF8 ("s. Running WITHOUT audio \xe2\x80\x94 "
              "playback and recording are off. Disconnect or change the device in "
              "system audio settings, then "
-             "press Retry.";
+             "press Retry."));
     }
 
     struct RecoveryGateEvidence

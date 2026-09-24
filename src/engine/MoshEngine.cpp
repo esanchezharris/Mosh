@@ -405,7 +405,7 @@ juce::String MoshEngine::audioReadinessError() const
 
     if (audioError.isNotEmpty())
         return audioError;
-    return "Audio unavailable — no open output device";
+    return juce::String (juce::CharPointer_UTF8 ("Audio unavailable \xe2\x80\x94 no open output device"));
 }
 
 MoshEngine::~MoshEngine()
@@ -496,9 +496,9 @@ juce::String MoshEngine::openAudioDeviceBounded()
         if (! loaded.valid)
         {
             audioOpen = false;
-            return "The saved audio device setup is invalid or too large. Running "
-                   "WITHOUT audio — playback and recording are off. Reset the "
-                   "audio device, then press Retry.";
+            return juce::String (juce::CharPointer_UTF8 ("The saved audio device setup is invalid or too large. Running "
+                   "WITHOUT audio \xe2\x80\x94 playback and recording are off. Reset the "
+                   "audio device, then press Retry."));
         }
         setupXml = std::move (loaded.xml);
     }
@@ -539,17 +539,17 @@ juce::String MoshEngine::openAudioDeviceBounded()
     if (probeArguments.isEmpty())
     {
         audioOpen = false;
-        return "The saved audio device setup is invalid or too large. Running WITHOUT "
-               "audio — playback and recording are off. Reset the audio device, then "
-               "press Retry.";
+        return juce::String (juce::CharPointer_UTF8 ("The saved audio device setup is invalid or too large. Running WITHOUT "
+               "audio \xe2\x80\x94 playback and recording are off. Reset the audio device, then "
+               "press Retry."));
     }
 
     const auto probe = audiostartup::runProbeProcess (probeArguments, timeoutMs);
     if (probe.status == audiostartup::ProbeProcessStatus::failedToStart)
     {
         audioOpen = false;
-        return "Audio device " + label + " could not start the safety probe. "
-               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+        return "Audio device " + label + juce::String (juce::CharPointer_UTF8 (" could not start the safety probe. "
+               "Running WITHOUT audio \xe2\x80\x94 playback and recording are off. Press Retry."));
     }
 
     if (probe.status == audiostartup::ProbeProcessStatus::timedOut)
@@ -561,8 +561,8 @@ juce::String MoshEngine::openAudioDeviceBounded()
     if (probe.status == audiostartup::ProbeProcessStatus::failedToTerminate)
     {
         audioOpen = false;
-        return "Audio device " + label + " safety probe could not be terminated. "
-               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+        return "Audio device " + label + juce::String (juce::CharPointer_UTF8 (" safety probe could not be terminated. "
+               "Running WITHOUT audio \xe2\x80\x94 playback and recording are off. Press Retry."));
     }
 
     const auto response = audiostartup::parseProbeResponse (probe.output, nonce);
@@ -570,15 +570,15 @@ juce::String MoshEngine::openAudioDeviceBounded()
     if (! response.valid || ! exitMatches)
     {
         audioOpen = false;
-        return "Audio device " + label + " safety probe exited without a valid result. "
-               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+        return "Audio device " + label + juce::String (juce::CharPointer_UTF8 (" safety probe exited without a valid result. "
+               "Running WITHOUT audio \xe2\x80\x94 playback and recording are off. Press Retry."));
     }
 
     if (response.error.isNotEmpty())
     {
         audioOpen = false;
         return "Audio device " + label + " could not open: " + response.error
-             + ". Running WITHOUT audio — playback and recording are off. Press Retry.";
+             + juce::String (juce::CharPointer_UTF8 (". Running WITHOUT audio \xe2\x80\x94 playback and recording are off. Press Retry."));
     }
 
     // The HAL answered within the bound, so the real open is safe to do inline, exactly

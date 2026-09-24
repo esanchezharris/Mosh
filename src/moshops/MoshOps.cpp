@@ -1317,7 +1317,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
         if (mosh::txnsafe::classify (e.command, reason) != mosh::txnsafe::Class::Safe)
             return errResult ("batch_begin",
                               agenttxn::codeManifestRejected() + ": step "
-                              + juce::String (e.index) + " — " + reason);
+                              + juce::String (e.index) + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 ")) + reason);
     }
 
     auto record = std::make_unique<agenttxn::Record>();
@@ -1370,7 +1370,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
     if (txn_ == nullptr || txn_->id != txnId)
         return errResult ("batch_end",
                           agenttxn::codeUnknownTxn() + ": no transaction " + txnId
-                          + " — query batch_status rather than inferring from this failure");
+                          + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 query batch_status rather than inferring from this failure")));
 
     // Idempotent: a lost commit RESPONSE is resolved by repeating the call (or by
     // batch_status), never by a blind second mutation.
@@ -1496,7 +1496,7 @@ juce::var MoshOps::cmdBatchRollback (const juce::var& args)
     if (txn_ == nullptr || txn_->id != txnId)
         return errResult ("batch_rollback",
                           agenttxn::codeUnknownTxn() + ": no transaction " + txnId
-                          + " — performing no undo");
+                          + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 performing no undo")));
 
     // Idempotent once rolled back.
     if (txn_->status == agenttxn::statusRolledBack())
@@ -1730,7 +1730,7 @@ bool MoshOps::txnPreDispatch (const juce::var& command, juce::var& early)
     {
         early = errResult (name,
                            agenttxn::codeUnknownTxn() + ": no transaction " + metaId
-                           + " — query batch_status");
+                           + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 query batch_status")));
         return true;
     }
 
@@ -1997,7 +1997,7 @@ juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
         for (auto* c : track->getClips())
             if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
                 return errResult ("add_drum_pattern",
-                    juce::String (juce::CharPointer_UTF8 ("track holds wave audio — a drum sampler would silence it; use a drum track")));
+                    juce::String (juce::CharPointer_UTF8 ("track holds wave audio \xe2\x80\x94 a drum sampler would silence it; use a drum track")));
     }
 
     beginTxn ("add_drum_pattern");
@@ -2199,7 +2199,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
     if (file.isEmpty() || ! wav.existsAsFile())
         return errResult ("sketch_beatbox", "no readable audio file: " + file);
     if (bpm < 20.0 || bpm > 300.0)
-        return errResult ("sketch_beatbox", juce::String (juce::CharPointer_UTF8 ("bpm must be 20-300 (the tempo is known — box to a click)")));
+        return errResult ("sketch_beatbox", juce::String (juce::CharPointer_UTF8 ("bpm must be 20-300 (the tempo is known \xe2\x80\x94 box to a click)")));
 
     const auto srcName = wav.getFileNameWithoutExtension();
 

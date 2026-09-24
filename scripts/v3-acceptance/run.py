@@ -14,6 +14,11 @@ What it proves, row by row (each check would read differently if the feature wer
   V3-vocal  `Mosh --v3-vocal-smoke` on a BlackHole loopback: a 1-bar count-in rolls and is
             EXCLUDED from the take, two passes land as non-silent WAVs within the calibrated
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
+            Then `Mosh --v3-booth-smoke`: the Booth's own button path (Add a Vocal track, Put
+            Me In from bar 1) with takes ended by the Stop pad, the TopBar stop, Shift+Space and
+            Space, each registering as a Part in snapshot.loop (what the Booth renders), a
+            take ended by a stop that bypasses the finalize leaving nothing in flight, and the
+            Stop pad ending a take the TopBar started.
   V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
             rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert, a
             load_preset and an add_send, each followed by undo, looped. The regression smoke
@@ -489,6 +494,36 @@ def row_vocal(ctx) -> Row:
         row.notes.append(f"calibrated loopback {ms('calibratedMs')} ms, landing tolerance {ms('toleranceMs')} ms; "
                          f"take1 (count-in) landed {ms('take1OffsetMs')} ms from the guide, take2 (Again, no count-in) "
                          f"{ms('take2OffsetMs')} ms — a count-in landing is up to one device block early (engine follow-up)")
+
+    # The Booth's OWN path (2026-09-23 walkthrough): the smoke above navigates to bar 3 and
+    # reads loop_state, which adopts unstamped clips; the V3 Booth does neither. This one
+    # presses Add a Vocal track -> Hear myself: Off -> Put Me In from bar 1, ends takes with
+    # the Stop pad, the TopBar stop, Shift+Space and Space, and reads snapshot.loop (what the
+    # Booth shows).
+    booth_leaf = f"v3-accept-booth-{ctx.pid}"
+    reset_owned_harness_session(_session_dir(booth_leaf))
+    env["MOSH_SELFTEST_SESSION"] = f"_harness/{booth_leaf}"
+    try:
+        booth = subprocess.run([str(ctx.bin), "--v3-booth-smoke", "-ApplePersistenceIgnoreState", "YES"],
+                               env=env, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired as e:
+        row.chk(False, "the Booth-path smoke finished within 180 s", str(e)); return row
+    (out / "v3-booth-smoke.log").write_text((booth.stdout or "") + "\n--- stderr ---\n" + (booth.stderr or ""))
+    row.artifacts.append(str(out / "v3-booth-smoke.log"))
+    booth_summary = {}
+    for line in (booth.stdout or "").splitlines():
+        if line.startswith("V3-BOOTH-SMOKE: "):
+            try:
+                booth_summary = json.loads(line[len("V3-BOOTH-SMOKE: "):])
+            except json.JSONDecodeError:
+                pass
+    booth_failed = [l for l in (booth.stderr or "").splitlines() if "FAIL" in l][:12]
+    row.chk(booth.returncode == 0 and booth_summary and int(booth_summary.get("failures", 1)) == 0,
+            f"Mosh --v3-booth-smoke passed every check ({booth_summary.get('checks', '?')} checks): each take ended by "
+            f"the Stop pad, the TopBar stop, Shift+Space or Space registers as a Part the Booth lists, Keep can act "
+            f"on it, a stop that bypasses the finalize leaves no pass in flight, and the Stop pad ends a take "
+            f"the TopBar started",
+            {"rc": booth.returncode, "summary": booth_summary, "failed": booth_failed})
     return row
 
 
