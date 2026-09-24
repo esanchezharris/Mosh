@@ -82,17 +82,9 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
 
     if (recording::shouldFinalizeBeforeTransportAction (transport.isRecording(), action))
     {
-        const auto stopResult = cmdStopRecording (var (new DynamicObject()));
-        const auto stopData = stopResult.getProperty ("data", var());
-        const bool stopped = stopResult.isObject()
-            && (bool) stopResult.getProperty ("ok", false)
-            && stopData.isObject()
-            && (bool) stopData.getProperty ("applied", false);
-        if (! stopped)
+        juce::String reason;
+        if (! finalizeInFlightRecordingOrFail (reason))
         {
-            auto reason = stopResult.getProperty ("error", var()).toString();
-            if (reason.isEmpty())
-                reason = stopData.getProperty ("reason", "could not land recording take").toString();
             logLine ("set_transport", args, false, reason, false);
             return errResult ("set_transport", reason);
         }
@@ -165,7 +157,32 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     }
 
     if (args.hasProperty ("loop"))
-        transport.looping = (bool) args.getProperty ("loop", false);
+    {
+        const bool wantsLooping = (bool) args.getProperty ("loop", false);
+        // A loop toggle mid-take is a stop too (2026-09-24 finding a): Tracktion's own
+        // valueTreePropertyChanged listener calls transport.stopIfRecording() the instant
+        // `.looping` actually changes, landing whatever is recording through ITS raw
+        // transport.stop() -- bypassing cmdStopRecording -- so before this fix the take
+        // landed unstamped, never a Part. With an empty loop range it can also raise
+        // UIBehaviour's MODAL "Recording" alert (WaveInputDevice's isLooping-driven endPos
+        // clamp) -- see RecordingLanding.h's shouldFinalizeBeforeLoopToggle for the full
+        // trace. Finalizing FIRST means `.looping` only ever changes on an already-idle
+        // transport, so neither hazard is reachable, whatever range the caller supplies.
+        // Every existing internal Booth flow that touches `.looping` mid-capture
+        // (loopStartCapture/loopStartPlayback, via loop_keep/loop_again/loop_hear/
+        // loop_play_all) already finalizes first for the same reason; this is set_transport's
+        // own direct `loop` field catching up to that precedent.
+        if (recording::shouldFinalizeBeforeLoopToggle (transport.isRecording(), transport.looping.get(), wantsLooping))
+        {
+            juce::String reason;
+            if (! finalizeInFlightRecordingOrFail (reason))
+            {
+                logLine ("set_transport", args, false, reason, false);
+                return errResult ("set_transport", reason);
+            }
+        }
+        transport.looping = wantsLooping;
+    }
 
     if (args.hasProperty ("loopStart") && args.hasProperty ("loopEnd"))
         transport.setLoopRange ({ tracktion::TimePosition::fromSeconds ((double) args.getProperty ("loopStart", 0.0)),

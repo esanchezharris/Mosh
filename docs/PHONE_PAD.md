@@ -93,18 +93,44 @@ clip, `lastId`/`reviewId` moved to it, and the older unkept pass muted. Before t
 a Part in the Booth (which renders `snapshot().loop`, a pure read that never adopts).
 Shift+Space (`continue`) was missed by the first fix and added the same day.
 
-Some stops still bypass it: `export_audio`, `export_stems` and the bounce stop the
-transport directly to detach the Edit, and Tracktion itself stops a recording when
-`looping` changes (a `set_transport {loop}` mid-take). The take they end lands on Takes
-unstamped. It is not finalized as a pass (`lastId` does not move, no older pass is muted),
-and the desktop Booth, which reads `snapshot().loop`, does not list it. A `loop_state`
-read does: it adopts every unstamped wave clip on Lead or Takes as a Part, so with a phone
-connected (it polls `loop_state` at 5 Hz) the take becomes a Part within one poll, and so
-does any later ordinary take on Takes. What is guaranteed is that the pass does not stay
-"in flight": `currentId` is reported only while the transport records (in `snapshot.loop`,
-`loop_state` and every `loop_*` result alike), and the next `set_transport`,
-`stop_recording` or `loop_stop` forgets it, so a later ordinary take is never stamped as
-the old pass.
+**No stop bypasses it any more (2026-09-24).** Three MORE stops used to bypass the
+finalize the same way the paragraph above fixed for the TopBar/Space/Shift+Space: they all
+now route through `cmdStopRecording` (via the shared `finalizeInFlightRecordingOrFail`)
+BEFORE doing what they do, so an in-flight pass lands as a real, stamped Part first.
+- `export_audio` and `export_stems` detach the Edit from the device before their render;
+  they used to call Tracktion's raw `transport.stop()` to do it. If the finalize itself
+  cannot land anything, the export/stems command is refused with the finalize's own reason
+  rather than silently landing the take unstamped.
+- The bounce (`bounce_track`, `freeze_track`, and the generative auto-bounce — they share
+  one offline-render helper) detaches the WHOLE Edit from the device even when bouncing a
+  DIFFERENT track than the one recording, so it hit the identical hazard for whatever else
+  was in flight. Same fix, same refusal on failure (as the helper's normal "offline render
+  failed" error, since it has no command of its own to log against).
+- A loop toggle mid-take (`set_transport {loop}` while recording) is a stop too: Tracktion's
+  own `valueTreePropertyChanged` listener calls `stopIfRecording()` the instant `.looping`
+  actually changes, and — confirmed live, unfixed — landing an in-flight take through that
+  raw path corrupted the audio graph badly enough to spam JUCE assertions and crash the
+  process, not just leave the take unstamped. `cmdSetTransport` now finalizes FIRST
+  (`recording::shouldFinalizeBeforeLoopToggle`), so `.looping` only ever changes once
+  nothing is recording. This also makes the modal "Recording" alert
+  (`UIBehaviour::showWarningAlert`, from `WaveInputDevice`'s `isLooping`-driven `endPos`
+  clamp with an empty loop range) unreachable from here, whatever range the caller supplies:
+  the PR #730 review had tried gating that trigger and dropped it because it hung the smoke.
+
+**"Hear myself" mid-take is DEFERRED, not finalized (2026-09-24).** Changing a track's
+input monitoring also reaches `InputDevice::setMonitorMode`, which ALSO calls Tracktion's
+`restartAllTransports()` → `stopIfRecording()` the instant the mode actually changes — so
+BoothView's "Hear myself" toggle could cut a pass short the same way. But monitoring is not
+itself an action meant to end the take, so `set_input_monitor` instead remembers the
+requested mode (`pendingMonitorModes_`, keyed by the shared input device) and applies it
+inside `stopRecordingAndLand` the moment a recording actually ends — every path above
+funnels through there, so every one of them picks up a pending change. While deferred the
+result reads `applied:false, deferred:true` with a `reason`, never a silent no-op that
+looks like success, and the snapshot's `track.monitor` honestly keeps reporting the OLD
+mode until it lands; BoothView shows "Hear myself: Off (pending On)" for exactly that
+window. A pending change is dropped, not carried over, on a project replacement
+(`new_project`/`open_project`/`open_recent`) — it was tied to a recording in an Edit that
+is now gone.
 
 **The Stop pad ends any recording** (2026-09-23). The Booth shows phase `recording`, and
 so its Stop pad, for a take the TopBar started, and the phone's Stop is live whenever the
@@ -112,8 +138,12 @@ loop is engaged. `loop_stop` used to send every recording to the pass finalize, 
 returns at once when no pass is in flight, so the transport kept recording under a
 "Stopped before recording began" receipt. It now lands such a take the way the TopBar stop
 does (`recording::loopStopRoute`), and its receipt never says "Stopped" while the transport
-still records. `Mosh --v3-booth-smoke` pins the four producer stops, the export case, a
-Booth start that cannot roll after it, and the Stop pad on a TopBar take, on a loopback.
+still records. `Mosh --v3-booth-smoke` pins the four producer stops, export_audio,
+export_stems, the bounce, a real-range loop toggle, an empty-range loop toggle (time-boxed —
+a real hang there needs an external timeout around the whole invocation, since a modal
+AlertWindow would own the message thread), a Hear-myself toggle mid-take (deferred, not
+finalized, and applied once the take ends), a Booth start that cannot roll after the export,
+and the Stop pad on a TopBar take, all on a loopback.
 
 `loop_keep` / `loop_again` report `applied:true` once the clip edit itself has
 committed, with a separate `data.restarted` bool and a `detail` that says plainly

@@ -16,9 +16,11 @@ What it proves, row by row (each check would read differently if the feature wer
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
             Then `Mosh --v3-booth-smoke`: the Booth's own button path (Add a Vocal track, Put
             Me In from bar 1) with takes ended by the Stop pad, the TopBar stop, Shift+Space and
-            Space, each registering as a Part in snapshot.loop (what the Booth renders), a
-            take ended by a stop that bypasses the finalize leaving nothing in flight, and the
-            Stop pad ending a take the TopBar started.
+            Space, each registering as a Part in snapshot.loop (what the Booth renders); since
+            2026-09-24 export_audio, export_stems, the bounce, and a loop toggle each finalize
+            an in-flight pass as a Part too (they used to bypass the finalize and leave it
+            unstamped), a Hear-myself toggle mid-take defers instead of ending the take, and
+            the Stop pad ends a take the TopBar started.
   V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
             rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert, a
             load_preset and an add_send, each followed by undo, looped. The regression smoke
@@ -521,7 +523,8 @@ def row_vocal(ctx) -> Row:
     row.chk(booth.returncode == 0 and booth_summary and int(booth_summary.get("failures", 1)) == 0,
             f"Mosh --v3-booth-smoke passed every check ({booth_summary.get('checks', '?')} checks): each take ended by "
             f"the Stop pad, the TopBar stop, Shift+Space or Space registers as a Part the Booth lists, Keep can act "
-            f"on it, a stop that bypasses the finalize leaves no pass in flight, and the Stop pad ends a take "
+            f"on it, export_audio/export_stems/the bounce/a loop toggle mid-take each finalize the pass as a Part, "
+            f"a Hear-myself toggle mid-take defers instead of ending the take, and the Stop pad ends a take "
             f"the TopBar started",
             {"rc": booth.returncode, "summary": booth_summary, "failed": booth_failed})
     return row

@@ -18657,21 +18657,21 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         check (loop.getProperty ("phase", var()).toString() == "idle", "idle after the final stop");
     }
 
-    // -- A stop that BYPASSES the finalize must not leave the pass "in flight". export_audio,
-    //    export_stems and the bounce stop the transport directly to detach the Edit for the
-    //    render, and none of them reach cmdStopRecording. Before 2026-09-23 the pass they ended
-    //    stayed loopCurrent_, the Booth kept naming it as the capture in flight, and the NEXT
-    //    ordinary take (TopBar Record, then Stop) was stamped as that old pass -- its id and
-    //    entry bar -- so Again rewound to the wrong place. The checks after the export are
-    //    relative to the state it leaves, so they hold whether or not a later change makes an
-    //    export finalize the pass first. (A loop toggle mid-take is another such stop --
-    //    Tracktion's stopIfRecording -- but with no loop range set, as here, Tracktion lands it
-    //    through UIBehaviour::showWarningAlert's modal "Recording" alert, which hangs a smoke.) --
+    // -- A stop that must not leave the pass "in flight", AND (since 2026-09-24) must not
+    //    land it unstamped either. export_audio, export_stems and the bounce all detach the
+    //    Edit from the device before their render; before this fix they called Tracktion's
+    //    raw transport.stop() to do it, bypassing cmdStopRecording, so an in-flight Booth
+    //    pass landed on Takes unstamped, never a Part. They now route through
+    //    finalizeInFlightRecordingOrFail (the same choke point cmdSetTransport's
+    //    action-based stops use) BEFORE detaching, so the pass survives the detach as a
+    //    real, stamped Part. --
     {
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "bypassed stop: count-in off");
+        const int partsBeforeExport = partsOf (boothLoop()).size();
         auto rec = cmd (ops, "loop_record");
         check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "bypassed stop: Put Me In applied");
-        check (rec["data"].getProperty ("currentId", var()).toString().isNotEmpty(), "bypassed stop: a pass is in flight");
+        const auto exportPassId = rec["data"].getProperty ("currentId", var()).toString();
+        check (exportPassId.isNotEmpty(), "bypassed stop: a pass is in flight");
         pump (1500);
         const auto exportFile = eng.sessionDir().getChildFile ("v3-booth-bypassed-stop.wav");
         check (ok (cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}))),
@@ -18684,12 +18684,33 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         const int partsMid = partsOf (mid).size();
         const auto lastMid = mid.getProperty ("lastId", var()).toString();
 
+        // The fix, not just the guard: the export's own in-flight pass landed as a real,
+        // stamped Part before the render detached the Edit from the device.
+        check (partsMid == partsBeforeExport + 1,
+               "bypassed stop: export_audio mid-take finalizes the in-flight pass as a new Part ("
+                   + String (partsBeforeExport) + " before, " + String (partsMid) + " after)");
+        check (lastMid == exportPassId, "bypassed stop: lastId names the pass export_audio just finalized");
+        var exportedPart;
+        for (auto& p : partsOf (mid))
+            if (p.getProperty ("id", var()).toString() == exportPassId)
+                exportedPart = p;
+        check (exportedPart.isObject(), "bypassed stop: the export-ended pass is one of the Parts");
+        if (exportedPart.isObject())
+        {
+            check (exportedPart.getProperty ("trackId", var()).toString() == takesId,
+                   "bypassed stop: the export-ended Part lives on Vocal Takes");
+            const auto clip = clipById (exportedPart.getProperty ("clipId", var()).toString());
+            check (peakOf (clip) > 0.05, "bypassed stop: the export-ended Part is a non-silent WAV on disk");
+        }
+
         // A Booth start that could NOT roll must not name the pass the export ended as the
         // capture in flight. loop_record / loop_keep / loop_again reported currentId from
         // loopCurrent_ alone, while snapshot.loop gates it on the transport recording, so the
         // result and the snapshot disagreed and the Booth marked "Not recording: ..." as rolling
         // (review of PR #730, round 3). Disarming Takes makes loopStartCapture refuse
-        // (REC-NO-INPUT) with the stale pass still in loopCurrent_.
+        // (REC-NO-INPUT) with the stale pass still in loopCurrent_ -- now the ALREADY-
+        // finalized export pass above, not a stale unstamped one, but the refusal path below
+        // is unaffected either way: it never has a pass to roll into.
         {
             // The export freed the playback context, and with no input instances arm_track
             // has nothing to disarm (ok, applied:false); the next start would rebuild the
@@ -18736,6 +18757,172 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         check (after.getProperty ("lastId", var()).toString() == lastMid, "bypassed stop: lastId did not move to the old pass");
         check (after.getProperty ("currentId", var()).toString().isEmpty(), "bypassed stop: nothing in flight after the ordinary stop");
         check (after.getProperty ("phase", var()).toString() == "idle", "bypassed stop: idle at the end");
+    }
+
+    // -- export_stems mid-take: same detach, same finalize (cmdExportStems shares the fix
+    //    with cmdExportAudio, MoshOps.ProjectIo.cpp). --
+    {
+        const int partsBefore = partsOf (boothLoop()).size();
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "export_stems mid-take: Put Me In applied");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), "export_stems mid-take: a pass is in flight");
+        pump (1500);
+        const auto stemsDir = eng.sessionDir().getChildFile ("v3-booth-export-stems");
+        check (ok (cmd (ops, "export_stems", objN ({{ "dir", stemsDir.getFullPathName() }, { "format", "wav" }}))),
+               "export_stems mid-take is accepted");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "export_stems mid-take: the export ended the recording");
+        const auto after = boothLoop();
+        check (partsOf (after).size() == partsBefore + 1,
+               "export_stems mid-take finalizes the in-flight pass as a new Part (" + String (partsBefore) + " before, "
+                   + String (partsOf (after).size()) + " after)");
+        check (after.getProperty ("lastId", var()).toString() == passId,
+               "export_stems mid-take: lastId names the pass export_stems just finalized");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "export_stems mid-take: nothing left in flight");
+    }
+
+    // -- bounce_track mid-take, on a DIFFERENT track (Guide) than the one recording:
+    //    bounceRenderToWavImpl detaches the WHOLE Edit from the device, not just the track
+    //    being bounced, so it hits the identical hazard for whatever else is in flight. --
+    {
+        juce::String guideId;
+        {
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("name", var()).toString() == "Guide")
+                        guideId = t.getProperty ("id", var()).toString();
+        }
+        check (guideId.isNotEmpty(), "bounce mid-take: found the Guide track");
+
+        const int partsBefore = partsOf (boothLoop()).size();
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "bounce mid-take: Put Me In applied");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), "bounce mid-take: a pass is in flight");
+        pump (1500);
+        check (ok (cmd (ops, "bounce_track", objN ({{ "trackId", guideId }, { "mode", "newTrack" }}))),
+               "bounce_track (Guide) mid-take is accepted");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "bounce mid-take: the bounce ended the recording");
+        const auto after = boothLoop();
+        check (partsOf (after).size() == partsBefore + 1,
+               "bounce mid-take finalizes the in-flight pass as a new Part (" + String (partsBefore) + " before, "
+                   + String (partsOf (after).size()) + " after)");
+        check (after.getProperty ("lastId", var()).toString() == passId,
+               "bounce mid-take: lastId names the pass the bounce just finalized");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "bounce mid-take: nothing left in flight");
+    }
+
+    // -- A loop toggle mid-take (set_transport {loop} while recording) is a stop too:
+    //    Tracktion's own valueTreePropertyChanged listener calls stopIfRecording() the
+    //    instant `.looping` changes. cmdSetTransport now finalizes the in-flight pass FIRST.
+    //    This is the range the UI actually sends (menuActions.ts's loopToggleArgs always
+    //    supplies a real range, never an empty one). --
+    {
+        const int partsBefore = partsOf (boothLoop()).size();
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "loop toggle mid-take: Put Me In applied");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), "loop toggle mid-take: a pass is in flight");
+        pump (1500);
+        auto toggled = cmd (ops, "set_transport", objN ({{ "loop", true }, { "loopStart", 0.0 }, { "loopEnd", 8.0 }}));
+        check (ok (toggled), "loop toggle mid-take (real range) is accepted");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "loop toggle mid-take: the toggle ended the recording");
+        check (eng.edit().getTransport().looping.get(),
+               "loop toggle mid-take: the loop flag itself still applies, after the finalize");
+        const auto after = boothLoop();
+        check (partsOf (after).size() == partsBefore + 1,
+               "loop toggle mid-take finalizes the in-flight pass as a new Part (" + String (partsBefore) + " before, "
+                   + String (partsOf (after).size()) + " after)");
+        check (after.getProperty ("lastId", var()).toString() == passId,
+               "loop toggle mid-take: lastId names the pass the toggle just finalized");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "loop toggle mid-take: nothing left in flight");
+        check (ok (cmd (ops, "set_transport", args1 ("loop", false))), "loop toggle mid-take: loop off again for the cases below");
+    }
+
+    // -- The same loop toggle, but with the EMPTY range a fresh session boots with
+    //    (loopStart==loopEnd==0) -- the case the PR #730 review tried and dropped because it
+    //    hung on Tracktion's modal "Recording" alert (UIBehaviour::showWarningAlert, from
+    //    WaveInputDevice's isLooping-driven endPos clamp). Finalizing first means `.looping`
+    //    only ever changes on an already-idle transport, so that alert is unreachable from
+    //    here regardless of the range. Time-boxed in-process as a second line of defence: a
+    //    genuine hang would block this whole process forever (a modal AlertWindow owns the
+    //    message thread) -- only an EXTERNAL timeout around the whole --v3-booth-smoke
+    //    invocation can actually catch that; this assertion only catches a SLOW path. --
+    {
+        check (ok (cmd (ops, "set_transport", objN ({{ "loopStart", 0.0 }, { "loopEnd", 0.0 }}))),
+               "empty-range loop toggle: loop range reset to empty");
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "empty-range loop toggle: Put Me In applied");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), "empty-range loop toggle: a pass is in flight");
+        pump (1500);
+        const auto startMs = Time::getMillisecondCounter();
+        auto toggled = cmd (ops, "set_transport", args1 ("loop", true));   // no range: stays (0,0)
+        const auto elapsedMs = Time::getMillisecondCounter() - startMs;
+        check (ok (toggled), "empty-range loop toggle is accepted");
+        check (elapsedMs < 5000, "empty-range loop toggle did not hang (" + String ((int) elapsedMs) + " ms)");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "empty-range loop toggle: the toggle ended the recording");
+        const auto after = boothLoop();
+        check (after.getProperty ("lastId", var()).toString() == passId,
+               "empty-range loop toggle finalizes the in-flight pass, same as the real-range case");
+        check (ok (cmd (ops, "set_transport", args1 ("loop", false))), "empty-range loop toggle: loop off again");
+    }
+
+    // -- "Hear myself" mid-take (set_input_monitor while recording) must NOT end the take.
+    //    InputDevice::setMonitorMode also calls Tracktion's restartAllTransports(), which
+    //    also calls stopIfRecording() -- so unlike the two stops above, the fix here is to
+    //    DEFER the mode change instead of finalizing, and apply it once the take actually
+    //    ends. --
+    {
+        check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "off" }}))),
+               "Hear-myself mid-take: monitor starts Off");
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "Hear-myself mid-take: Put Me In applied");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), "Hear-myself mid-take: a pass is in flight");
+        pump (1500);
+
+        auto monitor = cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "on" }}));
+        check (ok (monitor), "Hear-myself mid-take: set_input_monitor is accepted");
+        check (! (bool) monitor["data"].getProperty ("applied", true),
+               "Hear-myself mid-take: the change is NOT applied yet (deferred, not finalized)");
+        check ((bool) monitor["data"].getProperty ("deferred", false), "Hear-myself mid-take: the result says deferred");
+        check (monitor["data"].getProperty ("reason", var()).toString().contains ("recording"),
+               "Hear-myself mid-take: the reason names why (got '"
+                   + monitor["data"].getProperty ("reason", var()).toString() + "')");
+
+        // The honest part: the take is still rolling, still the SAME pass, and the snapshot
+        // still reports the OLD monitor mode -- nothing looks applied that is not.
+        check (eng.edit().getTransport().isRecording(), "Hear-myself mid-take: still recording after the toggle");
+        check (boothLoop().getProperty ("currentId", var()).toString() == passId,
+               "Hear-myself mid-take: the SAME pass is still in flight");
+        check (boothLoop().getProperty ("phase", var()).toString() == "recording",
+               "Hear-myself mid-take: the Booth still shows phase recording");
+        auto monitorModeOf = [&] (const String& trackId) -> String
+        {
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("id", var()).toString() == trackId)
+                        return t.getProperty ("monitor", var()).toString();
+            return {};
+        };
+        check (monitorModeOf (takesId) == "off", "Hear-myself mid-take: the snapshot still shows Off (nothing applied yet)");
+
+        pump (1000);
+        check (ok (cmd (ops, "loop_stop")), "Hear-myself mid-take: Stop pad ok");
+        pump (300);
+        const auto after = boothLoop();
+        check (after.getProperty ("lastId", var()).toString() == passId,
+               "Hear-myself mid-take: the take still lands as a Part once stopped normally");
+        check (monitorModeOf (takesId) == "on", "Hear-myself mid-take: the deferred change applied once the take ended");
     }
 
     // -- The Stop pad is the panic button: it ends ANY recording, not only a pass the loop

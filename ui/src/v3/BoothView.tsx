@@ -96,6 +96,15 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   // so local state would lie after a relaunch) and belongs to the shared input device.
   const takesTrack = loop?.engaged ? snapshot.tracks.find((t) => t.id === loop.takesTrackId) : undefined;
   const hearingMyself = takesTrack ? takesTrack.monitor !== "off" : false;
+  // 2026-09-24 finding c -- a mode change sent mid-take comes back {applied:false,
+  // deferred:true}: the snapshot honestly keeps showing the OLD mode until the take ends, so
+  // this is the only thing that tells the producer their click registered. Cleared once the
+  // snapshot's actual mode catches up (the deferred change landed) or the Takes track goes
+  // away (session/project changed under it).
+  const [pendingMonitor, setPendingMonitor] = useState<"off" | "automatic" | "on" | null>(null);
+  useEffect(() => {
+    if (pendingMonitor !== null && (!takesTrack || takesTrack.monitor === pendingMonitor)) setPendingMonitor(null);
+  }, [pendingMonitor, takesTrack]);
 
   // Every loop command answers with a human `detail` — including the ones that committed
   // the edit but could not roll again ("Kept Part 2; recording did not restart: …"). Show
@@ -136,10 +145,16 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
 
   const toggleHearMyself = async () => {
     if (!loop?.takesTrackId) return;
-    const result = await run("set_input_monitor", { trackId: loop.takesTrackId, mode: hearingMyself ? "off" : "automatic" });
-    const data = result?.ok ? result.data as { applied?: unknown; reason?: unknown } | undefined : undefined;
-    if (data?.applied === false)
+    const targetMode: "off" | "automatic" = hearingMyself ? "off" : "automatic";
+    const result = await run("set_input_monitor", { trackId: loop.takesTrackId, mode: targetMode });
+    const data = result?.ok ? result.data as { applied?: unknown; deferred?: unknown; reason?: unknown } | undefined : undefined;
+    if (data?.deferred === true) {
+      // Recording is still rolling (2026-09-24 finding c): the change is honestly pending,
+      // not applied -- show that instead of a toggle that looks like it did nothing.
+      setPendingMonitor(targetMode);
+    } else if (data?.applied === false) {
       setNote(`Monitoring unchanged: ${typeof data.reason === "string" && data.reason ? data.reason : "the engine did not apply it"}`);
+    }
   };
 
   const line = note ?? (loop?.blockReason || null);
@@ -190,9 +205,12 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
             <div className="booth-monitor-row">
               <button type="button" className={`btn${hearingMyself ? " on" : ""}`} data-testid="v3-booth-monitor"
                 aria-pressed={hearingMyself} disabled={!takesTrack || pending}
-                title="Monitoring applies to the whole input device"
+                title={pendingMonitor !== null
+                  ? "Recording in progress -- will apply when the take ends"
+                  : "Monitoring applies to the whole input device"}
                 onClick={() => void toggleHearMyself()}>
                 Hear myself: {hearingMyself ? "On" : "Off"}
+                {pendingMonitor !== null ? ` (pending ${pendingMonitor === "off" ? "Off" : "On"})` : ""}
               </button>
             </div>
 

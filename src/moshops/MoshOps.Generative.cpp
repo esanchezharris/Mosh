@@ -503,8 +503,27 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
     // tap re-attaches to the NEXT context on its own via unregisterAllMeterClients()'s
     // weak-reference detach. No-op when headless.
     unregisterAllMeterClients();
-    edit.getTransport().stop (false, false);
-    edit.getTransport().freePlaybackContext();
+    {
+        auto& transport = edit.getTransport();
+        if (transport.isRecording())
+        {
+            // This helper backs bounce_track, freeze_track and the generative auto-bounce.
+            // Same hazard as cmdExportAudio's detach (2026-09-24 finding b): a raw
+            // transport.stop() here would land an in-flight recording (on a DIFFERENT track
+            // than the one being bounced -- this detaches the whole Edit) unstamped, never a
+            // Part. Finalize it through cmdStopRecording first; the caller's own generic
+            // "offline render failed" error covers a refusal here, same as any other bounce
+            // failure.
+            juce::String reason;
+            if (! finalizeInFlightRecordingOrFail (reason))
+                return false;
+        }
+        else
+        {
+            transport.stop (false, false);
+        }
+        transport.freePlaybackContext();
+    }
 
     destWav.getParentDirectory().createDirectory();
     destWav.deleteFile();

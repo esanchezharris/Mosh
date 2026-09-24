@@ -4255,6 +4255,10 @@ void MoshOps::emitProjectReplaced (const juce::String& reason)
     // loop_state naming a pass that no longer exists.
     loopCurrent_ = {};
     loopAuditionedId_.clear();
+    // 2026-09-24 finding c — a set_input_monitor deferred against the OLD Edit's recording
+    // is meaningless once that Edit is gone: drop it rather than applying a stale intent to
+    // whatever the new project's input devices happen to be.
+    pendingMonitorModes_.clear();
     txnFingerprintRevision_ = -1;
     auto* payload = new DynamicObject();
     payload->setProperty ("projectReplaced", true);
