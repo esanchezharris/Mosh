@@ -99,18 +99,48 @@ export function gridDensity(beatPx: number): { beats: boolean; barStep: 1 | 2 | 
 }
 
 export type GridMark = { beat: number; x: number; bar: boolean; barNo: number };
+export type BeatWindow = { startBeat: number; endBeat: number };
 
-/** The visible marks across `beats` beats, x in lane px snapped to 1/dpr. */
-export function gridMarks(beats: number, beatPx: number, dpr = 1): GridMark[] {
+/** The visible marks across `beats` beats, x in lane px snapped to 1/dpr. `range` narrows the
+ *  loop to a beat window (e.g. from `visibleBeatWindow`) instead of the full `beats` span; every
+ *  mark's `x`/`bar`/`barNo` is identical to the unwindowed computation — `range` only changes
+ *  which marks are returned, never their positions. Omitting `range` keeps the old behaviour
+ *  (the whole `beats` span), which is what a long session used to always do: the ruler and every
+ *  lane's grid rendered thousands of DOM/AX nodes regardless of scroll position, and a macOS
+ *  accessibility walk of the window timed out on the node count (FINDINGS.md, "New (minor)",
+ *  2026-09-23 retest). */
+export function gridMarks(beats: number, beatPx: number, dpr = 1, range?: BeatWindow): GridMark[] {
   const out: GridMark[] = [];
   if (!(beatPx > 0) || !(beats > 0)) return out;
   const d = gridDensity(beatPx);
   const px = Math.max(1, dpr);
-  for (let k = 0; k < beats; k++) {
+  const from = Math.max(0, range ? Math.floor(range.startBeat) : 0);
+  const to = Math.min(beats, range ? Math.ceil(range.endBeat) : beats);
+  for (let k = from; k < to; k++) {
     const bar = k % 4 === 0;
     const barNo = Math.floor(k / 4) + 1;
     if (bar ? (barNo - 1) % d.barStep !== 0 : !d.beats) continue;
     out.push({ beat: k, x: Math.round(k * beatPx * px) / px, bar, barNo });
   }
   return out;
+}
+
+/** The beat window to draw for a scrolled lane: the visible px span (`scrollLeftPx` ..
+ *  `scrollLeftPx + viewportPx`) plus a one-viewport overscan on each side, converted to beats at
+ *  this zoom. Bounded by a small multiple of the viewport regardless of `totalBeats`, so a
+ *  550-bar song and a 4-bar song put the same, small mark count in the DOM (the fix for
+ *  FINDINGS.md's "New (minor)": rendering the whole content width timed out a macOS
+ *  accessibility walk on node count alone, CPU idle). The overscan means a small scroll, or the
+ *  gap while the next rAF-throttled update lands, still shows marks right to the lane's edge
+ *  instead of a bare strip. */
+export function visibleBeatWindow(scrollLeftPx: number, viewportPx: number, beatPxVal: number, totalBeats: number): BeatWindow {
+  if (!(beatPxVal > 0) || !(totalBeats > 0)) return { startBeat: 0, endBeat: 0 };
+  const scroll = Math.max(0, scrollLeftPx);
+  const view = Math.max(0, viewportPx);
+  const overscanPx = view;
+  const startPx = Math.max(0, scroll - overscanPx);
+  const endPx = scroll + view + overscanPx;
+  const startBeat = Math.max(0, Math.min(totalBeats, Math.floor(startPx / beatPxVal)));
+  const endBeat = Math.max(startBeat, Math.min(totalBeats, Math.ceil(endPx / beatPxVal)));
+  return { startBeat, endBeat };
 }
