@@ -152,32 +152,26 @@ juce::var MoshOps::muteAutomationAtPlayhead()
     return var (payload);
 }
 
-// Sync the client map to the LIVE meter taps in the edit. Robust against undo/
-// redo/remove destroying a meter plugin: we only ever read our OWN Client (alive),
-// never a stale measurer. A tap whose track no longer has a meter is dropped
-// WITHOUT removeClient (its measurer is already gone); a fresh meter gets a client
-// added to its (live) measurer. Called every frame before reading levels.
+// Sync the client map to the LIVE meter taps in the edit. Called every frame before
+// reading levels. A tap whose track no longer has a meter (undo/redo/remove) is erased;
+// a meter that changed instance gets our client moved to it. Neither path frees or
+// re-homes a client by guesswork about whether the old measurer still exists: MeterTap
+// detaches through its weak reference (see MoshOps.h). The old "drop WITHOUT removeClient,
+// its measurer is already gone" rule was false: a removed meter plugin lives on in the
+// PluginCache and the playback graph, and the next graph rebuild's
+// LevelMeterPlugin::deinitialise wrote into the freed client (2026-09-23 '+ Chords').
 void MoshOps::reconcileMeterClients()
 {
     std::map<juce::String, te::LevelMeterPlugin*> live;
-    juce::Array<te::LevelMeterPlugin*> livePlugins;
     for (auto* t : te::getAudioTracks (eng.edit()))
         if (t != nullptr)
             if (auto* lm = findTrackMeter (*t))
-            {
                 live[t->itemID.toString()] = lm;
-                livePlugins.add (lm);
-            }
 
     for (auto it = meterClients.begin(); it != meterClients.end();)
     {
         if (live.find (it->first) == live.end())
-        {
-            if (it->second != nullptr && it->second->plugin != nullptr
-                && livePlugins.contains (it->second->plugin))
-                it->second->plugin->measurer.removeClient (it->second->client);
-            it = meterClients.erase (it);                    // plugin gone (undo/remove) — drop, no removeClient
-        }
+            it = meterClients.erase (it);                    // ~MeterTap removes the client from a measurer that still exists
         else
             ++it;
     }
@@ -185,35 +179,20 @@ void MoshOps::reconcileMeterClients()
     {
         auto& slot = meterClients[id];
         if (slot == nullptr) slot = std::make_unique<MeterTap>();
-        if (slot->plugin != lm)                              // new / replaced instance — (re)register our client
-        {
-            if (slot->plugin != nullptr && livePlugins.contains (slot->plugin))
-                slot->plugin->measurer.removeClient (slot->client);
-            slot->plugin = lm;
-            lm->measurer.addClient (slot->client);
-        }
+        slot->attach (lm->measurer);                         // no-op when already registered there
     }
 
     std::map<SendMeterKey, te::AuxSendPlugin*> liveSends;
-    juce::Array<te::AuxSendPlugin*> liveSendPlugins;
     for (auto* track : te::getAudioTracks (eng.edit()))
         if (track != nullptr)
             for (auto* plugin : track->pluginList.getPlugins())
                 if (auto* send = dynamic_cast<te::AuxSendPlugin*> (plugin))
-                {
                     liveSends[{ track->itemID.toString(), send->getBusNumber() }] = send;
-                    liveSendPlugins.add (send);
-                }
 
     for (auto it = sendMeterClients.begin(); it != sendMeterClients.end();)
     {
         if (liveSends.find (it->first) == liveSends.end())
-        {
-            if (it->second != nullptr && it->second->plugin != nullptr
-                && liveSendPlugins.contains (it->second->plugin))
-                it->second->plugin->measurer.removeClient (it->second->client);
-            it = sendMeterClients.erase (it);
-        }
+            it = sendMeterClients.erase (it);                // ~MeterTap detaches, as above
         else
             ++it;
     }
@@ -222,40 +201,16 @@ void MoshOps::reconcileMeterClients()
     {
         auto& slot = sendMeterClients[key];
         if (slot == nullptr) slot = std::make_unique<SendMeterTap>();
-        if (slot->plugin != send)
-        {
-            if (slot->plugin != nullptr && liveSendPlugins.contains (slot->plugin))
-                slot->plugin->measurer.removeClient (slot->client);
-            slot->plugin = send;
-            send->measurer.addClient (slot->client);
-        }
+        slot->attach (send->measurer);
     }
 }
 
 void MoshOps::unregisterAllMeterClients()
 {
-    // Detach our clients, but ONLY from measurers that are still live — a track
-    // removed since the last reconcile leaves a stale plugin pointer we must not
-    // deref. Build the live set and match by value.
-    juce::Array<te::LevelMeterPlugin*> live;
-    for (auto* t : te::getAudioTracks (eng.edit()))
-        if (t != nullptr)
-            if (auto* lm = findTrackMeter (*t))
-                live.add (lm);
-    for (auto& [id, tap] : meterClients)
-        if (tap != nullptr && tap->plugin != nullptr && live.contains (tap->plugin))
-            tap->plugin->measurer.removeClient (tap->client);
+    // Detach our clients from every measurer that still exists — including the meter of
+    // a track removed since the last reconcile, which the PluginCache and the playback
+    // graph may still hold (the weak reference knows; a plugin-list scan does not).
     meterClients.clear();
-
-    juce::Array<te::AuxSendPlugin*> liveSends;
-    for (auto* track : te::getAudioTracks (eng.edit()))
-        if (track != nullptr)
-            for (auto* plugin : track->pluginList.getPlugins())
-                if (auto* send = dynamic_cast<te::AuxSendPlugin*> (plugin))
-                    liveSends.add (send);
-    for (auto& [key, tap] : sendMeterClients)
-        if (tap != nullptr && tap->plugin != nullptr && liveSends.contains (tap->plugin))
-            tap->plugin->measurer.removeClient (tap->client);
     sendMeterClients.clear();
 
     // The master client belongs to the playback context rather than a plugin. Every
@@ -413,12 +368,7 @@ juce::var MoshOps::cmdDisableTrackMeter (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("disable_track_meter", "no track");
     const auto id = track->itemID.toString();
-    if (auto it = meterClients.find (id); it != meterClients.end())
-    {
-        if (it->second != nullptr && it->second->plugin != nullptr)
-            it->second->plugin->measurer.removeClient (it->second->client);   // unregister before delete
-        meterClients.erase (it);
-    }
+    meterClients.erase (id);   // ~MeterTap unregisters from the measurer before the tap is freed
     beginTxn ("disable_track_meter");
     if (auto* lm = findTrackMeter (*track)) lm->deleteFromParent();
     logLine ("disable_track_meter", args, true, {}, true);
