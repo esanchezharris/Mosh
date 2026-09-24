@@ -500,6 +500,28 @@ def _is_asan_build(binary: Path) -> bool:
     return "libclang_rt.asan" in out
 
 
+def chords_verdict(checks_ok: bool, asan_build: bool, bin_path) -> str | None:
+    """The BLOCKED-message decision for row_chords, factored out so it is testable without a
+    binary or a live device.
+
+    A real failure — a failed check, or the stress run having crashed/timed out — must
+    NEVER be downgraded to BLOCKED: it has to read FAIL so it can't be waved off as "smoke
+    only". Only when every check passed does the missing ASan instrumentation reduce the row
+    to a smoke test with no detection power (a Release build runs the identical
+    --chords-stress sequence clean whether or not a heap use-after-free like 2026-09-23's is
+    still present).
+
+    Returns the message for row.blocked, or None to leave the row's PASS/FAIL verdict alone
+    (None with checks_ok True means PASS; None with checks_ok False means FAIL).
+    """
+    if not checks_ok or asan_build:
+        return None
+    return (f"smoke only (no detection power): {bin_path} has no ASan runtime "
+            f"(otool -L shows no libclang_rt.asan) — this run only shows the stress "
+            f"did not crash, not that the 2026-09-23 heap-use-after-free class of bug "
+            f"is absent; rebuild with the macos-arm64-asan preset and pass --bin")
+
+
 def row_chords(ctx) -> Row:
     row = Row("V3-chords", "+ Chords / create / 4OSC / preset / send, each undone, on a live device with meters on", [
         "Detection power needs an ASan build (cmake --preset macos-arm64-asan; --bin its Mosh): a Release run only shows it did not crash.",
@@ -533,8 +555,8 @@ def row_chords(ctx) -> Row:
             except json.JSONDecodeError:
                 pass
     asan = [l for l in (proc.stderr or "").splitlines() if "ERROR: AddressSanitizer" in l or l.startswith("SUMMARY: AddressSanitizer")][:4]
-    row.chk(not asan and proc.returncode == 0, "no crash and no sanitizer report", {"rc": proc.returncode, "asan": asan})
-    row.chk(bool(summary) and int(summary.get("failures", 1)) == 0,
+    ok_no_crash = row.chk(not asan and proc.returncode == 0, "no crash and no sanitizer report", {"rc": proc.returncode, "asan": asan})
+    ok_summary = row.chk(bool(summary) and int(summary.get("failures", 1)) == 0,
             f"every variant ran {summary.get('iterations', '?')} iterations with every command ok and every undo exact",
             summary)
     if summary:
@@ -545,14 +567,11 @@ def row_chords(ctx) -> Row:
             row.notes.append(f"a removed send's measurer was still held by the PluginCache after the settle in "
                              f"{summary.get('sendOutlivedRemoval')}/{summary.get('sendWitnessed')} undos "
                              f"(the same hazard, on an AuxSendPlugin instead of a track meter)")
-    if not asan_build:
-        # Every check above can still be green on a Release binary — that is exactly the
-        # false signal this guards against. Report BLOCKED, never PASS, so the row can't be
-        # read as regression evidence until it is re-run with an ASan --bin.
-        row.blocked = (f"smoke only (no detection power): {ctx.bin} has no ASan runtime "
-                       f"(otool -L shows no libclang_rt.asan) — this run only shows the stress "
-                       f"did not crash, not that the 2026-09-23 heap-use-after-free class of bug "
-                       f"is absent; rebuild with the macos-arm64-asan preset and pass --bin")
+    # A real failure (either check above false) is never downgraded to BLOCKED — it must
+    # read FAIL so a crash/regression can't be waved off as "smoke only". Only when every
+    # check passed does the missing ASan instrumentation reduce this to a smoke test with no
+    # detection power. See chords_verdict's docstring for the full rationale.
+    row.blocked = chords_verdict(ok_no_crash and ok_summary, asan_build, ctx.bin)
     return row
 
 
