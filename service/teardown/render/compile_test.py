@@ -15,7 +15,9 @@ if _SERVICE not in sys.path:
     sys.path.insert(0, _SERVICE)
 
 from teardown import recipe as R  # noqa: E402
-from teardown.render.compile import compile_recipe  # noqa: E402
+from teardown.render.compile import (  # noqa: E402
+    compile_recipe, FALLBACK_MARGIN_DB, HEADROOM_TRIM_DB,
+)
 
 fails: list[str] = []
 
@@ -52,15 +54,21 @@ expected_commands = [
     {"command": "set_tempo", "args": {"bpm": 140}},
     {"command": "set_key", "args": {"tonic": "F#", "mode": "minor"}},
     {"command": "set_time_signature", "args": {"numerator": 4, "denominator": 4}},
+    # track/clip names are derived from ROLE, never `label` (2026-09-24 recipe-hygiene fix):
+    # "lead" -> "Melody" per ROLE_DISPLAY_NAMES, regardless of this fixture's label="Lead".
     {"command": "create_track", "args": {"name": "Kick", "type": "audio"}, "capture": {"T0": "trackId"}},
     {"command": "import_clip", "args": {"file": "lib/kicks/k.wav", "trackId": "${T0}", "startSeconds": 0}},
-    {"command": "create_track", "args": {"name": "Lead", "type": "audio"}, "capture": {"T1": "trackId"}},
+    {"command": "create_track", "args": {"name": "Melody", "type": "audio"}, "capture": {"T1": "trackId"}},
     {"command": "create_track", "args": {"name": "808", "type": "drum"}, "capture": {"T2": "trackId"}},
     {"command": "add_midi_clip", "args": {"trackId": "${T2}", "start": 0, "length": 8.0}, "capture": {"C2": "clipId"}},
-    # mix stage: static per-track headroom trim (2026-07 clipping audit)
-    {"command": "set_track_volume", "args": {"trackId": "${T0}", "db": -4.5}},
-    {"command": "set_track_volume", "args": {"trackId": "${T1}", "db": -4.5}},
-    {"command": "set_track_volume", "args": {"trackId": "${T2}", "db": -4.5}},
+    # mix stage: one uniform trim (2026-09-24 recipe-hygiene fix, reworked). This fixture's
+    # only sample-bearing element (kick) takes the back-compat import_clip path (no inline
+    # notes), so compile_recipe never emits an `assign_sample` command here — there is
+    # nothing for _predict_peak_at_0db to read, so it honestly returns None and the FALLBACK
+    # margin applies (see compile.py's module note).
+    {"command": "set_track_volume", "args": {"trackId": "${T0}", "db": HEADROOM_TRIM_DB + FALLBACK_MARGIN_DB}},
+    {"command": "set_track_volume", "args": {"trackId": "${T1}", "db": HEADROOM_TRIM_DB + FALLBACK_MARGIN_DB}},
+    {"command": "set_track_volume", "args": {"trackId": "${T2}", "db": HEADROOM_TRIM_DB + FALLBACK_MARGIN_DB}},
 ]
 check("golden command list matches exactly", res.commands == expected_commands,
       f"got {len(res.commands)} cmds")
@@ -364,6 +372,51 @@ try:
           m3 == {"id-good": {}, "id-good2": {}}, str(m3))
 finally:
     _ex._run_capture = _orig_run_capture
+
+# ── drum-mode onset dedup (2026-09-24 recipe-hygiene rework): seed 4's real "hat" element ──
+# 2026-09-23 demo-prep found generate_beat_recipe(seed=4)'s "hat" element firing 14 different
+# pitches at the SAME onset (beat 0) onto ONE drum one-shot (assign_sample mode="drum" plays
+# the identical sample regardless of pitch) — an extraction artifact, not 14 real hits. Uses
+# the REAL recipe library (service/recipes/library, committed) — no palette/audio needed for
+# this check, only the note timing.
+from teardown.render.compile import _dedupe_drum_onsets  # noqa: E402
+from recipes.generate import generate as _generate  # noqa: E402
+
+_seed4_rec, _ = _generate({"key": "A minor", "lead": False, "tempo": 90}, seed=4)
+_hat_el = next(e for e in _seed4_rec.elements if e.role.value == "hat")
+check("fixture sanity: seed 4's hat element really does have >1 note at the same onset",
+      len(_hat_el.midi.notes) > 0, "the demo-prep evidence would be stale")
+
+from collections import Counter as _Counter  # noqa: E402
+_onset_counts = _Counter(round(float(n.start_beats), 6) for n in _hat_el.midi.notes)
+_max_stacked = max(_onset_counts.values())
+check("seed 4 hat: reproduces the demo-prep pile-up (>=10 notes share one onset, pre-dedup)",
+      _max_stacked >= 10, f"max stacked = {_max_stacked}")
+
+_deduped = _dedupe_drum_onsets(list(_hat_el.midi.notes))
+_deduped_onset_counts = _Counter(round(float(n.start_beats), 6) for n in _deduped)
+check("seed 4 hat: dedup collapses every onset to exactly one note",
+      set(_deduped_onset_counts.values()) == {1}, str(_deduped_onset_counts.most_common(3)))
+check("seed 4 hat: dedup keeps one note per DISTINCT onset (no onsets dropped)",
+      len(_deduped) == len(_onset_counts), f"{len(_deduped)} vs {len(_onset_counts)} distinct onsets")
+check("seed 4 hat: dedup keeps the LOUDEST velocity at a stacked onset",
+      max(n.velocity for n in _hat_el.midi.notes if abs(float(n.start_beats)) < 1e-9)
+      == next(n.velocity for n in _deduped if abs(float(n.start_beats)) < 1e-9))
+
+# a musically real roll (notes a grid tick apart, never at the identical onset) must survive
+# untouched — dedup is keyed on exact-instant coincidence, not proximity.
+_roll = [ne(pitch=42, start_beats=b, duration_beats=0.25, velocity=100)
+         for b in (0.0, 0.25, 0.5, 0.75)]
+check("a genuine 16th-note roll (no coincident onsets) is untouched by dedup",
+      len(_dedupe_drum_onsets(_roll)) == 4)
+
+# end-to-end: the pile-up is gone from the ACTUAL compiled clip, not just the unit helper.
+_seed4_compiled = compile_recipe(_seed4_rec).commands
+_hat_clip = next(c for c in _seed4_compiled if c["command"] == "add_midi_clip"
+                  and c["args"].get("name") == "Hats")
+_clip_onset_counts = _Counter(round(n["start"], 6) for n in _hat_clip["args"]["notes"])
+check("seed 4: the COMPILED hat clip has one note per onset (pile-up fixed end-to-end)",
+      set(_clip_onset_counts.values()) == {1}, str(_clip_onset_counts.most_common(3)))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
