@@ -8433,6 +8433,109 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! meterOn (mt), "undo removes the meter tap");
         cmd (ops, "redo");
         check (meterOn (mt), "redo restores the meter tap");
+
+        // METER-UAF (2026-09-23 '+ Chords' heap corruption): a meter plugin OUTLIVES its
+        // track. The PluginCache keeps it for up to a second and the live playback graph
+        // keeps it until the NEXT rebuild, whose teardown runs LevelMeterPlugin::deinitialise
+        // -> LevelMeasurer::clear() -> Client::reset() on every registered client (and the
+        // audio thread writes them until the swap). The telemetry reconcile used to drop a
+        // vanished track's tap WITHOUT removeClient ("its measurer is already gone") and free
+        // a Client that measurer still pointed at. Headless has no graph, so this holds the
+        // plugin the way the graph does, and asks the measurer whether it still has a client
+        // without touching one: processBuffer on a ZERO-channel buffer sets
+        // numActiveChannels = 0 only when a client is registered, and writes to none.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            auto pumpTelemetry = [mm]
+            {
+                // several 30 Hz MoshOps ticks: each one runs reconcileMeterClients
+                const auto end = Time::getMillisecondCounter() + 200;
+                while (Time::getMillisecondCounter() < end)
+                    if (mm != nullptr) mm->runDispatchLoopUntil (20); else Thread::sleep (20);
+            };
+            auto hasClient = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> none (0, 0);
+                m.processBuffer (none, 0, 0);
+                return m.getNumActiveChannels() == 0;
+            };
+            const auto ghostId = cmd (ops, "create_track", args1 ("name", "Meter Ghost"))
+                                     ["data"].getProperty ("trackId", var()).toString();
+            te::Plugin::Ptr held;   // what the playback graph's PluginNode (and the PluginCache) hold
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == ghostId)
+                    for (auto* p : t->pluginList.getPlugins())
+                        if (dynamic_cast<te::LevelMeterPlugin*> (p) != nullptr) held = p;
+            auto* ghostMeter = dynamic_cast<te::LevelMeterPlugin*> (held.get());
+            check (ghostMeter != nullptr, "METER-UAF: a new track carries a level-meter tap");
+            if (ghostMeter != nullptr)
+            {
+                pumpTelemetry();
+                check (hasClient (ghostMeter->measurer),
+                       "METER-UAF: the telemetry registered its client on the new meter (the probe sees it)");
+                ghostMeter->measurer.clear();   // the client is alive here; resets the probe to 1
+                check (ok (cmd (ops, "undo")), "METER-UAF: undo removes the metered track");
+                check (trackById (ghostId).isVoid(), "METER-UAF: the track is gone from the snapshot");
+                pumpTelemetry();
+                check (! hasClient (ghostMeter->measurer),
+                       "METER-UAF: the removed track's still-alive meter holds NO client after telemetry drops its tap");
+            }
+            held = nullptr;
+        }
+
+        // METER-UAF-send (sibling coverage, 2026-09-23 follow-up): the same lifetime bug on
+        // an AuxSendPlugin's measurer. AuxSendNode holds a Plugin::Ptr and calls processBuffer
+        // on the send's measurer from the audio thread (tracktion_AuxSendNode.cpp) until the
+        // next graph rebuild, exactly like LevelMeasurerProcessingNode does for a track's
+        // level-meter tap — but before this fix, only the track half of reconcileMeterClients
+        // was ever exercised headless. Same zero-channel probe, on a send instead of a meter.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            auto pumpTelemetry = [mm]
+            {
+                const auto end = Time::getMillisecondCounter() + 200;
+                while (Time::getMillisecondCounter() < end)
+                    if (mm != nullptr) mm->runDispatchLoopUntil (20); else Thread::sleep (20);
+            };
+            auto hasClient = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> none (0, 0);
+                m.processBuffer (none, 0, 0);
+                return m.getNumActiveChannels() == 0;
+            };
+            auto busResult = cmd (ops, "create_bus", args1 ("name", "Meter Send Bus"));
+            check (ok (busResult), "METER-UAF-send: create_bus ok");
+            const int busNumber = (int) busResult["data"].getProperty ("busNumber", -1);
+            const auto sendGhostId = cmd (ops, "create_track", args1 ("name", "Send Ghost"))
+                                         ["data"].getProperty ("trackId", var()).toString();
+            auto addSendResult = cmd (ops, "add_send", objN ({ { "trackId", sendGhostId }, { "bus", busNumber } }));
+            check (ok (addSendResult), "METER-UAF-send: add_send ok");
+
+            auto findSend = [&] () -> te::AuxSendPlugin*
+            {
+                for (auto* t : te::getAudioTracks (eng.edit()))
+                    if (t != nullptr && t->itemID.toString() == sendGhostId)
+                        for (auto* p : t->pluginList.getPlugins())
+                            if (auto* s = dynamic_cast<te::AuxSendPlugin*> (p)) return s;
+                return nullptr;
+            };
+            te::Plugin::Ptr held = findSend();   // what the playback graph's AuxSendNode (and the PluginCache) hold
+            auto* ghostSend = dynamic_cast<te::AuxSendPlugin*> (held.get());
+            check (ghostSend != nullptr, "METER-UAF-send: the track carries an aux-send tap");
+            if (ghostSend != nullptr)
+            {
+                pumpTelemetry();
+                check (hasClient (ghostSend->measurer),
+                       "METER-UAF-send: the telemetry registered its client on the new send (the probe sees it)");
+                ghostSend->measurer.clear();   // the client is alive here; resets the probe to 1
+                check (ok (cmd (ops, "undo")), "METER-UAF-send: undo removes the send");
+                check (findSend() == nullptr, "METER-UAF-send: the send is gone from the track's plugin list");
+                pumpTelemetry();
+                check (! hasClient (ghostSend->measurer),
+                       "METER-UAF-send: the removed send's still-alive measurer holds NO client after telemetry drops its tap");
+            }
+            held = nullptr;
+        }
     }
 
     // ─── METER-001: every track-creation path auto-meters (coverage gap fix) ───
@@ -19019,6 +19122,268 @@ int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
 
     std::cerr << "===== " << checks - failures << "/" << checks
               << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+// ── Chords stress — the '+ Chords' heap corruption (2026-09-23) on a LIVE device ──
+// The installed app crashed twice with a corrupted heap on a '+ Chords' that followed an
+// undo which deleted a track. --selftest never saw it because it runs with no audio device:
+// no playback graph ever processes a plugin there. This mode is the GUI's posture — a real
+// device (MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch"), enable_all_meters at init, the
+// 30 Hz MoshOps telemetry timer reading the meters, the transport rolling on a loop — and
+// then loops the V3 edits the demo uses, each followed by the undo a producer presses:
+//   chords  exactly ui/src/v3/beats.ts dropChords: list_presets, batch_begin, create_track
+//           Keys, add_midi_clip (4 bars; the engine loads a 4OSC), add_note (12 notes),
+//           load_preset Keys.json, batch_end, then the refresh + the Presets pane's
+//           list_presets; then undo (removes the Keys track + its 4OSC + its meter)
+//   track   create_track, undo
+//   4osc    load_builtin 4osc on a persistent instrument-less track, undo
+//   preset  load_preset on a persistent 4OSC track, undo
+//   send    add_send on the persistent base track, targeting a persistent bus, undo — the
+//           same lifetime hazard as `track`/`chords`, but on an AuxSendPlugin's measurer
+//           (SendMeterTap) rather than a track's LevelMeterPlugin (2026-09-23 follow-up)
+// The message loop is pumped between every step so the telemetry timer, graph rebuilds and
+// the PluginCache purge all interleave with the edits as they do in the app. Under ASan the
+// first stray write aborts the run with both stacks; without ASan the run is a smoke.
+// Env: MOSH_CHORDS_STRESS_ITERS (default 50), MOSH_CHORDS_STRESS_VARIANTS (comma list,
+// default "chords,track,4osc,preset,send"), MOSH_CHORDS_STRESS_SETTLE_MS (default 120).
+// Prints one "CHORDS-STRESS: {json}" line.
+int runChordsStress (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh chords stress (+ Chords / undo on a live device, meters on) =====\n";
+    section ("Chords stress: V3 edits + undo while the device, the meters and the telemetry run");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+    auto envInt = [] (const char* key, int fallback, int lo, int hi)
+    {
+        const auto v = SystemStats::getEnvironmentVariable (key, {}).trim();
+        return v.isEmpty() ? fallback : jlimit (lo, hi, v.getIntValue());
+    };
+    const int iters    = envInt ("MOSH_CHORDS_STRESS_ITERS", 50, 1, 100000);
+    const int settleMs = envInt ("MOSH_CHORDS_STRESS_SETTLE_MS", 120, 0, 10000);
+    auto variantList = SystemStats::getEnvironmentVariable ("MOSH_CHORDS_STRESS_VARIANTS", {}).trim();
+    if (variantList.isEmpty()) variantList = "chords,track,4osc,preset,send";
+    const auto variants = StringArray::fromTokens (variantList, ",", {});
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        do
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (5);
+            else Thread::sleep (5);
+        }
+        while (Time::getMillisecondCounter() < end);
+    };
+    // The WebView's path: executeFromUi, then a short pump (the bridge round trip).
+    int failedCommands = 0;
+    auto ui = [&] (const String& name, var a = var()) -> var
+    {
+        auto* c = new DynamicObject();
+        c->setProperty ("command", name);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        auto r = ops.executeFromUi (var (c));
+        if (! ok (r))
+        {
+            ++failedCommands;
+            std::cerr << "  ..   command failed: " << name << " -> "
+                      << r.getProperty ("error", var()).toString() << "\n";
+        }
+        pump (8);
+        return r;
+    };
+    auto trackCount = [&] { return (int) te::getAudioTracks (eng.edit()).size(); };
+    auto findTrackById = [&] (const String& id) -> te::AudioTrack*
+    {
+        for (auto* t : te::getAudioTracks (eng.edit()))
+            if (t != nullptr && t->itemID.toString() == id) return t;
+        return nullptr;
+    };
+    auto meterOf = [&] (const String& trackId) -> te::Plugin*
+    {
+        if (auto* t = findTrackById (trackId))
+            for (auto* p : t->pluginList.getPlugins())
+                if (dynamic_cast<te::LevelMeterPlugin*> (p) != nullptr) return p;
+        return nullptr;
+    };
+    auto sendOf = [&] (const String& trackId, int bus) -> te::Plugin*
+    {
+        if (auto* t = findTrackById (trackId))
+            for (auto* p : t->pluginList.getPlugins())
+                if (auto* s = dynamic_cast<te::AuxSendPlugin*> (p))
+                    if (s->getBusNumber() == bus) return p;
+        return nullptr;
+    };
+    // Mechanism witness only (pointer identity, never dereferenced): is the meter of a track
+    // the undo just removed still an object the PluginCache (and so possibly the playback
+    // graph) holds, after the telemetry timer has run?
+    int meterOutlivedTrack = 0, meterWitnessed = 0;
+    int sendOutlivedRemoval = 0, sendWitnessed = 0;
+    auto cacheHolds = [&] (te::Plugin* raw)
+    {
+        for (auto* p : eng.edit().getPluginCache().getPlugins())
+            if (p == raw) return true;
+        return false;
+    };
+
+    // ── the GUI's init posture ──
+    check (ok (ui ("enable_all_meters")), "enable_all_meters (the V3 store calls it at init)");
+    auto listed = ui ("list_presets", args1 ("plugin", "4osc"));
+    String keysFile;
+    {
+        auto pv = listed["data"].getProperty ("presets", var());
+        if (auto* arr = pv.getArray())
+            for (auto& p : *arr)
+                if (p.getProperty ("name", var()).toString().containsIgnoreCase ("keys"))
+                    keysFile = p.getProperty ("file", var()).toString();
+    }
+    check (keysFile.isNotEmpty(), "list_presets names the bundled Keys 4OSC preset");
+
+    // A persistent 4OSC track playing chords (the meters see signal) and a persistent
+    // instrument-less MIDI track for the 4osc variant.
+    const auto baseId = ui ("create_track", args1 ("name", "Stress Base"))["data"].getProperty ("trackId", var()).toString();
+    const auto baseClip = ui ("add_midi_clip", objN ({ { "trackId", baseId }, { "start", 0.0 }, { "length", 8.0 }, { "name", "Base" } }))
+                              ["data"].getProperty ("clipId", var()).toString();
+    auto chordNotes = [] (int beatsPerBar)
+    {
+        static const int prog[4][3] = { { 57, 60, 64 }, { 53, 57, 60 }, { 55, 60, 64 }, { 55, 59, 62 } };
+        Array<var> notes;
+        for (int bar = 0; bar < 4; ++bar)
+            for (int k = 0; k < 3; ++k)
+                notes.add (objN ({ { "pitch", prog[bar][k] }, { "start", bar * beatsPerBar },
+                                   { "length", beatsPerBar }, { "velocity", 90 } }));
+        return var (notes);
+    };
+    check (ok (ui ("add_note", objN ({ { "clipId", baseClip }, { "notes", chordNotes (4) } }))), "base chords written");
+    const auto emptyId = ui ("create_track", args1 ("name", "Stress Empty"))["data"].getProperty ("trackId", var()).toString();
+    check (baseId.isNotEmpty() && emptyId.isNotEmpty(), "persistent fixture tracks exist");
+    check (ok (ui ("set_transport", objN ({ { "loop", true }, { "loopStart", 0.0 }, { "loopEnd", 8.0 }, { "action", "play" } }))),
+           "transport rolling on an 8 s loop");
+    pump (400);
+    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "a playback context (a live graph) exists");
+
+    // A persistent return bus for the `send` variant — created once, like the base/empty
+    // tracks above, so its own create/undo never has to fight the loop's track-count check.
+    const auto sendBus = ui ("create_bus", args1 ("name", "Stress Bus"));
+    const int sendBusNumber = (int) sendBus["data"].getProperty ("busNumber", -1);
+    check (ok (sendBus) && sendBusNumber >= 0, "persistent send-bus fixture exists");
+
+    const int baseTracks = trackCount();
+    std::map<String, int> ran;
+    int undoMismatch = 0;
+    auto undoAndSettle = [&] (int expectTracks)
+    {
+        ui ("undo");
+        ops.snapshot();                 // the UI refreshes after every undo
+        pump (settleMs);
+        if (trackCount() != expectTracks) ++undoMismatch;
+    };
+
+    for (int i = 0; i < iters; ++i)
+    {
+        // Every fourth pass parks the transport: the graph still runs for monitoring.
+        const bool parked = (i % 4) == 3;
+        if (parked)  ui ("set_transport", args1 ("action", "stop"));
+        else if (! eng.edit().getTransport().isPlaying()) ui ("set_transport", args1 ("action", "play"));
+
+        for (const auto& v : variants)
+        {
+            if (v == "chords")
+            {
+                ui ("list_presets", args1 ("plugin", "4osc"));
+                if (! ok (ui ("batch_begin", args1 ("name", "Add chords")))) continue;
+                const auto tid = ui ("create_track", args1 ("name", "Keys"))["data"].getProperty ("trackId", var()).toString();
+                const auto cid = ui ("add_midi_clip", objN ({ { "trackId", tid }, { "start", 0.0 }, { "length", 8.0 }, { "name", "Chords" } }))
+                                     ["data"].getProperty ("clipId", var()).toString();
+                ui ("add_note", objN ({ { "clipId", cid }, { "notes", chordNotes (4) } }));
+                if (keysFile.isNotEmpty())
+                    ui ("load_preset", objN ({ { "trackId", tid }, { "file", keysFile } }));
+                ui ("batch_end");
+                ops.snapshot();
+                ui ("list_presets", args1 ("plugin", "4osc"));   // the Presets pane opens
+                pump (settleMs);
+                auto* meter = meterOf (tid);
+                undoAndSettle (baseTracks);
+                if (meter != nullptr) { ++meterWitnessed; if (cacheHolds (meter)) ++meterOutlivedTrack; }
+            }
+            else if (v == "track")
+            {
+                const auto tid = ui ("create_track", args1 ("name", "Stress Track"))["data"].getProperty ("trackId", var()).toString();
+                ops.snapshot();
+                pump (settleMs);
+                auto* meter = meterOf (tid);
+                undoAndSettle (baseTracks);
+                if (meter != nullptr) { ++meterWitnessed; if (cacheHolds (meter)) ++meterOutlivedTrack; }
+            }
+            else if (v == "4osc")
+            {
+                if (! ok (ui ("load_builtin", objN ({ { "trackId", emptyId }, { "type", "4osc" } })))) continue;
+                ops.snapshot();
+                pump (settleMs);
+                undoAndSettle (baseTracks);
+            }
+            else if (v == "preset")
+            {
+                if (keysFile.isEmpty() || ! ok (ui ("load_preset", objN ({ { "trackId", baseId }, { "file", keysFile } })))) continue;
+                ops.snapshot();
+                pump (settleMs);
+                undoAndSettle (baseTracks);
+            }
+            else if (v == "send")
+            {
+                if (! ok (ui ("add_send", objN ({ { "trackId", baseId }, { "bus", sendBusNumber } })))) continue;
+                ops.snapshot();
+                pump (settleMs);
+                auto* send = sendOf (baseId, sendBusNumber);
+                undoAndSettle (baseTracks);
+                if (send != nullptr) { ++sendWitnessed; if (cacheHolds (send)) ++sendOutlivedRemoval; }
+            }
+            else
+                continue;
+            ++ran[v];
+        }
+        if ((i + 1) % 10 == 0)
+            std::cerr << "  ..   iteration " << (i + 1) << "/" << iters << " (tracks=" << trackCount()
+                      << ", meters witnessed=" << meterWitnessed << ", outlived their track=" << meterOutlivedTrack
+                      << ", sends witnessed=" << sendWitnessed << ", outlived their removal=" << sendOutlivedRemoval << ")\n";
+    }
+    ui ("set_transport", args1 ("action", "stop"));
+    pump (300);
+
+    check (failedCommands == 0, "every command the stress sent succeeded");
+    check (undoMismatch == 0, "every undo returned the track count to the fixture's");
+    for (const auto& v : variants)
+        check (ran[v] == iters, "variant '" + v + "' ran every iteration");
+
+    auto* summary = new DynamicObject();
+    summary->setProperty ("iterations", iters);
+    summary->setProperty ("settleMs", settleMs);
+    auto* perVariant = new DynamicObject();
+    for (auto& [k, n] : ran) perVariant->setProperty (k, n);
+    summary->setProperty ("ran", var (perVariant));
+    summary->setProperty ("failedCommands", failedCommands);
+    summary->setProperty ("undoMismatch", undoMismatch);
+    summary->setProperty ("meterWitnessed", meterWitnessed);
+    summary->setProperty ("meterOutlivedTrack", meterOutlivedTrack);
+    summary->setProperty ("sendWitnessed", sendWitnessed);
+    summary->setProperty ("sendOutlivedRemoval", sendOutlivedRemoval);
+    summary->setProperty ("failures", failures);
+    std::cout << "CHORDS-STRESS: " << JSON::toString (var (summary), true) << std::endl;
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " chords-stress checks passed, " << failures << " failed =====\n";
     return failures;
 }
 

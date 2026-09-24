@@ -735,3 +735,71 @@
   .v3-shell .booth-details > summary::before { transition: none; }
 }
 /* demo-fixes:booth-reimagine end */
+
+/* demo-round2:recovery begin */
+/* The crash-recovery notice (D1): one calm line under the top bar. The orphan takes a crash
+   left on disk sit behind a disclosure. Opening it does push the timeline down, but by at most
+   30vh: past that the list scrolls inside its own box. */
+.v3-shell .v3-recovery {
+  flex-shrink: 0; margin: 6px 12px 0; padding: 5px 6px 5px 10px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--fog-line);
+  font-size: 11px; color: var(--muted);
+}
+.v3-shell .v3-recovery.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--fog-line)); }
+.v3-shell .v3-recovery-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.v3-shell .v3-recovery-lead { color: var(--text); }
+.v3-shell .v3-recovery-sep { color: var(--fog-label); }
+.v3-shell .v3-recovery-fill { flex: 1; }
+.v3-shell .v3-recovery-disclosure {
+  padding: 0; border: none; background: transparent; font: inherit; color: var(--muted);
+  cursor: pointer;
+}
+.v3-shell .v3-recovery-disclosure::before {
+  content: "›"; display: inline-block; margin-right: 5px; transition: transform .15s var(--ease-out);
+}
+.v3-shell .v3-recovery-disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
+@media (hover: hover) and (pointer: fine) {
+  .v3-shell .v3-recovery-disclosure:hover { color: var(--text); }
+}
+.v3-shell .v3-recovery-residue {
+  display: flex; flex-direction: column; gap: 3px;
+  margin: 6px 0 1px; padding: 6px 0 0; list-style: none;
+  max-height: 30vh; overflow-y: auto; border-top: 1px solid var(--fog-line);
+}
+.v3-shell .v3-recovery-residue li { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.v3-shell .v3-recovery-take { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .v3-recovery-take em { color: var(--text); font-style: normal; }
+@media (prefers-reduced-motion: reduce) {
+  .v3-shell .v3-recovery-disclosure::before { transition: none; }
+}
+/* demo-round2:recovery end */
+
+/* demo-round2:pressed begin */
+/* A pressed V3 .btn (.on / aria-pressed) is OUTLINED: accent ink and border on the button's own
+   dark surface, lightly tinted with the accent. mosh.css paints every pressed .btn with a --lime
+   fill, and the V3 rules above recoloured only the TEXT on top of it, so "Hear myself: On" read
+   lime on lime (1.1:1). Filled (.pri, .recb) and ghost buttons keep their own looks. The Booth's
+   record pad is .pri: it keeps the accent fill with dark ink and says "recording" with a
+   record-red ring, not red text on the accent (1.8:1 in coral). e2e/v3-pressed-contrast.spec.ts
+   holds every variant to 4.5:1 in every colorway.
+   Hover leaks the same way: mosh.css's `.btn:hover` sets --bone, which the default LIGHT theme
+   makes near-black, on V3's dark button — so "Hear myself: Off" vanished under the pointer that
+   had just turned it off. V3 hover keeps V3 ink. (Before the pressed rule: pressed wins.)
+   The hover rule leaves every FILLED button alone — V3's own (.pri, .recb) and mosh's, which V3
+   renders in shared dialogs (.primary: Create session, Capture, Confirm; .danger; a recording
+   .rec). Those keep their fill on hover, so V3 ink on top read near-white on lime, 1:1 (Q1). */
+.v3-shell .btn:not(.pri, .recb, .ghost, .primary, .danger, .rec[data-state="recording"]):hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--fog-line));
+}
+.v3-shell .btn:is(.on, [aria-pressed="true"]):not(.pri, .recb, .ghost) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.v3-shell .booth-pads .btn.pri.on {
+  color: #0B0C0C;
+  border-color: var(--record);
+  box-shadow: inset 0 0 0 1px var(--record);
+}
+/* demo-round2:pressed end */

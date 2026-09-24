@@ -19,6 +19,14 @@ What it proves, row by row (each check would read differently if the feature wer
             Space, each registering as a Part in snapshot.loop (what the Booth renders), a
             take ended by a stop that bypasses the finalize leaving nothing in flight, and the
             Stop pad ending a take the TopBar started.
+  V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
+            rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert, a
+            load_preset and an add_send, each followed by undo, looped. The regression smoke
+            for the 2026-09-23 heap corruption and its send-meter sibling; build with the
+            macos-arm64-asan preset (and pass --bin) for detection power. Without an ASan
+            `--bin`, this row can only report BLOCKED "smoke only" — a Release build runs the
+            identical stress clean whether or not a heap use-after-free is present, so a green
+            Release run is not evidence of anything.
   V3-mix    level / pan / mute / solo / a 4OSC preset / a send to a reverb bus / a clip move
             each change the RENDERED audio in the direction the edit implies, and one undo
             each returns the render to the baseline byte-for-byte within tolerance.
@@ -519,6 +527,76 @@ def row_vocal(ctx) -> Row:
     return row
 
 
+# ── V3-chords (regression smoke for the 2026-09-23 '+ Chords' heap corruption) ─────────────
+def _is_asan_build(binary: Path) -> bool:
+    """True when `binary` links the AddressSanitizer runtime. That is the only thing that
+    gives row_chords (a crash regression, not a functional one) any detection power: a plain
+    Release build runs the identical --chords-stress sequence clean whether or not a heap
+    use-after-free like 2026-09-23's is still present, so a green Release run proves nothing
+    and must not be reported as a passing detection row."""
+    try:
+        out = subprocess.run(["otool", "-L", str(binary)], capture_output=True, text=True, timeout=30).stdout
+    except Exception:
+        return False
+    return "libclang_rt.asan" in out
+
+
+def row_chords(ctx) -> Row:
+    row = Row("V3-chords", "+ Chords / create / 4OSC / preset / send, each undone, on a live device with meters on", [
+        "Detection power needs an ASan build (cmake --preset macos-arm64-asan; --bin its Mosh): a Release run only shows it did not crash.",
+    ])
+    out = ctx.out / "chords"; out.mkdir(parents=True, exist_ok=True)
+    devices = subprocess.run(["system_profiler", "SPAudioDataType"], capture_output=True, text=True).stdout
+    if LOOPBACK_DEVICE not in devices:
+        row.blocked = f'loopback device "{LOOPBACK_DEVICE}" not present (install BlackHole)'
+        return row
+    asan_build = _is_asan_build(ctx.bin)
+    leaf = f"v3-accept-chords-{ctx.pid}"
+    reset_owned_harness_session(_session_dir(leaf))
+    env = dict(os.environ)
+    env.pop("CI", None)   # CI=true opens the JUCE device output-only
+    env.update({"MOSH_AUDIO_OUTPUT_DEVICE": LOOPBACK_DEVICE, "MOSH_AUDIO_INPUT_DEVICE": LOOPBACK_DEVICE,
+                "MOSH_SELFTEST_SESSION": f"_harness/{leaf}", "MOSH_ENABLE_SA3": "0",
+                "MOSH_CHORDS_STRESS_ITERS": os.environ.get("MOSH_CHORDS_STRESS_ITERS", "20")})
+    env.setdefault("ASAN_OPTIONS", "detect_leaks=0:halt_on_error=1:print_stacktrace=1:symbolize=1")
+    try:
+        proc = subprocess.run([str(ctx.bin), "--chords-stress", "-ApplePersistenceIgnoreState", "YES"],
+                              env=env, capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired as e:
+        row.chk(False, "the stress finished within 900 s", str(e)); return row
+    (out / "chords-stress.log").write_text((proc.stdout or "") + "\n--- stderr ---\n" + (proc.stderr or ""))
+    row.artifacts.append(str(out / "chords-stress.log"))
+    summary = {}
+    for line in (proc.stdout or "").splitlines():
+        if line.startswith("CHORDS-STRESS: "):
+            try:
+                summary = json.loads(line[len("CHORDS-STRESS: "):])
+            except json.JSONDecodeError:
+                pass
+    asan = [l for l in (proc.stderr or "").splitlines() if "ERROR: AddressSanitizer" in l or l.startswith("SUMMARY: AddressSanitizer")][:4]
+    row.chk(not asan and proc.returncode == 0, "no crash and no sanitizer report", {"rc": proc.returncode, "asan": asan})
+    row.chk(bool(summary) and int(summary.get("failures", 1)) == 0,
+            f"every variant ran {summary.get('iterations', '?')} iterations with every command ok and every undo exact",
+            summary)
+    if summary:
+        row.notes.append(f"a removed track's meter was still held by the PluginCache after the settle in "
+                         f"{summary.get('meterOutlivedTrack')}/{summary.get('meterWitnessed')} undos "
+                         f"(why a meter client must be removed, not just dropped)")
+        if "sendWitnessed" in summary:
+            row.notes.append(f"a removed send's measurer was still held by the PluginCache after the settle in "
+                             f"{summary.get('sendOutlivedRemoval')}/{summary.get('sendWitnessed')} undos "
+                             f"(the same hazard, on an AuxSendPlugin instead of a track meter)")
+    if not asan_build:
+        # Every check above can still be green on a Release binary — that is exactly the
+        # false signal this guards against. Report BLOCKED, never PASS, so the row can't be
+        # read as regression evidence until it is re-run with an ASan --bin.
+        row.blocked = (f"smoke only (no detection power): {ctx.bin} has no ASan runtime "
+                       f"(otool -L shows no libclang_rt.asan) — this run only shows the stress "
+                       f"did not crash, not that the 2026-09-23 heap-use-after-free class of bug "
+                       f"is absent; rebuild with the macos-arm64-asan preset and pass --bin")
+    return row
+
+
 # ── V3-mp ───────────────────────────────────────────────────────────────────────────
 def row_mp(ctx) -> Row:
     row = Row("V3-mp", "Two peers: invite, join, claim a track, edit, leave", [
@@ -637,14 +715,15 @@ class Ctx:
     pass
 
 
-ROWS = {"beat": row_beat, "mix": row_mix, "file": row_file, "vocal": row_vocal, "mp": row_mp, "feel": row_feel}
+ROWS = {"beat": row_beat, "mix": row_mix, "file": row_file, "vocal": row_vocal, "chords": row_chords,
+        "mp": row_mp, "feel": row_feel}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bin", help="Mosh binary (default: newest local build)")
     ap.add_argument("--out", help="evidence directory (default ~/Library/Mosh/task-evidence/<date>-v3-acceptance)")
-    ap.add_argument("--only", help="comma list of rows: beat,mix,file,vocal,mp,feel")
+    ap.add_argument("--only", help="comma list of rows: beat,mix,file,vocal,chords,mp,feel")
     ap.add_argument("--skip", help="comma list of rows to skip")
     ap.add_argument("--cloud", action="store_true", help="also run the cloud-relay multiplayer smoke")
     args = ap.parse_args()

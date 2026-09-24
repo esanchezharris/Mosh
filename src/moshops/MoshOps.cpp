@@ -485,12 +485,14 @@ void MoshOps::timerCallback()
         float ml = -100.0f, mr = -100.0f;
         if (auto* ctx = transport.getCurrentPlaybackContext())
         {
-            if (ctx != lastSeenContext) { ctx->masterLevels.addClient (masterClient); lastSeenContext = ctx; }
-            ml = masterClient.getAndClearAudioLevel (0).dB;
-            mr = masterClient.getAndClearAudioLevel (1).dB;
+            masterTap.attach (ctx->masterLevels);   // no-op if already attached there; otherwise
+                                                     // detaches from whatever it was attached to first
+                                                     // (weak-ref safe even if that measurer is freed)
+            ml = masterTap.client.getAndClearAudioLevel (0).dB;
+            mr = masterTap.client.getAndClearAudioLevel (1).dB;
         }
         else
-            lastSeenContext = nullptr;
+            masterTap.detach();
 
         auto* master = new DynamicObject(); master->setProperty ("l", ml); master->setProperty ("r", mr);
         auto* payload = new DynamicObject();

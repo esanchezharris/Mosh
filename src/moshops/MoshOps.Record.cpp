@@ -552,11 +552,11 @@ juce::var MoshOps::cmdCalibrateLatency (const juce::var& args)
             return errResult (kName, juce::String (juce::CharPointer_UTF8 ("the audio device has no active input channel \xe2\x80\x94 pick an input in Settings first")));
 
         // Detach the Edit (export's exclusivity dance, MoshOps.ProjectIo.cpp): meter taps
-        // live on the context being freed, and lastSeenContext must not ABA-match the next.
+        // live on the context being freed; unregisterAllMeterClients() detaches the master
+        // tap through its weak reference, so there is nothing further to ABA-guard by hand.
         unregisterAllMeterClients();
         transport.stop (false, false);
         transport.freePlaybackContext();
-        lastSeenContext = nullptr;
         calibrationDetachedContext_ = true;
 
         if (calibrationRegistrar_ == nullptr)

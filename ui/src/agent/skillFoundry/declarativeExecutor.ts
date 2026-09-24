@@ -16,6 +16,7 @@
 
 import type { Snapshot, Track } from "../../types";
 import type { AgentCommandCall, ChangeSet } from "../executor";
+import { undoHeadMark } from "../undoHead";
 import type { SkillCheck, SkillExecutionSummary } from "../skills";
 import type { StudioContext } from "../studioSkills";
 import { runAtomicSkillPlanV1, type AtomicSkillGuardContextV1, type AtomicSkillGuardPhaseV1, type AtomicSkillPlanDepsV1, type AtomicSkillPlanV1 } from "./atomicPlan";
@@ -579,8 +580,8 @@ async function confirmationPlanSha256V1(
 // Atomic execution: hand the expanded plan to atomicPlan.ts and translate its result.
 // ---------------------------------------------------------------------------------------
 
-function toChangeSet(manifest: SkillManifestV1, summary: SkillExecutionSummary): ChangeSet {
-  return { label: manifest.title, entries: summary.entries, applied: summary.applied };
+function toChangeSet(manifest: SkillManifestV1, summary: SkillExecutionSummary, undoHeadMark: number): ChangeSet {
+  return { label: manifest.title, entries: summary.entries, applied: summary.applied, undoHeadMark };
 }
 
 /** `AtomicSkillPlanV1.slots` is typed `SkillSlotValues` (`skills.ts`'s legacy scalar-only
@@ -628,12 +629,23 @@ async function runAtomicallyV1(
     provenance: environment.provenance, // step-1 slice 6 — the turn's turn_id/source/utterance
   };
 
-  const result = await runAtomicSkillPlanV1(plan, { snapshot: environment.snapshot, exec: environment.exec, guard });
+  // Round-2 review, finding 4 — the receipt is set only after this outcome travels back through
+  // the runtime, and a manual edit can land in between. Stamp the change set with the undo-head
+  // mark its own batch_end left (see ChangeSet.undoHeadMark). A commit proven only through
+  // batch_status (the batch_end response was lost) has no such mark: -1 is never current, so
+  // that rare receipt is refused rather than risk an Undo that reverts something else.
+  let markAtCommit = -1;
+  const exec: AtomicSkillPlanDepsV1["exec"] = async (command, args, transaction) => {
+    const res = await environment.exec(command, args, transaction);
+    if (command === "batch_end" && res.ok) markAtCommit = undoHeadMark();
+    return res;
+  };
+  const result = await runAtomicSkillPlanV1(plan, { snapshot: environment.snapshot, exec, guard });
 
   if (result.ok) {
     return {
       kind: "completed", skill: skillId, version: manifest.version, say: manifest.responses.completed,
-      changes: toChangeSet(manifest, result.changes),
+      changes: toChangeSet(manifest, result.changes, markAtCommit),
     };
   }
 

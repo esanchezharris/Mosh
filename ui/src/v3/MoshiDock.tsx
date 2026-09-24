@@ -80,6 +80,14 @@ export function MoshiDock() {
     return onEvent("brain_runtime", (payload) => setBrainRuntime(payload as BrainRuntimeStatus));
   }, []);
 
+  // D2 — the reply caption that came with a receipt (the fast path's "90 bpm") is part of it.
+  // When a later edit retires the receipt (store.exec), the caption goes too, or it would stand
+  // in for the receipt as a stale reply. Subscribed rather than an effect, so it runs at the
+  // moment of retirement: a new ask clears the receipt BEFORE it sets its own reply, never after.
+  useEffect(() => useStore.subscribe((state, prev) => {
+    if (prev.agentChangeSet && !state.agentChangeSet) setSay(null);
+  }), []);
+
   const projectEpoch = useStore((s) => s.projectEpoch);
   useEffect(() => {
     pendingSkillToken.current = null;

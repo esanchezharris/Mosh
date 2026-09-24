@@ -59,7 +59,7 @@ export function AppV3() {
     <div className="v3-shell" data-testid="v3-shell" data-colorway={colorway} data-posture={posture}>
       {snapshot && <TopBar snapshot={snapshot} />}
       {displayError && <div className="v2-errbar" role="alert">{displayError}</div>}
-      <RecoveryNotice />
+      <RecoveryNotice compact />
       <AudioDeviceNotice />
       <MissingMediaBanner />
       <FeltWrongDialog />

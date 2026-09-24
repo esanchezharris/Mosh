@@ -20,6 +20,7 @@ import { invalidateMemoryHydration } from "./agent/memory/hydrate";
 // AGT-MEM (M3, item 5) — mirrors every exec() call into the in-session ring buffer
 // sessionSummary.ts digests into a project note on the next project switch.
 import { recordSessionCommand } from "./agent/memory/sessionLog";
+import { HISTORY_MOVES, movesUndoHead, noteUndoHeadMove, undoHeadMark } from "./agent/undoHead";
 // Per-rail "mosh_event" handler bodies (verbatim motion from init(); the dispatch
 // order + conditions stay in init() below, which is load-bearing).
 import {
@@ -376,9 +377,6 @@ async function stopRecording(
   return { kind: "reviewing", review };
 }
 
-/** Commands that move the session along its undo timeline (see State.historyEpoch). */
-const HISTORY_MOVES = new Set(["undo", "redo", "jump_to_history"]);
-
 async function refreshSnapshot(
   get: StateGet,
   set: StateSet,
@@ -486,8 +484,11 @@ export const useStore = create<State>((set, get, api) => ({
 
   exec: async (command, args = {}, transaction, origin) => {
     const replacesProject = ["new_project", "open_project", "open_recent", "reload", "recover_session", "open_without_plugins"].includes(command);
+    // Read BEFORE the call: a set_transport that stops a recording lands the take (an undo step).
+    const wasRecording = get().transport.recording;
     let transitionEpoch: number | undefined;
     if (replacesProject) {
+      noteUndoHeadMove();   // a new undo timeline: no change set stamped before this is current
       cancelTransportActions();
       clearProjectLocalShellRange();
       set((state) => ({
@@ -549,6 +550,15 @@ export const useStore = create<State>((set, get, api) => ({
     }
     recordSessionCommand(command, args, res.ok);
     if (res.ok && HISTORY_MOVES.has(command)) set((state) => ({ historyEpoch: state.historyEpoch + 1 }));
+    // D2 — a Moshi receipt undoes with a plain `undo`, so it is honest only while its batch is
+    // the newest undo step. Any command that moves the undo head — + Drum beat, a fader, ⌘Z, a
+    // Stop that lands a recorded take — retires it; otherwise its Undo would revert THAT edit.
+    // Transport, reads and preferences leave it up. The count catches a move that lands after
+    // the batch ended but before its receipt is set (see setAgentChangeSet).
+    if (res.ok && movesUndoHead(command, { recording: wasRecording })) {
+      noteUndoHeadMove();
+      if (get().agentChangeSet) set({ agentChangeSet: null });
+    }
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {
       // A success clears a stale transient error — but never the persistent version
@@ -579,6 +589,7 @@ export const useStore = create<State>((set, get, api) => ({
         const epochManagedByUi = projectReplaced
           && (ev.payload as { epochManagedByUi?: unknown }).epochManagedByUi === true;
         if (projectReplaced) {
+          noteUndoHeadMove();   // a new undo timeline (see exec)
           cancelTransportActions();
           clearProjectLocalShellRange();
           set((state) => ({
@@ -869,7 +880,11 @@ export const useStore = create<State>((set, get, api) => ({
   agentChangeSet: null,
   agentUtter: null,
   setAgentBusy: (b) => set({ agentBusy: b }),
-  setAgentChangeSet: (cs) => set({ agentChangeSet: cs }),
+  // A change set stamped after its batch_end is refused once anything moved the undo head
+  // since: its Undo would revert that later edit (round-2 review, finding 4).
+  setAgentChangeSet: (cs) => set({
+    agentChangeSet: cs && cs.undoHeadMark !== undefined && cs.undoHeadMark !== undoHeadMark() ? null : cs,
+  }),
   pushAgentUtter: (intent, say) =>
     set((s) => ({ agentUtter: { intent, say, tick: (s.agentUtter?.tick ?? 0) + 1 } })),
 
