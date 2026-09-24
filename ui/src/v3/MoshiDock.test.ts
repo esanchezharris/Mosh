@@ -9,6 +9,7 @@ import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { useTaskStore, type TaskView } from "../agent/loop/taskStore";
 import { useProducerRack } from "../agent/loop/producerRack";
 import type { ChangeSet } from "../agent/executor";
+import { __resetMockForTests } from "../bridge.mock";
 
 vi.mock("../vendor/moshi.js", () => ({}));
 vi.mock("../bridge", async () => {
@@ -273,5 +274,90 @@ describe("v3 Moshi dock", () => {
   it("A9 scope: the dock field opts in to owning ⌘Z/⌘X/⌘C/⌘V from the native menu", async () => {
     await mount();
     expect(host.querySelector('[data-testid="v3-moshi-field"]')?.hasAttribute("data-owns-edit-keys")).toBe(true);
+  });
+
+  // ── demo readiness round 2 (2026-09-23) ────────────────────────────────────────────
+  // D2: the receipt's Undo is a plain `undo`, so it is honest only while the receipt's own
+  // batch is the undo head. In the real app "Set tempo to 90 BPM / Undo" stayed up after
+  // + Drum beat and a fader move, and its Undo would have reverted the fader instead.
+
+  const tempoReceipt = (): ChangeSet => ({
+    label: "set the tempo to 90",
+    applied: 1,
+    entries: [{ index: 0, command: "set_tempo", summary: "Set tempo to 90 BPM", ok: true }],
+  });
+  const receipt = () => host.querySelector('[data-testid="v3-receipt"]');
+  // The REAL store exec over the dev mock — the one funnel every toolbar, fader and key uses.
+  const manual = async (command: string, args: Record<string, unknown> = {}) => {
+    let ok = false;
+    await act(async () => { ok = (await useStore.getState().exec(command, args)).ok; });
+    return ok;
+  };
+
+  it("D2: a later manual undoable edit retires the receipt; transport and preferences do not", async () => {
+    __resetMockForTests();
+    useStore.setState({
+      agentChangeSet: tempoReceipt(),
+      setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }),
+    });
+    await mount();
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    // Play, the click and a failed edit leave the undo head on the receipt's batch.
+    expect(await manual("set_transport", { playing: true })).toBe(true);
+    expect(await manual("set_metronome", { enabled: true })).toBe(true);
+    expect(await manual("add_drum_pattern", { pattern: "" })).toBe(false);
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    // + Drum beat: the head moves past the receipt's batch, so the receipt goes.
+    expect(await manual("add_drum_pattern", { pattern: "kick: x...x...x...x..." })).toBe(true);
+    expect(receipt()).toBeNull();
+    expect(useStore.getState().agentChangeSet).toBeNull();
+  });
+
+  it("D2: a fader move retires it too", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const trackId = useStore.getState().snapshot!.tracks[0].id;
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(receipt()).not.toBeNull();
+    expect(await manual("set_track_volume", { trackId, db: -3 })).toBe(true);
+    expect(receipt()).toBeNull();
+  });
+
+  it("D2: the reply caption that came with the receipt retires with it; a new ask's reply is kept", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    useStore.setState({
+      setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }),
+      setAgentBusy: (b) => useStore.setState({ agentBusy: b }),
+    });
+    await mount();
+    const dock = () => host.querySelector('[data-testid="v3-moshi-dock"]')?.textContent ?? "";
+
+    await ask(host, "set the tempo to 90");   // the fast path: a caption plus a receipt
+    expect(useStore.getState().snapshot?.session.tempo).toBe(90);
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    expect(await manual("add_drum_pattern", { pattern: "kick: x...x...x...x..." })).toBe(true);
+    expect(receipt()).toBeNull();
+    expect(dock()).not.toMatch(/90 bpm/i);   // no leftover caption standing in for the receipt
+
+    // A new ask retires the receipt through the same store path; its own reply must survive.
+    await ask(host, "set the tempo to 92");
+    expect(receipt()?.textContent).toContain("92");
+    await ask(host, "hey moshi");
+    expect(receipt()).toBeNull();
+    expect(dock()).toContain(DOCK_HELLO);
+  });
+
+  it("D2: a manual ⌘Z retires it (the receipt's batch may be what was just undone)", async () => {
+    __resetMockForTests();
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(receipt()).not.toBeNull();
+    expect(await manual("undo")).toBe(true);
+    expect(receipt()).toBeNull();
   });
 });

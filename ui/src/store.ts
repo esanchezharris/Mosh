@@ -20,6 +20,7 @@ import { invalidateMemoryHydration } from "./agent/memory/hydrate";
 // AGT-MEM (M3, item 5) — mirrors every exec() call into the in-session ring buffer
 // sessionSummary.ts digests into a project note on the next project switch.
 import { recordSessionCommand } from "./agent/memory/sessionLog";
+import { movesUndoHead } from "./agent/undoHead";
 // Per-rail "mosh_event" handler bodies (verbatim motion from init(); the dispatch
 // order + conditions stay in init() below, which is load-bearing).
 import {
@@ -549,6 +550,11 @@ export const useStore = create<State>((set, get, api) => ({
     }
     recordSessionCommand(command, args, res.ok);
     if (res.ok && HISTORY_MOVES.has(command)) set((state) => ({ historyEpoch: state.historyEpoch + 1 }));
+    // D2 — a Moshi receipt undoes with a plain `undo`, so it is honest only while its batch is
+    // the newest undo step. Its own batch ran (and ended) before it was set, so any later
+    // command that moves the undo head — + Drum beat, a fader, ⌘Z — retires it; otherwise its
+    // Undo would revert THAT edit. Transport, reads and preferences leave it up.
+    if (res.ok && get().agentChangeSet && movesUndoHead(command)) set({ agentChangeSet: null });
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {
       // A success clears a stale transient error — but never the persistent version
