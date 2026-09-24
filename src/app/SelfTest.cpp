@@ -17168,6 +17168,107 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
         check (trackOfClip() == loopLead, "redo returns the keeper to the lead track");
     }
 
+    // ── FU1 — one Moshi agent-loop task = ONE undo transaction on the REAL engine ──
+    // 2026-09-24 investor-demo walkthrough, FINDINGS.md finding 4: the live "build me a
+    // lofi sketch" task landed in transactions :5 and :6, so the first Cmd+Z only undid
+    // the last step. Root cause: te::Edit::UndoTransactionTimer (tracktion_Edit.cpp)
+    // fires 350 ms after ANY undo-manager change and calls beginNewTransaction() unless
+    // edit.numUndoTransactionInhibitors > 0 — and the LLM round-trip BETWEEN an agent
+    // task's steps (seconds, not ms) blows straight through that window. The dev-mock
+    // e2e's "one task = one undo" is vacuous here: the mock has no Tracktion timer to
+    // race. MoshOps::setInBatch now holds a real te::Edit::UndoTransactionInhibitor for
+    // exactly as long as `inBatch` is true (batch_begin..batch_end, the real loop's own
+    // path — see ui/src/agent/loop/taskExec.ts).
+    {
+        // A PRE-batch edit, landed as its OWN transaction, so an over- or under-undo of
+        // the batch below is visible as a WRONG track count relative to it — not just a
+        // count that happens to hit zero.
+        const auto preId = cmd (ops, "create_track", args1 ("name", "FU1 Pre-batch"))
+                               ["data"].getProperty ("trackId", var()).toString();
+        check (preId.isNotEmpty(), "FU1: pre-batch fixture track created (its own transaction)");
+        const int baseTracks = tracks (ops);
+
+        check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 agent task"))), "FU1: batch_begin ok");
+        check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Step A"))), "FU1: step A (create_track) ok");
+        check (tracks (ops) == baseTracks + 1, "FU1: step A landed");
+
+        // Pump the REAL JUCE message loop long enough for a real Edit's
+        // UndoTransactionTimer to fire at least once (350 ms) — this stands in for the
+        // seconds-long LLM round-trip between an agent task's steps in the real app.
+        auto* mm = MessageManager::getInstanceWithoutCreating();
+        auto pumpFor = [mm] (int ms)
+        {
+            const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+            do
+            {
+                if (mm != nullptr) mm->runDispatchLoopUntil (10);
+                else Thread::sleep (10);
+            }
+            while (Time::getMillisecondCounter() < end);
+        };
+        pumpFor (650);
+
+        check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Step B"))), "FU1: step B (create_track) ok");
+        check (tracks (ops) == baseTracks + 2, "FU1: step B landed");
+        check (ok (cmd (ops, "batch_end")), "FU1: batch_end ok");
+
+        // ONE undo must revert BOTH steps — not just the last one (the demo's bug).
+        check (ok (cmd (ops, "undo")), "FU1: first undo after the batch ok");
+        check (tracks (ops) == baseTracks,
+               "FU1: one undo reverts the WHOLE batch (both steps), proving the 350 ms "
+               "timer did not split it — on unfixed code only Step B is gone here");
+
+        // A second undo must land on the PRE-batch edit, not "the rest of the batch" —
+        // this is what rules out a lucky count match hiding an actual split.
+        check (ok (cmd (ops, "undo")), "FU1: second undo (the pre-batch edit) ok");
+        check (tracks (ops) == baseTracks - 1,
+               "FU1: second undo removes the PRE-batch track — the batch really was ONE step");
+
+        check (ok (cmd (ops, "redo")), "FU1: redo pre-batch edit ok");
+        check (ok (cmd (ops, "redo")), "FU1: redo whole batch ok");
+        check (tracks (ops) == baseTracks + 2, "FU1: redo restores both batch steps together");
+        check (ok (cmd (ops, "undo")), "FU1: cleanup undo (batch) ok");
+        check (ok (cmd (ops, "undo")), "FU1: cleanup undo (pre-batch) ok");
+        check (tracks (ops) == baseTracks - 1, "FU1: cleanup landed back at the pre-fixture count");
+        check (ok (cmd (ops, "redo")), "FU1: cleanup redo (pre-batch) ok");
+        check (ok (cmd (ops, "redo")), "FU1: cleanup redo (batch) ok");
+
+        // ── Regression guard: normal (non-batch) transaction splitting must still work ──
+        // A lone command, a real 650 ms pump, then another lone command must STILL land
+        // in two separate undo transactions — proving setInBatch's inhibitor is released
+        // the instant the batch ends and never leaks into ordinary, non-batch editing.
+        const int loneBase = tracks (ops);
+        check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone A"))), "FU1: lone A ok");
+        pumpFor (650);
+        check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone B"))), "FU1: lone B ok");
+        check (ok (cmd (ops, "undo")), "FU1: undo lone B ok");
+        check (tracks (ops) == loneBase + 1,
+               "FU1: outside a batch, one undo removes only the LAST lone command — "
+               "transactions still split normally (the inhibitor did not leak)");
+        check (ok (cmd (ops, "undo")), "FU1: undo lone A ok");
+        check (tracks (ops) == loneBase, "FU1: a second undo removes the other lone command");
+    }
+
+    // ── FU1 — a batch left open across a project swap must not wedge `inBatch` ──
+    // new_project/open_project REPLACE the Edit entirely; nothing survives to commit an
+    // open batch onto. Before this fix nothing ever cleared `inBatch` on that path, so
+    // the FIRST batch_begin on the fresh project would fail forever with "a batch is
+    // already open" (and the new inhibitor would leak onto the now-defunct Edit).
+    {
+        check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 pre-swap batch"))),
+               "FU1-swap: batch_begin ok");
+        check (ok (cmd (ops, "create_track", args1 ("name", "FU1 pre-swap step"))),
+               "FU1-swap: a step inside the still-open batch ok");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "fu1-swap-selftest"))),
+               "FU1-swap: new_project ok while a batch was left open");
+
+        check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 post-swap batch"))),
+               "FU1-swap: batch_begin on the fresh project succeeds — the abandoned batch "
+               "did not wedge inBatch true forever");
+        check (ok (cmd (ops, "batch_end")), "FU1-swap: batch_end ok");
+    }
+
     finishSection();
     std::cerr << "===== " << checks - failures << "/" << checks
               << " focused undo checks passed, " << failures << " failed =====\n";
