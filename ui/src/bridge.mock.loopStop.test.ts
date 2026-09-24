@@ -25,6 +25,9 @@ describe("bridge mock: a Booth pass ended from outside the Booth", () => {
   it.each([
     ["the TopBar stop", "set_transport", { action: "stop" }],
     ["Space", "set_transport", { action: "toggle" }],
+    // Shift+Space -- Live's Continue Playback. While recording it is a stop like any other;
+    // it used to skip the finalize and leave the pass "in flight" (review of PR #730).
+    ["Shift+Space", "set_transport", { action: "continue" }],
     ["a bare stop_recording", "stop_recording", {}],
   ] as const)("registers as a Part when %s ends it", async (_how, command, args) => {
     const { takesId } = await boothWithVocal();

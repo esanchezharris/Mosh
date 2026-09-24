@@ -35,11 +35,15 @@ inline bool captureApplied (int armedTrackCount, int landedTrackCount, bool disc
     return discarded || (armedTrackCount > 0 && landedTrackCount == armedTrackCount);
 }
 
+/** Every transport action that ENDS a recording lands it through cmdStopRecording first, so a
+    Booth pass in flight is finalized as a pass. "continue" is Shift+Space (Live's Continue
+    Playback): while recording the transport is playing, so cmdSetTransport takes it as a stop
+    -- it was missing here until 2026-09-23 and ended a Booth take unstamped. */
 inline bool shouldFinalizeBeforeTransportAction (bool isRecording,
                                                  const juce::String& action)
 {
     return isRecording
-        && (action == "stop" || action == "toggle"
+        && (action == "stop" || action == "toggle" || action == "continue"
             || action == "record" || action == "to_start");
 }
 

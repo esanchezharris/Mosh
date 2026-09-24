@@ -301,7 +301,10 @@ juce::var MoshOps::loopStateVar()
       : playing                                                               ? "playing"
                                                                               : "idle");
     state->setProperty ("listening", var (listening));
-    state->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    // Only while it is actually recording: a stop that bypassed the finalize (export, a loop
+    // toggle) leaves loopCurrent_ set until the next command forgets it, and the Booth must not
+    // claim a pass is in flight in between. A pure read -- loopForgetStaleCapture clears it.
+    state->setProperty ("currentId", loopCurrent_.active && recording ? var (loopCurrent_.passId) : var());
     state->setProperty ("lastId", optionalId (node.getProperty (ids::loopLastId, var()).toString()));
     state->setProperty ("reviewId", optionalId (node.getProperty (ids::loopReviewId, var()).toString()));
     state->setProperty ("auditionedId", optionalId (loopAuditionedId_));
@@ -440,6 +443,14 @@ bool MoshOps::loopStartPlayback (double startQn, juce::String& reason)
     transport.setPosition (tracktion::TimePosition::fromSeconds (startSec));
     insertMarkerSec = startSec;
     transport.play (false);
+    return true;
+}
+
+bool MoshOps::loopForgetStaleCapture()
+{
+    if (! loopCurrent_.active || eng.edit().getTransport().isRecording())
+        return false;
+    loopCurrent_ = {};
     return true;
 }
 
@@ -1082,6 +1093,9 @@ juce::var MoshOps::cmdLoopStop (const juce::var& args)
 
     const auto actionId = loopActionId (args);
     auto& transport = eng.edit().getTransport();
+    // The panic button also clears a pass some other stop (export, a loop toggle) left
+    // "in flight": with nothing recording there is no capture for it to preserve.
+    loopForgetStaleCapture();
 
     bool stoppedRecording = false, stoppedPlayback = false, landed = false;
     if (transport.isRecording())

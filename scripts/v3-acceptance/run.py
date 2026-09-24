@@ -15,8 +15,9 @@ What it proves, row by row (each check would read differently if the feature wer
             EXCLUDED from the take, two passes land as non-silent WAVs within the calibrated
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
             Then `Mosh --v3-booth-smoke`: the Booth's own button path (Add a Vocal track, Put
-            Me In from bar 1) with takes ended by the Stop pad, the TopBar stop and Space, each
-            registering as a Part in snapshot.loop (what the Booth renders).
+            Me In from bar 1) with takes ended by the Stop pad, the TopBar stop, Shift+Space and
+            Space, each registering as a Part in snapshot.loop (what the Booth renders), and a
+            take ended by a stop that bypasses the finalize leaving nothing in flight.
   V3-mix    level / pan / mute / solo / a 4OSC preset / a send to a reverb bus / a clip move
             each change the RENDERED audio in the direction the edit implies, and one undo
             each returns the render to the baseline byte-for-byte within tolerance.
@@ -488,7 +489,8 @@ def row_vocal(ctx) -> Row:
     # The Booth's OWN path (2026-09-23 walkthrough): the smoke above navigates to bar 3 and
     # reads loop_state, which adopts unstamped clips; the V3 Booth does neither. This one
     # presses Add a Vocal track -> Hear myself: Off -> Put Me In from bar 1, ends takes with
-    # the Stop pad, the TopBar stop and Space, and reads snapshot.loop (what the Booth shows).
+    # the Stop pad, the TopBar stop, Shift+Space and Space, and reads snapshot.loop (what the
+    # Booth shows).
     booth_leaf = f"v3-accept-booth-{ctx.pid}"
     reset_owned_harness_session(_session_dir(booth_leaf))
     env["MOSH_SELFTEST_SESSION"] = f"_harness/{booth_leaf}"
@@ -509,7 +511,8 @@ def row_vocal(ctx) -> Row:
     booth_failed = [l for l in (booth.stderr or "").splitlines() if "FAIL" in l][:12]
     row.chk(booth.returncode == 0 and booth_summary and int(booth_summary.get("failures", 1)) == 0,
             f"Mosh --v3-booth-smoke passed every check ({booth_summary.get('checks', '?')} checks): each take ended by "
-            f"the Stop pad, the TopBar stop or Space registers as a Part the Booth lists, and Keep can act on it",
+            f"the Stop pad, the TopBar stop, Shift+Space or Space registers as a Part the Booth lists, Keep can act "
+            f"on it, and a stop that bypasses the finalize leaves no pass in flight",
             {"rc": booth.returncode, "summary": booth_summary, "failed": booth_failed})
     return row
 

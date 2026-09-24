@@ -32,11 +32,15 @@ TEST_CASE ("recording landing reports complete and partial multi-track capture",
 
 TEST_CASE ("recording-ending transport actions finalize the take first", "[recording]")
 {
-    for (const auto* action : { "stop", "toggle", "record", "to_start" })
+    // "continue" is Shift+Space (Live's Continue Playback). While recording the transport is
+    // playing, so cmdSetTransport's wantsStop takes it as a stop -- and a stop that skips the
+    // finalize lands a Booth pass unstamped (review of PR #730, 2026-09-23).
+    for (const auto* action : { "stop", "toggle", "record", "to_start", "continue" })
         REQUIRE (mosh::recording::shouldFinalizeBeforeTransportAction (true, action));
 
     for (const auto* action : { "play", "to_end", "" })
         REQUIRE_FALSE (mosh::recording::shouldFinalizeBeforeTransportAction (true, action));
 
     REQUIRE_FALSE (mosh::recording::shouldFinalizeBeforeTransportAction (false, "stop"));
+    REQUIRE_FALSE (mosh::recording::shouldFinalizeBeforeTransportAction (false, "continue"));   // a continue-START
 }

@@ -1141,8 +1141,9 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
 {
     // A Booth pass is a Booth pass however it ends. loop_record starts a capture the loop
     // owns (loopCurrent_), but the producer can end it from anywhere: the TopBar stop, Space,
-    // Transport > Play/Pause, an agent's set_transport, the phone. Every one of those reaches
-    // this function (cmdSetTransport's finalize-before-transport-action branch calls it), and
+    // Shift+Space, Transport > Play/Pause, an agent's set_transport stop/toggle/continue/
+    // record/to_start, the phone. Every one of those reaches this function (cmdSetTransport's
+    // finalize-before-transport-action branch calls it), and
     // before 2026-09-23 they all landed the take WITHOUT the loop's finalize: the clip sat on
     // Takes unstamped, loopCurrent_ stayed "in flight", lastId never moved and the older pass
     // stayed audible -- so the desktop Booth, which renders snapshot.loop (a pure read that
@@ -1151,8 +1152,10 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     //
     // discardRecordings=true throws the capture away (see stopRecordingAndLand). A discarded
     // Booth pass goes through the loop's finalize too: nothing lands, and the pass it named
-    // must not stay "in flight" after the capture is gone.
+    // must not stay "in flight" after the capture is gone. A pass some OTHER stop already
+    // ended (export, a loop toggle) is forgotten first: there is nothing left to finalize.
     const bool discard = (bool) args.getProperty ("discardRecordings", false);
+    loopForgetStaleCapture();
     if (loopCurrent_.active)
     {
         const auto finalized = loopFinalizeCapture (args);

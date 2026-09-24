@@ -350,9 +350,11 @@ private:
     juce::var cmdQuarantineRecordingResidue (const juce::var& args);
     juce::var recordingResidueToVar();
     // Wave B — record-to-take (TRA-002 / MID-001 / ARE-003): stop the transport
-    // KEEPING takes, drain the async clip-add, return the landed clip ids. EVERY recording
-    // stop goes through here (set_transport stop/toggle/record/to_start, stop_recording),
-    // so a Booth pass in flight is finalized as a pass whichever button ended it.
+    // KEEPING takes, drain the async clip-add, return the landed clip ids. Every recording
+    // stop a producer presses goes through here (set_transport stop/toggle/continue/record/
+    // to_start, stop_recording), so a Booth pass in flight is finalized as a pass whichever
+    // button ended it. Stops that bypass it (export/stems/bounce, a loop toggle) are covered
+    // only by loopForgetStaleCapture: the take lands unstamped, never as a Part.
     juce::var cmdStopRecording  (const juce::var& args);
     // The stop + landing itself, with no knowledge of the Booth loop. Only
     // cmdStopRecording and loopFinalizeCapture call it.
@@ -683,6 +685,13 @@ private:
         with `stopArgs`, whose result is returned as stopResult), then identity on whatever
         landed and the "only the newest unkept take is audible" mute pass. */
     LoopFinalized loopFinalizeCapture (const juce::var& stopArgs = juce::var());
+    /** A pass is in flight only while the transport is recording it. A stop that never
+        reaches cmdStopRecording -- export/stems/bounce detaching the Edit, Tracktion's own
+        stopIfRecording on a loop toggle, a device drop -- lands the take unstamped and leaves
+        loopCurrent_ naming a capture that is gone; the next ordinary take would then be
+        finalized AS that pass (its id, its entry bar). Forgets such a capture; returns true
+        when it did. Called by every command that stops or starts the transport. */
+    bool loopForgetStaleCapture();
     /** Records that the pad polled (or that its last poll has aged out) and emits once on
         the transition — never per poll. Called from loop_state and from snapshot(). */
     void loopRefreshPhonePresence (bool polled);

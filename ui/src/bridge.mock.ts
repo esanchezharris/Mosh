@@ -1716,8 +1716,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
   switch (command) {
     case "set_transport": {
       const action = str(args.action);
+      // Mirrors recording::shouldFinalizeBeforeTransportAction: "continue" (Shift+Space) is a
+      // stop while recording, and a stop that skips the finalize leaves a Booth pass unlisted.
       const shouldFinalize = snapshot.transport.recording
-        && (action === "stop" || action === "toggle" || action === "record" || action === "to_start");
+        && (action === "stop" || action === "toggle" || action === "continue"
+            || action === "record" || action === "to_start");
       if (shouldFinalize) {
         const stopped = finalizeMockRecording(false);
         if (!stopped.applied) return err(command, stopped.reason ?? "could not land recording take");

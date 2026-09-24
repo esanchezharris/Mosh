@@ -18527,7 +18527,11 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         return r;
     }, 1);
     pass ("TopBar stop", 1, [&] { return cmd (ops, "set_transport", args1 ("action", "stop")); }, 2);
-    pass ("Space", 0, [&] { return cmd (ops, "set_transport", args1 ("action", "toggle")); }, 3);
+    // Shift+Space (Live's Continue Playback, keymap -> set_transport {action:"continue"}). While
+    // recording it is a stop, but it used to skip the finalize: the pass landed unstamped and
+    // stayed "in flight" (review of PR #730, 2026-09-23).
+    pass ("Shift+Space", 0, [&] { return cmd (ops, "set_transport", args1 ("action", "continue")); }, 3);
+    pass ("Space", 0, [&] { return cmd (ops, "set_transport", args1 ("action", "toggle")); }, 4);
 
     // -- Keep can act on a take the TopBar/Space ended: it moves to the Vocal (Lead) track,
     //    audible, and capture rolls again with no count-in (loop_keep's contract). --
@@ -18548,6 +18552,49 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         const auto keptClip = clipById (kept.getProperty ("clipId", var()).toString());
         check (keptClip.isObject() && ! (bool) keptClip.getProperty ("mute", false), "the keeper is audible");
         check (loop.getProperty ("phase", var()).toString() == "idle", "idle after the final stop");
+    }
+
+    // -- A stop that BYPASSES the finalize must not leave the pass "in flight". export_audio,
+    //    export_stems and the bounce stop the transport directly to detach the Edit for the
+    //    render, and none of them reach cmdStopRecording. Before 2026-09-23 the pass they ended
+    //    stayed loopCurrent_, the Booth kept naming it as the capture in flight, and the NEXT
+    //    ordinary take (TopBar Record, then Stop) was stamped as that old pass -- its id and
+    //    entry bar -- so Again rewound to the wrong place. The checks after the export are
+    //    relative to the state it leaves, so they hold whether or not a later change makes an
+    //    export finalize the pass first. (A loop toggle mid-take is another such stop --
+    //    Tracktion's stopIfRecording -- but with no loop range set, as here, Tracktion lands it
+    //    through UIBehaviour::showWarningAlert's modal "Recording" alert, which hangs a smoke.) --
+    {
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "bypassed stop: count-in off");
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "bypassed stop: Put Me In applied");
+        check (rec["data"].getProperty ("currentId", var()).toString().isNotEmpty(), "bypassed stop: a pass is in flight");
+        pump (1500);
+        const auto exportFile = eng.sessionDir().getChildFile ("v3-booth-bypassed-stop.wav");
+        check (ok (cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}))),
+               "bypassed stop: export_audio mid-take is accepted");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "bypassed stop: the export ended the recording");
+        check (boothLoop().getProperty ("currentId", var()).toString().isEmpty(),
+               "bypassed stop: the Booth does not name a pass in flight once nothing is recording");
+        const auto mid = boothLoop();
+        const int partsMid = partsOf (mid).size();
+        const auto lastMid = mid.getProperty ("lastId", var()).toString();
+
+        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "bypassed stop: TopBar Record starts an ordinary take");
+        pump (1500);
+        check (eng.edit().getTransport().isRecording(), "bypassed stop: the ordinary take is rolling");
+        check (boothLoop().getProperty ("currentId", var()).toString().isEmpty(),
+               "bypassed stop: the ordinary take is not the old pass");
+        check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "bypassed stop: TopBar Stop ok");
+        pump (300);
+        const auto after = boothLoop();
+        check (partsOf (after).size() == partsMid,
+               "bypassed stop: the ordinary take is not stamped as a Part (" + String (partsMid) + " before, "
+               + String (partsOf (after).size()) + " after)");
+        check (after.getProperty ("lastId", var()).toString() == lastMid, "bypassed stop: lastId did not move to the old pass");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "bypassed stop: nothing in flight after the ordinary stop");
+        check (after.getProperty ("phase", var()).toString() == "idle", "bypassed stop: idle at the end");
     }
 
     // One machine-readable line for scripts/v3-acceptance/run.py.
