@@ -10,17 +10,22 @@
 // edit, so an unlisted command can at worst hide a receipt early (its batch is still in the
 // History list and on ⌘Z). An edit wrongly listed here would leave a stale Undo up, which is
 // the defect itself — undoHead.test.ts re-derives every listed native command from MoshOps and
-// fails if its handler opens an undo transaction.
+// fails if its handler opens an undo transaction, or lands a recorded take without being in
+// LANDS_TAKE_WHILE_RECORDING.
+//
+// Known limit: this sees only commands that pass through the desktop WebView's store.exec. The
+// phone pad's actions and edits inside a native plugin editor window reach MoshOps directly.
 
-/** Moves along the undo timeline itself (mirrors store.ts's HISTORY_MOVES). */
-const HISTORY_MOVES = new Set(["undo", "redo", "jump_to_history"]);
+/** Moves along the undo timeline itself. store.ts bumps historyEpoch on exactly these. */
+export const HISTORY_MOVES: ReadonlySet<string> = new Set(["undo", "redo", "jump_to_history"]);
 
 /** Successful commands that leave the undo head where it was. */
 export const KEEPS_UNDO_HEAD: ReadonlySet<string> = new Set([
   // Reads (every get_* / list_* is also a read; see movesUndoHead).
   "file_peaks", "batch_status", "loop_state", "agent_memory_read", "training_job_status",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
-  // Transport and audition: sound and position, never an edit.
+  // Transport and audition: sound and position — except that a set_transport issued WHILE
+  // RECORDING lands the take first (see LANDS_TAKE_WHILE_RECORDING).
   "set_transport", "audition_file", "stop_audition", "audition_note", "all_notes_off",
   // Device / engine preferences (TransactionSafe.h: NonUndoable).
   "set_metronome", "set_key", "set_count_in", "set_project_settings", "set_record_options",
@@ -38,14 +43,50 @@ export const KEEPS_UNDO_HEAD: ReadonlySet<string> = new Set([
   // Persistence and the local issue log.
   "save", "save_as", "export_audio", "export_stems",
   "report_issue", "update_issue", "export_issue", "attach_issue_file",
-  // Multiplayer signalling.
-  "mp_broadcast_selection", "mp_send_signal",
+  // Multiplayer signalling. store/mp.ts sends the track claim/commit by itself — on every track
+  // click and every 20 s in a session — and MoshOps logs both undoable:false with no txn.
+  "mp_broadcast_selection", "mp_send_signal", "mp_claim_track", "mp_commit_track",
 ]);
+
+/** KEEPS_UNDO_HEAD entries that land a recorded take when they run WHILE RECORDING.
+ *  cmdSetTransport finalizes an active take (stop / toggle / record / to_start) through
+ *  cmdStopRecording, and Tracktion adds the landed clip through the Edit's own UndoManager: a
+ *  new undo step with no beginTxn anywhere. V3 ends every recording this way (TopBar Record →
+ *  Record, Play/Pause, Stop). While recording, ANY set_transport counts — a seek mid-take hides
+ *  the receipt early, which is the harmless direction (the dock hides it while recording
+ *  anyway). stop_recording itself is not listed at all, so it always counts. */
+export const LANDS_TAKE_WHILE_RECORDING: ReadonlySet<string> = new Set(["set_transport"]);
+
+export type UndoHeadContext = {
+  /** The store's transport.recording BEFORE the command ran. */
+  readonly recording?: boolean;
+};
 
 /** True when a successful `command` may have put a new step on (or moved along) the undo
  *  timeline — i.e. a receipt that undoes with plain `undo` is no longer about its own batch. */
-export function movesUndoHead(command: string): boolean {
+export function movesUndoHead(command: string, context: UndoHeadContext = {}): boolean {
   if (HISTORY_MOVES.has(command)) return true;
   if (command.startsWith("get_") || command.startsWith("list_")) return false;
+  if (context.recording === true && LANDS_TAKE_WHILE_RECORDING.has(command)) return true;
   return !KEEPS_UNDO_HEAD.has(command);
+}
+
+// ── the undo-head mark (round-2 review, finding 4) ────────────────────────────────────────
+// Retiring the receipt in store.exec only works once the receipt is up. The dock clears the old
+// receipt when an ask starts, and runAgentBatch hands the new one back only after the
+// `await refresh()` that follows batch_end — the toolbar stays live meanwhile, so a fader move
+// can land in that window with nothing to retire. So store.exec also counts every move here;
+// the producer stamps the change set with the count right after its own batch_end
+// (ChangeSet.undoHeadMark), and setAgentChangeSet refuses a stamp that is no longer current.
+
+let undoHeadMoves = 0;
+
+/** store.exec calls this after every successful command for which movesUndoHead is true. */
+export function noteUndoHeadMove(): void {
+  undoHeadMoves += 1;
+}
+
+/** The current position of the count. Two equal marks mean nothing moved the head in between. */
+export function undoHeadMark(): number {
+  return undoHeadMoves;
 }

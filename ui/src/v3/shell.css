@@ -738,8 +738,8 @@
 
 /* demo-round2:recovery begin */
 /* The crash-recovery notice (D1): one calm line under the top bar. The orphan takes a crash
-   left on disk sit behind a disclosure, and the open list scrolls in place rather than
-   pushing the timeline down. */
+   left on disk sit behind a disclosure. Opening it does push the timeline down, but by at most
+   30vh: past that the list scrolls inside its own box. */
 .v3-shell .v3-recovery {
   flex-shrink: 0; margin: 6px 12px 0; padding: 5px 6px 5px 10px; border-radius: 8px;
   background: var(--surface); border: 1px solid var(--fog-line);
@@ -773,3 +773,30 @@
   .v3-shell .v3-recovery-disclosure::before { transition: none; }
 }
 /* demo-round2:recovery end */
+
+/* demo-round2:pressed begin */
+/* A pressed V3 .btn (.on / aria-pressed) is OUTLINED: accent ink and border on the button's own
+   dark surface, lightly tinted with the accent. mosh.css paints every pressed .btn with a --lime
+   fill, and the V3 rules above recoloured only the TEXT on top of it, so "Hear myself: On" read
+   lime on lime (1.1:1). Filled (.pri, .recb) and ghost buttons keep their own looks. The Booth's
+   record pad is .pri: it keeps the accent fill with dark ink and says "recording" with a
+   record-red ring, not red text on the accent (1.8:1 in coral). e2e/v3-pressed-contrast.spec.ts
+   holds every variant to 4.5:1 in every colorway.
+   Hover leaks the same way: mosh.css's `.btn:hover` sets --bone, which the default LIGHT theme
+   makes near-black, on V3's dark button — so "Hear myself: Off" vanished under the pointer that
+   had just turned it off. V3 hover keeps V3 ink. (Before the pressed rule: pressed wins.) */
+.v3-shell .btn:not(.pri, .recb, .ghost):hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--fog-line));
+}
+.v3-shell .btn:is(.on, [aria-pressed="true"]):not(.pri, .recb, .ghost) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.v3-shell .booth-pads .btn.pri.on {
+  color: #0B0C0C;
+  border-color: var(--record);
+  box-shadow: inset 0 0 0 1px var(--record);
+}
+/* demo-round2:pressed end */

@@ -9,6 +9,7 @@ import { validateCommand, describeCommand } from "./commands";
 import { screenByCommand, MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON } from "./destructiveScreen";
 import { MEMORY_COMMANDS, handleRememberPreference } from "./memory/rememberPreference";
 import { bumpPatternUsesIfMatched } from "./memory/usesTracking";
+import { undoHeadMark } from "./undoHead";
 
 // The destructive screen itself lives in ./destructiveScreen (a PURE module the
 // Node-side bench runners can import without the store/bridge chain); it is
@@ -31,6 +32,10 @@ export type ChangeSet = {
   readonly label: string;
   readonly entries: readonly ChangeEntry[];
   readonly applied: number;
+  /** undoHeadMark() right after this change set's own batch_end. setAgentChangeSet refuses the
+   *  change set once the mark is no longer current (something moved the undo head in between).
+   *  Absent when no batch ran — nothing to check. */
+  readonly undoHeadMark?: number;
 };
 
 export class AgentBatchBoundaryError extends Error {
@@ -115,11 +120,12 @@ export async function logAgentTurn(label: string, meta: TurnMeta): Promise<void>
   }
 }
 
-function changeSet(label: string, entries: readonly ChangeEntry[]): ChangeSet {
+function changeSet(label: string, entries: readonly ChangeEntry[], undoHeadMark?: number): ChangeSet {
   return {
     label,
     entries: [...entries].sort((left, right) => left.index - right.index),
     applied: entries.filter((entry) => entry.ok).length,
+    ...(undoHeadMark === undefined ? {} : { undoHeadMark }),
   };
 }
 
@@ -240,6 +246,9 @@ export async function runAgentBatch(
       if (res.ok) void bumpPatternUsesIfMatched(c.command, c.args, exec);
     }
     const end = await exec("batch_end", {});
+    // Stamp BEFORE the refresh: a manual edit can land while it is in flight (the toolbar stays
+    // live), and the receipt must not come up over it (setAgentChangeSet checks the mark).
+    const mark = undoHeadMark();
     await refresh();
     if (!end.ok)
       throw new AgentBatchBoundaryError(
@@ -247,6 +256,7 @@ export async function runAgentBatch(
         `batch_end failed: ${end.error ?? "unknown error"}`,
         changeSet(label, entries),
       );
+    return changeSet(label, entries, mark);
   }
 
   return changeSet(label, entries);

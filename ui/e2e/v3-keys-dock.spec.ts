@@ -134,3 +134,32 @@ test("D2: a dock receipt retires on the next manual edit, so its Undo never reve
   await expect(tracks).toHaveCount(before);
   expect(await tempo(page)).toBe(90);
 });
+
+test("U1: Record → Record lands a take, and the receipt goes (its Undo would revert the take)", async ({ page }) => {
+  // Round-2 review, finding 1: after "set the tempo to 90", one Record → Record cycle on the top
+  // bar landed a take and the tempo receipt came back. Natively the landed take is an undo step
+  // (Tracktion adds it through the Edit's UndoManager), so that Undo would revert the take.
+  type RecWindow = Window & { __moshStore?: { getState: () => {
+    transport: { recording: boolean };
+    snapshot?: { tracks: { clips: unknown[] }[] };
+  } } };
+  const recording = () => page.evaluate(() => (window as unknown as RecWindow).__moshStore!.getState().transport.recording);
+  const clips = () => page.evaluate(() =>
+    ((window as unknown as RecWindow).__moshStore!.getState().snapshot?.tracks ?? []).reduce((n, t) => n + t.clips.length, 0));
+
+  await bootV3(page);
+  await page.getByLabel("Count-in").selectOption("0");
+  await page.getByTestId("v3-moshi-field").fill("set the tempo to 90");
+  await page.getByTestId("v3-moshi-send").click();
+  const receipt = page.getByTestId("v3-receipt");
+  await expect(receipt).toContainText("90");
+  const before = await clips();
+
+  await page.getByTestId("v3-record").click();
+  await expect.poll(recording).toBe(true);
+  await page.getByTestId("v3-record").click();
+  await expect.poll(recording).toBe(false);
+  await expect.poll(clips).toBeGreaterThan(before);                       // the take really landed
+  await expect(receipt).toHaveCount(0);
+  expect(await tempo(page)).toBe(90);                                     // nothing was undone
+});

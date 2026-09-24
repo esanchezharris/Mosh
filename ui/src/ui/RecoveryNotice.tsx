@@ -152,7 +152,7 @@ export function RecoveryNotice({ compact = false }: { compact?: boolean }) {
             <>
               <span className="v3-recovery-sep" aria-hidden="true">·</span>
               <button type="button" className="v3-recovery-disclosure" aria-expanded={residueOpen}
-                aria-controls="v3-recovery-residue" data-testid="recovery-residue-toggle"
+                aria-controls={residueOpen ? "v3-recovery-residue" : undefined} data-testid="recovery-residue-toggle"
                 onClick={() => setResidueOpen((open) => !open)}>
                 {residue.length} older recording{residue.length === 1 ? " is" : "s are"} still on disk
               </button>

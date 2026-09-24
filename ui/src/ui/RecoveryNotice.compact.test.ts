@@ -112,6 +112,20 @@ describe("D1: the V3 crash-recovery notice is one calm line", () => {
     expect(q("recovery-residue-item")).toHaveLength(0);
   });
 
+  // Round-2 review nit: aria-controls named a list that only exists while open, so a screen
+  // reader was pointed at nothing while it was collapsed. It is set only while the list exists.
+  it("the disclosure's aria-controls never names a missing element", async () => {
+    await render(true);
+    const toggle = host.querySelector<HTMLButtonElement>('[data-testid="recovery-residue-toggle"]')!;
+    const controls = () => toggle.getAttribute("aria-controls");
+    expect(controls(), "collapsed: nothing to point at").toBeNull();
+    await act(async () => { toggle.click(); });
+    expect(controls()).toBe("v3-recovery-residue");
+    expect(document.getElementById(controls()!)).toBe(host.querySelector('[data-testid="recovery-residue"]'));
+    await act(async () => { toggle.click(); });
+    expect(controls()).toBeNull();
+  });
+
   it("one take reads singular; no takes means no disclosure", async () => {
     useStore.setState({ snapshot: crashSnapshot(1) });
     await render(true);
