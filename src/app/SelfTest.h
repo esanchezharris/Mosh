@@ -89,6 +89,15 @@ int runV3VocalSmoke (MoshEngine&, MoshOps&);
     Prints one "V3-BOOTH-SMOKE: {json}" line for scripts/v3-acceptance/run.py. */
 int runV3BoothSmoke (MoshEngine&, MoshOps&);
 
+/** Chords stress — `Mosh --chords-stress`: the V3 '+ Chords' batch, create_track, a 4OSC
+    insert and a load_preset, each followed by undo, looped with a REAL device (pair with
+    MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch"), every track metered and the 30 Hz
+    telemetry live, the transport rolling. The regression smoke for the 2026-09-23 heap
+    corruption (an undo that removed a metered track). Run it in an ASan build to name any
+    stray write; MOSH_CHORDS_STRESS_ITERS / _VARIANTS / _SETTLE_MS tune it. Prints one
+    "CHORDS-STRESS: {json}" line. */
+int runChordsStress (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

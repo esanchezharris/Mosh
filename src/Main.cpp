@@ -151,6 +151,7 @@ public:
         const bool latencyCalibrationSmoke = commandLine.contains ("--latency-calibration-smoke");   // LAT-001
         const bool v3VocalSmoke = commandLine.contains ("--v3-vocal-smoke");   // V3-vocal acceptance row, live loopback
         const bool v3BoothSmoke = commandLine.contains ("--v3-booth-smoke");   // the Booth's own UI path, live loopback
+        const bool chordsStress = commandLine.contains ("--chords-stress");   // + Chords / undo on a live device (2026-09-23 heap corruption)
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool audioRecoveryIsolationSmoke =
             commandLine.contains ("--audio-recovery-isolation-smoke");
@@ -160,7 +161,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || v3BoothSmoke;
+        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || v3BoothSmoke || chordsStress;
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest")
                            || audioRecoverySmoke || audioRecoveryIsolationSmoke;
@@ -207,7 +208,7 @@ public:
         modes.selfTest       = commandLine.contains ("--selftest");   // also true for --selftest-undo
         modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
         modes.goldenSelfTest = goldenSelfTest;
-        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || v3BoothSmoke;
+        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || v3BoothSmoke || chordsStress;
         modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
@@ -578,6 +579,14 @@ public:
         if (v3BoothSmoke)
         {
             const int fails = runV3BoothSmoke (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (chordsStress)
+        {
+            const int fails = runChordsStress (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;
