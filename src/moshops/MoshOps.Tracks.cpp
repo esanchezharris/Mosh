@@ -1006,28 +1006,48 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     // until the user pressed Play once. Record-arm is itself a live-audio action: make
     // the context available before looking up device instances rather than exposing a
     // hidden Play-first precondition. Headless remains a graceful applied:false no-op.
-    if (armed && eng.hasAudio())
+    //
+    // ensurePlaybackContext() must run for BOTH directions, not just armed:true. The
+    // `armed` flag Tracktion tracks lives on a per-device INPUTDEVICEDESTINATION
+    // ValueTree child (tracktion_InputDevice.h: recordEnabled.referTo(state, IDs::armed,
+    // nullptr, false)) owned by the Edit's EditInputDevices -- that node is Edit-level
+    // state, not context-level, so a destination created while arming SURVIVES a freed
+    // playback context (e.g. export_audio's freePlaybackContext(), MoshOps.ProjectIo.cpp)
+    // untouched. Previously this block only ran `if (armed && eng.hasAudio())`, so
+    // disarming right after an export found `getAllInputDevices()` empty (no context ->
+    // no live InputDeviceInstance), fell through to "no input device" (applied:false),
+    // and never touched the persisted `armed:true` destination. The disarm reported ok,
+    // but the NEXT context rebuild (the following transport start) reconnected to that
+    // same persisted destination and read `armed:true` straight back -- a disarm that
+    // silently did nothing (found in PR #730 round-3 review, "Found in passing"). Always
+    // reallocating the context first -- cheap and idempotent once allocated, see
+    // MoshEngine::ensurePlaybackContext() -- gives disarm a live instance to actually
+    // flip the SAME persisted flag to false.
+    if (eng.hasAudio())
     {
-        const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
-        const auto storedKind = track->state.getProperty (
-            ids::moshInputDeviceKind, var()).toString();
-        auto* selectedDevice = eng.engine().getDeviceManager().findInputDeviceForID (chosenID);
-        const bool currentlyMidi = selectedDevice != nullptr && selectedDevice->isMidi();
-        const auto chosenKind = audiostartup::effectiveExplicitInputKind (
-            chosenID, storedKind, selectedDevice != nullptr, currentlyMidi);
-        if (storedKind.isEmpty() && selectedDevice != nullptr)
-            track->state.setProperty (ids::moshInputDeviceKind, chosenKind, nullptr);
-        const bool explicitInputBlocksAudio = audiostartup::explicitInputBlocksAudioActivation (
-            chosenID,
-            chosenKind,
-            currentlyMidi);
-        if (audiostartup::shouldActivateAudioInputForArm (
-                armed, trackHasInstrument (*track), explicitInputBlocksAudio))
-            if (const auto error = eng.activateAudioInput(); error.isNotEmpty())
-            {
-                logLine ("arm_track", args, false, error, false);
-                return errResult ("arm_track", error);
-            }
+        if (armed)
+        {
+            const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
+            const auto storedKind = track->state.getProperty (
+                ids::moshInputDeviceKind, var()).toString();
+            auto* selectedDevice = eng.engine().getDeviceManager().findInputDeviceForID (chosenID);
+            const bool currentlyMidi = selectedDevice != nullptr && selectedDevice->isMidi();
+            const auto chosenKind = audiostartup::effectiveExplicitInputKind (
+                chosenID, storedKind, selectedDevice != nullptr, currentlyMidi);
+            if (storedKind.isEmpty() && selectedDevice != nullptr)
+                track->state.setProperty (ids::moshInputDeviceKind, chosenKind, nullptr);
+            const bool explicitInputBlocksAudio = audiostartup::explicitInputBlocksAudioActivation (
+                chosenID,
+                chosenKind,
+                currentlyMidi);
+            if (audiostartup::shouldActivateAudioInputForArm (
+                    armed, trackHasInstrument (*track), explicitInputBlocksAudio))
+                if (const auto error = eng.activateAudioInput(); error.isNotEmpty())
+                {
+                    logLine ("arm_track", args, false, error, false);
+                    return errResult ("arm_track", error);
+                }
+        }
         eng.ensurePlaybackContext();
     }
 

@@ -14,6 +14,8 @@ What it proves, row by row (each check would read differently if the feature wer
   V3-vocal  `Mosh --v3-vocal-smoke` on a BlackHole loopback: a 1-bar count-in rolls and is
             EXCLUDED from the take, two passes land as non-silent WAVs within the calibrated
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
+            Then `Mosh --disarm-after-export-smoke`: a disarm right after export_audio applies
+            and survives the next transport start.
   V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
             rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert, a
             load_preset and an add_send, each followed by undo, looped. The regression smoke
@@ -483,6 +485,29 @@ def row_vocal(ctx) -> Row:
         row.notes.append(f"calibrated loopback {ms('calibratedMs')} ms, landing tolerance {ms('toleranceMs')} ms; "
                          f"take1 (count-in) landed {ms('take1OffsetMs')} ms from the guide, take2 (Again, no count-in) "
                          f"{ms('take2OffsetMs')} ms — a count-in landing is up to one device block early (engine follow-up)")
+    # export_audio frees the playback context; a disarm right after it used to find no input
+    # instance and silently no-op, so the track came back armed on the next transport start.
+    dleaf = f"v3-accept-disarm-{ctx.pid}"
+    reset_owned_harness_session(_session_dir(dleaf))
+    env["MOSH_SELFTEST_SESSION"] = f"_harness/{dleaf}"
+    try:
+        dproc = subprocess.run([str(ctx.bin), "--disarm-after-export-smoke", "-ApplePersistenceIgnoreState", "YES"],
+                               env=env, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired as e:
+        row.chk(False, "the disarm-after-export smoke finished within 180 s", str(e)); return row
+    (out / "disarm-after-export-smoke.log").write_text((dproc.stdout or "") + "\n--- stderr ---\n" + (dproc.stderr or ""))
+    row.artifacts.append(str(out / "disarm-after-export-smoke.log"))
+    dsummary = {}
+    for line in (dproc.stdout or "").splitlines():
+        if line.startswith("DISARM-AFTER-EXPORT-SMOKE: "):
+            try:
+                dsummary = json.loads(line[len("DISARM-AFTER-EXPORT-SMOKE: "):])
+            except json.JSONDecodeError:
+                pass
+    row.chk(dproc.returncode == 0 and dsummary and int(dsummary.get("failures", 1)) == 0,
+            f"Mosh --disarm-after-export-smoke passed every check ({dsummary.get('checks', '?')} checks) on {LOOPBACK_DEVICE}",
+            {"rc": dproc.returncode, "summary": dsummary,
+             "failed": [l for l in (dproc.stderr or "").splitlines() if "FAIL" in l][:12]})
     return row
 
 

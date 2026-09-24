@@ -150,6 +150,7 @@ public:
         const bool latencyCalibrationSmoke = commandLine.contains ("--latency-calibration-smoke");   // LAT-001
         const bool v3VocalSmoke = commandLine.contains ("--v3-vocal-smoke");   // V3-vocal acceptance row, live loopback
         const bool chordsStress = commandLine.contains ("--chords-stress");   // + Chords / undo on a live device (2026-09-23 heap corruption)
+        const bool disarmAfterExportSmoke = commandLine.contains ("--disarm-after-export-smoke");   // PR #730 round-3: disarm must survive export_audio's freed context
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool audioRecoveryIsolationSmoke =
             commandLine.contains ("--audio-recovery-isolation-smoke");
@@ -159,7 +160,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || chordsStress;
+        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || chordsStress || disarmAfterExportSmoke;
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest")
                            || audioRecoverySmoke || audioRecoveryIsolationSmoke;
@@ -206,7 +207,7 @@ public:
         modes.selfTest       = commandLine.contains ("--selftest");   // also true for --selftest-undo
         modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
         modes.goldenSelfTest = goldenSelfTest;
-        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || chordsStress;
+        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || chordsStress || disarmAfterExportSmoke;
         modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
@@ -577,6 +578,14 @@ public:
         if (chordsStress)
         {
             const int fails = runChordsStress (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (disarmAfterExportSmoke)
+        {
+            const int fails = runDisarmAfterExportSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;
