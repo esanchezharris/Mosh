@@ -54,6 +54,61 @@ const READ_ONLY = new Set([
 const IN_KEY_REQUEST = /\b(?:in (?:the )?key|(?:keep|stay|remain)[^.!?]{0,24}in (?:the )?key)\b/i;
 const MELODY_REQUEST = /\b(?:melody|melodic)\b/i;
 
+// FINDINGS.md #4 (2026-09-23 walkthrough) -- "build me a lofi sketch" called
+// create_track({name:"Keys", type:"audio"}) and the task ended before any
+// add_midi_clip/add_note ever landed, leaving a silent, instrument-less,
+// content-less "Keys" track -- the reply even said "I'll add a cozy bed, just
+// one layer" while never doing so. Scoped to melodic-INSTRUMENT names, not
+// "any empty track this task made": taskExec.test.ts already has several tasks
+// that create a track and rename/keep it with no clip at all (LoopTrack/
+// Renamed, AfterHeal, Kept, Real, Vocal) and expect it to survive close() --
+// that is a deliberate, exercised outcome (a scaffold track for a later step,
+// or a plain placeholder track), not the defect. The defect is specifically a
+// MELODIC PART that never got an instrument/notes. A blanket "any empty
+// created track, unless the utterance mentions recording" rule was considered
+// and rejected: none of LoopTrack/AfterHeal/Kept/Real's utterances ("build a
+// beat", none, none, none) mention recording, so that rule would delete all of
+// them and break those tests. EXPLICIT_EMPTY_TRACK_REQUEST below is the
+// narrower opt-out this design still wants: if the ask itself says the track
+// should stay empty/for later, skip the repair entirely for this task.
+// "lead" is deliberately absent: the Booth's vocal lane is "Lead", and an empty
+// vocal/mic track is a recording destination, never a failed melodic part.
+const MELODIC_TRACK_NAME_RE = /\b(?:keys?|piano|synth|pad|bass|chords?|melody|melodic|guitar|strings?|organ|rhodes|wurlitzer)\b/i;
+const RECORDING_TRACK_NAME_RE = /\b(?:vocals?|vox|voice|mic|takes?)\b/i;
+const EXPLICIT_EMPTY_TRACK_REQUEST = /\b(?:empty|blank|placeholder)\b|\bfor (?:me|you) to (?:record|play|fill|write)\b|\brecord into (?:it|this|that)\b|\b(?:record(?:ing)?|sing(?:ing)?|vocals?|vox|mic|live)\b/i;
+
+// FINDINGS.md #4 -- the same task's add_drum_pattern passed the EXISTING Drums
+// track's id with no clipId, and bridge.mock.ts's add_drum_pattern (mirroring
+// the native handler, see its own header comment at case "add_drum_pattern")
+// just PUSHES a new clip at `start` -- it does not replace or check for
+// collisions. The command already has a documented, SAFE in-place-edit path
+// (pass `clipId`, which replaces only the named lanes of an existing clip --
+// see its ArgSpec desc in commands.ts), so refusing the trackId-only
+// collision here closes a silent side door without removing any capability.
+const OVERLAP_GUARDED_COMMANDS = new Set(["add_drum_pattern", "add_midi_clip"]);
+
+function clipPlacementOverlapError(command: string, args: Record<string, unknown>, snap: Snapshot): string | null {
+  if (!OVERLAP_GUARDED_COMMANDS.has(command)) return null;
+  if (typeof args.clipId === "string" && args.clipId) return null; // explicit in-place edit
+  const trackId = typeof args.trackId === "string" ? args.trackId : "";
+  if (!trackId) return null; // add_drum_pattern's own "omit to create a new Drums track" path
+  const track = snap.tracks.find((t) => t.id === trackId);
+  if (!track || track.clips.length === 0) return null;
+
+  const start = typeof args.start === "number" && Number.isFinite(args.start) ? args.start : 0;
+  const beatsPerBar = snap.session.timeSigNumerator ?? 4;
+  const beatSec = (4 / (snap.session.timeSigDenominator ?? 4)) * (60 / (snap.session.tempo || 120));
+  const end = command === "add_midi_clip"
+    ? start + (typeof args.length === "number" && args.length > 0 ? args.length : beatsPerBar * beatSec)
+    : start + (typeof args.bars === "number" && args.bars > 0 ? args.bars : 1) * beatsPerBar * beatSec;
+
+  const hit = track.clips.find((c) => start < c.start + c.length && c.start < end);
+  if (!hit) return null;
+  return `${command} at ${start.toFixed(2)}s would overlap the existing clip "${hit.name}" `
+    + `(${hit.start.toFixed(2)}s-${(hit.start + hit.length).toFixed(2)}s) on this track; `
+    + `place it on a new track, in an empty range, or pass clipId to edit "${hit.name}" in place.`;
+}
+
 function noteKeyError(command: string, args: Record<string, unknown>, key: SessionKey, melody: boolean): string | null {
   if (command !== "add_note" && command !== "set_note") return null;
   const resolved = resolveKey(key);
@@ -133,6 +188,9 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
   let opened = false;
   let closed = false;
   let destructiveUsed = 0;
+  // trackId -> the `type` arg this task's create_track call was given (undefined = default
+  // "audio"). Only tracks CREATED BY THIS TASK are ever candidates for repairEmptyMelodicTracks.
+  const createdTrackTypes = new Map<string, string | undefined>();
 
   async function getSnapshot(): Promise<Snapshot> {
     await refresh();
@@ -172,6 +230,9 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       if (IN_KEY_REQUEST.test(meta.utterance ?? "")
           && calls.some((c) => c.command === "add_note" || c.command === "set_note" || c.command === "set_key"))
         constrainedKey = (await getSnapshot()).session.key;
+      let overlapSnapshot: Snapshot | undefined;
+      if (calls.some((c) => OVERLAP_GUARDED_COMMANDS.has(c.command)))
+        overlapSnapshot = await getSnapshot();
       const memoryCalls = calls
         .map((c, index) => ({ c, index }))
         .filter(({ c }) => MEMORY_COMMANDS.has(c.command));
@@ -190,6 +251,7 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
         if (!err && constrainedKey && c.command === "set_key")
           constrainedKey = { tonic: String(args.tonic), mode: String(args.mode) };
         if (!err && constrainedKey) err = noteKeyError(c.command, args, constrainedKey, melodyRequest);
+        if (!err && overlapSnapshot) err = clipPlacementOverlapError(c.command, args, overlapSnapshot);
         if (err) entries.push({ index, command: c.command, ok: false, error: err });
         else valid.push({ index, command: c.command, args });
       });
@@ -214,6 +276,11 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
         // AGT-MEM (M4, item 6) — same fire-and-forget "uses" tracking as executor.ts's
         // runAgentBatch (see that file's comment / usesTracking.ts's header).
         if (r.ok) void bumpPatternUsesIfMatched(c.command, c.args, exec);
+        if (r.ok && c.command === "create_track") {
+          const newId = ids?.trackId;
+          if (typeof newId === "string" && newId)
+            createdTrackTypes.set(newId, typeof c.args.type === "string" ? c.args.type : undefined);
+        }
       }
 
       // A render's ok = "job submitted"; the OBSERVATION must see the settled
@@ -237,6 +304,25 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
     },
   };
 
+  /** Removes a track THIS TASK created that ends the task empty and melodic-named -- see
+   *  MELODIC_TRACK_NAME_RE's header comment. Skipped entirely when the ask itself said the
+   *  track should stay empty/for later (EXPLICIT_EMPTY_TRACK_REQUEST). Called from close(),
+   *  before batch_end, so the removal is inside the same undo transaction as everything else
+   *  the task did. */
+  async function repairEmptyMelodicTracks(): Promise<void> {
+    if (createdTrackTypes.size === 0) return;
+    if (EXPLICIT_EMPTY_TRACK_REQUEST.test(meta.utterance ?? "")) return;
+    let liveSnapshot: Snapshot | undefined;
+    for (const [trackId, requestedType] of createdTrackTypes) {
+      if (requestedType && requestedType !== "audio") continue; // "drum" auto-loads a kit
+      liveSnapshot ??= await getSnapshot();
+      const track = liveSnapshot.tracks.find((t) => t.id === trackId);
+      if (!track || track.clips.length > 0) continue;
+      if (!MELODIC_TRACK_NAME_RE.test(track.name) || RECORDING_TRACK_NAME_RE.test(track.name)) continue;
+      await exec("remove_track", { trackId });
+    }
+  }
+
   return {
     env,
     async execRaw(command, args) {
@@ -249,6 +335,7 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       if (closed) return;
       closed = true;
       if (opened) {
+        await repairEmptyMelodicTracks();
         await exec("batch_end", {});
         await refresh();
       }
