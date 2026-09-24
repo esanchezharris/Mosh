@@ -1166,6 +1166,31 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     return stopRecordingAndLand (args, discard);
 }
 
+// 2026-09-24 findings a/b — every place that must land an in-flight recording as a REAL
+// stop before letting some OTHER transport change through: a loop toggle (cmdSetTransport,
+// before `transport.looping = ...`) and every offline-render detach (export_audio,
+// export_stems, the bounce/freeze's shared bounceRenderToWavImpl). Both used to call
+// Tracktion's transport.stop() directly -- bypassing cmdStopRecording -- so the take landed
+// unstamped, never a Part, same class of bug the review of PR #730 already fixed for the
+// action-based stops. `true` means either a take actually landed, or there was nothing in
+// flight to land (both are fine to proceed on); `false` fills outReason and the caller
+// refuses its own command with it rather than silently landing the take unstamped.
+bool MoshOps::finalizeInFlightRecordingOrFail (juce::String& outReason)
+{
+    const auto stopResult = cmdStopRecording (var (new DynamicObject()));
+    const auto stopData = stopResult.getProperty ("data", var());
+    const bool stopped = stopResult.isObject()
+        && (bool) stopResult.getProperty ("ok", false)
+        && stopData.isObject()
+        && (bool) stopData.getProperty ("applied", false);
+    if (stopped)
+        return true;
+    outReason = stopResult.getProperty ("error", var()).toString();
+    if (outReason.isEmpty())
+        outReason = stopData.getProperty ("reason", "could not land recording take").toString();
+    return false;
+}
+
 juce::var MoshOps::stopRecordingAndLand (const juce::var& args, bool discard)
 {
     // Wave B — record-to-take landing (TRA-002 wave, MID-001 MIDI, ARE-003 latency).
@@ -1248,6 +1273,26 @@ juce::var MoshOps::stopRecordingAndLand (const juce::var& args, bool discard)
     // playbackContext->stopRecording() -> applyRecording()), so the take clips exist in
     // track.getClips() right after this returns.
     transport.stop (discard, false);
+
+    // 2026-09-24 finding c — any set_input_monitor DEFERRED while this recording was in
+    // flight applies now that nothing is rolling. setMonitorMode still costs its own
+    // restartAllTransports()/graph rebuild here, but stopIfRecording() inside it is now a
+    // no-op (nothing is recording), so it can never land a take a second time. This is the
+    // one place that knows a recording just actually ended, so every path that ends one --
+    // the Stop pad, TopBar, Space, loop_stop, a loop toggle and export/stems/bounce's own
+    // finalize (finalizeInFlightRecordingOrFail, all of which funnel through here) -- picks
+    // it up, whichever one is holding the pending change.
+    if (pendingMonitorModes_.size() > 0)
+    {
+        for (auto* inst : eng.edit().getAllInputDevices())
+            if (inst != nullptr)
+            {
+                auto& device = inst->getInputDevice();
+                if (pendingMonitorModes_.contains (device.getDeviceID()))
+                    device.setMonitorMode ((te::InputDevice::MonitorMode) (int) pendingMonitorModes_[device.getDeviceID()]);
+            }
+        pendingMonitorModes_.clear();
+    }
 
     // Skill Foundry Slice B, Task 1 — stable take identity (state/TakeIdentity.h). A
     // landed take is a BRAND NEW TAKES child with no id yet; stamp it here, before the
@@ -1367,11 +1412,30 @@ juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
     // instance) — two tracks fed by the same physical input share one monitor mode.
     // Headless getAllInputDevices() is empty → no-op, applied:false (never an error).
     bool applied = false;
+    bool deferred = false;
     for (auto* inst : eng.edit().getAllInputDevices())
         if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
         {
-            inst->getInputDevice().setMonitorMode (mode);
-            applied = true;
+            auto& device = inst->getInputDevice();
+            // setMonitorMode calls Tracktion's restartAllTransports() the instant the mode
+            // actually changes, and THAT calls stopIfRecording() -- landing whatever is
+            // recording through its own raw transport.stop(), not cmdStopRecording, cutting
+            // a Booth pass short the moment a producer flips "Hear myself" mid-take
+            // (2026-09-24 finding c: BoothView.toggleHearMyself). Unlike a loop toggle or an
+            // offline-render detach, this is not itself an action meant to end the take, so
+            // DEFER instead of finalizing: remember it, apply it once the take actually ends
+            // (stopRecordingAndLand), so recording survives the toggle.
+            if (recording::shouldDeferMonitorChange (eng.edit().getTransport().isRecording(),
+                                                     device.getMonitorMode() != mode))
+            {
+                pendingMonitorModes_.set (device.getDeviceID(), (int) mode);
+                deferred = true;
+            }
+            else
+            {
+                device.setMonitorMode (mode);
+                applied = true;
+            }
             break;
         }
 
@@ -1382,8 +1446,15 @@ juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("mode", modeStr);
     data->setProperty ("applied", applied);
+    // `applied` is the honest answer to "did the change land": deferred is not applied, so
+    // BoothView's toggleHearMyself reads applied:false here exactly as it already does for
+    // "no input device" -- it must not read as a change that took effect but silently did
+    // nothing. `deferred` lets a caller (and the vitest/smoke below) tell the two apart.
+    if (deferred) data->setProperty ("deferred", true);
     if (! applied)
-        data->setProperty ("reason", "no input device");
+        data->setProperty ("reason", deferred
+            ? "recording in progress - will apply when the take ends"
+            : "no input device");
     return okResult ("set_input_monitor", var (data));
 }
 

@@ -681,8 +681,27 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     // detaches it through its weak reference, so a freed/reused context can never be
     // mistaken for the live one on the next reconcile.
     unregisterAllMeterClients();           // master tap follows the context being freed
-    edit.getTransport().stop (false, false);
-    edit.getTransport().freePlaybackContext();
+    {
+        auto& transport = edit.getTransport();
+        if (transport.isRecording())
+        {
+            // A recording still rolling here (a Booth pass or an ordinary take) is about to
+            // be detached from the device by the render below. The old transport.stop() call
+            // landed it through Tracktion's raw path, bypassing cmdStopRecording -- the take
+            // sat on Takes unstamped, never a Part (2026-09-24 finding b). Finalize it
+            // through the SAME choke point the Stop pad uses first, so it survives the
+            // detach as a real Part; refuse the export rather than land it silently unstamped
+            // if that finalize itself could not land anything.
+            juce::String reason;
+            if (! finalizeInFlightRecordingOrFail (reason))
+                return errResult ("export_audio", reason);
+        }
+        else
+        {
+            transport.stop (false, false);
+        }
+        transport.freePlaybackContext();
+    }
 
     const double len = juce::jmax (0.1, rEnd - rStart);
 
@@ -1032,8 +1051,23 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
     // cmdExportAudio's teardown; the master tap re-attaches to the NEXT context on its
     // own (weak-reference detach in unregisterAllMeterClients()).
     unregisterAllMeterClients();
-    edit.getTransport().stop (false, false);
-    edit.getTransport().freePlaybackContext();
+    {
+        auto& transport = edit.getTransport();
+        if (transport.isRecording())
+        {
+            // Same hazard as cmdExportAudio's detach (2026-09-24 finding b): finalize an
+            // in-flight recording through cmdStopRecording first, so it survives as a real
+            // Part instead of landing unstamped when the render below detaches the Edit.
+            juce::String reason;
+            if (! finalizeInFlightRecordingOrFail (reason))
+                return errResult ("export_stems", reason);
+        }
+        else
+        {
+            transport.stop (false, false);
+        }
+        transport.freePlaybackContext();
+    }
 
     // Edit-wide render mode: one realtime-only hosted synth (e.g. Serum) anywhere in
     // the edit forces ALL stems to render realtime — a safe superset, computed once

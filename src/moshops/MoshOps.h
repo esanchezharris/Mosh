@@ -353,13 +353,25 @@ private:
     // KEEPING takes, drain the async clip-add, return the landed clip ids. Every recording
     // stop a producer presses goes through here (set_transport stop/toggle/continue/record/
     // to_start, stop_recording), so a Booth pass in flight is finalized as a pass whichever
-    // button ended it. Stops that bypass it (export/stems/bounce, a loop toggle) are covered
-    // only by loopForgetStaleCapture: the take lands unstamped, never as a Part.
+    // button ended it. Since 2026-09-24 a loop toggle mid-take and an offline-render detach
+    // (export_audio/export_stems/the bounce) ALSO route here first via
+    // finalizeInFlightRecordingOrFail -- see cmdSetTransport's loop handling and
+    // MoshOps.ProjectIo.cpp / MoshOps.Generative.cpp's detach helper -- instead of letting
+    // Tracktion's own raw transport.stop() land the take unstamped.
     juce::var cmdStopRecording  (const juce::var& args);
     // The stop + landing itself, with no knowledge of the Booth loop. Only
     // cmdStopRecording, loopFinalizeCapture and cmdLoopStop (for a take the loop did not
-    // start: recording::loopStopRoute's landTake) call it.
+    // start: recording::loopStopRoute's landTake) call it. Also the ONE place a
+    // set_input_monitor deferred mid-take (pendingMonitorModes_, 2026-09-24 finding c) is
+    // applied -- every path above funnels through here, so every one of them picks it up.
     juce::var stopRecordingAndLand (const juce::var& args, bool discard);
+    // Calls cmdStopRecording and interprets its result: true when the in-flight recording
+    // was actually landed (or there was nothing in flight to land); false with outReason
+    // filled otherwise. Shared by cmdSetTransport's action-based AND loop-toggle stops, and
+    // by every offline-render detach (export_audio, export_stems, the bounce/freeze) --
+    // every place that must not let Tracktion's OWN transport.stop() (a loop toggle's
+    // stopIfRecording, an offline render's device detach) land a take without our stamp.
+    bool finalizeInFlightRecordingOrFail (juce::String& outReason);
     // Take lanes (audio): expose Tracktion's native take tree — list/select/keep.
     juce::var cmdListTakes      (const juce::var& args);
     juce::var cmdSetCurrentTake (const juce::var& args);
@@ -730,6 +742,15 @@ private:
     /** One recorded pass, in flight. Cleared by finalize and by a project replacement. */
     struct LoopCapture { juce::String passId; double entryQn = 0; bool active = false; };
     LoopCapture  loopCurrent_;
+    /** 2026-09-24 finding c — a set_input_monitor received while the transport is recording
+        is deferred here (te::InputDevice::getDeviceID() -> the requested MonitorMode, as
+        int) rather than applied immediately: InputDevice::setMonitorMode's own
+        restartAllTransports() would call stopIfRecording() and land the take out from under
+        the producer. Applied inside stopRecordingAndLand, the one place that knows a
+        recording just actually ended, so every path that ends one picks it up. Cleared (not
+        applied) on a project replacement, same as loopCurrent_ above: it was tied to a
+        recording in an Edit that is now gone. */
+    juce::HashMap<juce::String, int> pendingMonitorModes_;
     juce::String loopAuditionedId_;                              // the pass Review is soloing, if any
     /** Per-PROCESS identity: a reload or a relaunch means the phone's authority is stale
         even when the project id is unchanged. */

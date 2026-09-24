@@ -62,6 +62,10 @@ const nextTrackGroupId = () => `track-group-${++trackGroupSeq}`;
 // Live 12's Space vs ⇧Space marker memory (mirrors MoshOps::cmdSetTransport)
 let mockInsertMarker = 0;
 let mockViaContinue = false;
+// 2026-09-24 finding c — mirrors native's pendingMonitorModes_: a set_input_monitor
+// received while recording is deferred here (trackId -> the requested mode) instead of
+// applied immediately, and applied once the recording actually ends (finalizeMockRecording).
+const mockPendingMonitor = new Map<string, Track["monitor"]>();
 let sectionSeq = 3; // seed uses sec-1..3
 const nextSectionId = () => "sec-" + ++sectionSeq;
 let annotationSeq = 1; // seed uses ann-1
@@ -1378,6 +1382,18 @@ type MockRecordingStop = {
   reason?: string;
 };
 
+// 2026-09-24 finding c — the ONE place a set_input_monitor deferred mid-take is applied:
+// every path that ends a recording funnels through finalizeMockRecording, so every one of
+// them (the Stop pad, TopBar, Space, a bare stop_recording) picks up the deferred change.
+function applyPendingMonitor(): void {
+  if (mockPendingMonitor.size === 0) return;
+  for (const [trackId, mode] of mockPendingMonitor) {
+    const t = findTrack(trackId);
+    if (t) t.monitor = mode;
+  }
+  mockPendingMonitor.clear();
+}
+
 function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
   if (!snapshot.transport.recording) {
     emit("transport", snapshot.transport);
@@ -1397,6 +1413,7 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
     const landed = loopFinalizeCapture();
     stopPlayback();
     snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+    applyPendingMonitor();
     emit("transport", snapshot.transport);
     syncLoopSnapshot();
     invalidate();
@@ -1407,6 +1424,7 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
   if (boothPass) mockLoop.current = null;   // discarded: nothing lands, nothing in flight
   stopPlayback();
   snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+  applyPendingMonitor();
   emit("transport", snapshot.transport);
   if (discardRecordings) {
     invalidate();
@@ -1718,9 +1736,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const action = str(args.action);
       // Mirrors recording::shouldFinalizeBeforeTransportAction: "continue" (Shift+Space) is a
       // stop while recording, and a stop that skips the finalize leaves a Booth pass unlisted.
+      // Mirrors recording::shouldFinalizeBeforeLoopToggle too (2026-09-24 finding a): a bare
+      // {loop} toggle with no action field is ALSO a stop while recording, once the requested
+      // value actually differs from the current one -- native's Tracktion listener only fires
+      // stopIfRecording() on a real change, so a redundant {loop:true} while already looping
+      // must not finalize anything.
+      const requestedLooping = "loop" in args ? Boolean(args.loop) : null;
+      const loopToggleMidTake = snapshot.transport.recording && requestedLooping !== null
+        && requestedLooping !== snapshot.transport.looping;
       const shouldFinalize = snapshot.transport.recording
         && (action === "stop" || action === "toggle" || action === "continue"
-            || action === "record" || action === "to_start");
+            || action === "record" || action === "to_start" || loopToggleMidTake);
       if (shouldFinalize) {
         const stopped = finalizeMockRecording(false);
         if (!stopped.applied) return err(command, stopped.reason ?? "could not land recording take");
@@ -3334,7 +3360,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_input_monitor": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const mode = str(args.mode, "automatic");
-      t.monitor = mode === "off" || mode === "on" ? mode : "automatic";
+      const resolved: Track["monitor"] = mode === "off" || mode === "on" ? mode : "automatic";
+      // Mirrors native's InputDevice::setMonitorMode -> restartAllTransports() ->
+      // stopIfRecording() (2026-09-24 finding c): applying a REAL mode change while
+      // recording would cut a Booth pass short from underneath BoothView's Hear-myself
+      // toggle. Defer instead -- remember it, apply it once the take actually ends
+      // (finalizeMockRecording), same as native's pendingMonitorModes_.
+      if (snapshot.transport.recording && resolved !== t.monitor) {
+        mockPendingMonitor.set(t.id, resolved);
+        invalidate();
+        return ok(command, {
+          trackId: t.id, mode: resolved, applied: false, deferred: true,
+          reason: "recording in progress - will apply when the take ends",
+        });
+      }
+      t.monitor = resolved;
       invalidate();
       // Mirrors the NATIVE result shape (MoshOps.cpp cmdSetInputMonitor): {trackId, mode,
       // applied, reason?} — not the {monitor} this used to return before anything called
@@ -5836,6 +5876,7 @@ export function __resetMockForTests(): void {
   cmdLog.length = 0;
   mockLoop = freshLoopModel();
   mockLoopActionSeq = 0;
+  mockPendingMonitor.clear();   // 2026-09-24 finding c — stale against a session now gone
   mockRemote = { running: false, port: 0 };
 }
 
