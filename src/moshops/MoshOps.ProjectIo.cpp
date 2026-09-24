@@ -453,7 +453,6 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
-    lastSeenContext = nullptr;
 
     file.getParentDirectory().createDirectory();
     file.deleteFile();
@@ -677,14 +676,13 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 
     // Render exclusivity (01 §5): detach the Edit from the device before an
     // offline/realtime export render (asserts otherwise). No-op when no device
-    // is attached. Tear down our level-meter taps first (the master tap lives on
-    // the playback context we are about to free) and clear lastSeenContext so the
-    // master meter re-attaches to the *next* context rather than an ABA-reused
-    // address — same swap guard cmdNewProject/cmdOpenProject use.
+    // is attached. Tear down our level-meter taps first — the master tap lives on
+    // the playback context we are about to free, and unregisterAllMeterClients()
+    // detaches it through its weak reference, so a freed/reused context can never be
+    // mistaken for the live one on the next reconcile.
     unregisterAllMeterClients();           // master tap follows the context being freed
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
-    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the next ctx
 
     const double len = juce::jmax (0.1, rEnd - rStart);
 
@@ -1031,11 +1029,11 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
         plan.file.deleteFile();
 
     // Render exclusivity (01 §5), done ONCE for the whole stem set — mirrors
-    // cmdExportAudio's teardown so the master meter re-attaches to the NEXT context.
+    // cmdExportAudio's teardown; the master tap re-attaches to the NEXT context on its
+    // own (weak-reference detach in unregisterAllMeterClients()).
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
-    lastSeenContext = nullptr;
 
     // Edit-wide render mode: one realtime-only hosted synth (e.g. Serum) anywhere in
     // the edit forces ALL stems to render realtime — a safe superset, computed once
@@ -1619,7 +1617,6 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     }
 
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
-    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed
@@ -1699,7 +1696,6 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
         emitSnapshotInvalidated();         // re-attaches meters to the unchanged context
         return errResult (commandName, refusal);
     }
-    lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     refreshMpStemDir();   // PR-2: eng.editFile() just changed

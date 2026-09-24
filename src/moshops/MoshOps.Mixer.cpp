@@ -213,16 +213,14 @@ void MoshOps::unregisterAllMeterClients()
     meterClients.clear();
     sendMeterClients.clear();
 
-    // The master client belongs to the playback context rather than a plugin. Every
-    // caller invokes this helper while the current Edit/context is still alive and
-    // before an export, reload, project swap, or shutdown frees it. Detach here too so
-    // a newly allocated context that reuses the same address cannot be mistaken for the
-    // old registration (an ABA that leaves master levels pinned at -100 after reload).
-    if (lastSeenContext != nullptr)
-    {
-        lastSeenContext->masterLevels.removeClient (masterClient);
-        lastSeenContext = nullptr;
-    }
+    // The master tap belongs to the playback context's LevelMeasurer rather than a
+    // plugin. Detach here too, same as the track/send taps: ~MeterTap-style detach()
+    // is a no-op if the context's measurer is already gone, and otherwise removes the
+    // client under the measurer's own clientsMutex before the caller frees or swaps the
+    // context (export, reload, project swap, shutdown). No raw-pointer bookkeeping is
+    // needed to guard against an ABA-reused context address — attach() re-resolves the
+    // weak reference against whichever context's measurer is live next.
+    masterTap.detach();
 }
 
 // ── master spectral feed (Moshi reactivity) ──────────────────────────────────

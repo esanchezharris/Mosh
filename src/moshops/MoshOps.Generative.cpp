@@ -499,12 +499,12 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
     auto& edit = eng.edit();
 
     // Render exclusivity (01 §5): detach the Edit from the device before an offline
-    // render (Tracktion asserts otherwise). Mirror cmdExportAudio's teardown so the
-    // master meter re-attaches to the NEXT context (no ABA reuse). No-op when headless.
+    // render (Tracktion asserts otherwise). Mirror cmdExportAudio's teardown; the master
+    // tap re-attaches to the NEXT context on its own via unregisterAllMeterClients()'s
+    // weak-reference detach. No-op when headless.
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
-    lastSeenContext = nullptr;
 
     destWav.getParentDirectory().createDirectory();
     destWav.deleteFile();
