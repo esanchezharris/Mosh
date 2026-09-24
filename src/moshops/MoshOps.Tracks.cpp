@@ -295,7 +295,7 @@ juce::var MoshOps::cmdSetTrackIcon (const juce::var& args)
         juce::StringArray known;
         for (const auto& n : trackIcons::registry()) known.add (n);
         return errResult ("set_track_icon",
-                          "unknown icon \"" + icon + "\" — expected one of: "
+                          "unknown icon \"" + icon + juce::String (juce::CharPointer_UTF8 ("\" \xe2\x80\x94 expected one of: "))
                               + known.joinIntoString (", ") + ", or \"\" to clear");
     }
 
@@ -1139,6 +1139,35 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
 
 juce::var MoshOps::cmdStopRecording (const juce::var& args)
 {
+    // A Booth pass is a Booth pass however it ends. loop_record starts a capture the loop
+    // owns (loopCurrent_), but the producer can end it from anywhere: the TopBar stop, Space,
+    // Shift+Space, Transport > Play/Pause, an agent's set_transport stop/toggle/continue/
+    // record/to_start, the phone. Every one of those reaches this function (cmdSetTransport's
+    // finalize-before-transport-action branch calls it), and
+    // before 2026-09-23 they all landed the take WITHOUT the loop's finalize: the clip sat on
+    // Takes unstamped, loopCurrent_ stayed "in flight", lastId never moved and the older pass
+    // stayed audible -- so the desktop Booth, which renders snapshot.loop (a pure read that
+    // never adopts), listed "Nothing recorded yet" under an audible take. Only the Booth's own
+    // Stop pad (loop_stop) went through loopFinalizeCapture. Now the choke point does.
+    //
+    // discardRecordings=true throws the capture away (see stopRecordingAndLand). A discarded
+    // Booth pass goes through the loop's finalize too: nothing lands, and the pass it named
+    // must not stay "in flight" after the capture is gone. A pass some OTHER stop already
+    // ended (export, a loop toggle) is forgotten first: there is nothing left to finalize.
+    const bool discard = (bool) args.getProperty ("discardRecordings", false);
+    loopForgetStaleCapture();
+    if (loopCurrent_.active)
+    {
+        const auto finalized = loopFinalizeCapture (args);
+        emit ("loop", loopStateVar());   // the phone pad and the Booth both follow this
+        emitSnapshotInvalidated();       // the stamp landed after the stop's own invalidation
+        return finalized.stopResult;
+    }
+    return stopRecordingAndLand (args, discard);
+}
+
+juce::var MoshOps::stopRecordingAndLand (const juce::var& args, bool discard)
+{
     // Wave B — record-to-take landing (TRA-002 wave, MID-001 MIDI, ARE-003 latency).
     //
     // Stopping a recording is a RECORDING-LIFECYCLE action, NOT an undoable session
@@ -1152,7 +1181,6 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     // transport.stop(discardRecordings, clearDevices)); discardRecordings=true throws the
     // captured audio/MIDI away and lands nothing. clearDevices stays false so the
     // playback graph survives for the next take.
-    const bool discard = (bool) args.getProperty ("discardRecordings", false);
 
     auto& transport = eng.edit().getTransport();
 

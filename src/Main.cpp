@@ -4,6 +4,7 @@
 #include "app/MacStateRestoration.h"
 #include "files/SampleFolderAccess.h"
 #include "app/MenuController.h"
+#include "app/RecentMenuSignature.h"
 #include "app/SelfTest.h"
 #include "app/LiveInstrumentSmoke.h"
 #include "engine/AudioDeviceStartup.h"
@@ -149,6 +150,7 @@ public:
         const bool recordHoldSmoke = commandLine.contains ("--record-hold-smoke");   // CAP-001 run 1
         const bool latencyCalibrationSmoke = commandLine.contains ("--latency-calibration-smoke");   // LAT-001
         const bool v3VocalSmoke = commandLine.contains ("--v3-vocal-smoke");   // V3-vocal acceptance row, live loopback
+        const bool v3BoothSmoke = commandLine.contains ("--v3-booth-smoke");   // the Booth's own UI path, live loopback
         const bool chordsStress = commandLine.contains ("--chords-stress");   // + Chords / undo on a live device (2026-09-23 heap corruption)
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool audioRecoveryIsolationSmoke =
@@ -159,7 +161,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || chordsStress;
+        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || v3BoothSmoke || chordsStress;
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest")
                            || audioRecoverySmoke || audioRecoveryIsolationSmoke;
@@ -206,7 +208,7 @@ public:
         modes.selfTest       = commandLine.contains ("--selftest");   // also true for --selftest-undo
         modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
         modes.goldenSelfTest = goldenSelfTest;
-        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || chordsStress;
+        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || v3BoothSmoke || chordsStress;
         modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
@@ -574,6 +576,14 @@ public:
             return;
         }
 
+        if (v3BoothSmoke)
+        {
+            const int fails = runV3BoothSmoke (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
         if (chordsStress)
         {
             const int fails = runChordsStress (*engine, *moshOps);
@@ -675,25 +685,33 @@ public:
         }
 
         auto* bridgePtr = &bridge;
+        // The Recent list straight from the engine: exactly what snapshot().session
+        // .recentProjects is built from, without building a whole snapshot per read.
+        auto currentRecents = [this]() -> juce::var
+        {
+            return engine != nullptr ? engine->recentProjects() : juce::var();
+        };
         menuController = std::make_unique<MenuController> (
             [bridgePtr] (const juce::var& action) { bridgePtr->emitEvent (juce::Identifier ("mosh_menu"), action); },
-            [this]() -> juce::var
-            {
-                return moshOps != nullptr
-                     ? moshOps->snapshot().getProperty ("session", juce::var()).getProperty ("recentProjects", juce::var())
-                     : juce::var();
-            },
+            currentRecents,
             std::move (onCheckForUpdates));
+        recentMenuGate.prime (currentRecents());   // the menu bar is built from this list
 
-        moshOps->setEventSink ([&bridge, this] (const juce::var& e)
+        moshOps->setEventSink ([&bridge, this, currentRecents] (const juce::var& e)
                                {
                                    bridge.emitEvent (juce::Identifier ("mosh_event"), e);
                                    if (remoteServer != nullptr)
                                        remoteServer->pushEvent (e);
-                                   // Keep the File ▸ Open Recent submenu fresh after any
-                                   // structural change (open/save-as/new updates the list).
+                                   // Keep the File ▸ Open Recent submenu fresh after a
+                                   // structural change (open/save-as/new updates the list) --
+                                   // and ONLY then. JUCE rebuilds the whole NSMenu bar on
+                                   // refresh(); doing that on every snapshot_invalidated
+                                   // (several per batch) crashed inside the rebuild on
+                                   // 2026-09-23 (PopupMenu::Item::~Item from NSMenuItem
+                                   // dealloc). See app/RecentMenuSignature.h.
                                    if (menuController != nullptr
-                                       && e.getProperty ("type", {}).toString() == "snapshot_invalidated")
+                                       && e.getProperty ("type", {}).toString() == "snapshot_invalidated"
+                                       && recentMenuGate.shouldRefresh (currentRecents()))
                                        menuController->refresh();
                                });
         mainWindow->shell().load();
@@ -799,6 +817,8 @@ private:
     std::unique_ptr<LocalBrainManager> ownerRuntime;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
+    // N1: the menu bar is rebuilt only when File > Open Recent changed (message thread).
+    recentmenu::RefreshGate recentMenuGate;
     // FS-K2. GUI-only, constructed before the menu so the menu knows whether an
     // updater exists at all. Never built in a headless run.
     std::unique_ptr<SparkleUpdater> updater;

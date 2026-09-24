@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { CommandResult, LoopState, Snapshot, Track } from "../types";
 import { useV3 } from "./shellState";
@@ -60,7 +60,11 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
 
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // `rolling`: this answer describes a capture that is now in flight ("Recording from bar 1",
+  // "Kept Part 1; recording from bar 3") -- see the recording-edge effect below.
+  const [status, setStatus] = useState<{ text: string; rolling: boolean } | null>(null);
+  const note = status?.text ?? null;
+  const setNote = (text: string | null) => setStatus(text === null ? null : { text, rolling: false });
   const [bar, setBar] = useState("1");
   const [leadIn, setLeadIn] = useState("");
 
@@ -75,6 +79,17 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
   useEffect(() => {
     if (selected && !loop?.contributions.some((part) => part.id === selected)) setSelected(null);
   }, [loop, selected]);
+
+  // The note is the last PAD's answer. A take can also end from outside the Booth (the
+  // TopBar stop, Space, the Transport menu, the phone), and then "Recording from bar 1"
+  // would sit under a stopped transport (2026-09-23 walkthrough). So when recording ENDS,
+  // an answer that described the capture in flight is dropped. Anything else stays -- the
+  // Stop pad's own "Stopped" above all -- whatever order the result and the snapshot land in.
+  const wasRecording = useRef(recording);
+  useEffect(() => {
+    if (wasRecording.current && !recording) setStatus((s) => (s?.rolling ? null : s));
+    wasRecording.current = recording;
+  }, [recording]);
 
   const leadTrack = pickLeadTrack(snapshot.tracks, selectedTrackId, loop);
   // Monitoring is read from the SNAPSHOT (the engine resets it to automatic at every launch,
@@ -94,9 +109,11 @@ export function BoothView({ snapshot }: { snapshot: Snapshot }) {
     setPending(true);
     try {
       const result = await exec(command, args);
-      const data = result.data as { detail?: unknown } | undefined;
+      const data = result.data as { detail?: unknown; currentId?: unknown } | undefined;
       const detail = typeof data?.detail === "string" ? data.detail : null;
-      setNote(result.ok ? detail : (result.error ?? `${command} failed`));
+      const text = result.ok ? detail : (result.error ?? `${command} failed`);
+      const rolling = result.ok && typeof data?.currentId === "string" && data.currentId !== "";
+      setStatus(text === null ? null : { text, rolling });
       if (result.ok) await useStore.getState().refresh();
       return result;
     } catch (error) {

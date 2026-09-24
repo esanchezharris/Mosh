@@ -70,8 +70,8 @@ public:
         const auto roundTrip = detected.value->frames - preroll;
         if (roundTrip < 0)
             return { std::nullopt,
-                     "the arrival preceded the emission — retry in a "
-                     "quieter room" };
+                     juce::String (juce::CharPointer_UTF8 ("the arrival preceded the emission \xe2\x80\x94 retry in a "
+                     "quieter room")) };
         return { CalibrationMeasurement { roundTrip,
                                           detected.value->confidence },
                  {} };

@@ -87,7 +87,7 @@ inline CalibrationResult measureRoundTripOffset(const float* stimulus,
         return { std::nullopt, "the stimulus is silent" };
     if (capturedEnergy < 1.0e-9)
         return { std::nullopt,
-                 "nothing was captured — check the input device" };
+                 juce::String (juce::CharPointer_UTF8 ("nothing was captured \xe2\x80\x94 check the input device")) };
 
     const auto maxLag = std::min<std::int64_t>(
         capturedFrames - stimulusFrames,
@@ -151,8 +151,8 @@ inline CalibrationResult measureRoundTripOffset(const float* stimulus,
     }
     if (rival >= 0.7 * bestScore)
         return { std::nullopt,
-                 "the measurement is ambiguous (a strong distinct "
-                 "echo) — reduce reflections and retry" };
+                 juce::String (juce::CharPointer_UTF8 ("the measurement is ambiguous (a strong distinct "
+                 "echo) \xe2\x80\x94 reduce reflections and retry")) };
 
     const auto floorForConfidence =
         std::max(floor, bestScore / 1000.0);
