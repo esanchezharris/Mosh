@@ -51,4 +51,46 @@ describe("bridge.mock set_input_monitor — result shape matches native (MoshOps
     });
     expect(res.data?.mode).toBe("automatic");
   });
+
+  // 2026-09-24 finding c — InputDevice::setMonitorMode calls Tracktion's
+  // restartAllTransports() -> stopIfRecording() the instant the mode actually changes, so
+  // applying a Hear-myself toggle immediately mid-take would cut the take short. The mock
+  // must mirror the DEFER, not just the native result shape.
+  it("defers a real mode change while recording, and applies it once the take ends", async () => {
+    __resetMockForTests();
+    const s = await snap();
+    const track = s.tracks[0];
+
+    await mockExecute({ command: "arm_track", args: { trackId: track.id, armed: true } });
+    await mockExecute({ command: "set_transport", args: { action: "record" } });
+    expect((await snap()).transport.recording).toBe(true);
+
+    const deferred = await mockExecute<CommandResult<{ applied: boolean; deferred?: boolean; reason?: string }>>({
+      command: "set_input_monitor",
+      args: { trackId: track.id, mode: "on" },
+    });
+    expect(deferred.ok).toBe(true);
+    expect(deferred.data?.applied).toBe(false);
+    expect(deferred.data?.deferred).toBe(true);
+    expect(deferred.data?.reason).toMatch(/recording/);
+    // Honest, not just deferred in the result: the snapshot must not look applied either.
+    expect((await snap()).tracks.find((t) => t.id === track.id)?.monitor).not.toBe("on");
+    expect((await snap()).transport.recording, "the take must survive the toggle").toBe(true);
+
+    await mockExecute({ command: "set_transport", args: { action: "stop" } });
+    expect((await snap()).tracks.find((t) => t.id === track.id)?.monitor).toBe("on");
+  });
+
+  it("applies immediately when NOT recording, same as before", async () => {
+    __resetMockForTests();
+    const s = await snap();
+    const track = s.tracks[0];
+    const res = await mockExecute<CommandResult<{ applied: boolean; deferred?: boolean }>>({
+      command: "set_input_monitor",
+      args: { trackId: track.id, mode: "on" },
+    });
+    expect(res.data?.applied).toBe(true);
+    expect(res.data?.deferred).toBeUndefined();
+    expect((await snap()).tracks.find((t) => t.id === track.id)?.monitor).toBe("on");
+  });
 });

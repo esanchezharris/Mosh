@@ -393,6 +393,35 @@ describe("v3 Booth — the desktop recording pad", () => {
       await act(async () => { monitor()!.click(); });
       expect(host.querySelector('[data-testid="v3-booth-note"]')!.textContent).toContain("no input device");
     });
+
+    // 2026-09-24 finding c — a mode change sent mid-take comes back {applied:false,
+    // deferred:true}: the button must show that as PENDING, not as a toggle that silently
+    // failed or, worse, one that looks like it worked.
+    it("shows a pending state when the change is deferred, and clears it once the snapshot catches up", async () => {
+      useStore.setState({
+        exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+          calls.push({ command, args });
+          return {
+            ok: true, command,
+            data: { trackId: "12", mode: "automatic", applied: false, deferred: true,
+                    reason: "recording in progress - will apply when the take ends" },
+          };
+        }),
+      });
+      render(snapshot(loopState(), "off"));
+      expect(monitor()!.textContent).toBe("Hear myself: Off");
+      await act(async () => { monitor()!.click(); });
+      // The label itself stays honest (still reads the snapshot's real, unchanged mode) --
+      // the pending suffix is what tells the producer the click registered.
+      expect(monitor()!.textContent).toBe("Hear myself: Off (pending On)");
+      expect(monitor()!.title).toContain("Recording in progress");
+      // No "Monitoring unchanged" note: a deferred change is not a failure.
+      expect(host.querySelector('[data-testid="v3-booth-note"]')).toBeNull();
+
+      // The take ends and the deferred mode actually lands: re-render with the real snapshot.
+      render(snapshot(loopState(), "automatic"));
+      expect(monitor()!.textContent).toBe("Hear myself: On");
+    });
   });
 
   // ── A22: engineering readouts and the Phone button stay out of the way ────────────────

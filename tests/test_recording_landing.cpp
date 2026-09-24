@@ -77,3 +77,40 @@ TEST_CASE ("loop_stop's receipt says what the stop did", "[recording]")
     REQUIRE (stuck.startsWith ("Still recording"));
     REQUIRE_FALSE (stuck.startsWith ("Stopped"));
 }
+
+TEST_CASE ("a loop toggle mid-take finalizes before .looping changes", "[recording]")
+{
+    using mosh::recording::shouldFinalizeBeforeLoopToggle;
+
+    // Recording, and the requested value actually differs from the current one: this is
+    // set_transport {loop} landing on a live take (2026-09-24 finding a).
+    REQUIRE (shouldFinalizeBeforeLoopToggle (true, false, true));
+    REQUIRE (shouldFinalizeBeforeLoopToggle (true, true, false));
+
+    // Recording, but the requested value is what it already is: JUCE's CachedValue only
+    // fires stopIfRecording on a real change, so there is nothing to finalize.
+    REQUIRE_FALSE (shouldFinalizeBeforeLoopToggle (true, true, true));
+    REQUIRE_FALSE (shouldFinalizeBeforeLoopToggle (true, false, false));
+
+    // Not recording: nothing for a loop toggle to interrupt.
+    REQUIRE_FALSE (shouldFinalizeBeforeLoopToggle (false, false, true));
+    REQUIRE_FALSE (shouldFinalizeBeforeLoopToggle (false, true, false));
+}
+
+TEST_CASE ("an input-monitor change mid-take is deferred, not finalized", "[recording]")
+{
+    using mosh::recording::shouldDeferMonitorChange;
+
+    // Recording, and the requested mode actually differs: applying it now would run
+    // Tracktion's restartAllTransports -> stopIfRecording and cut the take short
+    // (2026-09-24 finding c) -- so defer instead of finalizing.
+    REQUIRE (shouldDeferMonitorChange (true, true));
+
+    // Recording, but the mode is unchanged: setMonitorMode itself no-ops, so there is
+    // nothing to defer.
+    REQUIRE_FALSE (shouldDeferMonitorChange (true, false));
+
+    // Not recording: apply immediately, same as always.
+    REQUIRE_FALSE (shouldDeferMonitorChange (false, true));
+    REQUIRE_FALSE (shouldDeferMonitorChange (false, false));
+}

@@ -29,6 +29,10 @@ describe("bridge mock: a Booth pass ended from outside the Booth", () => {
     // it used to skip the finalize and leave the pass "in flight" (review of PR #730).
     ["Shift+Space", "set_transport", { action: "continue" }],
     ["a bare stop_recording", "stop_recording", {}],
+    // A loop toggle mid-take, with the real range menuActions.ts's loopToggleArgs always
+    // sends -- Tracktion's own stopIfRecording (2026-09-24 finding a) is a stop too.
+    ["a loop toggle (set_transport {loop, loopStart, loopEnd})", "set_transport",
+      { loop: true, loopStart: 0, loopEnd: 8 }],
   ] as const)("registers as a Part when %s ends it", async (_how, command, args) => {
     const { takesId } = await boothWithVocal();
     const rec = await exec("loop_record");
