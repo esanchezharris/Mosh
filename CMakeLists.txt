@@ -598,8 +598,14 @@ if (MOSH_BUILD_APP)
             VERBATIM)
 
         # P1 preset seam — stage the bundled instrument preset bank the same way
-        # (MoshOps::presetsBundledRoot resolves Contents/Resources/presets).
+        # (MoshOps::presetsBundledRoot resolves Contents/Resources/presets). The bundle
+        # copy is REPLACED, not merged: copy_directory never deletes, so a renamed or
+        # removed preset would otherwise linger in an incrementally built app (the
+        # 2026-09-23 rename of mosh-*.json to Keys/Bass/Pad/Lead/Pluck would list ten).
+        # User presets live in ~/Library/Mosh/presets, never in the bundle.
         add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                    "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/presets"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                     "${CMAKE_SOURCE_DIR}/resources/presets"
                     "$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/presets"

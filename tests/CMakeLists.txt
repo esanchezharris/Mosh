@@ -8,6 +8,10 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
+    # N3 — no non-ASCII bytes inside src/ string literals (reads the source tree).
+    test_utf8_literals.cpp
+    # N1 — the macOS menu bar rebuilds only when File > Open Recent changed.
+    test_recent_menu_signature.cpp
     test_session_paths.cpp
     test_audio_device_startup.cpp
     test_webview_camera_permission.cpp
@@ -135,7 +139,9 @@ target_compile_definitions(MoshTests PRIVATE
     MOSH_GIT_COMMIT_STRING="${MOSH_GIT_COMMIT}"
     MOSH_GIT_STATE_STRING="${MOSH_GIT_STATE}"
     MOSH_BUILD_ARCHITECTURE_STRING="${MOSH_BUILD_ARCHITECTURE}"
-    MOSH_BUILD_CONFIGURATION_STRING="$<CONFIG>")
+    MOSH_BUILD_CONFIGURATION_STRING="$<CONFIG>"
+    # test_utf8_literals.cpp scans the checkout's own src/ tree.
+    MOSH_SOURCE_DIR_STRING="${CMAKE_SOURCE_DIR}")
 
 target_link_libraries(MoshTests PRIVATE
     Catch2::Catch2WithMain

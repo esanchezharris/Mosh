@@ -111,7 +111,7 @@ export const CHORD_PROGRESSION: readonly (readonly number[])[] = [
   [55, 59, 62],   // G
 ];
 const CHORD_VELOCITY = 90;
-const KEYS_PRESET = /keys/i;   // the bundled 4OSC patch: "mosh-keys" today, "Keys" once renamed
+const KEYS_PRESET = /keys/i;   // the bundled 4OSC patch "Keys" (resources/presets/4osc/Keys.json)
 
 export type DroppedChords = { trackId: string; clipId: string; noteCount: number; preset: string | null };
 

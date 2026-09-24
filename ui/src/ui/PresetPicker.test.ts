@@ -62,7 +62,7 @@ describe("PresetPicker against the mock backend", () => {
       await flush();
       const select = host.querySelector('[data-testid="preset-pick"]') as HTMLSelectElement;
       await act(async () => {
-        select.value = "/presets/4osc/mosh-bass.json";
+        select.value = "/presets/4osc/Bass.json";
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
       await flush();
@@ -71,6 +71,6 @@ describe("PresetPicker against the mock backend", () => {
     expect(onLoaded).not.toHaveBeenCalled();
     await pick(withSynth!.id);
     expect(onLoaded).toHaveBeenCalledTimes(1);
-    expect(onLoaded).toHaveBeenCalledWith({ name: "mosh-bass", file: "/presets/4osc/mosh-bass.json" });
+    expect(onLoaded).toHaveBeenCalledWith({ name: "Bass", file: "/presets/4osc/Bass.json" });
   });
 });

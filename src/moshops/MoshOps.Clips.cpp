@@ -604,7 +604,7 @@ juce::var MoshOps::cmdConsolidateClips (const juce::var& args)
     }
     if (midiCount > 0 && waveCount > 0)
         return errResult ("consolidate_clips",
-            "a mixed MIDI + audio selection can't consolidate — consolidate per type (Live's rule)");
+            juce::String (juce::CharPointer_UTF8 ("a mixed MIDI + audio selection can't consolidate \xe2\x80\x94 consolidate per type (Live's rule)")));
 
     double spanStart = std::numeric_limits<double>::max();
     double spanEnd   = std::numeric_limits<double>::lowest();
@@ -631,7 +631,7 @@ juce::var MoshOps::cmdConsolidateClips (const juce::var& args)
             const auto pos = c->getPosition();
             if (pos.getEnd().inSeconds() > spanStart + 1.0e-4 && pos.getStart().inSeconds() < spanEnd - 1.0e-4)
                 return errResult ("consolidate_clips",
-                    "an unselected clip overlaps the span — include it or move it before consolidating");
+                    juce::String (juce::CharPointer_UTF8 ("an unselected clip overlaps the span \xe2\x80\x94 include it or move it before consolidating")));
         }
 
         static int consolidateSeq = 0;
@@ -1081,7 +1081,7 @@ juce::var MoshOps::cmdNormalizeClip (const juce::var& args)
         : findSourcePeak (*reader,
                            (juce::int64) std::llround (span.startSec * reader->sampleRate),
                            (juce::int64) std::llround ((span.startSec + span.lengthSec) * reader->sampleRate));
-    if (peakLinear <= 0.0f) return errResult ("normalize_clip", "clip is silent (peak 0) — nothing to normalize");
+    if (peakLinear <= 0.0f) return errResult ("normalize_clip", juce::String (juce::CharPointer_UTF8 ("clip is silent (peak 0) \xe2\x80\x94 nothing to normalize")));
 
     const double targetDb = args.hasProperty ("targetDb") ? (double) args.getProperty ("targetDb", 0.0) : 0.0;
     const float peakDb = juce::Decibels::gainToDecibels (peakLinear);

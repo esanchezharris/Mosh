@@ -151,7 +151,7 @@ inline DrumPatternResult parseDrumPattern (const juce::var& pattern,
         if (totalSteps % l.chars.length() != 0)
             return fail ("lane \"" + l.key + "\" (" + juce::String (l.chars.length())
                          + " steps) doesn't divide the pattern (" + juce::String (totalSteps)
-                         + " steps) — can't tile");
+                         + juce::String (juce::CharPointer_UTF8 (" steps) \xe2\x80\x94 can't tile")));
     }
 
     for (const auto& l : lanes)

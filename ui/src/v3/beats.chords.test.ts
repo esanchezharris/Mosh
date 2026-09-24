@@ -118,7 +118,7 @@ describe("dropChords against the mock backend", () => {
   });
 
   it("keeps the chords when there is no Keys preset (best effort) — still one undo step", async () => {
-    override = (c) => (c === "list_presets" ? { ok: true, command: c, data: { presets: [{ name: "mosh-bass", file: "/presets/4osc/mosh-bass.json" }] } } : null);
+    override = (c) => (c === "list_presets" ? { ok: true, command: c, data: { presets: [{ name: "Bass", file: "/presets/4osc/Bass.json" }] } } : null);
     const before = st().snapshot!.tracks.length;
     const dropped = await dropChords();
     expect(dropped).not.toBeNull();

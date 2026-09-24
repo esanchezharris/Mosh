@@ -162,7 +162,7 @@ bool MoshOps::resolveLorasKey (const juce::ValueTree& node, juce::String& lorasK
         if (it == byName.end() || ! (bool) it->second.getProperty ("valid", false))
         {
             const auto dir = reg.getProperty ("dir", "~/Library/Mosh/loras/sa3").toString();
-            err = "LoRA '" + name + "' not found — drop the .safetensors in " + dir;
+            err = "LoRA '" + name + juce::String (juce::CharPointer_UTF8 ("' not found \xe2\x80\x94 drop the .safetensors in ")) + dir;
             return false;
         }
         lorasKey << name << "=" << row[ids::value].toString()
@@ -231,7 +231,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
             return errResult ("set_render_param", "Direct Re-Imagine supports prompt, amount, seed and supported Colors/LoRAs only.");
         if ((args.hasProperty ("nl") && (! std::isfinite ((double) args["nl"]) || (double) args["nl"] < 0.01 || (double) args["nl"] > 0.5))
             || (args.hasProperty ("seed") && (! std::isfinite ((double) args["seed"]) || (double) args["seed"] < 0 || (double) args["seed"] > 2147483647.0 || std::floor ((double) args["seed"]) != (double) args["seed"])))
-            return errResult ("set_render_param", "Amount must be 0.01–0.5 and seed a nonnegative integer.");
+            return errResult ("set_render_param", juce::String (juce::CharPointer_UTF8 ("Amount must be 0.01\xe2\x80\x93" "0.5 and seed a nonnegative integer.")));
     }
     beginTxn ("set_render_param");
     auto params = node.getChildWithName (ids::PARAMS);
@@ -2235,7 +2235,7 @@ juce::var MoshOps::cmdCancelRender (const juce::var& args)
     {
         node.setProperty (ids::status, "dirty", nullptr);
         node.setProperty (ids::renderError, cancelled ? juce::String()
-            : juce::String ("cancel was not acknowledged by the generative service — it may still be rendering"), nullptr);
+            : juce::String (juce::CharPointer_UTF8 ("cancel was not acknowledged by the generative service \xe2\x80\x94 it may still be rendering")), nullptr);
     }
     logLine ("cancel_render", args, cancelled, {}, false);
     emitSnapshotInvalidated();
