@@ -8257,6 +8257,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! meterOn (mt), "undo removes the meter tap");
         cmd (ops, "redo");
         check (meterOn (mt), "redo restores the meter tap");
+
+        // METER-UAF (2026-09-23 '+ Chords' heap corruption): a meter plugin OUTLIVES its
+        // track. The PluginCache keeps it for up to a second and the live playback graph
+        // keeps it until the NEXT rebuild, whose teardown runs LevelMeterPlugin::deinitialise
+        // -> LevelMeasurer::clear() -> Client::reset() on every registered client (and the
+        // audio thread writes them until the swap). The telemetry reconcile used to drop a
+        // vanished track's tap WITHOUT removeClient ("its measurer is already gone") and free
+        // a Client that measurer still pointed at. Headless has no graph, so this holds the
+        // plugin the way the graph does, and asks the measurer whether it still has a client
+        // without touching one: processBuffer on a ZERO-channel buffer sets
+        // numActiveChannels = 0 only when a client is registered, and writes to none.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            auto pumpTelemetry = [mm]
+            {
+                // several 30 Hz MoshOps ticks: each one runs reconcileMeterClients
+                const auto end = Time::getMillisecondCounter() + 200;
+                while (Time::getMillisecondCounter() < end)
+                    if (mm != nullptr) mm->runDispatchLoopUntil (20); else Thread::sleep (20);
+            };
+            auto hasClient = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> none (0, 0);
+                m.processBuffer (none, 0, 0);
+                return m.getNumActiveChannels() == 0;
+            };
+            const auto ghostId = cmd (ops, "create_track", args1 ("name", "Meter Ghost"))
+                                     ["data"].getProperty ("trackId", var()).toString();
+            te::Plugin::Ptr held;   // what the playback graph's PluginNode (and the PluginCache) hold
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == ghostId)
+                    for (auto* p : t->pluginList.getPlugins())
+                        if (dynamic_cast<te::LevelMeterPlugin*> (p) != nullptr) held = p;
+            auto* ghostMeter = dynamic_cast<te::LevelMeterPlugin*> (held.get());
+            check (ghostMeter != nullptr, "METER-UAF: a new track carries a level-meter tap");
+            if (ghostMeter != nullptr)
+            {
+                pumpTelemetry();
+                check (hasClient (ghostMeter->measurer),
+                       "METER-UAF: the telemetry registered its client on the new meter (the probe sees it)");
+                ghostMeter->measurer.clear();   // the client is alive here; resets the probe to 1
+                check (ok (cmd (ops, "undo")), "METER-UAF: undo removes the metered track");
+                check (trackById (ghostId).isVoid(), "METER-UAF: the track is gone from the snapshot");
+                pumpTelemetry();
+                check (! hasClient (ghostMeter->measurer),
+                       "METER-UAF: the removed track's still-alive meter holds NO client after telemetry drops its tap");
+            }
+            held = nullptr;
+        }
     }
 
     // ─── METER-001: every track-creation path auto-meters (coverage gap fix) ───

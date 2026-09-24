@@ -937,7 +937,41 @@ private:
     int                  allocateBusNumber();
 
     // ── metering (Wave 9): a level-meter tap + registered measurer client / track ──
-    struct MeterTap { te::LevelMeterPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
+    // A LevelMeasurer keeps a RAW Client* for every client added to it, and the measurer
+    // outlives the track it meters: the PluginCache holds a removed plugin for up to a
+    // second, and the live playback graph holds it until the NEXT rebuild, whose teardown
+    // runs LevelMeterPlugin::deinitialise -> LevelMeasurer::clear() -> Client::reset() on
+    // every registered client (the audio thread also writes them until the graph swaps).
+    // Freeing a Client that is still registered is a heap-use-after-free WRITE — the
+    // 2026-09-23 '+ Chords' crashes (an undo removed a metered track; the next edit's
+    // rebuild wrote into the freed tap). So the tap owns its registration: `measurer` is a
+    // WEAK reference to the measurer `client` is registered with (null once that measurer
+    // is destroyed, which happens on the message thread), and the destructor removes the
+    // client from it when it still exists. removeClient takes the measurer's clientsMutex,
+    // the same lock processBuffer holds while it walks the clients, so once it returns no
+    // thread can touch `client` again. Erasing a tap from a map is therefore always safe.
+    struct MeterTap
+    {
+        MeterTap() = default;
+        ~MeterTap() { detach(); }
+        bool isAttachedTo (const te::LevelMeasurer& m) const noexcept { return measurer.get() == &m; }
+        void attach (te::LevelMeasurer& m)
+        {
+            if (isAttachedTo (m)) return;
+            detach();
+            m.addClient (client);
+            measurer = &m;
+        }
+        void detach()
+        {
+            if (auto* live = measurer.get())
+                live->removeClient (client);
+            measurer = nullptr;
+        }
+        juce::WeakReference<te::LevelMeasurer> measurer;
+        te::LevelMeasurer::Client client;
+        JUCE_DECLARE_NON_COPYABLE (MeterTap)
+    };
     struct SendMeterKey
     {
         juce::String trackId;
@@ -949,7 +983,7 @@ private:
             return trackOrder < 0 || (trackOrder == 0 && bus < other.bus);
         }
     };
-    struct SendMeterTap { te::AuxSendPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
+    using SendMeterTap = MeterTap;   // an AuxSendPlugin's measurer: the same lifetime rule
     te::LevelMeterPlugin* ensureTrackMeter (te::AudioTrack&);
     te::LevelMeterPlugin* findTrackMeter (te::AudioTrack&);
     // ── CAP-AUT-006: the per-track mute gate ── a hidden mixer element carrying the one
