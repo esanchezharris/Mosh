@@ -9,6 +9,8 @@ import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { useTaskStore, type TaskView } from "../agent/loop/taskStore";
 import { useProducerRack } from "../agent/loop/producerRack";
 import type { ChangeSet } from "../agent/executor";
+import { __resetMockForTests } from "../bridge.mock";
+import { noteUndoHeadMove, undoHeadMark } from "../agent/undoHead";
 
 vi.mock("../vendor/moshi.js", () => ({}));
 vi.mock("../bridge", async () => {
@@ -33,6 +35,8 @@ vi.mock("../agent/loop/runTask", async () => {
 
 const requestMic = vi.mocked(requestMicrophonePermission);
 const originalExec = useStore.getState().exec;
+const originalRefresh = useStore.getState().refresh;
+const realSetAgentChangeSet = useStore.getState().setAgentChangeSet;
 
 /** Type into the React-controlled dock field and press Send. */
 async function ask(host: HTMLElement, text: string): Promise<void> {
@@ -90,7 +94,7 @@ describe("v3 Moshi dock", () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
-    useStore.setState({ exec: originalExec, snapshot: null });
+    useStore.setState({ exec: originalExec, refresh: originalRefresh, snapshot: null });
     useTaskStore.setState({ current: null, signal: null });
     useProducerRack.setState({ rack: null });
     vi.unstubAllEnvs();
@@ -273,5 +277,243 @@ describe("v3 Moshi dock", () => {
   it("A9 scope: the dock field opts in to owning ⌘Z/⌘X/⌘C/⌘V from the native menu", async () => {
     await mount();
     expect(host.querySelector('[data-testid="v3-moshi-field"]')?.hasAttribute("data-owns-edit-keys")).toBe(true);
+  });
+
+  // ── demo readiness round 2 (2026-09-23) ────────────────────────────────────────────
+  // D2: the receipt's Undo is a plain `undo`, so it is honest only while the receipt's own
+  // batch is the undo head. In the real app "Set tempo to 90 BPM / Undo" stayed up after
+  // + Drum beat and a fader move, and its Undo would have reverted the fader instead.
+
+  const tempoReceipt = (): ChangeSet => ({
+    label: "set the tempo to 90",
+    applied: 1,
+    entries: [{ index: 0, command: "set_tempo", summary: "Set tempo to 90 BPM", ok: true }],
+  });
+  const receipt = () => host.querySelector('[data-testid="v3-receipt"]');
+  // The REAL store exec over the dev mock — the one funnel every toolbar, fader and key uses.
+  const manual = async (command: string, args: Record<string, unknown> = {}) => {
+    let ok = false;
+    await act(async () => { ok = (await useStore.getState().exec(command, args)).ok; });
+    return ok;
+  };
+
+  it("D2: a later manual undoable edit retires the receipt; transport and preferences do not", async () => {
+    __resetMockForTests();
+    useStore.setState({
+      agentChangeSet: tempoReceipt(),
+      setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }),
+    });
+    await mount();
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    // Play, the click and a failed edit leave the undo head on the receipt's batch.
+    expect(await manual("set_transport", { playing: true })).toBe(true);
+    expect(await manual("set_metronome", { enabled: true })).toBe(true);
+    expect(await manual("add_drum_pattern", { pattern: "" })).toBe(false);
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    // + Drum beat: the head moves past the receipt's batch, so the receipt goes.
+    expect(await manual("add_drum_pattern", { pattern: "kick: x...x...x...x..." })).toBe(true);
+    expect(receipt()).toBeNull();
+    expect(useStore.getState().agentChangeSet).toBeNull();
+  });
+
+  it("D2: a fader move retires it too", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const trackId = useStore.getState().snapshot!.tracks[0].id;
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(receipt()).not.toBeNull();
+    expect(await manual("set_track_volume", { trackId, db: -3 })).toBe(true);
+    expect(receipt()).toBeNull();
+  });
+
+  it("D2: the reply caption that came with the receipt retires with it; a new ask's reply is kept", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    useStore.setState({
+      setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }),
+      setAgentBusy: (b) => useStore.setState({ agentBusy: b }),
+    });
+    await mount();
+    const dock = () => host.querySelector('[data-testid="v3-moshi-dock"]')?.textContent ?? "";
+
+    await ask(host, "set the tempo to 90");   // the fast path: a caption plus a receipt
+    expect(useStore.getState().snapshot?.session.tempo).toBe(90);
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    expect(await manual("add_drum_pattern", { pattern: "kick: x...x...x...x..." })).toBe(true);
+    expect(receipt()).toBeNull();
+    expect(dock()).not.toMatch(/90 bpm/i);   // no leftover caption standing in for the receipt
+
+    // A new ask retires the receipt through the same store path; its own reply must survive.
+    await ask(host, "set the tempo to 92");
+    expect(receipt()?.textContent).toContain("92");
+    await ask(host, "hey moshi");
+    expect(receipt()).toBeNull();
+    expect(dock()).toContain(DOCK_HELLO);
+  });
+
+  it("D2: a manual ⌘Z retires it (the receipt's batch may be what was just undone)", async () => {
+    __resetMockForTests();
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(receipt()).not.toBeNull();
+    expect(await manual("undo")).toBe(true);
+    expect(receipt()).toBeNull();
+  });
+  // ── round-2 review follow-ups (2026-09-23) ─────────────────────────────────────────
+  // U1: V3 ends every recording through set_transport (TopBar Record → Record, Play/Pause and
+  // Stop). While a take is recording, MoshOps finalizes it first and Tracktion lands the clip
+  // through the Edit's own UndoManager — a new undo step — so the receipt's plain `undo` would
+  // revert the take. Arming and starting the take are not edits.
+  const clipCount = () => (useStore.getState().snapshot?.tracks ?? []).reduce((n, t) => n + t.clips.length, 0);
+
+  it("U1: Record → Record that lands a take retires the receipt; arming and rolling do not", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const before = clipCount();
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+
+    await act(async () => { await useStore.getState().toggleRecord(); });   // TopBar Record: arm + roll
+    expect(useStore.getState().transport.recording).toBe(true);
+    expect(useStore.getState().agentChangeSet, "arming and rolling leave the undo head alone").not.toBeNull();
+
+    await act(async () => { await useStore.getState().toggleRecord(); });   // TopBar Record again: the take lands
+    await act(async () => { await useStore.getState().refresh(); });
+    expect(useStore.getState().transport.recording).toBe(false);
+    expect(clipCount(), "the take really landed").toBeGreaterThan(before);
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    expect(receipt()).toBeNull();
+  });
+
+  it("U1: the transport Stop that ends a recording retires it; a Stop while only playing does not", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+
+    expect(await manual("set_transport", { action: "play" })).toBe(true);
+    expect(await manual("set_transport", { action: "stop" })).toBe(true);
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+
+    await act(async () => { await useStore.getState().toggleRecord(); });
+    expect(useStore.getState().transport.recording).toBe(true);
+    const before = clipCount();
+    expect(await manual("set_transport", { action: "stop" })).toBe(true);    // TopBar ■ while recording
+    await act(async () => { await useStore.getState().refresh(); });
+    expect(clipCount(), "the take really landed").toBeGreaterThan(before);
+    expect(useStore.getState().agentChangeSet).toBeNull();
+  });
+
+  // U2: store/mp.ts sends these by itself — the claim on every track click, the commit every
+  // 20 s in a session. Round-3 review (Q2): the commit repoints each wave clip to its by-hash copy,
+  // and SourceFileReference writes through the Edit's own UndoManager — a new undo step — so the
+  // commit retires the receipt (the harmless direction: its batch stays in History and on ⌘Z).
+  it("U2/Q2: multiplayer's automatic track claim leaves the receipt up; a commit retires it", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const trackId = useStore.getState().snapshot!.tracks[0].id;
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(await manual("mp_claim_track", { trackId })).toBe(true);
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+    expect(await manual("mp_commit_track", { trackId })).toBe(true);
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    expect(receipt()).toBeNull();
+  });
+
+  // Q3: an export detaches the Edit with transport.stop(false, false), which lands a take still
+  // recording (Tracktion's own undo step); Save As does too, and its audio consolidation repoints
+  // clip sources even when nothing is recording. The V3 File menu offers all three mid-take.
+  it("Q3: an export while idle leaves the receipt up; an export mid-take retires it", async () => {
+    for (const command of ["export_audio", "export_stems"]) {
+      __resetMockForTests();
+      await useStore.getState().refresh();
+      useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+      await mount();
+      expect(await manual(command, { file: "/mock/q3-idle.wav" }), command).toBe(true);
+      expect(receipt()?.textContent, `${command} while idle`).toContain("Set tempo to 90 BPM");
+
+      await act(async () => { await useStore.getState().toggleRecord(); });
+      expect(useStore.getState().transport.recording).toBe(true);
+      expect(await manual(command, { file: "/mock/q3-mid-take.wav" }), command).toBe(true);
+      expect(useStore.getState().agentChangeSet, `${command} mid-take`).toBeNull();
+      await act(async () => { await useStore.getState().toggleRecord(); });   // end the take
+      expect(useStore.getState().transport.recording).toBe(false);
+    }
+  });
+
+  it("Q3: Save As retires the receipt, recording or not", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(useStore.getState().transport.recording).toBe(false);
+    expect(await manual("save_as", { file: "/mock/q3-save-as.mosh" })).toBe(true);
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    expect(receipt()).toBeNull();
+  });
+
+  // U3: the dock clears the old receipt when an ask starts, and runAgentBatch hands back the new
+  // one only after `await refresh()` that follows batch_end. The toolbar stays live meanwhile,
+  // so a fader move can land in that window — with no receipt up to retire. Setting the new
+  // receipt afterwards would put an Undo on screen that reverts the FADER.
+  const faderDuringRefresh = (trackId: string) => {
+    const state = { sawBatchEnd: false, moved: false };
+    useStore.setState({
+      exec: async (command, args, transaction, origin) => {
+        const res = await originalExec(command, args, transaction, origin);
+        if (command === "batch_end") state.sawBatchEnd = true;
+        return res;
+      },
+      refresh: async () => {
+        await originalRefresh();
+        if (state.sawBatchEnd && !state.moved) {
+          state.moved = true;
+          expect((await originalExec("set_track_volume", { trackId, db: -3 })).ok).toBe(true);
+        }
+      },
+    });
+    return state;
+  };
+
+  it("U3: an edit that lands between the batch's end and its receipt keeps that receipt off", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    const trackId = useStore.getState().snapshot!.tracks[0].id;
+    useStore.setState({ setAgentChangeSet: realSetAgentChangeSet, setAgentBusy: (b) => useStore.setState({ agentBusy: b }) });
+    const fader = faderDuringRefresh(trackId);
+    await mount();
+
+    await ask(host, "set the tempo to 90");
+    expect(fader.moved, "the fader landed inside the window (anti-vacuity)").toBe(true);
+    expect(useStore.getState().snapshot?.session.tempo).toBe(90);          // the batch itself applied
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    expect(receipt()).toBeNull();
+  });
+
+  it("U3: with nothing in that window the real setter keeps the receipt (the check is not a blanket drop)", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    useStore.setState({ setAgentChangeSet: realSetAgentChangeSet, setAgentBusy: (b) => useStore.setState({ agentBusy: b }) });
+    await mount();
+    await ask(host, "set the tempo to 90");
+    expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+  });
+
+  it("U3: setAgentChangeSet refuses a change set stamped before the latest undo-head move; unstamped ones pass", () => {
+    useStore.setState({ setAgentChangeSet: realSetAgentChangeSet });
+    const set = useStore.getState().setAgentChangeSet;
+    const mark = undoHeadMark();
+    set({ ...tempoReceipt(), undoHeadMark: mark });
+    expect(useStore.getState().agentChangeSet?.undoHeadMark).toBe(mark);
+    noteUndoHeadMove();
+    set({ ...tempoReceipt(), undoHeadMark: mark });
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    set(tempoReceipt());                                                    // no batch behind it: nothing to check
+    expect(useStore.getState().agentChangeSet).not.toBeNull();
   });
 });

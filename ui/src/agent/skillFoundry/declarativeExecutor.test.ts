@@ -21,6 +21,7 @@ import type {
 } from "./contracts";
 import { executeDeclarativeSkillV1, type DeclarativeExecutionInputV1 } from "./declarativeExecutor";
 import type { ValidatedDeclarativeSkillV1 } from "./packageValidation";
+import { noteUndoHeadMove, undoHeadMark } from "../undoHead";
 
 // ---------------------------------------------------------------------------------------
 // FakeEngine — a small, faithful-enough simulation of the MoshOps batch-transaction protocol.
@@ -290,6 +291,32 @@ describe("executeDeclarativeSkillV1", () => {
     const outcome = await executeDeclarativeSkillV1(baseInput(engine, manifest()));
     expect(outcome).toMatchObject({ kind: "completed", skill: "owner-set-volume", version: "1.0.0", say: "done" });
     expect(engine.tracks[0]!.volumeDb).toBe(-6);
+  });
+
+  // Round-2 review, finding 4: the dock sets the receipt only after this outcome travels back
+  // through the runtime. The change set carries the undo-head mark its batch_end left, so the
+  // store can refuse it if a manual edit moved the head in between.
+  it("stamps the completed change set with the undo-head mark its own batch_end left", async () => {
+    const env = environmentFor(engine);
+    let atBatchEnd: number | null = null;
+    const input = baseInput(engine, manifest(), {
+      environment: {
+        ...env,
+        // What store.exec does in the app: every successful edit (and the batch_end) notes a move.
+        exec: async (command, args, transaction) => {
+          const res = await env.exec(command, args, transaction);
+          if (res.ok && (command === "set_track_volume" || command === "batch_end")) noteUndoHeadMove();
+          if (command === "batch_end") atBatchEnd = undoHeadMark();
+          return res;
+        },
+      },
+    });
+    const outcome = await executeDeclarativeSkillV1(input);
+    expect(outcome.kind).toBe("completed");
+    const changes = outcome.kind === "completed" ? outcome.changes : null;
+    expect(atBatchEnd).not.toBeNull();
+    expect(changes?.undoHeadMark).toBe(atBatchEnd);
+    expect(changes?.applied).toBe(1);
   });
 
   it("`never` proceeds straight through with zero continuations issued", async () => {
