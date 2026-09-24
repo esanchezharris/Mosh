@@ -784,8 +784,11 @@
    holds every variant to 4.5:1 in every colorway.
    Hover leaks the same way: mosh.css's `.btn:hover` sets --bone, which the default LIGHT theme
    makes near-black, on V3's dark button — so "Hear myself: Off" vanished under the pointer that
-   had just turned it off. V3 hover keeps V3 ink. (Before the pressed rule: pressed wins.) */
-.v3-shell .btn:not(.pri, .recb, .ghost):hover {
+   had just turned it off. V3 hover keeps V3 ink. (Before the pressed rule: pressed wins.)
+   The hover rule leaves every FILLED button alone — V3's own (.pri, .recb) and mosh's, which V3
+   renders in shared dialogs (.primary: Create session, Capture, Confirm; .danger; a recording
+   .rec). Those keep their fill on hover, so V3 ink on top read near-white on lime, 1:1 (Q1). */
+.v3-shell .btn:not(.pri, .recb, .ghost, .primary, .danger, .rec[data-state="recording"]):hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 35%, var(--fog-line));
 }

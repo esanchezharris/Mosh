@@ -408,16 +408,53 @@ describe("v3 Moshi dock", () => {
     expect(useStore.getState().agentChangeSet).toBeNull();
   });
 
-  // U2: store/mp.ts sends these by itself — on every track click and every 20 s in a session.
-  it("U2: multiplayer's automatic track claim and commit leave the receipt up", async () => {
+  // U2: store/mp.ts sends these by itself — the claim on every track click, the commit every
+  // 20 s in a session. Round-3 review (Q2): the commit repoints each wave clip to its by-hash copy,
+  // and SourceFileReference writes through the Edit's own UndoManager — a new undo step — so the
+  // commit retires the receipt (the harmless direction: its batch stays in History and on ⌘Z).
+  it("U2/Q2: multiplayer's automatic track claim leaves the receipt up; a commit retires it", async () => {
     __resetMockForTests();
     await useStore.getState().refresh();
     const trackId = useStore.getState().snapshot!.tracks[0].id;
     useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
     await mount();
     expect(await manual("mp_claim_track", { trackId })).toBe(true);
-    expect(await manual("mp_commit_track", { trackId })).toBe(true);
     expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
+    expect(await manual("mp_commit_track", { trackId })).toBe(true);
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    expect(receipt()).toBeNull();
+  });
+
+  // Q3: an export detaches the Edit with transport.stop(false, false), which lands a take still
+  // recording (Tracktion's own undo step); Save As does too, and its audio consolidation repoints
+  // clip sources even when nothing is recording. The V3 File menu offers all three mid-take.
+  it("Q3: an export while idle leaves the receipt up; an export mid-take retires it", async () => {
+    for (const command of ["export_audio", "export_stems"]) {
+      __resetMockForTests();
+      await useStore.getState().refresh();
+      useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+      await mount();
+      expect(await manual(command, { file: "/mock/q3-idle.wav" }), command).toBe(true);
+      expect(receipt()?.textContent, `${command} while idle`).toContain("Set tempo to 90 BPM");
+
+      await act(async () => { await useStore.getState().toggleRecord(); });
+      expect(useStore.getState().transport.recording).toBe(true);
+      expect(await manual(command, { file: "/mock/q3-mid-take.wav" }), command).toBe(true);
+      expect(useStore.getState().agentChangeSet, `${command} mid-take`).toBeNull();
+      await act(async () => { await useStore.getState().toggleRecord(); });   // end the take
+      expect(useStore.getState().transport.recording).toBe(false);
+    }
+  });
+
+  it("Q3: Save As retires the receipt, recording or not", async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    useStore.setState({ agentChangeSet: tempoReceipt(), setAgentChangeSet: (cs) => useStore.setState({ agentChangeSet: cs }) });
+    await mount();
+    expect(useStore.getState().transport.recording).toBe(false);
+    expect(await manual("save_as", { file: "/mock/q3-save-as.mosh" })).toBe(true);
+    expect(useStore.getState().agentChangeSet).toBeNull();
+    expect(receipt()).toBeNull();
   });
 
   // U3: the dock clears the old receipt when an ask starts, and runAgentBatch hands back the new

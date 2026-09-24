@@ -94,8 +94,39 @@ test("Hear myself: On is readable in every colorway", async ({ page }) => {
   expect(contrast(resting.ink, resting.ground), `off, at rest: ink ${resting.ink} on ${resting.ground}`).toBeGreaterThanOrEqual(AA);
 });
 
+// Round-3 review (Q1): the V3 hover rule recoloured the ink of EVERY .btn inside .v3-shell, and
+// mosh's filled .btn.primary keeps its --lime-glow fill on hover — so "Create session" in the V3
+// Invite dialog went near-white on lime (about 1:1) under the pointer. The real button, in every
+// colorway, at rest and hovered.
+test("Create session (a mosh .btn.primary) in the V3 Invite dialog is readable at rest and hovered", async ({ page }) => {
+  await bootV3(page);
+  expect(await page.evaluate(() => document.documentElement.getAttribute("data-theme"))).toBe("light");
+  await page.getByTestId("v3-mp-trigger").click();
+  const modal = page.getByTestId("mp-launcher-modal");
+  await expect(modal).toBeVisible();
+  const create = modal.getByRole("button", { name: "Create session" });
+  await expect(create).toHaveClass(/\bprimary\b/);
+  // Anti-vacuity: it really renders inside the V3 shell, where the V3 hover rule applies.
+  expect(await create.evaluate((el) => el.closest(".v3-shell") !== null)).toBe(true);
+  const shell = page.getByTestId("v3-shell");
+  for (const colorway of COLORWAYS) {
+    await shell.evaluate((el, c) => el.setAttribute("data-colorway", c), colorway);
+    for (const state of ["at rest", "hovered"] as const) {
+      if (state === "hovered") await create.hover();
+      else await page.mouse.move(1, 1);
+      const { ink, ground } = await inkAndGround(create);
+      expect(contrast(ink, ground), `${colorway} · Create session · ${state}: ink ${ink} on ${ground}`)
+        .toBeGreaterThanOrEqual(AA);
+    }
+  }
+});
+
 // Every other pressed .btn variant V3 styles, probed outside React in a standalone shell, so
-// the fix holds for the class and not just for the one button that was reported.
+// the fix holds for the class and not just for the one button that was reported. The filled
+// mosh variants V3 renders in shared dialogs (.primary, .danger) ride along (Q1): V3's hover
+// must leave their ink alone. (.danger is mosh's own white on --rec, 3.5:1 at rest in every
+// shell — below AA, but a shared-palette question outside this rule, so it is held only to
+// "hover does not recolour it".)
 test("every pressed V3 .btn variant is readable in every colorway", async ({ page }) => {
   await bootV3(page);
   await page.evaluate(() => {
@@ -109,18 +140,23 @@ test("every pressed V3 .btn variant is readable in every colorway", async ({ pag
       <div class="direct-reimagine"><button class="btn" aria-pressed="true" data-variant="Re-Imagine audition">D</button></div>
       <div class="booth-pads"><button class="btn pri on" data-variant="booth record pad (recording)">E</button></div>
       <button class="btn sm on" data-variant="btn.sm.on">F</button>
-      <button class="btn" data-variant="unpressed btn">G</button>`;
+      <button class="btn" data-variant="unpressed btn">G</button>
+      <button class="btn primary" data-filled data-variant="mosh .btn.primary (Create session, Capture, Confirm)">H</button>
+      <button class="btn danger" data-filled data-aa-exempt data-variant="mosh .btn.danger (a destructive Confirm)">I</button>`;
     document.body.appendChild(shell);
   });
   const probe = page.getByTestId("pressed-probe");
-  const variants = probe.locator("button");
-  await expect(variants).toHaveCount(7);
+  const variants = probe.locator("button:not([data-aa-exempt])");
+  const count = 8;
+  await expect(variants).toHaveCount(count);
+  const filled = probe.locator("button[data-filled]");
+  await expect(filled).toHaveCount(2);
   // The app's default theme is light (settings schema), which is what makes mosh.css's hover
   // ink dark; pin it so this check cannot pass by running under the dark theme.
   expect(await page.evaluate(() => document.documentElement.getAttribute("data-theme"))).toBe("light");
   for (const colorway of COLORWAYS) {
     await probe.evaluate((el, c) => el.setAttribute("data-colorway", c), colorway);
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < count; i++) {
       const button = variants.nth(i);
       const name = await button.getAttribute("data-variant");
       for (const state of ["at rest", "hovered"] as const) {
@@ -129,6 +165,16 @@ test("every pressed V3 .btn variant is readable in every colorway", async ({ pag
         const { ink, ground } = await inkAndGround(button);
         expect(contrast(ink, ground), `${colorway} · ${name} · ${state}: ink ${ink} on ${ground}`).toBeGreaterThanOrEqual(AA);
       }
+    }
+    // A filled mosh button keeps its own ink under the pointer (mosh's :hover rules keep it).
+    for (let i = 0; i < 2; i++) {
+      const button = filled.nth(i);
+      const name = await button.getAttribute("data-variant");
+      await page.mouse.move(1, 1);
+      const rest = await inkAndGround(button);
+      await button.hover();
+      const hovered = await inkAndGround(button);
+      expect(hovered.ink, `${colorway} · ${name}: hover recoloured the ink ${rest.ink} → ${hovered.ink}`).toEqual(rest.ink);
     }
   }
 });

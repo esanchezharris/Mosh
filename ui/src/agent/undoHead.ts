@@ -10,8 +10,8 @@
 // edit, so an unlisted command can at worst hide a receipt early (its batch is still in the
 // History list and on ⌘Z). An edit wrongly listed here would leave a stale Undo up, which is
 // the defect itself — undoHead.test.ts re-derives every listed native command from MoshOps and
-// fails if its handler opens an undo transaction, or lands a recorded take without being in
-// LANDS_TAKE_WHILE_RECORDING.
+// fails if its handler opens an undo transaction, rewrites a clip's source reference, or lands a
+// recorded take without being in LANDS_TAKE_WHILE_RECORDING.
 //
 // Known limit: this sees only commands that pass through the desktop WebView's store.exec. The
 // phone pad's actions and edits inside a native plugin editor window reach MoshOps directly.
@@ -40,12 +40,19 @@ export const KEEPS_UNDO_HEAD: ReadonlySet<string> = new Set([
   // Agent memory (non-undoable by design, AGT-MEM M1) — also written fire-and-forget right
   // after a batch, so listing them keeps that write from retiring the batch's own receipt.
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
-  // Persistence and the local issue log.
-  "save", "save_as", "export_audio", "export_stems",
+  // Persistence and the local issue log. The exports land a take that is still recording (see
+  // LANDS_TAKE_WHILE_RECORDING). Deliberately NOT here: save_as — MoshEngine::saveProjectAs
+  // stops the transport (landing a live take) and consolidates audio into the new folder, and
+  // both it and cmdSaveAs repoint clip sources (repointWaveClipSource), which Tracktion records
+  // on the Edit's own UndoManager as a new step even when nothing is recording.
+  "save", "export_audio", "export_stems",
   "report_issue", "update_issue", "export_issue", "attach_issue_file",
-  // Multiplayer signalling. store/mp.ts sends the track claim/commit by itself — on every track
-  // click and every 20 s in a session — and MoshOps logs both undoable:false with no txn.
-  "mp_broadcast_selection", "mp_send_signal", "mp_claim_track", "mp_commit_track",
+  // Multiplayer signalling. store/mp.ts claims the track on every track click; the claim only
+  // stamps a logical id (null UndoManager). Deliberately NOT here: mp_commit_track, which
+  // store/mp.ts sends every 20 s in a session — it repoints each wave clip to its by-hash copy
+  // (SourceFileReference, written through the Edit's UndoManager: a new step 350 ms later), so
+  // it retires a receipt. That is the harmless direction; the batch stays on ⌘Z and in History.
+  "mp_broadcast_selection", "mp_send_signal", "mp_claim_track",
 ]);
 
 /** KEEPS_UNDO_HEAD entries that land a recorded take when they run WHILE RECORDING.
@@ -54,8 +61,12 @@ export const KEEPS_UNDO_HEAD: ReadonlySet<string> = new Set([
  *  new undo step with no beginTxn anywhere. V3 ends every recording this way (TopBar Record →
  *  Record, Play/Pause, Stop). While recording, ANY set_transport counts — a seek mid-take hides
  *  the receipt early, which is the harmless direction (the dock hides it while recording
- *  anyway). stop_recording itself is not listed at all, so it always counts. */
-export const LANDS_TAKE_WHILE_RECORDING: ReadonlySet<string> = new Set(["set_transport"]);
+ *  anyway). The exports detach the Edit for their render with transport.stop(false, false),
+ *  which lands the live take the same way; the V3 File menu offers them mid-take.
+ *  stop_recording itself is not listed at all, so it always counts. */
+export const LANDS_TAKE_WHILE_RECORDING: ReadonlySet<string> = new Set([
+  "set_transport", "export_audio", "export_stems",
+]);
 
 export type UndoHeadContext = {
   /** The store's transport.recording BEFORE the command ran. */
