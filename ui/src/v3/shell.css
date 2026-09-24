@@ -735,3 +735,41 @@
   .v3-shell .booth-details > summary::before { transition: none; }
 }
 /* demo-fixes:booth-reimagine end */
+
+/* demo-round2:recovery begin */
+/* The crash-recovery notice (D1): one calm line under the top bar. The orphan takes a crash
+   left on disk sit behind a disclosure, and the open list scrolls in place rather than
+   pushing the timeline down. */
+.v3-shell .v3-recovery {
+  flex-shrink: 0; margin: 6px 12px 0; padding: 5px 6px 5px 10px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--fog-line);
+  font-size: 11px; color: var(--muted);
+}
+.v3-shell .v3-recovery.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--fog-line)); }
+.v3-shell .v3-recovery-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.v3-shell .v3-recovery-lead { color: var(--text); }
+.v3-shell .v3-recovery-sep { color: var(--fog-label); }
+.v3-shell .v3-recovery-fill { flex: 1; }
+.v3-shell .v3-recovery-disclosure {
+  padding: 0; border: none; background: transparent; font: inherit; color: var(--muted);
+  cursor: pointer;
+}
+.v3-shell .v3-recovery-disclosure::before {
+  content: "›"; display: inline-block; margin-right: 5px; transition: transform .15s var(--ease-out);
+}
+.v3-shell .v3-recovery-disclosure[aria-expanded="true"]::before { transform: rotate(90deg); }
+@media (hover: hover) and (pointer: fine) {
+  .v3-shell .v3-recovery-disclosure:hover { color: var(--text); }
+}
+.v3-shell .v3-recovery-residue {
+  display: flex; flex-direction: column; gap: 3px;
+  margin: 6px 0 1px; padding: 6px 0 0; list-style: none;
+  max-height: 30vh; overflow-y: auto; border-top: 1px solid var(--fog-line);
+}
+.v3-shell .v3-recovery-residue li { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.v3-shell .v3-recovery-take { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .v3-recovery-take em { color: var(--text); font-style: normal; }
+@media (prefers-reduced-motion: reduce) {
+  .v3-shell .v3-recovery-disclosure::before { transition: none; }
+}
+/* demo-round2:recovery end */

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useStore } from "../store";
-import type { Snapshot } from "../types";
+import type { RecordingResidueEntry, Snapshot } from "../types";
 
 /** Pure visibility rule (testable without a DOM): show when the backend flagged an unclean
  *  prior exit, OR when a third-party plugin is implicated in a crash, OR when a transaction
@@ -49,8 +50,16 @@ export function safeModeOffer(snapshot: Snapshot | null): {
  *  already restored the last good save. When the A3 journal has replayable unsaved work
  *  (recoverableCount > 0) we offer "Recover" (recover_session replays the tail); otherwise the
  *  notice is informational. Either way "Dismiss" clears it (discard_recovery drops the tail).
- *  Dismissal is UI-local view state; the commands cross the bridge. */
-export function RecoveryNotice() {
+ *  Dismissal is UI-local view state; the commands cross the bridge.
+ *
+ *  `compact` (the V3 shell) keeps every action but not the volume: one calm line — "Restored
+ *  from the last auto-save", the Recover action when there is unsaved work to replay, and
+ *  Dismiss — with the crash's orphan takes behind a collapsed "N older recordings are still on
+ *  disk" disclosure. After a real crash that list ran to 15 takes, each with two buttons, as a
+ *  four-line red strip over the timeline. Expanding it shows the same per-take Recover take /
+ *  Set aside, still one explicit decision per file; nothing is decided by opening it. */
+export function RecoveryNotice({ compact = false }: { compact?: boolean }) {
+  const [residueOpen, setResidueOpen] = useState(false);
   const snapshot = useStore((s) => s.snapshot);
   const dismissed = useStore((s) => s.recoveryDismissed);
   const dismiss = useStore((s) => s.dismissRecovery);
@@ -97,6 +106,84 @@ export function RecoveryNotice() {
     await refresh();
   };
 
+  const residueDetail = (r: RecordingResidueEntry) =>
+    r.readable || r.repairable ? ` (${r.seconds.toFixed(1)} s, ${r.trackName || "no track"})` : " (unreadable)";
+  const residueActions = (r: RecordingResidueEntry, className?: string) => (
+    <>
+      {r.decision === "adopt" && (
+        <button type="button" className={className} onClick={() => void onAdopt(r.file)} style={{ marginLeft: 4 }}
+          data-testid="recovery-residue-adopt">Recover take</button>
+      )}
+      <button type="button" className={className} onClick={() => void onQuarantine(r.file)} style={{ marginLeft: 4 }}
+        data-testid="recovery-residue-quarantine">Set aside</button>
+    </>
+  );
+
+  if (compact) {
+    const warn = safe.active || !unclean;
+    const lead = safe.active
+      ? `⚠ Opened without your third-party plugins — the last launch crashed while loading ${
+        safe.suspects.length > 0 ? safe.suspects.join(", ") : "them"}. Read-only until you reopen it normally.`
+      : unclean
+        ? "↩ Restored from the last auto-save"
+        : blockedTxns > 0
+          ? `⚠ ${blockedTxns} unfinished edit${blockedTxns === 1 ? "" : "s"} from a previous run ${
+            blockedTxns === 1 ? "is" : "are"} blocking Moshi — your project is untouched; Dismiss clears ${
+            blockedTxns === 1 ? "it" : "them"}.`
+          : "⚠ The last launch crashed while loading a plugin.";
+    return (
+      <div className={`v3-recovery${warn ? " warn" : ""}`} role="status" aria-live="polite"
+        data-testid="recovery-notice" data-compact="">
+        <div className="v3-recovery-line">
+          <span className="v3-recovery-lead">{lead}</span>
+          {safe.active && (
+            <button type="button" className="btn sm" onClick={onReopenNormally} data-testid="recovery-reopen-normally">
+              Reopen with plugins
+            </button>
+          )}
+          {!safe.active && count > 0 && (
+            <>
+              <span className="v3-recovery-sep" aria-hidden="true">·</span>
+              <span>{count} unsaved change{count === 1 ? "" : "s"}</span>
+              <button type="button" className="btn sm" onClick={onRecover} data-testid="recovery-recover">Recover</button>
+            </>
+          )}
+          {!safe.active && residue.length > 0 && (
+            <>
+              <span className="v3-recovery-sep" aria-hidden="true">·</span>
+              <button type="button" className="v3-recovery-disclosure" aria-expanded={residueOpen}
+                aria-controls="v3-recovery-residue" data-testid="recovery-residue-toggle"
+                onClick={() => setResidueOpen((open) => !open)}>
+                {residue.length} older recording{residue.length === 1 ? " is" : "s are"} still on disk
+              </button>
+            </>
+          )}
+          {!safe.active && safe.canOffer && (
+            <>
+              <span className="v3-recovery-sep" aria-hidden="true">·</span>
+              <span>Suspect{safe.suspects.length === 1 ? "" : "s"}: {safe.suspects.join(", ")}</span>
+              <button type="button" className="btn sm" onClick={onSafeMode} data-testid="recovery-safe-mode">
+                Open without third-party plugins
+              </button>
+            </>
+          )}
+          <span className="v3-recovery-fill" />
+          <button type="button" className="btn sm ghost" onClick={onDismiss} data-testid="recovery-dismiss">Dismiss</button>
+        </div>
+        {!safe.active && residueOpen && residue.length > 0 && (
+          <ul className="v3-recovery-residue" id="v3-recovery-residue" data-testid="recovery-residue">
+            {residue.map((r) => (
+              <li key={r.file} data-testid="recovery-residue-item">
+                <span className="v3-recovery-take"><em>{r.name}</em>{residueDetail(r)}</span>
+                {residueActions(r, "btn sm")}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="error-bar" role="status" aria-live="polite" data-testid="recovery-notice">
       {safe.active ? (
@@ -133,13 +220,8 @@ export function RecoveryNotice() {
               {residue.map((r) => (
                 <span key={r.file} style={{ marginLeft: 8 }} data-testid="recovery-residue-item">
                   <em>{r.name}</em>
-                  {r.readable || r.repairable ? ` (${r.seconds.toFixed(1)} s, ${r.trackName || "no track"})` : " (unreadable)"}
-                  {r.decision === "adopt" && (
-                    <button type="button" onClick={() => void onAdopt(r.file)} style={{ marginLeft: 4 }}
-                      data-testid="recovery-residue-adopt">Recover take</button>
-                  )}
-                  <button type="button" onClick={() => void onQuarantine(r.file)} style={{ marginLeft: 4 }}
-                    data-testid="recovery-residue-quarantine">Set aside</button>
+                  {residueDetail(r)}
+                  {residueActions(r)}
                 </span>
               ))}
             </span>
@@ -154,7 +236,7 @@ export function RecoveryNotice() {
           )}
         </>
       )}
-      <button type="button" onClick={onDismiss} style={{ marginLeft: 8 }}>Dismiss</button>
+      <button type="button" onClick={onDismiss} style={{ marginLeft: 8 }} data-testid="recovery-dismiss">Dismiss</button>
     </div>
   );
 }
