@@ -998,8 +998,12 @@ private:
     void unregisterAllMeterClients();       // detach track/send/master clients while measurers live
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
     std::map<SendMeterKey, std::unique_ptr<SendMeterTap>> sendMeterClients;
-    te::LevelMeasurer::Client masterClient;
-    te::EditPlaybackContext*  lastSeenContext = nullptr;
+    // The master bus has no plugin of its own to hang a tap off; it taps the playback
+    // context's LevelMeasurer directly. Same MeterTap, same weak-reference lifetime rule
+    // as the track/send taps above -- no raw EditPlaybackContext* to dangle when Tracktion
+    // frees a context internally (TransportControl::restartAllTransports/
+    // freePlaybackContextIfNotRecording), and no address-reuse ABA to guard against by hand.
+    MeterTap masterTap;
 
     // ── master spectral feed (Moshi reactivity) ── drain a pure-measure tap on the
     // master plugin list at 30 Hz, window + Goertzel into 12 log-spaced bands, and

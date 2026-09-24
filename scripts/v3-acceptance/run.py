@@ -15,10 +15,13 @@ What it proves, row by row (each check would read differently if the feature wer
             EXCLUDED from the take, two passes land as non-silent WAVs within the calibrated
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
   V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
-            rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert and a
-            load_preset, each followed by undo, looped. The regression smoke for the
-            2026-09-23 heap corruption; build with the macos-arm64-asan preset (and pass
-            --bin) for detection power, since a Release build only proves it did not crash.
+            rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert, a
+            load_preset and an add_send, each followed by undo, looped. The regression smoke
+            for the 2026-09-23 heap corruption and its send-meter sibling; build with the
+            macos-arm64-asan preset (and pass --bin) for detection power. Without an ASan
+            `--bin`, this row can only report BLOCKED "smoke only" — a Release build runs the
+            identical stress clean whether or not a heap use-after-free is present, so a green
+            Release run is not evidence of anything.
   V3-mix    level / pan / mute / solo / a 4OSC preset / a send to a reverb bus / a clip move
             each change the RENDERED audio in the direction the edit implies, and one undo
             each returns the render to the baseline byte-for-byte within tolerance.
@@ -484,8 +487,21 @@ def row_vocal(ctx) -> Row:
 
 
 # ── V3-chords (regression smoke for the 2026-09-23 '+ Chords' heap corruption) ─────────────
+def _is_asan_build(binary: Path) -> bool:
+    """True when `binary` links the AddressSanitizer runtime. That is the only thing that
+    gives row_chords (a crash regression, not a functional one) any detection power: a plain
+    Release build runs the identical --chords-stress sequence clean whether or not a heap
+    use-after-free like 2026-09-23's is still present, so a green Release run proves nothing
+    and must not be reported as a passing detection row."""
+    try:
+        out = subprocess.run(["otool", "-L", str(binary)], capture_output=True, text=True, timeout=30).stdout
+    except Exception:
+        return False
+    return "libclang_rt.asan" in out
+
+
 def row_chords(ctx) -> Row:
-    row = Row("V3-chords", "+ Chords / create / 4OSC / preset, each undone, on a live device with meters on", [
+    row = Row("V3-chords", "+ Chords / create / 4OSC / preset / send, each undone, on a live device with meters on", [
         "Detection power needs an ASan build (cmake --preset macos-arm64-asan; --bin its Mosh): a Release run only shows it did not crash.",
     ])
     out = ctx.out / "chords"; out.mkdir(parents=True, exist_ok=True)
@@ -493,6 +509,7 @@ def row_chords(ctx) -> Row:
     if LOOPBACK_DEVICE not in devices:
         row.blocked = f'loopback device "{LOOPBACK_DEVICE}" not present (install BlackHole)'
         return row
+    asan_build = _is_asan_build(ctx.bin)
     leaf = f"v3-accept-chords-{ctx.pid}"
     reset_owned_harness_session(_session_dir(leaf))
     env = dict(os.environ)
@@ -524,6 +541,18 @@ def row_chords(ctx) -> Row:
         row.notes.append(f"a removed track's meter was still held by the PluginCache after the settle in "
                          f"{summary.get('meterOutlivedTrack')}/{summary.get('meterWitnessed')} undos "
                          f"(why a meter client must be removed, not just dropped)")
+        if "sendWitnessed" in summary:
+            row.notes.append(f"a removed send's measurer was still held by the PluginCache after the settle in "
+                             f"{summary.get('sendOutlivedRemoval')}/{summary.get('sendWitnessed')} undos "
+                             f"(the same hazard, on an AuxSendPlugin instead of a track meter)")
+    if not asan_build:
+        # Every check above can still be green on a Release binary — that is exactly the
+        # false signal this guards against. Report BLOCKED, never PASS, so the row can't be
+        # read as regression evidence until it is re-run with an ASan --bin.
+        row.blocked = (f"smoke only (no detection power): {ctx.bin} has no ASan runtime "
+                       f"(otool -L shows no libclang_rt.asan) — this run only shows the stress "
+                       f"did not crash, not that the 2026-09-23 heap-use-after-free class of bug "
+                       f"is absent; rebuild with the macos-arm64-asan preset and pass --bin")
     return row
 
 

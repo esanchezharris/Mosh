@@ -74,12 +74,13 @@ int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
 int runV3VocalSmoke (MoshEngine&, MoshOps&);
 
 /** Chords stress — `Mosh --chords-stress`: the V3 '+ Chords' batch, create_track, a 4OSC
-    insert and a load_preset, each followed by undo, looped with a REAL device (pair with
-    MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch"), every track metered and the 30 Hz
-    telemetry live, the transport rolling. The regression smoke for the 2026-09-23 heap
-    corruption (an undo that removed a metered track). Run it in an ASan build to name any
-    stray write; MOSH_CHORDS_STRESS_ITERS / _VARIANTS / _SETTLE_MS tune it. Prints one
-    "CHORDS-STRESS: {json}" line. */
+    insert, a load_preset and an add_send (on a persistent bus), each followed by undo,
+    looped with a REAL device (pair with MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch"),
+    every track metered and the 30 Hz telemetry live, the transport rolling. The regression
+    smoke for the 2026-09-23 heap corruption (an undo that removed a metered track; the
+    'send' variant is the sibling case, an undo that removed a metered send). Run it in an
+    ASan build to name any stray write; MOSH_CHORDS_STRESS_ITERS / _VARIANTS / _SETTLE_MS
+    tune it. Prints one "CHORDS-STRESS: {json}" line. */
 int runChordsStress (MoshEngine&, MoshOps&);
 
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS

@@ -8306,6 +8306,60 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             }
             held = nullptr;
         }
+
+        // METER-UAF-send (sibling coverage, 2026-09-23 follow-up): the same lifetime bug on
+        // an AuxSendPlugin's measurer. AuxSendNode holds a Plugin::Ptr and calls processBuffer
+        // on the send's measurer from the audio thread (tracktion_AuxSendNode.cpp) until the
+        // next graph rebuild, exactly like LevelMeasurerProcessingNode does for a track's
+        // level-meter tap — but before this fix, only the track half of reconcileMeterClients
+        // was ever exercised headless. Same zero-channel probe, on a send instead of a meter.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            auto pumpTelemetry = [mm]
+            {
+                const auto end = Time::getMillisecondCounter() + 200;
+                while (Time::getMillisecondCounter() < end)
+                    if (mm != nullptr) mm->runDispatchLoopUntil (20); else Thread::sleep (20);
+            };
+            auto hasClient = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> none (0, 0);
+                m.processBuffer (none, 0, 0);
+                return m.getNumActiveChannels() == 0;
+            };
+            auto busResult = cmd (ops, "create_bus", args1 ("name", "Meter Send Bus"));
+            check (ok (busResult), "METER-UAF-send: create_bus ok");
+            const int busNumber = (int) busResult["data"].getProperty ("busNumber", -1);
+            const auto sendGhostId = cmd (ops, "create_track", args1 ("name", "Send Ghost"))
+                                         ["data"].getProperty ("trackId", var()).toString();
+            auto addSendResult = cmd (ops, "add_send", objN ({ { "trackId", sendGhostId }, { "bus", busNumber } }));
+            check (ok (addSendResult), "METER-UAF-send: add_send ok");
+
+            auto findSend = [&] () -> te::AuxSendPlugin*
+            {
+                for (auto* t : te::getAudioTracks (eng.edit()))
+                    if (t != nullptr && t->itemID.toString() == sendGhostId)
+                        for (auto* p : t->pluginList.getPlugins())
+                            if (auto* s = dynamic_cast<te::AuxSendPlugin*> (p)) return s;
+                return nullptr;
+            };
+            te::Plugin::Ptr held = findSend();   // what the playback graph's AuxSendNode (and the PluginCache) hold
+            auto* ghostSend = dynamic_cast<te::AuxSendPlugin*> (held.get());
+            check (ghostSend != nullptr, "METER-UAF-send: the track carries an aux-send tap");
+            if (ghostSend != nullptr)
+            {
+                pumpTelemetry();
+                check (hasClient (ghostSend->measurer),
+                       "METER-UAF-send: the telemetry registered its client on the new send (the probe sees it)");
+                ghostSend->measurer.clear();   // the client is alive here; resets the probe to 1
+                check (ok (cmd (ops, "undo")), "METER-UAF-send: undo removes the send");
+                check (findSend() == nullptr, "METER-UAF-send: the send is gone from the track's plugin list");
+                pumpTelemetry();
+                check (! hasClient (ghostSend->measurer),
+                       "METER-UAF-send: the removed send's still-alive measurer holds NO client after telemetry drops its tap");
+            }
+            held = nullptr;
+        }
     }
 
     // ─── METER-001: every track-creation path auto-meters (coverage gap fix) ───
@@ -18460,11 +18514,14 @@ int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
 //   track   create_track, undo
 //   4osc    load_builtin 4osc on a persistent instrument-less track, undo
 //   preset  load_preset on a persistent 4OSC track, undo
+//   send    add_send on the persistent base track, targeting a persistent bus, undo — the
+//           same lifetime hazard as `track`/`chords`, but on an AuxSendPlugin's measurer
+//           (SendMeterTap) rather than a track's LevelMeterPlugin (2026-09-23 follow-up)
 // The message loop is pumped between every step so the telemetry timer, graph rebuilds and
 // the PluginCache purge all interleave with the edits as they do in the app. Under ASan the
 // first stray write aborts the run with both stacks; without ASan the run is a smoke.
 // Env: MOSH_CHORDS_STRESS_ITERS (default 50), MOSH_CHORDS_STRESS_VARIANTS (comma list,
-// default "chords,track,4osc,preset"), MOSH_CHORDS_STRESS_SETTLE_MS (default 120).
+// default "chords,track,4osc,preset,send"), MOSH_CHORDS_STRESS_SETTLE_MS (default 120).
 // Prints one "CHORDS-STRESS: {json}" line.
 int runChordsStress (MoshEngine& eng, MoshOps& ops)
 {
@@ -18493,7 +18550,7 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
     const int iters    = envInt ("MOSH_CHORDS_STRESS_ITERS", 50, 1, 100000);
     const int settleMs = envInt ("MOSH_CHORDS_STRESS_SETTLE_MS", 120, 0, 10000);
     auto variantList = SystemStats::getEnvironmentVariable ("MOSH_CHORDS_STRESS_VARIANTS", {}).trim();
-    if (variantList.isEmpty()) variantList = "chords,track,4osc,preset";
+    if (variantList.isEmpty()) variantList = "chords,track,4osc,preset,send";
     const auto variants = StringArray::fromTokens (variantList, ",", {});
 
     auto* mm = MessageManager::getInstanceWithoutCreating();
@@ -18538,10 +18595,19 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
                 if (dynamic_cast<te::LevelMeterPlugin*> (p) != nullptr) return p;
         return nullptr;
     };
+    auto sendOf = [&] (const String& trackId, int bus) -> te::Plugin*
+    {
+        if (auto* t = findTrackById (trackId))
+            for (auto* p : t->pluginList.getPlugins())
+                if (auto* s = dynamic_cast<te::AuxSendPlugin*> (p))
+                    if (s->getBusNumber() == bus) return p;
+        return nullptr;
+    };
     // Mechanism witness only (pointer identity, never dereferenced): is the meter of a track
     // the undo just removed still an object the PluginCache (and so possibly the playback
     // graph) holds, after the telemetry timer has run?
     int meterOutlivedTrack = 0, meterWitnessed = 0;
+    int sendOutlivedRemoval = 0, sendWitnessed = 0;
     auto cacheHolds = [&] (te::Plugin* raw)
     {
         for (auto* p : eng.edit().getPluginCache().getPlugins())
@@ -18584,6 +18650,12 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
            "transport rolling on an 8 s loop");
     pump (400);
     check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "a playback context (a live graph) exists");
+
+    // A persistent return bus for the `send` variant — created once, like the base/empty
+    // tracks above, so its own create/undo never has to fight the loop's track-count check.
+    const auto sendBus = ui ("create_bus", args1 ("name", "Stress Bus"));
+    const int sendBusNumber = (int) sendBus["data"].getProperty ("busNumber", -1);
+    check (ok (sendBus) && sendBusNumber >= 0, "persistent send-bus fixture exists");
 
     const int baseTracks = trackCount();
     std::map<String, int> ran;
@@ -18646,13 +18718,23 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
                 pump (settleMs);
                 undoAndSettle (baseTracks);
             }
+            else if (v == "send")
+            {
+                if (! ok (ui ("add_send", objN ({ { "trackId", baseId }, { "bus", sendBusNumber } })))) continue;
+                ops.snapshot();
+                pump (settleMs);
+                auto* send = sendOf (baseId, sendBusNumber);
+                undoAndSettle (baseTracks);
+                if (send != nullptr) { ++sendWitnessed; if (cacheHolds (send)) ++sendOutlivedRemoval; }
+            }
             else
                 continue;
             ++ran[v];
         }
         if ((i + 1) % 10 == 0)
             std::cerr << "  ..   iteration " << (i + 1) << "/" << iters << " (tracks=" << trackCount()
-                      << ", meters witnessed=" << meterWitnessed << ", outlived their track=" << meterOutlivedTrack << ")\n";
+                      << ", meters witnessed=" << meterWitnessed << ", outlived their track=" << meterOutlivedTrack
+                      << ", sends witnessed=" << sendWitnessed << ", outlived their removal=" << sendOutlivedRemoval << ")\n";
     }
     ui ("set_transport", args1 ("action", "stop"));
     pump (300);
@@ -18672,6 +18754,8 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
     summary->setProperty ("undoMismatch", undoMismatch);
     summary->setProperty ("meterWitnessed", meterWitnessed);
     summary->setProperty ("meterOutlivedTrack", meterOutlivedTrack);
+    summary->setProperty ("sendWitnessed", sendWitnessed);
+    summary->setProperty ("sendOutlivedRemoval", sendOutlivedRemoval);
     summary->setProperty ("failures", failures);
     std::cout << "CHORDS-STRESS: " << JSON::toString (var (summary), true) << std::endl;
     std::cerr << "===== " << (checks - failures) << "/" << checks << " chords-stress checks passed, " << failures << " failed =====\n";
