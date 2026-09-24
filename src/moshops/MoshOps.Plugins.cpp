@@ -1757,6 +1757,82 @@ namespace
         const te::EditItemID pluginItemId;
         const juce::MemoryBlock stateBefore, stateAfter;
     };
+
+    // The non-automatable half of a 4OSC .json preset: each oscillator's wave shape
+    // (plugin-state property waveShapeN) and unison count (voicesN), plus the filter
+    // mode (filterType) and slope (filterSlope). Tracktion's voice renders straight
+    // from these CachedValues (FourOscVoice: o.setWave (oscParams[i]->waveShapeValue),
+    // o.setNumVoices (oscParams[i]->voicesValue), `if (synth.filterTypeValue != 0)`),
+    // so they ARE the audible store, not a mirror of an AutomatableParameter.
+    //
+    // Written with a NULL undo manager from inside this one action, so the whole
+    // preset stays ONE undo step next to the SetPluginParamValueActions, and so the
+    // transaction is NEVER empty: a plain CachedValue write through the Edit's undo
+    // manager records nothing when the value is unchanged, and an empty transaction
+    // makes the next undo pop the PREVIOUS edit (G14). Same UAF-safe shape as
+    // SetPluginParamValueAction: re-resolves the plugin by EditItemID on every call.
+    struct FourOscVoicingAction final : public juce::UndoableAction
+    {
+        enum class Kind { waveShape, oscVoices, filterType, filterSlope };
+        struct Write { Kind kind; int osc; int after; int before = 0; bool hadBefore = false; };
+
+        FourOscVoicingAction (te::FourOscPlugin& p, juce::Array<Write> w)
+            : edit (p.edit), pluginItemId (p.itemID), writes (std::move (w))
+        {
+            for (auto& x : writes)
+                if (auto* cv = cachedFor (p, x.kind, x.osc))
+                {
+                    x.before = cv->get();
+                    x.hadBefore = ! cv->isUsingDefault();
+                }
+        }
+
+        bool perform() override        { apply (true);  return true; }
+        bool undo() override           { apply (false); return true; }
+        int  getSizeInUnits() override { return (int) (sizeof (*this) + (size_t) writes.size() * sizeof (Write)); }
+
+        static juce::CachedValue<int>* cachedFor (te::FourOscPlugin& p, Kind k, int osc)
+        {
+            const bool oscOk = osc >= 0 && osc < p.oscParams.size();
+            switch (k)
+            {
+                case Kind::waveShape:   return oscOk ? &p.oscParams[osc]->waveShapeValue : nullptr;
+                case Kind::oscVoices:   return oscOk ? &p.oscParams[osc]->voicesValue : nullptr;
+                case Kind::filterType:  return &p.filterTypeValue;
+                case Kind::filterSlope: return &p.filterSlopeValue;
+            }
+            return nullptr;
+        }
+
+        void apply (bool forward)
+        {
+            auto plugin = edit.getPluginCache().getPluginFor (pluginItemId);
+            auto* fourOsc = dynamic_cast<te::FourOscPlugin*> (plugin.get());
+            if (fourOsc == nullptr) return;   // removed / purged: a safe no-op, never a UAF
+            for (const auto& x : writes)
+                if (auto* cv = cachedFor (*fourOsc, x.kind, x.osc))
+                {
+                    if (forward)          cv->setValue (x.after, nullptr);
+                    else if (x.hadBefore) cv->setValue (x.before, nullptr);
+                    else                  cv->resetToDefault (nullptr);   // the property was never written
+                }
+        }
+
+        te::Edit& edit;
+        const te::EditItemID pluginItemId;
+        juce::Array<Write> writes;
+    };
+
+    // A JSON number that is an exact integer (1 and 1.0 both count; true, "1" and 1.5
+    // do not). Preset files are hand-edited, so the loader is strict rather than lossy.
+    bool presetInt (const juce::var& v, int& out)
+    {
+        if (v.isBool() || ! (v.isInt() || v.isInt64() || v.isDouble())) return false;
+        const double d = (double) v;
+        if (! std::isfinite (d) || std::floor (d) != d || std::abs (d) > 1.0e6) return false;
+        out = (int) d;
+        return true;
+    }
 }
 
 juce::var MoshOps::cmdListPresets (const juce::var& args)
@@ -1860,7 +1936,63 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         const auto parsed = juce::JSON::parse (file.loadFileAsString());
         const auto params = parsed.getProperty ("params", var());
         auto* paramsObj = params.getDynamicObject();
-        const auto waveShapes = parsed.getProperty ("waveShapes", var());
+
+        // Top-level voicing keys, validated in full BEFORE the txn (G14: a bad file must
+        // never open a transaction). Ranges verified against the pinned Tracktion source:
+        //   waveShapes[i]  0 none, 1 sine, 2 square, 3 saw, 4 triangle, 5 noise
+        //                  (te::Oscillator::Waves, which the 4OSC voice casts to; NOT
+        //                  SimpleLFO::WaveShape, whose none/sine/triangle/sawUp/sawDown/
+        //                  square/random order belongs to the LFOs)
+        //   oscVoices[i]   per-oscillator unison (OscParams::voicesValue, NOT the plugin's
+        //                  polyphony voicesValue), capped at 2 here to bound CPU
+        //   filterType     0 off, 1 low-pass, 2 high-pass, 3 band-pass, 4 notch
+        //   filterSlope    12 or 24 (dB/oct)
+        // Entry i of an array targets oscillator i+1; a shorter array leaves the rest.
+        using VoicingKind = FourOscVoicingAction::Kind;
+        juce::Array<FourOscVoicingAction::Write> voicing;
+        int waveShapesApplied = 0, oscVoicesApplied = 0, filterType = -1, filterSlope = -1;
+        const auto readOscArray = [&] (const char* key, VoicingKind kind, int lo, int hi, int& applied) -> juce::String
+        {
+            const auto v = parsed.getProperty (key, var());
+            if (v.isVoid()) return {};
+            auto* arr = v.getArray();
+            if (arr == nullptr || arr->size() > fourOsc->oscParams.size())
+                return juce::String (key) + " must be an array of at most "
+                       + juce::String (fourOsc->oscParams.size()) + " integers";
+            for (int i = 0; i < arr->size(); ++i)
+            {
+                int n = 0;
+                if (! presetInt ((*arr)[i], n) || n < lo || n > hi)
+                    return juce::String (key) + "[" + juce::String (i) + "] must be an integer in "
+                           + juce::String (lo) + ".." + juce::String (hi);
+                voicing.add ({ kind, i, n });
+                ++applied;
+            }
+            return {};
+        };
+        const auto readScalar = [&] (const char* key, VoicingKind kind, bool (*valid) (int),
+                                     const char* allowed, int& out) -> juce::String
+        {
+            const auto v = parsed.getProperty (key, var());
+            if (v.isVoid()) return {};
+            int n = 0;
+            if (! presetInt (v, n) || ! valid (n))
+                return juce::String (key) + " must be " + allowed;
+            voicing.add ({ kind, -1, n });
+            out = n;
+            return {};
+        };
+        const juce::String problems[] = {
+            readOscArray ("waveShapes", VoicingKind::waveShape, 0, 5, waveShapesApplied),
+            readOscArray ("oscVoices",  VoicingKind::oscVoices, 1, 2, oscVoicesApplied),
+            readScalar ("filterType",  VoicingKind::filterType,  [] (int n) { return n >= 0 && n <= 4; },
+                        "an integer in 0..4 (0 off, 1 low-pass, 2 high-pass, 3 band-pass, 4 notch)", filterType),
+            readScalar ("filterSlope", VoicingKind::filterSlope, [] (int n) { return n == 12 || n == 24; },
+                        "12 or 24", filterSlope),
+        };
+        for (const auto& problem : problems)
+            if (problem.isNotEmpty())
+                return errResult ("load_preset", "invalid preset " + presetName + ": " + problem);
 
         // Resolve every named param BEFORE the txn (G14 again): apply-all-or-error.
         struct Pending { te::AutomatableParameter* p; int index; float raw; };
@@ -1879,30 +2011,19 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
                 const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) prop.value);
                 pending.add ({ found, fi, found->valueRange.convertFrom0to1 (norm) });
             }
-        const bool hasShapes = waveShapes.isArray() && waveShapes.size() > 0;
-        if (pending.isEmpty() && ! hasShapes)
+        if (pending.isEmpty() && voicing.isEmpty())
             return errResult ("load_preset", "preset matched no 4OSC parameters"
                               + juce::String (unknown.isEmpty() ? "" : " (unknown: " + unknown.joinIntoString (", ") + ")"));
 
+        // One transaction: the automatable params replay through SetPluginParamValueAction
+        // (the parameter IS what renders — see cachedvalue-write trap), the voicing keys
+        // through FourOscVoicingAction. Both always record, so a re-load of identical
+        // values is still its own undo step and never an empty transaction.
         beginTxn ("load_preset");
         for (const auto& pe : pending)
             undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
-        if (hasShapes)
-        {
-            // Wave shape is a per-oscillator ValueTree property (not automatable).
-            // Find the oscillator child trees in order and set their waveShape with
-            // the undo manager, so the whole preset stays one undo step.
-            int osc = 0;
-            for (int i = 0; i < fourOsc->state.getNumChildren() && osc < waveShapes.size(); ++i)
-            {
-                auto child = fourOsc->state.getChild (i);
-                if (child.hasProperty (te::IDs::waveShape) || child.getType().toString().containsIgnoreCase ("osc"))
-                {
-                    child.setProperty (te::IDs::waveShape, (int) waveShapes[osc], &undoManager());
-                    ++osc;
-                }
-            }
-        }
+        if (! voicing.isEmpty())
+            undoManager().perform (new FourOscVoicingAction (*fourOsc, voicing));
         logLine ("load_preset", args, true, {}, true);
         emitTrackPatch (*track);
         reactiveTouchTrack (trackId);
@@ -1910,6 +2031,10 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         data->setProperty ("plugin", "4osc");
         data->setProperty ("preset", presetName);
         data->setProperty ("paramsApplied", pending.size());
+        data->setProperty ("waveShapesApplied", waveShapesApplied);
+        data->setProperty ("oscVoicesApplied", oscVoicesApplied);
+        if (filterType >= 0)  data->setProperty ("filterType", filterType);
+        if (filterSlope >= 0) data->setProperty ("filterSlope", filterSlope);
         if (! unknown.isEmpty()) data->setProperty ("unknownParams", unknown.joinIntoString (", "));
         return okResult ("load_preset", var (data));
     }

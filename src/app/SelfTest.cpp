@@ -6139,13 +6139,189 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // otherwise the next undo destroys the PREVIOUS edit's neighbour instead
             // of the edit itself. Sequence: real edit → failed load → undo must
             // revert exactly the real edit.
-            cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "volumeDb", -6.0 }}));
+            // (The arg is "db"; this line used to pass "volumeDb", which set_track_volume
+            // ignores, so the check below read 0 dB whether or not the undo was right.)
+            check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -6.0 }}))),
+                   "G14 fixture: a prior edit (volume -6 dB)");
+            check (std::abs ((double) trackById (mt).getProperty ("volumeDb", -999.0) + 6.0) < 0.01,
+                   "G14 fixture: the prior edit really moved the fader (the undo check is not vacuous)");
             check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", "/nonexistent/nope.json" }}))),
                    "load_preset errors on a missing file");
             cmd (ops, "undo");
             check ([&] { const double v = (double) trackById (mt).getProperty ("volumeDb", -999.0);
                          return v > -0.01 && v < 0.01; }(),
                    "undo after a FAILED preset load reverts the prior edit (no empty-txn G14 trap)");
+
+            // The live te::FourOscPlugin on the preset target. Wave shape, per-osc unison,
+            // filter type and slope are plain CachedValues FourOscVoice reads every block
+            // (not AutomatableParameters), so reading them back IS reading what renders;
+            // the params half is read from each parameter's CURRENT value, never from its
+            // attached CachedValue (the cachedvalue-write trap).
+            const auto fourOscOn = [&] (const String& tid) -> te::FourOscPlugin* {
+                for (auto* t : te::getAudioTracks (eng.edit()))
+                    if (t->itemID.toString() == tid)
+                        for (auto* p : t->pluginList.getPlugins())
+                            if (auto* f = dynamic_cast<te::FourOscPlugin*> (p))
+                                return f;
+                return nullptr;
+            };
+
+            // ── demo B2: every bundled 4OSC patch is a real, voiced, short-tailed patch ──
+            // (Before the re-voice, every file rendered as a bare sine: the loader dropped
+            // the wave shapes and never enabled the filter, and two files named noise.)
+            {
+                auto* bf = fourOscOn (mt);
+                check (bf != nullptr && bf->oscParams.size() == 4, "bank fixture: the target carries a 4-oscillator 4OSC");
+                juce::StringArray names;
+                juce::String why;
+                bool allLoad = true, noUnknown = true, filtered = true, osc1Voiced = true, noNoise = true,
+                     shortRelease = true, unisonCapped = true;
+                for (auto& p : foscBundled)
+                {
+                    const auto name = p.getProperty ("name", var()).toString();
+                    names.add (name);
+                    auto r = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", p.getProperty ("file", var()) }}));
+                    if (! ok (r)) { allLoad = false; why << name << ": load failed; "; continue; }
+                    if (r["data"].hasProperty ("unknownParams"))
+                    { noUnknown = false; why << name << ": unknown " << r["data"].getProperty ("unknownParams", var()).toString() << "; "; }
+                    const int ft = (int) r["data"].getProperty ("filterType", 0);
+                    if (bf == nullptr || bf->oscParams.size() != 4) { allLoad = false; continue; }
+                    if (ft < 1 || ft > 4 || bf->filterTypeValue.get() == 0)
+                    { filtered = false; why << name << ": filterType " << ft << "; "; }
+                    const int s1 = bf->oscParams[0]->waveShapeValue.get();
+                    if (s1 < 1 || s1 > 4) { osc1Voiced = false; why << name << ": osc1 shape " << s1 << "; "; }
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        if (bf->oscParams[i]->waveShapeValue.get() == 5) { noNoise = false; why << name << ": osc" << (i + 1) << " noise; "; }
+                        if (bf->oscParams[i]->voicesValue.get() > 2)     { unisonCapped = false; why << name << ": osc" << (i + 1) << " unison; "; }
+                    }
+                    if (bf->ampRelease->getCurrentValue() > 0.5f)
+                    { shortRelease = false; why << name << ": release " << (double) bf->ampRelease->getCurrentValue() << " s; "; }
+                }
+                names.sort (true);
+                check (names.joinIntoString (",") == "Bass,Keys,Lead,Pad,Pluck",
+                       "the bundled 4OSC bank is exactly Keys, Bass, Pad, Lead, Pluck (got " + names.joinIntoString (",") + ")");
+                check (allLoad, "every bundled 4OSC patch loads " + why);
+                check (noUnknown, "no bundled 4OSC patch reports unknownParams " + why);
+                check (filtered, "every bundled 4OSC patch switches the filter on (filterType 1..4) " + why);
+                check (osc1Voiced, "every bundled 4OSC patch gives oscillator 1 a real wave (not none/noise) " + why);
+                check (noNoise, "no bundled 4OSC patch uses the noise wave " + why);
+                check (unisonCapped, "no bundled 4OSC patch asks for more than 2 unison voices " + why);
+                check (shortRelease, "every bundled 4OSC patch releases in <= 0.5 s (Amp Release current value) " + why);
+            }
+
+            // ── demo B1: the 4OSC voicing keys (waveShapes / filterType / filterSlope / oscVoices) ──
+            auto* fosc = fourOscOn (mt);
+            check (fosc != nullptr, "voicing: the preset target exposes its te::FourOscPlugin");
+            const auto volOf = [&] { return (double) trackById (mt).getProperty ("volumeDb", -999.0); };
+            if (fosc != nullptr && fosc->oscParams.size() == 4)
+            {
+                struct Voicing { int shape[4]; int voices[4]; int type; int slope; };
+                const auto voicingNow = [&] {
+                    Voicing v {};
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        v.shape[i]  = fosc->oscParams[i]->waveShapeValue.get();
+                        v.voices[i] = fosc->oscParams[i]->voicesValue.get();
+                    }
+                    v.type  = fosc->filterTypeValue.get();
+                    v.slope = fosc->filterSlopeValue.get();
+                    return v;
+                };
+                const auto same = [] (const Voicing& a, const Voicing& b) {
+                    for (int i = 0; i < 4; ++i)
+                        if (a.shape[i] != b.shape[i] || a.voices[i] != b.voices[i]) return false;
+                    return a.type == b.type && a.slope == b.slope;
+                };
+                const auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory);
+                juce::Array<juce::File> tmpFiles;
+                const auto writePreset = [&] (const char* leaf, const char* json) {
+                    auto f = tmpDir.getChildFile (leaf);
+                    f.replaceWithText (json);
+                    tmpFiles.add (f);
+                    return f.getFullPathName();
+                };
+                const auto full = writePreset ("selftest-voicing-full.json",
+                    R"({"waveShapes":[3,2,0,0],"filterType":1,"filterSlope":24,"oscVoices":[2,1,1,1],)"
+                    R"("params":{"Filter Freq":0.61,"Amp Release":0.3}})");
+                const auto voicingOnly = writePreset ("selftest-voicing-only.json",
+                    R"({"waveShapes":[4,3],"filterType":2,"filterSlope":12})");
+
+                // A real prior edit that no voicing undo may eat.
+                const Voicing pre = voicingNow();
+                const int polyphonyBefore = fosc->voicesValue.get();
+                check (ok (cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -3.0 }}))),
+                       "voicing fixture: a prior edit (volume -3 dB)");
+                check (std::abs (volOf() + 3.0) < 0.01, "voicing fixture: the prior edit really moved the fader");
+
+                auto ld = cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", full }}));
+                check (ok (ld), "load_preset accepts top-level waveShapes / filterType / filterSlope / oscVoices");
+                check ((int) ld["data"].getProperty ("waveShapesApplied", -1) == 4
+                         && (int) ld["data"].getProperty ("oscVoicesApplied", -1) == 4
+                         && (int) ld["data"].getProperty ("filterType", -1) == 1
+                         && (int) ld["data"].getProperty ("filterSlope", -1) == 24,
+                       "load_preset reports the voicing it applied");
+                check (fosc->oscParams[0]->waveShapeValue.get() == 3 && fosc->oscParams[1]->waveShapeValue.get() == 2
+                         && fosc->oscParams[2]->waveShapeValue.get() == 0 && fosc->oscParams[3]->waveShapeValue.get() == 0,
+                       "osc wave shapes read back 3 (saw), 2 (square), 0, 0 from the store the voice renders");
+                check (fosc->filterTypeValue.get() == 1 && fosc->filterSlopeValue.get() == 24,
+                       "filterType 1 (low-pass) and filterSlope 24 read back");
+                check (fosc->oscParams[0]->voicesValue.get() == 2 && fosc->oscParams[1]->voicesValue.get() == 1,
+                       "per-oscillator unison (oscVoices) reads back 2, 1");
+                check (fosc->voicesValue.get() == polyphonyBefore,
+                       "oscVoices never touches the plugin's polyphony voicesValue");
+                check ((int) fosc->state.getProperty ("waveShape1", -1) == 3
+                         && (int) fosc->state.getProperty ("filterType", -1) == 1
+                         && (int) fosc->state.getProperty ("voices1", -1) == 2,
+                       "the voicing is in the plugin state the Edit saves (waveShape1 / filterType / voices1)");
+                check (std::abs (fosc->filterFreq->getCurrentValue() - fosc->filterFreq->valueRange.convertFrom0to1 (0.61f)) < 1.0e-3f,
+                       "the params half lands on the AutomatableParameter the voice reads (Filter Freq current value)");
+                check (! same (voicingNow(), pre), "voicing fixture: the load really changed the voicing (the undo check is not vacuous)");
+
+                check (ok (cmd (ops, "undo")), "undo the voicing load");
+                check (same (voicingNow(), pre), "ONE undo reverts every voicing key (shapes, voices, filter type and slope)");
+                check (std::abs (volOf() + 3.0) < 0.01, "...and only the load: the prior volume edit survives");
+
+                // The SAME voicing-only preset twice, then ONE undo: the first load must
+                // survive. With no params to replay, a CachedValue write of identical values
+                // records nothing, and the undo would then eat load #1 (G14).
+                check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", voicingOnly }}))),
+                       "a voicing-only preset (no params) loads");
+                const Voicing once = voicingNow();
+                check (once.shape[0] == 4 && once.shape[1] == 3 && once.type == 2 && once.slope == 12,
+                       "the voicing-only preset applied (triangle, saw, high-pass, 12 dB/oct)");
+                check (ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", voicingOnly }}))),
+                       "the same voicing-only preset loads a second time");
+                check (ok (cmd (ops, "undo")), "undo the second identical load");
+                check (same (voicingNow(), once), "load x2 + undo x1 keeps the FIRST load's voicing (no empty transaction)");
+                check (ok (cmd (ops, "undo")), "undo the first identical load");
+                check (same (voicingNow(), pre), "the second undo reverts the first load");
+                check (std::abs (volOf() + 3.0) < 0.01, "the prior volume edit is intact after both voicing undos");
+
+                // Out-of-range voicing is refused BEFORE any transaction: nothing changes and
+                // the next undo still reverts the prior volume edit.
+                const std::pair<const char*, const char*> bad[] = {
+                    { "selftest-voicing-bad-shape.json",  R"({"waveShapes":[9],"params":{"Filter Freq":0.5}})" },
+                    { "selftest-voicing-bad-type.json",   R"({"filterType":5})" },
+                    { "selftest-voicing-bad-slope.json",  R"({"filterSlope":18})" },
+                    { "selftest-voicing-bad-voices.json", R"({"oscVoices":[3]})" },
+                    { "selftest-voicing-bad-array.json",  R"({"waveShapes":"saw"})" },
+                    { "selftest-voicing-bad-float.json",  R"({"waveShapes":[1.5]})" },
+                };
+                const float filterFreqBeforeBad = fosc->filterFreq->getCurrentValue();
+                int refused = 0;
+                for (const auto& [leaf, json] : bad)
+                    if (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", writePreset (leaf, json) }})))) ++refused;
+                check (refused == 6, "out-of-range voicing is refused: shape 9, filterType 5, slope 18, 3 unison voices, a non-array, 1.5 ("
+                                     + juce::String (refused) + "/6)");
+                check (same (voicingNow(), pre), "a refused preset changes nothing");
+                check (std::abs (fosc->filterFreq->getCurrentValue() - filterFreqBeforeBad) < 1.0e-6f,
+                       "a refused preset's params are not applied either (all-or-nothing)");
+                cmd (ops, "undo");
+                check (std::abs (volOf()) < 0.01, "undo after the refused loads reverts the PRIOR edit (no transaction was opened)");
+
+                for (auto& f : tmpFiles) f.deleteFile();
+            }
 
             cmd (ops, "remove_track", args1 ("trackId", mt));
         }
@@ -9155,6 +9331,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! (bool) rec["data"].getProperty ("applied", true), "loop_record applied:false headless");
             check (rec["data"].getProperty ("reason", var()).toString().contains ("no audio"),
                    "loop_record names the missing audio device");
+            // demo B5: the Booth shows `detail`; it must never claim a take is rolling.
+            check (rec["data"].getProperty ("detail", var()).toString().startsWith ("Not recording: ")
+                       && rec["data"].getProperty ("detail", var()).toString().contains ("no audio"),
+                   "loop_record's detail says 'Not recording: <reason>' when nothing rolled (got '"
+                       + rec["data"].getProperty ("detail", var()).toString() + "')");
             check (rec["data"].getProperty ("currentId", var()).isVoid(),
                    "loop_record mints no contribution when the transport never rolled");
             check (loopState().getProperty ("currentId", var()).isVoid(), "loop_state agrees: nothing is capturing");
@@ -9297,10 +9478,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             auto hear = cmd (ops, "loop_hear", args1 ("targetId", passId));
             check (ok (hear), "loop_hear ok headless (never an error)");
             check (! (bool) hear["data"].getProperty ("applied", true), "loop_hear applied:false headless");
+            check (hear["data"].getProperty ("detail", var()).toString().startsWith ("Not playing: "),
+                   "loop_hear's detail says 'Not playing: <reason>' when nothing rolled (got '"
+                       + hear["data"].getProperty ("detail", var()).toString() + "')");
 
             auto all = cmd (ops, "loop_play_all");
             check (ok (all), "loop_play_all ok headless (never an error)");
             check (! (bool) all["data"].getProperty ("applied", true), "loop_play_all applied:false headless");
+            check (all["data"].getProperty ("detail", var()).toString().startsWith ("Not playing: "),
+                   "loop_play_all's detail says 'Not playing: <reason>' when nothing rolled (got '"
+                       + all["data"].getProperty ("detail", var()).toString() + "')");
+
+            // Keep on an ALREADY-kept take while stopped is "go again from here" — the
+            // resume branch. Headless it cannot roll, and its detail must say so.
+            check ((bool) firstContribution (loopState()).getProperty ("keeper", false),
+                   "resume fixture: the pass is a keeper again after undoing Again");
+            auto resume = cmd (ops, "loop_keep", args1 ("targetId", passId));
+            check (ok (resume) && ! (bool) resume["data"].getProperty ("applied", true),
+                   "loop_keep on a kept take (resume) is ok with applied:false headless");
+            check (resume["data"].getProperty ("detail", var()).toString().startsWith ("Not recording: "),
+                   "loop_keep's resume detail says 'Not recording: <reason>' when nothing rolled (got '"
+                       + resume["data"].getProperty ("detail", var()).toString() + "')");
 
             check (! ok (cmd (ops, "loop_keep", args1 ("targetId", "no-such-pass"))),
                    "a target that no longer resolves is refused");
@@ -9633,6 +9831,60 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Teardown: revert the two probe tracks (each its own transaction) + persist clean.
         check (ok (cmd (ops, "undo")), "undo probe 2"); check (ok (cmd (ops, "undo")), "undo probe 1");
         check (tracks (ops) == n0, "probe tracks reverted (clean teardown)");
+        cmd (ops, "save");
+    }
+
+    // ─── Project safety: the auto-save TIMER waits out a Direct audition (demo B4) ───
+    // Every save runs beforePersist → restoreDirectAuditions, and a Direct render marks the
+    // session dirty, so within 30 s of Generate the timer's saveIfDirty used to flip a
+    // Source/Result audition back to committed while the producer was listening.
+    // MoshOps::autosaveTick() is what Main.cpp's timer now calls: it postpones (never
+    // drops) the save while an audition or a result validation is live. Explicit ⌘S,
+    // save-on-quit and project switches still restore committed material first.
+    section ("Project safety: autosave waits for a Direct audition (demo B4)");
+    {
+        const auto at = cmd (ops, "create_track", args1 ("name", "AuditionProbe"))["data"]
+                            .getProperty ("trackId", var()).toString();
+        const auto acid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", at }, { "seconds", 1.0 }, { "freq", 220.0 }}))
+                              ["data"].getProperty ("clipId", var()).toString();
+        check (at.isNotEmpty() && acid.isNotEmpty(), "audition fixture: a track with one tone clip");
+        const auto auditionOf = [&] () -> String {
+            auto trk = trackById (at);   // keep the track alive while its clips array is read
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == acid)
+                        return c.getProperty ("renderLayer", var()).getProperty ("audition", var()).toString();
+            return {};
+        };
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", acid }, { "decisionPolicy", "explicit" },
+                                                           { "adapter", "stable_audio3" }, { "mode", "reimagine" },
+                                                           { "modelVariant", "sa3-medium" }}))),
+               "audition fixture: an explicit (Direct) SA3 render layer on the clip");
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", acid }, { "audition", "source" }}))),
+               "bypass_layer {audition:'source'} starts a Source audition (no render needed)");
+        check (auditionOf() == "source", "the snapshot layer reads audition 'source'");
+
+        eng.markDirty();   // what render_layer / any edit leaves behind before the timer fires
+        check (! ops.autosaveTick(), "autosaveTick does NOT save while a Direct audition is live");
+        check (eng.isDirty(), "...the save is postponed, not dropped (the session stays dirty)");
+        check (auditionOf() == "source", "...and the Source audition survives the timer tick");
+
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", acid }, { "audition", "committed" }}))),
+               "ending the audition (bypass_layer committed) ok");
+        check (auditionOf() == "committed", "the layer is back on committed material");
+        check (ops.autosaveTick(), "autosaveTick saves on the first tick after the audition ends");
+        check (! eng.isDirty(), "...and leaves the session clean");
+
+        // Why the timer needed its own entry point: the pre-B4 timer body (saveIfDirty)
+        // restores committed material mid-audition. Kept as a witness, so a future
+        // "simplify back to saveIfDirty" shows up here.
+        check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", acid }, { "audition", "source" }}))),
+               "witness: a second Source audition");
+        eng.markDirty();
+        check (eng.saveIfDirty() && auditionOf() == "committed",
+               "witness: a plain saveIfDirty (the pre-B4 timer body) ends the audition, which autosaveTick avoids");
+
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", at))), "audition fixture teardown");
         cmd (ops, "save");
     }
 

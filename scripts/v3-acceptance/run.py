@@ -212,9 +212,15 @@ def write_smf(path: Path, notes: list[tuple[int, int, int]], ppq: int = 480) -> 
 
 
 def four_osc_preset_file(binary: Path) -> Path | None:
+    """The bundled Keys patch (the one the V3 '+ Chords' moment loads); the Keys track in
+    row B is named for it. Falls back to the first bundled file so an older bundle (which
+    shipped mosh-*.json, where sort order happened to pick mosh-keys) still runs the row."""
     root = binary.parents[1] / "Resources" / "presets" / "4osc"   # Mosh.app/Contents/MacOS/Mosh → Contents/Resources
-    files = sorted(p for p in root.glob("*") if p.is_file()) if root.exists() else []
-    return files[1] if len(files) > 1 else (files[0] if files else None)
+    files = sorted(p for p in root.glob("*.json") if p.is_file()) if root.exists() else []
+    for name in ("Keys.json", "mosh-keys.json"):
+        if (root / name).is_file():
+            return root / name
+    return files[0] if files else None
 
 
 # ── V3-beat ─────────────────────────────────────────────────────────────────────────

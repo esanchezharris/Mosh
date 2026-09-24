@@ -193,7 +193,7 @@ describe("pickSynthPresets", () => {
     { plugin: "vital", name: "Keys 1", file: "/presets/vital/keys-rhodes.vital" },
     { plugin: "vital", name: "Arp Bell", file: "/presets/vital/arp-glass.vital" },
     { plugin: "vital", name: "Bell Hit", file: "/presets/vital/bell-hit.vital" },
-    { plugin: "4osc", name: "mosh-bass", file: "/presets/4osc/mosh-bass.json" },
+    { plugin: "4osc", name: "Bass", file: "/presets/4osc/Bass.json" },
   ];
 
   it("is deterministic for the same menu + seed", () => {
