@@ -78,7 +78,7 @@ the backend it runs against and is not a claim about the engine.
 | `loop_again {targetId}` | one undoable txn (skipped when idempotent) | Marks a pass rejected, mutes it, moves it to Takes, rewinds to its entry point, restarts capture with no count-in. |
 | `loop_hear {targetId}` | lifecycle, no txn | Finalizes an in-flight capture if needed, then plays from the target pass's entry point ("Review"). |
 | `loop_play_all` | lifecycle, no txn | Finalizes if needed, then plays from the listening start — backing, keepers, and the latest stopped unkept pass. |
-| `loop_stop` | lifecycle, stop-subset authority, never errors | Finalizes (preserving) if recording, else stops transport in place. |
+| `loop_stop` | lifecycle, stop-subset authority, never errors | Ends whatever is recording, preserving it: a pass the loop started is finalized as a pass; any other take (TopBar Record) lands the way a TopBar stop lands it, unstamped. Otherwise stops playback in place. `data.landed` says whether a take came out of it. |
 | `loop_navigate {bar}` | non-undoable preference | Moves the listening start to a bar (1..1,000,000); stopped-only. |
 | `loop_home` | non-undoable preference | Moves the listening start to the project beginning; stopped-only. |
 | `loop_lead_in {leadQn}` | non-undoable preference | Sets the run-up (0..256 quarter notes) for the *next* pass; leaves the listening start untouched. |
@@ -96,11 +96,24 @@ Shift+Space (`continue`) was missed by the first fix and added the same day.
 Some stops still bypass it: `export_audio`, `export_stems` and the bounce stop the
 transport directly to detach the Edit, and Tracktion itself stops a recording when
 `looping` changes (a `set_transport {loop}` mid-take). The take they end lands on Takes
-unstamped and is **not** listed as a Part. What is guaranteed is that the pass does not
-stay "in flight": `currentId` is reported only while the transport records, and the next
-`set_transport`, `stop_recording` or `loop_stop` forgets it, so a later ordinary take is
-never stamped as the old pass. `Mosh --v3-booth-smoke` pins the four producer stops and the
-export case on a loopback.
+unstamped. It is not finalized as a pass (`lastId` does not move, no older pass is muted),
+and the desktop Booth, which reads `snapshot().loop`, does not list it. A `loop_state`
+read does: it adopts every unstamped wave clip on Lead or Takes as a Part, so with a phone
+connected (it polls `loop_state` at 5 Hz) the take becomes a Part within one poll, and so
+does any later ordinary take on Takes. What is guaranteed is that the pass does not stay
+"in flight": `currentId` is reported only while the transport records (in `snapshot.loop`,
+`loop_state` and every `loop_*` result alike), and the next `set_transport`,
+`stop_recording` or `loop_stop` forgets it, so a later ordinary take is never stamped as
+the old pass.
+
+**The Stop pad ends any recording** (2026-09-23). The Booth shows phase `recording`, and
+so its Stop pad, for a take the TopBar started, and the phone's Stop is live whenever the
+loop is engaged. `loop_stop` used to send every recording to the pass finalize, which
+returns at once when no pass is in flight, so the transport kept recording under a
+"Stopped before recording began" receipt. It now lands such a take the way the TopBar stop
+does (`recording::loopStopRoute`), and its receipt never says "Stopped" while the transport
+still records. `Mosh --v3-booth-smoke` pins the four producer stops, the export case, a
+Booth start that cannot roll after it, and the Stop pad on a TopBar take, on a loopback.
 
 `loop_keep` / `loop_again` report `applied:true` once the clip edit itself has
 committed, with a separate `data.restarted` bool and a `detail` that says plainly

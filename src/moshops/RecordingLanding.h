@@ -47,4 +47,32 @@ inline bool shouldFinalizeBeforeTransportAction (bool isRecording,
             || action == "record" || action == "to_start");
 }
 
+/** loop_stop is the Booth's and the phone's panic button: it ends WHATEVER is recording. A
+    pass the loop started is finalized as a pass (its own transaction, the pass id stamped, a
+    Part). Any other recording -- the TopBar Record, an agent's set_transport record -- is
+    landed the way a TopBar stop lands it: preserved, unstamped. The Booth shows its Stop pad
+    for such a take (phase "recording") and the phone's Stop is always live once the loop is
+    engaged. Until 2026-09-23 both cases went to the pass finalize, which returns at once when
+    no pass is in flight, so the transport kept recording under a "Stopped" receipt. */
+enum class LoopStopRoute { finalizePass, landTake, stopPlayback, nothing };
+
+inline LoopStopRoute loopStopRoute (bool recording, bool passInFlight, bool playing)
+{
+    if (recording)
+        return passInFlight ? LoopStopRoute::finalizePass : LoopStopRoute::landTake;
+    return playing ? LoopStopRoute::stopPlayback : LoopStopRoute::nothing;
+}
+
+/** loop_stop's receipt: the one sentence the Booth and the phone show. It never says
+    "Stopped" while the transport is still recording. `landed` is false for a stop inside
+    the count-in, where nothing has been captured yet. */
+inline juce::String loopStopDetail (bool wasRecording, bool stillRecording, bool landed)
+{
+    if (wasRecording && stillRecording)
+        return juce::String (juce::CharPointer_UTF8 ("Still recording \xe2\x80\x94 press Stop again"));
+    if (wasRecording && ! landed)
+        return "Stopped before recording began";
+    return "Stopped";
+}
+
 }

@@ -70,6 +70,7 @@
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
+#include "RecordingLanding.h"
 #include "state/Ids.h"
 #include "remote/PhoneLoopProtocol.h"
 
@@ -304,7 +305,7 @@ juce::var MoshOps::loopStateVar()
     // Only while it is actually recording: a stop that bypassed the finalize (export, a loop
     // toggle) leaves loopCurrent_ set until the next command forgets it, and the Booth must not
     // claim a pass is in flight in between. A pure read -- loopForgetStaleCapture clears it.
-    state->setProperty ("currentId", loopCurrent_.active && recording ? var (loopCurrent_.passId) : var());
+    state->setProperty ("currentId", loopCurrentIdVar());
     state->setProperty ("lastId", optionalId (node.getProperty (ids::loopLastId, var()).toString()));
     state->setProperty ("reviewId", optionalId (node.getProperty (ids::loopReviewId, var()).toString()));
     state->setProperty ("auditionedId", optionalId (loopAuditionedId_));
@@ -444,6 +445,16 @@ bool MoshOps::loopStartPlayback (double startQn, juce::String& reason)
     insertMarkerSec = startSec;
     transport.play (false);
     return true;
+}
+
+juce::var MoshOps::loopCurrentIdVar()
+{
+    // The one gate for every place that names the capture in flight: snapshot.loop,
+    // loop_state and the loop_record / loop_keep / loop_again results. A start that did not
+    // roll (no input, no device) leaves a pass that some bypassed stop ended still sitting
+    // in loopCurrent_; a result that named it would mark "Not recording: ..." as rolling
+    // while the snapshot shows no pass (review of PR #730, round 3).
+    return loopCurrent_.active && eng.edit().getTransport().isRecording() ? var (loopCurrent_.passId) : var();
 }
 
 bool MoshOps::loopForgetStaleCapture()
@@ -781,7 +792,7 @@ juce::var MoshOps::cmdLoopRecord (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", reason);
-    data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    data->setProperty ("currentId", loopCurrentIdVar());
     data->setProperty ("entryQn", startQn);
     // The Booth and the phone show `detail` as-is, so it must never claim a take is
     // rolling when the transport never started (e.g. no audio device).
@@ -850,7 +861,7 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
         data->setProperty ("keptId", targetId);
         data->setProperty ("clipId", clip->itemID.toString());
         data->setProperty ("listeningQn", resumeQn);
-        data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+        data->setProperty ("currentId", loopCurrentIdVar());
         data->setProperty ("applied", applied);
         if (! applied) data->setProperty ("reason", reason);
         return loopOk (kName, data, actionId,
@@ -899,7 +910,7 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
     data->setProperty ("keptId", targetId);
     data->setProperty ("clipId", clip->itemID.toString());
     data->setProperty ("listeningQn", listeningQn);
-    data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    data->setProperty ("currentId", loopCurrentIdVar());
     data->setProperty ("applied", true);
     data->setProperty ("restarted", restarted);
     return loopOk (kName, data, actionId,
@@ -986,7 +997,7 @@ juce::var MoshOps::cmdLoopAgain (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("rejectedId", targetId);
     data->setProperty ("listeningQn", entryQn);
-    data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    data->setProperty ("currentId", loopCurrentIdVar());
     data->setProperty ("applied", true);
     data->setProperty ("restarted", restarted);
     return loopOk (kName, data, actionId,
@@ -1097,22 +1108,42 @@ juce::var MoshOps::cmdLoopStop (const juce::var& args)
     // "in flight": with nothing recording there is no capture for it to preserve.
     loopForgetStaleCapture();
 
-    bool stoppedRecording = false, stoppedPlayback = false, landed = false;
-    if (transport.isRecording())
+    // It ends WHATEVER is recording (recording::loopStopRoute). PRESERVE, never discard,
+    // either way: a producer pressing Stop is ending a take, not throwing it away.
+    const bool wasRecording = transport.isRecording();
+    bool stoppedPlayback = false, landed = false;
+    switch (recording::loopStopRoute (wasRecording, loopCurrent_.active, transport.isPlaying()))
     {
-        // PRESERVE, never discard. A producer pressing Stop is ending a take, not
-        // throwing it away — cmdStopRecording's discardRecordings stays false.
-        const auto finalized = loopFinalizeCapture();
-        stoppedRecording = true;
-        landed = finalized.landed;
+        case recording::LoopStopRoute::finalizePass:
+            landed = loopFinalizeCapture().landed;
+            break;
+
+        case recording::LoopStopRoute::landTake:
+        {
+            // A take the loop did not start (the TopBar Record, an agent's set_transport
+            // record). Before 2026-09-23 it went to loopFinalizeCapture, which returns at once
+            // with no pass in flight: the transport kept recording. Landed exactly as the
+            // TopBar stop lands it -- unstamped, so the Booth does not list it as a Part (a
+            // phone's loop_state read adopts it later, as it adopts any take on Takes).
+            const auto stopped = stopRecordingAndLand (var (new DynamicObject()), /*discard=*/ false);
+            const auto data    = stopped.getProperty ("data", var());
+            const auto clips   = data.getProperty ("clips", var());   // bound, never a temporary
+            landed = clips.size() > 0;
+            break;
+        }
+
+        case recording::LoopStopRoute::stopPlayback:
+            // Leave the playhead where it halted (no return to the insert marker): the
+            // producer stopped to listen to the thing that is on screen right now.
+            transport.stop (false, false);
+            stoppedPlayback = true;
+            break;
+
+        case recording::LoopStopRoute::nothing:
+            break;
     }
-    else if (transport.isPlaying())
-    {
-        // Leave the playhead where it halted (no return to the insert marker): the
-        // producer stopped to listen to the thing that is on screen right now.
-        transport.stop (false, false);
-        stoppedPlayback = true;
-    }
+    const bool stillRecording   = transport.isRecording();
+    const bool stoppedRecording = wasRecording && ! stillRecording;
     loopAuditionedId_.clear();
 
     logLine (kName, args, true, {}, false);
@@ -1126,8 +1157,9 @@ juce::var MoshOps::cmdLoopStop (const juce::var& args)
     data->setProperty ("applied", true);
     data->setProperty ("stoppedRecording", stoppedRecording);
     data->setProperty ("stoppedPlayback", stoppedPlayback);
+    data->setProperty ("landed", landed);
     return loopOk (kName, data, actionId,
-                   stoppedRecording && ! landed ? "Stopped before recording began" : "Stopped");
+                   recording::loopStopDetail (wasRecording, stillRecording, landed));
 }
 
 // ── loop_navigate / loop_home / loop_lead_in ─────────────────────────────────────────

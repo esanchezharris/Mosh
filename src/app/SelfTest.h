@@ -82,8 +82,10 @@ int runV3VocalSmoke (MoshEngine&, MoshOps&);
     (set_transport continue) and Space (set_transport toggle). After each one it reads the
     SNAPSHOT's loop block (what the Booth renders) and asserts the pass registered as a Part:
     one more contribution, idle, no capture in flight, lastId naming it, the older unkept pass
-    muted. Then Keep acts on it. Last, a take ended by a stop that bypasses the finalize (an
-    export mid-take) must leave nothing in flight for the next ordinary take to inherit.
+    muted. Then Keep acts on it. Then a take ended by a stop that bypasses the finalize (an
+    export mid-take) must leave nothing in flight: neither a Booth start that cannot roll
+    (Takes disarmed) nor the next ordinary take may name or inherit the old pass. Last, the
+    Stop pad must end a take the TopBar started (loop_stop is the panic button).
     Prints one "V3-BOOTH-SMOKE: {json}" line for scripts/v3-acceptance/run.py. */
 int runV3BoothSmoke (MoshEngine&, MoshOps&);
 

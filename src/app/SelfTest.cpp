@@ -18581,6 +18581,44 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         const int partsMid = partsOf (mid).size();
         const auto lastMid = mid.getProperty ("lastId", var()).toString();
 
+        // A Booth start that could NOT roll must not name the pass the export ended as the
+        // capture in flight. loop_record / loop_keep / loop_again reported currentId from
+        // loopCurrent_ alone, while snapshot.loop gates it on the transport recording, so the
+        // result and the snapshot disagreed and the Booth marked "Not recording: ..." as rolling
+        // (review of PR #730, round 3). Disarming Takes makes loopStartCapture refuse
+        // (REC-NO-INPUT) with the stale pass still in loopCurrent_.
+        {
+            // The export freed the playback context, and with no input instances arm_track
+            // has nothing to disarm (ok, applied:false); the next start would rebuild the
+            // context from the saved destinations, still armed. Rebuild it first.
+            eng.ensurePlaybackContext();
+            auto disarm = cmd (ops, "arm_track", objN ({{ "trackId", takesId }, { "armed", false }}));
+            check (ok (disarm) && (bool) disarm["data"].getProperty ("applied", false),
+                   "bypassed stop: Takes disarmed, so the next Booth start cannot capture");
+            auto rec2 = cmd (ops, "loop_record");
+            check (ok (rec2) && ! (bool) rec2["data"].getProperty ("applied", true),
+                   "bypassed stop: Put Me In with nothing armed does not roll");
+            check (rec2["data"].getProperty ("currentId", var()).toString().isEmpty(),
+                   "bypassed stop: loop_record that did not roll names no pass in flight (got '"
+                       + rec2["data"].getProperty ("currentId", var()).toString() + "')");
+            const auto keeperId = passIds[passIds.size() - 1];   // kept above: Keep on it resumes
+            auto keep2 = cmd (ops, "loop_keep", args1 ("targetId", keeperId));
+            check (ok (keep2) && ! (bool) keep2["data"].getProperty ("applied", true),
+                   "bypassed stop: Keep (resume) with nothing armed does not roll");
+            check (keep2["data"].getProperty ("currentId", var()).toString().isEmpty(),
+                   "bypassed stop: loop_keep that did not roll names no pass in flight (got '"
+                       + keep2["data"].getProperty ("currentId", var()).toString() + "')");
+            auto again2 = cmd (ops, "loop_again", args1 ("targetId", passIds[0]));
+            check (ok (again2) && ! (bool) again2["data"].getProperty ("restarted", true),
+                   "bypassed stop: Again with nothing armed rejects the take but does not roll");
+            check (again2["data"].getProperty ("currentId", var()).toString().isEmpty(),
+                   "bypassed stop: loop_again that did not roll names no pass in flight (got '"
+                       + again2["data"].getProperty ("currentId", var()).toString() + "')");
+            check (! eng.edit().getTransport().isRecording(), "bypassed stop: nothing is recording after the refused starts");
+            auto rearm = cmd (ops, "arm_track", objN ({{ "trackId", takesId }, { "armed", true }}));
+            check (ok (rearm) && (bool) rearm["data"].getProperty ("applied", false), "bypassed stop: Takes re-armed on the live input");
+        }
+
         check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "bypassed stop: TopBar Record starts an ordinary take");
         pump (1500);
         check (eng.edit().getTransport().isRecording(), "bypassed stop: the ordinary take is rolling");
@@ -18595,6 +18633,76 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         check (after.getProperty ("lastId", var()).toString() == lastMid, "bypassed stop: lastId did not move to the old pass");
         check (after.getProperty ("currentId", var()).toString().isEmpty(), "bypassed stop: nothing in flight after the ordinary stop");
         check (after.getProperty ("phase", var()).toString() == "idle", "bypassed stop: idle at the end");
+    }
+
+    // -- The Stop pad is the panic button: it ends ANY recording, not only a pass the loop
+    //    started. The Booth shows phase "recording" and its Stop pad for a take the TopBar
+    //    started, and the phone's Stop is always live once the loop is engaged. Before
+    //    2026-09-23 loop_stop sent every recording to the pass finalize, which returns at
+    //    once when no pass is in flight: the transport kept recording while the receipt said
+    //    "Stopped before recording began" (review of PR #730, round 3). --
+    {
+        auto clipsOn = [&] (const String& trackId) -> Array<var>
+        {
+            Array<var> out;
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("id", var()).toString() == trackId)
+                    {
+                        auto cv = t.getProperty ("clips", var());
+                        if (auto* clips = cv.getArray())
+                            for (auto& c : *clips) out.add (c);
+                    }
+            return out;
+        };
+        const auto before = boothLoop();
+        const int partsBefore = partsOf (before).size();
+        const auto lastBefore = before.getProperty ("lastId", var()).toString();
+        StringArray takesBefore;
+        for (auto& c : clipsOn (takesId))
+            takesBefore.add (c.getProperty ("id", var()).toString());
+
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "panic stop: playhead to bar 1 (the guide is under the take)");
+        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "panic stop: TopBar Record starts an ordinary take");
+        pump (3200);
+        check (eng.edit().getTransport().isRecording(), "panic stop: the ordinary take is rolling");
+        check (boothLoop().getProperty ("phase", var()).toString() == "recording",
+               "panic stop: the Booth shows phase recording (its Stop pad is live)");
+
+        auto stop = cmd (ops, "loop_stop");
+        pump (300);
+        check (ok (stop) && (bool) stop["data"].getProperty ("applied", false), "panic stop: loop_stop ok");
+        check (! eng.edit().getTransport().isRecording(), "panic stop: the Stop pad ended a take the TopBar started");
+        check ((bool) stop["data"].getProperty ("stoppedRecording", false), "panic stop: the receipt says it stopped a recording");
+        check ((bool) stop["data"].getProperty ("landed", false), "panic stop: the receipt says a take landed");
+        check (stop["data"].getProperty ("detail", var()).toString() == "Stopped",
+               "panic stop: the Booth reads \"Stopped\" (got \"" + stop["data"].getProperty ("detail", var()).toString() + "\")");
+
+        var fresh;
+        for (auto& c : clipsOn (takesId))
+            if (! takesBefore.contains (c.getProperty ("id", var()).toString()))
+                fresh = c;
+        check (fresh.isObject(), "panic stop: the take landed on Vocal Takes");
+        if (fresh.isObject())
+        {
+            const double peak = peakOf (fresh);
+            check (peak > 0.05, "panic stop: the landed take is a non-silent WAV on disk (peak " + String (peak, 3) + ")");
+        }
+        const auto after = boothLoop();
+        check (after.getProperty ("phase", var()).toString() == "idle",
+               "panic stop: idle after the Stop pad (got " + after.getProperty ("phase", var()).toString() + ")");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(), "panic stop: nothing in flight");
+        // Not a Booth pass: it lands like any TopBar take (unstamped), so the Booth's Parts and
+        // lastId do not move. The phone's loop_state read adopts it later; that is its contract.
+        check (partsOf (after).size() == partsBefore, "panic stop: an ordinary take is not stamped as a pass");
+        check (after.getProperty ("lastId", var()).toString() == lastBefore, "panic stop: lastId did not move");
+
+        // Leave the process stoppable whatever the checks above found: a harness that exits
+        // mid-recording can hang in Tracktion's modal "Recording" alert.
+        if (eng.edit().getTransport().isRecording())
+            cmd (ops, "set_transport", args1 ("action", "stop"));
     }
 
     // One machine-readable line for scripts/v3-acceptance/run.py.

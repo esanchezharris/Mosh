@@ -16,8 +16,9 @@ What it proves, row by row (each check would read differently if the feature wer
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
             Then `Mosh --v3-booth-smoke`: the Booth's own button path (Add a Vocal track, Put
             Me In from bar 1) with takes ended by the Stop pad, the TopBar stop, Shift+Space and
-            Space, each registering as a Part in snapshot.loop (what the Booth renders), and a
-            take ended by a stop that bypasses the finalize leaving nothing in flight.
+            Space, each registering as a Part in snapshot.loop (what the Booth renders), a
+            take ended by a stop that bypasses the finalize leaving nothing in flight, and the
+            Stop pad ending a take the TopBar started.
   V3-mix    level / pan / mute / solo / a 4OSC preset / a send to a reverb bus / a clip move
             each change the RENDERED audio in the direction the edit implies, and one undo
             each returns the render to the baseline byte-for-byte within tolerance.
@@ -512,7 +513,8 @@ def row_vocal(ctx) -> Row:
     row.chk(booth.returncode == 0 and booth_summary and int(booth_summary.get("failures", 1)) == 0,
             f"Mosh --v3-booth-smoke passed every check ({booth_summary.get('checks', '?')} checks): each take ended by "
             f"the Stop pad, the TopBar stop, Shift+Space or Space registers as a Part the Booth lists, Keep can act "
-            f"on it, and a stop that bypasses the finalize leaves no pass in flight",
+            f"on it, a stop that bypasses the finalize leaves no pass in flight, and the Stop pad ends a take "
+            f"the TopBar started",
             {"rc": booth.returncode, "summary": booth_summary, "failed": booth_failed})
     return row
 
