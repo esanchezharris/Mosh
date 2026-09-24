@@ -83,6 +83,18 @@ int runV3VocalSmoke (MoshEngine&, MoshOps&);
     tune it. Prints one "CHORDS-STRESS: {json}" line. */
 int runChordsStress (MoshEngine&, MoshOps&);
 
+/** Direct Re-Imagine audio smoke -- `Mosh --direct-reimagine-audio-smoke`: FINDINGS.md #7
+    follow-up (2026-09-24). Reproduces the exact sequence from the real walkthrough's
+    mosh-log.jsonl with a REAL device (pair with MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole
+    2ch", like --chords-stress): create an explicit Direct Re-Imagine render layer (the
+    deterministic fixture backend, no SA3 -- pair with MOSH_DIRECT_RENDER_TEST_FIXTURE=1 and
+    MOSH_SERVICE_SCRIPT pointing at scripts/verify-hardware/direct_render_fixture_service.py),
+    render, Keep, start playback, Source/Result audition, stop, undo. Asserts the undo
+    reverts Keep specifically (not some other transaction the live playback graph opened),
+    and that a prior unrelated edit survives. Prints one "DIRECT-REIMAGINE-AUDIO-SMOKE: {json}"
+    line. */
+int runDirectReimagineAudioSmoke (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

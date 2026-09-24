@@ -18762,4 +18762,206 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
+// FINDINGS.md #7 follow-up (2026-09-24, coordinator review of commit 9b205295): the real
+// walkthrough's mosh-log.jsonl (~Library/Mosh/session/mosh-log.jsonl, seq 60-65) showed the
+// undo after Keep + Source/Result audition reverting a transaction OLDER than Keep's own --
+// the txn stamp on the first `bypass_layer` call was already one past Keep's, with no
+// intervening command logged as undoable. --run-script (verify-direct-reimagine.py's own
+// harness) cannot reproduce a live-playback condition at all: it forces noAudio
+// unconditionally (see Main.cpp's `noAudio` computation), so transport.play() never actually
+// engages there (confirmed empirically: "playing" stays false even after
+// set_transport{action:"toggle"} under --run-script). This smoke uses a REAL device, like
+// --chords-stress, to run the exact sequence (Keep, roll playback, Source/Result audition,
+// stop, undo, redo) under a live graph and prove undo reverts exactly Keep with the fix in
+// MoshOps::completePendingAcceptDecisions / decideDirectRender.
+//
+// NOTE ON THE HIDDEN-TRANSACTION HYPOTHESIS: extensive attempts (this exact sequence with a
+// plain clip, a frozen-drum-track clip matching the real session's actual target, an idle
+// 14s real-playback window probing the raw UndoManager depth with no commands running, and
+// headless variants) did not reproduce an extra undo-tracked transaction appearing outside
+// bypass_layer's own dispatch. The undoDepth check below is kept as a permanent regression
+// guard (idle playback must never grow the undo stack) even though it did not, by itself,
+// explain the walkthrough's txn stamp. What IS fixed and verified here: with the
+// completePendingAcceptDecisions fix, this whole sequence -- including a prior unrelated
+// edit surviving one undo of Keep -- is correct under a real, live playback graph.
+int runDirectReimagineAudioSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh Direct Re-Imagine audio smoke (Keep + audition + undo on a live device) =====\n";
+    section ("Direct Re-Imagine audio smoke: Keep survives a live playback graph, undo reverts exactly Keep");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        do
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (5);
+            else Thread::sleep (5);
+        }
+        while (Time::getMillisecondCounter() < end);
+    };
+    int failedCommands = 0;
+    auto ui = [&] (const String& name, var a = var()) -> var
+    {
+        auto* c = new DynamicObject();
+        c->setProperty ("command", name);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        auto r = ops.executeFromUi (var (c));
+        if (! ok (r))
+        {
+            ++failedCommands;
+            std::cerr << "  ..   command failed: " << name << " -> "
+                      << r.getProperty ("error", var()).toString() << "\n";
+        }
+        pump (8);
+        return r;
+    };
+
+    auto findClipVar = [&] (const String& trackId, const String& clipId) -> var {
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == trackId)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == clipId)
+                                return c;
+        return {};
+    };
+    auto layerVar  = [&] (const String& trackId, const String& clipId) -> var {
+        return findClipVar (trackId, clipId).getProperty ("renderLayer", var()); };
+    auto sourceOf  = [&] (const String& trackId, const String& clipId) -> String {
+        return findClipVar (trackId, clipId).getProperty ("sourceFile", var()).toString(); };
+    auto trackNamed = [&] (const String& name) -> bool {
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("name", var()).toString() == name) return true;
+        return false;
+    };
+
+    // A prior, unrelated user edit -- the G14 class check: one undo of Keep must leave this
+    // alone, not eat it because Keep's own transaction (or a hidden one opened elsewhere)
+    // ended up empty.
+    const auto trackId = ui ("create_track", args1 ("name", "Target Track"))["data"].getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "target track created");
+    check (ok (ui ("rename_track", objN ({ { "trackId", trackId }, { "name", "Renamed before Keep" } }))),
+           "prior, unrelated edit (rename) applied");
+
+    // Match the real walkthrough: the Keep target was a FROZEN drum track (MIDI -> audio),
+    // not a plain imported/test-tone clip.
+    check (ok (ui ("add_drum_pattern", objN ({ { "trackId", trackId }, { "pattern", "kick: x...x...x...x...; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x." },
+                                              { "name", "Drums" }, { "start", 0 }, { "bars", 4 } }))),
+           "drum pattern added (to be frozen)");
+    check (ok (ui ("freeze_track", args1 ("trackId", trackId))), "freeze_track ok");
+    const auto clipId = [&] () -> String {
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == trackId)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        if (clips->size() > 0)
+                            return (*clips)[0].getProperty ("id", var()).toString();
+        return {};
+    }();
+    check (clipId.isNotEmpty(), "target (frozen) clip found");
+
+    check (ok (ui ("create_render_layer", objN ({ { "clipId", clipId }, { "decisionPolicy", "explicit" },
+                                                  { "adapter", "stable_audio3" } }))),
+           "create_render_layer (explicit) ok");
+    check (ok (ui ("set_render_param", objN ({ { "clipId", clipId }, { "prompt", "A sustained synthesizer tone." },
+                                               { "nl", 0.4 }, { "seed", 0 } }))),
+           "set_render_param ok");
+    check (ok (ui ("render_layer", args1 ("clipId", clipId))), "render_layer submitted");
+
+    // render_layer is asynchronous whenever hasAudio() is true (MoshOps::submitDirectRender
+    // refuses wait:true then), so poll for the fixture's fake result like the real UI would.
+    bool pending = false;
+    for (int i = 0; i < 200 && ! pending; ++i)
+    {
+        pump (50);
+        pending = (bool) layerVar (trackId, clipId).getProperty ("hasPending", false);
+    }
+    check (pending, "render_layer produced a pending fixture result");
+    if (! pending) return failures;
+
+    check (ok (ui ("accept_render", args1 ("clipId", clipId))), "accept_render (Keep) ok");
+    pump (200);
+    const auto keptLayer = layerVar (trackId, clipId);
+    check ((bool) keptLayer.getProperty ("userKept", false) && ! (bool) keptLayer.getProperty ("hasPending", true),
+           "Keep applied immediately (userKept true, hasPending false) -- no queued phase visible to the caller");
+    const auto keptSource = sourceOf (trackId, clipId);
+
+    // The real walkthrough's exact sequence: Keep, THEN roll playback (a real graph, real
+    // device), THEN the Source/Result A/B audition, THEN stop, THEN undo.
+    check (ok (ui ("set_transport", args1 ("action", "play"))), "transport rolling (real device)");
+    pump (400);
+    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "a playback context (a live graph) exists");
+    // A pure read of the REAL UndoManager's depth (never mutates anything): if this number
+    // moves while playback idles with no command of ours running, something reached the
+    // Edit's undo history outside the one-mutation-path directive.
+    auto& rawUndoManager = eng.edit().getUndoManager();
+    auto undoDepth = [&] { return rawUndoManager.getUndoDescriptions().size(); };
+    const int depthBeforeIdle = undoDepth();
+    pump (2000);
+    check (undoDepth() == depthBeforeIdle,
+           "no hidden undo-tracked transaction appears from letting playback idle for 2s");
+
+    check (ok (ui ("bypass_layer", objN ({ { "clipId", clipId }, { "audition", "source" } }))), "audition source ok");
+    pump (300);
+    check (ok (ui ("bypass_layer", objN ({ { "clipId", clipId }, { "audition", "result" } }))), "audition result ok");
+    pump (300);
+    check (ok (ui ("set_transport", args1 ("action", "stop"))), "transport stopped");
+    pump (200);
+
+    check (ok (ui ("undo")), "undo ok");
+    const auto afterUndo = layerVar (trackId, clipId);
+    const auto afterUndoSource = sourceOf (trackId, clipId);
+
+    // Then: undo must revert EXACTLY Keep -- source back to pre-Keep, hasPending true,
+    // userKept false, status never "cancelled" -- and the PRIOR unrelated edit (the rename)
+    // must survive: a hidden transaction opened by the live playback graph between Keep and
+    // the audition must not be what undo reverts instead of Keep.
+    check (afterUndoSource != keptSource, "undo changed the clip's source (something was reverted)");
+    check ((bool) afterUndo.getProperty ("hasPending", false), "undo restored hasPending (back to ready-to-accept)");
+    check (! (bool) afterUndo.getProperty ("userKept", true), "undo cleared userKept");
+    check (afterUndo.getProperty ("status", var()).toString() == "ready",
+           "undo left status \"ready\", not \"cancelled\" or stuck mid-decision");
+    check (trackNamed ("Renamed before Keep"),
+           "the PRIOR unrelated edit (rename_track) survives one undo of Keep (G14 class)");
+
+    check (ok (ui ("redo")), "redo ok");
+    const auto afterRedo = layerVar (trackId, clipId);
+    check ((bool) afterRedo.getProperty ("userKept", false), "redo re-applied Keep (userKept true again)");
+    check (sourceOf (trackId, clipId) == keptSource, "redo restored the exact kept source file");
+
+    ui ("set_transport", args1 ("action", "stop"));
+    pump (200);
+
+    check (failedCommands == 0, "every command the smoke sent succeeded");
+
+    auto* summary = new DynamicObject();
+    summary->setProperty ("keptSource", keptSource);
+    summary->setProperty ("afterUndoSource", afterUndoSource);
+    summary->setProperty ("failedCommands", failedCommands);
+    summary->setProperty ("failures", failures);
+    std::cout << "DIRECT-REIMAGINE-AUDIO-SMOKE: " << JSON::toString (var (summary), true) << std::endl;
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " direct-reimagine-audio-smoke checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 } // namespace mosh
