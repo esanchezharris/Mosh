@@ -3,6 +3,7 @@
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
 #include "SourceRef.h"
+#include "UndoTrace.h"
 #include "state/Migrations.h"
 #include "state/ProjectName.h"
 #include "state/TakeIdentity.h"
@@ -410,6 +411,7 @@ juce::String MoshEngine::audioReadinessError() const
 
 MoshEngine::~MoshEngine()
 {
+    undoTracer.reset();
     if (editPtr != nullptr)
         editPtr->getTransport().stop (false, false);
     editPtr.reset();
@@ -1064,6 +1066,15 @@ void MoshEngine::wireEditResolvers()
     // adoption" (Task 1) needs without a second call site per path. Idempotent and cheap
     // (a no-op recursive walk once every take already has an id) — see TakeIdentity.h.
     mosh::takeidentity::backfill (editPtr->state);
+
+    // MOSH_UNDO_TRACE — debug-only; see engine/UndoTrace.h. Every edit-adoption path lands
+    // here, so the tracer always watches the live Edit.
+    if (undotrace::enabled())
+    {
+        if (undoTracer == nullptr)
+            undoTracer = std::make_unique<undotrace::Tracer>();
+        undoTracer->attach (*editPtr);
+    }
 
     editPtr->editFileRetriever = [this] { return editPath; };
     editPtr->filePathResolver = [this] (const juce::String& path) -> juce::File
