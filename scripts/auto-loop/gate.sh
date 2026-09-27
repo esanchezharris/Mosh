@@ -224,6 +224,11 @@ run_harness_selftests() {
   run_step "harness_selftest_log_keep" bash scripts/auto-loop/selftest-log-keep-selftest.sh
   run_step "cmake_preset_bundle_metadata" bash tests/cmake-preset-bundle-metadata-test.sh
   run_step "tracktion_patch_stack" bash tests/apply-tracktion-patch-test.sh
+  # v3-acceptance's row_chords verdict logic (BLOCKED vs FAIL precedence) -- like run_py_tests
+  # above, path-scoped-only discovery let a scripts/v3-acceptance/ regression hide (it isn't
+  # under relay/ or service/), so this one runs unconditionally here too. Pure unittest, no
+  # binary/device required (subprocess + _is_asan_build mocked); <1s including python3 startup.
+  run_step "v3_acceptance_chords_verdict_selftest" python3 scripts/v3-acceptance/chords_verdict_test.py
 }
 
 # ── cheap lane ───────────────────────────────────────────────────────────────────
