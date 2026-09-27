@@ -624,6 +624,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     std::vector<String> eventTypes;
     var lastEvent;
     var lastLevelsEvent;
+    double peakMasterSinceReset = -1000.0;   // max master l/r over every "levels" event since reset
     var lastMpCommitDone;
     bool sawProjectReplacementEvent = false;
     String lastProjectReplacementReason;
@@ -633,7 +634,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eventTypes.push_back (e.getProperty ("type", var()).toString());
         lastEvent = e;
         if (e.getProperty ("type", var()).toString() == "levels")
+        {
             lastLevelsEvent = e;
+            const auto master = e.getProperty ("payload", var()).getProperty ("master", var());
+            peakMasterSinceReset = jmax (peakMasterSinceReset,
+                                         (double) master.getProperty ("l", -1000.0),
+                                         (double) master.getProperty ("r", -1000.0));
+        }
         if (e.getProperty ("type", var()).toString() == "mp_commit_done")
             lastMpCommitDone = e;
         if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
@@ -8359,6 +8366,197 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        "METER-UAF-send: the removed send's still-alive measurer holds NO client after telemetry drops its tap");
             }
             held = nullptr;
+        }
+
+        // METER-UAF-master (regression, PR #732 follow-up): masterTap must RE-ATTACH to
+        // the LIVE playback context's masterLevels after each of open_project,
+        // export_audio, and new_project. Two of them (open_project, new_project) swap
+        // eng.editPtr entirely (MoshEngine::openProject/newProject); export_audio keeps
+        // the same Edit but frees the context for render exclusivity
+        // (MoshOps::cmdExportAudio: "Tear down our level-meter taps first"). All three
+        // free the OLD te::EditPlaybackContext masterTap pointed at; before PR #731/#732
+        // the master client was a raw EditPlaybackContext* that could dangle (see the
+        // freePlaybackContextIfNotRecording comment on MoshOps::masterTap).
+        //
+        // Headless has no audio device, so MoshOps' OWN set_transport command skips
+        // transport.play() entirely (cmdSetTransport's `eng.audioReady()` gate in
+        // MoshOps.TempoProject.cpp) and getCurrentPlaybackContext() never allocates on
+        // its own. So — like METER-UAF above reaching for a raw te::LevelMeterPlugin* —
+        // this reaches straight for the engine: TransportControl::ensureContextAllocated()
+        // only checks Edit::shouldPlay() (editRole, which Mosh never touches), not
+        // hardware, exactly how tracktion_TransportControl.test.cpp exercises it in CI
+        // with no device either.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            // Pumps until `done()` holds or `ms` elapse: a deadline, not a fixed-length
+            // pump, because a loaded CI runner can take longer than one telemetry tick.
+            auto pumpUntil = [mm] (auto&& done, uint32 ms) -> bool
+            {
+                const auto end = Time::getMillisecondCounter() + ms;
+                while (Time::getMillisecondCounter() < end)
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (10); else Thread::sleep (10);
+                    if (done()) return true;
+                }
+                return done();
+            };
+            auto hasClient = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> none (0, 0);
+                m.processBuffer (none, 0, 0);
+                return m.getNumActiveChannels() == 0;
+            };
+            // Injects a real, non-silent buffer straight into a measurer -- the same
+            // thing the audio thread does via the playback graph -- so the "levels"
+            // telemetry the UI actually reads can be proven LIVE, not just "a client is
+            // registered". peak(0.5) is ~-6 dBFS, far clear of the -100 floor.
+            auto injectSignal = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> loud (2, 64);
+                for (int ch = 0; ch < loud.getNumChannels(); ++ch)
+                    for (int i = 0; i < loud.getNumSamples(); ++i)
+                        loud.setSample (ch, i, 0.5f);
+                m.processBuffer (loud, 0, loud.getNumSamples());
+            };
+            // Reads the PEAK master level over every "levels" event since the reset, not
+            // just the latest one: getAndClearAudioLevel resets to -100 dB on read, so on a
+            // loaded runner a later tick in the same dispatch slice would otherwise clobber
+            // the one live reading before the poll looks at it.
+            auto pollForLiveMaster = [&] () -> bool
+            {
+                return pumpUntil ([&] { return peakMasterSinceReset > -50.0; }, 3000);
+            };
+
+            const auto sessionEdit = eng.editFile();   // restore this harness session at the end
+
+            // A minimal real project: one metered track (METER-001 auto-meters it on
+            // create_track) with a tone clip, so every telemetry tick actually emits
+            // "levels" (MoshOps.cpp gates the whole payload, master included, on
+            // meterClients/sendMeterClients being non-empty) and export_audio has a
+            // non-empty render window.
+            auto mtFile = eng.sessionDir().getChildFile ("projects").getChildFile ("meter-uaf-master.mosh");
+            mtFile.deleteFile();
+            check (ok (cmd (ops, "new_project", args1 ("name", "meter-uaf-master"))),
+                   "METER-UAF-master: isolate on a fresh project");
+            const auto mtTrackId = cmd (ops, "create_track", args1 ("name", "Master Probe"))
+                                       ["data"].getProperty ("trackId", var()).toString();
+            check (mtTrackId.isNotEmpty(), "METER-UAF-master: create_track ok");
+            check (ok (cmd (ops, "add_test_tone_clip",
+                            objN ({{ "trackId", mtTrackId }, { "seconds", 1.0 }, { "freq", 220.0 }}))),
+                   "METER-UAF-master: add_test_tone_clip ok");
+            check (ok (cmd (ops, "save")), "METER-UAF-master: save ok");
+
+            // Allocates a context directly on the engine (see block comment above),
+            // pumps telemetry until masterTap attaches to it, and proves the reading the
+            // UI gets through it is genuinely live. Doubles as the "back to normal" check
+            // closing out the PREVIOUS case.
+            auto ensureLiveMaster = [&] (const char* label) -> te::EditPlaybackContext*
+            {
+                eng.edit().getTransport().ensureContextAllocated();
+                auto* ctx = eng.edit().getTransport().getCurrentPlaybackContext();
+                check (ctx != nullptr,
+                       String ("METER-UAF-master: playback context allocated (") + label + ")");
+                if (ctx != nullptr)
+                {
+                    ctx->masterLevels.clear();   // reset the client-probe to a known false
+                    check (pumpUntil ([&] { return hasClient (ctx->masterLevels); }, 3000),
+                           String ("METER-UAF-master: master tap attached to the live context's masterLevels (") + label + ")");
+                    lastLevelsEvent = var();
+                    peakMasterSinceReset = -1000.0;
+                    injectSignal (ctx->masterLevels);
+                    check (pollForLiveMaster(),
+                           String ("METER-UAF-master: telemetry's master level is LIVE, not stale/floor (") + label + ")");
+                }
+                return ctx;
+            };
+
+            // ── open_project ─────────────────────────────────────────────────
+            {
+                auto* ctxBefore = ensureLiveMaster ("pre-open_project");
+                juce::WeakReference<te::LevelMeasurer> weakOld =
+                    ctxBefore != nullptr ? &ctxBefore->masterLevels : nullptr;
+                auto* editBefore = &eng.edit();
+                check (ok (cmd (ops, "open_project", args1 ("file", eng.editFile().getFullPathName()))),
+                       "METER-UAF-master: open_project (reopen self) ok");
+                check (&eng.edit() != editBefore,
+                       "METER-UAF-master: open_project replaced the Edit (mechanism witness)");
+                check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+                       "METER-UAF-master: context is null immediately after open_project");
+                check (weakOld.get() == nullptr,
+                       "METER-UAF-master: open_project's old context+measurer is FREED, not just detached");
+                auto* ctxAfter = ensureLiveMaster ("post-open_project");
+                check (ctxAfter != nullptr, "METER-UAF-master: a context exists again after open_project");
+                // Diagnostic only, NOT a check: the allocator can legitimately hand back
+                // the just-freed context's address for the next allocation (the same ABA
+                // hazard MoshOps.h documents for masterTap) -- re-attach correctness is
+                // proven above via the weak reference and the live-telemetry probe, not
+                // by whether this address happens to differ.
+                std::cerr << "  ..   METER-UAF-master: post-open_project context "
+                          << (ctxAfter == ctxBefore ? "REUSED the freed address (ABA)" : "is at a new address")
+                          << "\n";
+            }
+
+            // ── export_audio ────────────────────────────────────────────
+            {
+                auto* ctxBefore = ensureLiveMaster ("pre-export_audio");
+                juce::WeakReference<te::LevelMeasurer> weakOld =
+                    ctxBefore != nullptr ? &ctxBefore->masterLevels : nullptr;
+                auto outFile = eng.sessionDir().getChildFile ("projects").getChildFile ("meter-uaf-master-export.wav");
+                outFile.deleteFile();
+                check (ok (cmd (ops, "export_audio", objN ({{ "file", outFile.getFullPathName() }, { "format", "wav" }}))),
+                       "METER-UAF-master: export_audio ok");
+                check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+                       "METER-UAF-master: context is null immediately after export_audio (freed for render exclusivity)");
+                check (weakOld.get() == nullptr,
+                       "METER-UAF-master: export_audio's old context+measurer is FREED, not just detached");
+                auto* ctxAfter = ensureLiveMaster ("post-export_audio");
+                check (ctxAfter != nullptr, "METER-UAF-master: a context exists again after export_audio");
+                // Diagnostic only -- see the open_project block above for why address
+                // identity is not asserted (observed in practice: export_audio's freed
+                // context/new context DO share an address on this allocator, which is
+                // exactly the ABA case the weak-reference design has to tolerate).
+                std::cerr << "  ..   METER-UAF-master: post-export_audio context "
+                          << (ctxAfter == ctxBefore ? "REUSED the freed address (ABA)" : "is at a new address")
+                          << "\n";
+                outFile.deleteFile();
+            }
+
+            // ── new_project ─────────────────────────────────────────────
+            {
+                auto* ctxBefore = ensureLiveMaster ("pre-new_project");
+                juce::WeakReference<te::LevelMeasurer> weakOld =
+                    ctxBefore != nullptr ? &ctxBefore->masterLevels : nullptr;
+                const auto editFileBefore = eng.editFile().getFullPathName();
+                check (ok (cmd (ops, "new_project", args1 ("name", "meter-uaf-master-2"))),
+                       "METER-UAF-master: new_project ok");
+                // Edit-pointer identity is NOT a safe witness here: unlike open_project
+                // (which allocates the incoming Edit before freeing the outgoing one),
+                // MoshEngine::newProject frees editPtr FIRST (editPtr.reset()) and only
+                // then allocates the replacement -- a genuine free-then-allocate window,
+                // and the address came back reused when this was tried with a raw
+                // pointer check. The backing file path is a real, deterministic proxy
+                // for "a different Edit is now loaded".
+                check (eng.editFile().getFullPathName() != editFileBefore,
+                       "METER-UAF-master: new_project replaced the Edit (different backing file, mechanism witness)");
+                check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+                       "METER-UAF-master: context is null immediately after new_project");
+                check (weakOld.get() == nullptr,
+                       "METER-UAF-master: new_project's old context+measurer is FREED, not just detached");
+                // new_project starts EMPTY -- add a track so METER-001's auto-meter makes
+                // the "levels" event (and its master field) fire again below.
+                check (ok (cmd (ops, "create_track", args1 ("name", "Post New"))),
+                       "METER-UAF-master: create_track on the new project ok");
+                auto* ctxAfter = ensureLiveMaster ("post-new_project");
+                check (ctxAfter != nullptr, "METER-UAF-master: a context exists again after new_project");
+                // Diagnostic only -- see the open_project block above.
+                std::cerr << "  ..   METER-UAF-master: post-new_project context "
+                          << (ctxAfter == ctxBefore ? "REUSED the freed address (ABA)" : "is at a new address")
+                          << "\n";
+            }
+
+            check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))),
+                   "METER-UAF-master: restored the harness session edit (clean teardown)");
+            mtFile.deleteFile();
         }
     }
 
