@@ -3839,6 +3839,71 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (eng.edit().getMasterPluginList().getPlugins().isEmpty(), "synthetic internal plugin cleaned up — master bus fully empty for later sections");
     }
 
+    // ─── The spectral tap is telemetry, not an undo step. In the 2026-09-23 real-app
+    // walkthrough, ⌘Z after Direct Re-Imagine Keep did not revert Keep: the first Play in
+    // the project made the playback timer insert the master spectral tap THROUGH the
+    // Edit's UndoManager, an unnamed transaction above Keep, and undo reverted that
+    // instead. Headless runs never have a playback context, so nothing else here reaches
+    // the insertion; drive the timer's own spectrum step directly. ───
+    section ("Master spectral tap insertion is not an undo step");
+    {
+        auto& um = eng.edit().getUndoManager();
+        auto pump = []
+        {
+            // Past Tracktion's 350 ms transaction-close timer, as in the GUI where Play
+            // comes seconds after the last edit.
+            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+                mm->runDispatchLoopUntil (500);
+            else
+                juce::Thread::sleep (500);
+        };
+        auto tapPresent = [&]
+        {
+            for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+                if (dynamic_cast<MasterSpectralTapPlugin*> (p) != nullptr)
+                    return true;
+            return false;
+        };
+        auto witnessPresent = [&]
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->getName() == "Tap undo witness")
+                    return true;
+            return false;
+        };
+
+        check (! tapPresent(), "no spectral tap before the first spectrum tick");
+        check (ok (cmd (ops, "create_track", args1 ("name", "Tap undo witness"))), "witness edit (create_track) ok");
+        pump();
+        const int undoBefore = um.getUndoDescriptions().size();
+        const int redoBefore = um.getRedoDescriptions().size();
+        const int actionsBefore = um.getNumActionsInCurrentTransaction();
+
+        ops.emitSpectrumForSelfTest (true);   // the first playing tick inserts the tap
+        pump();
+
+        check (tapPresent(), "the first playing spectrum tick inserted the master spectral tap");
+        check (um.getUndoDescriptions().size() == undoBefore,
+               "inserting the spectral tap adds no undo transaction");
+        check (um.getRedoDescriptions().size() == redoBefore, "inserting the spectral tap leaves redo untouched");
+        check (um.getNumActionsInCurrentTransaction() == actionsBefore,
+               "inserting the spectral tap folds nothing into the last user transaction");
+
+        check (ok (cmd (ops, "undo")), "undo after the spectrum tick ok");
+        check (! witnessPresent(), "undo reverts the user's last edit, not the tap insertion");
+        check (tapPresent(), "the spectral tap survives undo (it was never an undo step)");
+
+        // Leave the master bus as later sections expect it — without an undo step, the
+        // same way the tap arrived.
+        for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+            if (dynamic_cast<MasterSpectralTapPlugin*> (p) != nullptr)
+            {
+                p->state.getParent().removeChild (p->state, nullptr);
+                break;
+            }
+        check (! tapPresent(), "spectral tap removed — master bus clean for later sections");
+    }
+
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
     section ("MON-004: PDC / reported-latency readout");
     {
