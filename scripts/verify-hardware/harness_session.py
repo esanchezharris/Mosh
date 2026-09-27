@@ -42,7 +42,13 @@ EVIDENCE_WORDS = {"adapter", "adapters", "checkpoint", "checkpoints", "lora", "l
                   "eval", "evals", "evaluation", "evaluations"}
 MAX_DEPTH = 64
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+# Deletion needs descriptor-relative calls and no-follow opens. Where they are missing
+# (Windows), resets keep their quarantine and plan/apply refuse to run: fail closed.
+_FD_WALK = (hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+            and {os.open, os.stat, os.unlink, os.rmdir} <= os.supports_dir_fd
+            and os.listdir in os.supports_fd)
 _PY_QUARANTINE = re.compile(r"^\.mosh-reset-(?P<leaf>.+)-\d+-[0-9a-f]{8}$")
 _UUID_SUFFIX = re.compile(r"^(?P<prefix>.+)-[0-9a-f]{10}$")
 
@@ -105,6 +111,8 @@ def _open_child_dir(parent_fd, name, device, expected=None):
 
 
 def _open_harness_root(harness):
+    if not _FD_WALK:
+        raise RuntimeError("descriptor-relative deletion is unavailable on this platform")
     base = harness.parent
     if base.is_symlink() or harness.is_symlink():
         raise RuntimeError(f"refusing symlinked harness root: {harness}")
@@ -113,7 +121,7 @@ def _open_harness_root(harness):
 
 def _marker_ok_at(dir_fd):
     try:
-        fd = os.open(MARKER_NAME, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        fd = os.open(MARKER_NAME, os.O_RDONLY | _NOFOLLOW, dir_fd=dir_fd)
     except OSError:
         return False
     try:
@@ -317,7 +325,7 @@ def _producer(name, session_fd):
 
 def _last_project_leaf(session_fd):
     try:
-        fd = os.open("last-project.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=session_fd)
+        fd = os.open("last-project.json", os.O_RDONLY | _NOFOLLOW, dir_fd=session_fd)
     except OSError:
         return None
     try:
