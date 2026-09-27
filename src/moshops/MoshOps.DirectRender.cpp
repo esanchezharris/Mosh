@@ -10,6 +10,11 @@ namespace mosh
 using namespace juce;
 using namespace direct_render;
 
+bool MoshOps::hasDirectRenderWork() const
+{
+    return ! directRenders_.empty() || DirectRenderJob::activeRuns() > 0;
+}
+
 void MoshOps::restoreDirectAuditions()
 {
     bool changed = false;

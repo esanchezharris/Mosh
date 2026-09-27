@@ -156,15 +156,14 @@ run_selftest_x3() {
 # only on failure. On pass it is removed along with this run's own session dirs: the harness
 # names each sub-run session _harness/<name>-<uuid>, so without this every gate run would leave
 # ~29 dirs (~100 MB) behind for good. Only dirs this run's evidence names AND that carry the
-# harness ownership marker are removed. $2 = "advisory": report a failure but return 0.
+# harness ownership marker are removed.
 run_direct_reimagine() {
-  local bin="$1" mode="${2:-}" ev rc script session
+  local bin="$1" ev rc script session
   ev="$AL_HOME/direct-reimagine/${HEAD_SHA:0:12}-$(date +%Y%m%dT%H%M%S)-$$"
   mkdir -p "$ev" || return 1
   python3 scripts/verify-hardware/verify-direct-reimagine.py "$bin" "$ev"; rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "direct_reimagine FAILED (rc=$rc); evidence kept: $ev"
-    [ "$mode" = advisory ] && { echo "ADVISORY step: this failure does not fail the gate"; return 0; }
     return "$rc"
   fi
   for script in "$ev"/*/commands.jsonl; do
@@ -354,16 +353,15 @@ gate_native() {
   # lifecycle (render → audition → Keep/Reject/remove → undo/redo → save/reopen), and nothing ran
   # it, which is how the Keep→undo race (2026-09-23 walkthrough, FINDINGS #7) shipped. Hermetic:
   # a deterministic fixture service (no SA3, model or GPU), an isolated _harness/ session and an
-  # OS-assigned loopback port per sub-run (49152+, clear of this gate's 8800-8899 band). ~2.5 min,
-  # nearly all fixed waits. Needs pydantic>=2.
+  # OS-assigned loopback port per sub-run (49152+, clear of this gate's 8800-8899 band). Needs
+  # pydantic>=2.
   #
-  # ADVISORY (a failure is logged, never fails the gate) until those fixed waits become
-  # condition polls: several checks assert a result landed within a fixed __wait with only
-  # 1-2 s of margin over a cold fixture-service start. Measured 2026-09-26: 3/3 clean full runs
-  # on a quiet Mac, but under a sibling build `overlap` (4.5 s wait vs the fixture's 3 s delay)
-  # still read `rendering` in 2/12 runs at load 8-12 and red-flaked 1 of 2 full runs. Promote to
-  # blocking by dropping the `advisory` argument.
-  run_step "direct_reimagine" run_direct_reimagine "$bin" advisory
+  # BLOCKING. Every async result is awaited with `__wait_until` (SelfTest.cpp), never a fixed
+  # `__wait`. It returns when the work has landed and fails only past a generous deadline. The
+  # fixed waits it replaced had 1-2 s of margin over a cold fixture-service start. Under sibling
+  # builds `overlap` read `rendering` in 2/12 runs at load 8-12 and in 12/12 at load ~200, and one
+  # full run failed on it; that was why this step used to be advisory.
+  run_step "direct_reimagine" run_direct_reimagine "$bin"
 
   # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
   # through the real command surface. Fails on an in-scope regression (known gaps are
