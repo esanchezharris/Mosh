@@ -415,8 +415,18 @@ _seed4_compiled = compile_recipe(_seed4_rec).commands
 _hat_clip = next(c for c in _seed4_compiled if c["command"] == "add_midi_clip"
                   and c["args"].get("name") == "Hats")
 _clip_onset_counts = _Counter(round(n["start"], 6) for n in _hat_clip["args"]["notes"])
-check("seed 4: the COMPILED hat clip has one note per onset (pile-up fixed end-to-end)",
-      set(_clip_onset_counts.values()) == {1}, str(_clip_onset_counts.most_common(3)))
+# The collapse applies only when the track plays ONE drum one-shot (assign_sample mode
+# "drum"), which needs a matched palette sample. Without a palette (CI), the hat stays a
+# kit-mapped MIDI part whose distinct pitches are distinct sounds, so it must be left alone.
+_hat_one_shot = any(c["command"] == "assign_sample" and c["args"].get("mode") == "drum"
+                    and c["args"].get("trackId") == _hat_clip["args"]["trackId"]
+                    for c in _seed4_compiled)
+if _hat_one_shot:
+    check("seed 4: the COMPILED one-shot hat clip has one note per onset (pile-up fixed end-to-end)",
+          set(_clip_onset_counts.values()) == {1}, str(_clip_onset_counts.most_common(3)))
+else:
+    check("seed 4 (no one-shot bound): the compiled hat clip is NOT collapsed (distinct pitches kept)",
+          max(_clip_onset_counts.values()) == _max_stacked, str(_clip_onset_counts.most_common(3)))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}  ({len(fails)} failure(s))")
 sys.exit(len(fails))
