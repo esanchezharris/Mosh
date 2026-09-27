@@ -23,6 +23,7 @@ from direct_render_source_safety import source_safety
 from direct_render_split_safety import split_persistence
 from direct_render_decision_safety import cancel_pending_audition
 from direct_render_reopen import reopen_controls
+from direct_render_undo_race import undo_race
 
 
 def layer(run: Run, label: str) -> Layer:
@@ -158,6 +159,7 @@ def main() -> None:
     split_persistence(harness, source)
     source_safety(harness, source)
     cancel_pending_audition(harness, source)
+    undo_race(harness, source)
     owned_pids = [path.read_text().strip() for pattern in ("*/app.pid", "*/service-started.pid") for path in evidence.glob(pattern)]
     deadline = time.monotonic() + 5
     while True:

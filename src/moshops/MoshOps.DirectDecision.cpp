@@ -103,7 +103,18 @@ var MoshOps::decideDirectRender (const String& command, const var& args)
         layer.setProperty (ids::status, "queued", nullptr);
         layer.setProperty (ids::renderError, "Validating stored audio before " + (decision == "accept" ? String ("Keep.") : String ("audition.")), nullptr);
         directRenders_[id] = entry;
-        logLine (command, args, true, {}, false); emitSnapshotInvalidated();
+        // FINDINGS.md #7 — this line records the SUBMISSION of a decision, not its outcome:
+        // the actual mutation (a Tracktion transaction, and a SECOND "accept_render" log line
+        // with undoable:true) lands later, asynchronously, once validation finishes (see
+        // pollDirectRenders()). Stamping "status":"queued" into the logged args means a
+        // reader of mosh-log.jsonl never mistakes THIS undoable:false line for the final
+        // word on whether Keep is undoable.
+        {
+            auto queuedArgs = args.clone();
+            if (auto* o = queuedArgs.getDynamicObject()) o->setProperty ("status", "queued");
+            logLine (command, queuedArgs, true, {}, false);
+        }
+        emitSnapshotInvalidated();
         if ((bool) args.getProperty ("wait", false) && ! eng.hasAudio()) { work.run (jobManagerOwner_); pollDirectRenders(); }
         else Thread::launch ([entry, manager = jobManagerOwner_] { entry->work.run (manager); });
         auto* response = new DynamicObject(); response->setProperty ("requestId", work.requestId); response->setProperty ("status", "queued");
