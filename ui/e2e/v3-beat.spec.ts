@@ -84,6 +84,8 @@ test("a lofi ask in the Moshi dock lands a drum track, and one undo reverts the 
   await page.getByTestId("v3-moshi-field").fill("build me a lofi sketch");
   await page.getByTestId("v3-moshi-send").click();
   await expect(tracks).toHaveCount(tracksBefore + 1, { timeout: 15_000 });
+  // The bare ask takes the fast path to generate_beat_recipe, not the free-form loop.
+  await expect(tracks.filter({ hasText: "Recipe Drums" })).toHaveCount(1);
   await expect(page.getByTestId("v3-moshi-field")).toBeEnabled({ timeout: 15_000 });
 
   await page.keyboard.press("ControlOrMeta+z");

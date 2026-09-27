@@ -26,7 +26,9 @@ test("a lofi ask runs as a two-step task in the drawer and one Undo reverts it",
   const lanesBefore = await lanes.count();
 
   const input = page.getByTestId("agent-input");
-  await input.fill("build me a lofi sketch");
+  // A trailing modifier keeps this ask on the free-form loop: a bare "build me a lofi
+  // sketch" now takes the dock fast path to generate_beat_recipe (v3-beat.spec.ts).
+  await input.fill("build me a lofi sketch, keep it dusty");
   await page.getByTestId("agent-send").click();
 
   // The drawer opens for the task, then auto-collapses a beat (2.6s) after the

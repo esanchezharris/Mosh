@@ -49,6 +49,37 @@ describe("matchFastPath — parametrized + safety", () => {
   });
 });
 
+describe("matchFastPath — beat-shaped asks route to generate_beat_recipe (FINDINGS.md #4)", () => {
+  // "build me a lofi sketch" (live, packaged app) planned add_drum_pattern onto the EXISTING
+  // Drums track, dropped its volume unasked, and left an empty "Keys" audio track — see
+  // taskExec.test.ts's "guards from the 2026-09-23 real-app walkthrough" for that repro.
+  // Routing the ask here instead means the free-form loop never gets a turn for it.
+  it("'make me a beat' calls generate_beat_recipe with no mood", () => {
+    const a = matchFastPath("make me a beat", ctx());
+    expect(a).toMatchObject({ kind: "commands" });
+    expect(cmds(a)[0]).toMatchObject({ command: "generate_beat_recipe", args: {} });
+  });
+
+  it("'build me a lofi sketch' calls generate_beat_recipe with mood 'lofi' — the exact ask that broke", () => {
+    const a = matchFastPath("build me a lofi sketch", ctx());
+    expect(cmds(a)[0]).toMatchObject({ command: "generate_beat_recipe", args: { mood: "lofi" } });
+  });
+
+  it("'make me a lofi drum loop at this tempo' passes the current tempo through", () => {
+    const a = matchFastPath("make me a lofi drum loop at this tempo", ctx());
+    expect(cmds(a)[0]).toMatchObject({ command: "generate_beat_recipe", args: { mood: "lofi", tempo: 120 } });
+  });
+
+  it("does not steal a tempo/mix ask about an EXISTING beat", () => {
+    expect(matchFastPath("make the beat faster", ctx())).toBeNull();
+    expect(matchFastPath("make the beat louder", ctx())).toBeNull();
+  });
+
+  it("never fires mid-take", () => {
+    expect(matchFastPath("make me a beat", ctx("recording"))).toBeNull();
+  });
+});
+
 describe("matchFastPath — state-aware track ops (mute/solo by name)", () => {
   const T = [
     { id: "1", name: "Drums" },
