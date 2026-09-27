@@ -125,6 +125,9 @@ with tempfile.TemporaryDirectory(prefix="mosh-harness-sweep-") as temp:
     kept_sessions = harness_session.plan_harness_cleanup(
         older_than_hours=24, sessions_older_than_days=1, keep={"verify-recovery"}, now=later)
     assert "verify-recovery" not in {entry["name"] for entry in kept_sessions["delete"]}
+    globbed = harness_session.plan_harness_cleanup(
+        older_than_hours=24, sessions_older_than_days=1, keep={"verify-*"}, now=later)
+    assert "verify-recovery" not in {entry["name"] for entry in globbed["delete"]}
 
     # An entry replaced after planning is refused at apply time.
     swapped = harness / ".mosh-reset-verify-recovery-4242-deadbeef"

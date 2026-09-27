@@ -15,6 +15,7 @@ adapter, checkpoint or evaluation files are never deleted.
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -378,7 +379,7 @@ def plan_harness_cleanup(older_than_hours=24, sessions_older_than_days=None, kee
             def skip(reason):
                 plan["skip"].append({"name": name, "reason": reason})
 
-            if not quarantine and name in keep:
+            if not quarantine and any(fnmatch.fnmatchcase(name, pattern) for pattern in keep):
                 skip("on the keep list")
                 continue
             if not quarantine and _is_evidence_directory_name(name):
@@ -495,7 +496,7 @@ def main(argv=None):
     plan_cmd.add_argument("--older-than-hours", type=float, default=24)
     plan_cmd.add_argument("--sessions-older-than-days", type=float, default=None,
                           help="also plan owned sessions idle this long (off by default)")
-    plan_cmd.add_argument("--keep-file", help="session names never to plan, one per line")
+    plan_cmd.add_argument("--keep-file", help="session names or globs never to plan, one per line")
     plan_cmd.add_argument("--out", help="write the manifest here")
     apply_cmd = commands.add_parser("apply", help="delete exactly a reviewed manifest")
     apply_cmd.add_argument("manifest")
