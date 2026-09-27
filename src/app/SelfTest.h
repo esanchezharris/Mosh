@@ -83,6 +83,17 @@ int runV3VocalSmoke (MoshEngine&, MoshOps&);
     tune it. Prints one "CHORDS-STRESS: {json}" line. */
 int runChordsStress (MoshEngine&, MoshOps&);
 
+/** Disarm-after-export smoke (`Mosh --disarm-after-export-smoke`): arms a track on a REAL
+    device, calls export_audio (which frees the playback context and never reallocates
+    one -- MoshOps.ProjectIo.cpp), then disarms and asserts the disarm actually applied and
+    stays applied through the next transport start (the original PR #730 round-3 defect:
+    a disarm right after export found no live input instance, silently no-op'd, and the
+    persisted armed:true destination came back on the next context rebuild). Also re-arms
+    after a second export for cheap reverse-direction coverage. Pair with
+    MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch". Prints one
+    "DISARM-AFTER-EXPORT-SMOKE: {json}" line. */
+int runDisarmAfterExportSmoke (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

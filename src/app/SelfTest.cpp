@@ -18762,4 +18762,136 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
+// -- Disarm-after-export smoke (PR #730 round-3 review, "Found in passing") --------------
+// cmdExportAudio (MoshOps.ProjectIo.cpp) calls edit.getTransport().freePlaybackContext()
+// after rendering and never reallocates one. arm_track's `armed` flag is a ValueTree
+// property on a per-device INPUTDEVICEDESTINATION node owned by the Edit's
+// EditInputDevices (tracktion_InputDevice.h: recordEnabled.referTo(state, IDs::armed,
+// nullptr, false)) -- Edit-level state that survives a freed context untouched. Before the
+// fix, `arm_track {armed:false}` right after an export found `getAllInputDevices()` empty
+// (no context -> no live InputDeviceInstance), reported ok/applied:false, and never
+// touched the persisted armed:true destination; the NEXT context rebuild (a transport
+// start) read it straight back, so the disarm was silently lost. This needs a REAL
+// device: headless never allocates a playback context in the first place (arm_track is
+// always applied:false there), so the defect is invisible to --selftest. Pair with
+// MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch". Prints one
+// "DISARM-AFTER-EXPORT-SMOKE: {json}" line.
+int runDisarmAfterExportSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh disarm-after-export smoke (arm / export / disarm on a live device) =====\n";
+    section ("Disarm survives a freed-then-reallocated playback context (PR #730)");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        do
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (10);
+            else Thread::sleep (10);
+        }
+        while (Time::getMillisecondCounter() < end);
+    };
+
+    auto trackById = [&] (const String& id) -> var
+    {
+        auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
+        if (auto* arr = snap["tracks"].getArray())
+            for (auto& tr : *arr)
+                if (tr.getProperty ("id", var()).toString() == id) return tr;
+        return {};
+    };
+
+    auto tr = cmd (ops, "create_track", args1 ("name", "DisarmExport"));
+    check (ok (tr), "create_track ok");
+    const auto trackId = tr["data"].getProperty ("trackId", var()).toString();
+    // export_audio's renderer refuses an edit with literally no audio anywhere
+    // ("Didn't find any audio to render", tracktion_NodeRenderContext.cpp) -- a short
+    // test tone gives it real content so the export this smoke depends on can succeed;
+    // it is unrelated to (and does not gate) the arm/disarm behaviour under test.
+    check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 0.25 }, { "freq", 440.0 }}))),
+           "add_test_tone_clip ok (gives export_audio real content to render)");
+    pump (100);   // let device activation settle before the first arm
+
+    // -- 1. arm. This direction already ensured a context before the fix; asserting it
+    //       here pins the baseline and gives step 5 below cheap reverse coverage. --
+    auto armOn = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+    check (ok (armOn), "arm_track armed:true ok");
+    check ((bool) armOn["data"].getProperty ("applied", false),
+           "arm_track armed:true applied (a live input instance was armed)");
+    check ((bool) trackById (trackId).getProperty ("armed", false),
+           "snapshot shows the track armed before export");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr,
+           "playback context is allocated while armed");
+
+    // -- 2. export_audio -- the trigger. Mechanism witness: assert the context was
+    //       ACTUALLY freed, not merely assumed from reading the source. --
+    const File exportFile = eng.sessionDir().getChildFile ("disarm-export-smoke.wav");
+    exportFile.deleteFile();
+    auto exp = cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}));
+    check (ok (exp), "export_audio ok");
+    check (exportFile.existsAsFile() && exportFile.getSize() > 0, "export_audio produced a non-empty file");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+           "export_audio freed the playback context (mechanism witness)");
+
+    // -- 3. disarm right after export -- the reported defect. Pre-fix: no live instance
+    //       to find (context freed), so the persisted armed:true destination is never
+    //       touched; the command still reports ok with applied:false. --
+    auto armOff = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+    check (ok (armOff), "arm_track armed:false ok");
+    check ((bool) armOff["data"].getProperty ("applied", false),
+           "arm_track armed:false applied right after export (fix: context is reallocated before the lookup)");
+    check (! (bool) trackById (trackId).getProperty ("armed", true),
+           "snapshot shows the track disarmed immediately after the export+disarm sequence");
+
+    // -- 4. the ORIGINAL symptom: the next context rebuild (a transport start) must not
+    //       resurrect a stale armed:true destination. --
+    check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "set_transport play ok (rebuilds the context)");
+    pump (150);
+    check (! (bool) trackById (trackId).getProperty ("armed", true),
+           "track is STILL disarmed after the transport rebuilt the playback context");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "set_transport stop ok");
+
+    // -- 5. cheap reverse-direction coverage: re-arm after an export, so a regression on
+    //       the (already-working) armed:true path would also be caught here. --
+    exportFile.deleteFile();
+    auto exp2 = cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}));
+    check (ok (exp2), "second export_audio ok");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+           "second export freed the context again");
+    auto armOn2 = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+    check (ok (armOn2), "arm_track armed:true (after export) ok");
+    check ((bool) armOn2["data"].getProperty ("applied", false),
+           "arm_track armed:true (after export) applied");
+    check ((bool) trackById (trackId).getProperty ("armed", false),
+           "track shows armed again after re-arming post-export");
+
+    // Leave nothing armed and no stray export file behind.
+    cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+    exportFile.deleteFile();
+
+    auto* summary = new DynamicObject();
+    summary->setProperty ("trackId", trackId);
+    summary->setProperty ("checks", checks);
+    summary->setProperty ("failures", failures);
+    std::cout << "DISARM-AFTER-EXPORT-SMOKE: " << JSON::toString (var (summary), true) << std::endl;
+    std::cerr << "===== " << (checks - failures) << "/" << checks
+              << " disarm-after-export-smoke checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 } // namespace mosh
