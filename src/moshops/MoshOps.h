@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
@@ -1293,6 +1294,40 @@ private:
     // one falling-edge emit that clears the UI when the last mute curve is deleted.
     bool        hadMuteAutomation = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
+
+    // FU1 (2026-09-24 investor-demo walkthrough, finding 4) — a real Tracktion Edit runs
+    // te::Edit::UndoTransactionTimer (tracktion_Edit.cpp), which fires 350 ms after ANY
+    // change and calls beginNewTransaction() unless edit.numUndoTransactionInhibitors > 0.
+    // A multi-step Moshi agent task's LLM round-trip between steps routinely exceeds that
+    // window, so an unguarded batch_begin..batch_end could still split into two or more
+    // real undo transactions even though `inBatch` stayed true the whole time — the mock
+    // e2e's "one task = one undo" is vacuous because the mock has no Tracktion timer.
+    //
+    // batchInhibitor_ holds the real te::Edit::UndoTransactionInhibitor (tracktion_Edit.h)
+    // for exactly as long as `inBatch` is true. setInBatch() below is the ONLY place that
+    // may change `inBatch`, so every existing writer (batch_begin/batch_end/batch_rollback
+    // in both legacy and transactional mode, their error/needs-recovery branches, and the
+    // two ownBatch composites cmdSketchBeatbox/cmdGenerateBeatRecipe) toggles the inhibitor
+    // the same way and none of them can leak or double-release it.
+    //
+    // UndoTransactionInhibitor stores a SafeSelectable<Edit>, so its destructor is a no-op
+    // once the Edit is gone — it can never dereference a dangling Edit even if held across
+    // an Edit teardown or a new_project/open_project swap. Main.cpp destroys MoshOps (and
+    // so batchInhibitor_) BEFORE the engine/Edit on ordinary shutdown, so that path never
+    // even exercises the safety net. new_project/open_project additionally call
+    // setInBatch(false) themselves (see MoshOps.ProjectIo.cpp) so a batch left open across
+    // a project swap does not wedge `inBatch` true forever on the fresh Edit.
+    std::optional<te::Edit::UndoTransactionInhibitor> batchInhibitor_;
+
+    /** The only place `inBatch` is assigned. Toggling it also holds/releases the real
+        undo-transaction inhibitor so a whole agent batch coalesces into ONE undo step. */
+    void setInBatch (bool shouldBeInBatch)
+    {
+        if (shouldBeInBatch == inBatch) return;
+        inBatch = shouldBeInBatch;
+        if (shouldBeInBatch) batchInhibitor_.emplace (eng.edit());
+        else                 batchInhibitor_.reset();
+    }
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
     // `inBatch` above keeps its EXACT prior meaning (undo coalescing) and is still set
