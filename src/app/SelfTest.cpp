@@ -624,6 +624,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     std::vector<String> eventTypes;
     var lastEvent;
     var lastLevelsEvent;
+    double peakMasterSinceReset = -1000.0;   // max master l/r over every "levels" event since reset
     var lastMpCommitDone;
     bool sawProjectReplacementEvent = false;
     String lastProjectReplacementReason;
@@ -633,7 +634,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eventTypes.push_back (e.getProperty ("type", var()).toString());
         lastEvent = e;
         if (e.getProperty ("type", var()).toString() == "levels")
+        {
             lastLevelsEvent = e;
+            const auto master = e.getProperty ("payload", var()).getProperty ("master", var());
+            peakMasterSinceReset = jmax (peakMasterSinceReset,
+                                         (double) master.getProperty ("l", -1000.0),
+                                         (double) master.getProperty ("r", -1000.0));
+        }
         if (e.getProperty ("type", var()).toString() == "mp_commit_done")
             lastMpCommitDone = e;
         if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
@@ -8381,11 +8388,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // with no device either.
         {
             auto* mm = MessageManager::getInstanceWithoutCreating();
-            auto pumpTelemetry = [mm]
+            // Pumps until `done()` holds or `ms` elapse: a deadline, not a fixed-length
+            // pump, because a loaded CI runner can take longer than one telemetry tick.
+            auto pumpUntil = [mm] (auto&& done, uint32 ms) -> bool
             {
-                const auto end = Time::getMillisecondCounter() + 200;
+                const auto end = Time::getMillisecondCounter() + ms;
                 while (Time::getMillisecondCounter() < end)
-                    if (mm != nullptr) mm->runDispatchLoopUntil (20); else Thread::sleep (20);
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (10); else Thread::sleep (10);
+                    if (done()) return true;
+                }
+                return done();
             };
             auto hasClient = [] (te::LevelMeasurer& m)
             {
@@ -8405,21 +8418,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         loud.setSample (ch, i, 0.5f);
                 m.processBuffer (loud, 0, loud.getNumSamples());
             };
-            // Polls (rather than a fixed-length pump) so it catches the EXACT telemetry
-            // tick that reads+clears the injected level -- getAndClearAudioLevel resets
-            // to -100 dB on read, so a fixed pump risks a LATER tick clobbering
-            // lastLevelsEvent with that now-cleared floor before we ever look at it.
+            // Reads the PEAK master level over every "levels" event since the reset, not
+            // just the latest one: getAndClearAudioLevel resets to -100 dB on read, so on a
+            // loaded runner a later tick in the same dispatch slice would otherwise clobber
+            // the one live reading before the poll looks at it.
             auto pollForLiveMaster = [&] () -> bool
             {
-                const auto end = Time::getMillisecondCounter() + 1000;
-                while (Time::getMillisecondCounter() < end)
-                {
-                    if (mm != nullptr) mm->runDispatchLoopUntil (10); else Thread::sleep (10);
-                    const auto master = lastLevelsEvent.getProperty ("payload", var()).getProperty ("master", var());
-                    if (jmax ((double) master.getProperty ("l", -1000.0), (double) master.getProperty ("r", -1000.0)) > -50.0)
-                        return true;
-                }
-                return false;
+                return pumpUntil ([&] { return peakMasterSinceReset > -50.0; }, 3000);
             };
 
             const auto sessionEdit = eng.editFile();   // restore this harness session at the end
@@ -8454,10 +8459,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 if (ctx != nullptr)
                 {
                     ctx->masterLevels.clear();   // reset the client-probe to a known false
-                    pumpTelemetry();
-                    check (hasClient (ctx->masterLevels),
+                    check (pumpUntil ([&] { return hasClient (ctx->masterLevels); }, 3000),
                            String ("METER-UAF-master: master tap attached to the live context's masterLevels (") + label + ")");
                     lastLevelsEvent = var();
+                    peakMasterSinceReset = -1000.0;
                     injectSignal (ctx->masterLevels);
                     check (pollForLiveMaster(),
                            String ("METER-UAF-master: telemetry's master level is LIVE, not stale/floor (") + label + ")");
