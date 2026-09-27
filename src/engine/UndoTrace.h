@@ -74,7 +74,7 @@ public:
     ~ScopedCommand()
     {
         if (active)
-            commandState().stack.removeLast();
+            commandState().stack.strings.removeLast();
     }
     ScopedCommand (const ScopedCommand&) = delete;
     ScopedCommand& operator= (const ScopedCommand&) = delete;
