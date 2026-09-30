@@ -1583,6 +1583,14 @@ juce::var MoshOps::cmdSetAudioThreads (const juce::var& args)
 
 juce::var MoshOps::cmdNewProject (const juce::var& args)
 {
+    // FU1 — new_project REPLACES the Edit outright, so a batch/agent transaction left open
+    // across the swap has nothing left to commit onto. Clear it FIRST: setInBatch(false)
+    // releases the real UndoTransactionInhibitor (see MoshOps.h) and, just as importantly,
+    // stops `inBatch` from wedging true forever on the fresh Edit (beginTxn would then
+    // never open a transaction for the new session's own commands). batchTurnId_ goes with
+    // it, exactly like every other batch-closing path, so the swap's own log line — and
+    // every command after it — is not mis-stamped with the abandoned batch's turn id.
+    if (inBatch) { setInBatch (false); batchTurnId_.clear(); }
     releaseAllVoices();                    // silence held notes while their Edit still exists
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
     const auto projectsDir = eng.sessionDir().getChildFile ("projects");
@@ -1688,6 +1696,9 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 // distinguishable in the JSONL + the structured envelope.
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
+    // FU1 — same reasoning as cmdNewProject: open_project/open_recent also replace the
+    // Edit, so an open batch is force-closed before the swap rather than left stuck.
+    if (inBatch) { setInBatch (false); batchTurnId_.clear(); }
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
     // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.
     if (auto refusal = eng.openProject (file); refusal.isNotEmpty())  // else: stops transport + frees ctx before swap
