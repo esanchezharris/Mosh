@@ -150,6 +150,13 @@ public:
         const bool latencyCalibrationSmoke = commandLine.contains ("--latency-calibration-smoke");   // LAT-001
         const bool v3VocalSmoke = commandLine.contains ("--v3-vocal-smoke");   // V3-vocal acceptance row, live loopback
         const bool chordsStress = commandLine.contains ("--chords-stress");   // + Chords / undo on a live device (2026-09-23 heap corruption)
+        // FINDINGS.md #7 follow-up (2026-09-24, coordinator review of commit 9b205295):
+        // real mosh-log.jsonl showed the walkthrough's undo reverted a HIDDEN transaction
+        // (not Keep) that appeared specifically while the transport was rolling between
+        // Keep and the Source/Result audition -- a --run-script reproduction can't see
+        // this because --run-script forces noAudio unconditionally (see `noAudio` below),
+        // so transport.play() never actually engages there.
+        const bool directReimagineAudioSmoke = commandLine.contains ("--direct-reimagine-audio-smoke");
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool audioRecoveryIsolationSmoke =
             commandLine.contains ("--audio-recovery-isolation-smoke");
@@ -159,7 +166,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || chordsStress;
+        const bool liveAudio = liveAudioSmoke || liveInstrumentSmoke || midiRecordSmoke || recordHoldSmoke || latencyCalibrationSmoke || v3VocalSmoke || chordsStress || directReimagineAudioSmoke;
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest")
                            || audioRecoverySmoke || audioRecoveryIsolationSmoke;
@@ -206,7 +213,7 @@ public:
         modes.selfTest       = commandLine.contains ("--selftest");   // also true for --selftest-undo
         modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
         modes.goldenSelfTest = goldenSelfTest;
-        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || chordsStress;
+        modes.liveAudioSmoke = liveAudioSmoke || liveInstrumentSmoke || v3VocalSmoke || chordsStress || directReimagineAudioSmoke;
         modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
@@ -577,6 +584,14 @@ public:
         if (chordsStress)
         {
             const int fails = runChordsStress (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (directReimagineAudioSmoke)
+        {
+            const int fails = runDirectReimagineAudioSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;

@@ -1190,6 +1190,15 @@ private:
     juce::var decideDirectRender (const juce::String&, const juce::var&);
     void pollDirectRenders();
     void cancelDirectRenders (const juce::String& reason);
+    // Undo/redo/history-jump and project-replacing commands must never race a Keep
+    // (accept_render) decision that is still validating: cancelling it (as every other
+    // in-flight direct-render job is) could silently drop the user's Keep. Decision
+    // validation is bounded and fully local (a clonefile snapshot + two SHA256 reads,
+    // no network, no model) -- measured ~2.7s for a 200s clip -- so it is safe to block
+    // the message thread on briefly here instead. Only "accept" decisions are waited
+    // for; "result" (audition) validations and generation jobs still cancel as before.
+    // See FINDINGS.md #7 (2026-09-23 demo walkthrough).
+    void completePendingAcceptDecisions();
     void restoreDirectAuditions();
     void prepareDirectCommand (const juce::var&);
     void appendDirectRenderSnapshot (juce::DynamicObject&, te::Clip&, const juce::ValueTree&);
