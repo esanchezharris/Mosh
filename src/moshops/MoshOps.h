@@ -422,7 +422,7 @@ private:
     // stop a producer presses goes through here (set_transport stop/toggle/continue/record/
     // to_start, stop_recording), so a Booth pass in flight is finalized as a pass whichever
     // button ended it. Since 2026-09-24 a loop toggle mid-take and an offline-render detach
-    // (export_audio/export_stems/the bounce) ALSO route here first via
+    // (export_audio/export_stems/export_clip_consolidated/the bounce) ALSO route here first via
     // finalizeInFlightRecordingOrFail -- see cmdSetTransport's loop handling and
     // MoshOps.ProjectIo.cpp / MoshOps.Generative.cpp's detach helper -- instead of letting
     // Tracktion's own raw transport.stop() land the take unstamped.
@@ -436,7 +436,8 @@ private:
     // Calls cmdStopRecording and interprets its result: true when the in-flight recording
     // was actually landed (or there was nothing in flight to land); false with outReason
     // filled otherwise. Shared by cmdSetTransport's action-based AND loop-toggle stops, and
-    // by every offline-render detach (export_audio, export_stems, the bounce/freeze) --
+    // by every offline-render detach (export_audio, export_stems, export_clip_consolidated,
+    // the bounce/freeze) --
     // every place that must not let Tracktion's OWN transport.stop() (a loop toggle's
     // stopIfRecording, an offline render's device detach) land a take without our stamp.
     bool finalizeInFlightRecordingOrFail (juce::String& outReason);

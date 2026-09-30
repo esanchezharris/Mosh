@@ -453,8 +453,25 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
 
     // Render exclusivity, exactly as every other offline render here.
     unregisterAllMeterClients();
-    edit.getTransport().stop (false, false);
-    edit.getTransport().freePlaybackContext();
+    {
+        auto& transport = edit.getTransport();
+        if (transport.isRecording())
+        {
+            // Same hazard as cmdExportAudio's detach (2026-09-24 finding b): a raw
+            // transport.stop() here would land an in-flight recording (on ANY track -- this
+            // detaches the whole Edit, not just the clip's) unstamped, never a Part.
+            // Finalize it through cmdStopRecording first; refuse the export if that
+            // finalize could not land anything.
+            juce::String reason;
+            if (! finalizeInFlightRecordingOrFail (reason))
+                return errResult ("export_clip_consolidated", reason);
+        }
+        else
+        {
+            transport.stop (false, false);
+        }
+        transport.freePlaybackContext();
+    }
 
     file.getParentDirectory().createDirectory();
     file.deleteFile();

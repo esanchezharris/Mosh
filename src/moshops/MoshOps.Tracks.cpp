@@ -1169,7 +1169,8 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
 // 2026-09-24 findings a/b — every place that must land an in-flight recording as a REAL
 // stop before letting some OTHER transport change through: a loop toggle (cmdSetTransport,
 // before `transport.looping = ...`) and every offline-render detach (export_audio,
-// export_stems, the bounce/freeze's shared bounceRenderToWavImpl). Both used to call
+// export_stems, export_clip_consolidated, the bounce/freeze's shared
+// bounceRenderToWavImpl). Both used to call
 // Tracktion's transport.stop() directly -- bypassing cmdStopRecording -- so the take landed
 // unstamped, never a Part, same class of bug the review of PR #730 already fixed for the
 // action-based stops. `true` means either a take actually landed, or there was nothing in
