@@ -915,6 +915,12 @@ private:
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
     // sampler's async file load headless. Returns the number of pads loaded.
     int                  loadDrumKitInto (te::SamplerPlugin&, const juce::String& kitId = {});
+    // settleSamplers(): bring every sampler's LOADED sound list up to its state now. A
+    // te::SamplerPlugin plays from that list, which Tracktion rebuilds only on an
+    // AsyncUpdate after any sound edit (load, replace, pad gain/pan/key, reload/open), and
+    // an offline render runs on the message thread without dispatching one. Every render
+    // entry calls this first; otherwise it plays what the list held before the edit.
+    void                 settleSamplers();
     // ensureDefaultInstrument(): if the track has no instrument, auto-load the sane
     // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
     // audible immediately. No-op when an instrument is already present.

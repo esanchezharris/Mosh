@@ -505,6 +505,7 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    settleSamplers();                      // as cmdExportAudio: no stale sampler sound lists
 
     destWav.getParentDirectory().createDirectory();
     destWav.deleteFile();
