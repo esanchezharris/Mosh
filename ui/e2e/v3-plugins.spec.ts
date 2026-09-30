@@ -32,7 +32,7 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   const picker = synth.getByTestId("preset-pick");
   await expect(picker).toBeVisible();
   expect(await picker.locator("option").count()).toBeGreaterThan(1);
-  await picker.selectOption({ label: "mosh-bass" });
+  await picker.selectOption({ label: "Bass" });
   await expect(fader).not.toHaveValue(before);              // readback: the preset moved the patch
 
   // the Browser's Presets tab offers the same picker for the selected track, and names the sound
@@ -43,9 +43,9 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   const panePicker = page.getByTestId("v3-presets").getByTestId("preset-pick");
   await expect(panePicker).toBeVisible();
   await expect(panePicker).toHaveValue("");
-  await expect(page.getByTestId("v3-preset-current")).toHaveText("mosh-bass");
-  await panePicker.selectOption({ label: "mosh-pad" });
-  await expect(page.getByTestId("v3-preset-current")).toHaveText("mosh-pad");
+  await expect(page.getByTestId("v3-preset-current")).toHaveText("Bass");
+  await panePicker.selectOption({ label: "Pad" });
+  await expect(page.getByTestId("v3-preset-current")).toHaveText("Pad");
   await panePicker.blur();                                  // ⌘Z is ignored while a form control has focus
   await page.keyboard.press("ControlOrMeta+z");            // the pane pick is its own undo step
   // the label names what is ON the instrument: once ⌘Z reverted the load it cannot vouch for it

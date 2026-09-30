@@ -108,6 +108,15 @@ public:
         message-thread jobManager reads, whose posture is unchanged). */
     juce::var fetchBeatRecipeProgram (const juce::var& cmdArgs);
 
+    /** The GUI auto-save timer's entry point (Main.cpp, every 30 s). Every save runs
+        beforePersist → restoreDirectAuditions, so a plain saveIfDirty on the timer ends a
+        Direct Re-Imagine Source/Result audition while the producer is listening. This
+        returns false WITHOUT saving while a Direct audition is live or a Result audition's
+        validation is pending (the save is postponed to a later tick, never dropped);
+        otherwise it is exactly eng.saveIfDirty() and returns whether a save happened.
+        Explicit Save, save-on-quit and project switches keep restoring committed material. */
+    bool autosaveTick();
+
 private:
     // ── command handlers ──
     void applyMultiplayerCommitMessage (const juce::var& msg);
