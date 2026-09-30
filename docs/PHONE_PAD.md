@@ -97,10 +97,12 @@ Shift+Space (`continue`) was missed by the first fix and added the same day.
 finalize the same way the paragraph above fixed for the TopBar/Space/Shift+Space: they all
 now route through `cmdStopRecording` (via the shared `finalizeInFlightRecordingOrFail`)
 BEFORE doing what they do, so an in-flight pass lands as a real, stamped Part first.
-- `export_audio` and `export_stems` detach the Edit from the device before their render;
-  they used to call Tracktion's raw `transport.stop()` to do it. If the finalize itself
-  cannot land anything, the export/stems command is refused with the finalize's own reason
-  rather than silently landing the take unstamped.
+- `export_audio`, `export_stems` and `export_clip_consolidated` (Export Clip from Bar 1…)
+  detach the Edit from the device before their render; they used to call Tracktion's raw
+  `transport.stop()` to do it. If the finalize itself cannot land anything, the command is
+  refused with the finalize's own reason rather than silently landing the take unstamped.
+  (`export_clip_consolidated` was missed by the 2026-09-24 pass and fixed 2026-09-26; it
+  detaches the WHOLE Edit, so a take on any track was exposed, not just the clip's own.)
 - The bounce (`bounce_track`, `freeze_track`, and the generative auto-bounce — they share
   one offline-render helper) detaches the WHOLE Edit from the device even when bouncing a
   DIFFERENT track than the one recording, so it hit the identical hazard for whatever else
@@ -139,11 +141,12 @@ returns at once when no pass is in flight, so the transport kept recording under
 "Stopped before recording began" receipt. It now lands such a take the way the TopBar stop
 does (`recording::loopStopRoute`), and its receipt never says "Stopped" while the transport
 still records. `Mosh --v3-booth-smoke` pins the four producer stops, export_audio,
-export_stems, the bounce, a real-range loop toggle, an empty-range loop toggle (time-boxed —
-a real hang there needs an external timeout around the whole invocation, since a modal
-AlertWindow would own the message thread), a Hear-myself toggle mid-take (deferred, not
-finalized, and applied once the take ends), a Booth start that cannot roll after the export,
-and the Stop pad on a TopBar take, all on a loopback.
+export_stems, the bounce, export_clip_consolidated, a real-range loop toggle, an
+empty-range loop toggle (time-boxed — a real hang there needs an external timeout around
+the whole invocation, since a modal AlertWindow would own the message thread), a
+Hear-myself toggle mid-take (deferred, not finalized, and applied once the take ends), a
+Booth start that cannot roll after the export, and the Stop pad on a TopBar take, all on a
+loopback.
 
 `loop_keep` / `loop_again` report `applied:true` once the clip edit itself has
 committed, with a separate `data.restarted` bool and a `detail` that says plainly
