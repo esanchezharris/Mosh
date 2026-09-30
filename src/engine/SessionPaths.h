@@ -190,12 +190,23 @@ namespace mosh::sessionpaths
             moshDir.getChildFile (kHarnessRootName), directory);
     }
 
+    /** Frees an owned `_harness` session for a fresh run and deletes the reset quarantine
+        it created. Other `.mosh-reset-*` entries are left for scripts/verify-hardware/
+        harness_session.py's manifest sweep. */
     inline bool resetOwnedHarnessSession (const juce::File& moshDir,
-                                          const juce::File& directory)
+                                          const juce::File& directory
+                                         #if MOSH_TESTING
+                                          , const IsolationOwnershipTestHooks* hooks = nullptr
+                                         #endif
+    )
     {
         return isOwnedHarnessSession (moshDir, directory)
-            && resetOwnedIsolationDirectory (
-                moshDir.getChildFile (kHarnessRootName), directory);
+            && resetAndReclaimOwnedIsolationDirectory (
+                moshDir.getChildFile (kHarnessRootName), directory
+               #if MOSH_TESTING
+                , hooks
+               #endif
+                );
     }
 
     /** Resolves the project directory without allowing an environment-controlled
