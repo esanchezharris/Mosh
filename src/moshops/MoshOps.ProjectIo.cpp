@@ -12,6 +12,7 @@
 // anonymous namespace, verbatim.
 
 #include "MoshOps.h"
+#include "BoundedRender.h"
 #include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
@@ -479,25 +480,9 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
         const te::Edit::ScopedRenderStatus srs (edit, true);
         te::TransportControl::stopAllTransports (edit.engine, false, true);
         te::Renderer::turnOffAllPlugins (edit);
-        te::Renderer::RenderTask task ("Mosh consolidated clip export", params, nullptr, nullptr);
-        const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-        const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, endSec * 8000.0 + 60000.0);
-        const juce::uint32 stallMs    = 20000;
-        float  lastProgress   = -1.0f;
-        juce::uint32 lastProgressMs = startMs;
-        while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-        {
-            const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-            const float p = task.getCurrentTaskProgress();
-            if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-            if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-            {
-                if (task.errorMessage.isEmpty()) task.errorMessage = "consolidated export stalled";
-                break;
-            }
-        }
+        renderError = mosh::runBoundedRender (params, "Mosh consolidated clip export", endSec,
+                                              "consolidated export stalled");
         te::Renderer::turnOffAllPlugins (edit);
-        renderError = task.errorMessage;
     }
     if (renderError.isNotEmpty() || ! file.existsAsFile() || file.getSize() == 0)
     {
@@ -751,42 +736,18 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
             && params.destFile.hasWriteAccess()
             && ! params.destFile.isDirectory())
         {
-            te::Renderer::RenderTask task ("Mosh export", params, nullptr, nullptr);
-
-            // Defense-in-depth: bound the render loop. runJob() returns jobNeedsRunningAgain
-            // once per block; if a leaf node can NEVER become ready (e.g. a clip whose source
-            // file can't be opened), progress stalls and this loop would otherwise spin
-            // forever. A no-progress watchdog + an absolute deadline (scaled to the edit
-            // length to allow legitimate realtime renders) turn any such stall into a clean
-            // error instead of an app hang.
-            const double renderSpan   = (rEnd - rStart) + tailSeconds;   // actual rendered span, not the whole edit
-            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, renderSpan * 8000.0 + 60000.0);
-            const juce::uint32 stallMs    = 20000;   // abort if progress doesn't advance for 20s
-            float  lastProgress   = -1.0f;
-            juce::uint32 lastProgressMs = startMs;
-
-            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-            {
-                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                const float p = task.getCurrentTaskProgress();
-                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-
-                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                {
-                    if (task.errorMessage.isEmpty())
-                        task.errorMessage = "export render stalled (a clip's audio source could not be read)";
-                    break;
-                }
-            }
+            // Defense-in-depth: bound the render loop. If a leaf node can NEVER become ready
+            // (e.g. a clip whose source file can't be opened) the loop would otherwise spin
+            // forever; runBoundedRender turns that into a clean error instead of an app hang,
+            // without mistaking a slow render on a loaded machine for a stuck one.
+            const double renderSpan = (rEnd - rStart) + tailSeconds;   // actual rendered span, not the whole edit
+            renderError = mosh::runBoundedRender (params, "Mosh export", renderSpan,
+                                                  "export render stalled (a clip's audio source could not be read)");
 
             te::Renderer::turnOffAllPlugins (edit);
 
-            if (task.errorMessage.isNotEmpty())
-            {
-                renderError = task.errorMessage;
+            if (renderError.isNotEmpty())
                 file.deleteFile();
-            }
         }
         else
         {
@@ -1098,38 +1059,16 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
                 && params.destFile.hasWriteAccess()
                 && ! params.destFile.isDirectory())
             {
-                te::Renderer::RenderTask task ("Mosh stem export", params, nullptr, nullptr);
-
-                // Same no-progress watchdog + absolute deadline as cmdExportAudio /
-                // bounceClipToWav, so ONE bad track's stalled render (e.g. an unreadable
-                // source) errors cleanly instead of hanging the whole stem set.
-                const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-                const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, len * 8000.0 + 60000.0);
-                const juce::uint32 stallMs    = 20000;
-                float  lastProgress   = -1.0f;
-                juce::uint32 lastProgressMs = startMs;
-
-                while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-                {
-                    const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                    const float p = task.getCurrentTaskProgress();
-                    if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-
-                    if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                    {
-                        if (task.errorMessage.isEmpty())
-                            task.errorMessage = "stem render stalled (a clip's audio source could not be read)";
-                        break;
-                    }
-                }
+                // Same bounded loop as cmdExportAudio / bounceTrackToWav, so ONE bad track's
+                // stalled render (e.g. an unreadable source) errors cleanly instead of
+                // hanging the whole stem set.
+                renderError = mosh::runBoundedRender (params, "Mosh stem export", len,
+                                                      "stem render stalled (a clip's audio source could not be read)");
 
                 te::Renderer::turnOffAllPlugins (edit);
 
-                if (task.errorMessage.isNotEmpty())
-                {
-                    renderError = task.errorMessage;
+                if (renderError.isNotEmpty())
                     file.deleteFile();
-                }
             }
             else
             {

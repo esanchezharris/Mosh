@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <thread>
@@ -87,6 +88,29 @@ namespace
     void check (bool cond, const char* what)
     {
         check (cond, juce::String (juce::CharPointer_UTF8 (what)));
+    }
+
+    // Pumps the message loop until `ready()` holds, for at most `timeoutMs`; returns
+    // whether it held. For async engine work (a warp proxy render, a plugin's AsyncUpdate)
+    // whose duration depends on machine load: a fixed pump that is ample on an idle
+    // machine loses the race while other worktrees are building.
+    bool pumpUntil (const std::function<bool()>& ready, int timeoutMs)
+    {
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        const auto startMs = juce::Time::getMillisecondCounter();
+
+        while (! ready())
+        {
+            if (juce::Time::getMillisecondCounter() - startMs > (juce::uint32) timeoutMs)
+                return ready();
+
+            if (mm != nullptr)
+                mm->runDispatchLoopUntil (20);
+            else
+                juce::Thread::sleep (20);
+        }
+
+        return true;
     }
 
     juce::var cmd (MoshOps& ops, const juce::String& name, juce::var args = juce::var())
@@ -5677,19 +5701,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", true },
                                                         { "sourceBpm", 120.0 }}))),
                "source-window: valid remainder Warp on ok");
-        // Warp proxy creation is asynchronous in the real UI.  Match the frozen
-        // reproduction's two-second wait while continuing to pump the JUCE message
-        // loop so this control proves a ready proxy rather than racing its creation.
+        // Warp proxy creation is asynchronous in the real UI: a clip timer on the message
+        // thread starts a background proxy render, and export_audio then blocks the message
+        // thread, so a render begun before that job starts can never see a proxy. Pump until
+        // the proxy the warped render will read is complete, so this control proves a ready
+        // proxy rather than racing its creation. The old fixed 3 s pump lost that race on a
+        // loaded machine; the bound here is only a backstop.
         {
-            auto* mm = MessageManager::getInstanceWithoutCreating();
-            const auto deadline = Time::getMillisecondCounter() + 3000;
-            while (Time::getMillisecondCounter() < deadline)
-            {
-                if (mm != nullptr)
-                    mm->runDispatchLoopUntil (50);
-                else
-                    Thread::sleep (50);
-            }
+            auto* warpClip = dynamic_cast<te::AudioClipBase*> (
+                te::findClipForID (eng.edit(), te::EditItemID::fromString (validClip)));
+            auto& proxies = eng.edit().engine.getAudioFileManager().proxyGenerator;
+            check (warpClip != nullptr
+                   && pumpUntil ([&]
+                      {
+                          const auto playFile = warpClip->getPlaybackFile();
+                          return ! playFile.isNull()
+                                 && ! proxies.isProxyBeingGenerated (playFile)
+                                 && playFile.getFile().existsAsFile()
+                                 && playFile.isValid();
+                      }, 120000),
+                   "source-window: warp proxy is ready before the warped export");
         }
         auto validWarpFile = outDir.getChildFile ("valid-warp.wav");
         check (ok (cmd (ops, "export_audio", args1 ("file", validWarpFile.getFullPathName()))),
@@ -5775,6 +5806,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (hasSampler, "drum track hosts the built-in sampler");
         }
 
+        // The sampler loads its sounds on an AsyncUpdate that rebuilds the loaded list
+        // getSoundFile() reads; getNumSounds() reads the saved state. A render before that
+        // lands plays nothing, so the kit is "loaded" once every saved pad has a valid file.
+        auto drumKitLoaded = [&]
+        {
+            auto* drumTrack = dynamic_cast<te::AudioTrack*> (
+                te::findTrackForID (eng.edit(), te::EditItemID::fromString (dt)));
+            auto* sampler = drumTrack != nullptr
+                                ? drumTrack->pluginList.getPluginsOfType<te::SamplerPlugin>().getFirst()
+                                : nullptr;
+            if (sampler == nullptr || sampler->getNumSounds() == 0)
+                return false;
+            for (int i = 0; i < sampler->getNumSounds(); ++i)
+                if (! sampler->getSoundFile (i).isValid())
+                    return false;
+            return true;
+        };
+        // No pump here: headless, create_track itself must leave the kit loaded before the
+        // next command renders it (MoshOps drains the sampler's AsyncUpdate).
+        check (drumKitLoaded(), "create_track leaves the drum kit's sounds loaded for the next render");
+
         // Empty drum clip → export is SILENT (the "silence stays silent" control).
         auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", dt }, { "length", 2.0 }, { "notes", var (Array<var>()) }}));
         check (ok (mc), "empty drum MIDI clip added");
@@ -5803,9 +5855,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             check (ok (cmd (ops, "save")), "save before reload ok");
             check (ok (cmd (ops, "reload")), "reload ok");
-            // The sampler reloads its sample files on an AsyncUpdate; drain it before render.
-            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-                mm->runDispatchLoopUntil (50);
+            // The reloaded edit's new sampler rebuilds its loaded sound list on an AsyncUpdate
+            // (headless, reload has no drain of its own). Pump until every pad is loaded; a fixed
+            // 50 ms pump lost this race on a loaded machine.
+            check (pumpUntil (drumKitLoaded, 120000),
+                   "the reloaded sampler has loaded every kit sound before re-export");
             auto rtrk = trackById (dt);   // item ids are persisted, so dt still resolves
             check (rtrk.getProperty ("type", var()).toString() == "drum", "drum track type survives save/reload");
             bool hasSampler = false;

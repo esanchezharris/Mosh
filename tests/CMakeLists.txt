@@ -20,6 +20,7 @@ target_sources(MoshTests PRIVATE
     test_automation_curve_write.cpp
     test_clip_loop_phase.cpp
     test_render_source_window.cpp
+    test_render_watchdog.cpp
     test_export_range.cpp
     test_export_dither.cpp
     test_plugin_editor_param_gesture.cpp
