@@ -467,12 +467,13 @@ TEST_CASE ("stale auto-session pruning requires the exact ownership marker", "[s
 
     REQUIRE (ownerArtifact.existsAsFile());
     REQUIRE (ownerArtifact.loadFileAsString() == "<EDIT>not harness-owned</EDIT>");
+    REQUIRE (hasIsolationOwnershipMarker (actual));
     REQUIRE_FALSE (owned.exists());
-    const auto recoveries = moshDir.findChildFiles (
-        juce::File::findDirectories, false, ".mosh-reset-*");
-    REQUIRE (recoveries.size() == 1);
-    REQUIRE (recoveries[0].getChildFile ("session/mosh-log.jsonl").loadFileAsString()
-             == "{\"seq\":1}");
+    // The prune used to keep every pruned session in a `.mosh-reset-*` quarantine that
+    // nothing deleted (751 of them, 13.9 GiB, in ~/Library/Mosh by 2026-09-26). It now
+    // deletes the quarantine it just created; see the [reclaim] prune cases below.
+    REQUIRE (moshDir.findChildFiles (juce::File::findDirectories, false, ".mosh-reset-*")
+                 .isEmpty());
 
     moshDir.deleteRecursively();
 }
@@ -709,4 +710,170 @@ TEST_CASE ("a harness reset reclaim deletes only the directory it verified",
     REQUIRE_FALSE (box.target.exists());
     REQUIRE (replacement.getChildFile ("keep.txt").loadFileAsString() == "replacement data");
     REQUIRE (displaced.getChildFile ("old.txt").loadFileAsString() == "owned stale data");
+}
+
+// The auto-session prune in publishLatestPointer relocates every owned
+// `session-<mode>-auto-*` directory older than a day into `<moshDir>/.mosh-reset-*`.
+// Those quarantines were never deleted (751 of them, 13.9 GiB, in ~/Library/Mosh by
+// 2026-09-26). The prune now reclaims the quarantine it creates, under the same rules
+// as a harness reset: descriptors only, symlinks unlinked and never followed, and
+// anything holding model/adapter/checkpoint/evaluation evidence is kept.
+namespace
+{
+    struct AutoSessionSandbox
+    {
+        juce::File sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                 .getChildFile ("mosh-auto-reclaim-" + juce::Uuid().toString());
+        juce::File moshDir = sandbox.getChildFile ("Mosh");
+        juce::File actual = moshDir.getChildFile ("session-selftest-auto-3-cccccccc");
+
+        AutoSessionSandbox()
+        {
+            REQUIRE (moshDir.createDirectory());
+            REQUIRE (createOwnedAutoSession (moshDir, actual));
+        }
+
+        ~AutoSessionSandbox() { sandbox.deleteRecursively(); }
+
+        juce::File ownedSession (const juce::String& leaf) const
+        {
+            const auto directory = moshDir.getChildFile (leaf);
+            REQUIRE (createOwnedAutoSession (moshDir, directory));
+            return directory;
+        }
+
+        // Last, after populating: adding children bumps a directory's mtime.
+        static void backdate (const juce::File& directory)
+        {
+            REQUIRE (directory.setLastModificationTime (
+                juce::Time::getCurrentTime() - juce::RelativeTime::days (2.0)));
+        }
+
+        juce::Array<juce::File> quarantines() const
+        {
+            return moshDir.findChildFiles (juce::File::findDirectories, false,
+                                           ".mosh-reset-*", juce::File::FollowSymlinks::no);
+        }
+    };
+}
+
+TEST_CASE ("an auto-session prune reclaims the quarantine it creates",
+           "[sessionpaths][reclaim]")
+{
+    AutoSessionSandbox box;
+    const auto stale = box.ownedSession ("session-selftest-auto-2-bbbbbbbb");
+    REQUIRE (stale.getChildFile ("exports/deep/take.wav").create());
+    REQUIRE (stale.getChildFile ("exports/deep/take.wav").replaceWithText ("stale take"));
+    REQUIRE (stale.getChildFile ("training/adapters").createDirectory());   // empty: not evidence
+    AutoSessionSandbox::backdate (stale);
+
+    publishLatestPointer (box.moshDir, "session-selftest", box.actual);
+
+    REQUIRE_FALSE (stale.exists());
+    REQUIRE (box.quarantines().isEmpty());
+    REQUIRE (hasIsolationOwnershipMarker (box.actual));
+    REQUIRE (box.moshDir.getChildFile ("session-selftest").getLinkedTarget() == box.actual);
+}
+
+TEST_CASE ("an auto-session prune reclaim never follows a symlink out of its quarantine",
+           "[sessionpaths][reclaim][security]")
+{
+    AutoSessionSandbox box;
+    const auto outside = box.sandbox.getChildFile ("outside");
+    REQUIRE (outside.getChildFile ("keep.txt").create());
+    REQUIRE (outside.getChildFile ("keep.txt").replaceWithText ("owner data"));
+    const auto stale = box.ownedSession ("session-selftest-auto-2-bbbbbbbb");
+    REQUIRE (juce::File::createSymbolicLink (stale.getChildFile ("linked-dir"),
+                                             outside.getFullPathName(), true));
+    REQUIRE (juce::File::createSymbolicLink (stale.getChildFile ("linked-file"),
+                                             outside.getChildFile ("keep.txt").getFullPathName(),
+                                             true));
+    AutoSessionSandbox::backdate (stale);
+
+    publishLatestPointer (box.moshDir, "session-selftest", box.actual);
+
+    REQUIRE_FALSE (stale.exists());
+    REQUIRE (box.quarantines().isEmpty());
+    REQUIRE (outside.getChildFile ("keep.txt").loadFileAsString() == "owner data");
+}
+
+TEST_CASE ("an auto-session prune leaves quarantines it did not create alone",
+           "[sessionpaths][reclaim]")
+{
+    AutoSessionSandbox box;
+    // A backlog quarantine from an older build, marker and all: only the manifest sweep
+    // (scripts/verify-hardware/harness_session.py) may delete it, never the engine.
+    const auto earlier = box.moshDir.getChildFile (".mosh-reset-earlier/session");
+    REQUIRE (earlier.createDirectory());
+    REQUIRE (earlier.getChildFile (kHarnessOwnershipFile)
+                 .replaceWithText (kHarnessOwnershipContents));
+    REQUIRE (earlier.getChildFile ("old.txt").replaceWithText ("earlier quarantine"));
+    AutoSessionSandbox::backdate (earlier.getParentDirectory());
+    const auto stale = box.ownedSession ("session-selftest-auto-2-bbbbbbbb");
+    AutoSessionSandbox::backdate (stale);
+
+    publishLatestPointer (box.moshDir, "session-selftest", box.actual);
+
+    REQUIRE_FALSE (stale.exists());
+    REQUIRE (earlier.getChildFile ("old.txt").loadFileAsString() == "earlier quarantine");
+    const auto quarantines = box.quarantines();
+    REQUIRE (quarantines.size() == 1);
+    REQUIRE (quarantines[0].getFileName() == ".mosh-reset-earlier");
+}
+
+TEST_CASE ("an auto-session prune keeps a quarantine that holds model or adapter files",
+           "[sessionpaths][reclaim]")
+{
+    AutoSessionSandbox box;
+    const auto stale = box.ownedSession ("session-selftest-auto-2-bbbbbbbb");
+    const auto adapter = stale.getChildFile ("training/adapters/style.safetensors");
+    REQUIRE (adapter.create());
+    REQUIRE (adapter.replaceWithText ("adapter weights"));
+    AutoSessionSandbox::backdate (stale);
+
+    publishLatestPointer (box.moshDir, "session-selftest", box.actual);
+
+    REQUIRE_FALSE (stale.exists());
+    const auto quarantines = box.quarantines();
+    REQUIRE (quarantines.size() == 1);
+    REQUIRE (quarantines[0].getChildFile ("session/training/adapters/style.safetensors")
+                 .loadFileAsString() == "adapter weights");
+}
+
+TEST_CASE ("an auto-session prune keeps the quarantine of an evaluation-named session",
+           "[sessionpaths][reclaim]")
+{
+    AutoSessionSandbox box;
+    const auto actual = box.ownedSession ("session-eval-auto-3-cccccccc");
+    const auto stale = box.ownedSession ("session-eval-auto-2-bbbbbbbb");
+    REQUIRE (stale.getChildFile ("scores.json").replaceWithText ("{\"take\":1}"));
+    AutoSessionSandbox::backdate (stale);
+
+    publishLatestPointer (box.moshDir, "session-eval", actual);
+
+    REQUIRE_FALSE (stale.exists());
+    const auto quarantines = box.quarantines();
+    REQUIRE (quarantines.size() == 1);
+    REQUIRE (quarantines[0].getChildFile ("session/scores.json").loadFileAsString()
+             == "{\"take\":1}");
+}
+
+TEST_CASE ("an auto-session prune spares fresh, current and other-mode sessions",
+           "[sessionpaths][reclaim]")
+{
+    AutoSessionSandbox box;
+    const auto fresh = box.ownedSession ("session-selftest-auto-4-dddddddd");
+    REQUIRE (fresh.getChildFile ("mosh-log.jsonl").replaceWithText ("{\"seq\":4}"));
+    const auto otherMode = box.ownedSession ("session-selftest-undo-auto-5-eeeeeeee");
+    REQUIRE (otherMode.getChildFile ("mosh-log.jsonl").replaceWithText ("{\"seq\":5}"));
+    AutoSessionSandbox::backdate (otherMode);
+    REQUIRE (box.actual.getChildFile ("mosh-log.jsonl").replaceWithText ("{\"seq\":3}"));
+    AutoSessionSandbox::backdate (box.actual);
+
+    publishLatestPointer (box.moshDir, "session-selftest", box.actual);
+
+    REQUIRE (fresh.getChildFile ("mosh-log.jsonl").loadFileAsString() == "{\"seq\":4}");
+    REQUIRE (otherMode.getChildFile ("mosh-log.jsonl").loadFileAsString() == "{\"seq\":5}");
+    REQUIRE (box.actual.getChildFile ("mosh-log.jsonl").loadFileAsString() == "{\"seq\":3}");
+    REQUIRE (box.quarantines().isEmpty());
 }
