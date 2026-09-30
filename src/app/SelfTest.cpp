@@ -19281,7 +19281,6 @@ int runDisarmAfterExportSmoke (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
-} // namespace mosh
 // FINDINGS.md #7 follow-up (2026-09-24, coordinator review of commit 9b205295): the real
 // walkthrough's mosh-log.jsonl (~Library/Mosh/session/mosh-log.jsonl, seq 60-65) showed the
 // undo after Keep + Source/Result audition reverting a transaction OLDER than Keep's own --
@@ -19484,3 +19483,4 @@ int runDirectReimagineAudioSmoke (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
+} // namespace mosh
