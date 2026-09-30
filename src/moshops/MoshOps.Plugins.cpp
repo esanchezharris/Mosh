@@ -145,6 +145,35 @@ namespace
         { "tom_mid.wav",    "Mid Tom",    47 },
         { "crash.wav",      "Crash",      49 },
     };
+
+    // A sampler loads its sound files on an AsyncUpdate that rebuilds the list
+    // getSoundMedia() reads from the SOUND children of its state. True once that loaded
+    // list matches the saved one pad for pad, with no stale extra entries.
+    bool samplerSoundsLoaded (te::SamplerPlugin& sampler)
+    {
+        int i = 0;
+        for (auto v : sampler.state)
+            if (v.hasType (te::IDs::SOUND))
+                if (sampler.getSoundMedia (i++) != v[te::IDs::source].toString())
+                    return false;
+        return sampler.getSoundMedia (i).isEmpty();
+    }
+
+    // Headless there is no GUI dispatch between commands, so a sampler's AsyncUpdate must be
+    // drained before a later command renders it. Pump once, as before, then until the load
+    // has landed: a fixed 5 ms pump is outlasted on a loaded machine and DRM-001's beat then
+    // exports silent. Bounded so a sampler that never loads cannot hang the command.
+    void drainSamplerLoad (te::SamplerPlugin& sampler)
+    {
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        if (mm == nullptr)
+            return;
+
+        const auto startMs = juce::Time::getMillisecondCounter();
+        do
+            mm->runDispatchLoopUntil (5);
+        while (! samplerSoundsLoaded (sampler) && juce::Time::getMillisecondCounter() - startMs < 30000);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -679,8 +708,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     // there is no GUI dispatch between commands, so drain it now — the sound's audio
     // data must be resident before an export/render reads it (mirrors createAudioTrack).
     if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (5);
+        drainSamplerLoad (*sampler);
 
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
@@ -2093,8 +2121,7 @@ int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& ki
 
     // Resolve sample files now (see the pump note in cmdAssignSample).
     if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (5);
+        drainSamplerLoad (sampler);
 
     return loaded;
 }
