@@ -367,7 +367,8 @@ juce::var MoshOps::cmdBounceTrack (const juce::var& args)
         .getChildFile (track->getName() + "-" + track->itemID.toString()
                        + "-" + juce::String (++bounceSeq) + ".wav");
     if (! bounceTrackToWav (*track, 0.0, lastEnd, destWav))
-        return errResult ("bounce_track", "offline render failed (stalled or not possible here)");
+        return errResult ("bounce_track", "offline render failed ("
+            + (lastBounceError_.isNotEmpty() ? lastBounceError_ : juce::String ("stalled or not possible here")) + ")");
 
     te::AudioFile af (eng.edit().engine, destWav);
     const double len = af.isValid() ? af.getLength() : lastEnd;
@@ -453,7 +454,8 @@ juce::var MoshOps::cmdFreezeTrack (const juce::var& args)
         .getChildFile (track->getName() + "-" + track->itemID.toString()
                        + "-" + juce::String (++freezeSeq) + ".wav");
     if (! bounceTrackToWav (*track, 0.0, lastEnd, destWav))
-        return errResult ("freeze_track", "offline render failed (stalled or not possible here)");
+        return errResult ("freeze_track", "offline render failed ("
+            + (lastBounceError_.isNotEmpty() ? lastBounceError_ : juce::String ("stalled or not possible here")) + ")");
     te::AudioFile af (eng.edit().engine, destWav);
     const double len = af.isValid() ? af.getLength() : lastEnd;
 

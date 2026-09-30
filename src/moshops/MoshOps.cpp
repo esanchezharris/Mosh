@@ -352,7 +352,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     // message thread) to apply peer commits, feed the lock guard, and push presence
     // to the WebView. No relay echo: a remote apply repaints locally only.
     mpSession_ = std::make_unique<MultiplayerSession> (
-        [this] (const juce::var& msg) { applyMultiplayerCommitMessage (msg); },
+        [this] (const juce::var& msg) { runOrHoldMpApply ([this, msg] { applyMultiplayerCommitMessage (msg); }); },
         [this] (const juce::String& type, juce::var payload) { emit (type, payload); },
         [this] (bool active, const juce::String& self, const std::map<juce::String, juce::String>& locks)
         {
@@ -368,12 +368,36 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
         [this] (const juce::var& bundle) { return validateBootstrapBundle (bundle); },  // preflight
         [this] (const juce::var& bundle)
         {
-            auto* command = new DynamicObject();
-            command->setProperty ("command", "mp_apply_bootstrap");
-            command->setProperty ("args", bundle);
-            return execute (var (command));
+            auto adopt = [this, bundle]
+            {
+                auto* command = new DynamicObject();
+                command->setProperty ("command", "mp_apply_bootstrap");
+                command->setProperty ("args", bundle);
+                return execute (var (command));
+            };
+            if (! mpAppliesHeld())
+                return adopt();
+
+            // Held behind a render (see heldMpApplies_): report the rejection the session
+            // would have reported, if it comes to that, when the adoption actually runs.
+            runOrHoldMpApply ([this, adopt]
+            {
+                if (! (bool) adopt().getProperty ("ok", false))
+                {
+                    auto* diagnostic = new DynamicObject();
+                    diagnostic->setProperty ("stage", "apply");
+                    diagnostic->setProperty ("reason", "rejected");
+                    emit ("mp_bootstrap_rejected", var (diagnostic));
+                }
+            });
+            auto* held = new DynamicObject();
+            held->setProperty ("held", true);
+            return okResult ("mp_apply_bootstrap", var (held));
         },                                                                              // adopt
-        [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
+        [this] (const juce::var& msg)
+        {
+            runOrHoldMpApply ([this, msg] { cmdMpApplyStructural (msg); });
+        });                                                                             // structural
     refreshMpStemDir();
 }
 
@@ -404,6 +428,7 @@ MoshOps::~MoshOps()
 
 void MoshOps::timerCallback()
 {
+    runHeldMpApplies();
     pollDirectRenders();
     // Push a decimated transport delta while playing (and once on the
     // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
@@ -593,6 +618,15 @@ juce::var MoshOps::executeFromUi (const juce::var& command)
 
 juce::var MoshOps::execute (const juce::var& command)
 {
+    // A render command that waits for warped/reversed clip audio services the message loop
+    // (prepareRenderSources), so a UI click or queued async call can arrive in the middle
+    // of it, against an edit the render is about to read. Refuse it before it starts
+    // (multiplayer applies never get here mid-wait: runOrHoldMpApply holds them).
+    if (preparingRenderSources_)
+        return errResult (command.getProperty ("command", var()).toString(),
+                          "busy: a render is waiting for warped or reversed clip audio to finish "
+                          "generating; try again when it completes");
+
     // FS-B2a — re-entrancy depth. execute() is re-entered from INSIDE handlers (the
     // multiplayer apply path, cmdSketchBeatbox, cmdGenerateBeatRecipe), so the
     // transaction guard must govern the OUTERMOST call only: a manifested composite

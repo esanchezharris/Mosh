@@ -80,7 +80,27 @@ namespace
 
 void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
 {
-    applyMultiplayerCommitMessage (msg);
+    runOrHoldMpApply ([this, msg] { applyMultiplayerCommitMessage (msg); });   // the session's path
+}
+
+void MoshOps::runOrHoldMpApply (std::function<void()> apply)
+{
+    if (mpAppliesHeld())
+        heldMpApplies_.push_back (std::move (apply));
+    else
+        apply();
+}
+
+void MoshOps::runHeldMpApplies()
+{
+    if (preparingRenderSources_ || heldMpApplies_.empty())
+        return;
+
+    auto held = std::move (heldMpApplies_);
+    heldMpApplies_.clear();
+
+    for (auto& apply : held)
+        apply();
 }
 
 // PR-2: MultiplayerSession's stemBaseDir_ (worker-thread-only, mutex-guarded) must
