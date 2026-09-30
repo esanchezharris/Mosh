@@ -15,12 +15,58 @@ v1 compiles only the UNAMBIGUOUS mappings and records everything engine-dependen
 from __future__ import annotations
 
 import math
+import wave
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 DRUM_ROLES = {"kick", "snare", "hat", "clap", "perc", "808"}
 DEFAULT_CLIP_LEN_S = 8.0
-HEADROOM_TRIM_DB = -4.5  # per-track static trim (mix stage) — see compile_recipe
+
+# ── mix-stage headroom (2026-09-24 recipe-hygiene fix, reworked 2026-09-24) ──────────
+# The old flat HEADROOM_TRIM_DB = -4.5 (2026-07 clipping audit) was proven insufficient by
+# the 2026-09-23 investor-demo-prep run: recipe-probe/summary.json measured 4-5 of 6
+# generated seeds peaking at exactly 0.0 dBFS (hard clipping). Two DISTINCT causes, two
+# distinct fixes:
+#
+# 1) A single track firing many simultaneous MIDI notes onto the same one-shot
+#    (assign_sample's drum mode triggers the identical sample for every note regardless of
+#    pitch — seed 4's "hat" element fired 14 overlapping voices at beat 0). This is an
+#    EXTRACTION ARTIFACT, not musical content — a chord-shaped MIDI blob mis-read as N
+#    simultaneous drum hits — so the root fix is `_dedupe_drum_onsets`: collapse notes that
+#    land at the same onset (within a tiny epsilon) into ONE, keeping the loudest velocity.
+#    (A first attempt compensated with a per-track -20*log10(polyphony) volume cut instead;
+#    that punished the DURATION-based overlap of a merely HELD note, not just true
+#    coincident onsets, and made ordinary hi-hats ~23 dB quieter at every other hit —
+#    reverted.)
+# 2) Several tracks' one-shots genuinely landing together (kick+hat+808 on one downbeat) —
+#    real, not an artifact, and only a render can say how hot it actually gets. So
+#    `_predict_peak_at_0db` reads the ACTUAL palette one-shot bytes the compiled
+#    `assign_sample` commands reference and sums them at the compiled note positions/
+#    velocities at 0 dB gain — a real measurement, not a formula — and the ONE per-recipe
+#    trim is `min(HEADROOM_TRIM_DB, TARGET_PEAK_DB - predicted_peak)`: HEADROOM_TRIM_DB is
+#    the loudest any recipe ever gets (matches balance.py's own flat first-pass baseline —
+#    unchanged, so nothing there needs rescaling), and a hot recipe gets cut further, just
+#    enough to land at TARGET_PEAK_DB. A quiet recipe (predicted_peak already under target)
+#    keeps the −4.5 dB baseline rather than being pushed artificially louder. If the sample
+#    files can't be read (missing palette, unreadable format — this machine's `generate_
+#    beat_recipe` always HAS the palette, but the compiler must still degrade honestly),
+#    FALLBACK_MARGIN_DB adds a small, documented hedge instead of guessing a worst case.
+HEADROOM_TRIM_DB = -4.5          # the loudest any recipe track gets; mirrors balance.py's
+TARGET_PEAK_DB = -3.0            # goal ceiling for a MEASURED hot recipe's summed-mix peak
+FALLBACK_MARGIN_DB = -2.0        # can't measure (no palette) → this modest extra hedge,
+                                  # not a worst-case crush — see the module note above
+
+# ── track/clip display names (2026-09-24 recipe-hygiene fix) ─────────────────────────
+# The recipe library's `Element.label` is the SOURCE recording's own metadata (an artist
+# name, an FL project filename, an explicit word) — useful for provenance/debugging, never
+# for an on-screen name. The 2026-09-23 demo-prep run found these verbatim on track headers,
+# e.g. "skrill · kick friendly trsut beno #2 (kick)". Track/clip names are now derived ONLY
+# from the element's ROLE (the controlled vocabulary in recipe.Role), never from `label`.
+ROLE_DISPLAY_NAMES = {
+    "kick": "Kick", "snare": "Snare", "hat": "Hats", "clap": "Clap", "perc": "Perc",
+    "808": "808", "bass": "Bass", "lead": "Melody", "pad": "Chords", "pluck": "Pluck",
+    "fx": "FX", "vocal": "Vocal", "other": "Other",
+}
 
 
 @dataclass
@@ -192,6 +238,131 @@ def _center_pitch(notes) -> int:
     return ps[len(ps) // 2] if ps else 60
 
 
+def _role_display_name(role: str, seen: dict[str, int]) -> str:
+    """A user-visible track/clip name derived ONLY from the element's role — never the
+    library recipe's source `label` (see the module comment above ROLE_DISPLAY_NAMES).
+    `seen` counts prior uses of the same display name IN THIS RECIPE so a genuine same-role
+    repeat (e.g. two "hat" elements from a drum fill) reads "Hats", "Hats 2", ... — never a
+    silent on-screen collision. An out-of-vocabulary role (future Role addition) falls back
+    to a capitalized version of the role string rather than ever showing raw `label` text."""
+    base = ROLE_DISPLAY_NAMES.get(role) or (role.capitalize() if role else "Track")
+    seen[base] = seen.get(base, 0) + 1
+    return base if seen[base] == 1 else f"{base} {seen[base]}"
+
+
+_ONSET_EPSILON_BEATS = 1e-6   # "the same instant", not a musical grid tolerance — a real
+                              # 16th-note roll (0.25 beat apart) must NOT be touched
+
+
+def _dedupe_drum_onsets(notes, epsilon: float = _ONSET_EPSILON_BEATS) -> list:
+    """A drum-mode one-shot track (`assign_sample(mode="drum")`) triggers the IDENTICAL
+    sample for every note regardless of pitch, so several notes landing at the exact same
+    onset are not N real hits — they're an extraction artifact (a chord-shaped MIDI blob
+    mis-read as N simultaneous drum hits; seed 4's "hat" element fires 14 different pitches
+    at beat 0 onto one hi-hat sample). Collapse each coincident-onset group into ONE note,
+    keeping the loudest (max velocity) — never a duration-based overlap test: a one-shot's
+    audible length is the SAMPLE's own length, not the MIDI note's `duration_beats`, so a
+    held note must not be treated as "overlapping" everything that starts during its
+    nominal duration (that was the first attempt's bug — it made ordinary hi-hats ~23 dB
+    quieter at every other hit). Preserves input order otherwise; a note a grid tick away
+    (e.g. a genuine 16th-note roll) is untouched."""
+    if not notes:
+        return notes
+    by_onset: dict[int, Any] = {}
+    order: list[int] = []
+    for n in notes:
+        key = round(float(n.start_beats) / epsilon)
+        winner = by_onset.get(key)
+        if winner is None:
+            by_onset[key] = n
+            order.append(key)
+        elif int(n.velocity) > int(winner.velocity):
+            by_onset[key] = n
+    return [by_onset[k] for k in order]
+
+
+_MIX_SAMPLE_RATE = 44100.0
+
+
+def _read_wav_mono(path: str, np_mod) -> Any:
+    """A palette one-shot's samples as a mono numpy float array in [-1, 1] (16- or 24-bit
+    PCM — the palette's own format). Header/frame reads are stdlib `wave`; the byte→sample
+    decode and stereo downmix are vectorized numpy, not a per-sample Python loop (a
+    per-sample loop over a whole recipe's notes measured 1-3.5 SECONDS per compile — far too
+    slow for a command that otherwise runs in ~2s; the vectorized version is milliseconds)."""
+    with wave.open(path, "rb") as w:
+        n, sample_width, channels = w.getnframes(), w.getsampwidth(), w.getnchannels()
+        data = w.readframes(n)
+    if sample_width == 3:
+        raw = np_mod.frombuffer(data, dtype=np_mod.uint8).reshape(-1, 3)
+        as_int = (raw[:, 0].astype(np_mod.int32) | (raw[:, 1].astype(np_mod.int32) << 8)
+                  | (raw[:, 2].astype(np_mod.int32) << 16))
+        as_int = np_mod.where(as_int & 0x800000, as_int - 0x1000000, as_int)
+        vals = as_int.astype(np_mod.float64) / 8388608.0
+    elif sample_width == 2:
+        vals = np_mod.frombuffer(data, dtype="<i2").astype(np_mod.float64) / 32768.0
+    else:
+        raise ValueError(f"unsupported sample width {sample_width} in {path!r}")
+    if channels > 1:
+        return vals.reshape(-1, channels).mean(axis=1)
+    return vals
+
+
+def _predict_peak_at_0db(commands: list[dict], tempo: Optional[float]) -> Optional[float]:
+    """A REAL measurement of the mix this recipe will produce, at 0 dB (no per-track trim):
+    reads the ACTUAL palette one-shot audio the already-compiled `assign_sample` commands
+    reference, and sums it at the compiled `add_midi_clip` note positions, scaled by each
+    note's own velocity — the same arithmetic a render would show, without an engine.
+    Returns the summed-mix peak in dBFS, or None if numpy is unavailable, or not one track's
+    sample file could be read (missing palette, unreadable format, ...) — callers must fall
+    back to a fixed, documented margin rather than pretending a number this couldn't back
+    up. A melodic element with no matched sample (plays the stock 4OSC synth) has no PCM to
+    read and is correctly excluded — there's nothing to measure, not a failure to measure."""
+    file_by_track = {c["args"]["trackId"]: c["args"]["file"]
+                      for c in commands if c["command"] == "assign_sample"}
+    if not file_by_track:
+        return None
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    spb = 60.0 / float(tempo or 120.0)
+
+    # pass 1: every (sample array, start index, velocity gain) triple, and the buffer length
+    # needed — ONE allocation, not a Python list that regrows per note.
+    placements: list[tuple[Any, int, float]] = []
+    sample_cache: dict[str, Any] = {}
+    end = 0
+    for c in commands:
+        if c["command"] != "add_midi_clip":
+            continue
+        fpath = file_by_track.get(c["args"]["trackId"])
+        if not fpath:
+            continue
+        if fpath not in sample_cache:
+            try:
+                sample_cache[fpath] = _read_wav_mono(fpath, np)
+            except (OSError, wave.Error, ValueError):
+                sample_cache[fpath] = None
+        samp = sample_cache[fpath]
+        if samp is None or len(samp) == 0:
+            continue
+        for note in c["args"].get("notes", []):
+            start_i = int(round(float(note["start"]) * spb * _MIX_SAMPLE_RATE))
+            vel_gain = max(1, min(127, int(note.get("velocity", 100)))) / 127.0
+            placements.append((samp, start_i, vel_gain))
+            end = max(end, start_i + len(samp))
+    if not placements:
+        return None
+
+    # pass 2: one vectorized add per placement (not per sample).
+    mix = np.zeros(end, dtype=np.float64)
+    for samp, start_i, vel_gain in placements:
+        mix[start_i:start_i + len(samp)] += samp * vel_gain
+    peak = float(np.abs(mix).max()) if mix.size else 0.0
+    return 20.0 * math.log10(peak) if peak > 0 else float("-inf")
+
+
 def compile_recipe(recipe) -> CompileResult:
     """Compile a §0 Recipe (recipe.Recipe) into a full, inline MoshOps program + unresolved.
 
@@ -230,6 +401,7 @@ def compile_recipe(recipe) -> CompileResult:
 
     # ── elements ────────────────────────────────────────────────────────────────
     arr_beats = _arrangement_beats(recipe)
+    seen_names: dict[str, int] = {}
     for i, el in enumerate(recipe.elements):
         tvar = f"T{i}"
         role = el.role.value
@@ -239,9 +411,10 @@ def compile_recipe(recipe) -> CompileResult:
         matched = el.sample_match.status == "matched" and bool(el.sample_match.matched_path)
         melodic_bass = _is_melodic_bass(role, has_inline)
         is_drum = role in DRUM_ROLES and not melodic_bass
+        display_name = _role_display_name(role, seen_names)
 
         add({"command": "create_track",
-             "args": {"name": el.label or role,
+             "args": {"name": display_name,
                       "type": _track_type(role, melodic_bass, has_inline or has_ref_midi)},
              "capture": {tvar: "trackId"}})
         tref = f"${{{tvar}}}"
@@ -251,6 +424,11 @@ def compile_recipe(recipe) -> CompileResult:
             cvar = f"C{i}"
             # bind the real sound BEFORE the clip (so the default-instrument auto-load is a no-op).
             if matched and is_drum:
+                # every pitch here triggers the SAME one-shot (mode="drum") — collapse a
+                # coincident-onset pile-up (an extraction artifact) into one hit each; see
+                # _dedupe_drum_onsets. Only this branch dedupes: a melodic branch's distinct
+                # pitches are real, distinct musical content, never collapsed.
+                notes = _dedupe_drum_onsets(notes)
                 add({"command": "assign_sample",
                      "args": {"trackId": tref, "note": _common_pitch(notes), "mode": "drum",
                               "file": el.sample_match.matched_path}})
@@ -272,7 +450,7 @@ def compile_recipe(recipe) -> CompileResult:
                          el.element_id, "bind a palette 'melodic' one-shot"))
             add({"command": "add_midi_clip",
                  "args": {"trackId": tref, "start": 0, "length": _clip_len_s(notes, tempo),
-                          "name": el.label or role, "notes": _notes_payload(notes)},
+                          "name": display_name, "notes": _notes_payload(notes)},
                  "capture": {cvar: "clipId"}})
             placed = True
 
@@ -311,11 +489,22 @@ def compile_recipe(recipe) -> CompileResult:
             defer(_u("element has no compilable content", el.element_id,
                      "fill sample_match / midi / synth_patch"))
 
-    # ── mix stage: static headroom trim ──────────────────────────────────────────
-    # Full-scale one-shots stacked across 4-6 tracks clip the master hard (audit measured
-    # 7.4% clipped samples on a 6-track render). A flat −4.5 dB per track buys ~the same
-    # headroom a producer's first gain-staging pass would; deterministic, undo-friendly.
-    for i, el in enumerate(recipe.elements):
-        add({"command": "set_track_volume", "args": {"trackId": f"${{T{i}}}", "db": HEADROOM_TRIM_DB}})
+    # ── mix stage: one uniform, measured headroom trim ────────────────────────────
+    # See the HEADROOM_TRIM_DB block near the top of this module for the full derivation.
+    # ONE trim for the whole recipe (every track gets the same dB — the relative balance the
+    # elements were authored with is untouched): HEADROOM_TRIM_DB is the loudest a recipe
+    # ever gets; a recipe whose REAL predicted peak would exceed TARGET_PEAK_DB gets cut
+    # further, by exactly enough to land there.
+    predicted_peak_db = _predict_peak_at_0db(out.commands, tempo)
+    if predicted_peak_db is not None and predicted_peak_db != float("-inf"):
+        trim_db = min(HEADROOM_TRIM_DB, TARGET_PEAK_DB - predicted_peak_db)
+    else:
+        trim_db = HEADROOM_TRIM_DB + FALLBACK_MARGIN_DB
+    # 4 decimals: a 2-decimal round can drift the realized peak up to ~0.005 dB past
+    # TARGET_PEAK_DB when it's the binding branch — negligible for a mix, but avoids ever
+    # reporting a number technically over the ceiling this same call just computed.
+    trim_db = round(trim_db, 4)
+    for i in range(len(recipe.elements)):
+        add({"command": "set_track_volume", "args": {"trackId": f"${{T{i}}}", "db": trim_db}})
 
     return out
