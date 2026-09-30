@@ -3675,10 +3675,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // emitSpectrum() during REAL playback (a live PlaybackContext), which headless
     // --selftest never reaches, so the mapping logic that is supposed to protect the
     // tap from user-facing commands has never actually run against a real internal
-    // plugin. This section constructs one directly — the SAME insertion call
-    // cmdLoadMasterBuiltin/ensureMasterSpectralTap use (PluginCache::createNewPlugin +
-    // PluginList::insertPlugin at the list's current end) — and proves the mapping
-    // holds around it, then tears it down by hand (there is deliberately no user-facing
+    // plugin. This section inserts one through the production path (the playback
+    // timer's spectrum step, ensureMasterSpectralTap) and proves the mapping holds
+    // around it, then tears it down by hand (there is deliberately no user-facing
     // command that can reach an internal plugin) so later sections see a clean bus. ───
     section ("Master bus: internal plugin (spectral tap) visible-index boundary");
     {
@@ -3717,12 +3716,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "3 visible plugins load in order before the tap exists");
         check (physicalCount() == 3, "physical master list has exactly 3 plugins pre-tap");
 
-        {
-            auto tap = eng.edit().getPluginCache().createNewPlugin (MasterSpectralTapPlugin::xmlTypeName, {});
-            check (tap != nullptr, "synthetic internal plugin (spectral tap) created");
-            auto& list = eng.edit().getMasterPluginList();
-            list.insertPlugin (tap, list.getPlugins().size(), nullptr);   // append — same call cmdLoadMasterBuiltin/ensureMasterSpectralTap use
-        }
+        ops.emitSpectrumForSelfTest (true);   // the first playing spectrum tick appends the tap
         check (physicalCount() == 4, "physical master list now has 4 plugins (3 visible + the internal tap)");
         check (physicalTypeAt (3) == tapType, "the tap physically sits at index 3 (last)");
 
@@ -3821,9 +3815,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // ── cleanup: remove every visible plugin via the command surface (proves
         // remove_master_plugin keeps working with the tap present through to the end),
-        // then remove the synthetic internal plugin directly — mirrors its direct
-        // construction above; there is deliberately no user-facing command that can
-        // reach it — so later sections/demos see a fully clean master bus. ──
+        // then remove the internal plugin directly, without an undo step, the same way
+        // it arrived; there is deliberately no user-facing command that can reach it —
+        // so later sections/demos see a fully clean master bus. ──
         for (int guard = 0; guard < 8 && ! masterOrder().isEmpty(); ++guard)
         {
             const int idx = (int) masterPlugins()[0].getProperty ("index", -1);
@@ -3834,7 +3828,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             auto plugins = eng.edit().getMasterPluginList().getPlugins();
             if (! plugins.isEmpty())
-                plugins.getLast()->deleteFromParent();
+                plugins.getLast()->state.getParent().removeChild (plugins.getLast()->state, nullptr);
         }
         check (eng.edit().getMasterPluginList().getPlugins().isEmpty(), "synthetic internal plugin cleaned up — master bus fully empty for later sections");
     }

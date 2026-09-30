@@ -235,12 +235,21 @@ MasterSpectralTapPlugin* MoshOps::findMasterSpectralTap()
 MasterSpectralTapPlugin* MoshOps::ensureMasterSpectralTap()
 {
     if (auto* t = findMasterSpectralTap()) return t;
+    auto& list = eng.edit().getMasterPluginList();
+    // The same master budget PluginList::insertPlugin enforces (MoshEngineBehaviour's
+    // getEditLimits reserves the tap's slot).
+    if (list.size() >= eng.engine().getEngineBehaviour().getEditLimits().maxNumMasterPlugins)
+        return nullptr;
     auto plugin = eng.edit().getPluginCache().createNewPlugin (MasterSpectralTapPlugin::xmlTypeName, {});
     if (plugin == nullptr) return nullptr;
-    auto* t = dynamic_cast<MasterSpectralTapPlugin*> (plugin.get());
-    auto& list = eng.edit().getMasterPluginList();
-    list.insertPlugin (plugin, list.getPlugins().size(), nullptr);   // append → taps the final master output
-    return t;
+    // Telemetry, not a session edit: append with NO UndoManager. PluginList::insertPlugin
+    // always records on the Edit's UndoManager (its third argument is a SelectionManager),
+    // so the first Play in a project used to leave an unnamed transaction above the
+    // producer's last edit, and ⌘Z reverted the tap instead of that edit (2026-09-23
+    // walkthrough: Keep survived ⌘Z). Appending keeps the tap after every visible plugin,
+    // tapping the final master output.
+    list.state.appendChild (plugin->state, nullptr);
+    return dynamic_cast<MasterSpectralTapPlugin*> (plugin.get());
 }
 
 // See the MoshOps.h comment on masterVisibleBoundary() for the invariant this relies on.

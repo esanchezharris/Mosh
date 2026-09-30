@@ -62,8 +62,10 @@ namespace
         // The internal master-bus spectral tap (xmlTypeName moshMasterSpectralTap,
         // see MoshOps::ensureMasterSpectralTap/isInternalMasterPlugin) occupies ONE
         // master-plugin slot invisibly — masterVisibleBoundary() hides it from
-        // master.plugins entirely, but Tracktion's PluginList::insertPlugin still
-        // counts it against te::EditLimits::maxNumMasterPlugins (default 4). Without
+        // master.plugins entirely, but it still counts against
+        // te::EditLimits::maxNumMasterPlugins (default 4) — Tracktion's
+        // PluginList::insertPlugin for every visible load, and ensureMasterSpectralTap
+        // enforces the same budget for the tap itself. Without
         // this override, once the tap exists (created lazily the first time
         // transport plays, via emitSpectrum), the user's effective VISIBLE budget
         // silently drops from 4 to 3: the 4th load_master_plugin/load_master_builtin
