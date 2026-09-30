@@ -590,3 +590,108 @@ TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved"
 
     moshDir.deleteRecursively();
 }
+
+TEST_CASE ("a pointer to a vanished auto session is republished to the new run", "[sessionpaths]")
+{
+    // Observed 2026-09-30: ~/Library/Mosh/session-selftest still pointed at
+    // session-selftest-auto-57732-b41bd0a8 (Aug 3), long since pruned, while newer
+    // runs existed. Ownership is proven by a marker INSIDE the target, so a target
+    // that no longer exists can never be proven owned, and the pointer froze on the
+    // dead run forever. A link whose auto-named target is gone entirely guards nothing.
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+    REQUIRE (moshDir.createDirectory());
+
+    const auto newRun = moshDir.getChildFile ("session-selftest-auto-2-bbbbbbbb");
+    REQUIRE (newRun.createDirectory());
+    REQUIRE (newRun.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents));
+
+    const auto vanished = moshDir.getChildFile ("session-selftest-auto-1-aaaaaaaa");
+    const auto pointer = moshDir.getChildFile ("session-selftest");
+    REQUIRE (juce::File::createSymbolicLink (pointer, vanished.getFullPathName(), true));
+    REQUIRE (pointer.isSymbolicLink());
+    REQUIRE_FALSE (vanished.exists());
+
+    publishLatestPointer (moshDir, "session-selftest", newRun);
+
+    REQUIRE (pointer.isSymbolicLink());
+    REQUIRE (pointer.getLinkedTarget() == newRun);
+    REQUIRE_FALSE (vanished.exists());
+
+    REQUIRE (moshDir.deleteRecursively());
+}
+
+TEST_CASE ("a dangling pointer is kept unless its target is a vanished auto session of that base",
+           "[sessionpaths]")
+{
+    // The complement of the republish rule: each row breaks exactly one condition --
+    // a direct child of moshDir, named <baseName>-auto-*, and absent even to lstat --
+    // so the pointer must survive with its original target text.
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+
+    enum class Occupant { nothing, danglingSymlink, file, unownedDirectory };
+    struct Row { const char* label; const char* target; Occupant occupant; };
+    const Row rows[] = {
+        { "outside moshDir",         "../elsewhere/session-selftest-auto-1-aaaaaaaa", Occupant::nothing },
+        { "nested below moshDir",    "nested/session-selftest-auto-1-aaaaaaaa",       Occupant::nothing },
+        { "another base's session",  "session-selftest-undo-auto-1-aaaaaaaa",         Occupant::nothing },
+        { "not an auto session",     "owner-project",                                 Occupant::nothing },
+        { "a dangling symlink",      "session-selftest-auto-1-aaaaaaaa",              Occupant::danglingSymlink },
+        { "a file",                  "session-selftest-auto-1-aaaaaaaa",              Occupant::file },
+        { "an unowned directory",    "session-selftest-auto-1-aaaaaaaa",              Occupant::unownedDirectory },
+    };
+
+    int index = 0;
+    for (const auto& row : rows)
+    {
+        INFO ("pointer target: " << row.label);
+        const auto moshDir = sandbox.getChildFile ("case-" + juce::String (index++)).getChildFile ("Mosh");
+        REQUIRE (moshDir.createDirectory());
+        REQUIRE (moshDir.getChildFile ("nested").createDirectory());
+        REQUIRE (moshDir.getSiblingFile ("elsewhere").createDirectory());
+
+        const auto actual = moshDir.getChildFile ("session-selftest-auto-999-deadbeef");
+        REQUIRE (actual.createDirectory());
+        REQUIRE (actual.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents));
+
+        const auto target = moshDir.getChildFile (row.target);
+        switch (row.occupant)
+        {
+            case Occupant::nothing:
+                break;
+            case Occupant::danglingSymlink:
+                REQUIRE (juce::File::createSymbolicLink (
+                    target, sandbox.getChildFile ("gone").getFullPathName(), true));
+                break;
+            case Occupant::file:
+                REQUIRE (target.replaceWithText ("owner data"));
+                break;
+            case Occupant::unownedDirectory:
+                REQUIRE (target.createDirectory());
+                break;
+        }
+        if (row.occupant == Occupant::nothing)
+        {
+            REQUIRE_FALSE (target.exists());
+            REQUIRE_FALSE (target.isSymbolicLink());
+        }
+
+        const auto pointer = moshDir.getChildFile ("session-selftest");
+        REQUIRE (juce::File::createSymbolicLink (pointer, target.getFullPathName(), true));
+
+        publishLatestPointer (moshDir, "session-selftest", actual);
+
+        // CHECK, not REQUIRE: every row reports, so each one is shown to be load-bearing.
+        CHECK (pointer.isSymbolicLink());
+        CHECK (pointer.getLinkedTarget() == target);
+        if (row.occupant == Occupant::danglingSymlink)
+            CHECK (target.isSymbolicLink());
+        if (row.occupant == Occupant::file)
+            CHECK (target.loadFileAsString() == "owner data");
+        if (row.occupant == Occupant::unownedDirectory)
+            CHECK (target.isDirectory());
+    }
+
+    REQUIRE (sandbox.deleteRecursively());
+}
