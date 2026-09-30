@@ -240,16 +240,19 @@ MasterSpectralTapPlugin* MoshOps::ensureMasterSpectralTap()
     // getEditLimits reserves the tap's slot).
     if (list.size() >= eng.engine().getEngineBehaviour().getEditLimits().maxNumMasterPlugins)
         return nullptr;
-    auto plugin = eng.edit().getPluginCache().createNewPlugin (MasterSpectralTapPlugin::xmlTypeName, {});
-    if (plugin == nullptr) return nullptr;
-    // Telemetry, not a session edit: append with NO UndoManager. PluginList::insertPlugin
-    // always records on the Edit's UndoManager (its third argument is a SelectionManager),
-    // so the first Play in a project used to leave an unnamed transaction above the
-    // producer's last edit, and ⌘Z reverted the tap instead of that edit (2026-09-23
-    // walkthrough: Keep survived ⌘Z). Appending keeps the tap after every visible plugin,
-    // tapping the final master output.
-    list.state.appendChild (plugin->state, nullptr);
-    return dynamic_cast<MasterSpectralTapPlugin*> (plugin.get());
+    // Telemetry, not a session edit: nothing here may reach the Edit's UndoManager. The
+    // first Play in a project used to leave an unnamed transaction above the producer's
+    // last edit, and ⌘Z reverted the tap instead of that edit (2026-09-23 walkthrough:
+    // Keep survived ⌘Z). PluginList::insertPlugin always records the insert (its third
+    // argument is a SelectionManager), and PluginCache::createNewPlugin records two
+    // defaults on the new state (Plugin's `enabled`, and `remapOnTempoChange`). So hand
+    // the list a complete state and let it instantiate the tap as it does when an Edit
+    // loads. Appending keeps the tap after every visible plugin, on the final output.
+    juce::ValueTree tapState (te::IDs::PLUGIN);
+    tapState.setProperty (te::IDs::type, MasterSpectralTapPlugin::xmlTypeName, nullptr);
+    tapState.setProperty (te::IDs::enabled, true, nullptr);
+    list.state.appendChild (tapState, nullptr);
+    return findMasterSpectralTap();
 }
 
 // See the MoshOps.h comment on masterVisibleBoundary() for the invariant this relies on.
