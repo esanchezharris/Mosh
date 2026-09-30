@@ -13,6 +13,7 @@
 set -uo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib.sh"
+. "$SELF_DIR/../lib/harness-session.sh"
 # lib.sh enables `set -e`; the gate INTENTIONALLY runs steps that may fail and records
 # them, so turn errexit back OFF (keep nounset + pipefail).
 set +e -uo pipefail
@@ -80,6 +81,9 @@ run_memory_preflight() {
 
 # ── selftest ×3 (native only) ────────────────────────────────────────────────────
 SELFTEST_NS="[]"; SELFTEST_FMAX=0; SELFTEST_AMAX=0
+# The session each launched round was given, and whether selftest_x3 passed; read by
+# reclaim_selftest_sessions once every later step has run.
+SELFTEST_SESSIONS=""; SELFTEST_OK=false
 run_selftest_x3() {
   local bin="$1" i rc n f a det=true
   local ns="" deterministic=true baseline_ok=true rc_nonzero=""
@@ -101,6 +105,7 @@ run_selftest_x3() {
       rm -f "$log"; return 1
     fi
     [ -n "$PORT" ] || PORT="$sport"
+    SELFTEST_SESSIONS="$SELFTEST_SESSIONS $sess"
     # -ApplePersistenceIgnoreState YES: a headless selftest must NEVER inherit AppKit's
     # window-restoration / "reopen after crash" modal. After repeated crashes macOS shows
     # NSPersistentUIRestorer's runModal during launch, which blocks a headless run forever
@@ -143,6 +148,7 @@ run_selftest_x3() {
   [ "$det" = true ] || ok=false
   [ "$deterministic" = true ] || ok=false
   [ "$baseline_ok" = true ] || ok=false
+  SELFTEST_OK="$ok"
   emit_step "selftest_x3" "$ok" "$(jq -nc \
       --argjson ns "$SELFTEST_NS" --argjson fmax "$SELFTEST_FMAX" --argjson amax "$SELFTEST_AMAX" \
       --argjson deterministic "$deterministic" --argjson baseline_ok "$baseline_ok" \
@@ -406,6 +412,22 @@ gate_native() {
   run_step "replay_e2e" bash -c "python3 scripts/daw-conformance/replay_e2e_log.py '$bin' || true"
 }
 
+# ── reclaim this run's selftest sessions ─────────────────────────────────────────
+# Each --selftest round leaves a ~90 MB session under ~/Library/Mosh/_harness, and none
+# was ever deleted (210 of them, 15.4 GiB, on 2026-09-26). Nothing after run_selftest_x3
+# reads them: verify.py, conformance and replay run their own sessions, and
+# keep_failed_selftest_log copies a round's log, not its session. So after the last step,
+# a passing selftest_x3 removes exactly the sessions it generated, through the ownership
+# checks in scripts/lib/harness-session.sh; a failing one keeps them as its diagnostics.
+# Advisory: reclaiming disk never decides the verdict.
+reclaim_selftest_sessions() {
+  [ -n "$SELFTEST_SESSIONS" ] || return 0
+  local lines
+  lines="$(mosh_reclaim_harness_sessions "$SELFTEST_OK" $SELFTEST_SESSIONS)"
+  emit_step "harness_session_reclaim" true "$(printf '%s\n' "$lines" \
+    | jq -Rsc '{sessions:(split("\n") | map(select(length > 0)))}')"
+}
+
 finish() {
   local steps; steps="$(jq -sc . "$STEPS_FILE")"
   jq -nc \
@@ -429,5 +451,6 @@ if run_memory_preflight; then
   esac
 fi
 
+reclaim_selftest_sessions
 finish
 [ "$OVERALL" = true ]
