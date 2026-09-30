@@ -159,6 +159,142 @@ describe("createTaskExecutor — one undo unit per agent task", () => {
   });
 });
 
+describe("createTaskExecutor — guards from the 2026-09-23 real-app walkthrough (FINDINGS.md #4)", () => {
+  // "build me a lofi sketch" (live, packaged app) planned add_drum_pattern onto the EXISTING
+  // Drums track at bar 1 (overlapping the user's clip) and a create_track({name:"Keys",
+  // type:"audio"}) that never got an add_midi_clip/add_note before the task ended. The first
+  // and third tests below are true RED->GREEN reproductions of that defect (they FAIL without
+  // the guards and PASS with them). The rest are non-regression guards proving the new checks
+  // do not over-reach — they pass both before and after, since nothing removed/blocked
+  // anything before the guards existed.
+  beforeEach(async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+  });
+
+  it("refuses add_drum_pattern that would overlap an existing clip on the same track", async () => {
+    const created = await useStore.getState().exec("create_track", { name: "Drums", type: "drum" });
+    const trackId = (created.data as { trackId: string }).trackId;
+    const original = await useStore.getState().exec("add_drum_pattern", {
+      trackId, bars: 4, pattern: "kick: x...x...x...x...",
+    });
+    expect(original.ok).toBe(true);
+    await useStore.getState().refresh();
+
+    const t = createTaskExecutor("lofi sketch", { utterance: "build me a lofi sketch" });
+    const s = await t.env.runBatch("step 1", [
+      { command: "add_drum_pattern", args: { trackId, start: 0, bars: 2, pattern: "kick: x... .... x... ...." } },
+    ]);
+    expect(s.results[0]).toMatchObject({ command: "add_drum_pattern", ok: false });
+    expect(s.results[0]!.error).toMatch(/overlap/i);
+    await t.close();
+
+    // no second clip was silently pushed onto the track
+    expect(snap().tracks.find((x) => x.id === trackId)!.clips).toHaveLength(1);
+  });
+
+  it("still allows add_drum_pattern with clipId to replace lanes on the SAME existing clip in place", async () => {
+    const created = await useStore.getState().exec("create_track", { name: "Drums", type: "drum" });
+    const trackId = (created.data as { trackId: string }).trackId;
+    const original = await useStore.getState().exec("add_drum_pattern", {
+      trackId, bars: 4, pattern: "kick: x...x...x...x...",
+    });
+    const clipId = (original.data as { clipId: string }).clipId;
+    await useStore.getState().refresh();
+
+    const t = createTaskExecutor("dustier drums", { utterance: "make the drums dustier" });
+    const s = await t.env.runBatch("step 1", [
+      { command: "add_drum_pattern", args: { clipId, pattern: "hat: x.x.x.x.x.x.x.x." } },
+    ]);
+    expect(s.results[0]).toMatchObject({ command: "add_drum_pattern", ok: true });
+    await t.close();
+  });
+
+  it("removes an empty melodic-instrument track this task created but never filled", async () => {
+    // NOTE: the dev-mock seed already ships a DIFFERENT "Keys" track with its own clip
+    // (bridge.mock.ts's defaultSeed) — assertions below are by trackId, not by name, so
+    // this proves the repair removed the ONE this task made without touching the seed's.
+    const t = createTaskExecutor("lofi sketch", { utterance: "build me a lofi sketch" });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Keys", type: "audio" } }]);
+    expect(s.results[0]).toMatchObject({ command: "create_track", ok: true });
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(false);
+  });
+
+  it("keeps an empty NON-melodic track this task created (e.g. a bare Vocal track)", async () => {
+    const t = createTaskExecutor("add a vocal track", { utterance: "add a vocal track" });
+    await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Vocal" } }]);
+    await t.close();
+    expect(snap().tracks.some((x) => x.name === "Vocal")).toBe(true);
+  });
+
+  it("keeps a melodic-instrument track this task created if it DID get a clip", async () => {
+    const t = createTaskExecutor("add keys", { utterance: "add a keys part" });
+    const s1 = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Keys", type: "audio" } }]);
+    const trackId = s1.results[0]!.ids!.trackId as string;
+    const s2 = await t.env.runBatch("step 2", [{ command: "add_midi_clip", args: { trackId, start: 0, length: 4 } }]);
+    expect(s2.results[0]!.ok).toBe(true);
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
+  it("keeps an empty melodic-named track when the ask explicitly wants it empty/for later", async () => {
+    const t = createTaskExecutor("add keys", { utterance: "add a blank keys track for me to play live" });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Keys", type: "audio" } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
+  it("keeps an empty lead-vocal track: a recording destination is not a failed melodic part", async () => {
+    const t = createTaskExecutor("lead vocal", { utterance: "add a lead vocal track" });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Lead Vocal", type: "audio" } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
+  it("keeps an empty melodic-named track when the ask is about recording into it", async () => {
+    const t = createTaskExecutor("bass track", { utterance: "add a bass track so I can record my bass" });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Bass", type: "audio" } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
+  it("generate_beat_recipe (the fast-path reroute's target) adds a NEW track and never touches an existing Drums track/clip", async () => {
+    // Coordinator review point: the fast-path reroute to generate_beat_recipe is only safe if
+    // the recipe command itself cannot clobber the user's existing material the way the
+    // free-form plan did. bridge.mock.ts's case "generate_beat_recipe" always constructs a
+    // brand-new track object and pushes it; it never looks up an existing track by name/id.
+    const before = await useStore.getState().exec("create_track", { name: "Drums", type: "drum" });
+    const drumsId = (before.data as { trackId: string }).trackId;
+    const original = await useStore.getState().exec("add_drum_pattern", {
+      trackId: drumsId, bars: 4, pattern: "kick: x...x...x...x...",
+    });
+    const originalClipId = (original.data as { clipId: string }).clipId;
+    await useStore.getState().refresh();
+    const drumsBefore = snap().tracks.find((x) => x.id === drumsId)!;
+    const trackCountBefore = snap().tracks.length;
+
+    const r = await useStore.getState().exec("generate_beat_recipe", { mood: "lofi" });
+    expect(r.ok).toBe(true);
+    await useStore.getState().refresh();
+
+    // the user's Drums track and its clip are byte-identical
+    const drumsAfter = snap().tracks.find((x) => x.id === drumsId)!;
+    expect(drumsAfter.volumeDb).toBe(drumsBefore.volumeDb);
+    expect(drumsAfter.clips).toHaveLength(1);
+    expect(drumsAfter.clips[0]!.id).toBe(originalClipId);
+    expect(drumsAfter.clips[0]!.notes).toEqual(drumsBefore.clips[0]!.notes);
+
+    // exactly one NEW track was added
+    expect(snap().tracks.length).toBe(trackCountBefore + 1);
+  });
+});
+
 describe("createTaskExecutor — result ids reach the step results (step-1 slice 4)", () => {
   // Before this slice the step envelope was {command, ok, error} and `data` was
   // dropped, so a trackId/clipId/busNumber a command minted never reached the model

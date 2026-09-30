@@ -184,6 +184,51 @@ function resolveAll(names: string[], tracks: TrackLite[]): TrackLite[] | null {
   return out.some((t) => !t) || out.length === 0 ? null : (out as TrackLite[]);
 }
 
+// ── "make/build me a beat" → generate_beat_recipe ──────────────────────────────
+// FINDINGS.md #4 (2026-09-23 walkthrough): the free-form loop asked to "build me a
+// lofi sketch" planned add_drum_pattern onto the EXISTING Drums track at bar 1
+// (overlapping the user's clip), dropped Drums -5dB unasked, and left an empty
+// audio track named "Keys" with no instrument or notes. generate_beat_recipe
+// already exists as the curated, one-undoable-batch, real-sounds answer to
+// exactly this ask (see knowledge.ts's "beat-recipe-real-sounds" card, which tells
+// the MODEL to prefer it) — the model just did not reliably reach for it live. A
+// deterministic fast-path match removes that judgment call for the clearest
+// phrasings, so the free-form multi-step planner (the thing that produced the
+// broken plan) never gets a turn for THIS ask shape. Verified against
+// bridge.mock.ts's generate_beat_recipe (the dev-mock mirror of the native
+// contract): it ALWAYS pushes a brand-new "Recipe Drums" track and never reads or
+// mutates an existing track, so this reroute cannot touch the user's existing
+// Drums (or anything else) the way the free-form plan did.
+//
+// Scope: "lofi sketch" routes here too. It is the exact ask that broke — a
+// "sketch" IS a beat-shaped ask (the router's own CREATIVE_OBJECT list already
+// treats it as one), and generate_beat_recipe's mood arg takes free text (its own
+// ArgSpec: "vibe words steering retrieval, e.g. 'dark bounce'"), so
+// "lofi"/"dark"/"boom bap" etc. steer the SAME curated retrieval a free-form plan
+// would otherwise have to invent from scratch, more safely. The end-anchor below
+// keeps this narrow: "make the beat faster/louder" (a tempo/mix ask, not a NEW
+// beat) never matches because "faster"/"louder" trails the noun. "give" is
+// deliberately NOT in the verb list (unlike router.ts's CREATIVE_VERB) — "give me
+// a hand with the beat" was a real false-positive in standalone testing.
+const BEAT_RECIPE_VERB = "make|build|create|start|write|compose|produce|lay(?:\\s+down)?|sketch(?:\\s+out)?";
+const BEAT_RECIPE_NOUN = "beats?|grooves?|drum\\s*loops?|sketch(?:es)?";
+const BEAT_RECIPE_RE = new RegExp(`^(?:${BEAT_RECIPE_VERB})\\s+(?:me\\s+)?(?:an?\\s+)?(.*?)\\s*(?:${BEAT_RECIPE_NOUN})$`);
+const AT_TEMPO_RE = /\s+(?:at|in)\s+(?:this|the\s+same)\s+tempo$/;
+
+function matchBeatRecipe(norm: string, ctx: FastCtx): FastAction | null {
+  if (ctx.mode === "recording") return null; // never mid-take
+  const atTempo = AT_TEMPO_RE.test(norm);
+  const stripped = atTempo ? norm.replace(AT_TEMPO_RE, "") : norm;
+  const m = stripped.match(BEAT_RECIPE_RE);
+  if (!m) return null;
+  const mood = m[1].trim();
+  const args: Record<string, unknown> = {};
+  if (mood) args.mood = mood;
+  if (atTempo) args.tempo = ctx.tempo;
+  const say = mood ? `laying down a ${mood} beat` : "laying down a beat";
+  return cmd("generate_beat_recipe", args, "ACK_WORKING", say);
+}
+
 function matchTrackOp(norm: string, ctx: FastCtx): FastAction | null {
   const tracks = ctx.tracks;
   if (!tracks || tracks.length === 0 || ctx.mode === "recording") return null;
@@ -254,6 +299,8 @@ export function matchFastPath(text: string, ctx: FastCtx): FastAction | null {
   if (trackOp) return trackOp;
   const tempo = matchTempo(norm, ctx);
   if (tempo) return tempo;
+  const beatRecipe = matchBeatRecipe(norm, ctx);
+  if (beatRecipe) return beatRecipe;
   const uTokens = norm.split(" ");
   let best: { score: number; len: number; rule: Rule } | null = null;
   for (const rule of RULES) {
