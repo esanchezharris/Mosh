@@ -7,6 +7,7 @@
 namespace mosh
 {
 namespace te = tracktion::engine;
+namespace undotrace { class Tracer; }
 
 /** Owns the single te::Engine and the current te::Edit for the app lifetime
     (01 §1). Provides lifecycle + access only — it does NOT expose mutation to
@@ -241,6 +242,8 @@ public:
 private:
     std::unique_ptr<te::Engine> enginePtr;
     std::unique_ptr<te::Edit>   editPtr;
+    // MOSH_UNDO_TRACE only (engine/UndoTrace.h): follows the live Edit via wireEditResolvers.
+    std::unique_ptr<undotrace::Tracer> undoTracer;
     // Borrowed (non-owning) pointer to the MoshEngineBehaviour the Engine owns —
     // typed as the base here because the concrete type is anonymous-namespace-local
     // to MoshEngine.cpp. Lets the PRF-001 accessors mutate its audioThreads atomic.

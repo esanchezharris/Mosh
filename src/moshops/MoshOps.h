@@ -87,6 +87,11 @@ public:
 
     void applyMultiplayerCommitForSelfTest (const juce::var& msg);
 
+    /** The playback timer's spectrum step (timerCallback → emitSpectrum), which headless
+        runs never reach because it is gated on a live playback context. Lets --selftest
+        drive the production tap insertion without an audio device. */
+    void emitSpectrumForSelfTest (bool playing) { emitSpectrum (playing); }
+
     /** Direct plugin-host access for the headless deep-scan CLI (--scan-plugins-deep),
         which runs a synchronous OOP + hang-watchdog rescan off the message thread.
         NOT used by the normal command surface (that goes through cmdRescanPlugins). */
