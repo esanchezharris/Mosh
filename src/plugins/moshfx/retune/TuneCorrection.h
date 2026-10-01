@@ -38,7 +38,8 @@ public:
         double ratio = 1.0;
         double correctionCents = 0.0;
         int targetNote = -1; // MIDI note, -1 before the first voiced hop
-        bool active = false;
+        bool active = false;  // this hop was voiced
+        bool holding = false; // unvoiced, but inside the hold window of a note
     };
 
     void prepare (double hopSecondsIn)
@@ -67,6 +68,7 @@ public:
             out.correctionCents = smoothedCents;
             out.targetNote = heldNote;
             out.active = false;
+            out.holding = heldNote >= 0 && unvoicedRun < gapHops;
             return out;
         }
 

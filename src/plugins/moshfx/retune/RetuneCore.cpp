@@ -52,6 +52,7 @@ void RetuneCore::reset()
     shifter.reset();
     std::fill (dryRing.begin(), dryRing.end(), 0.0f);
     dryWrite = 0;
+    heldPeriod = 0.0;
     readout = RetuneReadout {};
 }
 
@@ -99,9 +100,22 @@ RetuneReadout RetuneCore::process (float* mono, int numSamples, const RetuneSett
             const auto out = correction.update (hop.f0Hz, hop.voiced, params);
             const bool voiced = out.active && hop.voiced && hop.f0Hz > 0.0;
             if (voiced)
-                shifter.setTarget (rate / hop.f0Hz, out.ratio);
+            {
+                heldPeriod = rate / hop.f0Hz;
+                shifter.setTarget (heldPeriod, out.ratio);
+            }
+            else if (out.holding && heldPeriod > 0.0)
+            {
+                // A short dropout inside a note: keep shifting at the held ratio.
+                // Releasing here would let the pitch blip back to uncorrected and
+                // force a recentre crossfade in the middle of the note.
+                shifter.setTarget (heldPeriod, out.ratio);
+            }
             else
+            {
+                heldPeriod = 0.0;
                 shifter.setTarget (0.0, 1.0);
+            }
 
             readout.voiced = voiced;
             readout.confidence = (float) hop.clarity;

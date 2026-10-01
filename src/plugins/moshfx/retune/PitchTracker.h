@@ -11,11 +11,12 @@
 // TunePitchTracker: YIN (difference function, cumulative-mean normalisation,
 // absolute threshold, parabolic refinement) on a preallocated ring, with the hop
 // cadence anchored to the absolute sample count so any chunking of the same
-// samples yields bit-identical hops. Changes from the original, all to cut
-// detection lag for the low-latency shifter: the fixed comparison segment is the
-// MOST RECENT span of samples (the lagged one slides back in time), the median is
-// 3 taps, and a clarity value is reported. No allocation, locks, logging or IO
-// after prepare().
+// samples yields bit-identical hops. Changes from the original: to cut detection
+// lag for the low-latency shifter, the fixed comparison segment is the MOST RECENT
+// span of samples (the lagged one slides back in time) and the median is 3 taps;
+// to stop notes dropping out, a voiced run survives a weaker match near the held
+// pitch (the continuity rescue below); and a clarity value is reported. No
+// allocation, locks, logging or IO after prepare().
 
 namespace mosh::moshfx::retune
 {
@@ -29,7 +30,8 @@ public:
         int tauMin = 0;
         int tauMax = 0;
         int span = 0;
-        double threshold = 0.15;  // CMNDF absolute threshold
+        double threshold = 0.15;        // CMNDF threshold to START a voiced run
+        double releaseThreshold = 0.35; // ... and to STAY in one, near the held pitch only
         double rmsGate = 0.00316; // -50 dBFS
         int medianTaps = 3;
         int voicingHysteresisFrames = 3;
@@ -175,6 +177,7 @@ private:
                 for (int tau = tauMin; tau <= tauMax; tau = next (tau))
                     if (cmndf[(std::size_t) tau] < cmndf[(std::size_t) best])
                         best = tau;
+                bool found = false;
                 for (int tau = tauMin; tau <= tauMax; tau = next (tau))
                 {
                     if (cmndf[(std::size_t) tau] < settings.threshold)
@@ -184,7 +187,29 @@ private:
                                && cmndf[(std::size_t) next (trough)] < cmndf[(std::size_t) trough])
                             trough = next (trough);
                         best = trough;
+                        found = true;
                         break;
+                    }
+                }
+                double limit = settings.threshold;
+                // Continuity rescue: inside a voiced run, a breathy or reverberant
+                // stretch can miss the strict threshold. Look only near the held
+                // pitch (+/- 4 semitones) and accept the looser release threshold
+                // there. Searching the whole band at the looser threshold instead
+                // would pick octave-up lags (measured on vocadito).
+                if (! found && voicedState && heldF0 > 0.0 && settings.releaseThreshold > settings.threshold)
+                {
+                    const double heldTau = rate / heldF0;
+                    const int from = std::max (tauMin, (int) std::floor (heldTau / 1.26));
+                    const int to = std::min (tauMax, (int) std::ceil (heldTau * 1.26));
+                    int near = -1;
+                    for (int tau = from; tau <= to; ++tau)
+                        if (! strided (tau) && (near < 0 || cmndf[(std::size_t) tau] < cmndf[(std::size_t) near]))
+                            near = tau;
+                    if (near > 0 && cmndf[(std::size_t) near] < settings.releaseThreshold)
+                    {
+                        best = near;
+                        limit = settings.releaseThreshold;
                     }
                 }
                 double tauEstimate = (double) best;
@@ -201,7 +226,7 @@ private:
                         tauEstimate += stride * 0.5 * (previous - after) / denominator;
                 }
                 rawF0 = rate / std::max (tauEstimate, 1.0);
-                rawVoiced = cmndf[(std::size_t) best] < settings.threshold;
+                rawVoiced = cmndf[(std::size_t) best] < limit;
                 rawClarity = std::clamp (1.0 - cmndf[(std::size_t) best], 0.0, 1.0);
             }
         }

@@ -51,6 +51,9 @@ public:
     // In place. No allocation, locks, logging or IO.
     RetuneReadout process (float* mono, int numSamples, const RetuneSettings& settings);
 
+    // For tests and tooling only.
+    [[nodiscard]] const SpliceShifter& shifterForDiagnostics() const noexcept { return shifter; }
+
 private:
     double rate = 0.0;
     int latency = 0;
@@ -61,6 +64,7 @@ private:
     std::vector<float> dryRing;
     int dryMask = 0;
     int dryWrite = 0;
+    double heldPeriod = 0.0; // the last voiced period, kept through short dropouts
     RetuneReadout readout;
 };
 

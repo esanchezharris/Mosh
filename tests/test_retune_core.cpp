@@ -251,6 +251,31 @@ TEST_CASE ("Retune tracker hears a quiet vowel and ignores silence", "[retune][t
         CHECK_FALSE (hop.voiced);
 }
 
+TEST_CASE ("Retune tracker keeps a noisy sustained note voiced", "[retune][tracker]")
+{
+    // Formant-shaped noise at the fixture's +2 dB setting: the strict threshold alone
+    // drops about one hop in eight here, so the continuity rescue near the held pitch
+    // has to carry the note.
+    const auto noisy = fx::renderVocal (2.0, [] (double) { return fx::centsToHz (220.0, 35.0); }, 2.0);
+    const auto hops = streamFixture (noisy, { 512 });
+    int dropouts = 0, voiced = 0;
+    bool started = false;
+    for (std::size_t i = 0; i + 12 < hops.size(); ++i) // ignore the fade-out
+    {
+        if (hops[i].voiced)
+        {
+            started = true;
+            ++voiced;
+        }
+        else if (started)
+            ++dropouts;
+    }
+    INFO ("voiced hops " << voiced << ", dropouts " << dropouts);
+    REQUIRE (voiced > 100);
+    CHECK (dropouts == 0);
+    CHECK (std::abs (fx::centsSeriesStats (voicedErrors (noisy, hops, 6)).median) <= 15.0);
+}
+
 // ----------------------------------------------------------------------------
 // Correction decision
 
@@ -540,6 +565,31 @@ TEST_CASE ("Retune core reports what it hears", "[retune][core]")
     CHECK (late.targetHz == Catch::Approx (220.0).epsilon (1.0e-9));
     CHECK (late.correctionCents == Catch::Approx (-35.0).margin (5.0));
     CHECK (late.confidence > 0.8f);
+}
+
+TEST_CASE ("Retune core holds the correction through a short dropout", "[retune][core]")
+{
+    // vowel / unvoiced burst / vowel, with the burst shorter or longer than the
+    // 60 ms hold. Releasing on the short one would blip the pitch back to
+    // uncorrected and force a recentre crossfade in the middle of a note.
+    auto recentresWithBurst = [] (double burstSeconds)
+    {
+        const double rate = 48000.0;
+        auto vowel = fx::renderVocal (0.5, [] (double) { return fx::centsToHz (220.0, 35.0); });
+        std::vector<float> input (vowel.samples.begin(), vowel.samples.end() - 1440); // drop the fade-out
+        fx::detail::Lcg random (5);
+        for (int i = 0; i < (int) (burstSeconds * rate); ++i)
+            input.push_back (0.05f * (float) random.next());
+        input.insert (input.end(), vowel.samples.begin() + 1440, vowel.samples.end() - 1440);
+
+        RetuneCore core;
+        REQUIRE (core.prepare (rate));
+        core.process (input.data(), (int) input.size(), hardChromatic());
+        return core.shifterForDiagnostics().recentreCount();
+    };
+
+    CHECK (recentresWithBurst (0.020) == 0);
+    CHECK (recentresWithBurst (0.200) >= 1);
 }
 
 TEST_CASE ("Retune core never allocates while processing", "[retune][core][rtguard]")

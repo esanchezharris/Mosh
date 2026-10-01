@@ -87,6 +87,15 @@ Changes from the Moshpit original, all to cut detection lag for the low-latency 
   UI confidence readout.
 - No JUCE dependency.
 
+One further change stops notes dropping out. Measured on the 40 vocadito excerpts against
+their hand-annotated pitch, the tracker as ported lost the note for under 60 ms about 42
+times a minute. **Continuity rescue:** inside a voiced run, when no lag passes the strict
+threshold, the tracker looks only within ±4 semitones of the held pitch and accepts a
+looser threshold (0.35) there. That cut the short dropouts to 15 a minute and raised
+voicing recall from 93.9% to 95.9%, with pitch accuracy (95.9% within 50 cents) and octave
+errors (1.45%) unchanged. Applying the looser threshold across the whole band instead
+tripled the octave errors.
+
 ## 6. TuneCorrection (ported from Moshpit `TuneCorrection.h`)
 
 Per voiced hop:
@@ -106,6 +115,11 @@ Per voiced hop:
 Unvoiced hops hold the last state, so a short dip inside a note resumes smoothly. After a
 gap of 60 ms or more the held note and smoothed correction are cleared, so a new phrase
 does not start with the previous phrase's correction.
+
+**Hold through dropouts.** While a hop is unvoiced but inside that 60 ms window,
+`RetuneCore` keeps the shifter voiced at the last period and the held ratio. Releasing
+straight away would let the pitch blip back to uncorrected and force a recentre crossfade
+in the middle of the note. Only after the window does the shifter go unvoiced.
 
 ## 7. SpliceShifter — behavioural spec
 
