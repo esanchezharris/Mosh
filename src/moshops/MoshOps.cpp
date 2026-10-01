@@ -313,7 +313,8 @@ namespace
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
-    : eng (engineToUse), pluginHost (engineToUse.engine()),
+    : eng (engineToUse),
+      pluginHost (engineToUse.engine(), engineToUse.pluginStateDir(), engineToUse.pluginSeedDir()),
       trainerRegistry (engineToUse.sessionDir())
 {
     eng.beforePersist = [this] { restoreDirectAuditions(); };
