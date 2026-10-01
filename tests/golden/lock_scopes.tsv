@@ -18,6 +18,7 @@ analyze_lyrics	Track
 apply_agent_patch	Unguarded
 apply_choke	Clip
 apply_remote_track	Unguarded
+apply_track_preset	Track
 approve_training_source	Unguarded
 arm_track	Track
 assert_lyric_line	Track

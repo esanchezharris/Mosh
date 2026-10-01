@@ -429,6 +429,10 @@ export type Plugin = {
   params: PluginParam[];
   rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
   moshFx?: MoshFxReadout;
+  /** Present iff a track-chain preset (apply_track_preset) inserted this plugin. It says
+   *  where the plugin CAME FROM — not that its values still equal the preset's, since the
+   *  user may have edited them. `stage` is its 0-based position in the preset's chain. */
+  preset?: { id: string; name: string; revision: number; stage: number };
   // Stable plugin-catalog identity (PluginHost::idFor), set for every external plugin —
   // the Skill Foundry's plugin_instance_added_once predicate compares this against a
   // resolved plugin_by_name binding's identity (docs/superpowers/plans/

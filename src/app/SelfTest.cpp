@@ -1,5 +1,6 @@
 #include "SelfTest.h"
 #include "selftest/MultiplayerAudioRefSelfTest.h"
+#include "selftest/VocalPresetSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -17070,6 +17071,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (tracks (ops) == tracksBefore,
               "…and the create_track step it DID apply was undone along with the rest of the batch");
     }
+
+    // Track-chain presets ("Mosh Clean Lead v0"). LAST in the core run on purpose: it
+    // opens a clean project so its renders contain the preset track and nothing else,
+    // and nothing it creates can shift the ids or revision counters earlier sections
+    // assert on. Its own sections cover what a matrix row would (one undo restores the
+    // canonical snapshot; the state survives save/reload) — see VocalPresetSelfTest.cpp.
+    runVocalPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
 
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks

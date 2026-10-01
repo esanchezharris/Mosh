@@ -36,6 +36,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   set_project_settings: "project-level settings dialog plumbing, not a musical move",
   set_track_input: "physical input routing is set from the track's input picker with the device list in view",
   rescan_plugins: "the plugin scan is a slow, blocking maintenance op driven from the settings UI",
+  apply_track_preset: "a vocal-chain preset is a manual producer choice from the inspector's Plugins group — agentic mixing is postponed, so Moshi inserting and tuning a dynamics chain is exactly what stays human for now",
   block_plugin: "the crash-blacklist is a safety console the producer manages",
   unblock_plugin: "retrying one quarantined plugin is a safety decision the producer makes from the insert dialog",
   clear_plugin_blocklist: "the crash-blacklist is a safety console the producer manages",

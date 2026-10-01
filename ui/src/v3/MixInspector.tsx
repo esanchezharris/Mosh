@@ -1,7 +1,8 @@
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { ReImagineSection } from "./ReImagineSection";
 import { midiInputOptions, trackOutputOptions, currentTrackOutput, trackOutputPatch, waveInputOptions, currentTrackInput } from "../settings/routing";
-import type { Plugin, Snapshot } from "../types";
+import type { Plugin, Snapshot, Track } from "../types";
 import { PresetPicker } from "../ui/PresetPicker";
 import { Range } from "./Range";
 import { useV3 } from "./shellState";
@@ -25,7 +26,8 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
   const native = !!plugin.builtin && !plugin.external;
   return (
-    <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}>
+    <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
+      data-preset={plugin.preset ? plugin.preset.id : undefined}>
       <div className="hdr">
         <span className="nm">{plugin.name}</span>
         <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
@@ -34,9 +36,19 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
           {plugin.enabled ? "on" : "off"}
         </button>
       </div>
+      {/* Its own line, not a header chip: the header is one tight row and a preset name
+          is long. It names where the plugin came from; editing a value does not remove it. */}
+      {plugin.preset && (
+        <div className="set-hint" data-testid="v3-plugin-preset"
+          title="Inserted by this preset. Undo removes the whole preset in one step.">
+          Preset: {plugin.preset.name}
+        </div>
+      )}
       {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
         onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
-      {native && plugin.params.slice(0, 4).map((p) => (
+      {/* A preset's stages show EVERY parameter: the chain is only inspectable if the
+          controls it set are on screen (the compressor's output trim is its fifth). */}
+      {native && (plugin.preset ? plugin.params : plugin.params.slice(0, 4)).map((p) => (
         <label className="fader" key={p.index}>
           <span className="nm">{p.name}</span>
           <Range min={0} max={1} step={0.01} value={p.value} aria-label={p.name}
@@ -52,6 +64,58 @@ function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
       )}
     </div>
   );
+}
+
+/** Can a vocal-chain preset go on this track? Mirrors the engine's own preflight
+ *  (cmdApplyTrackPreset), which stays the authority — this only decides whether to offer. */
+export function acceptsTrackPreset(track: Track): boolean {
+  return (track.type ?? "audio") === "audio" && !track.isInstrument && !track.isReturn
+    && !track.isGroup && !track.frozen
+    && !(track.plugins ?? []).some((p) => p.isInstrument);
+}
+
+// The manual entry point for track-chain presets ("Mosh Clean Lead v0"): one pick applies
+// the whole chain to THIS track as one undo step (apply_track_preset). The track id is the
+// one this picker was rendered for — never a fallback — and the engine re-validates it.
+// Keyed by track at the call site, so a refusal shown for one track cannot linger under,
+// or arrive late onto, another.
+function TrackPresetPicker({ trackId, recording }: { trackId: string; recording: boolean }) {
+  const exec = useStore((s) => s.exec);
+  const [presets, setPresets] = useState<{ name: string; file: string }[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    void Promise.resolve(exec("list_presets", { plugin: "track-chain" })).then((r) => {
+      if (dead || !r?.ok) return;
+      setPresets((r.data as { presets?: { name: string; file: string }[] } | undefined)?.presets ?? []);
+    });
+    return () => { dead = true; };
+  }, [exec]);
+  if (!presets || presets.length === 0) return null;
+  return (
+    <>
+      <select className="preset-pick" data-testid="v3-track-preset" value="" disabled={recording}
+        aria-label="Apply a vocal preset to this track"
+        title={recording ? "Stop recording to apply a preset" : "Adds the preset\u2019s effects to this track as one undo step"}
+        onChange={(e) => {
+          const file = e.target.value;
+          if (!file) return;
+          setFailed(null);
+          void Promise.resolve(exec("apply_track_preset", { trackId, file })).then((r) => {
+            if (r && !r.ok) setFailed(r.error ?? "Could not apply the preset");
+          });
+        }}>
+        <option value="" disabled>{recording ? "Vocal preset (stop recording first)" : "Vocal preset\u2026"}</option>
+        {presets.map((p) => <option key={p.file} value={p.file}>{trackPresetLabel(p.name)}</option>)}
+      </select>
+      {failed && <div className="set-hint" role="alert" data-testid="v3-track-preset-error">{failed}</div>}
+    </>
+  );
+}
+
+/** "mosh-clean-lead-v0" -> "Mosh Clean Lead v0": the library lists file stems. */
+export function trackPresetLabel(fileStem: string): string {
+  return fileStem.split("-").map((w) => (/^v\d+$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
 }
 
 export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
@@ -145,6 +209,11 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
             {plugins.map((p) => <PluginRow key={p.index} plugin={p} trackId={track.id} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"
               onClick={() => useV3.getState().setPane("plugins")}>+ Add plugin</button>
+            {/* Offered only for a track the producer actually SELECTED. The inspector
+                falls back to the first track when nothing is selected; a preset must
+                never ride that fallback onto a track nobody chose. */}
+            {selectedTrackId === track.id && acceptsTrackPreset(track)
+              && <TrackPresetPicker key={track.id} trackId={track.id} recording={!!snapshot.transport?.recording} />}
           </div>
         </details>
       </div>

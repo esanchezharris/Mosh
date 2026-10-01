@@ -24,6 +24,9 @@ target_sources(MoshTests PRIVATE
     test_export_dither.cpp
     test_plugin_editor_param_gesture.cpp
     test_plugin_parameter_readback.cpp
+    # Track-chain presets ("Mosh Clean Lead v0") — the engine-free half: schema, the
+    # pinned processor table, and the dB/ratio unit adapter (src/moshops/TrackPreset.h).
+    test_track_preset.cpp
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
