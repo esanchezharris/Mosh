@@ -3637,31 +3637,37 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // write, so reading it back is the only honest way to tell a restored pad from a
     // still-silenced one. minNote/maxNote are carried because assign_sample's melodic
     // mode maps one sound across the whole keyboard, which is not a pad at all.
+    //
+    // Every field is read from the persisted SOUND children, as the index getters below
+    // already do. `file` is taken from the child itself: the engine's getter for it,
+    // getSoundMedia, reads the LOADED sound list instead, which Tracktion rebuilds only in
+    // handleAsyncUpdate on the message thread. Right after a kit load, assign_sample or
+    // reload that has not run yet (always with an audio device open, since MoshOps pumps
+    // for it only headless) that list is empty or still names the replaced sample.
     if (auto* sampler = findSampler (t))
     {
         Array<var> pads;
-        for (int i = 0; i < sampler->getNumSounds(); ++i)
+        int i = 0;
+        for (auto sound : sampler->state)
         {
+            if (! sound.hasType (te::IDs::SOUND))
+                continue;   // the getters index SOUND children only
             auto* p = new DynamicObject();
             p->setProperty ("index",     i);
             p->setProperty ("pitch",     sampler->getKeyNote (i));
             p->setProperty ("minNote",   sampler->getMinKey (i));
             p->setProperty ("maxNote",   sampler->getMaxKey (i));
             p->setProperty ("name",      sampler->getSoundName (i));
-            p->setProperty ("file",      sampler->getSoundMedia (i));
+            p->setProperty ("file",      sound[te::IDs::source].toString());
             p->setProperty ("gainDb",    sampler->getSoundGainDb (i));
             p->setProperty ("pan",       sampler->getSoundPan (i));
             p->setProperty ("openEnded", sampler->isSoundOpenEnded (i));
             // Choke group is a Mosh-side property on the SOUND tree (see Ids.h) — the
             // engine has no such concept, so it can only be read back from where we put it.
-            {
-                int n = 0, group = 0;
-                for (auto v : sampler->state)
-                    if (v.hasType (te::IDs::SOUND))
-                        if (n++ == i) { group = (int) v.getProperty (ids::moshChokeGroup, 0); break; }
-                if (group > 0) p->setProperty ("chokeGroup", group);
-            }
+            if (const int group = (int) sound.getProperty (ids::moshChokeGroup, 0); group > 0)
+                p->setProperty ("chokeGroup", group);
             pads.add (var (p));
+            ++i;
         }
         o->setProperty ("drumPads", pads);
         const auto kit = t.state.getProperty (ids::drumKitId, "").toString();

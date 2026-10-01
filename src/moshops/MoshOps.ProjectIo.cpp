@@ -453,6 +453,7 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    settleSamplers();                      // play what each sampler holds, not a stale loaded copy
 
     file.getParentDirectory().createDirectory();
     file.deleteFile();
@@ -683,6 +684,10 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     unregisterAllMeterClients();           // master tap follows the context being freed
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    // The render below runs on this thread without a message-loop pass, so a sampler edit
+    // or reload/open just before this command would otherwise render from the sampler's
+    // stale loaded copy: silent after a reload, a muted lane still at full gain.
+    settleSamplers();
 
     const double len = juce::jmax (0.1, rEnd - rStart);
 
@@ -1034,6 +1039,7 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    settleSamplers();                      // as cmdExportAudio: no stale sampler sound lists
 
     // Edit-wide render mode: one realtime-only hosted synth (e.g. Serum) anywhere in
     // the edit forces ALL stems to render realtime — a safe superset, computed once
