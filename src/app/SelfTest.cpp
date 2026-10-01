@@ -8214,9 +8214,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         return true;
             return false;
         };
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        // Wait for the NEXT levels frame, by condition. Frames come from MoshOps' 30 Hz timer,
+        // and each one reconciles the meter taps before it is emitted, so the first frame after
+        // an edit already reflects it. A fixed 80 ms pump could end before that tick was even
+        // dispatched: on macOS the dispatch loop delivers a few queued messages per pass, and a
+        // reload queues an async update for nearly every object in the new Edit. That is a
+        // queue-depth race, so it lost on an idle machine as readily as on a loaded one.
+        auto nextLevelsFrame = [&] {
+            lastLevelsEvent = var();
+            const auto start = Time::getMillisecondCounterHiRes();
+            while (lastLevelsEvent.isVoid() && Time::getMillisecondCounterHiRes() - start < 5000.0)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);
+            return Time::getMillisecondCounterHiRes() - start;
+        };
+        nextLevelsFrame();
         check (latestLevelsHasSend (automationTrack, bus1),
                "levels telemetry carries the live send keyed by track and bus");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
@@ -8274,9 +8285,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && (bool) params[restoredMuteParamIndex].getProperty ("automated", false),
                    "send automation addresses and curves persist across save/reload");
         }
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        {
+            const double frameMs = nextLevelsFrame();
+            std::cerr << "  ..   first levels frame after the reload arrived in " << String (frameMs, 1).toStdString() << " ms" << std::endl;
+        }
         check (latestLevelsHasSend (automationTrack, bus1),
                "send meter registration reconciles after project reload");
         cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", false }}));
@@ -8285,18 +8297,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
         check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");
         check (sendsOf (gt).size() == 0, "remove_send drops the send");
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
-        check (! latestLevelsHasSend (gt, bus0),
+        nextLevelsFrame();
+        check (! lastLevelsEvent.isVoid() && ! latestLevelsHasSend (gt, bus0),   // a frame, without the send
                "removed send disappears from levels telemetry without a stale read");
         check (! ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send on a missing send errors");
         check (ok (cmd (ops, "undo")), "undo remove_send ok");
         check (sendsOf (gt).size() == 1 && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-6.0)) < 0.6,
                "undo restores the send at its prior level");
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        nextLevelsFrame();
         check (latestLevelsHasSend (gt, bus0),
                "undo restores the send meter registration");
 
