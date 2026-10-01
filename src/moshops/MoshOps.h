@@ -459,6 +459,14 @@ private:
     // The shared offline-render body behind both bounce wrappers (nullptr = all clips).
     bool bounceRenderToWavImpl (te::Track& track, double startSec, double endSec, const juce::File& destWav,
                                 const juce::Array<te::Clip*>* onlyTheseClips);
+    // Before an offline render: waits (bounded, servicing the message loop) until every
+    // background-generated file the render will read for these tracks' audio clips exists
+    // (warp proxies, reversed sources, decoded copies), starting any that never started.
+    // "" when ready, else a per-clip error. nullptr/empty onlyTheseClips = every clip.
+    juce::String prepareRenderSources (const juce::Array<te::Track*>& tracks,
+                                       const juce::Array<te::Clip*>* onlyTheseClips);
+    // Why the last bounceRenderToWavImpl failed, for the bounce/freeze command's error.
+    juce::String lastBounceError_;
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
@@ -1311,6 +1319,16 @@ private:
     juce::File        txnLedgerFile;
     juce::int64       editRevision_ = 0;   // bumped by beginTxn / cmdUndo / cmdRedo
     int               execDepth_    = 0;   // the guard governs the OUTERMOST execute only
+    // True while prepareRenderSources services the message loop inside a render command;
+    // execute() refuses any command that arrives then (a UI click, a queued async call).
+    bool              preparingRenderSources_ = false;
+    // Multiplayer applies (a peer commit, structural op or bootstrap adoption) arrive by
+    // callAsync; one delivered while a render waits would be refused and lost, so it is
+    // held here instead, in arrival order, and the next timer tick after the render runs it.
+    std::vector<std::function<void()>> heldMpApplies_;
+    bool mpAppliesHeld() const noexcept { return preparingRenderSources_ || ! heldMpApplies_.empty(); }
+    void runOrHoldMpApply (std::function<void()> apply);
+    void runHeldMpApplies();
     // Step-1 slice 6 — provenance stamped on every JSONL line (ADDITIVE fields; a reader
     // treats absence as unknown). currentOrigin_ is owned by the OUTERMOST execute(): the
     // envelope's non-empty "origin" sibling, else "ui" when the call came through

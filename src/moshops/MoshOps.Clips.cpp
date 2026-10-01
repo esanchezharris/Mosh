@@ -639,7 +639,8 @@ juce::var MoshOps::cmdConsolidateClips (const juce::var& args)
             .getChildFile (track->getName() + "-" + track->itemID.toString()
                            + "-" + juce::String (++consolidateSeq) + ".wav");
         if (! bounceRenderToWavImpl (*track, spanStart, spanEnd, destWav, nullptr))
-            return errResult ("consolidate_clips", "offline render failed (stalled or not possible here)");
+            return errResult ("consolidate_clips", "offline render failed ("
+                + (lastBounceError_.isNotEmpty() ? lastBounceError_ : juce::String ("stalled or not possible here")) + ")");
         te::AudioFile af (eng.edit().engine, destWav);
         const double len = af.isValid() ? af.getLength() : (spanEnd - spanStart);
 

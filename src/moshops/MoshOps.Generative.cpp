@@ -478,6 +478,7 @@ static juce::String stableSourceSig (te::Clip& clip)
 
 bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav)
 {
+    lastBounceError_.clear();
     auto* track = clip.getTrack();
     if (track == nullptr || endSec <= startSec + 1.0e-4) return false;
     juce::Array<te::Clip*> only; only.add (&clip);
@@ -486,6 +487,7 @@ bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, c
 
 bool MoshOps::bounceTrackToWav (te::Track& track, double startSec, double endSec, const juce::File& destWav)
 {
+    lastBounceError_.clear();
     if (endSec <= startSec + 1.0e-4) return false;
     return bounceRenderToWavImpl (track, startSec, endSec, destWav, nullptr);
 }
@@ -497,6 +499,10 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
                                      const juce::Array<te::Clip*>* onlyTheseClips)
 {
     auto& edit = eng.edit();
+
+    lastBounceError_ = prepareRenderSources ({ &track }, onlyTheseClips);
+    if (lastBounceError_.isNotEmpty())
+        return false;
 
     // Render exclusivity (01 §5): detach the Edit from the device before an offline
     // render (Tracktion asserts otherwise). Mirror cmdExportAudio's teardown; the master

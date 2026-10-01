@@ -153,6 +153,216 @@ namespace
                     return error;
         return {};
     }
+
+    // Where one audio clip's render input stands (see MoshOps::prepareRenderSources).
+    struct RenderSourceState
+    {
+        enum class Kind { ready, generating, idle, missing };
+        Kind kind = Kind::ready;
+        float progress = 0.0f;   // of the job generating it
+        juce::File file;         // the generated file the render waits on
+        juce::String what;       // what that file is, for errors
+    };
+
+    // True once `f` is on disk and the engine's cached info for it reads as audio. That
+    // info is cached the first time anything asks, so a file asked about before its job
+    // wrote it reads "invalid" until the job's completion callback re-reads it on the
+    // message thread; re-read it here instead of depending on that callback.
+    bool isReadableAudioFile (const te::AudioFile& f)
+    {
+        if (! f.getFile().existsAsFile())
+            return false;
+
+        if (! f.isValid())
+            f.engine->getAudioFileManager().checkFileForChanges (f);
+
+        return f.isValid();
+    }
+
+    RenderSourceState renderSourceState (te::AudioClipBase& clip)
+    {
+        using Kind = RenderSourceState::Kind;
+        auto& engine = clip.edit.engine;
+        const auto playFile = clip.getPlaybackFile();
+
+        // Nothing to read, or an ARA clip (its plugin renders it): not generated here.
+        if (playFile.isNull() || clip.isUsingARA())
+            return {};
+
+        const auto source = clip.getAudioFile();
+        auto* wave = dynamic_cast<te::WaveAudioClip*> (&clip);
+
+        // A generated SOURCE (a reversed copy, clip effects, warp-time markers) comes from a
+        // RenderManager job, which clip edits start at once.
+        if (clip.needsRender())
+        {
+            const juce::String what = wave != nullptr && wave->getIsReversed() ? "reversed audio"
+                                                                               : "rendered source audio";
+            auto& renders = engine.getRenderManager();
+
+            if (renders.isProxyBeingGenerated (source))
+                return { Kind::generating, renders.getProportionComplete (source, 0.0f), source.getFile(), what };
+
+            if (! isReadableAudioFile (source))
+                return { Kind::idle, 0.0f, source.getFile(), what };
+        }
+
+        if (playFile == source)
+            return {};
+
+        // A playback PROXY (the time-stretched render of a warped clip, or the decoded
+        // copy of a compressed file) comes from the AudioProxyGenerator, which only the
+        // clip's own timer starts.
+        const juce::String what = clip.usesTimeStretchedProxy() ? "time-stretched (warped) audio"
+                                                                : "decoded audio";
+
+        if (! clip.needsRender() && ! source.getFile().existsAsFile())
+            return { Kind::missing, 0.0f, playFile.getFile(),
+                     what + ": its source file " + source.getFile().getFullPathName().quoted() + " is missing" };
+
+        auto& proxies = engine.getAudioFileManager().proxyGenerator;
+
+        if (proxies.isProxyBeingGenerated (playFile))
+            return { Kind::generating, proxies.getProportionComplete (playFile), playFile.getFile(), what };
+
+        if (! isReadableAudioFile (playFile))
+            return { Kind::idle, 0.0f, playFile.getFile(), what };
+
+        return {};
+    }
+
+    juce::String describeRenderClip (te::AudioClipBase& clip)
+    {
+        auto* track = clip.getTrack();
+        return "clip \"" + clip.getName() + "\" (" + clip.itemID.toString() + ")"
+             + (track != nullptr ? " on track \"" + track->getName() + "\"" : juce::String());
+    }
+}
+
+// Offline renders (export_audio, export_stems, export_clip_consolidated, every bounce)
+// run synchronously on the message thread. Warped, reversed and compressed-format audio
+// clips render from files Tracktion generates in the background, and that generation
+// needs the message thread twice: a clip's proxy is only STARTED by its own timer
+// (AudioClipBase::timerCallback, 600 ms after the edit), and every generator job hands
+// its completion (file validation, the reverse render's result) back through a blocking
+// message-thread call. A render that blocks the message thread before then waits on a
+// WaveNode that can never become ready until the 20 s render watchdog calls it a stall,
+// which is what "warp this, then export" in one agent batch hit.
+//
+// So before the render is built, wait until every such file the render will read exists:
+// start any missing one through the engine's own entry point
+// (beginRenderingNewProxyIfNeeded, which fires the clip's pending timer at once) and
+// service the message loop in short slices while the jobs run. The wait is bounded by
+// progress, like the render watchdog: 20 s with no job advancing is a failure, reported
+// per clip. Commands that arrive while it pumps are refused (see execute()) and
+// multiplayer applies are held until after the render (heldMpApplies_); timers and other
+// async callbacks run as they would between two commands.
+juce::String MoshOps::prepareRenderSources (const juce::Array<te::Track*>& tracks,
+                                            const juce::Array<te::Clip*>* onlyTheseClips)
+{
+    using Kind = RenderSourceState::Kind;
+
+    // The render graph builds a node for every enabled clip (muted ones included) on the
+    // rendered tracks that process, and on their sub-tracks (submix children render with
+    // their folder), narrowed only by allowedClips; it waits for EVERY leaf node, whatever
+    // its time, so the render's time range does not narrow this set. Container clips take
+    // their own node path and are left to it.
+    juce::ReferenceCountedArray<te::AudioClipBase> clips;
+    auto addClipsOf = [&] (te::Track* track)
+    {
+        auto* clipTrack = dynamic_cast<te::ClipTrack*> (track);
+        if (clipTrack == nullptr || ! clipTrack->isProcessing (true))
+            return;
+
+        for (auto* clip : clipTrack->getClips())
+            if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
+                if (! audio->disabled && dynamic_cast<te::ContainerClip*> (clip) == nullptr
+                    && (onlyTheseClips == nullptr || onlyTheseClips->isEmpty() || onlyTheseClips->contains (clip)))
+                    clips.addIfNotAlreadyThere (audio);
+    };
+
+    for (auto* track : tracks)
+    {
+        if (track == nullptr)
+            continue;
+
+        addClipsOf (track);
+
+        for (auto* sub : track->getAllSubTracks (true))
+            addClipsOf (sub);
+    }
+
+    constexpr juce::uint32 stallMs = 20000;     // matches the render watchdog's stall window
+    constexpr juce::uint32 deadlineMs = 600000;
+    const auto startMs = juce::Time::getMillisecondCounter();
+    auto lastAdvanceMs = startMs;
+    double lastScore = -1.0;
+    juce::Array<juce::File> waitedOn;
+
+    const juce::ScopedValueSetter<bool> refuseNestedCommands (preparingRenderSources_, true);
+    // Nor may the pump let Tracktion's undo-transaction timer (350 ms after an edit) open a
+    // new undo transaction: inside an agent batch that would split the batch in two.
+    const te::Edit::UndoTransactionInhibitor keepUndoTransaction (eng.edit());
+
+    for (;;)
+    {
+        double score = 0.0;
+        juce::StringArray pending;
+
+        for (auto* clip : clips)
+        {
+            const auto state = renderSourceState (*clip);
+
+            if (state.kind == Kind::ready)
+            {
+                score += 2.0;
+                continue;
+            }
+
+            if (state.kind == Kind::missing)
+                return describeRenderClip (*clip) + " cannot render its " + state.what
+                       + ". Relink the clip, then render again.";
+
+            if (state.kind == Kind::generating)
+                score += 1.0 + juce::jlimit (0.0, 0.99, (double) state.progress);
+            else
+                clip->beginRenderingNewProxyIfNeeded();   // starts (or fires the clip's pending) generation
+
+            waitedOn.addIfNotAlreadyThere (state.file);
+            pending.add (describeRenderClip (*clip) + ": " + state.what);
+        }
+
+        if (pending.isEmpty())
+            break;
+
+        const auto nowMs = juce::Time::getMillisecondCounter();
+
+        if (score > lastScore)
+        {
+            lastScore = score;
+            lastAdvanceMs = nowMs;
+        }
+
+        if (nowMs - lastAdvanceMs > stallMs || nowMs - startMs > deadlineMs)
+            return "clip audio the render needs did not finish generating ("
+                   + juce::String ((nowMs - lastAdvanceMs) / 1000) + " s without progress): "
+                   + pending.joinIntoString ("; ");
+
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+
+        if (mm != nullptr && mm->isThisTheMessageThread())
+            mm->runDispatchLoopUntil (10);
+        else
+            juce::Thread::sleep (10);
+    }
+
+    // A reader that tried a proxy before it existed backs off for several seconds before
+    // retrying; clearing that is the last thing the job's own completion callback does.
+    auto& engine = eng.edit().engine;
+    for (auto& file : waitedOn)
+        engine.getAudioFileManager().validateFile (te::AudioFile (engine, file), false);
+
+    return {};
 }
 
 void MoshOps::invalidateCommandLogCache()
@@ -449,6 +659,15 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
     if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
         return errResult ("export_clip_consolidated", "bitDepth must be 16, 24, or 32");
 
+    {
+        const juce::Array<te::Clip*> onlyThisClip { clip };
+        if (auto sourceError = prepareRenderSources ({ track }, &onlyThisClip); sourceError.isNotEmpty())
+        {
+            logLine ("export_clip_consolidated", args, false, sourceError, false);
+            return errResult ("export_clip_consolidated", sourceError);
+        }
+    }
+
     // Render exclusivity, exactly as every other offline render here.
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
@@ -663,6 +882,14 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     // render graph waiting until the watchdog. Looping virtual phases are accepted
     // by hasRenderableAudioSourceWindow and continue to wrap normally.
     if (auto sourceError = invalidRenderSourceWindow (edit, rStart, rEnd); sourceError.isNotEmpty())
+    {
+        logLine ("export_audio", args, false, sourceError, false);
+        return errResult ("export_audio", sourceError);
+    }
+
+    // Warped / reversed clips render from background-generated files; have them ready
+    // before the render blocks the message thread their jobs need.
+    if (auto sourceError = prepareRenderSources (te::getAllTracks (edit), nullptr); sourceError.isNotEmpty())
     {
         logLine ("export_audio", args, false, sourceError, false);
         return errResult ("export_audio", sourceError);
@@ -1022,6 +1249,18 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
 
     if (plannedStems.empty())
         return errResult ("export_stems", "no renderable tracks (all empty or hidden)");
+
+    {
+        juce::Array<te::Track*> stemTracks;
+        for (auto& plan : plannedStems)
+            stemTracks.add (plan.track);
+
+        if (auto sourceError = prepareRenderSources (stemTracks, nullptr); sourceError.isNotEmpty())
+        {
+            logLine ("export_stems", args, false, sourceError, false);
+            return errResult ("export_stems", sourceError);
+        }
+    }
 
     // Clear every requested destination up front. If a later runtime render fails,
     // the cleanup below removes the entire planned set, including earlier successes.
