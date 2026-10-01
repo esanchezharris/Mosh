@@ -13,7 +13,7 @@
 // cadence anchored to the absolute sample count so any chunking of the same
 // samples yields bit-identical hops. Changes from the original: to cut detection
 // lag for the low-latency shifter, the fixed comparison segment is the MOST RECENT
-// span of samples (the lagged one slides back in time) and the median is 3 taps;
+// span of samples (the lagged one slides back in time) and the median is off;
 // to stop notes dropping out, a voiced run survives a weaker match near the held
 // pitch (the continuity rescue below); and a clarity value is reported. No
 // allocation, locks, logging or IO after prepare().
@@ -33,7 +33,7 @@ public:
         double threshold = 0.15;        // CMNDF threshold to START a voiced run
         double releaseThreshold = 0.35; // ... and to STAY in one, near the held pitch only
         double rmsGate = 0.00316; // -50 dBFS
-        int medianTaps = 3;
+        int medianTaps = 1; // no median: on real voices it only added lag (see the scope doc)
         int voicingHysteresisFrames = 3;
         double jumpRejectCents = 600.0;
         int jumpPersistFrames = 3;
