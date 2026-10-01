@@ -143,8 +143,9 @@ block sizes must give bit-identical output.
 - Each sample, `d += 1 − r`, where `r` is the current ratio. With `r > 1` the read head
   gains on the write head and the pitch rises.
 - `r` follows the target ratio through a one-pole smoother with a 2 ms time constant, and
-  is set to exactly the target once within 1e-7 of it. The target is clamped to
-  `[2^(−4/12), 2^(4/12)]`.
+  is set to exactly the target once within 1e-5 of it (0.017 cent). The target is clamped
+  to `[2^(−4/12), 2^(4/12)]`. (A tighter snap of 1e-7 took about 30 ms to settle from the
+  largest ratio and broke property 8.)
 
 ### Interpolator
 
@@ -213,8 +214,10 @@ A power of two holding at least `D + 2.6 × (fs/55) + 0.010 fs + 32` samples.
    preserved by harmonic number: each of the first eight harmonics of that tone stays
    within 1.5 dB of its input level. (The sine core this replaces had no harmonics at
    all.)
-5. **No clicks.** On that tone, the 1 ms RMS envelope of the output never steps by more
-   than 1.5 dB over what the input's envelope does, splices included.
+5. **No clicks.** On that tone, the 1 ms RMS envelope of the output stays within 1.5 dB,
+   in level and in step, of the same harmonic tone synthesised at the output pitch,
+   splices included. (Comparing against the input at its own pitch is wrong: a tone's
+   natural 1 ms envelope ripple depends on its pitch.)
 6. **Chunking.** Output is bit-identical for block sizes {1, 64, 128, 137, 512, 4096}.
 7. **Bounded delay.** While voiced, `d` stays within `[reach, D + 2.6 P]`; no read ever
    leaves the ring.

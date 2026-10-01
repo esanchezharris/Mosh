@@ -106,6 +106,7 @@ option(MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP "Enable free-form Moshi in packaged U
 option(MOSH_ENABLE_DEMO_COMPACT_MELODY "Demo-only: bypass the agent loop for in-key melody asks" OFF)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for plugin-host smoke tests" OFF)
+option(MOSH_BUILD_RETUNE_CLI "Build MoshRetuneCli, the offline AutoTune renderer for listening tests" OFF)
 option(MOSH_BUILD_REIMAGINE_PLUGIN "Build the owner-local Mosh Re-Imagine VST3" ${APPLE})
 # Linux audio backend: ALSA is JUCE's Linux default and is always on. JACK is opt-in
 # (needs libjack-dev); it is additive — the ALSA path is unchanged when this is OFF.
@@ -727,6 +728,10 @@ endif()
 if (MOSH_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if (MOSH_BUILD_RETUNE_CLI)
+    add_subdirectory(tools/retune-cli)
 endif()
 
 if (MOSH_BUILD_PLUGIN_FIXTURES)

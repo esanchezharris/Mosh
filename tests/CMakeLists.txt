@@ -26,6 +26,10 @@ target_sources(MoshTests PRIVATE
     test_plugin_parameter_readback.cpp
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
+    # Native AutoTune engine (docs/AUTOTUNE-SCOPE-2026-10-01.md). Header-only and
+    # JUCE-free under src/plugins/moshfx/retune/.
+    test_retune_shifter.cpp
+    test_retune_core.cpp
     test_renderlayer.cpp
     test_render_artifacts.cpp
     test_migrations.cpp
@@ -113,6 +117,7 @@ target_sources(MoshTests PRIVATE
     # lastError() surface, compile-safe in the default anira-off build).
     ${CMAKE_SOURCE_DIR}/src/plugins/transform/RaveEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/retune/RetuneCore.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)
 
