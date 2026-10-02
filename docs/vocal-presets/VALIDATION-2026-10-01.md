@@ -16,12 +16,13 @@ show that it sounds good on a voice.
 
 | Field | Value |
 |---|---|
-| Code under test | branch `claude/mosh-vocal-presets-2e6055`, local commit `e434294c` (not pushed), on top of baseline `e9f7182e` |
+| Code under test | branch `claude/mosh-vocal-presets-2e6055`, local commit `d8cfacb2` (not pushed), on top of baseline `e9f7182e` |
 | Build | Release, `macos-arm64-release-app` / `-tests`, from that commit with a clean tree |
 | Machine | this Mac (arm64), `MOSH_NO_AUDIO=1` — no audio device, no microphone, no plugin host |
 | Baseline for comparison | [AUDIT §1](AUDIT-2026-10-01.md#1-baseline-checks-before-any-change): selftest 3767/3767, MoshTests 504 cases |
 
-This report was added in a later docs-only commit; §9 records the final gate run.
+Every result below was produced from commit `d8cfacb2`. This report's final numbers were
+filled in by a docs-only commit on top of it; no code changed after the gate ran.
 
 ## 2. The preset as shipped in the tree
 
@@ -54,7 +55,7 @@ question this report cannot answer.
 ## 3. Unit conversion and schema (engine-free)
 
 `build-macos-arm64-release/tests/MoshTests_artefacts/Release/MoshTests "[track-preset]"`
-→ **165 assertions in 6 test cases, all passed.** Full suite: 75 988 assertions in 510 cases,
+→ **176 assertions in 6 test cases, all passed.** Full suite: 75 999 assertions in 510 cases,
 all passed (baseline 504 cases).
 
 Covered: threshold endpoints (0 dB → 1.0, −40 dB → exactly 0.01, −40.1 dB → error, not
@@ -63,8 +64,9 @@ clamped); ratio as reciprocal slope (2:1 → 0.5, 20:1 → 0.05, 1/0.95 : 1 → 
 identity-encoded ranges; and a schema reject table — not JSON, wrong kind, newer schema,
 unknown key, missing key, unsupported or unqualified processor, unknown parameter, missing
 parameter, wrong or missing unit, a normalized copy beside the canonical value, non-numeric or
-out-of-range value, bad typed state, non-boolean bypass. The bundled file is parsed and its
-values pinned.
+out-of-range value, bad typed state, non-boolean bypass, a 64-bit schema number that would
+truncate to 1, and a pathologically nested document (refused before the JSON parser recurses
+into it). The bundled file is parsed and its values pinned.
 
 ## 4. Measured DSP (direct plugin harness)
 
@@ -74,8 +76,8 @@ graph drives them (`baseClassInitialise` → `applyToBufferWithAutomation` per b
 `baseClassDeinitialise`), at **44.1 and 48 kHz × 64 / 128 / 256-sample blocks × mono and
 stereo** (12 configurations).
 
-**Table vs engine (32 checks).** Parameter ids, order, count and native ranges of both
-processors equal the pinned table; a plugin created from an all-non-default probe preset reads
+**Table vs engine (34 checks).** Parameter ids, order, count and native ranges of both
+processors equal the pinned table; creating a stage records **no** undoable action at all; a plugin created from an all-non-default probe preset reads
 every value and both pieces of typed state back; `mode = "highpass"` really selects the
 high-pass filter; ratio 4:1 is held as slope 0.25 and displayed by the engine as `4.00 : 1`;
 both declare zero latency.
@@ -122,8 +124,10 @@ latency was not measured — there is no device in this run.
 
 ## 5. The command (`apply_track_preset`)
 
-`--selftest`: **4068/4068 checks passed** (baseline 3767 + 301 new), three consecutive runs
-recorded in §9. `--selftest-undo`: 30/30.
+`--selftest`: **4080/4080 checks passed** in each of three consecutive hermetic runs inside
+the gate (§9) — 312 new checks in twelve `VOCAL-PRESET` sections on top of the 3768 a hermetic
+baseline run reads (a plain run reads 3767; one pre-existing check only fires in a hermetic
+session). `--selftest-undo`: 30/30.
 
 | Requirement | Evidence (section of `VocalPresetSelfTest.cpp`) |
 |---|---|
@@ -133,7 +137,7 @@ recorded in §9. `--selftest-undo`: 30/30.
 | Only the preset's own group is replaced | REAPPLY — tweaked group reset, one undo returns the tweak exactly; a partial group is completed, not doubled; the user's EQ is unchanged |
 | Other tracks, sends, fader, automation untouched | ISOLATION — first track's snapshot byte-identical; second track's fader level, send, user plugin and automation unchanged |
 | Chain sits ahead of sends and fader | ISOLATION (fader and send already present) and RENDER (fader created later lands after the chain) |
-| Failures mutate nothing | REFUSALS — 16 cases, each checked for refusal, reason, and canonical-snapshot equality |
+| Failures mutate nothing | REFUSALS — 20 cases, each checked for refusal, reason, and canonical-snapshot equality |
 | No empty transaction on refusal; a pending redo survives | REFUSALS — real edit → refusal → undo reverts the real edit; refusal while redo pending → redo still works |
 | Injected failure leaves no partial chain or damaged history | FAULTS — both fault points, outside and inside a batch, and during a replace |
 | Save / reload | PERSIST — see §6 |
@@ -142,8 +146,9 @@ recorded in §9. `--selftest-undo`: 30/30.
 Refusals covered: missing `trackId`; unknown track; instrument track; drum track; return
 track; frozen track; while recording; missing file; relative path; not JSON; an instrument
 patch offered as a track preset; newer schema; unsupported processor; unsupported typed state;
-unknown key; no room on the track (16-plugin engine limit). Also: `load_preset` given a
-track-chain file refuses it by name.
+unknown key; pathologically nested file; no room on the track (16-plugin engine limit). Also:
+`load_preset` given a track-chain file refuses it by name — on an instrument track, on a vocal
+track, and when the file has been copied out of the library folder.
 
 **Recording.** Applying while recording is refused with "cannot apply a preset while recording
 — stop recording first". A headless run has no device and cannot start a real recording, so
@@ -169,7 +174,8 @@ A 44.1 kHz render of the same track matches the 48 kHz one on the top step (0.00
 
 ## 7. Could these tests fail? (RED proofs)
 
-Run once and discarded; nothing below is in the tree.
+Run once, on an earlier revision of the same code (before the review fixes in §9), and
+discarded; nothing below is in the tree.
 
 - **DSP.** The selftest was run against a deliberately weak preset (ratio 1.06:1) through
   `MOSH_PRESETS_DIR`: 18 checks failed, including "the compressor measurably compresses"
@@ -186,7 +192,8 @@ Run once and discarded; nothing below is in the tree.
 `~/Library/Mosh/references/songs/greg/source/` (`mixpackage.json`: the owner's own song;
 consent recorded there as "local probe only; never committed or uploaded"). SHA-256 of every
 source verified identical before and after. Output: `~/Library/Mosh/task-evidence/vocal-preset-20261001/audition/` (outside the
-repository; nothing uploaded; 27 WAVs + `audition-report.json`).
+repository; nothing uploaded; 27 WAVs + `audition-report.json`). Rendered twice — before and
+after the review fixes — with identical measurements.
 
 **Method.** Each source is imported into a throwaway session and exported dry, then exported
 again after `apply_track_preset`. Input level is varied with clip gain in the session (−6, 0,
@@ -234,18 +241,46 @@ is available. Human listening session: **NOT RUN.**
 
 | Check | Command | Result |
 |---|---|---|
-| Unit tests | `MoshTests` | 75 988 assertions, 510 cases, all passed |
-| Native selftest ×3 | `MOSH_NO_AUDIO=1 Mosh --selftest` | see below |
+| Canonical gate | `MOSH_SELFTEST_BASELINE=3767 scripts/auto-loop/gate.sh native <worktree> origin/main` | **pass: true**, clean tree, HEAD `d8cfacb2`; all 23 steps ok |
+| Native selftest ×3 (inside the gate, hermetic session) | `Mosh --selftest` | 4080 / 4080 / 4080, 0 failed, deterministic; baseline floor 3767 met |
+| Native selftest, plain (no hermetic session) | `MOSH_NO_AUDIO=1 Mosh --selftest` | 4068/4068 ×3 on the pre-review revision; **4071/4079 once on `d8cfacb2`** — see the note below |
+| Unit tests | `MoshTests` | 75 999 assertions, 510 cases, all passed; ctest 10/10 inside the gate |
 | Undo selftest | `Mosh --selftest-undo` | 30/30 |
 | Reopen in a fresh process | `scripts/vocal-preset/verify.py reopen --bin …` | 14/14 |
+| UI unit tests (inside the gate) | `npm test` | 5285 passed, 1 skipped, 0 failed (baseline 5271 + the one that only fails outside a git checkout) |
 | UI typecheck | `npm run typecheck` | rc 0 |
-| UI unit tests | `npm test` | see below |
-| UI e2e, V3 plugins | `npx playwright test -c playwright.isolated.config.ts e2e/v3-plugins.spec.ts` | 2/2 |
+| UI e2e, V3 plugins | `npx playwright test -c playwright.isolated.config.ts e2e/v3-plugins.spec.ts` | 2/2, including the new preset row |
+| UI e2e, full suite | `npx playwright test -c playwright.isolated.config.ts` | 525 passed, 5 skipped, **6 failed — pre-existing** (below) |
 | Command coverage | `scripts/daw-conformance/coverage_check.py` | 284 commands, 265 covered, 19 waived, 0 uncovered |
 | Scoreboard | `scripts/daw-conformance/scoreboard.py --check` | fresh (regenerated: 265 / 284) |
-| Canonical gate | `scripts/auto-loop/gate.sh native <worktree> origin/main` | see below |
+| Hardware-verify, conformance, direct Re-Imagine (inside the gate) | `verify.py --gate`, `conformance.py`, `verify-direct-reimagine.py` | all ok; the SA3 Re-Imagine workflow is untouched |
 
-GATE_RESULTS_PLACEHOLDER
+**The one plain selftest run with failures.** After the gate, a plain `--selftest` of the same
+binary read 4071/4079: eight failures, all in "Route B: transform render mode (fake)", none in
+a `VOCAL-PRESET` section (all twelve read 0 failed in that run). This is a known environmental
+condition on this machine: a plain run adopts the owner's shared generative helper when one is
+listening on port 8770, and one was by then (it was not during the earlier plain runs or the
+baseline). The gate's hermetic runs of the same binary are unaffected and read 4080 three
+times. The helper was left alone.
+
+**Pre-existing e2e failures, not caused by this work.** Six Moshi agent-loop specs fail under
+the isolated Playwright config on this machine: `agent-loop.spec.ts` (two), `v3-beat.spec.ts`
+"a lofi ask…", `v3-chords.spec.ts` "+ Chords is disabled while a Moshi task runs…",
+`v3-keys-dock.spec.ts` "A7…", and `protools-shell.spec.ts` "audio producer flow…". The same six
+fail identically on a clean copy of the baseline commit. They were not investigated or
+repaired here.
+
+**Independent review.** A separate read-only review of the diff found no critical or
+important defect and six low-severity items, all fixed before the gate ran: the schema check
+compared a possibly 64-bit number as an `int`; a deeply nested file could exhaust the JSON
+parser's stack; the `load_preset` guard was reachable only on a track that already had a
+4OSC; plugin creation still recorded one undoable property write (`remapOnTempoChange`), now
+pre-set in the state tree and pinned by a check; the picker's error message was not keyed to
+its track; and a rollback list was appended after, rather than before, a position check.
+
+**Gate hazard, unrelated.** All 19 coverage waivers expire 2026-10-01; from 2026-10-02
+`parity_coverage` fails in both lanes on `origin/main` as well. The gate above ran on
+2026-10-01.
 
 ## 10. Not verified
 
