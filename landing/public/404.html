@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Mosh — nothing on this bar</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      /* Self-contained: this page is served for any missing path, so it cannot rely on
+         the hashed bundle. Colours are the shell's (src/styles/tokens.css). */
+      html { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem;
+        background: #0b0c0c; color: #f2eee6;
+        font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center;
+      }
+      img { width: 6rem; height: 6rem; transform: rotate(-6deg); }
+      h1 { margin: 1.75rem 0 0.5rem; font-size: clamp(2rem, 8vw, 3.5rem); letter-spacing: -0.03em; line-height: 1; }
+      p { margin: 0 0 1.75rem; color: #9a9e99; font-size: 1.1rem; }
+      a {
+        display: inline-block; padding: 0.8rem 1.4rem; border-radius: 14px;
+        background: #c6f542; color: #0b0c0c; font-weight: 700; text-decoration: none;
+      }
+      a:focus-visible { outline: 2px solid #c6f542; outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/favicon.svg" alt="" />
+      <h1>Nothing on this bar.</h1>
+      <p>That page does not exist.</p>
+      <a href="/">Back to Mosh</a>
+    </main>
+  </body>
+</html>

@@ -97,24 +97,43 @@ vercel env add PUBLIC_SUPABASE_ANON_KEY production
 vercel --prod
 ```
 
-## Cloudflare Pages
+## Cloudflare (production: moshapp.net)
 
-1. **Workers & Pages → Create → Pages → Connect to Git** → this repo.
-2. **Root directory:** `landing`
-3. **Build command:** `npm run build`
-4. **Build output directory:** `dist`
-5. **Settings → Environment variables** → add the table above for Production (and
-   Preview if desired).
-6. Deploy. Add your domain under **Custom domains** → follow Cloudflare's CNAME (or
-   nameserver) instructions for that domain.
+The site deploys to Cloudflare as a Worker with static assets, configured in
+`wrangler.jsonc`: no Worker script, `dist/` served as-is, and `moshapp.net` plus
+`www.moshapp.net` attached as custom domains (Cloudflare creates their DNS records and
+certificates on deploy, because the zone lives in the same account).
 
-CLI equivalent (Wrangler):
+One-time, on the machine that deploys:
+
+```sh
+wrangler login        # opens the browser; approve with the account that owns moshapp.net
+```
+
+Every deploy:
 
 ```sh
 cd landing
-npm run build
-npx wrangler pages deploy dist --project-name=mosh-landing
+npm run deploy        # = npm run build && wrangler deploy
 ```
+
+Build-time values:
+
+- `.env.production` (committed) sets `PUBLIC_SITE_URL=https://moshapp.net`.
+- Put the per-round values in `.env.production.local` (gitignored), then redeploy:
+
+  ```sh
+  PUBLIC_DOWNLOAD_URL=https://…/Mosh.dmg
+  PUBLIC_BUILD_LABEL=Build 2026-10-02
+  PUBLIC_FEEDBACK_URL=mailto:you@example.com
+  ```
+
+`public/404.html` is the not-found page; it is self-contained on purpose (no hashed
+bundle) because it is served for any missing path.
+
+The build itself can be large to host: Workers assets cap a single file at 25 MiB, so
+the app download does not go in `public/`. Host the DMG elsewhere (an R2 bucket with a
+public domain works well on the same account) and point `PUBLIC_DOWNLOAD_URL` at it.
 
 ## Notes
 
