@@ -5488,27 +5488,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── rights-cleared type-beat training ────────────────────────────────────
+    // Results mirror native (MoshOps.ProjectIo.cpp + TrainerRegistry): import and approve
+    // answer with the source summary itself as `data`, and refuse in the same words.
     case "import_training_source": {
       const state = trainingState();
+      if (!str(args.sourceUrl) && !str(args.localPath)) return err(command, "missing sourceUrl or localPath");
       const id = str(args.sourceId, `beat-${String(state.sources.length + 1).padStart(3, "0")}`);
+      // A re-import replaces the record in the slot it already occupies.
+      const existing = state.sources.findIndex((s) => s.source_id === id);
       const src = stampTrainingEligibility({
-        index: state.sources.length,
+        index: existing >= 0 ? existing : state.sources.length,
         source_id: id,
-      title: str(args.title, "Untitled Type Beat"),
-      creator: str(args.creator, "Unknown"),
-      source_url: str(args.sourceUrl),
-      local_path: str(args.localPath),
-      user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
-      license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
-      proof_of_rights: str(args.proofOfRights),
-      approved_for_training: Boolean(args.approvedForTraining),
+        title: str(args.title, "Untitled Type Beat"),
+        creator: str(args.creator, "Unknown"),
+        source_url: str(args.sourceUrl),
+        local_path: str(args.localPath),
+        user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
+        license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
+        proof_of_rights: str(args.proofOfRights),
+        approved_for_training: Boolean(args.approvedForTraining),
         expiration: (typeof args.expiration === "string" && args.expiration) ? String(args.expiration) : null,
         notes: str(args.notes, ""),
       });
-      const existing = state.sources.findIndex((s) => s.source_id === id);
       if (existing >= 0) state.sources[existing] = src; else state.sources.push(src);
       invalidate();
-      return ok(command, { source: src });
+      return ok(command, src);
     }
     case "list_training_sources": {
       const state = trainingState();
@@ -5516,12 +5520,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "approve_training_source": {
       const state = trainingState();
-      const src = state.sources.find((s) => s.source_id === str(args.sourceId));
-      if (!src) return err(command, "source not found");
+      const sourceId = str(args.sourceId);
+      if (!sourceId) return err(command, "missing sourceId");
+      const src = state.sources.find((s) => s.source_id === sourceId);
+      if (!src) return err(command, `source not found: ${sourceId}`);
       src.approved_for_training = Boolean(args.approved ?? true);
       stampTrainingEligibility(src);
       invalidate();
-      return ok(command, { source: src });
+      return ok(command, src);
     }
     case "build_training_corpus": {
       const state = trainingState();
