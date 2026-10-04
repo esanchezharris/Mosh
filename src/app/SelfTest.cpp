@@ -14562,6 +14562,105 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // Regression: a copy of a warped clip is warped the same way.
+    //
+    // duplicate_clip and paste_clip insert the source file plain and then carry the clip's gain
+    // across. They did not carry its warp: the copy of a clip stretched from 4 s to 5 s kept the
+    // 5 s of timeline, played the file unstretched for 4 of them, and then nothing. So the
+    // copies are judged by what they render as well as by their state: the tone has to run to
+    // the end of each.
+    {
+        section ("Copies: duplicate_clip and paste_clip keep a clip's warp");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "warp-copy-selftest"))), "warp-copy: fresh project ok");
+
+        auto engineClip = [&] (const String& id) -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+
+        const auto trackId = cmd (ops, "create_track", args1 ("name", "Loop"))["data"]
+                                 .getProperty ("trackId", var()).toString();
+        const auto sourceId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 4.0 },
+                                                                      { "freq", 220.0 }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        constexpr double warpedSeconds = 5.0;
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", sourceId }, { "length", warpedSeconds }}))),
+               "warp-copy: stretch_clip, 4 s of file across 5 s, ok");
+
+        auto* source = engineClip (sourceId);
+        check (source != nullptr && source->getAutoTempo(), "warp-copy: the source clip is warped");
+        const auto sourceMode = source != nullptr ? source->getTimeStretchMode() : te::TimeStretcher::disabled;
+        const double sourceBpm = source != nullptr ? source->getLoopInfo().getBpm (source->getAudioFile().getInfo()) : 0.0;
+
+        auto warpedLikeSource = [&] (const String& id, double start)
+        {
+            auto* w = engineClip (id);
+            return w != nullptr && w->getAutoTempo() && w->getTimeStretchMode() == sourceMode
+                   && std::abs (w->getLoopInfo().getBpm (w->getAudioFile().getInfo()) - sourceBpm) < 1.0e-6
+                   && std::abs (w->getPosition().getStart().inSeconds() - start) < 1.0e-6
+                   && std::abs (w->getPosition().getLength().inSeconds() - warpedSeconds) < 1.0e-6;
+        };
+
+        auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", sourceId));
+        const auto dupId = dup["data"].getProperty ("newClipId", var()).toString();
+        check (ok (dup) && warpedLikeSource (dupId, warpedSeconds),
+               "warp-copy: duplicate_clip's copy has the source's warp (stretch mode, source tempo, length)");
+
+        var clipDesc;
+        {
+            const auto snap = ops.snapshot();
+            if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                for (auto& t : *tracks)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == sourceId)
+                                clipDesc = c;
+        }
+        constexpr double pasteStart = 20.0;
+        auto pasted = cmd (ops, "paste_clip", objN ({{ "trackId", trackId }, { "start", pasteStart }, { "clip", clipDesc }}));
+        const auto pastedId = pasted["data"].getProperty ("clipId", var()).toString();
+        check (ok (pasted) && warpedLikeSource (pastedId, pasteStart),
+               "warp-copy: paste_clip's copy has the source's warp (stretch mode, source tempo, length)");
+
+        // The peak of channel 0 over [fromSec, toSec) of a rendered file; -1 if unreadable.
+        auto levelIn = [] (const File& f, double fromSec, double toSec) -> float
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) };
+            if (reader == nullptr) return -1.0f;
+            const auto first = (int64) (fromSec * reader->sampleRate);
+            const int n = (int) jmin ((int64) ((toSec - fromSec) * reader->sampleRate), reader->lengthInSamples - first);
+            if (n < 1) return -1.0f;
+            AudioBuffer<float> buf ((int) reader->numChannels, n);
+            reader->read (&buf, 0, n, first, true, true);
+            return buf.getMagnitude (0, 0, n);
+        };
+
+        // Unstretched, the 4 s file is over well before the last half second of a 5 s clip.
+        auto out = eng.sessionDir().getChildFile ("exports").getChildFile ("warp-copy-selftest.wav");
+        out.getParentDirectory().createDirectory();
+        out.deleteFile();
+        auto exp = cmd (ops, "export_audio", objN ({{ "file", out.getFullPathName() }, { "format", "wav" },
+                                                    { "bitDepth", 24 }, { "tail", "cut" }}));
+        check (ok (exp), "warp-copy: export ok" + (ok (exp) ? String() : " (" + exp.getProperty ("error", var()).toString() + ")"));
+        check (levelIn (out, warpedSeconds + 4.4, warpedSeconds + 4.9) > 0.05f,
+               "warp-copy: the duplicate's tone runs to the end of the clip");
+        check (levelIn (out, pasteStart + 4.4, pasteStart + 4.9) > 0.05f,
+               "warp-copy: the pasted copy's tone runs to the end of the clip");
+        out.deleteFile();
+
+        // The warp is part of the copy's own undo step.
+        check (ok (cmd (ops, "undo")) && engineClip (pastedId) == nullptr, "warp-copy: one undo removes the pasted copy");
+        check (ok (cmd (ops, "undo")) && engineClip (dupId) == nullptr
+                   && engineClip (sourceId) != nullptr && engineClip (sourceId)->getAutoTempo(),
+               "warp-copy: one more removes the duplicate, and the source is still warped");
+    }
+
     // Regression: export after relink_clip to a project-LOCAL copy. relink_clip rewrites a
     // wave clip's source via setToDirectFileReference(newFile, /*useRelativePath*/ local).
     // When the new file lives under the project dir (local==true), that computes the path
