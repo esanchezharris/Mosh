@@ -1,293 +1,424 @@
-/* Reusable components. */
+/* Shared pieces used by both pages: nav, buttons, labels, the app-window frame,
+   screenshot crops, the splat tile, the section marker, the footer. */
 
-.container {
-  max-width: var(--container-max);
-  margin-inline: auto;
-  padding-inline: var(--container-pad);
-}
-
-/* ---------------------------------------------------------------- nav */
-
+/* ---------- nav: the shell's top bar ---------- */
 .site-nav {
   position: sticky;
   top: 0;
-  z-index: var(--z-nav);
-  backdrop-filter: blur(14px) saturate(1.4);
-  -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  background: color-mix(in srgb, var(--color-bg) 78%, transparent);
-  border-bottom: 1px solid var(--color-border);
+  z-index: 50;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  border-bottom: 1px solid var(--fog-line);
 }
-
 .site-nav__inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-block: var(--space-4);
+  gap: var(--s4);
+  min-height: 3.75rem;
 }
-
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-body);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  gap: 0.55rem;
+  text-decoration: none;
+  font-stretch: 125%;
+  font-weight: 800;
+  font-size: 1.3rem;
+  letter-spacing: -0.03em;
 }
-
-.brand__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent),
-    0 0 10px 1px var(--color-accent);
-  animation: pulse-dot 2.6s var(--ease-in-out) infinite;
+.brand__mark {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  background: var(--tile);
+  flex: none;
 }
-
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-
 .nav-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--s2);
+}
+.nav-link {
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.nav-link:hover {
+  color: var(--text);
+}
+@media (max-width: 620px) {
+  .nav-link--wide {
+    display: none;
+  }
 }
 
 .theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  color: var(--color-fg-muted);
-  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
-    background-color var(--dur-fast) var(--ease-out);
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
-
 .theme-toggle:hover {
-  color: var(--color-accent);
-  border-color: var(--color-border-strong);
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  color: var(--text);
+  border-color: var(--line);
 }
-
 .theme-toggle svg {
   width: 1.1rem;
   height: 1.1rem;
 }
-
 .theme-toggle .icon-sun {
-  display: none;
-}
-:root[data-theme='light'] .theme-toggle .icon-moon {
   display: none;
 }
 :root[data-theme='light'] .theme-toggle .icon-sun {
   display: block;
 }
+:root[data-theme='light'] .theme-toggle .icon-moon {
+  display: none;
+}
 
-/* ---------------------------------------------------------------- buttons */
-
+/* ---------- buttons ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: 0.85em 1.5em;
-  font-family: var(--font-mono);
-  font-size: var(--fs-small);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border-radius: var(--radius-md);
-  white-space: nowrap;
-  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out),
-    background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  gap: 0.55rem;
+  min-height: 3rem;
+  padding: 0.7rem 1.35rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-weight: 650;
+  font-size: 1rem;
+  line-height: 1.1;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
 }
-
 .btn:active {
-  transform: translateY(1px);
+  transform: scale(0.97);
 }
-
 .btn--primary {
-  background: var(--color-accent);
-  color: var(--color-accent-ink);
-  box-shadow: 0 1px 0 0 color-mix(in srgb, var(--color-accent-ink) 30%, transparent) inset,
-    0 8px 24px -8px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
-
 .btn--primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 1px 0 0 color-mix(in srgb, var(--color-accent-ink) 30%, transparent) inset,
-    0 12px 28px -6px color-mix(in srgb, var(--color-accent) 85%, transparent);
+  box-shadow: 0 0 0 5px var(--accent-soft);
 }
-
-.btn--primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-}
-
 .btn--ghost {
+  border-color: var(--line);
   background: transparent;
-  color: var(--color-fg);
-  border: 1px solid var(--color-border-strong);
+  color: var(--text);
 }
-
 .btn--ghost:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+  border-color: var(--text);
 }
-
+.btn--ink {
+  background: var(--accent-ink);
+  color: var(--accent);
+}
+.btn--ink:hover {
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-ink) 18%, transparent);
+}
 .btn--sm {
-  padding: 0.6em 1.1em;
-  font-size: 0.7rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.95rem;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-small);
+}
+.btn--lg {
+  min-height: 3.6rem;
+  padding: 0.9rem 1.7rem;
+  font-size: 1.1rem;
+}
+.btn[aria-disabled='true'] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.btn svg {
+  width: 1.1em;
+  height: 1.1em;
+  flex: none;
 }
 
-/* ---------------------------------------------------------------- badges */
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4em;
-  padding: 0.3em 0.75em;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  border: 1px solid var(--color-border-strong);
-  color: var(--color-fg-muted);
-}
-
-.badge--accent {
-  color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border-strong));
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-}
-
-.badge--amber {
-  color: var(--color-amber);
-  border-color: color-mix(in srgb, var(--color-amber) 45%, var(--color-border-strong));
-  background: color-mix(in srgb, var(--color-amber) 10%, transparent);
-}
-
-/* ---------------------------------------------------------------- eyebrow / labels */
-
-.eyebrow {
+/* ---------- small type ---------- */
+.label {
   font-family: var(--font-mono);
   font-size: var(--fs-label);
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--color-fg-faint);
+  color: var(--faint);
+}
+.label--accent {
+  color: var(--accent-text);
+}
+.lede {
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: var(--fs-lede);
+  line-height: 1.45;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
-.eyebrow--accent {
-  color: var(--color-accent);
-}
-
-/* ---------------------------------------------------------------- panels / cards */
-
-.panel {
-  background: var(--color-bg-raised);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
-/* ---------------------------------------------------------------- waitlist form */
-
-.waitlist-form {
-  width: 100%;
-}
-
-.waitlist-form__row {
+/* ---------- section marker: the arrangement's section strip ---------- */
+.marker {
   display: flex;
-  gap: var(--space-3);
-  align-items: stretch;
+  align-items: baseline;
+  gap: var(--s4);
+  padding: 0.5rem 0.75rem 0.45rem;
+  border-top: 3px solid var(--mk, var(--sec-verse));
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--mk, var(--sec-verse)) 16%, transparent),
+    transparent
+  );
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.marker__name {
+  color: var(--text);
+  font-weight: 600;
+}
+.marker__bars {
+  margin-left: auto;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
 
-.field {
+/* ---------- the app window ---------- */
+.window {
   position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  border: 1px solid var(--shot-line);
+  border-radius: var(--r-lg);
+  background: var(--shot-bg);
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 40px 80px -30px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+.window__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 2.1rem;
+  padding-inline: 0.9rem;
+  background: var(--shot-chrome);
+  border-bottom: 1px solid var(--shot-line);
+}
+.window__bar i {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: #3a4040;
+}
+.window__title {
+  margin-inline: auto;
+  padding-right: 2.6rem;
+  color: var(--shot-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+}
+.window img {
+  width: 100%;
+  height: auto;
 }
 
-.field__input {
+/* ---------- crops: one screenshot, many windows onto it ----------
+   The source frame is 3024x1634. A crop declares its rectangle in SOURCE pixels and
+   the image is scaled/offset to show exactly that region, so every crop follows the
+   colorway (they all share the one <img src>) and stays pixel-true to the app. */
+.crop {
+  position: relative;
+  aspect-ratio: var(--cw) / var(--ch);
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--shot-bg);
+}
+.crop img {
+  position: absolute;
+  max-width: none;
+  width: calc(3024 / var(--cw) * 100%);
+  height: auto;
+  left: calc(var(--cx) / var(--cw) * -100%);
+  top: calc(var(--cy) / var(--ch) * -100%);
+}
+
+/* ---------- the splat ---------- */
+.splat {
+  display: block;
   width: 100%;
   height: 100%;
-  padding: 0.95em 1.15em;
-  background: var(--color-bg-inset);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  color: var(--color-fg);
+}
+.splat-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: var(--r-xl);
+  background: var(--tile);
+  transition: background-color var(--dur) var(--ease-out);
+}
+button.splat-tile {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+/* ---------- colorway picker ---------- */
+.colorways {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+}
+.colorways__list {
+  display: flex;
+  gap: var(--s2);
+}
+.swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 0.8rem 0.35rem 0.45rem;
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
   font-family: var(--font-mono);
-  font-size: var(--fs-small);
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.swatch::before {
+  content: '';
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: var(--sw);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+}
+.swatch:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+.swatch[aria-pressed='true'] {
+  color: var(--text);
+  border-color: var(--text);
+}
+@media (max-width: 520px) {
+  .swatch {
+    padding-right: 0.45rem;
+  }
+  .swatch span {
+    display: none;
+  }
 }
 
-.field__input::placeholder {
-  color: var(--color-fg-faint);
+/* ---------- waitlist form (only rendered when a backend is configured) ---------- */
+.waitlist-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
 }
-
-.field__input:focus-visible {
-  border-color: var(--color-accent);
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
-  outline-offset: 1px;
+.field {
+  flex: 1 1 15rem;
 }
-
-.field__input:user-invalid {
-  border-color: var(--color-danger);
-}
-
-/* Honeypot: hidden from sighted + AT users, but present in the DOM and
-   tabbable-excluded, so naive bots that fill every input still get caught. */
 .field--trap {
   position: absolute;
+  left: -9999px;
   width: 1px;
   height: 1px;
   overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  left: -9999px;
 }
-
-.waitlist-form__submit {
-  flex: 0 0 auto;
+.field__input {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
 }
-
-.waitlist-form__hint {
-  margin-top: var(--space-3);
-  font-size: var(--fs-small);
-  color: var(--color-fg-faint);
+.field__input::placeholder {
+  color: var(--faint);
 }
-
+.field__input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 .waitlist-form__status {
-  margin-top: var(--space-3);
-  font-family: var(--font-mono);
+  min-height: 1.5em;
+  margin-top: var(--s3);
   font-size: var(--fs-small);
-  min-height: 1.4em;
+  color: var(--muted);
 }
-
 .waitlist-form__status[data-state='success'] {
-  color: var(--color-accent);
+  color: var(--accent-text);
 }
-
 .waitlist-form__status[data-state='error'] {
-  color: var(--color-danger);
+  color: var(--record);
 }
 
-@media (max-width: 560px) {
-  .waitlist-form__row {
-    flex-direction: column;
-  }
+/* ---------- footer ---------- */
+.site-footer {
+  border-top: 1px solid var(--fog-line);
+  padding-block: var(--s6);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+}
+.site-footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--s3) var(--s6);
+}
+.site-footer a {
+  color: var(--muted);
+}
+.site-footer a:hover {
+  color: var(--text);
 }

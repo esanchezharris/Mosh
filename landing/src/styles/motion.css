@@ -1,85 +1,96 @@
-/* Motion. Reduced-motion is neutralized globally in base.css (all durations
-   collapse to ~0), so every rule below is automatically safe. */
+/* Motion. One orchestrated entrance for the hero, a quiet rise for everything
+   below, and nothing at all for visitors who asked for less. */
 
-@keyframes fade-up {
+@keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(0.4em);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: rotate(-22deg) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-6deg) scale(1);
+  }
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
   }
 }
 
-/* Hero: one staggered load-in, no JS required (progressive enhancement —
-   works even if the script fails to load). */
+.hero__readout,
+.hero__line,
+.hero__lede,
+.hero__cta,
+.hero__stage,
+.guide-hero > * {
+  animation: rise var(--dur-slow) var(--ease-out) both;
+}
 .hero__readout {
-  animation: fade-up var(--dur-slow) var(--ease-out) both;
-  animation-delay: 0.02s;
+  animation-delay: 40ms;
 }
-.hero__title {
-  animation: fade-up var(--dur-slow) var(--ease-out) both;
-  animation-delay: 0.12s;
+.hero__line:nth-child(1) {
+  animation-delay: 100ms;
 }
-.hero__thesis {
-  animation: fade-up var(--dur-slow) var(--ease-out) both;
-  animation-delay: 0.26s;
+.hero__line:nth-child(2) {
+  animation-delay: 190ms;
 }
-.hero__body {
-  animation: fade-up var(--dur-slow) var(--ease-out) both;
-  animation-delay: 0.38s;
+.hero__lede {
+  animation-delay: 300ms;
 }
-.hero__form-wrap {
-  animation: fade-up var(--dur-slow) var(--ease-out) both;
-  animation-delay: 0.5s;
+.hero__cta {
+  animation-delay: 380ms;
 }
-.hero__scope {
-  animation: fade-up var(--dur-slow) var(--ease-out) both;
-  animation-delay: 0.62s;
+.hero__stage {
+  animation-delay: 460ms;
+  animation-duration: 900ms;
+}
+.hero__tile {
+  /* backwards, not both: once it lands, the tile's own hover transform takes over */
+  animation: pop 800ms var(--ease-out) 240ms backwards;
+}
+.guide-hero > *:nth-child(2) {
+  animation-delay: 90ms;
+}
+.guide-hero > *:nth-child(3) {
+  animation-delay: 180ms;
 }
 
-/* Below-the-fold reveals, driven by IntersectionObserver (src/reveal.ts). */
-[data-reveal] {
+/* Scroll reveal. The hidden state only applies once reveal.ts has stamped
+   .js-reveal on <html>, so the page is fully visible without JavaScript. */
+.js-reveal [data-reveal] {
   opacity: 0;
-  transform: translateY(22px);
-  transition: opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out);
-  transition-delay: calc(var(--reveal-i, 0) * 80ms);
+  transform: translateY(18px);
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+  transition-delay: calc(var(--reveal-i, 0) * 70ms);
 }
-
-[data-reveal].is-visible {
+.js-reveal [data-reveal].is-visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: none;
 }
 
-/* Slow scanline sweep across the scope screen — an ambient, always-on detail
-   rather than a scroll/hover trigger, like a CRT's refresh. */
-.scope-panel__screen::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    color-mix(in srgb, var(--scope-trace) 10%, transparent) 48%,
-    transparent 100%
-  );
-  background-size: 100% 340%;
-  animation: scanline 7s linear infinite;
-  pointer-events: none;
-  mix-blend-mode: screen;
-}
-
-@keyframes scanline {
-  0% {
-    background-position: 0 -240%;
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
-  100% {
-    background-position: 0 100%;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
   }
-}
-
-/* Button/link micro-interaction shared with .btn but usable standalone. */
-.tap-press:active {
-  transform: translateY(1px) scale(0.99);
 }

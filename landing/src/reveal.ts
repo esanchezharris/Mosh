@@ -21,6 +21,10 @@ export function initScrollReveal(): void {
     return
   }
 
+  // The hidden pre-reveal state is keyed off this class (motion.css), so a page
+  // where this module never runs stays fully visible.
+  document.documentElement.classList.add('js-reveal')
+
   const observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {

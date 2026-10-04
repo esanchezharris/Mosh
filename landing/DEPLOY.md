@@ -1,4 +1,8 @@
-# Deploying the Mosh landing page
+# Deploying the Mosh site
+
+Two pages: the site itself (`/`) and the playtest guide you send to friends
+(`/playtest/`, marked `noindex`). The look follows the app's V3 shell: its palette
+(`ui/src/v3/tokens.css`), its four colorways, and the same splat engine the dock draws.
 
 `landing/` is a fully standalone static site (Vite + vanilla TypeScript, no framework)
 with its own `package.json` — it does not import from `ui/` or anywhere else in the
@@ -31,13 +35,20 @@ the multiplayer relay's publishable key).
 | `PUBLIC_SUPABASE_ANON_KEY` | yes, unless using `PUBLIC_WAITLIST_URL` | The project's **anon/publishable** key. Never the `service_role` key — that must never reach a browser. |
 | `PUBLIC_WAITLIST_URL` | no | Overrides the default Supabase table insert. If set, the form POSTs `{ "email": "...", "source": "..." }` as JSON to this URL instead — a custom Edge Function, a webhook, a different backend entirely. Contract: respond 2xx for a new signup, `409` for an address already on the list, anything else is treated as an error. |
 | `PUBLIC_WAITLIST_SOURCE` | no | Short label stored in the `source` column (default `"landing"`). Useful if a second landing page/campaign ever exists and you want to tell signups apart. |
+| `PUBLIC_DOWNLOAD_URL` | no | Where the playtest page's **Download** button points: the signed, notarized DMG or zip, hosted wherever you like (`https` only). Unset, the page tells the tester to ask their host for the build. |
+| `PUBLIC_BUILD_LABEL` | no | Short label beside the Download button, e.g. `Build 2026-10-02`. |
+| `PUBLIC_FEEDBACK_URL` | no | Where playtest feedback goes: an `https` link (Discord, a form) or a `mailto:` address. Unset, the page says to message whoever invited them. |
+| `PUBLIC_SITE_URL` | no | The site's public origin, e.g. `https://mosh.example`. Build-time only: makes the link-preview image URL absolute, which iMessage/Discord/Slack previews need. |
+
+The waitlist block on the home page only renders when a waitlist backend is configured
+(`PUBLIC_WAITLIST_URL`, or both Supabase variables). With none set the site is a pure
+brochure plus the playtest guide, and no form appears.
 
 Copy `.env.example` to `.env.local` for local dev (gitignored); set the same names in
 the host's dashboard for production. Without either `PUBLIC_WAITLIST_URL` or the two
-Supabase variables set, the form fails closed with a clear on-page message ("signups
-aren't wired up on this build yet") and a console warning — it never fails silently.
+Supabase variables set, the waitlist block stays hidden.
 
-## One-time: create the `waitlist` table
+## One-time, only if you want the waitlist: create the `waitlist` table
 
 This repo does **not** apply the migration for you. Before signups can land anywhere,
 apply `supabase/migrations/20260717214247_waitlist.sql` to whichever Supabase project
@@ -115,6 +126,20 @@ npx wrangler pages deploy dist --project-name=mosh-landing
   `service_role` key or anything secret behind a `PUBLIC_` name.
 - Redeploy (rebuild) any time a `PUBLIC_*` value changes — a static build doesn't pick
   up environment changes at runtime.
-- Fonts (`@fontsource-variable/bricolage-grotesque`, `@fontsource/ibm-plex-mono`) are
+- Fonts (`@fontsource-variable/archivo`, `@fontsource/ibm-plex-mono`) are
   self-hosted npm packages bundled at build time — no Google Fonts or other
   third-party request at runtime, and nothing to configure for that.
+
+## Refreshing the product imagery
+
+- **Screenshots** (`public/img/mosh-shell-<colorway>.webp`, 3024x1634): the four colorway
+  captures of the V3 shell on the showcase session, produced by
+  `ui/e2e/portfolio-shot.spec.ts` (`MOSH_PORTFOLIO_SHOT=1
+  MOSH_PORTFOLIO_COLORWAYS=lime,bone,violet,coral`), then `cwebp -q 92`. Every feature crop
+  on the home page is a window onto that same frame (`.crop` in `components.css`, rectangles
+  in source pixels), so if the shell's layout moves, re-check the `--cx/--cy/--cw/--ch`
+  values in `index.html`.
+- **The splat** (`src/vendor/agent-sprites/engine.js`) is a copy of the app's
+  `ui/src/vendor/agent-sprites/engine.js`. Copy it again when the app's changes.
+- **Playtest copy** (`playtest/index.html`) names real controls (`+ Drum beat`, `Invite`,
+  `Create session`, `Buffer`, `History`). Re-check it against the shell before each round.

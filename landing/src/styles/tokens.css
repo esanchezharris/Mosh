@@ -1,152 +1,169 @@
 /*
- * Design tokens. Semantic custom properties only — components reference
- * --color-* / --font-* / --space-* names, never raw hex, so no component
- * rule needs to know or care which theme is active.
+ * Design tokens. The dark palette IS the V3 shell's (ui/src/v3/tokens.css): the same
+ * near-black, bone text and lime accent, so the site and the app read as one product.
+ * The light palette is the logo's cream paper with the ink splat on it.
  *
- * Theme resolution order (same pattern used for claude.ai Artifacts, applied
- * here because it's the correct robust technique for any manually-toggleable
- * theme): :root sets the dark palette as the default (baseline + pre-JS
- * fallback). A prefers-color-scheme:light query supplies light values when
- * the OS says light AND the user hasn't explicitly forced dark. Explicit
- * :root[data-theme="light"|"dark"] rules — stamped onto <html> by the inline
- * bootstrap script in index.html <head>, before first paint — win in BOTH
- * directions over the system preference once the user has picked a side.
+ * Two independent switches, both stamped on <html> by the inline bootstrap in each
+ * page's <head> before first paint:
+ *   data-theme    = dark | light           (system preference until the visitor picks)
+ *   data-colorway = lime | bone | violet | coral   (the app's four colorways)
+ *
+ * --accent is a FILL (clips, buttons, the playhead). It is not always legible as text
+ * on the page background (lime on cream is not), so text uses --accent-text.
  */
 
 :root {
-  /* ---- dark palette (default) ---- */
-  --color-bg: #0b0c0d;
-  --color-bg-raised: #141618;
-  --color-bg-inset: #060707;
-  --color-border: rgba(255, 255, 255, 0.09);
-  --color-border-strong: rgba(255, 255, 255, 0.18);
-  --color-fg: #f2efe7;
-  --color-fg-muted: #a7a79d;
-  --color-fg-faint: #67685f;
-  --color-accent: #8cff6b;
-  --color-accent-strong: #c3ffb0;
-  --color-accent-ink: #06170a;
-  --color-amber: #ffb238;
-  --color-danger: #ff9184;
-  --color-focus: #8cff6b;
-  --color-scrim: rgba(6, 7, 7, 0.72);
+  /* ---- dark: the V3 shell ---- */
+  --bg: #0b0c0c;
+  --surface: #161a1a;
+  --surface-2: #1e2424;
+  --top: #121414;
+  --text: #f2eee6;
+  --muted: #9a9e99;
+  --faint: #6e7270;
+  --line: #3a4040;
+  --fog-line: #2a2e2e;
+  --grid-bar: color-mix(in srgb, var(--text) 11%, transparent);
+  --grid-beat: color-mix(in srgb, var(--text) 5%, transparent);
+  --accent: #c6f542;
+  --accent-ink: #0b0c0c;
+  --accent-text: #c6f542;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --record: #e0342c;
+  --warn: #e8c15a;
+  --focus: var(--accent-text);
 
-  /* the hero "scope screen" is always a dark recessed panel, in both themes —
-     a physical instrument's LCD/CRT stays dark even on a light chassis, and
-     it gives the signature waveform one guaranteed-legible home. */
-  --scope-bg: #060807;
-  --scope-bg-2: #0c130f;
-  --scope-grid: rgba(140, 255, 107, 0.09);
-  --scope-trace: #8cff6b;
-  --scope-trace-dim: #4f9c46;
-  --scope-trace-glow: rgba(140, 255, 107, 0.55);
+  /* the splat's backdrop tile: accent behind an ink body, ink behind the bone body */
+  --tile: var(--accent);
+
+  /* the app is always dark, so its screenshots live in a dark frame in both themes */
+  --shot-bg: #0b0c0c;
+  --shot-chrome: #121414;
+  --shot-line: #2a2e2e;
+  --shot-text: #f2eee6;
+  --shot-muted: #8e928e;
+
+  /* arrangement section-strip hues, as the shell draws them */
+  --sec-intro: #8e928e;
+  --sec-verse: #8fb8d8;
+  --sec-hook: #e8a0b0;
+  --sec-bridge: #8fe0c0;
+  --sec-outro: #e8c15a;
 
   /* ---- type ---- */
-  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'Archivo Variable', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --fs-hero: clamp(2.75rem, 1.9rem + 4.4vw, 6.75rem);
-  --fs-h2: clamp(2rem, 1.5rem + 2.1vw, 3.4rem);
-  --fs-h3: clamp(1.3rem, 1.15rem + 0.6vw, 1.75rem);
-  --fs-body-lg: clamp(1.05rem, 0.98rem + 0.3vw, 1.3rem);
-  --fs-body: 1rem;
-  --fs-small: 0.875rem;
+  --fs-hero: clamp(3.1rem, 1.2rem + 8.6vw, 9rem);
+  --fs-h2: clamp(2rem, 1.3rem + 3vw, 4rem);
+  --fs-h3: clamp(1.35rem, 1.15rem + 0.8vw, 1.9rem);
+  --fs-lede: clamp(1.1rem, 1rem + 0.45vw, 1.4rem);
+  --fs-body: 1.0625rem;
+  --fs-small: 0.9375rem;
   --fs-label: 0.75rem;
 
-  --lh-tight: 1.04;
-  --lh-snug: 1.25;
-  --lh-normal: 1.55;
-
   /* ---- space (4px base) ---- */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-7: 3rem;
-  --space-8: 4.5rem;
-  --space-9: 6.5rem;
-  --space-10: 9rem;
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+  --s8: 4.5rem;
+  --s9: 6.5rem;
+  --s10: 9rem;
 
-  --container-max: 1240px;
-  --container-pad: clamp(1.25rem, 1rem + 2vw, 3rem);
+  --container: 1280px;
+  --gutter: clamp(1rem, 0.6rem + 2.4vw, 3rem);
 
-  /* ---- shape ---- */
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 20px;
-  --radius-panel: 26px;
-  --radius-pill: 999px;
+  /* ---- shape: the shell's 8px controls, rounder for the big marketing blocks ---- */
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 22px;
+  --r-xl: 34px;
+  --r-pill: 999px;
 
-  /* ---- motion ---- */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --dur-fast: 150ms;
-  --dur-base: 320ms;
-  --dur-slow: 640ms;
-
-  --z-nav: 50;
-  --z-overlay: 100;
+  /* ---- motion: the shell's own curves ---- */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-morph: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-fast: 140ms;
+  --dur: 320ms;
+  --dur-slow: 700ms;
 
   color-scheme: dark;
 }
 
+/* ---- light: the logo's cream paper ---- */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
-    --color-bg: #f3f0e6;
-    --color-bg-raised: #fffdf7;
-    --color-bg-inset: #e8e2d0;
-    --color-border: rgba(21, 19, 12, 0.11);
-    --color-border-strong: rgba(21, 19, 12, 0.22);
-    --color-fg: #16150f;
-    --color-fg-muted: #5b5849;
-    --color-fg-faint: #8e8a76;
-    --color-accent: #1e7a34;
-    --color-accent-strong: #145a1f;
-    --color-accent-ink: #f3ffec;
-    --color-amber: #8a5200;
-    --color-danger: #a8331e;
-    --color-focus: #1e7a34;
-    --color-scrim: rgba(22, 21, 15, 0.4);
+    --bg: #faf0e8;
+    --surface: #fff9f3;
+    --surface-2: #f0e4d9;
+    --top: #f5eae0;
+    --text: #151716;
+    --muted: #5b5750;
+    --faint: #8a847b;
+    --line: rgba(21, 23, 22, 0.24);
+    --fog-line: rgba(21, 23, 22, 0.12);
+    --accent-text: #46600a;
     color-scheme: light;
   }
 }
-
 :root[data-theme='light'] {
-  --color-bg: #f3f0e6;
-  --color-bg-raised: #fffdf7;
-  --color-bg-inset: #e8e2d0;
-  --color-border: rgba(21, 19, 12, 0.11);
-  --color-border-strong: rgba(21, 19, 12, 0.22);
-  --color-fg: #16150f;
-  --color-fg-muted: #5b5849;
-  --color-fg-faint: #8e8a76;
-  --color-accent: #1e7a34;
-  --color-accent-strong: #145a1f;
-  --color-accent-ink: #f3ffec;
-  --color-amber: #8a5200;
-  --color-danger: #a8331e;
-  --color-focus: #1e7a34;
-  --color-scrim: rgba(22, 21, 15, 0.4);
+  --bg: #faf0e8;
+  --surface: #fff9f3;
+  --surface-2: #f0e4d9;
+  --top: #f5eae0;
+  --text: #151716;
+  --muted: #5b5750;
+  --faint: #8a847b;
+  --line: rgba(21, 23, 22, 0.24);
+  --fog-line: rgba(21, 23, 22, 0.12);
+  --accent-text: #46600a;
   color-scheme: light;
 }
 
-:root[data-theme='dark'] {
-  --color-bg: #0b0c0d;
-  --color-bg-raised: #141618;
-  --color-bg-inset: #060707;
-  --color-border: rgba(255, 255, 255, 0.09);
-  --color-border-strong: rgba(255, 255, 255, 0.18);
-  --color-fg: #f2efe7;
-  --color-fg-muted: #a7a79d;
-  --color-fg-faint: #67685f;
-  --color-accent: #8cff6b;
-  --color-accent-strong: #c3ffb0;
-  --color-accent-ink: #06170a;
-  --color-amber: #ffb238;
-  --color-danger: #ff9184;
-  --color-focus: #8cff6b;
-  --color-scrim: rgba(6, 7, 7, 0.72);
-  color-scheme: dark;
+/* ---- colorways (dark values are the shell's own) ---- */
+:root[data-colorway='bone'] {
+  --accent: #e8e2d6;
+  --accent-text: #e8e2d6;
+  --tile: #1e2424;
+}
+:root[data-colorway='violet'] {
+  --accent: #b8a4ff;
+  --accent-text: #b8a4ff;
+}
+:root[data-colorway='coral'] {
+  --accent: #ff8b7a;
+  --accent-text: #ff8b7a;
+}
+
+/* light-theme text-safe accents. Bone on cream paper would vanish, so there the
+   accent becomes ink, the way the cream logo uses it. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark'])[data-colorway='bone'] {
+    --accent: #1b1d1c;
+    --accent-ink: #faf0e8;
+    --accent-text: #1b1d1c;
+    --tile: #1b1d1c;
+  }
+  :root:not([data-theme='dark'])[data-colorway='violet'] {
+    --accent-text: #5236c9;
+  }
+  :root:not([data-theme='dark'])[data-colorway='coral'] {
+    --accent-text: #a8361f;
+  }
+}
+:root[data-theme='light'][data-colorway='bone'] {
+  --accent: #1b1d1c;
+  --accent-ink: #faf0e8;
+  --accent-text: #1b1d1c;
+  --tile: #1b1d1c;
+}
+:root[data-theme='light'][data-colorway='violet'] {
+  --accent-text: #5236c9;
+}
+:root[data-theme='light'][data-colorway='coral'] {
+  --accent-text: #a8361f;
 }
