@@ -38,9 +38,11 @@ inline constexpr int kMaxStages = 8;
 /** How a canonical (file) value becomes the value the engine parameter stores. */
 enum class Encoding
 {
-    identity,        // Hz, ms, dB stored as-is
-    dbToLinearGain,  // dB in the file  -> 10^(dB/20) in the parameter
-    ratioToSlope     // N (as in N:1)   -> 1/N in the parameter
+    identity,          // Hz, ms, dB, cents stored as-is
+    dbToLinearGain,    // dB in the file  -> 10^(dB/20) in the parameter
+    ratioToSlope,      // N (as in N:1)   -> 1/N in the parameter
+    percentToFraction, // % in the file   -> value/100 in the parameter
+    wholeNumber        // stored as-is, but a fractional value is an error (a choice, not an amount)
 };
 
 struct ParamSpec
@@ -70,7 +72,7 @@ struct ProcessorSpec
     int numState;
 };
 
-// ── the pinned table: exactly the two processors "Mosh Clean Lead v0" needs ──────────
+// ── the pinned table: the processors the bundled presets need ────────────────────────
 // tracktion_LowPass.cpp:18-25 — frequency 10..22000 Hz; `mode` is a plain CachedValue
 // ("lowpass" | "highpass"), NOT a parameter, so a parameter dump alone would miss it.
 inline constexpr ParamSpec kLowPassParams[] = {
@@ -93,9 +95,26 @@ inline constexpr StateSpec kCompressorState[] = {
     { "sidechainTrigger", "sidechainTrigger", StateSpec::Kind::boolean, "" },
 };
 
+// MoshAutoTunePlugin.cpp, in the plugin's own parameter order
+// (docs/AUTOTUNE-SCOPE-2026-10-01.md section 8). Root and scale are choices: root counts
+// semitones above C (0 = C .. 11 = B) and scale is 0 chromatic, 1 major, 2 minor. Unlike
+// the two engine built-ins above, this one reports latency (about 1.8 ms plus look-ahead).
+inline constexpr ParamSpec kAutoTuneParams[] = {
+    { "root",      "moshAutoTuneRoot",      "semitones above C", Encoding::wholeNumber,        0.0f,  11.0f },
+    { "scale",     "moshAutoTuneScale",     "scale index",       Encoding::wholeNumber,        0.0f,   2.0f },
+    { "retune",    "moshAutoTuneRetune",    "ms",                Encoding::identity,           5.0f, 250.0f },
+    { "amount",    "moshAutoTuneAmount",    "%",                 Encoding::percentToFraction,  0.0f,   1.0f },
+    { "range",     "moshAutoTuneRange",     "cents",             Encoding::identity,           0.0f, 300.0f },
+    { "mix",       "moshAutoTuneMix",       "%",                 Encoding::percentToFraction,  0.0f,   1.0f },
+    { "output",    "moshAutoTuneOutput",    "dB",                Encoding::identity,         -18.0f,   6.0f },
+    { "glide",     "moshAutoTuneGlide",     "%",                 Encoding::percentToFraction,  0.0f,   1.0f },
+    { "lookahead", "moshAutoTuneLookahead", "ms",                Encoding::identity,           0.0f,  12.0f },
+};
+
 inline constexpr ProcessorSpec kProcessors[] = {
-    { "lowpass",    kLowPassParams,    1, kLowPassState,    1 },
-    { "compressor", kCompressorParams, 6, kCompressorState, 1 },
+    { "lowpass",      kLowPassParams,    1, kLowPassState,    1 },
+    { "compressor",   kCompressorParams, 6, kCompressorState, 1 },
+    { "moshAutoTune", kAutoTuneParams,   9, nullptr,          0 },
 };
 
 inline const ProcessorSpec* findProcessor (const juce::String& type)
@@ -150,6 +169,16 @@ inline Conversion toNative (const ParamSpec& spec, double canonical)
             }
             native = 1.0 / canonical;
             break;
+        case Encoding::percentToFraction:
+            native = canonical / 100.0;
+            break;
+        case Encoding::wholeNumber:
+            if (std::floor (canonical) != canonical)
+            {
+                out.error = who + " must be a whole number";
+                return out;
+            }
+            break;
     }
 
     // Compare as float: that is the precision the parameter holds, and it is what makes
@@ -177,6 +206,8 @@ inline double toCanonical (const ParamSpec& spec, float native)
                                                               : -std::numeric_limits<double>::infinity();
         case Encoding::ratioToSlope:    return native > 0.0f ? 1.0 / (double) native
                                                               : std::numeric_limits<double>::infinity();
+        case Encoding::percentToFraction: return (double) native * 100.0;
+        case Encoding::wholeNumber:       return (double) native;
     }
     return (double) native;
 }

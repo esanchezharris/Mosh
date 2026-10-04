@@ -1,5 +1,6 @@
 #include "SelfTest.h"
 #include "selftest/MultiplayerAudioRefSelfTest.h"
+#include "selftest/TunedLeadPresetSelfTest.h"
 #include "selftest/VocalPresetSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
@@ -17250,6 +17251,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // assert on. Its own sections cover what a matrix row would (one undo restores the
     // canonical snapshot; the state survives save/reload) — see VocalPresetSelfTest.cpp.
     runVocalPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
+    // "Mosh Tuned Lead v0": Mosh AutoTune as a preset stage. Straight after, in the same
+    // clean project, so it is equally unable to shift ids earlier sections assert on.
+    runTunedLeadPresetSelfTest (
         eng, ops, { [] (const String& name) { section (name); },
                     [] (bool condition, const String& message) { check (condition, message); },
                     [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });

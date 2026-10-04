@@ -367,3 +367,152 @@ TEST_CASE ("the bundled Mosh Clean Lead v0 preset is a valid, dry, two-stage ori
     CHECK (r.preset.provenance["origin"].toString() == "original");
     CHECK (r.preset.validation["listening"].toString() == "not-run");
 }
+
+// ── Mosh AutoTune as a preset stage (docs/AUTOTUNE-SCOPE-2026-10-01.md section 8) ─────
+namespace
+{
+    juce::var autoTuneStage()
+    {
+        return juce::JSON::parse (R"json({
+          "processor": "moshAutoTune", "state": {}, "bypassed": false,
+          "params": {
+            "root":      { "value": 9,   "unit": "semitones above C" },
+            "scale":     { "value": 2,   "unit": "scale index" },
+            "retune":    { "value": 5,   "unit": "ms" },
+            "amount":    { "value": 75,  "unit": "%" },
+            "range":     { "value": 200, "unit": "cents" },
+            "mix":       { "value": 50,  "unit": "%" },
+            "output":    { "value": -3,  "unit": "dB" },
+            "glide":     { "value": 25,  "unit": "%" },
+            "lookahead": { "value": 12,  "unit": "ms" } } })json");
+    }
+
+    juce::var docWithStage (const juce::var& stageVar)
+    {
+        auto doc = validDoc();
+        doc["stages"].getArray()->clearQuick();
+        doc["stages"].getArray()->add (stageVar);
+        return doc;
+    }
+
+    ParseResult withAutoTuneParam (const char* id, double value)
+    {
+        auto s = autoTuneStage();
+        obj (s["params"][id]).setProperty ("value", value);
+        return parseTrackPreset (docWithStage (s));
+    }
+}
+
+TEST_CASE ("an AutoTune stage parses: percentages become fractions, choices stay whole", "[track-preset][autotune]")
+{
+    const auto r = parseTrackPreset (docWithStage (autoTuneStage()));
+    INFO (r.error);
+    REQUIRE (r.ok);
+    REQUIRE (r.preset.stages.size() == 1);
+    const auto& stage = r.preset.stages[0];
+    CHECK (juce::String (stage.processor->type) == "moshAutoTune");
+    CHECK (stage.state.empty());
+    REQUIRE (stage.params.size() == 9);
+
+    // In the plugin's own parameter order, each under the property the plugin saves it as.
+    const char* ids[] = { "root", "scale", "retune", "amount", "range", "mix", "output", "glide", "lookahead" };
+    const float natives[] = { 9.0f, 2.0f, 5.0f, 0.75f, 200.0f, 0.5f, -3.0f, 0.25f, 12.0f };
+    for (int i = 0; i < 9; ++i)
+    {
+        INFO (ids[i]);
+        CHECK (juce::String (stage.params[(size_t) i].spec->id) == ids[i]);
+        CHECK (stage.params[(size_t) i].native == Approx (natives[i]));
+        CHECK (juce::String (stage.params[(size_t) i].spec->stateProp).startsWith ("moshAutoTune"));
+    }
+    // Readback converts the other way.
+    CHECK (toCanonical (*stage.params[3].spec, 0.75f) == Approx (75.0));
+    CHECK (toCanonical (*stage.params[0].spec, 9.0f) == Approx (9.0));
+}
+
+TEST_CASE ("an AutoTune stage is as strict as the rest of schema 1", "[track-preset][autotune]")
+{
+    // A choice cannot be fractional: there is no note between A and A#.
+    CHECK_FALSE (withAutoTuneParam ("root", 9.5).ok);
+    CHECK_FALSE (withAutoTuneParam ("scale", 1.5).ok);
+    CHECK (withAutoTuneParam ("root", 11).ok);
+    CHECK_FALSE (withAutoTuneParam ("root", 12).ok);
+    CHECK_FALSE (withAutoTuneParam ("scale", 3).ok);
+
+    // Ranges are the plugin's, in the file's units.
+    CHECK_FALSE (withAutoTuneParam ("amount", 101).ok);
+    CHECK_FALSE (withAutoTuneParam ("glide", -1).ok);
+    CHECK_FALSE (withAutoTuneParam ("retune", 4).ok);
+    CHECK_FALSE (withAutoTuneParam ("lookahead", 12.5).ok);
+    CHECK (withAutoTuneParam ("lookahead", 0).ok);
+
+    // Every parameter is required, in its own unit, and no typed state is accepted.
+    {
+        auto s = autoTuneStage();
+        obj (s["params"]).removeProperty ("glide");
+        CHECK_FALSE (parseTrackPreset (docWithStage (s)).ok);
+    }
+    {
+        auto s = autoTuneStage();
+        obj (s["params"]["amount"]).setProperty ("unit", "ratio");
+        CHECK_FALSE (parseTrackPreset (docWithStage (s)).ok);
+    }
+    {
+        auto s = autoTuneStage();
+        obj (s["state"]).setProperty ("mode", "highpass");
+        CHECK_FALSE (parseTrackPreset (docWithStage (s)).ok);
+    }
+}
+
+TEST_CASE ("the bundled Mosh Tuned Lead v0 preset is AutoTune ahead of the Clean Lead chain", "[track-preset][bundled][autotune]")
+{
+    const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile ("resources/presets/track-chain");
+    const auto tunedFile = dir.getChildFile ("mosh-tuned-lead-v0.json");
+    const auto cleanFile = dir.getChildFile ("mosh-clean-lead-v0.json");
+    REQUIRE (tunedFile.existsAsFile());
+    REQUIRE (cleanFile.existsAsFile());
+
+    const auto tuned = parseTrackPresetText (tunedFile.loadFileAsString());
+    const auto clean = parseTrackPresetText (cleanFile.loadFileAsString());
+    INFO (tuned.error);
+    REQUIRE (tuned.ok);
+    REQUIRE (clean.ok);
+    CHECK (tuned.preset.id == "mosh.tuned-lead");
+    CHECK (tuned.preset.id != clean.preset.id); // each preset owns its own tagged group
+    CHECK (tuned.preset.name == "Mosh Tuned Lead v0");
+
+    REQUIRE (tuned.preset.stages.size() == 3);
+    const auto& tune = tuned.preset.stages[0];
+    CHECK (juce::String (tune.processor->type) == "moshAutoTune"); // first: it hears the voice uncompressed
+    CHECK_FALSE (tune.bypassed);
+    auto native = [&tune] (const char* id)
+    {
+        for (const auto& p : tune.params)
+            if (juce::String (p.spec->id) == id)
+                return p.native;
+        FAIL ("no such AutoTune parameter: " << id);
+        return 0.0f;
+    };
+    CHECK (native ("scale") == 0.0f);     // chromatic: a preset cannot know the song's key
+    CHECK (native ("lookahead") == 0.0f); // safe to sing through
+    CHECK (native ("amount") == 1.0f);
+    CHECK (native ("mix") == 1.0f);
+
+    // The rest IS the Clean Lead chain: same processors, same values.
+    REQUIRE (clean.preset.stages.size() == 2);
+    for (size_t i = 0; i < 2; ++i)
+    {
+        const auto& a = tuned.preset.stages[i + 1];
+        const auto& b = clean.preset.stages[i];
+        CHECK (a.processor == b.processor);
+        CHECK (a.bypassed == b.bypassed);
+        REQUIRE (a.params.size() == b.params.size());
+        for (size_t p = 0; p < a.params.size(); ++p)
+            CHECK (a.params[p].native == b.params[p].native);
+        REQUIRE (a.state.size() == b.state.size());
+        for (size_t st = 0; st < a.state.size(); ++st)
+            CHECK (a.state[st].value == b.state[st].value);
+    }
+
+    CHECK (tuned.preset.provenance["origin"].toString() == "original");
+    CHECK (tuned.preset.validation["listening"].toString() == "not-run");
+}
