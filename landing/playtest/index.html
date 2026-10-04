@@ -42,7 +42,8 @@
     <meta property="og:image" content="/img/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
 
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/icon-64.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -50,7 +51,7 @@
     <header class="site-nav">
       <div class="container site-nav__inner">
         <a class="brand" href="/" aria-label="Mosh home">
-          <span class="brand__mark" aria-hidden="true"><canvas class="splat" data-splat data-pad="0.16"></canvas></span>
+          <img class="app-icon" src="/icon-128.png" width="128" height="128" alt="" />
           Mosh
         </a>
         <nav class="nav-actions" aria-label="Primary">
@@ -72,19 +73,16 @@
       <section class="guide-top">
         <div class="container guide-top__grid">
           <div class="guide-hero">
-            <span class="chip"><i class="rec-dot" aria-hidden="true"></i>Playtest guide</span>
             <h1 class="guide-hero__title">You&rsquo;re <span class="clip-word">in.</span></h1>
             <p class="lede">
-              This page gets you from the download to making sound in about ten minutes. There is no
-              account and nothing to sign up for.
+              This is the Mosh playtest guide. It gets you from the download to making sound in about
+              ten minutes, with no account and nothing to sign up for.
             </p>
           </div>
 
           <aside class="download" aria-labelledby="download-heading">
             <div class="download__head">
-              <button class="splat-tile download__tile" type="button" data-splat-poke aria-label="Poke Moshi">
-                <canvas class="splat" data-splat data-splat-name="download" data-pad="0.18"></canvas>
-              </button>
+              <img class="app-icon download__icon" src="/icon-256.png" width="256" height="256" alt="" />
               <div>
                 <h2 class="download__title" id="download-heading">Mosh for Mac</h2>
                 <p class="download__build mono" data-build-label hidden></p>
@@ -98,11 +96,7 @@
               <strong>Ask your host for the build.</strong> They&rsquo;ll send you the download
               directly, then you can carry on from step 2.
             </p>
-            <ul class="download__reqs">
-              <li class="chip">Apple Silicon</li>
-              <li class="chip">macOS 11+</li>
-              <li class="chip">~1 GB free</li>
-            </ul>
+            <p class="fine">Apple Silicon Mac, macOS 11 or later, about 1 GB free.</p>
           </aside>
         </div>
       </section>
@@ -110,7 +104,7 @@
       <section class="guide">
         <div class="container guide__grid">
           <nav class="toc" aria-label="Steps">
-            <span class="label">Steps</span>
+            <span class="toc__label">Steps</span>
             <ol class="toc__list">
               <li><a href="#before"><span class="mono">01</span>Before you start</a></li>
               <li><a href="#install"><span class="mono">02</span>Install</a></li>
@@ -124,7 +118,7 @@
           </nav>
 
           <ol class="steps">
-            <li class="step" id="before" data-reveal>
+            <li class="step" id="before">
               <span class="step__num mono">01</span>
               <div class="step__body">
                 <h2>Before you start</h2>
@@ -138,7 +132,7 @@
               </div>
             </li>
 
-            <li class="step" id="install" data-reveal>
+            <li class="step" id="install">
               <span class="step__num mono">02</span>
               <div class="step__body">
                 <h2>Install</h2>
@@ -155,7 +149,7 @@
               </div>
             </li>
 
-            <li class="step" id="first-launch" data-reveal>
+            <li class="step" id="first-launch">
               <span class="step__num mono">03</span>
               <div class="step__body">
                 <h2>First launch</h2>
@@ -172,7 +166,7 @@
               </div>
             </li>
 
-            <li class="step" id="sound-check" data-reveal>
+            <li class="step" id="sound-check">
               <span class="step__num mono">04</span>
               <div class="step__body">
                 <h2>Sound check</h2>
@@ -191,10 +185,10 @@
               </div>
             </li>
 
-            <li class="step" id="together" data-reveal>
+            <li class="step" id="together">
               <span class="step__num mono">05</span>
               <div class="step__body">
-                <h2>Play together <span class="badge badge--plain">Optional</span></h2>
+                <h2>Play together <span class="aside">optional</span></h2>
                 <ol class="numbered">
                   <li>Both of you click <span class="ui">Invite</span> at the top right of the window.</li>
                   <li>The host clicks <span class="ui">Create session</span> and sends the room code.</li>
@@ -208,7 +202,7 @@
               </div>
             </li>
 
-            <li class="step" id="try" data-reveal>
+            <li class="step" id="try">
               <span class="step__num mono">06</span>
               <div class="step__body">
                 <h2>Things to try</h2>
@@ -231,7 +225,7 @@
               </div>
             </li>
 
-            <li class="step" id="quirks" data-reveal>
+            <li class="step" id="quirks">
               <span class="step__num mono">07</span>
               <div class="step__body">
                 <h2>Good to know</h2>
@@ -245,7 +239,7 @@
               </div>
             </li>
 
-            <li class="step" id="feedback" data-reveal>
+            <li class="step" id="feedback">
               <span class="step__num mono">08</span>
               <div class="step__body">
                 <h2>Tell me what happened</h2>
@@ -272,8 +266,8 @@
 
     <footer class="site-footer">
       <div class="container site-footer__inner">
-        <span>Mosh &middot; a native macOS music studio</span>
-        <span>&copy; <span data-year>2026</span> &middot; Pre-release software. Save often. &middot; <a href="/">About Mosh</a></span>
+        <span>Mosh, a native macOS music studio. &copy; <span data-year>2026</span></span>
+        <span>Pre-release software. Save often. <a href="/">About Mosh</a></span>
       </div>
     </footer>
 

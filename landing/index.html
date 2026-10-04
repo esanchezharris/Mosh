@@ -22,17 +22,17 @@
       })();
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mosh — make it, Mosh it</title>
+    <title>Mosh: make it, Mosh it</title>
     <meta
       name="description"
-      content="Mosh is a native music studio for the Mac. Drop in a beat, record a vocal, tune and mix it with built-in plugins, and ask Moshi for the next move. Now in playtest."
+      content="Mosh is a native music studio for the Mac. Drop in a beat, record a vocal, tune and mix it with built-in plugins, and ask Moshi for the next change. Now in playtest."
     />
     <meta name="theme-color" content="#0b0c0c" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#faf0e8" media="(prefers-color-scheme: light)" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Mosh" />
-    <meta property="og:title" content="Mosh — make it, Mosh it" />
+    <meta property="og:title" content="Mosh: make it, Mosh it" />
     <meta
       property="og:description"
       content="A native music studio for the Mac with a creature in the corner. Beats, vocals, built-in plugins, two-player sessions. Now in playtest."
@@ -40,7 +40,8 @@
     <meta property="og:image" content="/img/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
 
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/icon-64.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -48,7 +49,7 @@
     <header class="site-nav">
       <div class="container site-nav__inner">
         <a class="brand" href="/" aria-label="Mosh home">
-          <span class="brand__mark" aria-hidden="true"><canvas class="splat" data-splat data-pad="0.16"></canvas></span>
+          <img class="app-icon" src="/icon-128.png" width="128" height="128" alt="" />
           Mosh
         </a>
         <nav class="nav-actions" aria-label="Primary">
@@ -70,16 +71,10 @@
     </header>
 
     <main id="main">
-      <!-- ============ INTRO ============ -->
       <section class="hero" id="top">
         <div class="container">
           <div class="hero__grid">
             <div class="hero__copy">
-              <div class="hero__readout">
-                <span class="chip"><i class="rec-dot" aria-hidden="true"></i>Playtest build</span>
-                <span class="chip">macOS 11+</span>
-                <span class="chip">Apple Silicon</span>
-              </div>
               <h1 class="hero__title">
                 <span class="hero__line">Make it.</span>
                 <span class="hero__line"><span class="clip-word">Mosh it.</span></span>
@@ -95,22 +90,16 @@
                 </a>
                 <a class="btn btn--ghost btn--lg" href="#inside">See what&rsquo;s inside</a>
               </div>
+              <p class="fine hero__fine">For Apple Silicon Macs on macOS 11 or later.</p>
             </div>
 
-            <div class="hero__mascot">
-              <button class="splat-tile hero__tile" type="button" data-splat-poke aria-label="Poke Moshi">
-                <canvas class="splat" data-splat data-splat-name="hero" data-pad="0.2"></canvas>
-              </button>
-              <p class="hero__poke label" aria-hidden="true">&#8593; poke Moshi</p>
-            </div>
+            <button class="splat-tile hero__tile" type="button" data-splat-poke aria-label="Poke Moshi" title="Poke Moshi">
+              <canvas class="splat" data-splat data-splat-name="hero" data-pad="0.2"></canvas>
+            </button>
           </div>
 
           <figure class="hero__stage">
-            <div class="window">
-              <div class="window__bar" aria-hidden="true">
-                <i></i><i></i><i></i>
-                <span class="window__title">greg.mosh</span>
-              </div>
+            <div class="shot">
               <img
                 data-shot
                 src="/img/mosh-shell-lime.webp"
@@ -122,8 +111,8 @@
               />
             </div>
             <figcaption class="hero__under">
-              <div class="colorways" role="group" aria-label="Colorway">
-                <span class="label">Colorway</span>
+              <div class="colorways" role="group" aria-labelledby="colorway-label">
+                <span class="colorways__label" id="colorway-label">Colorway</span>
                 <div class="colorways__list">
                   <button class="swatch" type="button" data-colorway-set="lime" style="--sw: #c6f542" aria-pressed="true"><span>Lime</span></button>
                   <button class="swatch" type="button" data-colorway-set="bone" style="--sw: #e8e2d6" aria-pressed="false"><span>Bone</span></button>
@@ -131,118 +120,98 @@
                   <button class="swatch" type="button" data-colorway-set="coral" style="--sw: #ff8b7a" aria-pressed="false"><span>Coral</span></button>
                 </div>
               </div>
-              <p class="hero__caption">The real app, on a real song. Pick a colorway and the whole studio follows.</p>
+              <p class="fine">The app on a real session. The colorway is a setting in Mosh; try all four here.</p>
             </figcaption>
           </figure>
         </div>
       </section>
 
-      <!-- ============ VERSE: what's inside ============ -->
       <section class="section" id="inside" aria-labelledby="inside-heading">
         <div class="container">
-          <div class="marker" style="--mk: var(--sec-verse)" aria-hidden="true">
-            <span class="marker__name">Verse</span>
-            <span>What&rsquo;s inside</span>
-            <span class="marker__bars">bars 1&ndash;16</span>
-          </div>
-          <div class="section__head" data-reveal>
-            <h2 id="inside-heading">Everything a song needs. Nothing to set up.</h2>
+          <div class="section__head">
+            <h2 id="inside-heading">Open it and start a song.</h2>
             <p class="lede">
-              Mosh is a native Mac app, not a browser tab. The drum kit, the synth, the tuner and the
-              mix tools are already inside when you open it.
+              Mosh is a native Mac app. The drum kit, the synth, the tuner and the mix tools are
+              already inside when you open it.
             </p>
           </div>
 
           <div class="lanes">
-
-            <article class="lane" data-reveal>
+            <article class="lane">
               <div class="lane__head">
-                <span class="lane__num">01</span>
                 <h3>Start with a beat</h3>
                 <p>
                   One button drops a drum beat onto the built-in kit. Add a MIDI track, pick a synth
                   preset, and write the 808 underneath it.
                 </p>
-                <span class="tag">+ Drum beat</span>
               </div>
               <div class="lane__body">
-                <figure class="clip" style="--w: 100%">
+                <figure class="crop crop--wide" style="--cx: 415; --cy: 423; --cw: 1268; --ch: 292">
                   <figcaption class="visually-hidden">Drum and 808 patterns in the arrangement</figcaption>
-                  <div class="crop" style="--cx: 443; --cy: 423; --cw: 1180; --ch: 292">
-                    <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
-                  </div>
+                  <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
                 </figure>
               </div>
             </article>
 
-            <article class="lane" data-reveal>
+            <article class="lane">
               <div class="lane__head">
-                <span class="lane__num">02</span>
                 <h3>Record the vocal</h3>
                 <p>
                   Arm a track, set a count-in, and sing. Takes land on the timeline as clips you can
                   cut, double and stack into a hook.
                 </p>
-                <span class="tag">Count-in &middot; 1 bar</span>
               </div>
               <div class="lane__body">
-                <figure class="clip" style="--w: 100%">
+                <figure class="crop crop--wide" style="--cx: 1090; --cx-m: 1400; --cy: 729; --cw: 1296; --ch: 448">
                   <figcaption class="visually-hidden">Lead, double and background vocal takes on the timeline</figcaption>
-                  <div class="crop" style="--cx: 1150; --cy: 729; --cw: 1236; --ch: 448">
-                    <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
-                  </div>
+                  <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
                 </figure>
               </div>
             </article>
 
-            <article class="lane" data-reveal>
+            <article class="lane">
               <div class="lane__head">
-                <span class="lane__num">03</span>
                 <h3>Tune it and mix it</h3>
                 <p>
                   Mosh AutoTune, a compressor and a four-band EQ ship with the app. Your own VST3 and
                   AU plugins load beside them and open in their own windows.
                 </p>
-                <span class="tag">+ Add plugin</span>
               </div>
-              <div class="lane__body lane__body--split">
-                <figure class="clip" style="--w: 46%">
-                  <figcaption class="visually-hidden">Mosh AutoTune and Compressor on the lead vocal</figcaption>
-                  <div class="crop" style="--cx: 2408; --cy: 783; --cw: 596; --ch: 505">
-                    <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
-                  </div>
+              <div class="lane__body">
+                <!-- whole inspector panels, edge to edge: the plugin chain beside levels and sends -->
+                <figure class="crop" style="--cx: 2404; --cy: 770; --cw: 600; --ch: 512">
+                  <figcaption class="visually-hidden">Mosh AutoTune and the compressor on the lead vocal</figcaption>
+                  <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
                 </figure>
-                <figure class="clip" style="--w: 46%">
-                  <figcaption class="visually-hidden">Levels and sends for the lead vocal</figcaption>
-                  <div class="crop" style="--cx: 2408; --cy: 163; --cw: 596; --ch: 505">
+                <div class="lane__stack">
+                  <figure class="crop" style="--cx: 2404; --cy: 112; --cw: 600; --ch: 240">
+                    <figcaption class="visually-hidden">Volume, pan and routing for the lead vocal</figcaption>
                     <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
-                  </div>
-                </figure>
+                  </figure>
+                  <figure class="crop" style="--cx: 2404; --cy: 524; --cw: 600; --ch: 186">
+                    <figcaption class="visually-hidden">Reverb and delay sends for the lead vocal</figcaption>
+                    <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
+                  </figure>
+                </div>
               </div>
             </article>
 
-            <article class="lane" data-reveal>
+            <article class="lane">
               <div class="lane__head">
-                <span class="lane__num">04</span>
                 <h3>Re-Imagine a take</h3>
                 <p>
                   Select a clip, describe where it should go, and Mosh renders a new version of that
                   take on your own Mac. Audition it, then keep it or throw it away.
                 </p>
-                <span class="tag">Runs locally</span>
               </div>
-              <div class="lane__body lane__body--stack">
-                <figure class="clip" style="--w: 100%">
+              <div class="lane__body">
+                <figure class="crop" style="--cx: 1491; --cy: 733; --cw: 640; --ch: 134">
                   <figcaption class="visually-hidden">The selected hook clip on the lead vocal track</figcaption>
-                  <div class="crop" style="--cx: 1497; --cy: 735; --cw: 889; --ch: 130">
-                    <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
-                  </div>
+                  <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
                 </figure>
-                <figure class="clip" style="--w: 62%">
+                <figure class="crop" style="--cx: 2404; --cy: 356; --cw: 600; --ch: 156">
                   <figcaption class="visually-hidden">The Open Re-Imagine button in the track inspector</figcaption>
-                  <div class="crop" style="--cx: 2408; --cy: 366; --cw: 596; --ch: 128">
-                    <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
-                  </div>
+                  <img data-shot src="/img/mosh-shell-lime.webp" alt="" loading="lazy" decoding="async" />
                 </figure>
               </div>
             </article>
@@ -250,26 +219,19 @@
         </div>
       </section>
 
-      <!-- ============ HOOK: Moshi ============ -->
       <section class="section" id="moshi" aria-labelledby="moshi-heading">
         <div class="container">
-          <div class="marker" style="--mk: var(--sec-hook)" aria-hidden="true">
-            <span class="marker__name">Hook</span>
-            <span>Moshi</span>
-            <span class="marker__bars">bars 17&ndash;24</span>
-          </div>
-
           <div class="moshi">
-            <div class="moshi__copy" data-reveal>
-              <h2 id="moshi-heading">Say it. Moshi does it.</h2>
+            <div class="moshi__copy">
+              <h2 id="moshi-heading">Ask Moshi in plain words.</h2>
               <p class="lede">
-                Type what you want in plain words. Moshi makes the change with the same commands your
-                own clicks use, so it shows up in History and one undo takes it back.
+                Moshi makes the change with the same commands your own clicks use, so it shows up in
+                History and one undo takes it back.
               </p>
             </div>
 
-            <div class="dock" data-moshi-demo data-reveal>
-              <p class="dock__say" role="status" aria-live="polite" data-moshi-say>&nbsp;</p>
+            <div class="dock" data-moshi-demo>
+              <p class="dock__say" role="status" aria-live="polite" data-moshi-say>Lead &rarr; Reverb send &minus;12 &rarr; &minus;9 dB (+3 dB by default)</p>
               <div class="dock__row">
                 <span class="dock__face" aria-hidden="true"><canvas class="splat" data-splat data-splat-name="dock" data-flat="false" data-pad="0.2"></canvas></span>
                 <span class="dock__field" data-moshi-field data-placeholder="Ask Moshi"></span>
@@ -278,100 +240,81 @@
                 </span>
               </div>
               <div class="dock__asks">
-                <span class="label">Try</span>
-                <button class="ask" type="button" data-ask="more reverb on lead" data-reply="Lead &rarr; Reverb send &minus;12 &rarr; &minus;9 dB (+3 dB by default)">more reverb on lead</button>
-                <button class="ask" type="button" data-ask="mute the ref" data-reply="Muted a track">mute the ref</button>
+                <span class="dock__try">Try</span>
+                <button class="ask" type="button" aria-pressed="true" data-ask="more reverb on lead" data-reply="Lead &rarr; Reverb send &minus;12 &rarr; &minus;9 dB (+3 dB by default)">more reverb on lead</button>
+                <button class="ask" type="button" aria-pressed="false" data-ask="mute the ref" data-reply="Muted a track">mute the ref</button>
               </div>
               <p class="dock__note">A replay of real replies from the session above. The live Moshi is in the app.</p>
             </div>
           </div>
 
-          <ul class="moods" data-reveal>
-            <li class="mood">
-              <span class="mood__face" aria-hidden="true"><canvas class="splat" data-splat data-state="idle" data-seed="3" data-pad="0.2"></canvas></span>
-              <span class="mood__name">Idle</span>
-              <span class="mood__desc">Hanging out until you ask.</span>
-            </li>
-            <li class="mood">
-              <span class="mood__face" aria-hidden="true"><canvas class="splat" data-splat data-state="wide" data-seed="19" data-pad="0.2"></canvas></span>
-              <span class="mood__name">Listening</span>
-              <span class="mood__desc">Eyes wide while the mic is live.</span>
-            </li>
-            <li class="mood">
-              <span class="mood__face" aria-hidden="true"><canvas class="splat" data-splat data-state="laugh" data-seed="11" data-pad="0.2"></canvas></span>
-              <span class="mood__name">Pleased</span>
-              <span class="mood__desc">A laugh when your change lands.</span>
-            </li>
-            <li class="mood">
-              <span class="mood__face" aria-hidden="true"><canvas class="splat" data-splat data-state="sleep" data-seed="27" data-pad="0.2"></canvas></span>
-              <span class="mood__name">Asleep</span>
-              <span class="mood__desc">Curls into a ball while you record, so nothing distracts the take.</span>
-            </li>
-          </ul>
+          <div class="moods" data-moods>
+            <span class="splat-tile moods__tile" aria-hidden="true">
+              <canvas class="splat" data-splat data-splat-name="moods" data-seed="3" data-pad="0.2"></canvas>
+            </span>
+            <!-- Phrases are spans, not <button>s: a button is an atomic inline box, so a long
+                 phrase could not wrap and its comma would drop to the next line. -->
+            <p class="moods__text">
+              Moshi
+              <span class="mood" role="button" tabindex="0" data-mood="idle" aria-pressed="true">hangs around until you ask</span>,
+              <span class="mood" role="button" tabindex="0" data-mood="wide" aria-pressed="false">goes wide-eyed while the mic is live</span>,
+              <span class="mood" role="button" tabindex="0" data-mood="laugh" aria-pressed="false">laughs when a change lands</span>,
+              and
+              <span class="mood" role="button" tabindex="0" data-mood="sleep" aria-pressed="false">curls into a ball while you record</span>
+              so nothing distracts the take.
+            </p>
+          </div>
         </div>
       </section>
 
-      <!-- ============ BRIDGE: together ============ -->
       <section class="section" id="together" aria-labelledby="together-heading">
         <div class="container">
-          <div class="marker" style="--mk: var(--sec-bridge)" aria-hidden="true">
-            <span class="marker__name">Bridge</span>
-            <span>Two-player</span>
-            <span class="marker__bars">bars 25&ndash;32</span>
-          </div>
-          <div class="section__head" data-reveal>
-            <h2 id="together-heading">Two Macs. One song.</h2>
+          <div class="section__head">
+            <h2 id="together-heading">Make a song with a friend.</h2>
             <p class="lede">
               Start a session, send a room code, and you are both inside the same project, each on
-              your own machine.
+              your own Mac.
             </p>
           </div>
 
           <div class="duo">
-            <article class="card card--players" data-reveal>
-              <div class="players" aria-hidden="true">
-                <div class="player">
-                  <span class="splat-tile player__tile"><canvas class="splat" data-splat data-seed="5" data-pad="0.2"></canvas></span>
-                  <span class="chip"><i class="online-dot"></i>you</span>
-                </div>
-                <span class="players__code mono">room code</span>
-                <div class="player">
-                  <span class="splat-tile player__tile player__tile--alt"><canvas class="splat" data-splat data-body="ink" data-seed="41" data-pad="0.2"></canvas></span>
-                  <span class="chip"><i class="online-dot"></i>friend</span>
-                </div>
+            <div class="players" aria-hidden="true">
+              <div class="player">
+                <span class="splat-tile player__tile"><canvas class="splat" data-splat data-seed="5" data-pad="0.2"></canvas></span>
+                <span class="player__name"><i class="online-dot"></i>you</span>
               </div>
-              <h3>Invite a friend</h3>
-              <p>
-                Each of you takes a track, and a small lock shows who is editing what. The song syncs
-                between you. Your voices don&rsquo;t, so keep a call open on the side.
-              </p>
-            </article>
+              <span class="players__code">room code</span>
+              <div class="player">
+                <span class="splat-tile player__tile player__tile--alt"><canvas class="splat" data-splat data-body="ink" data-seed="41" data-pad="0.2"></canvas></span>
+                <span class="player__name"><i class="online-dot"></i>friend</span>
+              </div>
+            </div>
 
-            <article class="card card--phone" data-reveal>
-              <div class="phone" aria-hidden="true">
-                <div class="phone__body">
-                  <span class="phone__pad"></span><span class="phone__pad"></span><span class="phone__pad phone__pad--on"></span>
-                  <span class="phone__pad"></span><span class="phone__pad phone__pad--on"></span><span class="phone__pad"></span>
-                  <span class="phone__pad"></span><span class="phone__pad"></span><span class="phone__pad"></span>
-                </div>
+            <div class="duo__text">
+              <div>
+                <h3>One track each</h3>
+                <p>
+                  Each of you takes a track, and a small lock shows who is editing what. The song syncs
+                  between you. Your voices don&rsquo;t, so keep a call open on the side.
+                </p>
               </div>
-              <h3>Your phone is a pad <span class="badge">Early</span></h3>
-              <p>
-                Scan a code with the iPhone camera and a controller for the session opens in Safari.
-                There is no app to install.
-              </p>
-            </article>
+              <div>
+                <h3>Your phone as a pad</h3>
+                <p>
+                  Still early. Scan a code with the iPhone camera and a controller for the session
+                  opens in Safari, with no app to install.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- ============ OUTRO: playtest ============ -->
       <section class="section section--outro" id="playtest" aria-labelledby="outro-heading">
         <div class="container">
-          <div class="outro" data-reveal>
+          <div class="outro">
             <div class="outro__copy">
-              <span class="label outro__label">Outro &middot; playtest</span>
-              <h2 id="outro-heading">Come break it.</h2>
+              <h2 id="outro-heading">Hop in the pit.</h2>
               <p>
                 Mosh is in playtest with friends. The guide takes about ten minutes, and everything
                 you run into makes the next build better.
@@ -412,8 +355,8 @@
 
     <footer class="site-footer">
       <div class="container site-footer__inner">
-        <span>Mosh &middot; a native macOS music studio</span>
-        <span>&copy; <span data-year>2026</span> &middot; Built on JUCE, Tracktion Engine and Stable Audio &middot; <a href="/playtest/">Playtest guide</a></span>
+        <span>Mosh, a native macOS music studio. &copy; <span data-year>2026</span></span>
+        <span>Built on JUCE, Tracktion Engine and Stable Audio. <a href="/playtest/">Playtest guide</a></span>
       </div>
     </footer>
 

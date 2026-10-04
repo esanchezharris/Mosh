@@ -155,9 +155,14 @@ public domain works well on the same account) and point `PUBLIC_DOWNLOAD_URL` at
   captures of the V3 shell on the showcase session, produced by
   `ui/e2e/portfolio-shot.spec.ts` (`MOSH_PORTFOLIO_SHOT=1
   MOSH_PORTFOLIO_COLORWAYS=lime,bone,violet,coral`), then `cwebp -q 92`. Every feature crop
-  on the home page is a window onto that same frame (`.crop` in `components.css`, rectangles
-  in source pixels), so if the shell's layout moves, re-check the `--cx/--cy/--cw/--ch`
-  values in `index.html`.
+  on the home page is a window onto that same frame (`.crop` in `components.css`): rectangles
+  in source pixels, all shown at one fixed zoom so the app's type is the same size in each.
+  If the shell's layout moves, re-check the `--cx/--cy/--cw/--ch` values in `index.html`
+  against the new capture: cut on panel and lane edges, and keep the playhead away from a
+  crop's edge.
+- **Icons** (`public/icon-64.png`, `icon-128.png`, `icon-256.png`, `apple-touch-icon.png`)
+  are the Mac app icon, `resources/icon/MoshIcon.png`, cropped to its squircle
+  (`sips -c 824 824`, then `sips -Z <size>`). Regenerate them if the app icon changes.
 - **The splat** (`src/vendor/agent-sprites/engine.js`) is a copy of the app's
   `ui/src/vendor/agent-sprites/engine.js`. Copy it again when the app's changes.
 - **Playtest copy** (`playtest/index.html`) names real controls (`+ Drum beat`, `Invite`,

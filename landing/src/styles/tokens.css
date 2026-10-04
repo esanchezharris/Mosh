@@ -20,7 +20,7 @@
   --top: #121414;
   --text: #f2eee6;
   --muted: #9a9e99;
-  --faint: #6e7270;
+  --faint: #8a8e89;
   --line: #3a4040;
   --fog-line: #2a2e2e;
   --grid-bar: color-mix(in srgb, var(--text) 11%, transparent);
@@ -43,19 +43,12 @@
   --shot-text: #f2eee6;
   --shot-muted: #8e928e;
 
-  /* arrangement section-strip hues, as the shell draws them */
-  --sec-intro: #8e928e;
-  --sec-verse: #8fb8d8;
-  --sec-hook: #e8a0b0;
-  --sec-bridge: #8fe0c0;
-  --sec-outro: #e8c15a;
-
   /* ---- type ---- */
   --font-sans: 'Archivo Variable', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --fs-hero: clamp(3.1rem, 1.2rem + 8.6vw, 9rem);
-  --fs-h2: clamp(2rem, 1.3rem + 3vw, 4rem);
+  --fs-hero: clamp(3.1rem, 1.2rem + 7vw, 6rem);
+  --fs-h2: clamp(2rem, 1.3rem + 3vw, 3.75rem);
   --fs-h3: clamp(1.35rem, 1.15rem + 0.8vw, 1.9rem);
   --fs-lede: clamp(1.1rem, 1rem + 0.45vw, 1.4rem);
   --fs-body: 1.0625rem;
@@ -77,11 +70,11 @@
   --container: 1280px;
   --gutter: clamp(1rem, 0.6rem + 2.4vw, 3rem);
 
-  /* ---- shape: the shell's 8px controls, rounder for the big marketing blocks ---- */
+  /* ---- shape: the shell's 8px controls; surfaces stay at 12-16px ---- */
   --r-sm: 8px;
-  --r-md: 14px;
-  --r-lg: 22px;
-  --r-xl: 34px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
   --r-pill: 999px;
 
   /* ---- motion: the shell's own curves ---- */
@@ -103,7 +96,7 @@
     --top: #f5eae0;
     --text: #151716;
     --muted: #5b5750;
-    --faint: #8a847b;
+    --faint: #6e6960;
     --line: rgba(21, 23, 22, 0.24);
     --fog-line: rgba(21, 23, 22, 0.12);
     --accent-text: #46600a;
@@ -117,7 +110,7 @@
   --top: #f5eae0;
   --text: #151716;
   --muted: #5b5750;
-  --faint: #8a847b;
+  --faint: #6e6960;
   --line: rgba(21, 23, 22, 0.24);
   --fog-line: rgba(21, 23, 22, 0.12);
   --accent-text: #46600a;

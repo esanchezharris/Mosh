@@ -1,83 +1,19 @@
-/* Motion. One orchestrated entrance for the hero, a quiet rise for everything
-   below, and nothing at all for visitors who asked for less. */
+/* Motion. One authored moment: Moshi lands in the hero. Everything else is visible
+   from the first paint, and the page's remaining motion is the creature itself and
+   direct feedback on controls. */
 
-@keyframes rise {
+@keyframes land {
   from {
-    opacity: 0;
-    transform: translateY(0.4em);
+    transform: rotate(-24deg) scale(0.72);
   }
   to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: rotate(-22deg) scale(0.6);
-  }
-  to {
-    opacity: 1;
     transform: rotate(-6deg) scale(1);
   }
 }
-@keyframes caret {
-  50% {
-    opacity: 0;
-  }
-}
 
-.hero__readout,
-.hero__line,
-.hero__lede,
-.hero__cta,
-.hero__stage,
-.guide-hero > * {
-  animation: rise var(--dur-slow) var(--ease-out) both;
-}
-.hero__readout {
-  animation-delay: 40ms;
-}
-.hero__line:nth-child(1) {
-  animation-delay: 100ms;
-}
-.hero__line:nth-child(2) {
-  animation-delay: 190ms;
-}
-.hero__lede {
-  animation-delay: 300ms;
-}
-.hero__cta {
-  animation-delay: 380ms;
-}
-.hero__stage {
-  animation-delay: 460ms;
-  animation-duration: 900ms;
-}
 .hero__tile {
   /* backwards, not both: once it lands, the tile's own hover transform takes over */
-  animation: pop 800ms var(--ease-out) 240ms backwards;
-}
-.guide-hero > *:nth-child(2) {
-  animation-delay: 90ms;
-}
-.guide-hero > *:nth-child(3) {
-  animation-delay: 180ms;
-}
-
-/* Scroll reveal. The hidden state only applies once reveal.ts has stamped
-   .js-reveal on <html>, so the page is fully visible without JavaScript. */
-.js-reveal [data-reveal] {
-  opacity: 0;
-  transform: translateY(18px);
-  transition:
-    opacity var(--dur-slow) var(--ease-out),
-    transform var(--dur-slow) var(--ease-out);
-  transition-delay: calc(var(--reveal-i, 0) * 70ms);
-}
-.js-reveal [data-reveal].is-visible {
-  opacity: 1;
-  transform: none;
+  animation: land 900ms var(--ease-out) 120ms backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

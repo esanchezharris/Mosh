@@ -1,12 +1,6 @@
 /* Playtest guide. A reading page: one column of steps, a sticky list of them on
    wide screens, and the download card at the top. */
 
-.rec-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: var(--record);
-}
 .clip-word {
   display: inline-block;
   padding: 0.02em 0.14em 0.07em;
@@ -18,7 +12,7 @@
 
 /* ---------- top: title + download ---------- */
 .guide-top {
-  padding-block: clamp(2rem, 1rem + 4vw, 4.5rem) var(--s7);
+  padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem) var(--s7);
   border-bottom: 1px solid var(--fog-line);
 }
 .guide-top__grid {
@@ -32,8 +26,8 @@
   align-content: start;
 }
 .guide-hero__title {
-  font-size: clamp(3.4rem, 1.6rem + 8vw, 8rem);
-  line-height: 0.92;
+  font-size: var(--fs-hero);
+  line-height: 0.94;
   letter-spacing: -0.035em;
 }
 @media (min-width: 900px) {
@@ -57,15 +51,9 @@
   align-items: center;
   gap: var(--s4);
 }
-.download__tile {
-  flex: none;
-  width: 4.75rem;
-  border-radius: var(--r-lg);
-  transform: rotate(-6deg);
-  transition: transform var(--dur) var(--ease-out);
-}
-.download__tile:hover {
-  transform: rotate(-2deg) scale(1.04);
+.download__icon {
+  width: 4.5rem;
+  height: 4.5rem;
 }
 .download__title {
   font-size: 1.6rem;
@@ -74,8 +62,7 @@
 .download__build {
   margin-top: 0.3rem;
   color: var(--faint);
-  font-size: var(--fs-label);
-  letter-spacing: 0.06em;
+  font-size: var(--fs-small);
 }
 .download__btn {
   width: 100%;
@@ -89,11 +76,6 @@
 }
 .download__fallback strong {
   color: var(--text);
-}
-.download__reqs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
 }
 
 /* ---------- body: toc + steps ---------- */
@@ -109,7 +91,7 @@
 }
 @media (min-width: 1000px) {
   .guide__grid {
-    grid-template-columns: 15rem minmax(0, 46rem);
+    grid-template-columns: 15rem minmax(0, 44rem);
     gap: var(--s8);
   }
   .toc {
@@ -118,6 +100,11 @@
     top: 5.5rem;
     align-self: start;
   }
+}
+.toc__label {
+  color: var(--faint);
+  font-size: var(--fs-small);
+  font-weight: 500;
 }
 .toc__list {
   display: grid;
@@ -160,7 +147,7 @@
 .step {
   display: grid;
   gap: var(--s3);
-  padding-block: var(--s6);
+  padding-block: var(--s7) var(--s6);
   border-top: 1px solid var(--fog-line);
 }
 .step:first-child {
@@ -170,17 +157,26 @@
 .step__num {
   color: var(--accent-text);
   font-size: var(--fs-small);
-  letter-spacing: 0.1em;
 }
 .step__body {
   display: grid;
   gap: var(--s4);
   min-width: 0;
+  /* a reading measure: about 68 characters of body text */
+  max-width: 36rem;
 }
 .step h2 {
   font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.5rem);
   letter-spacing: -0.02em;
   line-height: 1.02;
+}
+.aside {
+  margin-left: 0.3rem;
+  color: var(--faint);
+  font-size: var(--fs-body);
+  font-stretch: 100%;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 .step__intro {
   color: var(--muted);
@@ -229,7 +225,7 @@
   color: var(--accent-text);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* a control's name, drawn the way the shell draws a toolbar button */
@@ -246,8 +242,8 @@
 
 .note {
   padding: var(--s4);
-  border-left: 3px solid var(--accent);
-  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-md);
   background: var(--surface);
   color: var(--muted);
   font-size: var(--fs-small);
@@ -255,24 +251,11 @@
 .note strong {
   color: var(--text);
 }
+/* the one warning on the page: joining replaces your project */
 .note--warn {
-  border-left-color: var(--warn);
-}
-
-.badge {
-  display: inline-block;
-  margin-left: 0.4rem;
-  padding: 0.2rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  font-stretch: 100%;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  vertical-align: middle;
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  color: var(--text);
 }
 
 /* ---------- checklist ---------- */
@@ -339,8 +322,7 @@
 }
 .checklist__count {
   color: var(--faint);
-  font-size: var(--fs-label);
-  letter-spacing: 0.06em;
+  font-size: var(--fs-small);
 }
 
 .feedback {

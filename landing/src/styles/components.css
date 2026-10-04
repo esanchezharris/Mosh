@@ -1,15 +1,14 @@
-/* Shared pieces used by both pages: nav, buttons, labels, the app-window frame,
-   screenshot crops, the splat tile, the section marker, the footer. */
+/* Shared pieces used by both pages: nav, buttons, small type, the screenshot frame
+   and its crops, the splat tile, the colorway picker, the waitlist form, the footer. */
 
-/* ---------- nav: the shell's top bar ---------- */
+/* ---------- nav ---------- */
 .site-nav {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  backdrop-filter: blur(14px) saturate(1.2);
+  background: var(--bg);
   border-bottom: 1px solid var(--fog-line);
+  transition: background-color var(--dur) var(--ease-out);
 }
 .site-nav__inner {
   display: flex;
@@ -21,19 +20,21 @@
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
   text-decoration: none;
   font-stretch: 125%;
   font-weight: 800;
   font-size: 1.3rem;
   letter-spacing: -0.03em;
 }
-.brand__mark {
+/* The Mac app icon. Its body is near-black, so on the dark theme a hairline keeps the
+   squircle's edge; the radius follows the icon's own corner. */
+.app-icon {
+  flex: none;
   width: 2.1rem;
   height: 2.1rem;
-  border-radius: 10px;
-  background: var(--tile);
-  flex: none;
+  border-radius: 23%;
+  box-shadow: 0 0 0 1px var(--fog-line);
 }
 .nav-actions {
   display: flex;
@@ -109,8 +110,7 @@
   transition:
     transform var(--dur-fast) var(--ease-out),
     background-color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur) var(--ease-out);
+    border-color var(--dur-fast) var(--ease-out);
 }
 .btn:active {
   transform: scale(0.97);
@@ -120,7 +120,7 @@
   color: var(--accent-ink);
 }
 .btn--primary:hover {
-  box-shadow: 0 0 0 5px var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 84%, var(--text));
 }
 .btn--ghost {
   border-color: var(--line);
@@ -135,7 +135,7 @@
   color: var(--accent);
 }
 .btn--ink:hover {
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-ink) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-ink) 86%, var(--accent));
 }
 .btn--sm {
   min-height: 2.5rem;
@@ -144,13 +144,9 @@
   font-size: var(--fs-small);
 }
 .btn--lg {
-  min-height: 3.6rem;
-  padding: 0.9rem 1.7rem;
+  min-height: 3.5rem;
+  padding: 0.9rem 1.6rem;
   font-size: 1.1rem;
-}
-.btn[aria-disabled='true'] {
-  opacity: 0.55;
-  pointer-events: none;
 }
 .btn svg {
   width: 1.1em;
@@ -159,124 +155,69 @@
 }
 
 /* ---------- small type ---------- */
-.label {
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-.label--accent {
-  color: var(--accent-text);
-}
 .lede {
   max-width: 34rem;
   color: var(--muted);
   font-size: var(--fs-lede);
   line-height: 1.45;
 }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.7rem;
-  border: 1px solid var(--fog-line);
-  border-radius: var(--r-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-/* ---------- section marker: the arrangement's section strip ---------- */
-.marker {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s4);
-  padding: 0.5rem 0.75rem 0.45rem;
-  border-top: 3px solid var(--mk, var(--sec-verse));
-  border-radius: 0 0 var(--r-sm) var(--r-sm);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--mk, var(--sec-verse)) 16%, transparent),
-    transparent
-  );
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.marker__name {
-  color: var(--text);
-  font-weight: 600;
-}
-.marker__bars {
-  margin-left: auto;
+.fine {
   color: var(--faint);
-  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-small);
 }
 
-/* ---------- the app window ---------- */
-.window {
-  position: relative;
+/* ---------- the app screenshot ---------- */
+.shot {
   border: 1px solid var(--shot-line);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: var(--shot-bg);
   overflow: hidden;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.05) inset,
-    0 40px 80px -30px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(0, 0, 0, 0.3);
 }
-.window__bar {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  height: 2.1rem;
-  padding-inline: 0.9rem;
-  background: var(--shot-chrome);
-  border-bottom: 1px solid var(--shot-line);
-}
-.window__bar i {
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
-  background: #3a4040;
-}
-.window__title {
-  margin-inline: auto;
-  padding-right: 2.6rem;
-  color: var(--shot-muted);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-}
-.window img {
+.shot img {
   width: 100%;
   height: auto;
 }
 
 /* ---------- crops: one screenshot, many windows onto it ----------
    The source frame is 3024x1634. A crop declares its rectangle in SOURCE pixels and
-   the image is scaled/offset to show exactly that region, so every crop follows the
-   colorway (they all share the one <img src>) and stays pixel-true to the app. */
+   shows it at ONE fixed zoom (--k), so the app's type and controls are the same size
+   in every crop on the page. Nothing is scaled to fit: a `--wide` crop is a window that
+   starts at --cx and shows as much of the timeline as its container has room for, up
+   to --cw. All crops share one <img src>, so they follow the colorway together. */
 .crop {
+  --k: 0.62;
   position: relative;
-  aspect-ratio: var(--cw) / var(--ch);
+  flex: none;
+  width: calc(var(--cw) * var(--k) * 1px);
+  max-width: 100%;
+  height: calc(var(--ch) * var(--k) * 1px);
   overflow: hidden;
-  border-radius: var(--r-md);
+  border: 1px solid var(--shot-line);
+  border-radius: var(--r-sm);
   background: var(--shot-bg);
+}
+.crop--wide {
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: calc(var(--cw) * var(--k) * 1px);
 }
 .crop img {
   position: absolute;
   max-width: none;
-  width: calc(3024 / var(--cw) * 100%);
+  width: calc(3024px * var(--k));
   height: auto;
-  left: calc(var(--cx) / var(--cw) * -100%);
-  top: calc(var(--cy) / var(--ch) * -100%);
+  left: calc(var(--cx) * var(--k) * -1px);
+  top: calc(var(--cy) * var(--k) * -1px);
+}
+@media (max-width: 560px) {
+  /* on a phone, half scale is the app at its true size (the capture is 2x); a crop may
+     name a different starting point (--cx-m) for the narrower window */
+  .crop {
+    --k: 0.5;
+  }
+  .crop img {
+    left: calc(var(--cx-m, var(--cx)) * var(--k) * -1px);
+  }
 }
 
 /* ---------- the splat ---------- */
@@ -307,6 +248,11 @@ button.splat-tile {
   align-items: center;
   gap: var(--s2) var(--s3);
 }
+.colorways__label {
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
 .colorways__list {
   display: flex;
   gap: var(--s2);
@@ -321,10 +267,8 @@ button.splat-tile {
   border-radius: var(--r-pill);
   background: transparent;
   color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--fs-small);
+  font-weight: 500;
   cursor: pointer;
   transition:
     border-color var(--dur-fast) var(--ease-out),
@@ -382,14 +326,16 @@ button.splat-tile {
   font: inherit;
 }
 .field__input::placeholder {
-  color: var(--faint);
+  color: var(--muted);
 }
 .field__input:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+.waitlist-form__status:empty {
+  display: none;
+}
 .waitlist-form__status {
-  min-height: 1.5em;
   margin-top: var(--s3);
   font-size: var(--fs-small);
   color: var(--muted);
@@ -406,9 +352,7 @@ button.splat-tile {
   border-top: 1px solid var(--fog-line);
   padding-block: var(--s6);
   color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: var(--fs-label);
-  letter-spacing: 0.04em;
+  font-size: var(--fs-small);
 }
 .site-footer__inner {
   display: flex;

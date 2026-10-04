@@ -9,6 +9,10 @@ html {
   text-size-adjust: 100%;
   scroll-behavior: smooth;
   scroll-padding-top: 5.5rem;
+  /* the parts the browser draws: scrollbars, form accents, the caret */
+  scrollbar-color: var(--line) var(--bg);
+  accent-color: var(--accent);
+  caret-color: var(--accent-text);
 }
 
 body {
@@ -53,6 +57,8 @@ svg {
 
 a {
   color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
 }
 
 button {

@@ -1,6 +1,7 @@
-// The Moshi dock on the home page: a REPLAY, not an agent. Each ask types itself into
-// the field, the creature thinks, and the reply line shows what Moshi answered to that
-// same ask in the showcase session. Asks and replies live in the markup (data-ask /
+// The Moshi dock on the home page: a REPLAY, not an agent. The dock rests on a real reply
+// (it is in the markup, so it is never empty); clicking an ask types it into the field,
+// the creature thinks, and the reply line shows what Moshi answered to that same ask in
+// the showcase session. Asks and replies live in the markup (data-ask /
 // data-reply) so the copy stays reviewable in one place.
 import { getSplat } from './splat'
 
@@ -36,7 +37,6 @@ export function initMoshiDemo(): void {
       say!.textContent = reply
     } else {
       say!.dataset.pending = 'true'
-      field!.dataset.typing = 'true'
       field!.textContent = ''
       for (const ch of ask) {
         field!.textContent += ch
@@ -44,7 +44,6 @@ export function initMoshiDemo(): void {
       }
       await wait(220)
       field!.textContent = ''
-      delete field!.dataset.typing
       splat?.setState('thinking')
       await wait(THINK_MS)
       say!.textContent = reply
@@ -58,21 +57,4 @@ export function initMoshiDemo(): void {
   }
 
   for (const button of asks) button.addEventListener('click', () => void run(button))
-
-  // Play the first ask once, when the dock first scrolls into view.
-  const first = asks[0]
-  if (!first) return
-  if (!('IntersectionObserver' in window)) {
-    void run(first)
-    return
-  }
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return
-      observer.disconnect()
-      void run(first)
-    },
-    { threshold: 0.6 },
-  )
-  observer.observe(root)
 }

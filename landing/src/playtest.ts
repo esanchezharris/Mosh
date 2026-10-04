@@ -1,8 +1,6 @@
 import { initShared, onReady } from './shared'
 import './styles/playtest.css'
 
-import { getSplat } from './splat'
-
 /** A build-time URL is only used if it parses and uses an allowed scheme, so a typo'd
  *  or hostile value can never become a clickable link. */
 function safeUrl(value: string | undefined, schemes: readonly string[]): string | null {
@@ -23,7 +21,6 @@ function initDownload(): void {
     link.href = href
     link.hidden = false
     if (fallback) fallback.hidden = true
-    link.addEventListener('click', () => getSplat('download')?.flash('laugh'))
   }
 
   const label = import.meta.env.PUBLIC_BUILD_LABEL
@@ -71,7 +68,6 @@ function initChecklist(): void {
   list.addEventListener('change', () => {
     render()
     const done = boxes.filter((b) => b.checked)
-    if (done.length === boxes.length) getSplat('download')?.flash('laugh')
     try {
       localStorage.setItem(key, JSON.stringify(done.map((b) => b.dataset.check)))
     } catch {
