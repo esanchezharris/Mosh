@@ -3416,12 +3416,6 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto at = cmd (ops, "create_track", args1 ("name", "AutoTune Render"))["data"].getProperty ("trackId", var()).toString();
         check (ok (cmd (ops, "import_clip", objN ({{ "trackId", at }, { "file", fixture.getFullPathName() }}))), "AutoTune fixture imported");
 
-        const auto dry = renderStem (at, "autotune-dry");
-        check (! dry.samples.empty(), "AutoTune dry stem rendered");
-        const double dryClick = clickSeconds (dry);
-        const double dryHz = toneHz (dry);
-        check (std::abs (cents (dryHz, detunedHz)) < 3.0, "AutoTune fixture reads back at A3 + 35 cents before the plugin");
-
         auto atLoad = cmd (ops, "load_builtin", objN ({{ "trackId", at }, { "type", "moshAutoTune" }}));
         const int atIdx = (int) atLoad["data"].getProperty ("index", -1);
         check (ok (atLoad) && atIdx >= 0, "AutoTune loaded on the fixture track");
@@ -3446,11 +3440,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         const auto wet = renderStem (at, "autotune-wet");
         check (! wet.samples.empty(), "AutoTune wet stem rendered");
+
+        // The bypassed render is the reference: same track, same clip, no plugin and
+        // no latency claimed. (Each stem export renders every track, so two are enough.)
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", at }, { "index", atIdx }, { "bypassed", true }}))), "AutoTune bypassed");
+        const auto dry = renderStem (at, "autotune-bypassed");
+        check (! dry.samples.empty(), "AutoTune bypassed stem rendered");
+        const double dryHz = toneHz (dry);
+        const double dryClick = clickSeconds (dry);
+        check (std::abs (cents (dryHz, detunedHz)) < 3.0, "bypassed AutoTune leaves the pitch alone (A3 + 35 cents)");
+        check (std::abs (dryClick - 0.25) < 0.002, "bypassed AutoTune adds no delay: the click is where the fixture put it");
+
         const double wetHz = toneHz (wet);
         check (std::abs (cents (wetHz, 220.0)) < 6.0,
                "AutoTune pulls the +35 cent tone onto A3 (output " + String (wetHz, 2) + " Hz)");
         check (std::abs (clickSeconds (wet) - dryClick) < 0.0005,
-               "AutoTune's latency is reported and compensated: the click lands within 0.5 ms of the dry render");
+               "AutoTune's latency is reported and compensated: the click lands within 0.5 ms of the bypassed render");
         bool keepsHarmonics = dryHz > 0.0 && wetHz > 0.0;
         for (int h = 2; h <= 5 && keepsHarmonics; ++h)
         {
@@ -3458,12 +3463,6 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             keepsHarmonics = before > 0.0 && after > 0.0 && std::abs (20.0 * std::log10 (after / before)) < 3.0;
         }
         check (keepsHarmonics, "AutoTune output keeps harmonics 2-5 within 3 dB (it shifts the voice, it does not replace it)");
-
-        // Bypassed: untouched audio, and no latency claimed.
-        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", at }, { "index", atIdx }, { "bypassed", true }}))), "AutoTune bypassed");
-        const auto bypassed = renderStem (at, "autotune-bypassed");
-        check (std::abs (cents (toneHz (bypassed), detunedHz)) < 3.0, "bypassed AutoTune leaves the pitch alone");
-        check (std::abs (clickSeconds (bypassed) - dryClick) < 0.0005, "bypassed AutoTune adds no delay");
 
         // Leave no latency behind for the sections that follow.
         check (ok (cmd (ops, "remove_track", args1 ("trackId", at))), "AutoTune fixture track removed");

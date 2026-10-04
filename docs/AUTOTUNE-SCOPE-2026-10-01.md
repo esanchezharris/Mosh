@@ -280,6 +280,18 @@ Past about 12 ms the correction runs ahead of the audio and gets worse again, so
 stops there. Zero is for singing through it live; the top is for the mix, where delay
 compensation hides the latency.
 
+**Plugin behaviour.**
+
+- **Stereo.** The mid is retuned; the side is delayed to match and left uncorrected. A mono
+  vocal on a stereo track therefore stays exactly mono.
+- **Latency.** Tracktion reads a plugin's latency once, when it builds the playback graph,
+  and does not keep a bypassed built-in plugin delayed. So a bypassed AutoTune reports zero
+  latency, and a change of bypass or Look-ahead rebuilds the graph (debounced by 150 ms,
+  and held off while a take is recording). Look-ahead is read from the saved value, so
+  automating it has no effect.
+- **Amount** now defaults to 1.0. Sessions saved with the old default and never touched
+  will load at 1.0.
+
 ## 9. Not in v1
 
 Formant control, key detection, MIDI target notes, more scales, a reference-pitch (detune)
