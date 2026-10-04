@@ -14192,7 +14192,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // message-loop pump.
     //
     // te::insertWaveClip acts on a file's loop metadata (insertPlainWaveClip in
-    // MoshOps.Clips.cpp has the mechanism). Three shapes, each from real material:
+    // MoshOpsInternal.h has the mechanism). Three shapes, each from real material:
     //   • an ACID chunk with a root note and zero beats (what Sony ACID writes on a one-shot
     //     a cappella) → the clip came in auto-PITCHED: transposed to the session key;
     //   • an ACID chunk with a beat count → auto-TEMPO: stretched to the session tempo;
