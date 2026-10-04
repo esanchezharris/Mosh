@@ -116,7 +116,6 @@ target_sources(MoshTests PRIVATE
     # is exactly what test_rave_engine.cpp exercises (AL-022's additive
     # lastError() surface, compile-safe in the default anira-off build).
     ${CMAKE_SOURCE_DIR}/src/plugins/transform/RaveEngine.cpp
-    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/retune/RetuneCore.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)

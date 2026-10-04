@@ -3296,6 +3296,179 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // checks live in the separate runUndoSelfTest with its own fresh engine.
     }
 
+    // ─── Mosh AutoTune: real pitch correction, latency compensated ───
+    // docs/AUTOTUNE-SCOPE-2026-10-01.md. Renders a detuned, harmonic-rich tone with a
+    // click ahead of it through the real plugin and reads the stem back. The click is
+    // unvoiced, so it passes at exactly the plugin's latency: it lands on time only if
+    // the reported latency is right and the render compensates for it. This proves the
+    // wiring, not how a voice sounds.
+    section ("Mosh AutoTune: pitch correction through the plugin");
+    {
+        const double fixtureRate = 48000.0;
+        const double detunedHz = 220.0 * std::pow (2.0, 35.0 / 1200.0); // A3 + 35 cents
+        auto makeFixture = [&] () -> File
+        {
+            const int n = (int) (2.0 * fixtureRate);
+            juce::AudioBuffer<float> buf (1, n);
+            buf.clear();
+            const int clickAt = (int) (0.25 * fixtureRate);
+            for (int i = 0; i < 48; ++i)
+                buf.setSample (0, clickAt + i, 0.8f * (1.0f - (float) i / 48.0f) * (i % 2 == 0 ? 1.0f : -1.0f));
+            const int toneStart = (int) (0.5 * fixtureRate), toneEnd = (int) (1.9 * fixtureRate);
+            const int fade = (int) (0.02 * fixtureRate);
+            for (int i = toneStart; i < toneEnd; ++i)
+            {
+                const double phase = juce::MathConstants<double>::twoPi * detunedHz * (double) (i - toneStart) / fixtureRate;
+                double v = 0.0;
+                for (int h = 1; h <= 10; ++h)
+                    v += std::sin (h * phase) / h;
+                const double env = juce::jmin (1.0, (double) (i - toneStart) / fade, (double) (toneEnd - 1 - i) / fade);
+                buf.setSample (0, i, (float) (0.2 * v * env));
+            }
+            auto dir = eng.sessionDir().getChildFile ("autotune-test");
+            dir.createDirectory();
+            auto f = dir.getChildFile ("detuned-vowel.wav");
+            f.deleteFile();
+            juce::WavAudioFormat fmt;
+            if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (os.get(), fixtureRate, 1u, 24, {}, 0));
+                if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, n); }
+            }
+            return f;
+        };
+
+        struct Stem { std::vector<float> samples; double rate = 0.0; };
+        auto renderStem = [&] (const String& trackId, const String& leaf) -> Stem
+        {
+            Stem stem;
+            auto dir = selftestTempPath (eng, leaf);
+            dir.deleteRecursively();
+            auto exp = cmd (ops, "export_stems", objN ({{ "dir", dir.getFullPathName() }}));
+            if (auto* arr = exp["data"].getProperty ("stems", var()).getArray())
+                for (auto& st : *arr)
+                    if (st.getProperty ("trackId", var()).toString() == trackId)
+                    {
+                        AudioFormatManager fm; fm.registerBasicFormats();
+                        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (File (st.getProperty ("file", var()).toString())));
+                        if (reader != nullptr && reader->lengthInSamples > 0)
+                        {
+                            const int count = (int) reader->lengthInSamples;
+                            AudioBuffer<float> buf ((int) reader->numChannels, count);
+                            reader->read (&buf, 0, count, 0, true, true);
+                            stem.rate = reader->sampleRate;
+                            stem.samples.resize ((size_t) count);
+                            for (int i = 0; i < count; ++i)
+                            {
+                                float sum = 0.0f;
+                                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                                    sum += buf.getSample (ch, i);
+                                stem.samples[(size_t) i] = sum / (float) buf.getNumChannels();
+                            }
+                        }
+                    }
+            dir.deleteRecursively();
+            return stem;
+        };
+        // Time of the largest sample in [0.15 s, 0.40 s): the click.
+        auto clickSeconds = [] (const Stem& stem) -> double
+        {
+            if (stem.rate <= 0.0) return -1.0;
+            const size_t from = (size_t) (0.15 * stem.rate), to = juce::jmin (stem.samples.size(), (size_t) (0.40 * stem.rate));
+            size_t best = from;
+            for (size_t i = from; i < to; ++i)
+                if (std::abs (stem.samples[i]) > std::abs (stem.samples[best])) best = i;
+            return (double) best / stem.rate;
+        };
+        // Autocorrelation pitch over [1.0 s, 1.6 s), searched only around A3.
+        auto toneHz = [] (const Stem& stem) -> double
+        {
+            if (stem.rate <= 0.0 || stem.samples.size() < (size_t) (1.7 * stem.rate)) return 0.0;
+            const float* x = stem.samples.data() + (size_t) (1.0 * stem.rate);
+            const int n = (int) (0.6 * stem.rate);
+            const int minLag = (int) (stem.rate / 260.0), maxLag = (int) (stem.rate / 180.0);
+            auto corr = [&] (int lag) { double sum = 0.0; for (int i = 0; i + lag < n; ++i) sum += (double) x[i] * x[i + lag]; return sum / (double) (n - lag); };
+            int best = minLag; double bestValue = -1.0e30;
+            for (int lag = minLag; lag <= maxLag; ++lag) { const double c = corr (lag); if (c > bestValue) { bestValue = c; best = lag; } }
+            const double a = corr (best - 1), b = corr (best), c = corr (best + 1);
+            const double denom = a - 2.0 * b + c;
+            return stem.rate / ((double) best + (std::abs (denom) > 1.0e-12 ? 0.5 * (a - c) / denom : 0.0));
+        };
+        // Level of one frequency over the same span (Hann-weighted).
+        auto levelAt = [] (const Stem& stem, double hz) -> double
+        {
+            if (stem.rate <= 0.0 || stem.samples.size() < (size_t) (1.7 * stem.rate)) return 0.0;
+            const float* x = stem.samples.data() + (size_t) (1.0 * stem.rate);
+            const int n = (int) (0.6 * stem.rate);
+            double re = 0.0, im = 0.0, weight = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                const double w = 0.5 * (1.0 - std::cos (juce::MathConstants<double>::twoPi * i / (n - 1)));
+                const double angle = juce::MathConstants<double>::twoPi * hz * i / stem.rate;
+                re += w * x[i] * std::cos (angle); im -= w * x[i] * std::sin (angle); weight += w;
+            }
+            return 2.0 * std::sqrt (re * re + im * im) / juce::jmax (weight, 1.0e-12);
+        };
+        auto cents = [] (double hz, double ref) { return hz > 0.0 ? 1200.0 * std::log2 (hz / ref) : 1.0e9; };
+
+        auto fixture = makeFixture();
+        check (fixture.existsAsFile(), "AutoTune fixture synthesized (click + detuned harmonic tone)");
+        auto at = cmd (ops, "create_track", args1 ("name", "AutoTune Render"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "import_clip", objN ({{ "trackId", at }, { "file", fixture.getFullPathName() }}))), "AutoTune fixture imported");
+
+        const auto dry = renderStem (at, "autotune-dry");
+        check (! dry.samples.empty(), "AutoTune dry stem rendered");
+        const double dryClick = clickSeconds (dry);
+        const double dryHz = toneHz (dry);
+        check (std::abs (cents (dryHz, detunedHz)) < 3.0, "AutoTune fixture reads back at A3 + 35 cents before the plugin");
+
+        auto atLoad = cmd (ops, "load_builtin", objN ({{ "trackId", at }, { "type", "moshAutoTune" }}));
+        const int atIdx = (int) atLoad["data"].getProperty ("index", -1);
+        check (ok (atLoad) && atIdx >= 0, "AutoTune loaded on the fixture track");
+
+        bool hasGlide = false, hasLookahead = false; int paramCount = 0;
+        { auto trk = trackById (at);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == atIdx)
+                if (auto* params = p.getProperty ("params", var()).getArray())
+                {
+                    paramCount = params->size();
+                    if (paramCount > 7) hasGlide = params->getReference (7).getProperty ("name", var()).toString() == "Glide";
+                    if (paramCount > 8) hasLookahead = params->getReference (8).getProperty ("name", var()).toString() == "Look-ahead";
+                } }
+        check (paramCount == 9, "AutoTune exposes nine params (seven original + Glide + Look-ahead)");
+        check (hasGlide && hasLookahead, "AutoTune's new params are appended as Glide then Look-ahead");
+
+        // Hard tune, and the longest look-ahead so the reported latency is large
+        // enough (about 14 ms) that a missing compensation cannot hide.
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 2 }, { "value", 0.0 }}))), "AutoTune retune set to hard");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 8 }, { "value", 1.0 }}))), "AutoTune look-ahead set to maximum");
+
+        const auto wet = renderStem (at, "autotune-wet");
+        check (! wet.samples.empty(), "AutoTune wet stem rendered");
+        const double wetHz = toneHz (wet);
+        check (std::abs (cents (wetHz, 220.0)) < 6.0,
+               "AutoTune pulls the +35 cent tone onto A3 (output " + String (wetHz, 2) + " Hz)");
+        check (std::abs (clickSeconds (wet) - dryClick) < 0.0005,
+               "AutoTune's latency is reported and compensated: the click lands within 0.5 ms of the dry render");
+        bool keepsHarmonics = dryHz > 0.0 && wetHz > 0.0;
+        for (int h = 2; h <= 5 && keepsHarmonics; ++h)
+        {
+            const double before = levelAt (dry, h * dryHz), after = levelAt (wet, h * wetHz);
+            keepsHarmonics = before > 0.0 && after > 0.0 && std::abs (20.0 * std::log10 (after / before)) < 3.0;
+        }
+        check (keepsHarmonics, "AutoTune output keeps harmonics 2-5 within 3 dB (it shifts the voice, it does not replace it)");
+
+        // Bypassed: untouched audio, and no latency claimed.
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", at }, { "index", atIdx }, { "bypassed", true }}))), "AutoTune bypassed");
+        const auto bypassed = renderStem (at, "autotune-bypassed");
+        check (std::abs (cents (toneHz (bypassed), detunedHz)) < 3.0, "bypassed AutoTune leaves the pitch alone");
+        check (std::abs (clickSeconds (bypassed) - dryClick) < 0.0005, "bypassed AutoTune adds no delay");
+
+        // Leave no latency behind for the sections that follow.
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", at))), "AutoTune fixture track removed");
+    }
+
     // ─── R3.3: highpass + softclip built-ins ───
     // "highpass" is not its own Tracktion xmlTypeName — it's te::LowPassPlugin
     // (xmlTypeName "lowpass") flipped into high-pass mode by load_builtin/

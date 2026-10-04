@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include "PitchOracle.h"
 #include "RetuneFixtures.h"
 #include "audio/RealtimeAudioGuard.h"
-#include "plugins/moshfx/MoshFxDsp.h"
 #include "plugins/moshfx/retune/PitchTracker.h"
 #include "plugins/moshfx/retune/RetuneCore.h"
 #include "plugins/moshfx/retune/TuneCorrection.h"
@@ -454,7 +454,7 @@ TEST_CASE ("Retune core pulls a detuned vowel to pitch and keeps its harmonics",
     const auto out = render (vowel.samples, vowel.sampleRate, hardChromatic(), 512);
 
     const int from = 48000, length = 24000; // 1.0 s .. 1.5 s
-    const auto measured = mosh::moshfx::estimateMonophonicPitch (out.data() + from, length, vowel.sampleRate, 180.0, 260.0);
+    const auto measured = fx::measurePitch (out.data() + from, length, vowel.sampleRate, 180.0, 260.0);
     REQUIRE (measured.voiced);
     INFO ("output " << measured.frequencyHz << " Hz, " << fx::hzToCents (measured.frequencyHz, 220.0) << " c from A3");
     CHECK (std::abs (fx::hzToCents (measured.frequencyHz, 220.0)) <= 5.0);

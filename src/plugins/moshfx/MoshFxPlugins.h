@@ -2,6 +2,7 @@
 
 #include <tracktion_engine/tracktion_engine.h>
 #include "plugins/moshfx/MoshFxDsp.h"
+#include "plugins/moshfx/retune/RetuneCore.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -18,7 +19,17 @@ public:
     virtual juce::var describeMoshFx() const = 0;
 };
 
-class MoshAutoTunePlugin : public te::Plugin, public MoshFxDescribable
+// Vocal pitch correction (docs/AUTOTUNE-SCOPE-2026-10-01.md). The engine is
+// moshfx::retune::RetuneCore: a pitch tracker, a scale-snapping correction with
+// retune speed and glide, and a resample-and-splice shifter that keeps the voice's
+// own timbre. The mid of a stereo track is retuned; the side is delayed to match
+// and left uncorrected, so a mono vocal on a stereo track stays exactly mono.
+//
+// It reports its latency (about 1.8 ms plus the Look-ahead) so playback and
+// recorded takes stay aligned. Tracktion reads a plugin's latency once per graph
+// build and does not keep a bypassed built-in plugin delayed, so a change of
+// bypass or Look-ahead rebuilds the graph, and a bypassed AutoTune reports zero.
+class MoshAutoTunePlugin : public te::Plugin, public MoshFxDescribable, private juce::Timer
 {
 public:
     static const char* xmlTypeName;
@@ -35,13 +46,24 @@ public:
     void deinitialise() override;
     void applyToBuffer (const te::PluginRenderContext&) override;
     int getNumOutputChannelsGivenInputs (int n) override { return n; }
+    double getLatencySeconds() override;
     void restorePluginStateFromValueTree (const juce::ValueTree&) override;
     juce::var describeMoshFx() const override;
 
+protected:
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
+
 private:
-    juce::CachedValue<float> rootValue, scaleValue, retuneValue, amountValue, rangeValue, mixValue, outputValue;
-    te::AutomatableParameter::Ptr rootParam, scaleParam, retuneParam, amountParam, rangeParam, mixParam, outputParam;
-    std::array<moshfx::AutoTuneCore, 8> cores;
+    void timerCallback() override;
+
+    juce::CachedValue<float> rootValue, scaleValue, retuneValue, amountValue, rangeValue, mixValue, outputValue,
+                             glideValue, lookaheadValue;
+    te::AutomatableParameter::Ptr rootParam, scaleParam, retuneParam, amountParam, rangeParam, mixParam, outputParam,
+                                  glideParam, lookaheadParam;
+    moshfx::retune::RetuneCore core;
+    moshfx::retune::SampleDelay sideDelay;
+    double sampleRate = 0.0;
+    std::atomic<bool> pendingReset { false }; // set on re-enable; served on the audio thread
     std::atomic<double> lastInputHz { 0.0 };
     std::atomic<double> lastTargetHz { 0.0 };
     std::atomic<double> lastCorrectionCents { 0.0 };

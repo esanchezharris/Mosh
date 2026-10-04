@@ -344,7 +344,7 @@ if (MOSH_BUILD_APP)
         # CAP-AUT-006 — the per-track mute gate (hidden mixer element, one automatable param)
         src/plugins/mixer/TrackMutePlugin.cpp
         # Mosh-native FX suite — in-app Tracktion built-ins.
-        src/plugins/moshfx/MoshAutoTuneDsp.cpp
+        src/plugins/moshfx/retune/RetuneCore.cpp
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
