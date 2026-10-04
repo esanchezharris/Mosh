@@ -18,6 +18,11 @@ Both drive the built app through `--run-script` (the same MoshOps command surfac
 uses) with no audio device. Source recordings are opened read-only, copied into the
 harness session by import_clip, and hashed before and after.
 
+Audition sources must be plain PCM WAVs with no tempo metadata. A BPM token in the file
+name, an ACID chunk, or a FLAC makes the app queue a stretch/convert proxy and the headless
+export stalls. Make a clean copy first, e.g.
+    ffmpeg -i in.flac -map_metadata -1 -fflags +bitexact -flags:a +bitexact -c:a pcm_s24le out.wav
+
     scripts/vocal-preset/verify.py reopen   --bin <Mosh binary>
     scripts/vocal-preset/verify.py audition --bin <Mosh binary> --source-dir <dir> --out <dir>
 
@@ -287,7 +292,13 @@ def cmd_audition(args):
             ok = rc == 0 and result(lines, "apply_track_preset").get("ok") is True and dry.is_file() and wet.is_file()
             if not ok:
                 failures += 1
-                print(f"  FAIL {tag}: render failed (rc {rc})\n{err}")
+                # The app's own reason, not just its stderr. "export render stalled" on a
+                # freshly imported file almost always means the SOURCE carries tempo
+                # metadata (a BPM token in its name, or an ACID chunk in a WAV) or is not a
+                # plain WAV, so the app queued a stretch/convert proxy that a headless run
+                # never finishes. Import a metadata-free PCM WAV copy instead.
+                reasons = [f"{l.get('command')}: {l.get('error')}" for l in lines if l.get("ok") is False]
+                print(f"  FAIL {tag}: render failed (rc {rc}) — " + ("; ".join(reasons) or err.strip()[-300:]))
                 continue
             _, _, d = read_float_wav(dry)
             _, _, w = read_float_wav(wet)

@@ -237,6 +237,49 @@ already-processed vocals, **not raw dry recordings**, so this is a chain on top 
 No rap, no deliberately sibilant fixture, and no recording made through Mosh's own input path
 is available. Human listening session: **NOT RUN.**
 
+### 8b. Dry stock vocals (added 2026-10-03)
+
+The Song A stems above were already processed, so they are a poor A/B. At the owner's request
+seven openly licensed a cappellas were downloaded from ccMixter (CC BY 3.0 or CC0; lossless;
+labelled dry or raw by their uploaders — not independently verified) and rendered the same way
+with the same binary. Sources, licenses, page links and SHA-256:
+`~/Library/Mosh/references/vocal-fixtures/ccmixter/ATTRIBUTION.md`. Renders:
+`~/Library/Mosh/task-evidence/vocal-preset-20261001/audition-ccmixter/` (21 sets, 63 WAVs,
+nothing above −0.56 dBFS). Neither folder is in the repository.
+
+At each recording's own level (0 dB offset):
+
+| Source | Loudness change | Peak change | Crest change | Match gain |
+|---|---|---|---|---|
+| Missing Person — female, sung | −3.1 LU | −4.41 dB | −1.83 dB | +3.1 dB |
+| Morning Star — female, sung | −3.8 LU | −5.10 dB | −1.47 dB | +3.8 dB |
+| All I Want — male, sung | −3.7 LU | −4.02 dB | −0.40 dB | +3.7 dB |
+| Solstice — male, sung | −3.3 LU | −5.70 dB | −2.63 dB | +3.3 dB |
+| Happy Birthday Rap — male, rap | −2.5 LU | −2.05 dB | +0.48 dB | +2.5 dB |
+| Holorhyme — male, rap | −4.2 LU | −3.66 dB | +1.00 dB | +4.2 dB |
+| Les mauvaises — French | −2.6 LU | −1.86 dB | +0.71 dB | +2.6 dB |
+
+- These recordings are hotter than the Song A stems (file peaks −1.5 to −6.8 dBFS), so the
+  preset does more: 2.5–4.2 LU at their own level, 0.7–2.4 LU at −6 dB, 0.1–0.8 LU at −12 dB.
+- On all four **sung** files the peak comes down with the body and crest factor falls. On the
+  **rap** files loudness falls more than the peak and crest factor rises by 0.5–1.0 dB — the
+  same direction as the Song A lead, and what a 20 ms attack on fast consonant onsets predicts.
+- The processed peak exceeded the dry peak in three of the 21 sets, all at low input level and
+  by at most 0.51 dB.
+- Four sources clip above 0 dBFS when pushed +6 dB, so those use −12 / −6 / 0 dB instead of
+  −6 / 0 / +6 dB; no file in the folder clips on playback.
+- The uploaders' "dry" label is their claim. Two files peak at exactly −1.5 dBFS and one at
+  exactly 0 dBFS, so those were at least normalised.
+
+**Import finding (pre-existing, not fixed here).** Every one of these files failed its first
+render with "export render stalled (a clip's audio source could not be read)". The rap WAV
+carries an ACID chunk (tempo 82 bpm), which makes `import_clip` treat it as a loop to stretch
+to the session tempo; the FLACs stalled as well, cause not diagnosed. Metadata-free 24-bit WAV
+copies with sample-identical audio import and render at the correct length, and the renders
+were made from those. The originals are untouched.
+
+Human listening session on this material: **NOT RUN** at the time of writing.
+
 ## 9. Gates
 
 | Check | Command | Result |
