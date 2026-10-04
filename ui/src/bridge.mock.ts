@@ -15,7 +15,7 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -1191,6 +1191,27 @@ function trainingState(): TrainingState {
     };
   }
   return snapshot.training as TrainingState;
+}
+
+// Mirrors TrainerRegistry::sourceEligible (src/training/TrainerRegistry.cpp), reason for
+// reason and in its order: native stamps `eligible` and `blocked_reason` on every source it
+// lists, and the popover's status badges, its Build button and the Lab's Train count all
+// read them. The one check a browser cannot make is native's last — that the file exists.
+function trainingBlockedReason(s: TrainingSource): string {
+  if (!s.source_id) return "missing source_id";
+  if (!s.title) return "missing title";
+  if (!s.creator) return "missing creator";
+  if (!s.user_claimed_license) return "missing user_claimed_license";
+  if (!s.proof_of_rights) return "missing proof_of_rights";
+  if (!s.approved_for_training) return "not approved_for_training";
+  if (!s.local_path) return "missing local_path";
+  return "";
+}
+
+function withTrainingEligibility(s: TrainingSource): TrainingSource {
+  s.blocked_reason = trainingBlockedReason(s);
+  s.eligible = s.blocked_reason === "";
+  return s;
 }
 
 const VST3S = [
@@ -5467,8 +5488,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "import_training_source": {
       const state = trainingState();
       const id = str(args.sourceId, `beat-${String(state.sources.length + 1).padStart(3, "0")}`);
-      const src = {
-        index: state.sources.length,
+      const existing = state.sources.findIndex((s) => s.source_id === id);
+      const src = withTrainingEligibility({
+        index: existing >= 0 ? existing : state.sources.length,
         source_id: id,
       title: str(args.title, "Untitled Type Beat"),
       creator: str(args.creator, "Unknown"),
@@ -5480,11 +5502,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       approved_for_training: Boolean(args.approvedForTraining),
         expiration: (typeof args.expiration === "string" && args.expiration) ? String(args.expiration) : null,
         notes: str(args.notes, ""),
-      };
-      const existing = state.sources.findIndex((s) => s.source_id === id);
+      });
       if (existing >= 0) state.sources[existing] = src; else state.sources.push(src);
       invalidate();
-      return ok(command, { source: src });
+      return ok(command, src);
     }
     case "list_training_sources": {
       const state = trainingState();
@@ -5493,20 +5514,21 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "approve_training_source": {
       const state = trainingState();
       const src = state.sources.find((s) => s.source_id === str(args.sourceId));
-      if (!src) return err(command, "source not found");
+      if (!src) return err(command, `source not found: ${str(args.sourceId)}`);
       src.approved_for_training = Boolean(args.approved ?? true);
+      withTrainingEligibility(src);
       invalidate();
-      return ok(command, { source: src });
+      return ok(command, src);
     }
     case "build_training_corpus": {
       const state = trainingState();
-      const eligible = state.sources.filter((s) => s.approved_for_training && s.local_path);
+      const eligible = state.sources.filter((s) => s.eligible);
       if (eligible.length === 0) return err(command, "no approved local sources available for training");
       const bundleId = str(args.bundleName, `corpus-${String(eligible.length).padStart(3, "0")}`);
       const bundleHash = `mock-${bundleId}-${eligible.length}`;
       const bundlePath = `/mock/training/corpora/${bundleId}`;
       const sources = eligible.map((s, index) => ({ ...s, index, copied_path: `${bundlePath}/sources/${String(index).padStart(3, "0")}-${s.source_id}.wav`, sha256: `mock-${s.source_id}`, bytes: 123456 }));
-      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !eligible.includes(s)).map((s) => ({ source_id: s.source_id, reason: s.approved_for_training ? "missing local file" : "not approved_for_training" })) };
+      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !s.eligible).map((s) => ({ source_id: s.source_id, reason: s.blocked_reason ?? "" })) };
       state.activeCorpusHash = bundleHash;
       invalidate();
       return ok(command, bundle);

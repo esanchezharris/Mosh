@@ -79,6 +79,7 @@ void TrainerRegistry::saveState (const var& s) const
     if (! stateVar.isObject())
         stateVar = var (new DynamicObject());
     saveJson (stateFile(), stateVar);
+    stateView = var();
 }
 
 var TrainerRegistry::registry() const
@@ -102,6 +103,7 @@ void TrainerRegistry::saveRegistry (const var& reg) const
     if (! o->hasProperty ("sources")) o->setProperty ("sources", Array<var>());
     o->setProperty ("updated_at", utcNow());
     saveJson (registryFile(), regVar);
+    sourcesView = var();
 }
 
 String TrainerRegistry::nextSourceId (const Array<var>& sources) const
@@ -190,27 +192,69 @@ var TrainerRegistry::sourceSummary (const var& src, int index, bool includeEligi
     return var (o);
 }
 
+// The `training` block of MoshOps::snapshot(): what the training popover and the
+// LoRA Lab render from. MoshOps::snapshot() runs on the message thread after every
+// command, and building this block from disk costs two JSON files, a directory
+// scan and a stat per approved source: 0.6 ms with an empty registry and 4.5 ms
+// with 300 sources, measured against 0.1-0.5 ms for the whole of a small
+// session's snapshot. So each half is kept in memory and read again only after
+// this class changes the file it came from:
+//
+//   sources  rights_registry.json. Dropped by saveRegistry().
+//   state    training_state.json and adapters/. Dropped by saveState(), which
+//            every adapter and job write ends in.
+//
+// Nothing else writes those files. What can change behind the sources half is a
+// source's own audio file, which decides `eligible`: that answer is from the
+// registry's last look. listSources() and buildCorpus() look again for their
+// caller and take the half with them, so a snapshot never goes on contradicting
+// a direct read, and buildCorpus() never copies on the strength of an old answer.
 var TrainerRegistry::snapshot()
 {
+    if (sourcesView.isVoid())
+        sourcesView = readSources();
+    if (stateView.isVoid())
+        stateView = readStateView();
+
+    // Copies, because a juce::var object is shared by reference: a caller that
+    // edited its snapshot would otherwise be editing every later one.
     auto* rootObj = new DynamicObject();
     rootObj->setProperty ("registryPath", registryFile().getFullPathName());
     rootObj->setProperty ("statePath", stateFile().getFullPathName());
-    rootObj->setProperty ("activeAdapterId", activeAdapterId());
-    rootObj->setProperty ("activeAdapterPath", activeAdapterPath());
-    rootObj->setProperty ("activeCorpusHash", activeCorpusHash());
-    rootObj->setProperty ("sources", listSources().getProperty ("sources", Array<var>()));
-    rootObj->setProperty ("adapters", listAdapters().getProperty ("adapters", Array<var>()));
-    rootObj->setProperty ("jobs", listJobs().getProperty ("jobs", Array<var>()));
+    for (auto* field : { "activeAdapterId", "activeAdapterPath", "activeCorpusHash" })
+        rootObj->setProperty (field, stateView[field]);
+    rootObj->setProperty ("sources", sourcesView.clone());
+    rootObj->setProperty ("adapters", stateView["adapters"].clone());
+    rootObj->setProperty ("jobs", stateView["jobs"].clone());
     return var (rootObj);
+}
+
+Array<var> TrainerRegistry::readSources() const
+{
+    const auto sources = toArray (registry().getProperty ("sources", Array<var>()));
+    Array<var> items;
+    for (int i = 0; i < sources.size(); ++i)
+        items.add (sourceSummary (sources.getReference (i), i, true));
+    return items;
+}
+
+var TrainerRegistry::readStateView() const
+{
+    const auto st = state();
+    const auto activeId = st.getProperty ("activeAdapterId", var()).toString();
+    auto* view = new DynamicObject();
+    view->setProperty ("activeAdapterId", activeId);
+    view->setProperty ("activeAdapterPath", st.getProperty ("activeAdapterPath", var()).toString());
+    view->setProperty ("activeCorpusHash", st.getProperty ("activeCorpusHash", var()).toString());
+    view->setProperty ("adapters", readAdapters (activeId));
+    view->setProperty ("jobs", st.getProperty ("jobs", Array<var>()));
+    return var (view);
 }
 
 var TrainerRegistry::listSources()
 {
-    auto reg = registry();
-    Array<var> sources = toArray (reg.getProperty ("sources", Array<var>()));
-    Array<var> items;
-    for (int i = 0; i < sources.size(); ++i)
-        items.add (sourceSummary (sources.getReference (i), i, true));
+    const var items (readSources());
+    sourcesView = items.clone();
     auto* out = new DynamicObject();
     out->setProperty ("registryPath", registryFile().getFullPathName());
     out->setProperty ("sources", items);
@@ -307,6 +351,7 @@ var TrainerRegistry::approveSource (const String& sourceId, bool approved, Strin
 var TrainerRegistry::buildCorpus (const var& args, String& error)
 {
     error.clear();
+    sourcesView = var();   // eligibility is looked up again below; see snapshot()
     auto reg = registry();
     auto sources = toArray (reg.getProperty ("sources", Array<var>()));
     Array<var> eligible;
@@ -431,11 +476,9 @@ var TrainerRegistry::buildCorpus (const var& args, String& error)
     return var (out);
 }
 
-var TrainerRegistry::listAdapters()
+Array<var> TrainerRegistry::readAdapters (const String& activeId) const
 {
     Array<var> adapters;
-    auto st = state();
-    const auto activeId = activeAdapterId();
     for (auto& sub : adaptersDir().findChildFiles (File::findDirectories, false))
     {
         auto manifest = sub.getChildFile ("adapter.manifest.json");
@@ -453,12 +496,17 @@ var TrainerRegistry::listAdapters()
         o->setProperty ("quality", data.getProperty ("quality", var()));
         adapters.add (var (o));
     }
+    return adapters;
+}
 
+var TrainerRegistry::listAdapters()
+{
+    const auto activeId = activeAdapterId();
     auto* out = new DynamicObject();
     out->setProperty ("activeAdapterId", activeId);
     out->setProperty ("activeAdapterPath", activeAdapterPath());
     out->setProperty ("activeCorpusHash", activeCorpusHash());
-    out->setProperty ("adapters", adapters);
+    out->setProperty ("adapters", readAdapters (activeId));
     return var (out);
 }
 
