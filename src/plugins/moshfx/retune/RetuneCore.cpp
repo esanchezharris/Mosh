@@ -33,16 +33,47 @@ bool RetuneCore::prepare (double sampleRate)
     const auto& ts = tracker.getSettings();
     correction.prepare ((double) ts.hopFrames / sampleRate);
     shifter.prepare (sampleRate);
-    latency = shifter.latencySamples();
+    shifterLatency = shifter.latencySamples();
+    maxLookahead = (int) std::lround (kMaxLookaheadMs * 0.001 * sampleRate);
+    lookahead = 0;
+    latency = shifterLatency;
 
     // Sub-blocks never exceed the distance to the next hop, which is at most one
     // analysis window (before the first hop).
     analysis.assign ((std::size_t) ts.windowFrames, 0.0f);
-    const int ringSize = nextPowerOfTwo (latency + 1);
+    // One ring serves the look-ahead delay into the shifter and the dry path; it
+    // is sized for the largest look-ahead so changing it never allocates.
+    const int ringSize = nextPowerOfTwo (shifterLatency + maxLookahead + 1);
     dryRing.assign ((std::size_t) ringSize, 0.0f);
     dryMask = ringSize - 1;
     reset();
     return true;
+}
+
+int RetuneCore::latencySamplesFor (double sampleRate, float lookaheadMs)
+{
+    if (sampleRate <= 0.0)
+        return 0;
+    const int maxSamples = (int) std::lround (kMaxLookaheadMs * 0.001 * sampleRate);
+    const int samples = std::clamp ((int) std::lround ((double) lookaheadMs * 0.001 * sampleRate), 0, maxSamples);
+    return SpliceShifter::latencySamplesFor (sampleRate) + samples;
+}
+
+void RetuneCore::setLookaheadMs (float ms) noexcept
+{
+    if (dryRing.empty())
+        return;
+    const int wanted = std::clamp ((int) std::lround ((double) ms * 0.001 * rate), 0, maxLookahead);
+    if (wanted == lookahead)
+        return;
+    lookahead = wanted;
+    latency = shifterLatency + lookahead;
+    // The audio path's delay just changed, so its history is no longer aligned.
+    // The tracker keeps listening to the same undelayed input and is left alone.
+    shifter.reset();
+    std::fill (dryRing.begin(), dryRing.end(), 0.0f);
+    dryWrite = 0;
+    heldPeriod = 0.0;
 }
 
 void RetuneCore::reset()
@@ -82,13 +113,22 @@ RetuneReadout RetuneCore::process (float* mono, int numSamples, const RetuneSett
         float* chunk = mono + at;
 
         std::memcpy (analysis.data(), chunk, (std::size_t) count * sizeof (float));
+
+        // The shifter is fed the input `lookahead` samples late, so the tracker
+        // (which hears it undelayed) has already seen the audio being corrected.
+        const int ringSize = dryMask + 1;
+        const int base = dryWrite;
+        for (int i = 0; i < count; ++i)
+        {
+            dryRing[(std::size_t) dryWrite] = analysis[(std::size_t) i];
+            chunk[i] = dryRing[(std::size_t) ((dryWrite + ringSize - lookahead) & dryMask)];
+            dryWrite = (dryWrite + 1) & dryMask;
+        }
         shifter.process (chunk, chunk, count);
 
         for (int i = 0; i < count; ++i)
         {
-            dryRing[(std::size_t) dryWrite] = analysis[(std::size_t) i];
-            const float dry = dryRing[(std::size_t) ((dryWrite + dryMask + 1 - latency) & dryMask)];
-            dryWrite = (dryWrite + 1) & dryMask;
+            const float dry = dryRing[(std::size_t) ((base + i + ringSize - latency) & dryMask)];
             // Fully wet takes the shifter's sample untouched, so an identity through
             // the shifter stays bit-exact through the core.
             const float wet = chunk[i];
@@ -128,16 +168,25 @@ RetuneReadout RetuneCore::process (float* mono, int numSamples, const RetuneSett
     return readout;
 }
 
-void SampleDelay::prepare (int delaySamples)
+void SampleDelay::prepare (int maxDelaySamples)
 {
-    delay = std::max (0, delaySamples);
-    const int ringSize = nextPowerOfTwo (delay + 1);
+    const int ringSize = nextPowerOfTwo (std::max (0, maxDelaySamples) + 1);
     ring.assign ((std::size_t) ringSize, 0.0f);
     mask = ringSize - 1;
     write = 0;
+    delay = 0;
 }
 
-void SampleDelay::reset()
+void SampleDelay::setDelay (int delaySamples) noexcept
+{
+    const int wanted = std::clamp (delaySamples, 0, mask);
+    if (wanted == delay)
+        return;
+    delay = wanted;
+    reset();
+}
+
+void SampleDelay::reset() noexcept
 {
     std::fill (ring.begin(), ring.end(), 0.0f);
     write = 0;

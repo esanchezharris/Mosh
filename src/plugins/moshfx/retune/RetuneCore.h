@@ -40,13 +40,27 @@ class RetuneCore
 public:
     // The bottom of the plugin's Retune knob.
     static constexpr float kHardRetuneMs = 5.0f;
+    // The top of the plugin's Look-ahead knob. Measured on eleven real vocals, hard
+    // tune lands closest to the grid at about 12 ms; beyond that the correction
+    // runs ahead of the audio and gets worse again.
+    static constexpr float kMaxLookaheadMs = 12.0f;
 
     // Allocates; never call on the audio thread. Returns false for an unusable rate.
+    // Look-ahead starts at zero.
     bool prepare (double sampleRate);
     void reset();
 
-    // Constant after prepare().
+    // Delays the audio into the shifter so each correction is decided from pitch
+    // that is as new as the audio it corrects: tighter tuning for added latency.
+    // Safe on the audio thread (no allocation); a change clears the audio path.
+    void setLookaheadMs (float ms) noexcept;
+
+    // The shifter's own latency plus the look-ahead. Changes only in
+    // setLookaheadMs().
     [[nodiscard]] int latencySamples() const noexcept { return latency; }
+
+    // What latencySamples() will be at a rate and look-ahead, without preparing.
+    [[nodiscard]] static int latencySamplesFor (double sampleRate, float lookaheadMs);
 
     // In place. No allocation, locks, logging or IO.
     RetuneReadout process (float* mono, int numSamples, const RetuneSettings& settings);
@@ -56,12 +70,15 @@ public:
 
 private:
     double rate = 0.0;
-    int latency = 0;
+    int latency = 0;        // shifterLatency + lookahead
+    int shifterLatency = 0;
+    int lookahead = 0;
+    int maxLookahead = 0;
     PitchTracker tracker;
     TuneCorrection correction;
     SpliceShifter shifter;
     std::vector<float> analysis; // the untouched input for the tracker and dry path
-    std::vector<float> dryRing;
+    std::vector<float> dryRing; // input history: feeds the look-ahead and the dry path
     int dryMask = 0;
     int dryWrite = 0;
     double heldPeriod = 0.0; // the last voiced period, kept through short dropouts
@@ -73,8 +90,9 @@ private:
 class SampleDelay
 {
 public:
-    void prepare (int delaySamples);
-    void reset();
+    void prepare (int maxDelaySamples);       // allocates; delay starts at zero
+    void setDelay (int delaySamples) noexcept; // no allocation; a change clears the line
+    void reset() noexcept;
     void process (float* samples, int numSamples);
 
 private:

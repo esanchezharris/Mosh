@@ -2,7 +2,7 @@
 //
 //   MoshRetuneCli in.wav out.wav [--root 0..11] [--scale chromatic|major|minor]
 //                 [--retune ms] [--amount 0..1] [--range cents] [--glide 0..1]
-//                 [--mix 0..1] [--chunk frames] [--no-trim]
+//                 [--mix 0..1] [--lookahead ms] [--chunk frames] [--no-trim]
 //
 // The input is summed to mono. The output is mono 32-bit float at the input rate,
 // trimmed by the engine's reported latency so it lines up with the input (pass
@@ -39,10 +39,11 @@ int main (int argc, char* argv[])
     const juce::StringArray args (argv + 1, argc - 1);
     if (args.size() < 2)
         return fail ("usage: MoshRetuneCli in.wav out.wav [--root N] [--scale chromatic|major|minor] [--retune ms] "
-                     "[--amount A] [--range cents] [--glide G] [--mix M] [--chunk N] [--no-trim]");
+                     "[--amount A] [--range cents] [--glide G] [--mix M] [--lookahead ms] [--chunk N] [--no-trim]");
 
     mosh::moshfx::retune::RetuneSettings settings;
     int chunk = 512;
+    float lookaheadMs = 0.0f;
     bool trim = true;
     for (int i = 2; i < args.size(); ++i)
     {
@@ -58,6 +59,7 @@ int main (int argc, char* argv[])
         else if (key == "--range") settings.maxCorrectionCents = value.getFloatValue();
         else if (key == "--glide") settings.glide = value.getFloatValue();
         else if (key == "--mix") settings.mix = value.getFloatValue();
+        else if (key == "--lookahead") lookaheadMs = value.getFloatValue();
         else if (key == "--chunk") chunk = juce::jmax (1, value.getIntValue());
         else return fail ("unknown option " + key);
     }
@@ -81,6 +83,7 @@ int main (int argc, char* argv[])
     mosh::moshfx::retune::RetuneCore core;
     if (! core.prepare (reader->sampleRate))
         return fail ("unsupported sample rate");
+    core.setLookaheadMs (lookaheadMs);
     const int latency = core.latencySamples();
 
     // Run past the end by the latency so the tail is not cut off.

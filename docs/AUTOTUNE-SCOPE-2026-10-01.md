@@ -31,6 +31,12 @@ not quality evidence.
   - no audible difference between the reference's 22 ms and 3 ms modes, so Mosh's engine
     is low-latency only.
 
+- **Ear gate 2 (passed 2026-10-03).** Blind A/B of Mosh's engine against the reference on
+  eleven sources. The owner heard one of each pair retuning slightly faster and otherwise
+  no difference, and asked only that the speed be adjustable with a knob. The faster one
+  is the reference in its 22 ms mode: Mosh at 1.8 ms decides each correction from pitch a
+  few milliseconds older than the audio. That became the **Look-ahead** control (§8).
+
 ## 3. Provenance
 
 - The technique is the classic one for vocal retuning: resample the input at the correction
@@ -256,10 +262,23 @@ Unchanged ids, order and ranges for the first seven; one appended.
 | 5 | Mix | 0–1 | dry/wet; dry is delayed by `D` |
 | 6 | Output | −18…+6 dB | output gain |
 | 7 | **Glide** (new) | 0–1 | 0 snaps onto each new note, 1 eases in (default 1) |
+| 8 | **Look-ahead** (new) | 0–12 ms | delays the audio into the shifter so the correction is decided from pitch as new as the audio (default 0) |
 
-Reported latency is `D` (about 1.8 ms). Voiced audio is additionally delayed by between
-zero and one and a half pitch periods as the read head moves, which is inherent to the
-technique; a Mix below 1 on voiced audio therefore combs.
+Reported latency is `D` plus the look-ahead: about 1.8 ms at zero, 13.8 ms at the top.
+Voiced audio is additionally delayed by between zero and one and a half pitch periods as
+the read head moves, which is inherent to the technique; a Mix below 1 on voiced audio
+therefore combs.
+
+**What Look-ahead buys.** Hard tune, median distance from the nearest semitone, mean over
+eleven real vocals:
+
+| Look-ahead | 0 ms | 5 ms | 8 ms | 10 ms | 12 ms | 15 ms | 20 ms | Reference (22 ms) |
+|---|---|---|---|---|---|---|---|---|
+| Cents | 6.7 | 4.1 | 2.5 | 1.8 | 1.5 | 2.1 | 4.6 | 2.4 |
+
+Past about 12 ms the correction runs ahead of the audio and gets worse again, so the knob
+stops there. Zero is for singing through it live; the top is for the mix, where delay
+compensation hides the latency.
 
 ## 9. Not in v1
 

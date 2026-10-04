@@ -34,10 +34,7 @@ public:
     {
         fs_ = sampleRate >= 8000.0 ? sampleRate : 8000.0;  // also rejects NaN
 
-        // D = half the interpolator + 1 + the furthest the old read head can close on
-        // the write head during the longest crossfade at the largest ratio + 4.
-        const double travel = kMaxCrossfadeSeconds * fs_ * (kMaxRatio - 1.0);
-        latency_ = kReach + 1 + (int) std::ceil (travel) + 4;
+        latency_ = latencySamplesFor (fs_);
 
         minPeriod_ = fs_ / 1200.0;
         maxPeriod_ = fs_ / 55.0;
@@ -87,6 +84,16 @@ public:
 
     // Constant after prepare().
     int latencySamples() const noexcept { return latency_; }
+
+    // The latency prepare() will report at a sample rate.
+    // D = half the interpolator + 1 + the furthest the old read head can close on
+    // the write head during the longest crossfade at the largest ratio + 4.
+    static int latencySamplesFor (double sampleRate) noexcept
+    {
+        const double fs = sampleRate >= 8000.0 ? sampleRate : 8000.0;
+        const double travel = kMaxCrossfadeSeconds * fs * (kMaxRatio - 1.0);
+        return kReach + 1 + (int) std::ceil (travel) + 4;
+    }
 
     // Takes effect from the next processed sample. periodSamples outside
     // [fs/1200, fs/55] (including <= 0 and NaN) means unvoiced, which forces ratio 1.

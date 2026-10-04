@@ -8,6 +8,7 @@
 #include "plugins/moshfx/retune/RetuneCore.h"
 #include "plugins/moshfx/retune/TuneCorrection.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -92,10 +93,11 @@ namespace
 
     // Runs samples through a fresh core in fixed-size chunks.
     std::vector<float> render (const std::vector<float>& input, double sampleRate, const RetuneSettings& settings,
-                               int chunk, std::vector<RetuneReadout>* readouts = nullptr)
+                               int chunk, std::vector<RetuneReadout>* readouts = nullptr, float lookaheadMs = 0.0f)
     {
         RetuneCore core;
         REQUIRE (core.prepare (sampleRate));
+        core.setLookaheadMs (lookaheadMs);
         std::vector<float> out (input);
         for (std::size_t at = 0; at < out.size(); at += (std::size_t) chunk)
         {
@@ -590,6 +592,92 @@ TEST_CASE ("Retune core holds the correction through a short dropout", "[retune]
 
     CHECK (recentresWithBurst (0.020) == 0);
     CHECK (recentresWithBurst (0.200) >= 1);
+}
+
+TEST_CASE ("Retune core look-ahead adds exactly its length to the latency", "[retune][core][lookahead]")
+{
+    for (const double rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        RetuneCore core;
+        REQUIRE (core.prepare (rate));
+        const int base = core.latencySamples();
+        core.setLookaheadMs (RetuneCore::kMaxLookaheadMs);
+        const int latency = core.latencySamples();
+        INFO ("rate " << rate << ", latency " << base << " -> " << latency);
+        CHECK (latency == base + (int) std::lround (RetuneCore::kMaxLookaheadMs * 0.001 * rate));
+        CHECK (latency == RetuneCore::latencySamplesFor (rate, RetuneCore::kMaxLookaheadMs));
+        CHECK (base == RetuneCore::latencySamplesFor (rate, 0.0f));
+
+        // Unvoiced input is still an exact delay, now by the longer latency.
+        std::vector<float> click (8000, 0.0f);
+        click[1000] = 0.5f;
+        auto out = click;
+        core.process (out.data(), (int) out.size(), hardChromatic());
+        CHECK (delayMismatches (click, out, latency) == 0);
+
+        // Values past the top of the knob clamp to it.
+        core.setLookaheadMs (500.0f);
+        CHECK (core.latencySamples() == latency);
+    }
+}
+
+TEST_CASE ("Retune core look-ahead tightens hard tune on a moving pitch", "[retune][core][lookahead]")
+{
+    // A3 wandering +/-40 cents at 3 Hz: the target stays A3, so any distance from
+    // 220 Hz in the output is correction that arrived late.
+    const auto wander = fx::renderVocal (2.0, [] (double t) { return fx::centsToHz (220.0, 40.0 * std::sin (fx::kTwoPi * 3.0 * t)); });
+
+    auto residualCents = [&wander] (float lookaheadMs)
+    {
+        const auto out = render (wander.samples, wander.sampleRate, hardChromatic(), 512, nullptr, lookaheadMs);
+        fx::VocalFixture tuned;
+        tuned.samples = out;
+        tuned.sampleRate = wander.sampleRate;
+        std::vector<double> cents;
+        const auto hops = streamFixture (tuned, { 512 });
+        for (std::size_t i = 40; i + 20 < hops.size(); ++i)
+            if (hops[i].voiced)
+                cents.push_back (fx::hzToCents (hops[i].f0Hz, 220.0));
+        REQUIRE (cents.size() > 100);
+        std::vector<double> magnitudes;
+        for (const double c : cents)
+            magnitudes.push_back (std::abs (c));
+        std::sort (magnitudes.begin(), magnitudes.end());
+        return magnitudes[magnitudes.size() / 2];
+    };
+
+    const double loose = residualCents (0.0f);
+    const double tight = residualCents (RetuneCore::kMaxLookaheadMs);
+    INFO ("median residual: " << loose << " c without look-ahead, " << tight << " c with it");
+    CHECK (loose > 3.0);          // the lag is real at the lowest latency
+    CHECK (tight < 0.5 * loose);  // and look-ahead buys most of it back
+    CHECK (tight <= 3.0);
+}
+
+TEST_CASE ("Retune core with look-ahead is still chunking-invariant and allocation-free", "[retune][core][lookahead]")
+{
+    const auto phrase = fx::phraseFixture();
+    const auto reference = render (phrase.samples, phrase.sampleRate, hardChromatic(), 4096, nullptr, 12.0f);
+    for (const int chunk : { 64, 137, 512 })
+    {
+        const auto chunked = render (phrase.samples, phrase.sampleRate, hardChromatic(), chunk, nullptr, 12.0f);
+        CHECK (std::memcmp (chunked.data(), reference.data(), reference.size() * sizeof (float)) == 0);
+    }
+
+    RetuneCore core;
+    REQUIRE (core.prepare (phrase.sampleRate));
+    auto buffer = phrase.samples;
+    const auto settings = hardChromatic();
+    mosh::rtguard::setViolationHandler ([] {});
+    const long before = mosh::rtguard::violationCount();
+    {
+        mosh::rtguard::ScopedRealtime realtime;
+        core.setLookaheadMs (12.0f); // changing it on the audio thread must not allocate
+        core.process (buffer.data(), 4096, settings);
+        core.setLookaheadMs (0.0f);
+        core.process (buffer.data() + 4096, 4096, settings);
+    }
+    CHECK (mosh::rtguard::violationCount() == before);
 }
 
 TEST_CASE ("Retune core never allocates while processing", "[retune][core][rtguard]")
