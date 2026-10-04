@@ -4581,6 +4581,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "promote_lora_checkpoint is transaction-safe (it writes to the library, not the edit)");
     }
 
+    // ── LoRA Lab: cancel_training_job ("Stop") refuses what it cannot confirm ──
+    // Hermetic — every check here is a REFUSAL, and it holds whichever service
+    // answers: one that is up says it does not know a made-up id, and one that is
+    // not running has no jobs at all. Stopping a real run needs a trainer and
+    // lives in scripts/verify-hardware.
+    //
+    // The command used to report success for any id and write a "cancelled" job
+    // into the registry without reading the service's answer, so a mistyped id
+    // became a recorded job that never existed.
+    section ("LoRA Lab: cancel_training_job refuses a job the service does not know");
+    {
+        // Read the registry's own state file, located through the command surface.
+        // The native snapshot carries no `training` key, so a check against
+        // snapshot().training.jobs passes whatever the command wrote.
+        const File stateFile = File (cmd (ops, "list_training_sources")["data"]
+                                         .getProperty ("registryPath", var()).toString())
+                                   .getSiblingFile ("training_state.json");
+        check (stateFile.existsAsFile(), "the training registry's state file is readable from this run");
+        auto recordedJob = [&stateFile] (const String& jobId)
+        {
+            auto jobs = JSON::parse (stateFile.loadFileAsString()).getProperty ("jobs", var());
+            for (int i = 0; i < jobs.size(); ++i)
+                if (jobs[i].getProperty ("jobId", var()).toString() == jobId)
+                    return true;
+            return false;
+        };
+
+        auto noId = cmd (ops, "cancel_training_job", objN ({}));
+        check (! ok (noId), "cancel_training_job without a jobId fails");
+
+        const String ghost = "selftest-job-that-never-existed";
+        check (! recordedJob (ghost), "the made-up job is not in the registry to begin with");
+        auto unknown = cmd (ops, "cancel_training_job", args1 ("jobId", ghost));
+        check (! ok (unknown), "cancel_training_job refuses a jobId no service knows (it does not report success)");
+        check (unknown.getProperty ("error", var()).toString().isNotEmpty(),
+               "…and says why");
+        check (! recordedJob (ghost),
+               "…and records no job for it (no phantom \"cancelled\" job in the registry)");
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The

@@ -5517,10 +5517,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!bundlePath) return err(command, "missing corpusBundle");
       const jobId = `job-${Math.random().toString(36).slice(2, 8)}`;
       const outputDir = str(args.outputDir, `${bundlePath}/training-output/${jobId}`);
+      // Recorded as "queued", as native records a submit. The run finishes when its
+      // status is first read (training_job_status below) — until then it is still
+      // going, which is what leaves cancel_training_job something to stop.
       const job = {
         jobId,
-        status: "ready",
-        progress: 1,
+        status: "queued",
+        progress: 0,
         bundlePath,
         outputDir,
         artifactPath: `${outputDir}/adapter.lora.json`,
@@ -5554,15 +5557,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
+      // No trainer here: a run that is still going finishes on this read. Like
+      // native, the read is what updates the recorded job.
+      if (job.status === "queued" || job.status === "running") {
+        job.status = "ready";
+        job.progress = 1;
+      }
       return ok(command, job);
     }
+    // Mirrors native: the answer is the state the run was IN, and only a run that
+    // is still going has anything to stop. A finished run keeps its status, and an
+    // id nobody knows is refused rather than recorded as a cancelled job.
     case "cancel_training_job": {
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
-      job.status = "cancelled";
-      invalidate();
-      return ok(command);
+      const live = job.status === "queued" || job.status === "running";
+      const answer = { jobId: job.jobId, status: job.status, progress: job.progress, cancelRequested: live };
+      if (live) {
+        // Natively the status moves once the stop reaches the trainer and the next
+        // training_job_status reports it. With no trainer to wind down, it lands now.
+        job.status = "cancelled";
+        invalidate();
+      }
+      return ok(command, answer);
     }
     // Import now ENROLLS into the library — the same place the render path reads
     // — instead of copying into a training/adapters dir nothing renders from.

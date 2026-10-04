@@ -62,6 +62,9 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_outbox.cpp
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
+    # cancel_training_job — what TrainingJobManager hands back from /training/cancel.
+    # juce_core only; talks to a fake service on a private loopback port.
+    test_training_jobmanager.cpp
     test_webbridge_resource_guard.cpp
     test_webview_cursor.cpp
     test_directory_listing.cpp
@@ -102,6 +105,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/remote/PhoneLoopProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/PhoneLoopEndpoint.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/training/TrainingJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/files/DirectoryListing.cpp
     ${CMAKE_SOURCE_DIR}/src/files/ImportCopy.cpp
