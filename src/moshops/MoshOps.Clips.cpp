@@ -185,6 +185,20 @@ namespace
         if (lo >= at - eps)              return { lo + delta, hi + delta, true };   // entirely after
         return { lo, hi + delta, true };                                      // straddles → grows
     }
+
+    // Warps a fresh copy the way the clip it copies is warped. Warp, as set_clip_warp and
+    // stretch_clip write it, is three things: a stretch mode, the source's tempo, and the
+    // auto-tempo switch. A copy starts from insertPlainWaveClip, which leaves all of it off
+    // whatever the file says, so duplicate_clip and paste_clip carry it across from the CLIP.
+    // Without it the copy of a stretched clip keeps the stretched length and plays the file
+    // at its own speed: early, and silent at the end.
+    void warpLikeSource (te::WaveAudioClip& copy, te::TimeStretcher::Mode mode, double sourceBpm)
+    {
+        copy.setTimeStretchMode (te::TimeStretcher::checkModeIsAvailable (mode));
+        auto info = copy.getAudioFile().getInfo();
+        copy.getLoopInfo().setBpm (sourceBpm, info);
+        copy.setAutoTempo (true);
+    }
 }
 
 // Shared wave-file insertion path used by both import_clip (path-based) and
@@ -1374,6 +1388,8 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
             { { tracktion::TimePosition::fromSeconds (newStart), pos.getLength() }, pos.getOffset() });
         if (nc != nullptr)
         {
+            if (w->getAutoTempo())
+                warpLikeSource (*nc, w->getTimeStretchMode(), w->getLoopInfo().getBpm (w->getAudioFile().getInfo()));
             nc->setGainDB (w->getGainDB());
             if (hasSourceGainCurve)
                 if (const auto error = replaceClipGainEnvelope (*nc, sourceGainCurve.points, undoManager());
@@ -1847,6 +1863,16 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
             { { tracktion::TimePosition::fromSeconds (start), tracktion::TimeDuration::fromSeconds (length) },
               tracktion::TimeDuration::fromSeconds (offset) });
         if (nc == nullptr) return errResult ("paste_clip", "insertWaveClip failed");
+        // The descriptor is the snapshot's clip, which reports a warped clip as autoTempo
+        // with its stretchMode and sourceBpm. Defaults as in set_clip_warp.
+        if ((bool) clipVar.getProperty ("autoTempo", false))
+        {
+            auto mode = te::TimeStretcher::defaultMode;
+            if (clipVar.hasProperty ("stretchMode"))
+                mode = te::TimeStretcher::getModeFromName (eng.engine(), clipVar.getProperty ("stretchMode", var()).toString());
+            const double mapBpm = eng.edit().tempoSequence.getBpmAt (nc->getPosition().getStart());
+            warpLikeSource (*nc, mode, juce::jlimit (20.0, 999.0, (double) clipVar.getProperty ("sourceBpm", mapBpm)));
+        }
         nc->setGainDB ((float) (double) clipVar.getProperty ("gainDb", 0.0));
         if (hasPastedGainCurve)
             if (const auto error = replaceClipGainEnvelope (*nc, pastedGainCurve.points, undoManager());
