@@ -56,3 +56,43 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   await page.keyboard.press("ControlOrMeta+z");
   await expect(rows).toHaveCount(rowsBefore);
 });
+
+// Track-chain presets: one pick in the inspector's Plugins group applies the whole vocal chain to
+// the selected audio track, a second pick does not stack another, and one undo removes it. Plumbing
+// only — that the chain is the DSP it claims to be is the native selftest's job, and how it sounds
+// is nobody's claim yet.
+test("apply the Mosh Clean Lead preset to an audio track, re-apply without duplicating, undo in one step", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-add-audio").click();
+  const newTrack = page.getByTestId("v3-track").last();
+  await newTrack.getByRole("button", { name: /^Select track/ }).click();
+  const inspector = page.getByTestId("v3-inspector");
+  await expect(inspector).toHaveAttribute("data-track-id", (await newTrack.getAttribute("data-track-id"))!);
+  const rows = inspector.getByTestId("v3-plugin");
+  const rowsBefore = await rows.count();
+  await expect(inspector.getByTestId("v3-plugin-preset")).toHaveCount(0);     // anti-vacuity baseline
+
+  const picker = inspector.getByTestId("v3-track-preset");
+  await expect(picker).toBeVisible();
+  await picker.selectOption({ label: "Mosh Clean Lead v0" });
+  await expect(rows).toHaveCount(rowsBefore + 2);
+  await expect(inspector.getByTestId("v3-plugin-preset")).toHaveCount(2);
+  await expect(inspector.getByTestId("v3-plugin-preset").first()).toHaveText("Preset: Mosh Clean Lead v0");
+  const highPass = rows.nth(rowsBefore);
+  const compressor = rows.nth(rowsBefore + 1);
+  await expect(highPass).toContainText("High-Pass");
+  await expect(highPass).toContainText("80 Hz");                             // readback in real units
+  await expect(compressor).toContainText("Compressor");
+  await expect(compressor).toContainText("2.50 : 1");
+  await expect(compressor.locator('input[type="range"]')).toHaveCount(6);    // every parameter, trim included
+  await expect(compressor.getByRole("button", { name: "Bypass" })).toBeVisible();
+
+  await expect(picker).toHaveValue("");                                      // snaps back, so it can be picked again
+  await picker.selectOption({ label: "Mosh Clean Lead v0" });
+  await expect(rows).toHaveCount(rowsBefore + 2);                            // still one chain, not two
+
+  await picker.blur();                                                       // ⌘Z is ignored while a form control has focus
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(rows).toHaveCount(rowsBefore);                                // ONE undo removed both stages
+  await expect(inspector.getByTestId("v3-plugin-preset")).toHaveCount(0);
+});

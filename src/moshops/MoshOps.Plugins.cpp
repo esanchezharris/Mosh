@@ -16,6 +16,7 @@
 #include "AutomationMode.h"
 #include "AutomationCurveWrite.h"
 #include "PluginScanPlan.h"
+#include "TrackPresetEngine.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include "files/ImportCopy.h"
@@ -1849,6 +1850,17 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
     // ── .json → the built-in 4OSC on this track ──────────────────────────────
     if (ext == ".json")
     {
+        // A track-chain preset is a different thing from an instrument patch, and this
+        // command is agent-reachable while apply_track_preset deliberately is not. Refuse
+        // it by NAME. Checked twice: by its library folder FIRST, before the 4OSC lookup,
+        // so a file picked from list_presets gets "wrong command" on any track rather
+        // than "no 4OSC instrument" on the vocal track it was meant for; and by the
+        // file's own `kind` once it is parsed, for one that was copied somewhere else.
+        static const juce::String wrongSeam ("this is a track preset, not an instrument patch — "
+                                             "apply it from the track's Vocal preset menu");
+        if (file.getParentDirectory().getFileName() == trackpreset::kLibraryKey)
+            return errResult ("load_preset", wrongSeam);
+
         te::Plugin* target = index >= 0 ? findPlugin (trackId, index) : nullptr;
         if (target == nullptr)
             for (auto p : track->pluginList)
@@ -1858,6 +1870,8 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
             return errResult ("load_preset", "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
 
         const auto parsed = juce::JSON::parse (file.loadFileAsString());
+        if (parsed.getProperty ("kind", var()).toString() == trackpreset::kKind)
+            return errResult ("load_preset", wrongSeam);
         const auto params = parsed.getProperty ("params", var());
         auto* paramsObj = params.getDynamicObject();
         const auto waveShapes = parsed.getProperty ("waveShapes", var());
@@ -1915,6 +1929,255 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
     }
 
     return errResult ("load_preset", "unsupported preset type: " + ext);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Track-chain presets — apply_track_preset {trackId, file}.
+//
+// Applies an ordered group of BUILT-IN effects ("Mosh Clean Lead v0": high-pass →
+// compressor) to ONE explicitly named audio track as ONE undo step. Discovery reuses the
+// preset library seam above: list_presets {plugin:"track-chain"}.
+//
+// A separate command from load_preset on purpose. load_preset swaps the state of an
+// instrument the track already has and is in the agent's catalog; this INSERTS plugins,
+// owns them as a group, and is UI-only — a producer applies a vocal chain, Moshi does not
+// (agentic mixing is postponed, docs/vocal-presets/AUDIT-2026-10-01.md).
+//
+// The shape is preflight → one transaction → readback:
+//
+//   PREFLIGHT touches nothing: no engine object is created, the UndoManager is not
+//   contacted, nothing is saved. Every reason the apply could fail is checked here —
+//   the target, the file, each processor, each value against the pinned parameter table
+//   (TrackPreset.h), the track's plugin capacity — so a refusal leaves no trace and no
+//   empty transaction for the next undo to trip over (the G14 class).
+//
+//   APPLY is state-first (TrackPresetEngine.h::makeStageState): each stage is built as a
+//   finished PLUGIN tree and the only undoable action is adding it to the track. No
+//   parameter is written through the undo manager, so one undo removes the chain and one
+//   redo restores it with its values, including after the plugin objects were purged.
+//
+//   READBACK reports what the live plugins hold, converted to the preset's units. A
+//   value that did not land is a failure, never a success carrying the requested number.
+//
+// OWNERSHIP. Each inserted plugin is tagged (ids::moshPresetId …). Re-applying the same
+// preset finds that group: untouched → a no-op that opens no transaction; edited, partial
+// or reordered → only that group is replaced. A user's own plugin is never matched, even
+// one of the same type. Replacing the group takes any automation the user drew on it
+// along (one undo brings it back); nothing outside the group is touched.
+//
+// POSITION. The chain goes after the user's existing inserts and ahead of the first send
+// and the fader, so the fader sets level rather than how hard the compressor is driven,
+// and a send carries the processed voice. On a fresh track (mute gate + meter only) that
+// is the end of the list, and the lazily created fader lands after it.
+//
+// NOT DONE HERE, deliberately: the transport is not stopped, nothing is rendered into
+// the source audio, and no track gain, send, or other track is changed. Applying while
+// RECORDING is refused — replacing the graph under a rolling record is not something this
+// repo has proven safe, and a refusal the producer can read beats a take that glitched.
+juce::var MoshOps::cmdApplyTrackPreset (const juce::var& args)
+{
+    using namespace trackpreset;
+    static const juce::String cmd ("apply_track_preset");
+
+    // ── preflight: the target ────────────────────────────────────────────────────────
+    // The track is named by the caller, every time. There is no "selected track" here to
+    // fall back to; an id that no longer resolves is an error, not a retarget.
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    if (trackId.isEmpty())
+        return errResult (cmd, "trackId is required — a preset is applied to one named track");
+    auto* track = findTrack (trackId);
+    if (track == nullptr)
+        return errResult (cmd, "no track: " + trackId);
+
+    const auto trackType = track->state.getProperty (ids::trackType, "audio").toString();
+    if (trackType != "audio")
+        return errResult (cmd, "a vocal preset applies to an audio track; this is a " + trackType + " track");
+    if (trackHasInstrument (*track))
+        return errResult (cmd, "this track hosts an instrument; a vocal preset applies to an audio track");
+    if (firstAuxReturnOn (*track) != nullptr)
+        return errResult (cmd, "this is a return track; apply the preset to the vocal track that feeds it");
+    if (eng.edit().getTransport().isRecording() || trackPresetPretendRecording_)
+        return errResult (cmd, "cannot apply a preset while recording — stop recording first");
+
+    // ── preflight: the preset ────────────────────────────────────────────────────────
+    const auto fileArg = args.getProperty ("file", var()).toString();
+    const juce::File file = juce::File::isAbsolutePath (fileArg) ? juce::File (fileArg) : juce::File();
+    if (! file.existsAsFile())
+        return errResult (cmd, "preset file not found: " + fileArg);
+    if (file.getSize() > 1024 * 1024)
+        return errResult (cmd, "preset file too large");
+    const auto parsed = parseTrackPresetText (file.loadFileAsString());
+    if (! parsed.ok)
+        return errResult (cmd, "invalid track preset: " + parsed.error);
+    const auto& preset = parsed.preset;
+    const int numStages = (int) preset.stages.size();
+
+    // The table only admits processors it pins; this confirms each is also in the
+    // palette this build exposes (so the rack can name and show the row).
+    for (const auto& stage : preset.stages)
+        if (findBuiltin (stage.processor->type) == nullptr)
+            return errResult (cmd, "this build has no '" + juce::String (stage.processor->type) + "' effect");
+
+    // ── preflight: what is already there ─────────────────────────────────────────────
+    auto& list = track->pluginList;
+    juce::Array<te::Plugin*> owned;
+    for (auto* p : list.getPlugins())
+        if (p != nullptr && isOwnedBy (*p, preset.id))
+            owned.add (p);
+
+    auto ownedGroupIsThePreset = [&]
+    {
+        if (owned.size() != numStages) return false;
+        for (int i = 0; i < numStages; ++i)
+        {
+            auto& p = *owned[i];
+            if ((int) p.state.getProperty (ids::moshPresetStage, -1) != i
+                || (int) p.state.getProperty (ids::moshPresetRevision, -1) != preset.revision
+                || (i > 0 && list.indexOf (&p) != list.indexOf (owned[i - 1]) + 1)
+                || stageMismatch (p, preset.stages[(size_t) i]).isNotEmpty())
+                return false;
+        }
+        return true;
+    };
+
+    auto resultFor = [&] (bool changed, bool replaced)
+    {
+        juce::Array<var> stages;
+        int i = 0;
+        for (auto* p : list.getPlugins())
+            if (p != nullptr && isOwnedBy (*p, preset.id) && i < numStages)
+            {
+                stages.add (stageReadback (*p, preset.stages[(size_t) i], list.indexOf (p)));
+                ++i;
+            }
+        auto* data = new DynamicObject();
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("presetId", preset.id);
+        data->setProperty ("revision", preset.revision);
+        data->setProperty ("name", preset.name);
+        data->setProperty ("changed", changed);
+        data->setProperty ("replaced", replaced);
+        data->setProperty ("stages", stages);
+        return var (data);
+    };
+
+    // Already applied and untouched: nothing to do, so do nothing — in particular do NOT
+    // open a transaction. An empty one would be logged as an undo step that undoes the
+    // producer's PREVIOUS edit instead.
+    if (ownedGroupIsThePreset())
+        return okResult (cmd, resultFor (false, false));
+
+    // Capacity, counted as it will be once the old group (if any) is gone. The engine's
+    // insertPlugin drops a plugin silently at the limit, hidden mixer elements included.
+    const int limit = eng.engine().getEngineBehaviour().getEditLimits().maxPluginsOnTrack;
+    if (list.size() - owned.size() + numStages > limit)
+        return errResult (cmd, "no room on this track for the preset's " + juce::String (numStages)
+                               + " effects (a track holds at most " + juce::String (limit) + ")");
+
+    // Where the chain goes: in place of the group being replaced, else ahead of the
+    // first send and the fader, else at the end.
+    auto insertIndexNow = [&]
+    {
+        auto plugins = list.getPlugins();
+        for (int i = 0; i < plugins.size(); ++i)
+            if (dynamic_cast<te::VolumeAndPanPlugin*> (plugins[i].get()) != nullptr
+                || dynamic_cast<te::AuxSendPlugin*> (plugins[i].get()) != nullptr)
+                return i;
+        return plugins.size();
+    };
+    const bool replacing = ! owned.isEmpty();
+    const int replaceAt = replacing ? list.indexOf (owned.getFirst()) : -1;
+
+    // Finished PLUGIN trees, built with a null undo manager — still no engine contact.
+    const bool remap = eng.engine().getEngineBehaviour().arePluginsRemappedWhenTempoChanges();
+    juce::Array<juce::ValueTree> stageStates;
+    for (int i = 0; i < numStages; ++i)
+        stageStates.add (makeStageState (preset, i, remap));
+
+    // ── apply: one transaction ───────────────────────────────────────────────────────
+    beginTxn (cmd);
+    auto& um = undoManager();
+
+    // Rollback. Unreachable in real use — everything that can fail was checked above —
+    // and exercised only through the selftest fault points. Outside a batch this
+    // transaction is ours alone, so undoing it is exact and JUCE discards the undone set
+    // (nothing is left redoable). Inside a batch "the current transaction" is the WHOLE
+    // batch, so undoing it would take the batch's earlier commands too; there the pieces
+    // are put back by hand.
+    struct Removed { juce::ValueTree state; int index; };
+    juce::Array<Removed> removed;
+    juce::Array<te::Plugin::Ptr> inserted;
+    auto rollback = [&]
+    {
+        if (! inBatch)
+        {
+            if (um.getNumActionsInCurrentTransaction() > 0)
+                um.undoCurrentTransactionOnly();
+        }
+        else
+        {
+            for (int i = inserted.size(); --i >= 0;)
+                inserted[i]->deleteFromParent();
+            for (const auto& r : removed)             // ascending, so each index is valid as it lands
+                list.insertPlugin (r.state, r.index);
+        }
+        synchronisePlaybackGraph();
+    };
+    auto fail = [&] (const juce::String& why)
+    {
+        rollback();
+        return errResult (cmd, why);
+    };
+
+    // Create every stage and prove it holds the preset BEFORE the track is touched.
+    juce::Array<te::Plugin::Ptr> created;
+    for (int i = 0; i < numStages; ++i)
+    {
+        auto plugin = eng.edit().getPluginCache().createNewPlugin (stageStates[i]);
+        if (plugin == nullptr)
+            return fail ("could not create the preset's " + juce::String (preset.stages[(size_t) i].processor->type));
+        if (auto why = stageMismatch (*plugin, preset.stages[(size_t) i]); why.isNotEmpty())
+            return fail ("the preset did not load as written: " + why);
+        created.add (plugin);
+    }
+    if (trackPresetFaultPoint_ == 1)
+        return fail ("injected fault after creating the preset stages (selftest)");
+
+    if (replacing)
+    {
+        for (auto* p : owned)
+        {
+            removed.add ({ p->state, list.indexOf (p) });
+            pluginHost.closeEditor (*p);
+        }
+        for (int i = owned.size(); --i >= 0;)
+            owned[i]->deleteFromParent();
+    }
+
+    // Removing the old group cannot move anything ahead of its first member, so that
+    // position is still where the new group belongs.
+    const int at = replacing ? replaceAt : insertIndexNow();
+    for (int i = 0; i < numStages; ++i)
+    {
+        list.insertPlugin (created[i], at + i, nullptr);
+        inserted.add (created[i]);   // before the check: a misplaced insert must still be rolled back
+        if (list.indexOf (created[i].get()) != at + i)
+            return fail ("could not insert the preset's " + juce::String (preset.stages[(size_t) i].processor->type));
+        if (trackPresetFaultPoint_ == 2 && i == 0)
+            return fail ("injected fault after inserting the first preset stage (selftest)");
+    }
+    synchronisePlaybackGraph();
+
+    // Readback from the live, inserted plugins. Reported as actual values; if they are
+    // not the preset's, that is a failure.
+    for (int i = 0; i < numStages; ++i)
+        if (auto why = stageMismatch (*created[i], preset.stages[(size_t) i]); why.isNotEmpty())
+            return fail ("the preset did not read back as written: " + why);
+
+    logLine (cmd, args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouchTrack (trackId);   // the track's sound changed → re-bounce anything layered on it
+    return okResult (cmd, resultFor (true, replacing));
 }
 
 bool MoshOps::drumKitAvailable (const juce::String& kitId) const

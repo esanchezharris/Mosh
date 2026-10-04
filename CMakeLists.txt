@@ -278,6 +278,7 @@ if (MOSH_BUILD_APP)
         src/app/SelfTest.cpp
         src/app/LiveInstrumentSmoke.cpp
         src/app/selftest/MultiplayerAudioRefSelfTest.cpp
+        src/app/selftest/VocalPresetSelfTest.cpp
         src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's

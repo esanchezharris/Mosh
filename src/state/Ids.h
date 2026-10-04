@@ -165,6 +165,18 @@ namespace mosh::ids
     // The kit a drum track last loaded, so the picker can show what is on it.
     MOSH_DECLARE_ID (drumKitId)
 
+    // Track-chain presets (apply_track_preset) — OWNERSHIP tags on each PLUGIN node a
+    // preset inserted. They are what lets a re-apply find and replace exactly its own
+    // stages (never a user's plugin of the same type) instead of stacking a second
+    // chain, and what the rack shows as the preset's name. Plain properties on the
+    // plugin's own state tree, so they save with the edit and ride undo with the plugin.
+    // The tag records where a plugin CAME FROM; it does not claim the plugin still
+    // holds the preset's values after the user has edited it.
+    MOSH_DECLARE_ID (moshPresetId)        // stable preset id, e.g. "mosh.clean-lead"
+    MOSH_DECLARE_ID (moshPresetRevision)  // the preset file's revision when applied (int)
+    MOSH_DECLARE_ID (moshPresetStage)     // 0-based position in the preset's chain (int)
+    MOSH_DECLARE_ID (moshPresetName)      // display name, so the snapshot never needs the file
+
     // MP-001 (multiplayer) — STABLE LOGICAL IDs that survive across two peers'
     // independent engines. Tracktion's own te::EditItemID is allocator-dependent
     // and so differs per process; these UUIDs are the cross-peer identity used to

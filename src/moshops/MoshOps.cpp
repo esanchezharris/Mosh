@@ -696,6 +696,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
             "normalize_clip", "set_clip_warp", "stretch_clip",
             "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
             "set_plugin_param", "bypass_plugin", "open_plugin_editor", "load_preset",
+            "apply_track_preset",
             "set_track_automation_mode", "write_automation_curve",
             "add_automation_point", "set_automation_point", "remove_automation_point",
             "clear_automation", "replace_instrument", "hot_swap_instrument",
@@ -900,6 +901,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
     if (name == "list_presets")      return cmdListPresets (args);
     if (name == "load_preset")       return cmdLoadPreset (args);
+    if (name == "apply_track_preset") return cmdApplyTrackPreset (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
     if (name == "set_drum_pad")      return cmdSetDrumPad (args);
@@ -3146,6 +3148,19 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         o->setProperty ("category", bspec->category);
     if (ext != nullptr)
         addExternalPluginMetadata (*o, *ext);
+    // A stage a track-chain preset inserted (apply_track_preset). Additive: absent on
+    // every plugin a user loaded, so their payload is byte-identical. Read from the
+    // node's own tags — never from the preset file — and it says where the plugin CAME
+    // FROM, not that its values still equal the preset's.
+    if (p.state.hasProperty (ids::moshPresetId))
+    {
+        auto* preset = new DynamicObject();
+        preset->setProperty ("id", p.state.getProperty (ids::moshPresetId).toString());
+        preset->setProperty ("name", p.state.getProperty (ids::moshPresetName).toString());
+        preset->setProperty ("revision", (int) p.state.getProperty (ids::moshPresetRevision, 0));
+        preset->setProperty ("stage", (int) p.state.getProperty (ids::moshPresetStage, 0));
+        o->setProperty ("preset", var (preset));
+    }
    #if MOSH_HAVE_ANIRA
     if (auto* r = asRave (&p))
         o->setProperty ("rave", r->describe());

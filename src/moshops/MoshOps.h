@@ -87,6 +87,18 @@ public:
 
     void applyMultiplayerCommitForSelfTest (const juce::var& msg);
 
+    /** apply_track_preset's two selftest inputs. `faultPoint` makes the next apply fail
+        at that point (1 = stages created, nothing inserted yet; 2 = first stage
+        inserted) so the rollback can be proven — the preflight makes both unreachable in
+        real use. `pretendRecording` stands in for a rolling record, which a headless
+        --selftest has no device to start; the guard that reads it is the real one.
+        Neither is reachable from the command surface. */
+    void setTrackPresetHooksForSelfTest (int faultPoint, bool pretendRecording)
+    {
+        trackPresetFaultPoint_ = faultPoint;
+        trackPresetPretendRecording_ = pretendRecording;
+    }
+
     /** Direct plugin-host access for the headless deep-scan CLI (--scan-plugins-deep),
         which runs a synchronous OOP + hang-watchdog rescan off the message thread.
         NOT used by the normal command surface (that goes through cmdRescanPlugins). */
@@ -391,6 +403,9 @@ private:
     juce::var cmdLoadDrumKit    (const juce::var& args);
     juce::var cmdListPresets    (const juce::var& args);   // read-only preset library scan
     juce::var cmdLoadPreset     (const juce::var& args);   // apply a preset to a track's instrument
+    // A track-chain preset ("Mosh Clean Lead v0"): an ordered group of built-in effects
+    // applied to ONE explicitly named audio track as ONE undo step. UI-only by design.
+    juce::var cmdApplyTrackPreset (const juce::var& args);
     juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdSetDrumLane    (const juce::var& args);
     // Drum-rack pads: per-pad mixer/identity/choke, and the inverse of assign_sample.
@@ -895,6 +910,8 @@ private:
     // user is ~/Library/Mosh/presets/<pluginKey>/ and wins on name collisions.
     juce::File           presetsBundledRoot() const;
     juce::File           presetsUserRoot() const;
+    int                  trackPresetFaultPoint_ = 0;          // selftest only; see setTrackPresetHooksForSelfTest
+    bool                 trackPresetPretendRecording_ = false;
     // True when at least one bundled pad is resolvable — guard mutations that load
     // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
     bool                 drumKitAvailable (const juce::String& kitId = {}) const;

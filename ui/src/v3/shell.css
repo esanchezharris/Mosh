@@ -366,6 +366,9 @@
 .v3-shell .insp .pr .hdr .btn { flex: 0 0 auto; }
 .v3-shell .insp .pr .fader .nm { width: 86px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v3-shell .insp .pr .fader .v { width: 36px; }
+/* A preset's rows read back real units ("-24.00 dB", "150.0 ms", "2.50 : 1"), which the
+   36px value column above breaks across two lines. Widen it for those rows only. */
+.v3-shell .insp .pr[data-preset] .fader .v { width: 58px; white-space: nowrap; }
 .v3-shell .insp .pr.add {
   border-style: dashed; color: var(--muted); justify-content: center; align-items: center;
   font-size: 10px; padding: 7px; cursor: pointer; background: transparent;

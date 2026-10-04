@@ -557,7 +557,7 @@ const MOCK_FROZEN_LOCKED = new Set([
   "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
   "normalize_clip", "set_clip_warp", "stretch_clip",
   "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
-  "set_plugin_param", "bypass_plugin", "open_plugin_editor",
+  "set_plugin_param", "bypass_plugin", "open_plugin_editor", "apply_track_preset",
   "set_track_automation_mode", "write_automation_curve",
   "add_automation_point", "set_automation_point", "remove_automation_point",
   "clear_automation", "replace_instrument", "hot_swap_instrument",
@@ -990,6 +990,42 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 }
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
+}
+
+// The one bundled track-chain preset, as the mock knows it. The values and display
+// strings are what the pinned engine reports for resources/presets/track-chain/
+// mosh-clean-lead-v0.json (normalized = position inside the parameter's native range).
+const MOCK_TRACK_PRESET = {
+  id: "mosh.clean-lead",
+  name: "Mosh Clean Lead v0",
+  revision: 0,
+  fileName: "mosh-clean-lead-v0",
+  file: "/presets/track-chain/mosh-clean-lead-v0.json",
+} as const;
+
+function mockTrackPresetRows(): Plugin[] {
+  const tag = (stage: number) => ({
+    id: MOCK_TRACK_PRESET.id, name: MOCK_TRACK_PRESET.name, revision: MOCK_TRACK_PRESET.revision, stage,
+  });
+  return [
+    {
+      index: 0, name: "High-Pass", type: "highpass", enabled: true, external: false, builtin: true,
+      category: "Filter", isInstrument: false, preset: tag(0),
+      params: [{ index: 0, name: "Frequency", value: (80 - 10) / (22000 - 10), display: "80 Hz", min: 10, max: 22000 }],
+    },
+    {
+      index: 1, name: "Compressor", type: "compressor", enabled: true, external: false, builtin: true,
+      category: "Dynamics", isInstrument: false, preset: tag(1),
+      params: [
+        { index: 0, name: "Threshold", value: (0.0630957 - 0.01) / 0.99, display: "-24.00 dB" },
+        { index: 1, name: "Ratio", value: 0.4 / 0.95, display: "2.50 : 1" },
+        { index: 2, name: "Attack", value: (20 - 0.3) / 199.7, display: "20.0 ms", min: 0.3, max: 200 },
+        { index: 3, name: "Release", value: (150 - 10) / 290, display: "150.0 ms", min: 10, max: 300 },
+        { index: 4, name: "Output gain", value: 10 / 34, display: "+0.00 dB", min: -10, max: 24 },
+        { index: 5, name: "Sidechain gain", value: 0.5, display: "+0.00 dB", min: -24, max: 24 },
+      ],
+    },
+  ];
 }
 function trackGroupSupports(group: TrackGroup, axis: "edit" | "mix"): boolean {
   return group.kind === axis || group.kind === "edit_mix";
@@ -5220,6 +5256,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         { plugin: "4osc", name: "mosh-pad", file: "/presets/4osc/mosh-pad.json", source: "bundled" },
         { plugin: "4osc", name: "mosh-pluck", file: "/presets/4osc/mosh-pluck.json", source: "bundled" },
         { plugin: "vital", name: "user-patch", file: "/presets/vital/user-patch.vital", source: "user" },
+        // the bundled track-chain preset (resources/presets/track-chain/*.json) — applied
+        // with apply_track_preset, never load_preset
+        { plugin: "track-chain", name: MOCK_TRACK_PRESET.fileName, file: MOCK_TRACK_PRESET.file, source: "bundled" },
       ];
       const filter = str(args.plugin, "").toLowerCase();
       return ok(command, { presets: filter ? lib.filter((p) => p.plugin === filter) : lib });
@@ -5246,11 +5285,56 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       ];
       return ok(command, { items });
     }
+    // Track-chain presets. Mirrors native cmdApplyTrackPreset's CONTRACT — the same
+    // refusals in the same order, one undo step, ownership tags, no duplicate on
+    // re-apply — over the one bundled preset. The mock holds no DSP; the two rows carry
+    // the display strings the pinned engine produces for the preset's values.
+    case "apply_track_preset": {
+      const trackId = str(args.trackId);
+      if (!trackId) return err(command, "trackId is required — a preset is applied to one named track");
+      const t = findTrack(trackId);
+      if (!t) return err(command, "no track: " + trackId);
+      if (t.type === "drum") return err(command, "a vocal preset applies to an audio track; this is a drum track");
+      if (t.isInstrument || (t.plugins ?? []).some((p) => p.isInstrument))
+        return err(command, "this track hosts an instrument; a vocal preset applies to an audio track");
+      if (t.isReturn) return err(command, "this is a return track; apply the preset to the vocal track that feeds it");
+      if (snapshot.transport.recording) return err(command, "cannot apply a preset while recording — stop recording first");
+      const file = str(args.file, "");
+      if (file !== MOCK_TRACK_PRESET.file) return err(command, "preset file not found: " + file);
+
+      const rack = t.plugins ?? [];
+      const owned = rack.filter((p) => p.preset?.id === MOCK_TRACK_PRESET.id);
+      const fresh = mockTrackPresetRows();
+      const sameAsPreset = owned.length === fresh.length && owned.every((p, i) =>
+        p.preset?.stage === i && p.type === fresh[i]!.type && p.enabled
+        && p.params.length === fresh[i]!.params.length
+        && p.params.every((q, k) => Math.abs(q.value - fresh[i]!.params[k]!.value) < 1e-9)
+        && (i === 0 || p.index === owned[i - 1]!.index + 1));
+      const result = (changed: boolean, replaced: boolean) => ok(command, {
+        trackId, presetId: MOCK_TRACK_PRESET.id, revision: MOCK_TRACK_PRESET.revision,
+        name: MOCK_TRACK_PRESET.name, changed, replaced,
+        stages: (t.plugins ?? []).filter((p) => p.preset?.id === MOCK_TRACK_PRESET.id)
+          .map((p) => ({ index: p.index, processor: p.type === "highpass" ? "lowpass" : p.type, enabled: p.enabled })),
+      });
+      if (sameAsPreset) return result(false, false);   // native opens no transaction here either
+
+      pushUndo();
+      const at = owned.length > 0 ? rack.indexOf(owned[0]!) : rack.length;
+      const kept = rack.filter((p) => p.preset?.id !== MOCK_TRACK_PRESET.id);
+      const insertAt = Math.min(at, kept.length);
+      t.plugins = [...kept.slice(0, insertAt), ...fresh, ...kept.slice(insertAt)];
+      t.plugins.forEach((p, i) => { p.index = i; });
+      invalidate();
+      return result(true, owned.length > 0);
+    }
     case "load_preset": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "no track");
       const file = str(args.file, "");
       if (!file) return err(command, "preset file not found: ");
+      // Mirrors native: a track-chain preset is refused by name on the instrument seam.
+      if (file.includes("/track-chain/"))
+        return err(command, "this is a track preset, not an instrument patch — apply it from the track's Vocal preset menu");
       const isVital = file.endsWith(".vital");
       const inst = (t.plugins ?? []).find((p) =>
         isVital ? p.isInstrument && /vital/i.test(p.name) : p.isInstrument && !!p.builtin);
