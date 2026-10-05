@@ -17866,11 +17866,16 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
 
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
+    // Xruns across the take (device overloads plus callbacks that overran their block). A
+    // HAL cycle skipped between the click going out and coming back moves the landing by
+    // exactly one device block, so a block-sized error can only be read with this beside it.
+    const int xrunsBeforeRecord = deviceManager.getXRunCount();
     auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
     check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
     pump (2500);
     auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
     check (ok (stop), "recording stopped");
+    const int xrunsAfterStop = deviceManager.getXRunCount();
 
     // ── 4. where did it land? ──
     var landed;
@@ -17917,6 +17922,8 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
             }
         }
     }
+    std::cerr << "  ..   xruns: beforeRecord=" << xrunsBeforeRecord << " afterStop=" << xrunsAfterStop
+              << " duringTake=" << (xrunsAfterStop - xrunsBeforeRecord) << "\n";
     std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
     return failures;
 }
