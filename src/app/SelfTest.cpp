@@ -17782,13 +17782,20 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (device != nullptr, "JUCE audio device is open");
     if (device == nullptr)
         return failures;
-    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
-              << " block=" << device->getCurrentBufferSizeSamples()
-              << " reportedIn=" << device->getInputLatencyInSamples()
-              << " reportedOut=" << device->getOutputLatencyInSamples()
-              << " activeIn=" << device->getActiveInputChannels().countNumberOfSetBits() << "\n";
-    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
-    const double rate = device->getCurrentSampleRate();
+    auto describeDevice = [&] (const char* when)
+    {
+        std::cerr << "  ..   " << when << ": device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+                  << " block=" << device->getCurrentBufferSizeSamples()
+                  << " reportedIn=" << device->getInputLatencyInSamples()
+                  << " reportedOut=" << device->getOutputLatencyInSamples()
+                  << " activeIn=" << device->getActiveInputChannels().countNumberOfSetBits() << "\n";
+    };
+    describeDevice ("at launch");
+    // NB: MoshEngine opens the device output-only at launch and activates the input side
+    // lazily, on the first arm (activateAudioInput), and calibrate_latency refuses until
+    // an input channel is active. So the take track is armed FIRST: "active input
+    // channel" is asserted after that, and the calibration runs after it too — the same
+    // order the V3-vocal smoke below uses.
 
     auto* mm = MessageManager::getInstanceWithoutCreating();
     auto pump = [mm] (int ms)
@@ -17802,7 +17809,26 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     };
     auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
 
-    // ── 1. calibrate ──
+    // ── 1. open the input the way the product does: arm the track the take will land on ──
+    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
+    check (ok (takeTrack), "create_track Take ok");
+    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
+           "input monitoring OFF on the take (so the loopback carries only the click)");
+    // Arming activated the input side, which RE-OPENS the device: the pointer read at the
+    // top is stale from here on. Re-fetch it before it is used again.
+    device = deviceManager.getCurrentAudioDevice();
+    check (device != nullptr, "the device is still open after arming (input side activated)");
+    if (device == nullptr)
+        return failures;
+    describeDevice ("after arming");
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0,
+           "arming opened an active input channel on the device (set MOSH_AUDIO_INPUT_DEVICE)");
+    const double rate = device->getCurrentSampleRate();
+
+    // ── 2. calibrate ──
     check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
     auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
     check (ok (start), "calibrate_latency start ok with a live device");
@@ -17830,7 +17856,7 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (measuredMs >= 0.0 && measuredMs < 200.0, "loopback round trip is a sane number (< 200 ms)");
     check (std::abs ((double) cal.getProperty ("sampleRate", 0.0) - rate) < 0.5, "record carries the device rate");
 
-    // ── 2. the click: play at 1.0 s on one track, record the loopback on another ──
+    // ── 3. the click: play at 1.0 s on one track, record the loopback on the armed one ──
     auto clickTrack = cmd (ops, "create_track", args1 ("name", "Click"));
     check (ok (clickTrack), "create_track Click ok");
     const auto clickTrackId = clickTrack["data"].getProperty ("trackId", var()).toString();
@@ -17839,14 +17865,6 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     const auto clickId = tone["data"].getProperty ("clipId", var()).toString();
     check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
 
-    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
-    check (ok (takeTrack), "create_track Take ok");
-    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
-    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
-    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
-    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
-           "input monitoring OFF on the take (so the loopback carries only the click)");
-
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
     auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
     check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
@@ -17854,7 +17872,7 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
     check (ok (stop), "recording stopped");
 
-    // ── 3. where did it land? ──
+    // ── 4. where did it land? ──
     var landed;
     {
         auto snap = ops.snapshot();
