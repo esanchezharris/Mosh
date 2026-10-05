@@ -26,6 +26,70 @@ namespace
     // graph is rebuilt to pick up the new latency.
     constexpr int kLatencyChangeSettleMs = 150;
     constexpr int kRecordingRetryMs = 500;
+
+    /** A parameter that is one of a few named choices: the key and the scale. It is
+        stepped for real (every incoming value, automation included, snaps to the nearest
+        choice) and it carries the choices' names, so a surface can offer a menu instead of
+        a slider whose positions mean nothing. A name may list two spellings ("A#/Bb");
+        either one is understood when the value arrives as text. */
+    struct ChoiceParameter final : public te::AutomatableParameter
+    {
+        ChoiceParameter (const String& paramID, const String& name, te::Plugin& owner, StringArray choiceNames)
+            : te::AutomatableParameter (paramID, name, owner, { 0.0f, (float) jmax (1, choiceNames.size() - 1) }),
+              labels (std::move (choiceNames))
+        {
+        }
+
+        ~ChoiceParameter() override
+        {
+            notifyListenersOfDeletion();
+        }
+
+        int stateFor (float v) const noexcept               { return jlimit (0, labels.size() - 1, roundToInt (v)); }
+
+        bool isDiscrete() const override                    { return true; }
+        int getNumberOfStates() const override              { return labels.size(); }
+        float getValueForState (int i) const override       { return (float) jlimit (0, labels.size() - 1, i); }
+        int getStateForValue (float v) const override       { return stateFor (v); }
+        float snapToState (float v) const override          { return (float) stateFor (v); }
+
+        bool hasLabels() const override                     { return true; }
+        String getLabelForValue (float v) const override    { return labels[stateFor (v)]; }
+        StringArray getAllLabels() const override           { return labels; }
+        String valueToString (float v) override             { return labels[stateFor (v)]; }
+
+        float stringToValue (const String& s) override
+        {
+            const auto wanted = s.trim();
+            for (int i = 0; i < labels.size(); ++i)
+                for (const auto& spelling : StringArray::fromTokens (labels[i], "/", {}))
+                    if (spelling.equalsIgnoreCase (wanted))
+                        return (float) i;
+            return (float) stateFor (wanted.getFloatValue());
+        }
+
+        const StringArray labels;
+    };
+
+    // What each continuous control reads back as, so nothing shows a bare 0-1 number.
+    std::function<String (float)> shownAs (float scale, int decimals, const char* unit)
+    {
+        return [scale, decimals, unit] (float v)
+        {
+            // Rounded here, not by String: with no decimal places String prints the raw
+            // float ("80.95"), and a hair under zero would read "-0.0".
+            const double step = std::pow (10.0, -decimals);
+            double shown = std::round ((double) v * scale / step) * step;
+            if (std::abs (shown) < 0.5 * step)
+                shown = 0.0;
+            return (decimals <= 0 ? String (roundToInt (shown)) : String (shown, decimals)) + " " + unit;
+        };
+    }
+
+    std::function<float (const String&)> readAs (float scale)
+    {
+        return [scale] (const String& s) { return s.retainCharacters ("0123456789.-").getFloatValue() / scale; };
+    }
 }
 
 MoshAutoTunePlugin::MoshAutoTunePlugin (te::PluginCreationInfo info) : te::Plugin (info)
@@ -41,16 +105,21 @@ MoshAutoTunePlugin::MoshAutoTunePlugin (te::PluginCreationInfo info) : te::Plugi
     glideValue.referTo (state, idGlide, um, 1.0f);
     lookaheadValue.referTo (state, idLookahead, um, 0.0f);
 
-    // The first seven keep their order and ranges; new params are appended.
-    rootParam = addParam ("root", TRANS ("Root"), { 0.0f, 11.0f });
-    scaleParam = addParam ("scale", TRANS ("Scale"), { 0.0f, 2.0f });
-    retuneParam = addParam ("retune", TRANS ("Retune"), { 5.0f, 250.0f });
-    amountParam = addParam ("amount", TRANS ("Amount"), { 0.0f, 1.0f });
-    rangeParam = addParam ("range", TRANS ("Range"), { 0.0f, 300.0f });
-    mixParam = addParam ("mix", TRANS ("Mix"), { 0.0f, 1.0f });
-    outputParam = addParam ("output", TRANS ("Output"), { -18.0f, 6.0f });
-    glideParam = addParam ("glide", TRANS ("Glide"), { 0.0f, 1.0f });
-    lookaheadParam = addParam ("lookahead", TRANS ("Look-ahead"), { 0.0f, moshfx::retune::RetuneCore::kMaxLookaheadMs });
+    // The first seven keep their order and ranges; new params are appended. Key and
+    // scale are menus; the rest read back in their own units.
+    rootParam = new ChoiceParameter ("root", TRANS ("Key"), *this,
+                                     { "C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B" });
+    addAutomatableParameter (rootParam);
+    scaleParam = new ChoiceParameter ("scale", TRANS ("Scale"), *this, { TRANS ("Chromatic"), TRANS ("Major"), TRANS ("Minor") });
+    addAutomatableParameter (scaleParam);
+    retuneParam = addParam ("retune", TRANS ("Retune speed"), { 5.0f, 250.0f }, shownAs (1.0f, 0, "ms"), readAs (1.0f));
+    amountParam = addParam ("amount", TRANS ("Amount"), { 0.0f, 1.0f }, shownAs (100.0f, 0, "%"), readAs (100.0f));
+    rangeParam = addParam ("range", TRANS ("Range"), { 0.0f, 300.0f }, shownAs (1.0f, 0, "cents"), readAs (1.0f));
+    mixParam = addParam ("mix", TRANS ("Mix"), { 0.0f, 1.0f }, shownAs (100.0f, 0, "%"), readAs (100.0f));
+    outputParam = addParam ("output", TRANS ("Output"), { -18.0f, 6.0f }, shownAs (1.0f, 1, "dB"), readAs (1.0f));
+    glideParam = addParam ("glide", TRANS ("Glide"), { 0.0f, 1.0f }, shownAs (100.0f, 0, "%"), readAs (100.0f));
+    lookaheadParam = addParam ("lookahead", TRANS ("Look-ahead"), { 0.0f, moshfx::retune::RetuneCore::kMaxLookaheadMs },
+                               shownAs (1.0f, 1, "ms"), readAs (1.0f));
 
     rootParam->attachToCurrentValue (rootValue);
     scaleParam->attachToCurrentValue (scaleValue);

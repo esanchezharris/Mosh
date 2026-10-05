@@ -27,6 +27,35 @@ export const BUILTINS = [
   { type: "softclip", name: "Mosh Soft Clipper", category: "Effects", isInstrument: false, builtin: true as const },
 ];
 
+// Mosh AutoTune's controls as the engine describes them (MoshAutoTunePlugin.cpp): the key
+// and the scale are named choices, the rest are ranges that read back in their own units.
+type AutoTuneSpec = { name: string; choices?: readonly string[]; min?: number; max?: number; scale?: number; decimals?: number; unit?: string };
+const AUTOTUNE_PARAMS: readonly AutoTuneSpec[] = [
+  { name: "Key", choices: ["C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B"] },
+  { name: "Scale", choices: ["Chromatic", "Major", "Minor"] },
+  { name: "Retune speed", min: 5, max: 250, decimals: 0, unit: "ms" },
+  { name: "Amount", min: 0, max: 1, scale: 100, decimals: 0, unit: "%" },
+  { name: "Range", min: 0, max: 300, decimals: 0, unit: "cents" },
+  { name: "Mix", min: 0, max: 1, scale: 100, decimals: 0, unit: "%" },
+  { name: "Output", min: -18, max: 6, decimals: 1, unit: "dB" },
+  { name: "Glide", min: 0, max: 1, scale: 100, decimals: 0, unit: "%" },
+  { name: "Look-ahead", min: 0, max: 12, decimals: 1, unit: "ms" },
+];
+// C, chromatic, 80 ms, 100 %, 100 cents, 100 %, 0 dB, 100 %, 0 ms: a new plugin's values.
+const AUTOTUNE_DEFAULTS = [0, 0, 75 / 245, 1, 1 / 3, 1, 0.75, 1, 0];
+
+/** What a built-in's parameter reads back as at a 0-1 `value`, where the mock knows the
+ *  engine's own wording (Mosh AutoTune). Undefined elsewhere: the row shows the number. */
+export function builtinParamDisplay(type: string, index: number, value: number): string | undefined {
+  if (type !== "moshAutoTune") return undefined;
+  const spec = AUTOTUNE_PARAMS[index];
+  if (!spec) return undefined;
+  const v = Math.min(1, Math.max(0, value));
+  if (spec.choices) return spec.choices[Math.round(v * (spec.choices.length - 1))];
+  const physical = (spec.min ?? 0) + v * ((spec.max ?? 1) - (spec.min ?? 0));
+  return `${(physical * (spec.scale ?? 1)).toFixed(spec.decimals ?? 0)} ${spec.unit ?? ""}`.trim();
+}
+
 export function mkParams(n: number): PluginParam[] {
   return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
 }
@@ -39,7 +68,13 @@ export function mkBuiltinParams(type: string, isInstrument: boolean): PluginPara
   if (isInstrument) return type === "4osc"
     ? params(["Osc 1 Level", "Osc 2 Level", "Cutoff", "Resonance", "Attack", "Decay", "Sustain", "Release"], [0.8, 0.5, 0.6, 0.2, 0.05, 0.3, 0.7, 0.25])
     : [];
-  if (type === "moshAutoTune") return params(["Root", "Scale", "Retune", "Amount", "Range", "Mix", "Output", "Glide", "Look-ahead"], [0, 0, 0.31, 1, 0.33, 1, 0.75, 1, 0]);
+  if (type === "moshAutoTune") return AUTOTUNE_PARAMS.map((spec, index) => {
+    const value = AUTOTUNE_DEFAULTS[index];
+    return {
+      index, name: spec.name, value, display: builtinParamDisplay(type, index, value),
+      ...(spec.choices ? { discrete: true, states: spec.choices.length, choices: [...spec.choices] } : {}),
+    };
+  });
   if (type === "moshOTT") return params(["Amount", "Time", "Low Gain", "Mid Gain", "High Gain", "Mix", "Output"], [0.12, 0.24, 0.5, 0.5, 0.5, 1, 0.71]);
   if (type === "moshXFeedback") return params(["Sensitivity", "Max Cuts", "Max Depth", "Release", "Auto Suppress", "Mix", "Output"], [0.62, 0.5, 0.55, 0.38, 1, 0.8, 0.5]);
   if (type === "highpass") return params(["Frequency"], [0.34]);   // 180 Hz within the 10-22000 Hz native range

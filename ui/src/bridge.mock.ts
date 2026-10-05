@@ -23,7 +23,7 @@ import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
 import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
 import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
-import { BUILTINS, mkParams, mkBuiltinParams, mkMoshFx } from "./mock/builtins";
+import { BUILTINS, mkParams, mkBuiltinParams, mkMoshFx, builtinParamDisplay } from "./mock/builtins";
 import { fixturePeaksForClip } from "./mock/fixturePeaks";
 import { portfolioSeed } from "./mock/portfolioSeed";
 
@@ -4513,6 +4513,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_plugin_param": {
       const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
       const p = f.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      // A stepped parameter lands on its nearest state, and the read-out follows the
+      // value, as in the engine (only where the mock knows the engine's wording).
+      if (p?.choices?.length) p.value = Math.round(Math.min(1, Math.max(0, p.value)) * (p.choices.length - 1)) / (p.choices.length - 1);
+      if (p) { const shown = builtinParamDisplay(f.track.plugins![f.idx].type, p.index, p.value); if (shown !== undefined) p.display = shown; }
       // G10 — mirrors the native cmdSetPluginParam: when the owning track is armed
       // "write", capture a point at the current transport position in the SAME mutation
       // (touch/latch are accepted by set_track_automation_mode but inert here too, v0).

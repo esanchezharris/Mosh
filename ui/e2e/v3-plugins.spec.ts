@@ -135,3 +135,62 @@ test("drag a plugin's header above or below another row to reorder the chain; un
   await expect(rows.nth(first)).toContainText("High-Pass");
   await expect(rows).toHaveCount(first + 2);
 });
+
+// Mosh AutoTune reads like a tuner: the key and the scale are menus of named choices, every
+// control is on screen, and each slider reads back in its own units. The row shows what the
+// engine describes (choices + display); this drives it against the mock's copy of that.
+test("AutoTune: Key and Scale are menus, all nine controls show with units, and a picked key sticks", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-add-audio").click();
+  const newTrack = page.getByTestId("v3-track").last();
+  await newTrack.getByRole("button", { name: /^Select track/ }).click();
+  const inspector = page.getByTestId("v3-inspector");
+  await expect(inspector).toHaveAttribute("data-track-id", (await newTrack.getAttribute("data-track-id"))!);
+  const rows = inspector.getByTestId("v3-plugin");
+  const before = await rows.count();
+
+  await page.getByTestId("v3-add-plugin").click();
+  const dock = page.getByTestId("v2-plugin-dock");
+  await dock.getByTestId("v2-pb-search").fill("AutoTune");
+  await dock.getByTestId("v2-pb-row").first().click();
+  await expect(rows).toHaveCount(before + 1);
+  const tuner = rows.last();
+  await expect(tuner).toHaveAttribute("data-plugin-type", "moshAutoTune");
+
+  // every control, in the order a tuner is read
+  const params = tuner.getByTestId("v3-plugin-param");
+  await expect(params).toHaveCount(9);
+  await expect(params.locator(".nm")).toHaveText(
+    ["Key", "Scale", "Retune speed", "Glide", "Amount", "Range", "Mix", "Output", "Look-ahead"]);
+
+  // Key and Scale are menus, not sliders
+  const key = tuner.getByLabel("Key");
+  const scale = tuner.getByLabel("Scale");
+  await expect(key).toHaveJSProperty("tagName", "SELECT");
+  await expect(scale).toHaveJSProperty("tagName", "SELECT");
+  await expect(key.locator("option")).toHaveText(["C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B"]);
+  await expect(scale.locator("option")).toHaveText(["Chromatic", "Major", "Minor"]);
+  await expect(tuner.locator('input[type="range"]')).toHaveCount(7);
+  await expect(key.locator("option:checked")).toHaveText("C");
+
+  // the sliders read back in units, not as a bare 0-1 number
+  await expect(params.nth(2).locator(".v")).toHaveText("80 ms");
+  await expect(params.nth(5).locator(".v")).toHaveText("100 cents");
+  await expect(params.nth(7).locator(".v")).toHaveText("0.0 dB");
+
+  // on the chromatic scale Key changes nothing, and the row says so until a scale is chosen
+  const hint = tuner.getByTestId("v3-plugin-hint");
+  await expect(hint).toContainText("Key has no effect");
+  await scale.selectOption({ label: "Minor" });
+  await expect(scale.locator("option:checked")).toHaveText("Minor");
+  await expect(hint).toHaveCount(0);
+
+  // A picked key sticks and leaves the scale alone. (That each pick is its own undo step
+  // is the engine's doing and is checked in --selftest; the mock keeps no history for
+  // parameter edits.)
+  await key.selectOption({ label: "A#/Bb" });
+  await expect(key.locator("option:checked")).toHaveText("A#/Bb");
+  await expect(scale.locator("option:checked")).toHaveText("Minor");
+  await key.selectOption({ label: "G" });
+  await expect(key.locator("option:checked")).toHaveText("G");
+});

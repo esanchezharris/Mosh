@@ -7,6 +7,7 @@ import { PresetPicker } from "../ui/PresetPicker";
 import { Range } from "./Range";
 import { useV3 } from "./shellState";
 import { usePresetMemory } from "./presetMemory";
+import { choiceIndex, choiceValue, inspectorParams, isChoice, pluginHint, showsEveryParam } from "./pluginParams";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -58,9 +59,14 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
   const moveTo = (toIndex: number | undefined) => {
     if (toIndex !== undefined) void exec("reorder_plugin", { trackId, index: plugin.index, toIndex });
   };
+  const setParam = (paramIndex: number, value: number) =>
+    void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex, value });
+  const hint = native ? pluginHint(plugin) : null;
   return (
     <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
+      data-plugin-type={plugin.type}
       data-preset={plugin.preset ? plugin.preset.id : undefined}
+      data-units={native && showsEveryParam(plugin) ? "" : undefined}
       data-drop={dropSide ?? undefined}
       onDragOver={(e) => {
         if (!acceptsDrag()) return;
@@ -112,16 +118,26 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
       )}
       {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
         onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
-      {/* A preset's stages show EVERY parameter: the chain is only inspectable if the
-          controls it set are on screen (the compressor's output trim is its fifth). */}
-      {native && (plugin.preset ? plugin.params : plugin.params.slice(0, 4)).map((p) => (
-        <label className="fader" key={p.index}>
+      {/* Which controls show, and in what order, is pluginParams.ts. A control the engine
+          offers as named choices (AutoTune's key and scale) is a menu; the rest are
+          sliders that read back in the engine's own units. */}
+      {native && inspectorParams(plugin).map((p) => isChoice(p) ? (
+        <label className="fader" key={p.index} data-testid="v3-plugin-param" data-param-index={p.index}>
+          <span className="nm">{p.name}</span>
+          <select aria-label={p.name} value={choiceIndex(p.value, p.choices.length)}
+            onChange={(e) => setParam(p.index, choiceValue(Number(e.target.value), p.choices.length))}>
+            {p.choices.map((c, i) => <option key={c} value={i}>{c}</option>)}
+          </select>
+        </label>
+      ) : (
+        <label className="fader" key={p.index} data-testid="v3-plugin-param" data-param-index={p.index}>
           <span className="nm">{p.name}</span>
           <Range min={0} max={1} step={0.01} value={p.value} aria-label={p.name}
-            onChange={(e) => void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
+            onChange={(e) => setParam(p.index, Number(e.target.value))} />
           <span className="v">{p.display ?? p.value.toFixed(2)}</span>
         </label>
       ))}
+      {hint && <div className="set-hint" data-testid="v3-plugin-hint">{hint}</div>}
       {!native && (
         <button type="button" className="btn pri" data-testid="v3-open-editor"
           onClick={() => void exec("open_plugin_editor", { trackId, index: plugin.index })}>

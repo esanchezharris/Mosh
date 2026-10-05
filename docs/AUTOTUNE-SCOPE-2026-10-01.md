@@ -254,15 +254,24 @@ Unchanged ids, order and ranges for the first seven; one appended.
 
 | # | Param | Range | Maps to |
 |---|---|---|---|
-| 0 | Root | 0–11 | scale root |
-| 1 | Scale | 0–2 | chromatic, major, minor |
-| 2 | Retune | 5–250 ms | retune time; 5 ms = hard tune |
+| 0 | Key (id `root`) | 12 choices, C to B | scale root; a menu, stepped |
+| 1 | Scale | 3 choices | Chromatic, Major, Minor; a menu, stepped |
+| 2 | Retune speed (id `retune`) | 5–250 ms | retune time; 5 ms = hard tune |
 | 3 | Amount | 0–1 | correction strength (default changes 0.35 → 1.0) |
 | 4 | Range | 0–300 cents | cap on the correction |
 | 5 | Mix | 0–1 | dry/wet; dry is delayed by `D` |
 | 6 | Output | −18…+6 dB | output gain |
 | 7 | **Glide** (new) | 0–1 | 0 snaps onto each new note, 1 eases in (default 1) |
 | 8 | **Look-ahead** (new) | 0–12 ms | delays the audio into the shifter so the correction is decided from pitch as new as the audio (default 0) |
+
+**How the controls present (2026-10-05, owner request).** Key and Scale are stepped
+parameters that name their choices; the snapshot carries those names (`params[].choices`)
+and the inspector shows a menu. A value that falls between two choices (an old slider
+position, an automation point) lands on the nearest. Every other control reads back in its
+own units ("80 ms", "100 %", "100 cents", "0.0 dB"). The V3 inspector shows all nine,
+ordered Key, Scale, Retune speed, Glide, Amount, Range, Mix, Output, Look-ahead, and says
+so when the scale is Chromatic, because Key then changes nothing. Ids, order and ranges
+are unchanged, so saved sessions and presets load as before.
 
 Reported latency is `D` plus the look-ahead: about 1.8 ms at zero, 13.8 ms at the top.
 Voiced audio is additionally delayed by between zero and one and a half pitch periods as

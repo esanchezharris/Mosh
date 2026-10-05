@@ -387,6 +387,9 @@ export type PluginParam = {
    *  editor snaps its points to the same grid. Absent means continuous. */
   discrete?: boolean;
   states?: number;
+  /** The names of a stepped parameter's states, in order, when it has them (AutoTune's
+   *  key and scale). The inspector offers these as a menu instead of a slider. */
+  choices?: string[];
 };
 
 // Route C.2 — the real-time RAVE insert's snapshot view (present iff this plugin is one).

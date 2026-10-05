@@ -3435,6 +3435,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (paramCount == 9, "AutoTune exposes nine params (seven original + Glide + Look-ahead)");
         check (hasGlide && hasLookahead, "AutoTune's new params are appended as Glide then Look-ahead");
 
+        // Key and scale are menus, not sliders: stepped, with every choice named, and the
+        // other controls read back in their own units instead of a bare 0-1 number.
+        {
+            auto atParam = [&] (int paramIndex) -> var
+            {
+                auto trk = trackById (at);
+                if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                    for (auto& p : *arr)
+                        if ((int) p.getProperty ("index", -1) == atIdx)
+                            if (auto* params = p.getProperty ("params", var()).getArray())
+                                if (paramIndex < params->size())
+                                    return params->getReference (paramIndex);
+                return {};
+            };
+            auto shown = [&] (int paramIndex) { return atParam (paramIndex).getProperty ("display", var()).toString(); };
+            auto choice = [&] (int paramIndex, int i) { return atParam (paramIndex).getProperty ("choices", var())[i].toString(); };
+
+            const auto key = atParam (0), scale = atParam (1);
+            check (key.getProperty ("name", var()).toString() == "Key", "AutoTune's first control is named Key");
+            check ((bool) key.getProperty ("discrete", false) && (int) key.getProperty ("states", 0) == 12
+                   && key.getProperty ("choices", var()).size() == 12,
+                   "Key is a stepped control with twelve named choices");
+            check (choice (0, 0) == "C" && choice (0, 7) == "G" && choice (0, 10) == "A#/Bb" && choice (0, 11) == "B",
+                   "Key's choices are the twelve notes in order from C");
+            check (shown (0) == "C", "a new AutoTune is in C");
+            check ((bool) scale.getProperty ("discrete", false) && (int) scale.getProperty ("states", 0) == 3
+                   && choice (1, 0) == "Chromatic" && choice (1, 1) == "Major" && choice (1, 2) == "Minor",
+                   "Scale is a stepped control: Chromatic, Major, Minor");
+            check (shown (1) == "Chromatic", "a new AutoTune is chromatic");
+            check (shown (2) == "80 ms" && shown (3) == "100 %" && shown (4) == "100 cents" && shown (5) == "100 %"
+                   && shown (6) == "0.0 dB" && shown (7) == "100 %" && shown (8) == "0.0 ms",
+                   "the other controls read back in units (retune \"" + shown (2) + "\", output \"" + shown (6) + "\")");
+
+            // A menu sends the exact position of a choice.
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 0 }, { "value", 7.0 / 11.0 }}))),
+                   "set Key to its eighth choice");
+            check (shown (0) == "G", "Key reads G");
+            // Anything else (an old slider position, an automation point) lands on the nearest note.
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 0 }, { "value", 0.80 }}))),
+                   "set Key between two notes");
+            check (shown (0) == "A" && std::abs ((double) atParam (0).getProperty ("value", -1.0) - 9.0 / 11.0) < 1.0e-4,
+                   "a value between two notes snaps to the nearest (0.80 -> A, stored exactly on it)");
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 1 }, { "value", 0.5 }}))),
+                   "set Scale to its middle choice");
+            check (shown (1) == "Major", "Scale reads Major");
+            check (ok (cmd (ops, "undo")) && shown (1) == "Chromatic", "undo puts the scale back to Chromatic");
+            check (ok (cmd (ops, "undo")) && shown (0) == "G", "undo puts the key back to G");
+            check (ok (cmd (ops, "undo")) && shown (0) == "C", "undo puts the key back to C");
+        }
+
         // Hard tune, and the longest look-ahead so the reported latency is large
         // enough (about 14 ms) that a missing compensation cannot hide.
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 2 }, { "value", 0.0 }}))), "AutoTune retune set to hard");

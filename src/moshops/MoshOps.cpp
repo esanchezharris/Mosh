@@ -3195,6 +3195,15 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         {
             po->setProperty ("discrete", true);
             po->setProperty ("states", juce::jmax (2, param->getNumberOfStates()));
+            // The states' own names, when the parameter has them (AutoTune's key and
+            // scale), so a surface can offer a menu instead of a slider. Additive.
+            if (param->hasLabels())
+            {
+                juce::Array<var> choices;
+                for (const auto& label : param->getAllLabels())
+                    choices.add (label);
+                po->setProperty ("choices", choices);
+            }
         }
         const bool automated = param->hasAutomationPoints();
         po->setProperty ("automated", automated);
