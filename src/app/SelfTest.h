@@ -57,7 +57,9 @@ int runRecordHoldSmoke (MoshEngine&, MoshOps&);
     what opens the input side, and calibrate_latency refuses without an active input.
     Asserts a measurement lands (never a silent number), that its residual is applied,
     and - the part that matters - that a click played at 1.0 s and recorded through the
-    same loopback lands within 1 ms of 1.0 s. Its own mode
+    same loopback lands within 1 ms of 1.0 s. Two more takes arm and record with no
+    message-loop turn in between - a re-arm followed by Record, and loop_record on a
+    project that was never set up - and must land within the same 1 ms. Its own mode
     because it needs a real device; proves nothing about AUDIBILITY (that is
     --live-audio-smoke's job). */
 int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
