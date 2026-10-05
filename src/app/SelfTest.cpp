@@ -17785,7 +17785,8 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
               << " block=" << device->getCurrentBufferSizeSamples()
               << " reportedIn=" << device->getInputLatencyInSamples()
-              << " reportedOut=" << device->getOutputLatencyInSamples() << "\n";
+              << " reportedOut=" << device->getOutputLatencyInSamples()
+              << " activeIn=" << device->getActiveInputChannels().countNumberOfSetBits() << "\n";
     check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
     const double rate = device->getCurrentSampleRate();
 
@@ -17805,6 +17806,8 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
     auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
     check (ok (start), "calibrate_latency start ok with a live device");
+    if (! ok (start))   // a refusal is not recorded in the status block, so name it here
+        std::cerr << "  ..   calibrate_latency start refused: " << start["error"].toString() << "\n";
     check (calState().getProperty ("state", var()).toString() == "running", "calibration reports running");
     const auto deadline = Time::getMillisecondCounter() + 12000;
     while (Time::getMillisecondCounter() < deadline
