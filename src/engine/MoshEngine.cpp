@@ -18,6 +18,25 @@ namespace mosh
 {
 namespace
 {
+    // te::InputDeviceInstance keeps its deferred record-status update (recordStatusUpdater)
+    // private and offers no way to run it early. An explicit template instantiation is
+    // allowed to name a private member, which is what lets startRecord() reach that one
+    // AsyncCaller without patching the engine. If Tracktion renames the member this stops
+    // compiling, which is the failure we want.
+    struct RecordStatusUpdater
+    {
+        using Member = te::AsyncCaller te::InputDeviceInstance::*;
+        friend Member memberPointer (RecordStatusUpdater);
+    };
+
+    template <typename Tag, typename Tag::Member member>
+    struct ExposeMember
+    {
+        friend typename Tag::Member memberPointer (Tag) { return member; }
+    };
+
+    template struct ExposeMember<RecordStatusUpdater, &te::InputDeviceInstance::recordStatusUpdater>;
+
     juce::File requireAllocatedDirectory (std::optional<juce::File> directory,
                                           const char* purpose)
     {
@@ -637,6 +656,15 @@ void MoshEngine::adoptOpenedAudioDevice()
     audioOpen = true;
     audioError = {};                // the banner clears on the next snapshot
     ensurePlaybackContext();
+}
+
+void MoshEngine::startRecord()
+{
+    for (auto* instance : edit().getAllInputDevices())
+        if (instance != nullptr)
+            (instance->*memberPointer (RecordStatusUpdater {})).handleUpdateNowIfNeeded();
+
+    edit().getTransport().record (false);
 }
 
 juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputName)

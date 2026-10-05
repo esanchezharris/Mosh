@@ -105,6 +105,16 @@ public:
     /** Attach the Edit to the audio device so the transport can play (01 §5). */
     void ensurePlaybackContext();
 
+    /** Start recording on the Edit's transport: the one place a record starts.
+        Tracktion applies an arm or input-target change on the NEXT message-loop turn
+        (te::InputDeviceInstance's deferred record-status update). If a record has
+        started by then, that update stops the fresh take: one that already holds audio
+        simply ends there, and an empty one is punched in again and lands a block or two
+        early. So any such update is run here first, while the transport is not yet
+        recording and it has nothing to stop, and only then does the transport record.
+        Needs an allocated playback context (ensurePlaybackContext()). */
+    void startRecord();
+
     /** Generate a deterministic stereo test-tone WAV in the session audio dir
         (so the Stage 1 gate — "import_clip + audio loops" — needs no file picker
         or bundled asset). Returns the written file. */
