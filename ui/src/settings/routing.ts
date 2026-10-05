@@ -21,6 +21,24 @@ export function inputDeviceOptions(devices: AudioDevices | null): string[] {
   return currentType(devices)?.inputs ?? [];
 }
 
+// The buffer sizes the Settings picker offers. The open device knows what it can run, so
+// its own list wins: CoreAudio reports many in-between sizes (48, 96, 192…), and a picker
+// of fourteen entries helps nobody, so only powers of two from 64 up are offered. With no
+// device report (headless, or a device that lists nothing) a standard ladder stands in.
+// The size in use is always present, so the select never shows a value it cannot display.
+export const STANDARD_BUFFER_SIZES = [64, 128, 256, 512, 1024];
+const MIN_BUFFER_SIZE = 64;
+const MAX_BUFFER_SIZE = 2048;
+
+export function bufferSizeOptions(devices: AudioDevices | null, current?: number | null): number[] {
+  const isPowerOfTwo = (n: number) => Number.isInteger(n) && n > 0 && (n & (n - 1)) === 0;
+  const reported = (devices?.bufferSizes ?? [])
+    .filter((n) => isPowerOfTwo(n) && n >= MIN_BUFFER_SIZE && n <= MAX_BUFFER_SIZE);
+  const sizes = new Set<number>(reported.length > 0 ? reported : STANDARD_BUFFER_SIZES);
+  if (typeof current === "number" && current > 0) sizes.add(current);
+  return [...sizes].sort((a, b) => a - b);
+}
+
 function currentType(devices: AudioDevices | null) {
   if (!devices) return undefined;
   return devices.types.find((t) => t.name === devices.current.type);

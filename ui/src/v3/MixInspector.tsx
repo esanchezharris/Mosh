@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { useStore } from "../store";
 import { ReImagineSection } from "./ReImagineSection";
 import { midiInputOptions, trackOutputOptions, currentTrackOutput, trackOutputPatch, waveInputOptions, currentTrackInput } from "../settings/routing";
@@ -22,13 +22,79 @@ function Fader({ label, value, min, max, step, display, onChange }: {
   );
 }
 
-function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+// ── drag a plugin above or below another to reorder the chain ───────────────
+// Signal-chain order is audible (a tuner ahead of a compressor is a different sound from
+// one behind it), so it gets a gesture. The HEADER is the handle: making the whole card
+// draggable would let a drag start on a parameter slider. The drop lands above or below
+// the row under the pointer, whichever half it is over, and a line shows where.
+// The drag source lives here rather than in the DataTransfer payload: the drag never
+// leaves the page, and WebKit hides custom payload types while the drag is in flight.
+let draggingPlugin: { trackId: string; index: number } | null = null;
+
+export type PluginDropSide = "above" | "below";
+
+/** Where a dragged plugin lands, as reorder_plugin's `toIndex` (the index it ends up at
+ *  once it has been taken out of its old slot). Null when the drop changes nothing. */
+export function pluginDropIndex(from: number, target: number, side: PluginDropSide): number | null {
+  if (from === target) return null;
+  const to = side === "above" ? (from < target ? target - 1 : target)
+                              : (from < target ? target : target + 1);
+  return to === from ? null : to;
+}
+
+function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
+  plugin: Plugin; trackId: string;
+  /** The chain indices of the visible plugins above and below, for the keyboard move. */
+  prevIndex?: number; nextIndex?: number;
+}) {
   const exec = useStore((s) => s.exec);
   const native = !!plugin.builtin && !plugin.external;
+  const [dropSide, setDropSide] = useState<PluginDropSide | null>(null);
+  const acceptsDrag = () => draggingPlugin !== null && draggingPlugin.trackId === trackId;
+  const sideUnder = (e: DragEvent<HTMLDivElement>): PluginDropSide => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return e.clientY < box.top + box.height / 2 ? "above" : "below";
+  };
+  const moveTo = (toIndex: number | undefined) => {
+    if (toIndex !== undefined) void exec("reorder_plugin", { trackId, index: plugin.index, toIndex });
+  };
   return (
     <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
-      data-preset={plugin.preset ? plugin.preset.id : undefined}>
-      <div className="hdr">
+      data-preset={plugin.preset ? plugin.preset.id : undefined}
+      data-drop={dropSide ?? undefined}
+      onDragOver={(e) => {
+        if (!acceptsDrag()) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDropSide(draggingPlugin!.index === plugin.index ? null : sideUnder(e));
+      }}
+      onDragLeave={(e) => {
+        // Crossing onto a child fires dragleave too; only leaving the row clears the line.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropSide(null);
+      }}
+      onDrop={(e) => {
+        if (!acceptsDrag()) return;
+        e.preventDefault();
+        const from = draggingPlugin!.index;
+        const toIndex = pluginDropIndex(from, plugin.index, sideUnder(e));
+        draggingPlugin = null;
+        setDropSide(null);
+        if (toIndex !== null) void exec("reorder_plugin", { trackId, index: from, toIndex });
+      }}>
+      <div className="hdr" data-testid="v3-plugin-handle" draggable tabIndex={0}
+        title="Drag to reorder (or Alt+Up / Alt+Down)"
+        onDragStart={(e) => {
+          draggingPlugin = { trackId, index: plugin.index };
+          e.dataTransfer.setData("text/plain", plugin.name);   // a drag with no payload never starts
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => { draggingPlugin = null; setDropSide(null); }}
+        onKeyDown={(e) => {
+          // The keyboard path: a drag is not reachable without a pointer.
+          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          e.preventDefault();
+          moveTo(e.key === "ArrowUp" ? prevIndex : nextIndex);
+        }}>
         <span className="nm">{plugin.name}</span>
         <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
         <button type="button" className="btn ghost sm" aria-label={plugin.enabled ? "Bypass" : "Enable"}
@@ -206,7 +272,8 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
         <details className="grp quiet" open>
           <summary className="grphd"><span className="sec">Plugins</span></summary>
           <div className="grp-body chain" data-testid="v3-plugins">
-            {plugins.map((p) => <PluginRow key={p.index} plugin={p} trackId={track.id} />)}
+            {plugins.map((p, i) => <PluginRow key={p.index} plugin={p} trackId={track.id}
+              prevIndex={plugins[i - 1]?.index} nextIndex={plugins[i + 1]?.index} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"
               onClick={() => useV3.getState().setPane("plugins")}>+ Add plugin</button>
             {/* Offered only for a track the producer actually SELECTED. The inspector

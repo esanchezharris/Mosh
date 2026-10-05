@@ -361,6 +361,12 @@
   color: var(--text); font-size: 10px;
 }
 .v3-shell .insp .pr .hdr { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The header is the drag handle for reordering the chain (MixInspector.tsx). WebKit needs
+   -webkit-user-drag on a non-link element, and text selection must not win the gesture. */
+.v3-shell .insp .pr .hdr[draggable="true"] { cursor: grab; -webkit-user-drag: element; user-select: none; -webkit-user-select: none; }
+.v3-shell .insp .pr .hdr[draggable="true"]:active { cursor: grabbing; }
+.v3-shell .insp .pr[data-drop="above"] { box-shadow: 0 -2px 0 0 var(--accent); }
+.v3-shell .insp .pr[data-drop="below"] { box-shadow: 0 2px 0 0 var(--accent); }
 .v3-shell .insp .pr .hdr .nm { flex: 1 1 auto; min-width: 0; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v3-shell .insp .pr .hdr .kind { flex: 0 0 auto; font-size: 9px; letter-spacing: .06em; color: var(--muted); }
 .v3-shell .insp .pr .hdr .btn { flex: 0 0 auto; }

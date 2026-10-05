@@ -96,3 +96,42 @@ test("apply the Mosh Clean Lead preset to an audio track, re-apply without dupli
   await expect(rows).toHaveCount(rowsBefore);                                // ONE undo removed both stages
   await expect(inspector.getByTestId("v3-plugin-preset")).toHaveCount(0);
 });
+
+// Chain order is audible, so the inspector lets you drag a plugin above or below another.
+// A real pointer drag in the browser: the header is the handle, the half of the row under
+// the pointer decides above/below, and it is one undoable reorder_plugin.
+test("drag a plugin's header above or below another row to reorder the chain; undo puts it back", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-add-audio").click();
+  const newTrack = page.getByTestId("v3-track").last();
+  await newTrack.getByRole("button", { name: /^Select track/ }).click();
+  const inspector = page.getByTestId("v3-inspector");
+  await expect(inspector).toHaveAttribute("data-track-id", (await newTrack.getAttribute("data-track-id"))!);
+  const rows = inspector.getByTestId("v3-plugin");
+  const first = await rows.count();
+
+  const picker = inspector.getByTestId("v3-track-preset");
+  await picker.selectOption({ label: "Mosh Clean Lead v0" });
+  await expect(rows).toHaveCount(first + 2);
+  await picker.blur();
+  await expect(rows.nth(first)).toContainText("High-Pass");            // anti-vacuity baseline: the starting order
+  await expect(rows.nth(first + 1)).toContainText("Compressor");
+
+  // Compressor up: drop on the UPPER half of the High-Pass row.
+  await rows.nth(first + 1).getByTestId("v3-plugin-handle").dragTo(rows.nth(first), { targetPosition: { x: 24, y: 4 } });
+  await expect(rows.nth(first)).toContainText("Compressor");
+  await expect(rows.nth(first + 1)).toContainText("High-Pass");
+
+  // And back down: drop on the LOWER half of the row now beneath it.
+  const lower = (await rows.nth(first + 1).boundingBox())!;
+  await rows.nth(first).getByTestId("v3-plugin-handle").dragTo(rows.nth(first + 1), { targetPosition: { x: 24, y: lower.height - 4 } });
+  await expect(rows.nth(first)).toContainText("High-Pass");
+  await expect(rows.nth(first + 1)).toContainText("Compressor");
+
+  // Each move is its own undo step.
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(rows.nth(first)).toContainText("Compressor");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(rows.nth(first)).toContainText("High-Pass");
+  await expect(rows).toHaveCount(first + 2);
+});

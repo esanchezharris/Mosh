@@ -8,6 +8,8 @@ import {
   trackOutputOptions,
   currentTrackOutput,
   trackOutputPatch,
+  bufferSizeOptions,
+  STANDARD_BUFFER_SIZES,
 } from "./routing";
 import type { AudioDevices, WaveInput, Track, TrackOutputs } from "../types";
 
@@ -151,5 +153,29 @@ describe("trackOutputPatch", () => {
   });
   it("decodes dev:<deviceID> into a deviceID patch (preserving colons in the id)", () => {
     expect(trackOutputPatch("dev:out-3-4", "t1")).toEqual({ trackId: "t1", deviceID: "out-3-4" });
+  });
+});
+
+describe("bufferSizeOptions", () => {
+  it("offers the device's own power-of-two sizes from 64 up, dropping the in-between ones", () => {
+    // What CoreAudio reports for a built-in device.
+    const d = devices({ bufferSizes: [14, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 4096] });
+    expect(bufferSizeOptions(d, 128)).toEqual([64, 128, 256, 512, 1024, 2048]);
+  });
+
+  it("does not offer 64 when the device cannot run it", () => {
+    expect(bufferSizeOptions(devices({ bufferSizes: [128, 256, 512] }), 256)).toEqual([128, 256, 512]);
+  });
+
+  it("falls back to a standard ladder that includes 64 when nothing is reported", () => {
+    expect(bufferSizeOptions(null, 512)).toEqual(STANDARD_BUFFER_SIZES);
+    expect(bufferSizeOptions(devices({ bufferSizes: [] }), 512)).toEqual([64, 128, 256, 512, 1024]);
+    expect(STANDARD_BUFFER_SIZES).toContain(64);
+  });
+
+  it("always includes the size in use, even an unusual one", () => {
+    expect(bufferSizeOptions(devices({ bufferSizes: [128, 256] }), 96)).toEqual([96, 128, 256]);
+    expect(bufferSizeOptions(null, undefined)).toEqual(STANDARD_BUFFER_SIZES);
+    expect(bufferSizeOptions(null, 0)).toEqual(STANDARD_BUFFER_SIZES);
   });
 });

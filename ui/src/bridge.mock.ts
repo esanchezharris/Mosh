@@ -4225,7 +4225,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
                    outputDevice: dead ? "" : mockAudioSel.outputDevice,
                    inputDevice: dead ? "" : mockAudioSel.inputDevice,
                    sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
-        sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512,
+        sampleRates: [44100, 48000, 96000], bufferSizes: [64, 128, 256, 512, 1024], defaultBufferSize: 512,
         audioEnabled: !dead,
         // CAP-TRN-005 — click destinations, by te::OutputDevice NAME (not the deviceID the
         // track-output pickers use). Sentinel first, then wave outs, then the MIDI sentinel

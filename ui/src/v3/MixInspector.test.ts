@@ -1,7 +1,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MixInspector, acceptsTrackPreset, inspectorHasForbiddenTabs, trackPresetLabel } from "./MixInspector";
+import { MixInspector, acceptsTrackPreset, inspectorHasForbiddenTabs, pluginDropIndex, trackPresetLabel } from "./MixInspector";
 import { useStore } from "../store";
 import type { CommandResult, Plugin, Snapshot, Track } from "../types";
 
@@ -96,6 +96,105 @@ describe("v3 Mix inspector", () => {
     const values = [...row!.querySelectorAll(".fader .v")].map((el) => el.textContent);
     expect(values).toEqual(["-3.2 dB", "0.50"]);
     expect(row!.textContent).not.toContain("0.85");
+  });
+
+  // ── drag a plugin above or below another to reorder the chain ──
+  // jsdom lays nothing out (every box is 0×0 at the origin), so a pointer at y = -1 is in
+  // the upper half of a row and y = +1 in the lower half.
+  function chain(): Snapshot {
+    const snap = snapshot();
+    const native = (index: number, name: string) => ({
+      index, name, type: name.toLowerCase(), enabled: true, external: false, builtin: true, isInstrument: false, params: [],
+    }) as unknown as Plugin;
+    snap.tracks[0]!.plugins = [native(1, "Tune"), native(2, "Filter"), native(3, "Comp")];
+    return snap;
+  }
+  function fire(el: Element, type: string, clientY = 0) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, { clientY, dataTransfer: { setData: vi.fn(), effectAllowed: "", dropEffect: "" } });
+    act(() => { el.dispatchEvent(event); });
+    return event;
+  }
+  const row = (index: number) => host.querySelector<HTMLElement>(`[data-testid="v3-plugin"][data-plugin-index="${index}"]`)!;
+  const handle = (index: number) => row(index).querySelector<HTMLElement>('[data-testid="v3-plugin-handle"]')!;
+  const reorders = () => calls.filter((c) => c.command === "reorder_plugin").map((c) => c.args);
+
+  it("dragging a plugin's header below another row moves it there", () => {
+    const snap = chain();
+    useStore.setState({ snapshot: snap });
+    act(() => root.render(React.createElement(MixInspector, { snapshot: snap })));
+    expect(handle(1).getAttribute("draggable")).toBe("true");
+
+    fire(handle(1), "dragstart");
+    const over = fire(row(3), "dragover", 1);
+    expect(over.defaultPrevented).toBe(true);                 // the row accepts the drop
+    expect(row(3).getAttribute("data-drop")).toBe("below");   // and shows where it will land
+    fire(row(3), "drop", 1);
+    expect(reorders()).toEqual([{ trackId: "t1", index: 1, toIndex: 3 }]);
+    expect(row(3).hasAttribute("data-drop")).toBe(false);
+  });
+
+  it("dragging above the first row moves a plugin to the top", () => {
+    const snap = chain();
+    useStore.setState({ snapshot: snap });
+    act(() => root.render(React.createElement(MixInspector, { snapshot: snap })));
+    fire(handle(3), "dragstart");
+    fire(row(1), "dragover", -1);
+    expect(row(1).getAttribute("data-drop")).toBe("above");
+    fire(row(1), "drop", -1);
+    expect(reorders()).toEqual([{ trackId: "t1", index: 3, toIndex: 1 }]);
+  });
+
+  it("a drop that changes nothing sends nothing, and a drag that did not start here is ignored", () => {
+    const snap = chain();
+    useStore.setState({ snapshot: snap });
+    act(() => root.render(React.createElement(MixInspector, { snapshot: snap })));
+
+    // Something else dragged over the row (a file, a clip): not ours.
+    const foreign = fire(row(2), "dragover", 1);
+    expect(foreign.defaultPrevented).toBe(false);
+    fire(row(2), "drop", 1);
+
+    // Dropped on itself, and dropped just below the row already directly above it.
+    fire(handle(2), "dragstart");
+    fire(row(2), "drop", 1);
+    fire(handle(2), "dragstart");
+    fire(row(1), "drop", 1);
+    fire(handle(2), "dragend");
+    expect(reorders()).toEqual([]);
+
+    // After dragend the row no longer accepts a drop.
+    expect(fire(row(3), "dragover", 1).defaultPrevented).toBe(false);
+  });
+
+  it("Alt+Up and Alt+Down on a plugin's header move it without a pointer", () => {
+    const snap = chain();
+    useStore.setState({ snapshot: snap });
+    act(() => root.render(React.createElement(MixInspector, { snapshot: snap })));
+    const key = (index: number, k: string, altKey: boolean) =>
+      act(() => { handle(index).dispatchEvent(new KeyboardEvent("keydown", { key: k, altKey, bubbles: true, cancelable: true })); });
+
+    key(2, "ArrowDown", true);
+    key(2, "ArrowUp", true);
+    key(1, "ArrowUp", true);      // already first: nothing to move past
+    key(3, "ArrowDown", true);    // already last
+    key(2, "ArrowDown", false);   // without Alt it is ordinary navigation
+    expect(reorders()).toEqual([
+      { trackId: "t1", index: 2, toIndex: 3 },
+      { trackId: "t1", index: 2, toIndex: 1 },
+    ]);
+  });
+
+  it("pluginDropIndex is the index a plugin ends up at once it has left its old slot", () => {
+    expect(pluginDropIndex(1, 3, "below")).toBe(3);
+    expect(pluginDropIndex(1, 3, "above")).toBe(2);
+    expect(pluginDropIndex(3, 1, "above")).toBe(1);
+    expect(pluginDropIndex(3, 1, "below")).toBe(2);
+    // No change: onto itself, just below its upper neighbour, just above its lower one.
+    expect(pluginDropIndex(2, 2, "above")).toBeNull();
+    expect(pluginDropIndex(2, 2, "below")).toBeNull();
+    expect(pluginDropIndex(2, 1, "below")).toBeNull();
+    expect(pluginDropIndex(2, 3, "above")).toBeNull();
   });
 });
 
