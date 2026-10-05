@@ -297,6 +297,10 @@ if (MOSH_BUILD_APP)
         # CAP-EXP-001 — TPDF dither on the export's final requantisation (offline only;
         # the pure quantiser in TpdfDither.h is header-only so MoshTests can unit it).
         src/audio/DitheringAudioFormat.cpp
+        # Microphone on one device, headphones on another: opened as ONE private CoreAudio
+        # aggregate instead of through JUCE's two-device FIFO (see CombinedAudioDevice.h).
+        src/audio/CombinedAudioDevice.cpp
+        src/audio/MacCoreAudioAggregateType.cpp
         # Opt-in, privacy-respecting crash reporting + telemetry (self-contained
         # module; see docs/telemetry/PRIVACY.md). Installed from ONE line at the
         # top of Main.cpp's initialise().

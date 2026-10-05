@@ -614,6 +614,13 @@ export type AudioSelection = {
   requestedOutputDevice?: string;
   activeOutputDevice?: string;
   audioReady?: boolean;
+  /** How the open device joins its input and output: one device, two devices opened as
+   *  one (macOS aggregate), two devices through a FIFO (the slow fallback), or "none"
+   *  when no input is open. */
+  combining?: "none" | "single" | "aggregate" | "fifo";
+  /** Estimated microphone-to-headphone delay of the device path, in ms. Absent with no
+   *  input open. Plugin latency on the monitored track is extra. */
+  monitorLatencyMs?: number;
 };
 
 // Full device enumeration from list_audio_devices (on-demand, NOT in the snapshot).

@@ -100,6 +100,10 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineService.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
+    test_combined_audio_device.cpp
+    ${CMAKE_SOURCE_DIR}/src/audio/CombinedAudioDevice.cpp
+    # macOS only by its own #if; carries the hidden real-hardware test [.audio-combine-live].
+    ${CMAKE_SOURCE_DIR}/src/audio/MacCoreAudioAggregateType.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/AudioRefValidation.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp

@@ -9,9 +9,10 @@ import {
   currentTrackOutput,
   trackOutputPatch,
   bufferSizeOptions,
+  monitoringDelayLabel,
   STANDARD_BUFFER_SIZES,
 } from "./routing";
-import type { AudioDevices, WaveInput, Track, TrackOutputs } from "../types";
+import type { AudioDevices, AudioSelection, WaveInput, Track, TrackOutputs } from "../types";
 
 const devices = (over: Partial<AudioDevices> = {}): AudioDevices => ({
   types: [
@@ -157,14 +158,15 @@ describe("trackOutputPatch", () => {
 });
 
 describe("bufferSizeOptions", () => {
-  it("offers the device's own power-of-two sizes from 64 up, dropping the in-between ones", () => {
+  it("offers the device's own power-of-two sizes from 32 up, dropping the in-between ones", () => {
     // What CoreAudio reports for a built-in device.
-    const d = devices({ bufferSizes: [14, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 4096] });
-    expect(bufferSizeOptions(d, 128)).toEqual([64, 128, 256, 512, 1024, 2048]);
+    const d = devices({ bufferSizes: [16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 4096] });
+    expect(bufferSizeOptions(d, 128)).toEqual([32, 64, 128, 256, 512, 1024, 2048]);
   });
 
-  it("does not offer 64 when the device cannot run it", () => {
+  it("does not offer 32 or 64 when the device cannot run them", () => {
     expect(bufferSizeOptions(devices({ bufferSizes: [128, 256, 512] }), 256)).toEqual([128, 256, 512]);
+    expect(bufferSizeOptions(devices({ bufferSizes: [64, 128, 256] }), 256)).toEqual([64, 128, 256]);
   });
 
   it("falls back to a standard ladder that includes 64 when nothing is reported", () => {
@@ -177,5 +179,28 @@ describe("bufferSizeOptions", () => {
     expect(bufferSizeOptions(devices({ bufferSizes: [128, 256] }), 96)).toEqual([96, 128, 256]);
     expect(bufferSizeOptions(null, undefined)).toEqual(STANDARD_BUFFER_SIZES);
     expect(bufferSizeOptions(null, 0)).toEqual(STANDARD_BUFFER_SIZES);
+  });
+});
+
+describe("monitoringDelayLabel", () => {
+  const audio = (patch: Partial<AudioSelection>): AudioSelection =>
+    ({ type: "CoreAudio", outputDevice: "External Headphones", inputDevice: "MacBook Pro Microphone",
+       sampleRate: 48000, bufferSize: 128, ...patch });
+
+  it("shows the engine's estimate, rounded the way a person would say it", () => {
+    expect(monitoringDelayLabel(audio({ combining: "aggregate", monitorLatencyMs: 40.4 }))).toBe("about 40 ms");
+    expect(monitoringDelayLabel(audio({ combining: "single", monitorLatencyMs: 7.3 }))).toBe("about 7.3 ms");
+  });
+
+  it("says so when the two devices could not be opened as one", () => {
+    expect(monitoringDelayLabel(audio({ combining: "fifo", monitorLatencyMs: 78.1 })))
+      .toBe("about 78 ms (devices not combined)");
+  });
+
+  it("shows nothing without an open input or an estimate", () => {
+    expect(monitoringDelayLabel(audio({ combining: "none" }))).toBeNull();
+    expect(monitoringDelayLabel(audio({ combining: "single", monitorLatencyMs: 0 }))).toBeNull();
+    expect(monitoringDelayLabel(undefined)).toBeNull();
+    expect(monitoringDelayLabel(null)).toBeNull();
   });
 });
