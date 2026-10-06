@@ -9,7 +9,7 @@
 .v3-shell .insp .pr .pp-softclip .pp-softclip-dot { fill: var(--text); stroke: var(--bg); stroke-width: 1; pointer-events: none; }
 .v3-shell .insp .pr .pp-softclip .pp-softclip-over { fill: var(--warn); pointer-events: none; }
 /* The live clipping bar and its number. */
-.v3-shell .insp .pr .pp-softclip .pp-softclip-gr { flex: 0 0 auto; width: 22px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: ui-monospace, monospace; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-gr { flex: 0 0 auto; width: 22px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: var(--mono); }
 .v3-shell .insp .pr .pp-softclip .pp-softclip-gr .pp-bar { height: 52px; }
 /* The shared vertical "gr" fill resolves to left:auto + right:0 with no width (0 px wide);
    span the bar's width here. */
@@ -25,7 +25,7 @@
 .v3-shell .insp .pr .pp-softclip .pp-softclip-dials .pp-dial { flex: 0 0 auto; min-width: 0; }
 .v3-shell .insp .pr .pp-softclip .pp-softclip-dials .pp-dial:nth-child(1) { width: 50px; }
 .v3-shell .insp .pr .pp-softclip .pp-softclip-dials .pp-dial:nth-child(2) { width: 62px; }
-.v3-shell .insp .pr .pp-softclip .pp-softclip-hint { font-family: ui-monospace, monospace; font-size: 9.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-hint { font-family: var(--mono); font-size: 9.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Minimized row: a tiny live clipping bar. */
 .v3-shell .insp .pr .pp-softclip.mini { display: inline-flex; align-items: center; flex: 0 0 auto; width: 40px; }
 .v3-shell .insp .pr .pp-softclip.mini .pp-bar { width: 100%; min-width: 0; }

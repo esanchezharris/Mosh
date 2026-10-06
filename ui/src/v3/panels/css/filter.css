@@ -22,12 +22,12 @@
 .v3-shell .insp .pr .pp-filter-hz { display: inline-flex; align-items: baseline; gap: 2px; flex: 0 0 auto; }
 .v3-shell .insp .pr .pp-filter-hz input {
   width: 44px; height: 16px; padding: 0 3px; border: 1px solid transparent; border-radius: 3px;
-  background: transparent; color: var(--text); font-family: ui-monospace, monospace; font-size: 11px;
+  background: transparent; color: var(--text); font-family: var(--mono); font-size: 11px;
   text-align: right; font-variant-numeric: tabular-nums;
 }
 .v3-shell .insp .pr .pp-filter-hz input:hover { border-color: var(--line); }
 .v3-shell .insp .pr .pp-filter-hz input:focus { outline: none; border-color: var(--accent); background: var(--bg); }
-.v3-shell .insp .pr .pp-filter-unit { color: var(--muted); font-family: ui-monospace, monospace; font-size: 9.5px; }
+.v3-shell .insp .pr .pp-filter-unit { color: var(--muted); font-family: var(--mono); font-size: 9.5px; }
 
 /* "A": the cutoff follows an automation lane during playback. */
 .v3-shell .insp .pr .pp-filter-auto {
@@ -35,7 +35,7 @@
   color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
 }
 .v3-shell .insp .pr .pp-filter-facts {
-  margin-left: auto; color: var(--muted); font-family: ui-monospace, monospace; font-size: 9.5px; white-space: nowrap;
+  margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 9.5px; white-space: nowrap;
 }
 
 /* The plot: shared .pp-plot look; the cutoff is a thin dashed guide under the handle. */

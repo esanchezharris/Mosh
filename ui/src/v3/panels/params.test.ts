@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  fmtDb, fmtHz, fmtMs, fmtPct, fmtRatio, normOf, physOf, ratioNorm, ratioOf, stateNum, thresholdDb, thresholdNorm,
+  fmtDb, fmtFreq, fmtHz, fmtMs, fmtPct, fmtRatio, normOf, physOf, ratioNorm, ratioOf, stateNum, thresholdDb, thresholdNorm,
 } from "./params";
 import type { Plugin } from "../../types";
 
@@ -41,6 +41,9 @@ describe("formatters", () => {
     expect(fmtHz(80)).toBe("80 Hz");
     expect(fmtHz(1234)).toBe("1.2k");
     expect(fmtHz(17000)).toBe("17k");
+    expect(fmtFreq(80)).toBe("80 Hz");
+    expect(fmtFreq(1234)).toBe("1.23 kHz");
+    expect(fmtFreq(12345)).toBe("12.3 kHz");
     expect(fmtDb(3)).toBe("+3.0 dB");
     expect(fmtDb(-0.04)).toBe("0.0 dB");
     expect(fmtDb(-2.46)).toBe("-2.5 dB");

@@ -4,9 +4,12 @@ import { panelKey, resetPanelStateForTests, usePanelState } from "./panelState";
 describe("panel minimized state", () => {
   beforeEach(() => resetPanelStateForTests());
 
-  it("keys by the stable item id when there is one, else by the slot", () => {
-    expect(panelKey("1013", { itemId: "1042", index: 3 })).toBe("id:1042");
-    expect(panelKey("1013", { index: 3 })).toBe("slot:1013:3");
+  it("keys by project and the stable item id when there is one, else by the slot", () => {
+    expect(panelKey("1013", { itemId: "1042", index: 3 }, "/songs/a.tracktionedit")).toBe("/songs/a.tracktionedit|id:1042");
+    expect(panelKey("1013", { index: 3 }, "/songs/a.tracktionedit")).toBe("/songs/a.tracktionedit|slot:1013:3");
+    // the same item id in another song is a different plugin
+    expect(panelKey("1013", { itemId: "1042", index: 3 }, "/songs/b.tracktionedit"))
+      .not.toBe(panelKey("1013", { itemId: "1042", index: 3 }, "/songs/a.tracktionedit"));
   });
 
   it("toggles, and persists only the minimized ones", () => {

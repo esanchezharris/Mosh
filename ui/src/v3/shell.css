@@ -45,7 +45,7 @@
   background: #3A2020; border: 1px solid #5A2A26; cursor: pointer;
 }
 .v3-shell .tp .rec.on { background: var(--record); border-color: var(--record); }
-.v3-shell .time, .v3-shell .bpm { font-family: ui-monospace, monospace; color: var(--text); }
+.v3-shell .time, .v3-shell .bpm { font-family: var(--mono); color: var(--text); }
 .v3-shell .btn {
   padding: 4px 9px; border-radius: 6px; background: var(--surface2);
   border: 1px solid var(--fog-line); font-size: 10px; color: var(--muted); cursor: pointer;
@@ -90,7 +90,7 @@
 @media (hover: hover) and (pointer: fine) {
   .v3-shell .mi:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 }
-.v3-shell .mi kbd, .v3-shell .mi .soon { font-size: 10px; color: var(--fog-label); font-family: ui-monospace, monospace; }
+.v3-shell .mi kbd, .v3-shell .mi .soon { font-size: 10px; color: var(--fog-label); font-family: var(--mono); }
 .v3-shell .mi .check { color: var(--accent); }
 .v3-shell .mi.muted { color: var(--muted); }
 .v3-shell .mi.danger { color: #FF8B7A; }
@@ -207,7 +207,7 @@
   display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; font-size: 11px;
   border: none; background: transparent; color: inherit; width: 100%; text-align: left;
 }
-.v3-shell .hist-row .when { color: var(--fog-label); font-family: ui-monospace, monospace; width: 32px; }
+.v3-shell .hist-row .when { color: var(--fog-label); font-family: var(--mono); width: 32px; }
 .v3-shell .hist-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fog-label); }
 .v3-shell .hist-row.prog .dot { background: var(--accent); }
 .v3-shell .hist-row .flex { flex: 1; min-width: 0; }
@@ -244,7 +244,7 @@
 .v3-shell .tl-corner .ibtn svg { width: 14px; height: 14px; }
 .v3-shell .tl-corner .tl-sp { flex: 1; }
 .v3-shell .tl-corner .grid-div {
-  height: 22px; padding: 0 4px; font-size: 10px; font-family: ui-monospace, monospace;
+  height: 22px; padding: 0 4px; font-size: 10px; font-family: var(--mono);
   color: var(--text); background: var(--surface2); border: 1px solid var(--fog-line); border-radius: 5px;
 }
 .v3-shell .ruler-clip { flex: 1; min-width: 0; overflow: hidden; }
@@ -254,7 +254,7 @@
 .v3-shell .rmark { position: absolute; top: 0; bottom: 0; width: 0; }
 .v3-shell .rmark .tick { position: absolute; left: 0; bottom: 0; width: 1px; height: 4px; background: var(--grid-bar); }
 .v3-shell .rmark .tick.bar { height: 8px; background: color-mix(in srgb, var(--text) 30%, transparent); }
-.v3-shell .rn { position: absolute; left: 4px; top: 3px; white-space: nowrap; font-size: 9px; font-family: ui-monospace, monospace; color: var(--muted); }
+.v3-shell .rn { position: absolute; left: 4px; top: 3px; white-space: nowrap; font-size: 9px; font-family: var(--mono); color: var(--muted); }
 .v3-shell .rn.bar { color: #C8CBC6; font-weight: 600; }
 .v3-shell .rn.beat { color: #5A6060; font-size: 8px; }
 
@@ -346,7 +346,7 @@
 .v3-shell .fader, .v3-shell .send { display: flex; align-items: center; gap: 6px; font-size: 10px; }
 .v3-shell .fader .nm { width: 44px; color: var(--text); }
 .v3-shell .fader input[type="range"] { flex: 1; accent-color: var(--accent); }
-.v3-shell .fader .v { font-family: ui-monospace, monospace; width: 48px; text-align: right; }
+.v3-shell .fader .v { font-family: var(--mono); width: 48px; text-align: right; }
 .v3-shell .chip {
   padding: 3px 8px; border-radius: 999px; border: 1px solid var(--fog-line);
   background: #101212; font-size: 9px; color: var(--fog-label); cursor: pointer;
@@ -380,7 +380,7 @@
 /* Mosh AutoTune's live display: a one-octave keyboard. Keys in the chosen key and scale
    are lit, the rest greyed out; the key being sung lights in the accent colour, and the key
    it is being pulled to (when different) gets an accent outline. */
-.v3-shell .insp .pr .tuner { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; }
+.v3-shell .insp .pr .tuner { display: flex; align-items: center; gap: 8px; font-family: var(--mono); }
 .v3-shell .insp .pr .tuner .keys { flex: 1 1 auto; min-width: 0; height: 34px; display: block; }
 .v3-shell .insp .pr .tuner .key { stroke: var(--bg); stroke-width: 1; transition: fill 60ms linear; }
 .v3-shell .insp .pr .tuner .key.white.in { fill: var(--text); }
@@ -411,27 +411,55 @@
 .v3-shell .insp .pr .hdr .pp-chev svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.6;
   stroke-linecap: round; stroke-linejoin: round; transform: rotate(90deg); transition: transform .12s var(--ease-out); }
 .v3-shell .insp .pr[data-collapsed] .hdr .pp-chev svg { transform: rotate(0deg); }
-/* Minimized: one line of summary, with an optional tiny live element before it. */
-.v3-shell .insp .pr[data-collapsed] { gap: 3px; }
-.v3-shell .insp .pr .pp-min { display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; padding-left: 22px; }
-.v3-shell .insp .pr .pp-min .sum { flex: 1 1 auto; min-width: 0; color: var(--muted); font-family: ui-monospace, monospace; font-size: 10px;
+/* Minimized: the plugin is its header row. The name gets a fixed width and the thumbnail
+   a fixed slot, so every summary down the chain starts at the same x. */
+.v3-shell .insp .pr[data-collapsed] { gap: 0; padding-top: 4px; padding-bottom: 4px; }
+.v3-shell .insp .pr[data-collapsed] .hdr .nm { flex: 0 0 82px; }
+.v3-shell .insp .pr .pp-hsum { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.v3-shell .insp .pr .pp-min-viz { flex: 0 0 44px; height: 14px; display: flex; align-items: center; overflow: hidden; }
+.v3-shell .insp .pr .pp-hsum .sum { flex: 1 1 auto; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: var(--pp-fs-cap);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Dial: arc track, value arc, pointer; read-out above the label. */
-.v3-shell .insp .pr .pp-dial { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 44px; }
+/* On/off: the lit state is the accent with a small LED, so a bypassed plugin reads off at a glance. */
+.v3-shell .insp .pr .hdr .btn.on::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 4px;
+  border-radius: 50%; background: currentColor; vertical-align: 1px; }
+/* Dial: arc track, value arc, pointer; read-out above the label. One size (30) for the
+   family; a panel's single hero control may be larger. */
+.v3-shell .insp .pr .pp-dial { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 46px; }
 .v3-shell .insp .pr .pp-dial svg { display: block; cursor: ns-resize; touch-action: none; outline: none; }
 .v3-shell .insp .pr .pp-dial svg:focus-visible { filter: drop-shadow(0 0 2px var(--accent)); }
 .v3-shell .insp .pr .pp-dial .track { fill: none; stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 3; stroke-linecap: round; }
 .v3-shell .insp .pr .pp-dial .value { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
 .v3-shell .insp .pr .pp-dial .pointer { stroke: var(--text); stroke-width: 1.6; stroke-linecap: round; }
-.v3-shell .insp .pr .pp-dial .v { font-family: ui-monospace, monospace; font-size: 10px; color: var(--text); white-space: nowrap; }
-.v3-shell .insp .pr .pp-dial .nm { font-size: 9px; color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-dial .v { font-family: var(--mono); font-size: var(--pp-fs-val); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.v3-shell .insp .pr .pp-dial .nm { font-size: var(--pp-fs-cap); color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-dial .unity { stroke: var(--muted); stroke-width: 1; }
+/* Truly unavailable: faded. Adjustable but without effect right now: only the arc is muted. */
 .v3-shell .insp .pr .pp-dial.off { opacity: .45; }
 .v3-shell .insp .pr .pp-dial.off svg { cursor: default; }
+.v3-shell .insp .pr .pp-dial.inert .value { stroke: color-mix(in srgb, var(--accent) 35%, var(--muted)); }
+/* Shared panel buttons and segmented switches: one outline, one pressed look. */
+.v3-shell .insp .pr .pp-btn, .v3-shell .insp .pr .pp-seg > button {
+  height: 18px; padding: 0 7px; border: 1px solid var(--pp-edge); border-radius: 4px; background: transparent;
+  color: var(--muted); font-size: var(--pp-fs-cap); line-height: 1; cursor: pointer; white-space: nowrap;
+}
+.v3-shell .insp .pr .pp-seg { display: inline-flex; }
+.v3-shell .insp .pr .pp-seg > button { border-radius: 0; }
+.v3-shell .insp .pr .pp-seg > button + button { margin-left: -1px; }
+.v3-shell .insp .pr .pp-seg > button:first-child { border-radius: 4px 0 0 4px; }
+.v3-shell .insp .pr .pp-seg > button:last-child { border-radius: 0 4px 4px 0; }
+.v3-shell .insp .pr :is(.pp-btn, .pp-seg > button):hover { color: var(--text); }
+.v3-shell .insp .pr :is(.pp-btn, .pp-seg > button):is([aria-pressed="true"], [aria-checked="true"]) {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); position: relative; z-index: 1;
+}
+.v3-shell .insp .pr :is(.pp-btn, .pp-seg > button):focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 /* Plots: full-width SVG; grid, 0 dB line, curve and its fill. */
-.v3-shell .insp .pr .pp-plot { display: block; width: 100%; height: auto; overflow: visible; touch-action: none; }
+.v3-shell .insp .pr .pp-plot { display: block; width: 100%; height: auto; overflow: visible; touch-action: none;
+  border-radius: 4px; background: color-mix(in srgb, var(--bg) 55%, transparent); }
 .v3-shell .insp .pr .pp-plot .grid { stroke: color-mix(in srgb, var(--text) 9%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .v3-shell .insp .pr .pp-plot .zero { stroke: color-mix(in srgb, var(--text) 22%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.v3-shell .insp .pr .pp-plot .axis { fill: var(--muted); font-size: 7px; font-family: ui-monospace, monospace; }
+.v3-shell .insp .pr .pp-plot .axis { fill: var(--muted); font-size: var(--pp-fs-axis); font-family: var(--mono);
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round; }
 .v3-shell .insp .pr .pp-plot .curve { fill: none; stroke: var(--accent); stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .v3-shell .insp .pr .pp-plot .area { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: none; }
 .v3-shell .insp .pr .pp-plot.bypassed .curve { stroke: var(--muted); }
@@ -442,7 +470,7 @@
 .v3-shell .insp .pr .pp-node .dot { fill: var(--accent); stroke: var(--bg); stroke-width: 1.2; }
 .v3-shell .insp .pr .pp-node.hollow .dot { fill: var(--surface2); stroke: var(--accent); }
 .v3-shell .insp .pr .pp-node.active .dot, .v3-shell .insp .pr .pp-node:focus-visible .dot { stroke: var(--text); stroke-width: 1.6; }
-.v3-shell .insp .pr .pp-node .lbl { fill: var(--bg); font-size: 6.5px; font-weight: 700; pointer-events: none; }
+.v3-shell .insp .pr .pp-node .lbl { fill: var(--bg); font-size: 8px; font-weight: 700; pointer-events: none; }
 .v3-shell .insp .pr .pp-node.hollow .lbl { fill: var(--accent); }
 /* Live meter bars (gain reduction fills from the top/right in the warning tone). */
 .v3-shell .insp .pr .pp-bar { position: relative; height: 4px; min-width: 24px; border-radius: 2px; overflow: hidden;

@@ -7,7 +7,7 @@
 .v3-shell .insp .pr .pp-pitch .pp-pitch-dial .pp-dial .v { display: none; }
 .v3-shell .insp .pr .pp-pitch .pp-pitch-read {
   flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.25;
-  font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums;
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
 }
 .v3-shell .insp .pr .pp-pitch .pp-pitch-st { font-size: 16px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .v3-shell .insp .pr .pp-pitch .pp-pitch-int,
@@ -22,7 +22,7 @@
 .v3-shell .insp .pr .pp-pitch .pp-pitch-chips { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
 .v3-shell .insp .pr .pp-pitch .pp-pitch-chips button {
   height: 17px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: transparent;
-  color: var(--muted); font-family: ui-monospace, monospace; font-size: 10px; cursor: pointer;
+  color: var(--muted); font-family: var(--mono); font-size: 10px; cursor: pointer;
   font-variant-numeric: tabular-nums;
 }
 .v3-shell .insp .pr .pp-pitch .pp-pitch-chips button:hover { color: var(--text); border-color: color-mix(in srgb, var(--text) 30%, transparent); }

@@ -51,6 +51,14 @@ export function fmtHz(hz: number): string {
   return `${Math.round(hz / 1000)}k`;
 }
 
+/** In-panel frequency read-out: "80 Hz", "950 Hz", "1.20 kHz", "12.0 kHz" (fmtHz is the
+ *  shorter form for one-line summaries). */
+export function fmtFreq(hz: number): string {
+  if (!Number.isFinite(hz)) return "–";
+  if (hz < 1000) return `${Math.round(hz)} Hz`;
+  return `${(hz / 1000).toFixed(hz < 10000 ? 2 : 1)} kHz`;
+}
+
 /** "+3.0 dB", "-2.5 dB", "0.0 dB" (never "-0.0"). */
 export function fmtDb(db: number, decimals = 1): string {
   if (!Number.isFinite(db)) return db < 0 ? "-∞ dB" : "∞ dB";

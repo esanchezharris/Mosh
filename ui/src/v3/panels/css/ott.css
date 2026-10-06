@@ -19,7 +19,7 @@
 .v3-shell .insp .pr .pp-ott-mid { stroke: color-mix(in srgb, var(--text) 40%, transparent); stroke-width: 1; }
 .v3-shell .insp .pr .pp-ott-lift { fill: var(--accent); }
 .v3-shell .insp .pr .pp-ott-cut { fill: var(--warn); }
-.v3-shell .insp .pr .pp-ott-read { display: flex; flex-direction: column; min-width: 0; font-family: ui-monospace, monospace; line-height: 1.15; }
+.v3-shell .insp .pr .pp-ott-read { display: flex; flex-direction: column; min-width: 0; font-family: var(--mono); line-height: 1.15; }
 .v3-shell .insp .pr .pp-ott-read .g { font-size: 10px; color: var(--text); white-space: nowrap; }
 .v3-shell .insp .pr .pp-ott-read .g.up { color: var(--accent); }
 .v3-shell .insp .pr .pp-ott-read .g.dn { color: var(--warn); }
@@ -35,7 +35,7 @@
 .v3-shell .insp .pr .pp-ott-trimbar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; }
 .v3-shell .insp .pr .pp-ott-trimbar .ctr { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px;
   background: color-mix(in srgb, var(--text) 45%, transparent); }
-.v3-shell .insp .pr .pp-ott-trim .v { flex: 0 0 auto; font-family: ui-monospace, monospace; font-size: 9px; color: var(--muted); }
+.v3-shell .insp .pr .pp-ott-trim .v { flex: 0 0 auto; font-family: var(--mono); font-size: 9px; color: var(--muted); }
 .v3-shell .insp .pr .pp-ott-trim .v.set { color: var(--text); }
 
 /* Dials: Amount (larger) leads; Output carries the clip light. */
@@ -44,7 +44,7 @@
 .v3-shell .insp .pr .pp-ott-mixw.inert .pp-dial { opacity: .45; }
 .v3-shell .insp .pr .pp-ott-out { display: flex; align-items: flex-start; gap: 3px; }
 .v3-shell .insp .pr .pp-ott-clip { margin-top: 2px; padding: 0 3px; border-radius: 3px; font-size: 8px; line-height: 12px;
-  font-family: ui-monospace, monospace; text-transform: uppercase; color: var(--muted);
+  font-family: var(--mono); text-transform: uppercase; color: var(--muted);
   border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
 .v3-shell .insp .pr .pp-ott-clip.on { color: var(--bg); background: var(--record); border-color: var(--record); }
 .v3-shell .insp .pr .pp-ott-note { font-size: 9px; color: var(--muted); }

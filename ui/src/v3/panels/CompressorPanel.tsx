@@ -38,7 +38,7 @@ function LiveDot({ trackId, index, type, x, y, yLo, yHi }: {
 function GrGauge({ trackId, index, type, scale }: { trackId: string; index: number; type: string; scale: number }) {
   const m = useDynamics(trackId, index, type);
   const gr = m ? Math.max(0, m.grDb) : 0;
-  const peak = usePeakHold(gr, 1000);
+  const peak = usePeakHold(m ? gr : undefined, 1000) ?? 0;
   const cx = 40, cy = 40, r = 33;
   const ang = gaugeAngle(gr, scale), peakAng = gaugeAngle(peak, scale);
   const [tx1, ty1] = gaugePoint(cx, cy, r - 5, peakAng), [tx2, ty2] = gaugePoint(cx, cy, r + 3, peakAng);

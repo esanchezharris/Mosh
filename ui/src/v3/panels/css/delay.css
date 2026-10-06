@@ -5,7 +5,7 @@
 .v3-shell .insp .pr .pp-delay .pp-delay-tap { stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .v3-shell .insp .pr .pp-delay .pp-delay-env { stroke: color-mix(in srgb, var(--accent) 50%, transparent); stroke-width: 1;
   stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
-.v3-shell .insp .pr .pp-delay .pp-delay-read { fill: var(--text); font-family: ui-monospace, monospace; font-size: 7.5px;
+.v3-shell .insp .pr .pp-delay .pp-delay-read { fill: var(--text); font-family: var(--mono); font-size: 7.5px;
   /* A halo so the read-out stays legible where echo stems run through it (0 dB feedback). */
   paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round; }
 .v3-shell .insp .pr .pp-delay .pp-delay-read.warn { fill: var(--warn); }
@@ -25,7 +25,7 @@
 }
 .v3-shell .insp .pr .pp-delay .pp-delay-time:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .v3-shell .insp .pr .pp-delay .pp-delay-time:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-.v3-shell .insp .pr .pp-delay .pp-delay-time .v { font-family: ui-monospace, monospace; font-size: 15px; line-height: 17px; color: var(--text); white-space: nowrap; }
+.v3-shell .insp .pr .pp-delay .pp-delay-time .v { font-family: var(--mono); font-size: 15px; line-height: 17px; color: var(--text); white-space: nowrap; }
 .v3-shell .insp .pr .pp-delay .pp-delay-time .v small { font-size: 9px; color: var(--muted); }
 .v3-shell .insp .pr .pp-delay .pp-delay-time .nm { font-size: 9px; color: var(--muted); }
 /* The one-off "set from tempo" menu. */

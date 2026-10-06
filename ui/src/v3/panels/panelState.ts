@@ -7,10 +7,12 @@ import type { Plugin } from "../../types";
 const STORAGE_KEY = "mosh.v3.pluginPanels";
 const MAX_ENTRIES = 500;
 
-/** The key a plugin's minimized state is stored under: its stable item id, else its
- *  track and chain position (which follows the slot on a reorder: older sessions only). */
-export const panelKey = (trackId: string, plugin: Pick<Plugin, "itemId" | "index">): string =>
-  plugin.itemId ? `id:${plugin.itemId}` : `slot:${trackId}:${plugin.index}`;
+/** The key a plugin's minimized state is stored under: the project (`scope`, its edit
+ *  file: Tracktion numbers items from 1001 in every edit, so an id alone repeats across
+ *  songs) plus the plugin's stable item id, else its track and chain position (which
+ *  follows the slot on a reorder: older engines only). */
+export const panelKey = (trackId: string, plugin: Pick<Plugin, "itemId" | "index">, scope = ""): string =>
+  `${scope}|${plugin.itemId ? `id:${plugin.itemId}` : `slot:${trackId}:${plugin.index}`}`;
 
 function load(): Record<string, true> {
   try {

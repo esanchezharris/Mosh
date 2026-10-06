@@ -34,8 +34,18 @@ type Props = {
   quantize?: (norm: number) => number;
   /** Draw the value arc from the centre (for ± controls). */
   bipolar?: boolean;
+  /** Draw the value arc from this 0-1 position, with a tick there (for gains: unity, so
+   *  0 dB shows no arc and a boost or cut grows away from it). Overrides `bipolar`. */
+  origin?: number;
   size?: number;
   disabled?: boolean;
+  /** Still adjustable, but has no effect right now (e.g. a mix with no processing): the
+   *  arc is muted, the read-out stays legible. Say why in `title`. */
+  inert?: boolean;
+  title?: string;
+  /** Replace the default wheel step (1 %, Shift 0.2 %) with the caller's: called with whole
+   *  notches (positive = up) after the wheel has been kept from scrolling the inspector. */
+  onWheelNotches?: (notches: number, shift: boolean) => void;
   /** The words a screen reader hears for the value; defaults to `display`. */
   valueText?: string;
   testId?: string;
@@ -44,7 +54,7 @@ type Props = {
 /** A compact rotary control: drag up/down (Shift for fine), wheel, arrow keys (PageUp/Down
  *  for big steps, Home/End for the ends), double-click for the default. Every drag, and
  *  every burst of keys or wheel, is one undo step. */
-export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bipolar, size = 40, disabled, valueText, testId }: Props) {
+export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bipolar, origin, size = 30, disabled, inert, title, onWheelNotches, valueText, testId }: Props) {
   const q = (v: number) => {
     const c = Math.min(1, Math.max(0, v));
     return quantize ? quantize(c) : c;
@@ -53,7 +63,9 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
   const start = useRef<{ y: number; norm: number } | null>(null);
   const shown = drag.live ?? norm;
   const c = size / 2, r = size / 2 - 4;
-  const from = bipolar ? 0 : START, to = dialAngle(shown);
+  const from = origin !== undefined ? dialAngle(origin) : bipolar ? 0 : START, to = dialAngle(shown);
+  const [ux1, uy1] = polar(c, c, r - 2.5, from);
+  const [ux2, uy2] = polar(c, c, r + 2.5, from);
   const [px, py] = polar(c, c, r - 6, to);
 
   const onPointerDown = (e: PointerEvent<SVGSVGElement>) => {
@@ -93,11 +105,12 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
   // non-passive native listener (React's onWheel cannot preventDefault). Trackpads send
   // many small deltas: they are summed into notches of ~100 px (3 lines) each.
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const wheelState = useRef({ acc: 0, norm, disabled, quantize: q, nudge: drag.nudge });
+  const wheelState = useRef({ acc: 0, norm, disabled, quantize: q, nudge: drag.nudge, custom: onWheelNotches });
   wheelState.current.norm = drag.live ?? norm;
   wheelState.current.disabled = !!disabled;
   wheelState.current.quantize = q;
   wheelState.current.nudge = drag.nudge;
+  wheelState.current.custom = onWheelNotches;
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
@@ -109,6 +122,7 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
       const notches = Math.trunc(st.acc / 100);
       if (notches === 0) return;
       st.acc -= notches * 100;
+      if (st.custom) { st.custom(-notches, e.shiftKey); return; }
       const next = st.quantize(st.norm - notches * (e.shiftKey ? 0.002 : 0.01));
       st.norm = next;
       st.nudge(next);
@@ -118,7 +132,7 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
   }, []);
 
   return (
-    <div className={`pp-dial${disabled ? " off" : ""}`} data-testid={testId}>
+    <div className={`pp-dial${disabled ? " off" : ""}${inert ? " inert" : ""}`} data-testid={testId} title={title}>
       <svg ref={svgRef} width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="slider" tabIndex={disabled ? -1 : 0}
         aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(shown * 100)}
         aria-valuetext={valueText ?? display} aria-disabled={disabled || undefined}
@@ -126,6 +140,7 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
         onLostPointerCapture={finish} onKeyDown={onKeyDown}
         onDoubleClick={() => { if (!disabled && defaultNorm !== undefined) drag.nudge(q(defaultNorm)); }}>
         <path className="track" d={arcPath(c, c, r, START, START + SWEEP)} />
+        {origin !== undefined && <line className="unity" x1={ux1} y1={uy1} x2={ux2} y2={uy2} />}
         <path className="value" d={arcPath(c, c, r, from, to)} />
         <line className="pointer" x1={c} y1={c} x2={px} y2={py} />
       </svg>

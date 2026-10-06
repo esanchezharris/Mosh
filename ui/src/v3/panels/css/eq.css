@@ -13,7 +13,7 @@
 /* The read-out row: four band buttons, then three scrubbable values. */
 .v3-shell .insp .pr .pp-eq .pp-eq-row {
   display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px;
-  font-family: ui-monospace, monospace; font-size: 10px;
+  font-family: var(--mono); font-size: 10px;
 }
 .v3-shell .insp .pr .pp-eq .pp-eq-bands { flex: 0 0 auto; display: flex; gap: 2px; }
 .v3-shell .insp .pr .pp-eq .pp-eq-b {

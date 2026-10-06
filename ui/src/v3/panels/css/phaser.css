@@ -11,7 +11,7 @@
 .v3-shell .insp .pr .pp-phaser .pp-phaser-ctl .pp-dial { min-width: 48px; }
 .v3-shell .insp .pr .pp-phaser .pp-phaser-read {
   flex: 1 1 auto; min-width: 0; align-self: center; display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
-  font-family: ui-monospace, monospace; font-size: 10px; color: var(--text); white-space: nowrap;
+  font-family: var(--mono); font-size: 10px; color: var(--text); white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .v3-shell .insp .pr .pp-phaser .pp-phaser-read span { display: flex; gap: 5px; align-items: baseline; }

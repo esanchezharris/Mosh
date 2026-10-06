@@ -47,10 +47,13 @@ export function pluginDropIndex(from: number, target: number, side: PluginDropSi
   return to === from ? null : to;
 }
 
-function PluginRow({ plugin, trackId, sampleRate, prevIndex, nextIndex }: {
+function PluginRow({ plugin, trackId, sampleRate, scope, prevIndex, nextIndex }: {
   plugin: Plugin; trackId: string;
   /** The session's sample rate, for curves that depend on it. */
   sampleRate: number;
+  /** The open project (its edit file), so a minimized plugin stays minimized in this
+   *  song only. */
+  scope: string;
   /** The chain indices of the visible plugins above and below, for the keyboard move. */
   prevIndex?: number; nextIndex?: number;
 }) {
@@ -58,7 +61,7 @@ function PluginRow({ plugin, trackId, sampleRate, prevIndex, nextIndex }: {
   const native = !!plugin.builtin && !plugin.external;
   const def = native ? PANELS[plugin.type] : undefined;
   // Minimized is this viewer's view preference: never a command, never undoable.
-  const key = panelKey(trackId, plugin);
+  const key = panelKey(trackId, plugin, scope);
   const collapsed = usePanelState((s) => !!s.collapsed[key]);
   const toggle = usePanelState((s) => s.toggle);
   const [dropSide, setDropSide] = useState<PluginDropSide | null>(null);
@@ -80,6 +83,7 @@ function PluginRow({ plugin, trackId, sampleRate, prevIndex, nextIndex }: {
   const hint = native && !def ? pluginHint(plugin) : null;
   const summary = def ? def.summary(plugin) : genericSummary(plugin);
   const Mini = def?.Mini;
+  const title = def?.title ?? plugin.name;
   return (
     <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
       data-plugin-type={plugin.type}
@@ -126,21 +130,24 @@ function PluginRow({ plugin, trackId, sampleRate, prevIndex, nextIndex }: {
           onClick={() => toggle(key)} onPointerDown={(e) => e.stopPropagation()}>
           <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2 L7 5 L3 8" /></svg>
         </button>
-        <span className="nm">{plugin.name}</span>
-        <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
-        <button type="button" className="btn ghost sm" aria-label={plugin.enabled ? "Bypass" : "Enable"}
+        <span className="nm" title={title === plugin.name ? undefined : plugin.name}>{title}</span>
+        {collapsed ? (
+          // Minimized: the whole plugin is this one row. A fixed slot for the thumbnail keeps
+          // every summary starting at the same place down the chain.
+          <span className="pp-hsum" data-testid="v3-plugin-summary" title={summary}>
+            <span className="pp-min-viz">{Mini && <Mini {...panelProps} />}</span>
+            <span className="sum">{summary}</span>
+          </span>
+        ) : (
+          <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
+        )}
+        <button type="button" className={`btn ghost sm${plugin.enabled ? " on" : ""}`} aria-pressed={plugin.enabled}
+          aria-label={plugin.enabled ? "Bypass" : "Enable"}
           onClick={() => void exec("bypass_plugin", { trackId, index: plugin.index, bypassed: plugin.enabled })}>
           {plugin.enabled ? "on" : "off"}
         </button>
       </div>
-      {collapsed ? (
-        // Minimized: one line that still says what the plugin is doing (and, for the
-        // plugins that have one, a tiny live element).
-        <div className="pp-min" data-testid="v3-plugin-summary">
-          {Mini && <Mini {...panelProps} />}
-          <span className="sum">{summary}</span>
-        </div>
-      ) : (<>
+      {collapsed ? null : (<>
       {/* Its own line, not a header chip: the header is one tight row and a preset name
           is long. It names where the plugin came from; editing a value does not remove it. */}
       {plugin.preset && (
@@ -307,7 +314,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
           <summary className="grphd"><span className="sec">Plugins</span></summary>
           <div className="grp-body chain" data-testid="v3-plugins">
             {plugins.map((p, i) => <PluginRow key={p.itemId ?? `slot-${p.index}`} plugin={p} trackId={track.id}
-              sampleRate={snapshot.session?.sampleRate || 48000}
+              sampleRate={snapshot.session?.sampleRate || 48000} scope={snapshot.session?.editFile ?? ""}
               prevIndex={plugins[i - 1]?.index} nextIndex={plugins[i + 1]?.index} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"
               onClick={() => useV3.getState().setPane("plugins")}>+ Add plugin</button>

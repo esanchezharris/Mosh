@@ -16,10 +16,10 @@
   background: transparent; color: var(--text); font: inherit; font-size: 11px; line-height: 13px; cursor: pointer; }
 .v3-shell .insp .pr .pp-xf-step button[aria-disabled="true"] { opacity: .35; cursor: default; }
 .v3-shell .insp .pr .pp-xf-step button:focus-visible, .v3-shell .insp .pr .pp-xf-mode button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-.v3-shell .insp .pr .pp-xf-step .v { min-width: 40px; text-align: center; font-family: ui-monospace, monospace; font-size: 10px;
+.v3-shell .insp .pr .pp-xf-step .v { min-width: 40px; text-align: center; font-family: var(--mono); font-size: 10px;
   color: var(--text); outline: none; border-radius: 3px; }
 .v3-shell .insp .pr .pp-xf-step .v:focus-visible { outline: 1px solid var(--accent); }
-.v3-shell .insp .pr .pp-xf-thrv { margin-left: auto; font-family: ui-monospace, monospace; font-size: 9px; color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-xf-thrv { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--muted); white-space: nowrap; }
 
 /* The ring strip. */
 .v3-shell .insp .pr .pp-xf-strip { border-radius: 3px; background: color-mix(in srgb, var(--bg) 45%, transparent); }
@@ -35,7 +35,7 @@
 
 /* Status line: what it hears now, with chips. */
 .v3-shell .insp .pr .pp-xf-status { display: flex; align-items: center; gap: 4px; height: 14px; min-width: 0; overflow: hidden;
-  font-family: ui-monospace, monospace; font-size: 9px; color: var(--muted); white-space: nowrap; }
+  font-family: var(--mono); font-size: 9px; color: var(--muted); white-space: nowrap; }
 .v3-shell .insp .pr .pp-xf-status.cutting .t { color: var(--warn); }
 .v3-shell .insp .pr .pp-xf-status.ringing .t { color: var(--accent); }
 .v3-shell .insp .pr .pp-xf-chip { flex: 0 0 auto; padding: 0 4px; border-radius: 3px; line-height: 12px; font-size: 9px; color: var(--text);
