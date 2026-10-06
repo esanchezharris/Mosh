@@ -217,44 +217,58 @@ void driveScheduled (te::Plugin& plugin, juce::AudioBuffer<float>& io, int block
     plugin.baseClassDeinitialise();
 }
 
-// An instrument, the way the playback graph drives it during LIVE playback: rendering
-// false (the drive helpers above pass true), and each block handed the MIDI that falls in
-// it. `events` are (sample, message) pairs; a message's timestamp is its sample over the
-// rate, measured, like the block's bufferStartSample, from the start of `io` (FourOsc
-// keeps a message when round (timestamp * rate) lands inside the block). `strays` go into
-// the FIRST block's MIDI only, whatever their sample: a stray past the first block is
-// handed to a block it does not belong to, so the synth must ignore it.
-juce::AudioBuffer<float> driveMidi (te::Plugin& plugin, double seconds, int block,
-                                    const std::vector<std::pair<int, juce::MidiMessage>>& events,
-                                    bool rendering = false,
-                                    const std::vector<std::pair<int, juce::MidiMessage>>& strays = {})
+// An instrument the way the playback graph drives it during LIVE playback: initialised
+// ONCE (FourOsc's initialise turns every voice off, so re-initialising between calls
+// would cut what is sounding), then rendered block by block with rendering FALSE (the
+// drive helpers above pass true) and each block handed the MIDI that falls in it, the
+// edit time running on across calls. In play(), `events` are (sample, message) pairs
+// counted from the start of that call; a message's timestamp is its sample over the
+// rate, measured, like the block's bufferStartSample, from the start of the call's buffer
+// (FourOsc keeps a message when round (timestamp * rate) lands inside the block).
+// `strays` go into the FIRST block's MIDI only, whatever their sample: a stray past the
+// first block is handed to a block it does not belong to, so the synth must ignore it.
+using MidiEvents = std::vector<std::pair<int, juce::MidiMessage>>;
+struct LiveInstrument
 {
-    const double rate = 48000.0;
-    juce::AudioBuffer<float> io (2, (int) (seconds * rate));
-    io.clear();
-    plugin.baseClassInitialise ({ tracktion::TimePosition(), rate, block });
-    te::MidiMessageArray midi;
-    const auto source = te::createUniqueMPESourceID();
-    for (int start = 0; start < io.getNumSamples(); start += block)
+    LiveInstrument (te::Plugin& p, int blockSize) : plugin (p), block (blockSize)
     {
-        const int n = juce::jmin (block, io.getNumSamples() - start);
-        midi.clear();
-        for (const auto& [at, message] : events)
-            if (at >= start && at < start + n)
-                midi.addMidiMessage (message, at / rate, source);
-        if (start == 0)
-            for (const auto& [at, message] : strays)
-                midi.addMidiMessage (message, at / rate, source);
-        const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
-                                         tracktion::TimePosition::fromSeconds ((start + n) / rate));
-        te::PluginRenderContext context (&io, juce::AudioChannelSet::stereo(), start, n, &midi, 0.0, time,
-                                         /*playing*/ true, /*scrubbing*/ false, rendering,
-                                         /*allowBypassedProcessing*/ false);
-        plugin.applyToBufferWithAutomation (context);
+        plugin.baseClassInitialise ({ tracktion::TimePosition(), rate, block });
     }
-    plugin.baseClassDeinitialise();
-    return io;
-}
+    ~LiveInstrument() { plugin.baseClassDeinitialise(); }
+
+    juce::AudioBuffer<float> play (double seconds, const MidiEvents& events = {}, bool rendering = false,
+                                   const MidiEvents& strays = {})
+    {
+        juce::AudioBuffer<float> io (2, (int) (seconds * rate));
+        io.clear();
+        for (int start = 0; start < io.getNumSamples(); start += block)
+        {
+            const int n = juce::jmin (block, io.getNumSamples() - start);
+            midi.clear();
+            for (const auto& [at, message] : events)
+                if (at >= start && at < start + n)
+                    midi.addMidiMessage (message, at / rate, source);
+            if (start == 0)
+                for (const auto& [at, message] : strays)
+                    midi.addMidiMessage (message, at / rate, source);
+            const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds ((double) (position + start) / rate),
+                                             tracktion::TimePosition::fromSeconds ((double) (position + start + n) / rate));
+            te::PluginRenderContext context (&io, juce::AudioChannelSet::stereo(), start, n, &midi, 0.0, time,
+                                             /*playing*/ true, /*scrubbing*/ false, rendering,
+                                             /*allowBypassedProcessing*/ false);
+            plugin.applyToBufferWithAutomation (context);
+        }
+        position += io.getNumSamples();
+        return io;
+    }
+
+    te::Plugin& plugin;
+    const int block;
+    const double rate = 48000.0;
+    juce::int64 position = 0;
+    te::MidiMessageArray midi;
+    const te::MPESourceID source = te::createUniqueMPESourceID();
+};
 
 // A parameter object exactly as pluginToVar built it before the 4OSC work (2026-10-05):
 // index, name, value, the readback (display/unit, and min/max when `range` is given), the
@@ -1671,83 +1685,96 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             auto noteOn = [] (int note) { return juce::MidiMessage::noteOn (1, note, (juce::uint8) 100); };
             auto noteOff = [] (int note) { return juce::MidiMessage::noteOff (1, note); };
             auto meter = [&] { return meterFor (ops.pluginMeters(), ft, fo); };
-            using Events = std::vector<std::pair<int, juce::MidiMessage>>;
 
             (void) ops.pluginMeters();   // the 4OSC is now in the chain the rail last saw
-            driveMidi (*synth, 0.25, 256, {});
-            check (! meter().isObject(), "a 4OSC that played nothing is not on the rail (idle)");
+            {
+                LiveInstrument live (*synth, 256);
+                live.play (0.25);
+                check (! meter().isObject(), "a 4OSC that played nothing is not on the rail (idle)");
 
-            driveMidi (*synth, 0.25, 256, Events { { 0, noteOn (60) } });
-            const auto first = meter();
-            check (first.isObject() && first.getProperty ("type", var()).toString() == "4osc"
-                       && first.getProperty ("itemId", var()).toString() == pluginAt (ops, ft, fo).getProperty ("itemId", var()).toString(),
-                   "after a note-on the 4OSC is on the rail, with its type and itemId");
-            check (notesIn (first.getProperty ("held", var())) == std::vector<int> { 60 } && notesIn (first.getProperty ("struck", var())) == std::vector<int> { 60 },
-                   "held [60] and struck [60]");
-            check ((double) first.getProperty ("outDb", -100.0) > -100.0,
-                   "outDb " + first.getProperty ("outDb", var()).toString() + " dBFS is the synth's output peak (> -100)");
-            check (! meter().isObject(), "asked again with no new audio, the entry is gone (never stale)");
+                live.play (0.25, { { 0, noteOn (60) } });
+                const auto first = meter();
+                check (first.isObject() && first.getProperty ("type", var()).toString() == "4osc"
+                           && first.getProperty ("itemId", var()).toString() == pluginAt (ops, ft, fo).getProperty ("itemId", var()).toString(),
+                       "after a note-on the 4OSC is on the rail, with its type and itemId");
+                check (notesIn (first.getProperty ("held", var())) == std::vector<int> { 60 } && notesIn (first.getProperty ("struck", var())) == std::vector<int> { 60 },
+                       "held [60] and struck [60]");
+                check ((double) first.getProperty ("outDb", -100.0) > -100.0,
+                       "outDb " + first.getProperty ("outDb", var()).toString() + " dBFS is the synth's output peak (> -100)");
+                check (! meter().isObject(), "asked again with no new audio, the entry is gone (never stale)");
 
-            driveMidi (*synth, 0.1, 256, {});
-            const auto holding = meter();
-            check (holding.isObject() && notesIn (holding.getProperty ("held", var())) == std::vector<int> { 60 }
-                       && holding.getProperty ("struck", var()).size() == 0,
-                   "the key still down: held [60], nothing struck again");
-            check (first.hasProperty ("seq") && (juce::int64) holding.getProperty ("seq", 0) == (juce::int64) first.getProperty ("seq", 0) + 1,
-                   "seq " + holding.getProperty ("seq", var()).toString() + " follows " + first.getProperty ("seq", var()).toString() + " (a new frame is told from a held one)");
+                live.play (0.1);
+                const auto holding = meter();
+                check (holding.isObject() && notesIn (holding.getProperty ("held", var())) == std::vector<int> { 60 }
+                           && holding.getProperty ("struck", var()).size() == 0 && (double) holding.getProperty ("outDb", -100.0) > -100.0,
+                       "the key still down: held [60], nothing struck again, still sounding (outDb " + holding.getProperty ("outDb", var()).toString() + ")");
+                check (first.hasProperty ("seq") && (juce::int64) holding.getProperty ("seq", 0) == (juce::int64) first.getProperty ("seq", 0) + 1,
+                       "seq " + holding.getProperty ("seq", var()).toString() + " follows " + first.getProperty ("seq", var()).toString() + " (a new frame is told from a held one)");
 
-            driveMidi (*synth, 0.05, 256, Events { { 100, noteOff (60) } });
-            const auto released = meter();
-            check (released.isObject() && released.getProperty ("held", var()).size() == 0 && released.getProperty ("struck", var()).size() == 0,
-                   "a note-off clears held (the release tail keeps it on the rail: outDb " + released.getProperty ("outDb", var()).toString() + ")");
+                live.play (0.05, { { 100, noteOff (60) } });
+                const auto released = meter();
+                check (released.isObject() && released.getProperty ("held", var()).size() == 0 && released.getProperty ("struck", var()).size() == 0
+                           && (double) released.getProperty ("outDb", -100.0) > -100.0,
+                       "a note-off clears held; the release tail keeps it on the rail (outDb " + released.getProperty ("outDb", var()).toString() + ")");
 
-            driveMidi (*synth, 3.0, 256, {});   // the release dies away
-            (void) ops.pluginMeters();
-            driveMidi (*synth, 0.25, 256, {});
-            check (! meter().isObject(), "once the release has died away the idle 4OSC drops off the rail");
+                live.play (3.0);   // the release dies away
+                (void) ops.pluginMeters();
+                live.play (0.25);
+                check (! meter().isObject(), "once the release has died away the idle 4OSC drops off the rail");
 
-            // Several keys in one block, ascending; a velocity-0 note-on is a note-off.
-            driveMidi (*synth, 0.1, 256, Events { { 10, noteOn (67) }, { 10, noteOn (60) }, { 20, noteOn (64) } });
-            const auto chord = meter();
-            check (notesIn (chord.getProperty ("held", var())) == std::vector<int> { 60, 64, 67 }
-                       && notesIn (chord.getProperty ("struck", var())) == std::vector<int> { 60, 64, 67 },
-                   "a chord: held and struck [60, 64, 67], ascending");
-            driveMidi (*synth, 0.05, 256, Events { { 0, juce::MidiMessage::noteOn (1, 64, (juce::uint8) 0) } });
-            check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 60, 67 }, "a velocity-0 note-on releases 64: held [60, 67]");
-            synth->midiPanic();
-            driveMidi (*synth, 0.05, 256, Events { { 0, noteOn (72) } });
-            check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 72 }, "midiPanic() drops the held keys: after it only the new key 72 is held");
-            // As in the synth (JUCE's MPEInstrument, legacy mode), an all-notes-off acts on
-            // its own channel only.
-            driveMidi (*synth, 0.05, 256, Events { { 0, juce::MidiMessage::allNotesOff (2) } });
-            check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 72 }, "an all-notes-off on channel 2 leaves channel 1's key 72 held");
-            driveMidi (*synth, 0.05, 256, Events { { 0, juce::MidiMessage::allNotesOff (1) } });
-            const auto allOff = meter();
-            check (! allOff.isObject() || allOff.getProperty ("held", var()).size() == 0, "an all-notes-off on channel 1 releases it: held []");
-            synth->midiPanic();
-            driveMidi (*synth, 3.0, 256, {});
-            (void) ops.pluginMeters();
+                // Several keys in one block, ascending; a velocity-0 note-on is a note-off.
+                live.play (0.1, { { 10, noteOn (67) }, { 10, noteOn (60) }, { 20, noteOn (64) } });
+                const auto chord = meter();
+                check (notesIn (chord.getProperty ("held", var())) == std::vector<int> { 60, 64, 67 }
+                           && notesIn (chord.getProperty ("struck", var())) == std::vector<int> { 60, 64, 67 },
+                       "a chord: held and struck [60, 64, 67], ascending");
+                live.play (0.05, { { 0, juce::MidiMessage::noteOn (1, 64, (juce::uint8) 0) } });
+                check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 60, 67 }, "a velocity-0 note-on releases 64: held [60, 67]");
+                synth->midiPanic();
+                live.play (0.05, { { 0, noteOn (72) } });
+                check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 72 }, "midiPanic() drops the held keys: after it only the new key 72 is held");
+                // As in the synth (JUCE's MPEInstrument, legacy mode), an all-notes-off acts on
+                // its own channel only.
+                live.play (0.05, { { 0, juce::MidiMessage::allNotesOff (2) } });
+                check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 72 }, "an all-notes-off on channel 2 leaves channel 1's key 72 held");
+                live.play (0.05, { { 0, juce::MidiMessage::allNotesOff (1) } });
+                const auto allOff = meter();
+                check (! allOff.isObject() || allOff.getProperty ("held", var()).size() == 0, "an all-notes-off on channel 1 releases it: held []");
+                synth->midiPanic();
+                live.play (3.0);
+                (void) ops.pluginMeters();
 
-            // FourOsc's own in-block filter: a message whose timestamp falls outside the block
-            // it was handed in is ignored by the synth, and by the rail.
-            driveMidi (*synth, 0.1, 256, {}, false, Events { { 300, noteOn (62) } });
-            check (! meter().isObject(), "a note-on timestamped past its block is ignored, as FourOsc ignores it (nothing held, struck or heard)");
+                // FourOsc's own in-block filter: a message whose timestamp falls outside the
+                // block it was handed in is ignored by the synth, and by the rail.
+                live.play (0.1, {}, false, { { 300, noteOn (62) } });
+                check (! meter().isObject(), "a note-on timestamped past its block is ignored, as FourOsc ignores it (nothing held, struck or heard)");
 
-            // Offline renders and a bypassed synth never reach the rail.
-            driveMidi (*synth, 0.25, 256, Events { { 0, noteOn (60) } }, /*rendering*/ true);
-            check (! meter().isObject(), "a note played while rendering offline (export/bounce) is not on the rail");
-            synth->midiPanic();
-            driveMidi (*synth, 3.0, 256, {});
-            (void) ops.pluginMeters();
-            check (ok (command (ops, "bypass_plugin", object ({ { "trackId", ft }, { "index", fo }, { "bypassed", true } }))), "bypass the 4OSC");
-            driveMidi (*synth, 0.25, 256, Events { { 0, noteOn (60) } });
-            check (! meter().isObject(), "a bypassed 4OSC reports nothing, whatever it is handed");
-            check (ok (command (ops, "undo")), "un-bypass the 4OSC");
-            synth->midiPanic();
-            driveMidi (*synth, 3.0, 256, {});
-            (void) ops.pluginMeters();
-            driveMidi (*synth, 0.25, 256, {});
-            check (! meter().isObject(), "back on and idle: still nothing on the rail (no held key survived the bypass)");
+                // Offline renders and a bypassed synth never reach the rail.
+                live.play (0.25, { { 0, noteOn (60) } }, /*rendering*/ true);
+                check (! meter().isObject(), "a note played while rendering offline (export/bounce) is not on the rail");
+                synth->midiPanic();
+                live.play (3.0);
+                (void) ops.pluginMeters();
+                check (ok (command (ops, "bypass_plugin", object ({ { "trackId", ft }, { "index", fo }, { "bypassed", true } }))), "bypass the 4OSC");
+                live.play (0.25, { { 0, noteOn (60) } });
+                check (! meter().isObject(), "a bypassed 4OSC reports nothing, whatever it is handed");
+                check (ok (command (ops, "undo")), "un-bypass the 4OSC");
+                synth->midiPanic();
+                live.play (3.0);
+                (void) ops.pluginMeters();
+                live.play (0.25);
+                check (! meter().isObject(), "back on and idle: still nothing on the rail (no held key survived the bypass)");
+
+                // A key still down when playback stops and restarts: FourOsc's initialise turns
+                // every voice off and its MPEInstrument releases the note, so it is not held.
+                live.play (0.1, { { 0, noteOn (65) } });
+                check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 65 }, "key 65 down before playback stops");
+            }
+            {
+                LiveInstrument restarted (*synth, 256);
+                restarted.play (0.25);
+                check (! meter().isObject(), "after a restart (initialise) the key the synth released is not held, and nothing sounds: off the rail");
+            }
         }
 
         check (ok (command (ops, "remove_track", object ({ { "trackId", ft } }))), "4OSC fixture track removed");
