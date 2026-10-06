@@ -44,8 +44,9 @@ type Props = {
   inert?: boolean;
   title?: string;
   /** Replace the default wheel step (1 %, Shift 0.2 %) with the caller's: called with whole
-   *  notches (positive = up) after the wheel has been kept from scrolling the inspector. */
-  onWheelNotches?: (notches: number, shift: boolean) => void;
+   *  notches (positive = up) and the modifier keys, after the wheel has been kept from
+   *  scrolling the inspector. */
+  onWheelNotches?: (notches: number, shift: boolean, mods: { alt: boolean; meta: boolean }) => void;
   /** The words a screen reader hears for the value; defaults to `display`. */
   valueText?: string;
   testId?: string;
@@ -116,13 +117,15 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       const st = wheelState.current;
-      if (st.disabled || e.deltaY === 0) return;
+      // macOS turns Shift+wheel into a horizontal scroll: read deltaX then.
+      const delta = e.deltaY !== 0 ? e.deltaY : e.shiftKey ? e.deltaX : 0;
+      if (st.disabled || delta === 0) return;
       e.preventDefault();
-      st.acc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      st.acc += e.deltaMode === 1 ? delta * 33 : e.deltaMode === 2 ? delta * 400 : delta;
       const notches = Math.trunc(st.acc / 100);
       if (notches === 0) return;
       st.acc -= notches * 100;
-      if (st.custom) { st.custom(-notches, e.shiftKey); return; }
+      if (st.custom) { st.custom(-notches, e.shiftKey, { alt: e.altKey, meta: e.metaKey }); return; }
       const next = st.quantize(st.norm - notches * (e.shiftKey ? 0.002 : 0.01));
       st.norm = next;
       st.nudge(next);

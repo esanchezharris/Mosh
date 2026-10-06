@@ -6,7 +6,8 @@ import {
   CUTOFF_RANGE, PLOT_H, PLOT_W, clampCutoff, cutoffAtX, cutoffHz, cutoffNorm, defaultCutoff, filterMode,
   filterSummary, handleX, isUnstable, maxCutoff, parseHz, plotScales, responseDb, stepCutoff,
 } from "./filter";
-import { filterPanelDef, keyTarget } from "./FilterPanel";
+import { MINI_H, MINI_W, filterPanelDef, keyTarget } from "./FilterPanel";
+import { fmtFreq } from "./params";
 
 const FS = 48000;
 const SPAN = 22000 - 10;
@@ -90,17 +91,34 @@ describe("filter maths (te::LowPassPlugin: one 12 dB/oct Butterworth biquad, lin
     expect(parseHz("-5")).toBeNull();
   });
 
-  it("summarises what the filter is doing in one line", () => {
-    expect(filterSummary(filter("highpass", 180))).toBe("HP 180 Hz");
-    expect(filterSummary(filter("lowpass", 4000))).toBe("LP 4.0k");
-    expect(filterSummary(filter("highpass", 80, { enabled: false }))).toBe("HP 80 Hz · bypassed");
-    expect(filterPanelDef.summary(filter("lowpass", 12000))).toBe("LP 12k");
+  it("summarises what the filter is doing in one short line of words: the type, then the cutoff", () => {
+    expect(filterSummary(filter("highpass", 180))).toBe("high-pass 180 Hz");
+    expect(filterSummary(filter("lowpass", 4000))).toBe("low-pass 4.0k");
+    // bypass is the header's own on/off, not repeated in the summary
+    expect(filterSummary(filter("highpass", 80, { enabled: false }))).toBe("high-pass 80 Hz");
+    expect(filterPanelDef.summary(filter("lowpass", 12000))).toBe("low-pass 12k");
+    // an older engine (no state): the type still says which
+    expect(filterSummary({ ...filter("highpass", 180), state: undefined })).toBe("high-pass 180 Hz");
+    // the minimized row's summary slot holds about 17 monospace characters: never cut
+    for (const mode of ["lowpass", "highpass"] as const) {
+      for (const hz of [10, 999, 4238, 9960, 22000]) {
+        expect(filterSummary(filter(mode, hz)).length).toBeLessThanOrEqual(17);
+      }
+    }
+    expect(filterSummary(filter("highpass", 999))).toBe("high-pass 999 Hz");   // the longest: 16
+  });
+
+  it("is titled Filter: the engine's LPF/HPF and High-Pass names are unhelpful", () => {
+    expect(filterPanelDef.title).toBe("Filter");
   });
 
   it("places the handle on the log axis, pinned inside the plot past its ends", () => {
     const { x } = plotScales(FS);
     expect(handleX(1000, FS)).toBeCloseTo(x.to(1000), 9);
     expect(handleX(1000, FS)).toBeCloseTo((Math.log(1000 / 20) / Math.log(20000 / 20)) * PLOT_W, 6);
+    // the viewBox is the drawn width at the 320 px inspector (273 px), so 1 unit = 1 px
+    expect(PLOT_W).toBe(273);
+    expect(handleX(1000, FS)).toBeCloseTo(154.606, 3);
     expect(handleX(10, FS)).toBe(0);
     expect(handleX(22000, FS)).toBe(PLOT_W);
     expect(cutoffAtX(0, FS)).toBeCloseTo(20, 9);
@@ -178,7 +196,7 @@ describe("FilterPanel wiring", () => {
   it("a typed cutoff is sent on Enter (120 Hz, then 1.2k)", () => {
     render(filter("highpass", 180));
     const input = host.querySelector<HTMLInputElement>('[data-testid="v3-filter-hz"]')!;
-    expect(input.value).toBe("180");
+    expect(input.value).toBe("180 Hz");
     const type = (text: string) => {
       act(() => input.focus());
       act(() => {
@@ -208,6 +226,40 @@ describe("FilterPanel wiring", () => {
     act(() => hp.click());
     expect(setState).toHaveBeenCalledTimes(1);
     expect(setState.mock.calls[0].slice(0, 2)).toEqual(["mode", "highpass"]);
+  });
+
+  it("an older engine (no state.mode): LP/HP shows the reported type, disabled, with a note, and never sends", () => {
+    const old = { ...filter("highpass", 180), state: undefined };
+    render(old);
+    const lp = host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-mode-lowpass"]')!;
+    const hp = host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-mode-highpass"]')!;
+    expect(hp.getAttribute("aria-pressed")).toBe("true");
+    expect(lp.disabled && hp.disabled).toBe(true);
+    expect(host.querySelector('[data-testid="v3-filter-old-engine"]')!.textContent).toMatch(/needs the updated Mosh engine/);
+    act(() => lp.click());
+    // a disabled button swallows the click; even dispatched directly, the handler refuses
+    act(() => { lp.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(setState).not.toHaveBeenCalled();
+    // the cutoff is a plain parameter: it still works on the old engine
+    key(handle(), "ArrowRight");
+    expect(sentNorms()[0]).toBeCloseTo(normFor(180 * 2 ** (1 / 12)), 9);
+    // the updated engine: enabled, no note
+    render(filter("highpass", 180));
+    expect(hp.disabled).toBe(false);
+    expect(host.querySelector('[data-testid="v3-filter-old-engine"]')).toBeNull();
+  });
+
+  it("the cutoff reads as a frequency at rest and as the plain number while typing", () => {
+    render(filter("lowpass", 4000));
+    const input = field();
+    expect(input.value).toBe("4.00 kHz");
+    expect(host.querySelector(".pp-filter-unit")).toBeNull();
+    act(() => input.focus());
+    expect(input.value).toBe("4000");
+    expect(host.querySelector(".pp-filter-unit")!.textContent).toBe("Hz");
+    key(input, "Escape");
+    expect(input.value).toBe("4.00 kHz");
+    expect(setParam).not.toHaveBeenCalled();
   });
 
   it("a plot drag is one gesture and lands on the log-axis frequency under the pointer", () => {
@@ -251,6 +303,14 @@ describe("FilterPanel wiring", () => {
     expect(handle().classList.contains("hollow")).toBe(true);
   });
 
+  it("draws the axis labels over the curve (their halo keeps them legible) and under the handle", () => {
+    render(filter("lowpass", 4000));
+    const svg = host.querySelector('[data-testid="v3-filter-plot"]')!;
+    const order = [...svg.querySelectorAll("path.curve, text.axis, [data-testid='v3-filter-handle']")]
+      .map((el) => (el.matches("text") ? `t:${el.textContent}` : el.matches("path") ? "curve" : "handle"));
+    expect(order).toEqual(["curve", "t:100", "t:1k", "t:10k", "t:-12", "t:-24", "t:0", "handle"]);
+  });
+
   it("shows the automation chip only when the cutoff is automated", () => {
     render(filter("lowpass", 4000));
     expect(host.querySelector('[data-testid="v3-filter-automated"]')).toBeNull();
@@ -264,10 +324,12 @@ describe("FilterPanel wiring", () => {
     act(() => root.render(React.createElement(filterPanelDef.Mini!, { plugin: filter("lowpass", 1000), trackId: "t1", sampleRate: FS, setParam, setState })));
     const d = host.querySelector('[data-testid="v3-filter-mini"] path')!.getAttribute("d")!;
     const pts = [...d.matchAll(/[ML]([-\d.]+) ([-\d.]+)/g)].map((r) => [Number(r[1]), Number(r[2])]);
-    const mini = plotScales(FS, 48, 12);
+    const mini = plotScales(FS, MINI_W, MINI_H);
+    const svg = host.querySelector('[data-testid="v3-filter-mini"]')!;
+    expect([svg.getAttribute("width"), svg.getAttribute("height")]).toEqual(["44", "14"]);   // the row's 44×14 slot
     // its first point is flat passband, its last is well into the stopband
     expect(pts[0][1]).toBeCloseTo(mini.y.to(responseDb("lowpass", 1000, 20, FS)), 1);
-    expect(pts[pts.length - 1][1]).toBeCloseTo(Math.min(12, mini.y.to(responseDb("lowpass", 1000, 20000, FS))), 1);
+    expect(pts[pts.length - 1][1]).toBeCloseTo(Math.min(MINI_H, mini.y.to(responseDb("lowpass", 1000, 20000, FS))), 1);
   });
 
   const svgOf = () => {
@@ -335,8 +397,8 @@ describe("FilterPanel wiring", () => {
     expect(host.querySelector('[data-testid="v3-filter-unstable"]')!.textContent).toMatch(/unstable/);
     expect(host.querySelector('[data-testid="v3-filter-plot"]')!.classList.contains("unstable")).toBe(true);
     expect(handle().classList.contains("hollow")).toBe(true);
-    expect(handle().getAttribute("aria-valuetext")).toBe("22000 Hz, above Nyquist: unstable");
-    expect(field().value).toBe("22000");
+    expect(handle().getAttribute("aria-valuetext")).toBe("22.0 kHz, above Nyquist: unstable");
+    expect(field().value).toBe("22.0 kHz");
     // End brings it back under Nyquist
     key(handle(), "End");
     expect(sentNorms()[0]).toBeCloseTo(normFor(32000 * 0.499), 9);
@@ -402,12 +464,12 @@ describe("FilterPanel wiring", () => {
       act(() => { vi.advanceTimersByTime(100); });
       ptrAt(svg, "pointerdown", x.to(2000));
       // during the drag the handle follows the pointer, not the key's pending value
-      expect(handle().getAttribute("aria-valuetext")).toBe("2000 Hz, 12 dB/oct");
+      expect(handle().getAttribute("aria-valuetext")).toBe("2.00 kHz, 12 dB/oct");
       ptrAt(svg, "pointerup", x.to(2000));
       render(filter("highpass", 2000));            // the engine's patch
       act(() => { vi.advanceTimersByTime(350); }); // the drag's settle (300 ms) is over, < 800 ms
-      expect(field().value).toBe("2000");
-      expect(handle().getAttribute("aria-valuetext")).toBe("2000 Hz, 12 dB/oct");
+      expect(field().value).toBe("2.00 kHz");
+      expect(handle().getAttribute("aria-valuetext")).toBe("2.00 kHz, 12 dB/oct");
       key(handle(), "ArrowRight");
       expect(lastHz()).toBeCloseTo(2000 * 2 ** (1 / 12), 3);
     });
@@ -419,7 +481,7 @@ describe("FilterPanel wiring", () => {
       ptrAt(svg, "pointerdown", x.to(1000));
       ptrAt(svg, "pointerup", x.to(1000));
       key(handle(), "ArrowRight");
-      expect(field().value).toBe(String(Math.round(x.from(x.to(1000)) * 2 ** (1 / 12))));
+      expect(field().value).toBe(fmtFreq(x.from(x.to(1000)) * 2 ** (1 / 12)));
       key(handle(), "ArrowRight");
       expect(lastHz()).toBeCloseTo(x.from(x.to(1000)) * 2 ** (2 / 12), 3);
     });
@@ -427,9 +489,9 @@ describe("FilterPanel wiring", () => {
     it("a snapshot change we did not send (undo, agent) replaces the pending value at once", () => {
       render(filter("highpass", 180));
       key(handle(), "ArrowRight");
-      expect(field().value).toBe("191");
+      expect(field().value).toBe("191 Hz");
       render(filter("highpass", 500));
-      expect(field().value).toBe("500");
+      expect(field().value).toBe("500 Hz");
       key(handle(), "ArrowRight");
       expect(lastHz()).toBeCloseTo(500 * 2 ** (1 / 12), 3);
     });
@@ -439,12 +501,12 @@ describe("FilterPanel wiring", () => {
       key(handle(), "ArrowRight");
       key(handle(), "ArrowRight");
       render(filter("highpass", 180 * 2 ** (1 / 12)));   // echo of the first key
-      expect(field().value).toBe(String(Math.round(180 * 2 ** (2 / 12))));
+      expect(field().value).toBe(fmtFreq(180 * 2 ** (2 / 12)));
       key(handle(), "ArrowRight");
       expect(lastHz()).toBeCloseTo(180 * 2 ** (3 / 12), 3);
       render(filter("highpass", 180 * 2 ** (3 / 12)));   // caught up
       act(() => { vi.advanceTimersByTime(1000); });
-      expect(field().value).toBe(String(Math.round(180 * 2 ** (3 / 12))));
+      expect(field().value).toBe(fmtFreq(180 * 2 ** (3 / 12)));
     });
   });
 

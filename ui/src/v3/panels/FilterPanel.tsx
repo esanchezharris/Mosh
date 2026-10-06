@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { DragNode } from "./DragNode";
 import { logFreqs } from "./dsp";
 import {
-  CUTOFF_PARAM, FILTER_FACTS, PLOT_H, PLOT_LO_HZ, PLOT_W, clampCutoff, cutoffAtX, cutoffHz, cutoffNorm,
-  defaultCutoff, filterMode, filterSummary, fmtCutoff, handleX, isUnstable, maxCutoff, parseHz, plotScales,
+  CUTOFF_PARAM, FILTER_FACTS, PLOT_H, PLOT_LO_HZ, PLOT_W, canSetMode, clampCutoff, cutoffAtX, cutoffHz, cutoffNorm,
+  defaultCutoff, filterMode, filterSummary, handleX, isUnstable, maxCutoff, parseHz, plotScales,
   responseDb, stepCutoff, CUTOFF_RANGE, type FilterMode,
 } from "./filter";
-import { clamp, fmtHz, param } from "./params";
+import { clamp, fmtFreq, param } from "./params";
 import { clientToSvg, curvePath, fillPath } from "./plot";
 import type { PanelDef, PanelProps } from "./types";
 import { useDragSend } from "./useDragSend";
@@ -18,6 +18,8 @@ const MODES: { mode: FilterMode; short: string; long: string }[] = [
 const GRID_HZ = [100, 1000, 10000];
 const GRID_DB = [-12, -24];
 const AXIS_LABEL: Record<number, string> = { 100: "100", 1000: "1k", 10000: "10k" };
+/** The minimized row's thumbnail slot. */
+export const MINI_W = 44, MINI_H = 14;
 /** How long a keyboard/typed value stays on screen at most while the engine's patch arrives. */
 const PENDING_MS = 800;
 /** Two cutoffs closer than this are the same value (a normalised float round trip). */
@@ -37,7 +39,8 @@ export function keyTarget(e: Pick<KeyboardEvent, "key" | "shiftKey">, hz: number
   }
 }
 
-/** The cutoff as an editable number: type "120", "1.2k" or "1.2 kHz", Enter to set; the
+/** The cutoff read-out, which is also where you type one: it reads "4.00 kHz" at rest and
+ *  turns into the plain number on focus. Type "120", "1.2k" or "1.2 kHz", Enter to set; the
  *  arrow keys step it like the handle. */
 function CutoffField({ hz, warn, onSet, onStep }: { hz: number; warn: boolean; onSet: (hz: number) => void; onStep: (from: number, e: KeyboardEvent<HTMLInputElement>) => number | null }) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -54,9 +57,11 @@ function CutoffField({ hz, warn, onSet, onStep }: { hz: number; warn: boolean; o
     setDraft(null);
   };
   return (
-    <label className={`pp-filter-hz${warn ? " warn" : ""}`} title="Cutoff frequency: type a value (e.g. 120 or 1.2k), Enter to set">
+    <label className={`pp-filter-hz${warn ? " warn" : ""}`} title="Cutoff frequency: click to type a value (e.g. 120 or 1.2k), Enter to set">
       <input data-testid="v3-filter-hz" inputMode="decimal" spellCheck={false} aria-label="Cutoff frequency (Hz)"
-        value={draft ?? String(Math.round(hz))}
+        value={draft ?? fmtFreq(hz)}
+        // While typing, the field hugs the number so the unit sits right after it.
+        style={draft !== null ? { width: `${Math.max(3, draft.length) + 1}ch` } : undefined}
         onFocus={(e) => { setDraft(String(Math.round(hz))); e.currentTarget.select(); }}
         onChange={(e) => { typed.current = true; setDraft(e.target.value); }}
         onBlur={commit}
@@ -68,7 +73,7 @@ function CutoffField({ hz, warn, onSet, onStep }: { hz: number; warn: boolean; o
           const to = onStep(from, e);
           if (to !== null) { typed.current = false; setDraft(String(Math.round(to))); }
         }} />
-      <span className="pp-filter-unit">Hz</span>
+      {draft !== null && <span className="pp-filter-unit">Hz</span>}
     </label>
   );
 }
@@ -113,32 +118,37 @@ function ResponsePlot({ mode, fc, fs, enabled, onDragStart, onDrag, onDragEnd, o
       }}
       onPointerMove={(e) => { if (dragging.current) onDrag(atPointer(e)); }}
       onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}>
-      <title>{`Drag to set the cutoff. Arrows: 1/12 octave, Shift: an octave. Double-click the handle for ${fmtCutoff(defaultCutoff(mode))}.`}</title>
+      <title>{`Drag to set the cutoff. Arrows: 1/12 octave, Shift: an octave. Double-click the handle for ${fmtFreq(defaultCutoff(mode))}.`}</title>
       {GRID_HZ.filter((f) => f < top).map((f) => (
-        <g key={f}>
-          <line className="grid" x1={x.to(f)} x2={x.to(f)} y1={0} y2={PLOT_H} />
-          <text className="axis" x={x.to(f) + 2} y={PLOT_H - 2}>{AXIS_LABEL[f]}</text>
-        </g>
+        <line key={f} className="grid" x1={x.to(f)} x2={x.to(f)} y1={0} y2={PLOT_H} />
       ))}
       {GRID_DB.map((db) => (
-        <g key={db}>
-          <line className="grid" x1={0} x2={PLOT_W} y1={y.to(db)} y2={y.to(db)} />
-          <text className="axis" x={PLOT_W - 2} y={y.to(db) - 1.5} textAnchor="end">{db}</text>
-        </g>
+        <line key={db} className="grid" x1={0} x2={PLOT_W} y1={y.to(db)} y2={y.to(db)} />
       ))}
       <line className="zero" x1={0} x2={PLOT_W} y1={y.to(0)} y2={y.to(0)} />
       {!unstable && <path className="area" d={fillPath(curve, 0, PLOT_W, PLOT_H)} />}
       {!unstable && <path className="curve" d={curve} data-testid="v3-filter-curve" />}
       {unstable && (
         <text className="pp-filter-warn" data-testid="v3-filter-unstable" x={PLOT_W / 2} y={PLOT_H / 2 - 4} textAnchor="middle">
-          <tspan x={PLOT_W / 2}>{`Above Nyquist (${fmtHz(fs / 2)} at this rate): the engine's filter is unstable`}</tspan>
-          <tspan x={PLOT_W / 2} dy={10}>End, or type a value, to bring it back</tspan>
+          <tspan x={PLOT_W / 2}>{`Above Nyquist (${fmtFreq(fs / 2)} here): the filter is unstable`}</tspan>
+          <tspan x={PLOT_W / 2} dy={11}>Press End or type a value to bring it back</tspan>
         </text>
       )}
       <line className="pp-filter-fc" x1={hx} x2={hx} y1={0} y2={PLOT_H} />
+      {/* The axis labels go over the curve and the cutoff guide (their halo keeps them
+          legible where the roll-off passes), and under the handle. */}
+      <g className="pp-filter-axes" data-testid="v3-filter-axes">
+        {GRID_HZ.filter((f) => f < top).map((f) => (
+          <text key={f} className="axis" x={x.to(f) + 2} y={PLOT_H - 2}>{AXIS_LABEL[f]}</text>
+        ))}
+        {GRID_DB.map((db) => (
+          <text key={db} className="axis" x={PLOT_W - 2} y={y.to(db) - 1.5} textAnchor="end">{db}</text>
+        ))}
+        <text className="axis pp-filter-db0" x={PLOT_W - 2} y={y.to(0) - 1.5} textAnchor="end">0</text>
+      </g>
       <DragNode x={hx} y={hy} r={4.5} hollow={!enabled || unstable} testId="v3-filter-handle"
         ariaLabel={`${label} cutoff`}
-        ariaValueText={`${fmtCutoff(fc)}, ${unstable ? "above Nyquist: unstable" : FILTER_FACTS}`}
+        ariaValueText={`${fmtFreq(fc)}, ${unstable ? "above Nyquist: unstable" : FILTER_FACTS}`}
         valueNow={Math.round(fc)} valueMin={CUTOFF_RANGE.min} valueMax={Math.round(Math.max(maxCutoff(fs), fc))}
         onStart={() => {
           // Relative drag: remember the press and the cutoff's (unclamped) axis position.
@@ -151,15 +161,17 @@ function ResponsePlot({ mode, fc, fs, enabled, onDragStart, onDrag, onDragEnd, o
         }}
         onEnd={() => { grab.current = null; onDragEnd(); }}
         onKeyDown={onKey} onDoubleClick={onReset} />
-      <text className="axis pp-filter-db0" x={PLOT_W - 2} y={y.to(0) - 1.5} textAnchor="end">0</text>
     </svg>
   );
 }
 
-/** Low-pass / high-pass: LP|HP, the cutoff as a number, the fixed slope, and the response. */
+/** Low-pass / high-pass: LP|HP, the cutoff as a number, the fixed slope, and the response.
+ *  An older engine (no `state.mode`) cannot switch LP/HP: the switch shows the type it
+ *  reports, disabled, with a note; the cutoff (a plain parameter) still works. */
 function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   const fs = sampleRate > 0 ? sampleRate : 48000;
   const mode = filterMode(plugin);
+  const modeSettable = canSetMode(plugin);
   const automated = !!param(plugin, CUTOFF_PARAM)?.automated;
   const drag = useDragSend<number>((hz, gesture) => setParam(CUTOFF_PARAM, cutoffNorm(plugin, hz, fs), { gesture }));
   const snapHz = cutoffHz(plugin);
@@ -207,11 +219,12 @@ function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   return (
     <div className="pp-filter" data-testid="v3-filter" data-mode={mode}>
       <div className="pp-filter-top">
-        <div className="pp-filter-seg" role="group" aria-label="Filter type">
+        <div className="pp-seg pp-filter-seg" role="group" aria-label="Filter type">
           {MODES.map((m) => (
             <button key={m.mode} type="button" data-testid={`v3-filter-mode-${m.mode}`} aria-pressed={mode === m.mode}
-              aria-label={`${m.short} (${m.long})`} title={m.long}
-              onClick={() => { if (mode !== m.mode) setState("mode", m.mode); }}>{m.short}</button>
+              aria-label={`${m.short} (${m.long})`} title={modeSettable ? m.long : `${m.long}: switching needs the updated Mosh engine`}
+              disabled={!modeSettable}
+              onClick={() => { if (modeSettable && mode !== m.mode) setState("mode", m.mode); }}>{m.short}</button>
           ))}
         </div>
         <CutoffField hz={fc} warn={isUnstable(fc, fs)} onSet={send} onStep={(from, e) => {
@@ -221,9 +234,10 @@ function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
         }} />
         {automated && <span className="pp-filter-auto" data-testid="v3-filter-automated" role="img"
           aria-label="Cutoff automated: during playback the automation lane overrides edits here"
-          title="Automated: during playback the automation lane sets the cutoff and overrides edits here">A</span>}
+          title="Automated: during playback the automation lane sets the cutoff and overrides edits here">auto</span>}
         <span className="pp-filter-facts" title="One 2nd-order Butterworth stage (Q 0.707): fixed in the engine">{FILTER_FACTS}</span>
       </div>
+      {!modeSettable && <div className="pp-filter-note" data-testid="v3-filter-old-engine">LP/HP switch needs the updated Mosh engine</div>}
       <ResponsePlot mode={mode} fc={fc} fs={fs} enabled={plugin.enabled}
         onDragStart={dragStart} onDrag={(hz) => drag.update(hz)} onDragEnd={drag.end}
         onKey={onKey} onReset={() => send(defaultCutoff(mode))} />
@@ -231,13 +245,13 @@ function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   );
 }
 
-/** The minimized row's thumbnail: the same exact curve, 48×12, no handle. Above Nyquist
+/** The minimized row's thumbnail: the same exact curve, 44×14, no handle. Above Nyquist
  *  (unstable in the engine) it draws no curve, only a dashed warning baseline. */
 function FilterMini({ plugin, sampleRate }: PanelProps) {
   const fs = sampleRate > 0 ? sampleRate : 48000;
   const mode = filterMode(plugin), fc = cutoffHz(plugin);
   const unstable = isUnstable(fc, fs);
-  const W = 48, H = 12;
+  const W = MINI_W, H = MINI_H;
   const { x, y, top } = plotScales(fs, W, H);
   const d = unstable ? "" : curvePath((f) => (plugin.enabled ? responseDb(mode, fc, f, fs) : 0), logFreqs(24, PLOT_LO_HZ, top), x, y, 0, H);
   return (
@@ -250,6 +264,8 @@ function FilterMini({ plugin, sampleRate }: PanelProps) {
 }
 
 export const filterPanelDef: PanelDef = {
+  // The engine calls it "LPF/HPF" or "High-Pass" by mode; the LP|HP switch says which.
+  title: "Filter",
   Panel: FilterPanel,
   summary: filterSummary,
   Mini: FilterMini,

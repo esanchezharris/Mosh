@@ -1,11 +1,10 @@
 import { useState, type KeyboardEvent } from "react";
-import { useStore } from "../../store";
 import { Dial } from "./Dial";
 import { DragNode } from "./DragNode";
-import { clamp, fmtDb, fmtPct } from "./params";
+import { clamp, fmtPct } from "./params";
 import {
-  DEFAULTS, FREEZE_PARAM, HF_HZ, ONSET_S, PLOT, dampingForHfRt60, decayAxes, decayGeometry, fmtSec, plotSpan,
-  reverbModel, reverbSummary, sizeForRt60, type ReverbModel,
+  DEFAULTS, FREEZE_PARAM, HF_HZ, ONSET_S, PLOT, UNITY, dampingForHfRt60, decayAxes, decayGeometry, fmtLevel, fmtSec,
+  plotSpan, reverbModel, reverbSummary, sizeForRt60, type ReverbModel,
 } from "./reverb";
 import type { PanelDef, PanelProps } from "./types";
 import { useDragSend } from "./useDragSend";
@@ -58,15 +57,20 @@ function DecayPlot({ m, span, enabled, onSize, onDamping, onDragStart, onDragEnd
       {m.frozen ? (
         <>
           <line className="curve" data-testid="pp-reverb-frozen" x1={g.onsetX} x2={a.right} y1={top + 0.8} y2={top + 0.8} />
-          <text className="pp-reverb-read" x={a.right - 2} y={top + 11} textAnchor="end">∞ frozen · input cut</text>
+          <text className="pp-reverb-read" x={a.right - 2} y={top + 12} textAnchor="end">∞ frozen · input cut</text>
         </>
       ) : (
         <>
           <path className="area" d={g.wedge} />
           <line className="pp-reverb-hf" x1={g.onsetX} y1={top} x2={g.high.x} y2={g.high.y} />
           <line className="curve" x1={g.onsetX} y1={top} x2={g.low.x} y2={g.low.y} />
-          <text className="pp-reverb-read" x={a.right - 2} y={top + 8} textAnchor="end" data-testid="pp-reverb-decay">~{fmtSec(m.rtLow)}</text>
-          <text className="pp-reverb-read hf" x={a.right - 2} y={top + 17} textAnchor="end">{`8k ${fmtSec(m.rtHigh)}`}</text>
+          {/* Approximate RT60s (eight combs of 25-37 ms): the tooltip says so, the text stays short. */}
+          <text className="pp-reverb-read" x={a.right - 2} y={top + 9} textAnchor="end" data-testid="pp-reverb-decay">
+            {`lows ${fmtSec(m.rtLow)}`}<title>Approximate time for the low frequencies to fall 60 dB</title>
+          </text>
+          <text className="pp-reverb-read hf" x={a.right - 2} y={top + 19} textAnchor="end" data-testid="pp-reverb-highs">
+            {`highs ${fmtSec(m.rtHigh)}`}<title>{`Approximate time for ${HF_HZ / 1000} kHz to fall 60 dB`}</title>
+          </text>
           <DragNode x={g.highMid.x} y={g.highMid.y} r={3.5} testId="pp-reverb-damp-node"
             ariaLabel="Damping (8 kHz decay)" ariaValueText={`${fmtPct(m.damping)}, highs ${fmtSec(m.rtHigh)}`} valueNow={m.damping * 100} valueMin={0} valueMax={100}
             onStart={() => onDragStart("damp")} onEnd={() => onDragEnd("damp")} onKeyDown={dampKey}
@@ -93,8 +97,9 @@ function ReverbPanel({ plugin, sampleRate, setParam }: PanelProps) {
   });
   const span = held ?? plotSpan(m.rtLowSet);
   const set = (i: number) => (norm: number, gesture: string) => setParam(i, norm, { gesture });
-  const frozenNote = m.frozen ? "No effect while Freeze is on" : undefined;
-  // Screen readers hear the same note on the sliders themselves (the title is on a wrapper).
+  // Size and Damping stay adjustable while frozen but do nothing (the engine forces feedback
+  // 1 and damping 0): inert, with the reason in the tooltip and in the spoken value.
+  const frozenNote = m.frozen ? " No effect while Freeze is on." : "";
   const frozenSuffix = m.frozen ? ", no effect while Freeze is on" : "";
   return (
     <div className="pp-reverb" data-testid="pp-reverb">
@@ -106,34 +111,37 @@ function ReverbPanel({ plugin, sampleRate, setParam }: PanelProps) {
         sizeKey={(e) => stepKey(e, m.size, sizeDrag.nudge)}
         dampKey={(e) => stepKey(e, m.damping, dampDrag.nudge)} />
       <div className="pp-reverb-ctl">
-        <span className={m.frozen ? "pp-reverb-held" : undefined} title={frozenNote}>
-          <Dial label="Size" size={30} norm={m.size} defaultNorm={DEFAULTS.size} testId="pp-reverb-size"
-            display={`~${fmtSec(m.rtLowSet)}`} valueText={`${fmtPct(m.size)}, low decay about ${fmtSec(m.rtLowSet)}${frozenSuffix}`}
-            onChange={set(0)} />
-        </span>
-        <span className={m.frozen ? "pp-reverb-held" : undefined} title={frozenNote}>
-          <Dial label="Damping" size={30} norm={m.damping} defaultNorm={DEFAULTS.damping} testId="pp-reverb-damping"
-            display={fmtPct(m.damping)} valueText={`${fmtPct(m.damping)}, highs decay ${fmtSec(m.rtHighSet)} at ${HF_HZ / 1000} kHz${frozenSuffix}`}
-            onChange={set(1)} />
-        </span>
-        <Dial label="Wet" size={30} norm={m.wet} defaultNorm={DEFAULTS.wet} testId="pp-reverb-wet"
-          display={fmtDb(m.wetDb)} onChange={set(2)} />
-        <Dial label="Dry" size={30} norm={m.dry} defaultNorm={DEFAULTS.dry} testId="pp-reverb-dry"
-          display={fmtDb(m.dryDb)} onChange={set(3)} />
-        <Dial label="Width" size={30} norm={m.width} defaultNorm={DEFAULTS.width} testId="pp-reverb-width"
+        <Dial label="Size" norm={m.size} defaultNorm={DEFAULTS.size} testId="pp-reverb-size" inert={m.frozen}
+          title={`Room size ${fmtPct(m.size)}: the low frequencies take about ${fmtSec(m.rtLowSet)} to fall 60 dB (approximate).${frozenNote}`}
+          display={fmtSec(m.rtLowSet)} valueText={`${fmtPct(m.size)}, low decay about ${fmtSec(m.rtLowSet)}${frozenSuffix}`}
+          onChange={set(0)} />
+        <Dial label="Damping" norm={m.damping} defaultNorm={DEFAULTS.damping} testId="pp-reverb-damping" inert={m.frozen}
+          title={`Damping: the highs (${HF_HZ / 1000} kHz) take about ${fmtSec(m.rtHighSet)} to fall 60 dB.${frozenNote}`}
+          display={fmtPct(m.damping)} valueText={`${fmtPct(m.damping)}, highs decay ${fmtSec(m.rtHighSet)} at ${HF_HZ / 1000} kHz${frozenSuffix}`}
+          onChange={set(1)} />
+        <Dial label="Wet" norm={m.wet} defaultNorm={DEFAULTS.wet} origin={UNITY.wet} testId="pp-reverb-wet"
+          display={fmtLevel(m.wetDb)} onChange={set(2)} />
+        <Dial label="Dry" norm={m.dry} defaultNorm={DEFAULTS.dry} origin={UNITY.dry} testId="pp-reverb-dry"
+          display={fmtLevel(m.dryDb)} onChange={set(3)} />
+        <Dial label="Width" norm={m.width} defaultNorm={DEFAULTS.width} testId="pp-reverb-width"
           display={fmtPct(m.width)} valueText={`${fmtPct(m.width)} stereo width`} onChange={set(4)} />
-        <button type="button" className="pp-reverb-freeze" data-testid="pp-reverb-freeze" aria-pressed={m.frozen}
-          title={m.frozen ? "Frozen: the tail holds forever and new input is cut. Click to release." : "Freeze: hold the current tail forever and cut new input"}
-          onClick={() => setParam(FREEZE_PARAM, m.frozen ? 0 : 1)}>
-          <span className="g" aria-hidden="true">∞</span>
+        {/* Freeze: a glyph toggle in a dial-shaped column, so its value and caption sit on the dials' lines. */}
+        <div className="pp-dial pp-reverb-freeze-col">
+          <button type="button" className="pp-btn pp-reverb-freeze" data-testid="pp-reverb-freeze" aria-pressed={m.frozen}
+            aria-label="Freeze"
+            title={m.frozen ? "Frozen: the tail holds forever and new input is cut. Click to release." : "Freeze: hold the current tail forever and cut new input"}
+            onClick={() => setParam(FREEZE_PARAM, m.frozen ? 0 : 1)}>
+            <span aria-hidden="true">∞</span>
+          </button>
+          <span className="v">{m.frozen ? "on" : "off"}</span>
           <span className="nm">Freeze</span>
-        </button>
+        </div>
       </div>
     </div>
   );
 }
 
-const MINI = { w: 36, h: 12, span: 4 };
+const MINI = { w: 44, h: 14, span: 4 };
 
 /** Minimized: the decay wedge on a fixed 0-4 s scale (so a longer room reads longer). */
 function ReverbMini({ plugin, sampleRate }: PanelProps) {
@@ -156,7 +164,7 @@ function ReverbMini({ plugin, sampleRate }: PanelProps) {
 
 export const reverbPanelDef: PanelDef = {
   Panel: ReverbPanel,
-  // The 8 kHz decay depends on the session rate; the row re-renders on every snapshot.
-  summary: (plugin) => reverbSummary(plugin, useStore.getState().snapshot?.session?.sampleRate || 48000),
+  // The low-frequency decay it leads with does not depend on the sample rate.
+  summary: (plugin) => reverbSummary(plugin),
   Mini: ReverbMini,
 };

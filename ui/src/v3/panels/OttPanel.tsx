@@ -5,7 +5,7 @@ import { usePluginMeter } from "./meters";
 import { clamp, fmtDb, fmtMs, normOf, param, physOf, type Range } from "./params";
 import {
   OTT_BANDS, OTT_DEFAULTS, OTT_LEVEL_AXIS, OTT_LIFT_WINDOW_DB, OTT_PARAM, OTT_RANGES, OTT_THRESHOLD_DB,
-  fmtAmount, ottBandView, ottMeterOf, ottOutputOnly, ottSettings, ottSummary, ottTaus,
+  fmtAmount, ottBandView, ottMeterOf, ottOutputOnly, ottSettings, ottSummary, ottTaus, type OttBandDef,
 } from "./ott";
 import type { PanelDef, PanelProps } from "./types";
 import { useDragSend } from "./useDragSend";
@@ -27,19 +27,20 @@ function useLatch(on: boolean, ms: number): boolean {
 }
 
 // ── a band's live bars ─────────────────────────────────────────────────────────────────
-const BAR_H = 30;
+const BAR_H = 20;
 const yOfDb = (db: number) => (1 - (db - OTT_LEVEL_AXIS.min) / (OTT_LEVEL_AXIS.max - OTT_LEVEL_AXIS.min)) * BAR_H;
 
 /** One band's envelope level (with the -20 dBFS threshold tick and the -76..-38 dBFS lift
- *  window shaded) and its applied gain change, both from the 30 Hz meter rail. Subscribes
- *  to this plugin's frame only. */
-function OttBandLive({ trackId, index, itemId, band, label }: { trackId: string; index: number; itemId?: string; band: number; label: string }) {
+ *  window shaded) and its applied gain change, both from the 30 Hz meter rail, with the gain
+ *  read-out over the band's name (the level is in the tooltip). Subscribes to this plugin's
+ *  frame only. With no frame the read-out is a muted "–"; the panel says "no signal" once. */
+function OttBandLive({ trackId, index, itemId, band, def }: { trackId: string; index: number; itemId?: string; band: number; def: OttBandDef }) {
   const view = ottBandView(ottMeterOf(usePluginMeter<PluginMeterReading>(trackId, index), itemId), band);
   const half = BAR_H / 2;
-  const desc = view ? `${label}: level ${view.levelText}, gain ${view.gainText}` : `${label}: no signal`;
+  const desc = view ? `${def.title}: level ${view.levelText}, gain ${view.gainText}` : `${def.title}: no signal`;
   return (
     <div className={`pp-ott-live${view ? "" : " idle"}`} data-testid="v3-ott-band-live" data-live={view ? "" : undefined}
-      role="img" aria-label={desc}>
+      role="img" aria-label={desc} title={desc}>
       <svg viewBox={`0 0 18 ${BAR_H}`} width={18} height={BAR_H} aria-hidden="true">
         <rect className="pp-ott-trk" x={0} y={0} width={5} height={BAR_H} rx={1} />
         <rect className="pp-ott-window" x={0} y={yOfDb(OTT_LIFT_WINDOW_DB.hi)} width={5}
@@ -52,23 +53,31 @@ function OttBandLive({ trackId, index, itemId, band, label }: { trackId: string;
         <line className="pp-ott-mid" x1={9} x2={17} y1={half} y2={half} />
       </svg>
       <span className="pp-ott-read">
-        <span className={`g${view && view.gainDb > 0.05 ? " up" : view && view.gainDb < -0.05 ? " dn" : ""}`} data-testid="v3-ott-gain">
+        <span className={`g${!view ? " none" : view.gainDb > 0.05 ? " up" : view.gainDb < -0.05 ? " dn" : ""}`} data-testid="v3-ott-gain">
           {view ? view.gainText : "–"}{view?.over ? "!" : ""}
         </span>
-        <span className="l">{view ? view.levelText : "idle"}</span>
+        <span className="nm">{def.label}</span>
       </span>
     </div>
   );
 }
 
-/** The output clamp light (the final stage is a hard clip at ±0.999, MoshFxMath.h). */
-function OttClip({ trackId, index, itemId }: { trackId: string; index: number; itemId?: string }) {
+/** The panel's status column beside Output, in the dials' footer (value over its fixed
+ *  "Clip" caption, like every control): the output clamp light (the final stage is a hard
+ *  clip at ±0.999, MoshFxMath.h) while frames arrive, and one muted "no signal" in the value
+ *  slot when none do. */
+function OttStatus({ trackId, index, itemId }: { trackId: string; index: number; itemId?: string }) {
   const meter = ottMeterOf(usePluginMeter<PluginMeterReading>(trackId, index), itemId);
   const lit = useLatch(!!meter?.clipped, OTT_CLIP_HOLD_MS);
   return (
-    <span className={`pp-ott-clip${lit ? " on" : ""}`} data-testid="v3-ott-clip" data-on={lit ? "" : undefined}
-      role="status" aria-label={lit ? "Output clipping" : "Output not clipping"}
-      title="Lights when the output's hard clip at 0 dBFS engaged">clip</span>
+    <div className={`pp-ott-stat${meter ? "" : " idle"}`} data-testid="v3-ott-status">
+      {meter ? (
+        <span className={`pp-ott-clip${lit ? " on" : ""}`} data-testid="v3-ott-clip" data-on={lit ? "" : undefined}
+          role="status" aria-label={lit ? "Output clipping" : "Output not clipping"}
+          title="Lights when the output's hard clip at 0 dBFS engaged" />
+      ) : <span className="v none" title="No meter frames: play to see the clip light">no signal</span>}
+      <span className="nm">Clip</span>
+    </div>
   );
 }
 
@@ -85,7 +94,9 @@ const roundTenth = (db: number) => Math.round(db * 10) / 10;
 /** A band trim as a thin bipolar bar with its dB read-out: drag sideways (Shift = fine),
  *  arrow keys ±0.5 dB (Shift ±0.1), PageUp/Down ±3 dB, Home/End the ends, double-click
  *  or Delete for 0 dB. One drag (or one burst of keys) is one undo step. */
-function TrimSlider({ name, p, onSend }: { name: string; p: ReturnType<typeof param>; onSend: (norm: number, gesture: string) => void }) {
+function TrimSlider({ name, p, inert, onSend }: {
+  name: string; p: ReturnType<typeof param>; inert?: boolean; onSend: (norm: number, gesture: string) => void;
+}) {
   const drag = useDragSend<number>((db, g) => onSend(normOf(p, db, TRIM), g));
   const start = useRef<{ x: number; db: number; w: number } | null>(null);
   const db = drag.live ?? physOf(p, TRIM);
@@ -94,9 +105,11 @@ function TrimSlider({ name, p, onSend }: { name: string; p: ReturnType<typeof pa
   const text = fmtDb(db);
   const finish = () => { if (start.current) { start.current = null; drag.end(); } };
   return (
-    <div className="pp-ott-trim" role="slider" tabIndex={0} data-testid="v3-ott-trim" aria-label={name}
-      aria-valuemin={TRIM.min} aria-valuemax={TRIM.max} aria-valuenow={roundTenth(db)} aria-valuetext={text}
-      title={`${name}: a fixed trim on this band (drag, arrows; double-click for 0 dB)`}
+    <div className={`pp-ott-trim${inert ? " inert" : ""}`} role="slider" tabIndex={0} data-testid="v3-ott-trim" aria-label={name}
+      aria-valuemin={TRIM.min} aria-valuemax={TRIM.max} aria-valuenow={roundTenth(db)}
+      aria-valuetext={`${text}${inert ? ", skipped at Amount 0" : ""}`}
+      title={inert ? `${name}: skipped at Amount 0 (only Output applies)`
+        : `${name}: a fixed trim on this band (drag, arrows; double-click for 0 dB)`}
       onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
         if (e.button !== 0) return;
         e.preventDefault();
@@ -137,61 +150,67 @@ function OttPanel({ plugin, trackId, setParam }: PanelProps) {
   const norm = (i: number) => param(plugin, i)?.value ?? 0;
   const taus = ottTaus(s.time);
   const outputOnly = ottOutputOnly(s.amount);
+  const skipped = outputOnly ? "skipped at Amount 0 (only Output applies)" : undefined;
   return (
     <div className={`pp-ott${plugin.enabled ? "" : " off"}`} data-testid="v3-ott">
       <div className={`pp-ott-bands${outputOnly ? " skipped" : ""}`}>
         {OTT_BANDS.map((b, i) => (
           <div key={b.key} className="pp-ott-band" data-band={b.key}>
-            <span className="pp-ott-bh" title={b.title}><b>{b.label}</b> {b.range}</span>
-            <OttBandLive trackId={trackId} index={plugin.index} itemId={plugin.itemId} band={i} label={b.title} />
-            <TrimSlider name={param(plugin, b.param)?.name ?? `${b.label} Gain`} p={param(plugin, b.param)} onSend={send(b.param)} />
+            <span className="pp-ott-bh" title={b.title}>{b.range}</span>
+            <OttBandLive trackId={trackId} index={plugin.index} itemId={plugin.itemId} band={i} def={b} />
+            <TrimSlider name={param(plugin, b.param)?.name ?? `${b.label} Gain`} p={param(plugin, b.param)} inert={outputOnly}
+              onSend={send(b.param)} />
           </div>
         ))}
       </div>
       <div className="pp-ott-dials">
-        <Dial label="Amount" size={38} norm={norm(OTT_PARAM.amount)} display={fmtAmount(s.amount)}
+        <Dial label="Amount" norm={norm(OTT_PARAM.amount)} display={fmtAmount(s.amount)}
           defaultNorm={def(OTT_PARAM.amount, OTT_DEFAULTS.amount, OTT_RANGES.amount)} onChange={send(OTT_PARAM.amount)}
           testId="v3-ott-amount" />
-        <Dial label="Time" size={30} norm={norm(OTT_PARAM.time)} display={fmtMs(s.time)}
+        <Dial label="Time" norm={norm(OTT_PARAM.time)} display={fmtMs(s.time)}
           valueText={`${fmtMs(taus.releaseMs)} release, ${fmtMs(taus.attackMs)} attack`}
+          title={`Release ${fmtMs(taus.releaseMs)}, attack ${fmtMs(taus.attackMs)}`}
           defaultNorm={def(OTT_PARAM.time, OTT_DEFAULTS.time, OTT_RANGES.time)} onChange={send(OTT_PARAM.time)}
           testId="v3-ott-time" />
-        {/* At Amount 0 the engine skips Mix, so it dims, but it stays adjustable (preset it
-            before raising Amount); the note below says why it has no effect. */}
-        <div className={`pp-ott-mixw${outputOnly ? " inert" : ""}`} data-testid="v3-ott-mixw">
-          <Dial label="Mix" size={30} norm={norm(OTT_PARAM.mix)} display={`${Math.round(s.mix * 100)}%`}
-            valueText={`${Math.round(s.mix * 100)}%${outputOnly ? ", skipped at Amount 0" : ""}`}
-            defaultNorm={def(OTT_PARAM.mix, OTT_DEFAULTS.mix, OTT_RANGES.mix)} onChange={send(OTT_PARAM.mix)}
-            testId="v3-ott-mix" />
-        </div>
-        <div className="pp-ott-out">
-          <Dial label="Output" size={30} norm={norm(OTT_PARAM.output)} display={fmtDb(s.output)}
-            defaultNorm={def(OTT_PARAM.output, OTT_DEFAULTS.output, OTT_RANGES.output)} onChange={send(OTT_PARAM.output)}
-            testId="v3-ott-output" />
-          <OttClip trackId={trackId} index={plugin.index} itemId={plugin.itemId} />
-        </div>
+        {/* At Amount 0 the engine skips Mix: it stays adjustable (preset it before raising
+            Amount) but has no effect, so only its arc is muted. */}
+        <Dial label="Mix" norm={norm(OTT_PARAM.mix)} display={`${Math.round(s.mix * 100)}%`} inert={outputOnly}
+          title={skipped && `Mix: ${skipped}`}
+          valueText={`${Math.round(s.mix * 100)}%${outputOnly ? ", skipped at Amount 0" : ""}`}
+          defaultNorm={def(OTT_PARAM.mix, OTT_DEFAULTS.mix, OTT_RANGES.mix)} onChange={send(OTT_PARAM.mix)}
+          testId="v3-ott-mix" />
+        <Dial label="Output" norm={norm(OTT_PARAM.output)} display={fmtDb(s.output)}
+          origin={normOf(param(plugin, OTT_PARAM.output), 0, OTT_RANGES.output)}
+          defaultNorm={def(OTT_PARAM.output, OTT_DEFAULTS.output, OTT_RANGES.output)} onChange={send(OTT_PARAM.output)}
+          testId="v3-ott-output" />
+        <OttStatus trackId={trackId} index={plugin.index} itemId={plugin.itemId} />
       </div>
       {outputOnly && (
-        <div className="pp-ott-note" data-testid="v3-ott-note">Amount 0: bands, trims and Mix are skipped; only Output applies.</div>
+        <div className="pp-ott-note" data-testid="v3-ott-note" title="At Amount 0 the bands, their trims and Mix are skipped">
+          Amount 0: only Output applies.
+        </div>
       )}
     </div>
   );
 }
 
-/** Minimized: each band's live gain change as a tiny bipolar tick (lift up, cut down). */
+/** Minimized (44×14): each band's live gain change as a bipolar bar on one baseline (lift
+ *  up, cut down); just the baseline when no frame arrives. */
+const MINI_W = 44, MINI_H = 14, MINI_MID = MINI_H / 2;
 function OttMini({ plugin, trackId }: PanelProps) {
   const meter = ottMeterOf(usePluginMeter<PluginMeterReading>(trackId, plugin.index), plugin.itemId);
   return (
-    <svg className={`pp-ott-mini${meter ? "" : " idle"}`} data-testid="v3-ott-mini" viewBox="0 0 22 12" width={22} height={12}
-      role="img" aria-label={meter ? `Band gains ${OTT_BANDS.map((b, i) => `${b.label} ${ottBandView(meter, i)?.gainText ?? "–"}`).join(", ")}` : "No signal"}>
-      {OTT_BANDS.map((b, i) => {
+    <svg className={`pp-ott-mini${meter ? "" : " idle"}`} data-testid="v3-ott-mini" viewBox={`0 0 ${MINI_W} ${MINI_H}`}
+      width={MINI_W} height={MINI_H} role="img"
+      aria-label={meter ? `Band gains ${OTT_BANDS.map((b, i) => `${b.label} ${ottBandView(meter, i)?.gainText ?? "–"}`).join(", ")}` : "No signal"}>
+      <line className="pp-ott-mid" x1={0} x2={MINI_W} y1={MINI_MID} y2={MINI_MID} />
+      {meter && OTT_BANDS.map((b, i) => {
         const v = ottBandView(meter, i);
-        const x = i * 8;
+        const x = 2 + i * 15;
         return (
           <g key={b.key}>
-            <line className="pp-ott-mid" x1={x} x2={x + 6} y1={6} y2={6} />
-            {v && v.lift > 0 && <rect className="pp-ott-lift" x={x + 1} y={6 - v.lift * 6} width={4} height={v.lift * 6} />}
-            {v && v.cut > 0 && <rect className="pp-ott-cut" x={x + 1} y={6} width={4} height={v.cut * 6} />}
+            {v && v.lift > 0 && <rect className="pp-ott-lift" x={x} y={MINI_MID - v.lift * MINI_MID} width={10} height={v.lift * MINI_MID} />}
+            {v && v.cut > 0 && <rect className="pp-ott-cut" x={x} y={MINI_MID} width={10} height={v.cut * MINI_MID} />}
           </g>
         );
       })}
@@ -199,4 +218,4 @@ function OttMini({ plugin, trackId }: PanelProps) {
   );
 }
 
-export const ottPanelDef: PanelDef = { Panel: OttPanel, summary: ottSummary, Mini: OttMini };
+export const ottPanelDef: PanelDef = { title: "OTT", Panel: OttPanel, summary: ottSummary, Mini: OttMini };

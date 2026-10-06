@@ -52,7 +52,7 @@ describe("reading the 12 parameters (linear: Hz 20..20000, dB ±20, Q 0.1..4)", 
     expect(b[0].q).toBeCloseTo(2.05, 9);
     expect(b[2].freq).toBeCloseTo(12407.6, 1);
     expect(b[3].freq).toBeCloseTo(16403.6, 1);
-    expect(eqSummary(p)).toBe("Lo -2.4 · 12k +2.4 · Hi +3.2");   // compact: the full form is 37 chars
+    expect(eqSummary(p)).toBe("high +3 · 2 more");   // biggest move first; even in whole dB all three are 21 chars
   });
 
   it("falls back to the documented ranges when the engine sends no min/max", () => {
@@ -61,25 +61,55 @@ describe("reading the 12 parameters (linear: Hz 20..20000, dB ±20, Q 0.1..4)", 
       .toEqual([{ paramIndex: 9, norm: n(9, 17000) }, { paramIndex: 10, norm: 0.575 }, { paramIndex: 11, norm: n(11, 0.5) }]);
   });
 
-  it("summarises only the bands doing something, in full while it fits one line", () => {
-    const v = DEFAULTS.slice();
-    v[4] = n(4, 2.5); v[7] = n(7, -6); v[6] = n(6, 450);
-    expect(eqSummary(eq(v))).toBe("3.0k +2.5 dB · 450 Hz -6.0 dB");
-    v[7] = 0.5; v[1] = n(1, -3);
-    expect(eqSummary(eq(v))).toBe("Lo -3.0 dB · 3.0k +2.5 dB");
+  it("budgets the summary to the 16 monospace characters the minimized row shows whole (97 px)", () => {
+    expect(SUMMARY_CHARS).toBe(16);
   });
 
-  it("compacts three or four active bands so the last band is never lost to the ellipsis", () => {
+  it("summarises only the bands doing something, biggest move first, in full while it fits", () => {
     const v = DEFAULTS.slice();
-    v[1] = n(1, -3); v[4] = n(4, 2.5); v[10] = n(10, 3);
-    expect(eqSummary(eq(v))).toBe("Lo -3 · 3.0k +2.5 · Hi +3");
-    v[7] = n(7, -2);
-    expect(eqSummary(eq(v))).toBe("Lo -3·3.0k +2.5·5.0k -2·Hi +3");     // spaced would be 35 chars
-    // Worst case: four bands, all with decimals and two-digit gains.
-    v[0] = n(0, 450); v[1] = n(1, -12.6); v[3] = n(3, 3600); v[4] = n(4, -12.4); v[6] = n(6, 12400); v[7] = n(7, 11.6); v[10] = n(10, -0.4);
-    const s = eqSummary(eq(v));
-    expect(s.length).toBeLessThanOrEqual(SUMMARY_CHARS);
-    expect(s).toBe("Lo -13·3.6k -12·12k +12·Hi -0.4");   // a small gain is never rounded to "0"
+    v[1] = n(1, -3);
+    expect(eqSummary(eq(v))).toBe("low -3.0 dB");
+    v[1] = 0.5; v[7] = n(7, -6); v[6] = n(6, 450);
+    expect(eqSummary(eq(v))).toBe("450 Hz -6.0 dB");
+    v[4] = n(4, 2.5);
+    // "450 Hz -6.0 dB · 3.0k +2.5 dB" is 29 chars; without the dB it is 21; bare numbers fit.
+    expect(eqSummary(eq(v))).toBe("450 -6·3.0k +2.5");
+    v[7] = 0.5; v[1] = n(1, -3); v[4] = 0.5; v[10] = n(10, 3);
+    expect(eqSummary(eq(v))).toBe("low -3 · high +3");    // the dB goes before the spaces do
+    v[1] = 0.5; v[10] = n(10, 1.5);
+    expect(eqSummary(eq(v))).toBe("high +1.5 dB");
+    v[10] = 0.5; v[6] = n(6, 9960); v[7] = n(7, 3);
+    expect(eqSummary(eq(v))).toBe("10k +3.0 dB");        // not fmtHz's "10.0k"
+  });
+
+  it("compacts several active bands, and counts the smallest rather than cut them off", () => {
+    const v = DEFAULTS.slice();
+    v[1] = n(1, -3); v[4] = n(4, 2.5);
+    expect(eqSummary(eq(v))).toBe("low -3·3.0k +2.5");
+    v[1] = n(1, -12.6); v[4] = n(4, -12.4); v[3] = n(3, 3600);
+    expect(eqSummary(eq(v))).toBe("low -13·3.6k -12");    // whole dB: 2 decimals would be 20 chars
+    v[10] = n(10, 3);
+    expect(eqSummary(eq(v))).toBe("low -13 · 2 more");    // three bands are 23 chars even in whole dB
+    // Rounding to whole dB never turns a small gain into a misleading "0", and the tightest
+    // form still fits when the biggest move is under 1 dB on all four bands.
+    const small = DEFAULTS.slice();
+    small[1] = n(1, 0.3); small[4] = n(4, -0.2); small[7] = n(7, 0.2); small[10] = n(10, -0.4); small[9] = n(9, 9900);
+    expect(eqSummary(eq(small))).toBe("high -0.4·3 more");
+  });
+
+  it("never exceeds the budget, whatever the four bands are set to", () => {
+    // A deterministic sweep over frequencies of every width ("20", "999", "9.9k", "20k"; 9950 Hz
+    // reads "10k", not fmtHz's "10.0k") and gains of every width ("-0.4", "+3", "-12.6", "-20").
+    const freqs = [20, 450, 999, 1000, 9940, 9950, 12400, 20000];
+    const gains = [0, 0.4, -0.4, 3, -12.6, 12.4, 20, -20];
+    let seed = 7;
+    const pick = <T,>(xs: T[]) => xs[(seed = (seed * 16807) % 2147483647) % xs.length];
+    for (let k = 0; k < 2000; k++) {
+      const v = DEFAULTS.slice();
+      for (let b = 0; b < 4; b++) { v[3 * b] = n(0, pick(freqs)); v[3 * b + 1] = n(1, pick(gains)); }
+      const s = eqSummary(eq(v));
+      expect(s.length, s).toBeLessThanOrEqual(SUMMARY_CHARS);
+    }
   });
 });
 
@@ -157,21 +187,21 @@ describe("plot geometry and drags", () => {
   it("spans 20 Hz..20 kHz at 48 kHz, stops just under Nyquist at 32 kHz, and puts 0 dB mid-height", () => {
     const g = geometry(FS, 12);
     expect(g.x.to(20)).toBeCloseTo(0, 9);
-    expect(g.x.to(20000)).toBeCloseTo(286, 9);
+    expect(g.x.to(20000)).toBeCloseTo(273, 9);
     expect(g.y.to(0)).toBe(42);
     expect(g.y.to(12)).toBe(6);
     expect(g.y.to(-12)).toBe(78);
     const low = geometry(32000, 12);
     expect(low.top).toBeCloseTo(15968, 6);
-    expect(nodePos(band(17000, 3, 0.5), low).x).toBe(286);
+    expect(nodePos(band(17000, 3, 0.5), low).x).toBe(273);
   });
 
   it("turns a node drag into a log frequency and a linear gain, rounded and snapped to 0 dB", () => {
     const g = geometry(FS, 12);
-    expect(dragTarget({ x: 143, y: 42 }, g)).toEqual({ freq: 632, gain: 0 });       // √(20·20000) = 632.46
-    expect(dragTarget({ x: 143, y: 6 }, g)).toEqual({ freq: 632, gain: 12 });
+    expect(dragTarget({ x: 136.5, y: 42 }, g)).toEqual({ freq: 632, gain: 0 });     // mid-width: √(20·20000) = 632.46
+    expect(dragTarget({ x: 136.5, y: 6 }, g)).toEqual({ freq: 632, gain: 12 });
     expect(dragTarget({ x: 0, y: 43 }, g)).toEqual({ freq: 20, gain: -0.3 });       // 1 px = 1/3 dB
-    expect(dragTarget({ x: 286, y: 42.3 }, g)).toEqual({ freq: 20000, gain: 0 });   // -0.1 dB snaps to off
+    expect(dragTarget({ x: 273, y: 42.3 }, g)).toEqual({ freq: 20000, gain: 0 });   // -0.1 dB snaps to off
     expect(dragTarget({ x: 400, y: -500 }, g)).toEqual({ freq: 20000, gain: 20 });  // clamped to the engine range
   });
 
@@ -282,6 +312,10 @@ describe("EqPanel", () => {
     host.remove();
   });
 
+  it("is titled 4-Band EQ, not the engine's 4-Band Equaliser", () => {
+    expect(eqPanelDef.title).toBe("4-Band EQ");
+  });
+
   it("draws four nodes, hollow exactly where the band is at 0 dB, over a non-empty curve", () => {
     const v = DEFAULTS.slice(); v[10] = n(10, 3);
     render(eq(v));
@@ -290,6 +324,13 @@ describe("EqPanel", () => {
     expect(q('[data-testid="pp-eq-node-H"]').classList.contains("hollow")).toBe(false);
     expect(q('[data-testid="pp-eq-node-H"]').getAttribute("aria-valuetext")).toBe("17.0 kHz, +3.0 dB, Q 0.50");
     expect(q('[data-testid="pp-eq-node-L"]').getAttribute("aria-valuetext")).toMatch(/off \(at 0 dB the engine skips this band\)/);
+    // The band picker agrees: only a processing band carries the lit dot, and the off one says why.
+    expect(q('[data-testid="pp-eq-band-H"]').classList.contains("live")).toBe(true);
+    expect(q('[data-testid="pp-eq-band-L"]').classList.contains("live")).toBe(false);
+    expect(q('[data-testid="pp-eq-band-L"]').getAttribute("title")).toBe("Low shelf: off at 0 dB");
+    // An off band's Freq / Q stay adjustable (inert, not disabled); its Gain is never inert.
+    expect(q('[data-testid="pp-eq-field-freq"]').parentElement!.classList.contains("inert")).toBe(true);
+    expect(q('[data-testid="pp-eq-field-gain"]').parentElement!.classList.contains("inert")).toBe(false);
     const d = q('[data-testid="pp-eq-curve"]').getAttribute("d")!;
     const g = geometry(FS, 12);
     const bands = readBands(eq(v));
@@ -324,7 +365,7 @@ describe("EqPanel", () => {
 
   const sizePlot = () => {
     const svg = q<SVGSVGElement>('[data-testid="pp-eq-plot"]');
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 286, height: 84, right: 286, bottom: 84, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 273, height: 84, right: 273, bottom: 84, x: 0, y: 0, toJSON() {} }) as DOMRect;
   };
 
   it("dragging a node sets frequency and gain under ONE gesture across frames; Alt-drag sets Q", async () => {
@@ -337,8 +378,8 @@ describe("EqPanel", () => {
     ptr(node, "pointermove", 100, 20);
     await wait(40);                                    // a frame passes: the first move is sent
     expect(calls()).toHaveLength(2);
-    ptr(node, "pointermove", 143, 6);
-    ptr(node, "pointerup", 143, 6);
+    ptr(node, "pointermove", 136.5, 6);
+    ptr(node, "pointerup", 136.5, 6);
     const c = calls();
     expect(c.slice(2).map(([i, v]) => [i, v])).toEqual([[0, n(0, 632)], [1, 0.8]]);
     expect(c[0][2]).toMatch(/^ui-/);
@@ -356,7 +397,7 @@ describe("EqPanel", () => {
     sizePlot();
     const g = geometry(32000, 12);
     const start = nodePos(readBands(eq(DEFAULTS))[3], g);
-    expect(start.x).toBe(286);                          // 17 kHz is past the 15968 Hz top
+    expect(start.x).toBe(273);                          // 17 kHz is past the 15968 Hz top
     const node = q('[data-testid="pp-eq-node-H"]');
     ptr(node, "pointerdown", start.x, start.y);
     ptr(node, "pointermove", start.x, start.y - 9);

@@ -7,13 +7,15 @@ import { clamp, fmtDb, fmtMs, fmtRatio, normOf, param, ratioNorm, thresholdNorm 
 import { curvePath, linScale, type Scale } from "./plot";
 import { useDragSend } from "./useDragSend";
 import {
-  ATTACK, compOutDb, compSettings, compSummary, curveSamples, DEFAULTS, dynamicsFrame, fmtGr, fmtThr, gaugeAngle, gaugePoint,
-  grScale, MAKEUP, outRange, RELEASE, ratioDialPos, ratioNormFromDial, SIDECHAIN, THR_MAX_DB, THR_MIN_DB, unitySpan, X_HI, X_LO,
+  ATTACK, compOutDb, compSettings, compSummary, curveSamples, DEFAULTS, dynamicsFrame, fmtGr, fmtPeak, fmtThr, GAUGE_HALF_SWEEP,
+  gaugeAngle, gaugePoint, grScale, MAKEUP, outRange, RELEASE, ratioDialPos, ratioNormFromDial, SIDECHAIN, THR_MAX_DB, THR_MIN_DB,
+  unitySpan, X_HI, X_LO,
 } from "./compressor";
 import type { PanelDef, PanelProps } from "./types";
 
-// Transfer-curve plot geometry (viewBox units). The x axis is the detector level.
-const PW = 100, PH = 100;
+// Transfer-curve plot geometry: the viewBox is the drawn size in px, so its 9 px axis text
+// is not scaled down. The x axis is the detector level.
+const PW = 82, PH = 82;
 const GRID = [-36, -24, -12];
 
 /** One live frame for this compressor, or undefined (idle). Subscribes to this plugin only. */
@@ -32,14 +34,19 @@ function LiveDot({ trackId, index, type, x, y, yLo, yHi }: {
   return <circle className="pp-compressor-dot" data-testid="pp-compressor-dot" cx={cx.toFixed(2)} cy={cy.toFixed(2)} r={2.6} />;
 }
 
+/** The gauge face: a ±50° arc pivoting at the bottom, like a VU needle. */
+const G = { w: 80, h: 38, cx: 40, cy: 36, r: 31 };
+
 /** The hero: a needle gauge of the gain reduction being applied right now, with a
- *  one-second peak-hold tick and the measured in/out peaks. Idle when no frame arrives
- *  (stopped, bypassed, silent). */
-function GrGauge({ trackId, index, type, scale }: { trackId: string; index: number; type: string; scale: number }) {
+ *  one-second peak-hold tick, the number, and the measured in/out peaks. With no frame
+ *  (stopped, bypassed, silent) the needle rests at 0 and the panel says "no signal". */
+function GrGauge({ trackId, index, type, scale, more, onMore }: {
+  trackId: string; index: number; type: string; scale: number; more: boolean; onMore: () => void;
+}) {
   const m = useDynamics(trackId, index, type);
   const gr = m ? Math.max(0, m.grDb) : 0;
   const peak = usePeakHold(m ? gr : undefined, 1000) ?? 0;
-  const cx = 40, cy = 40, r = 33;
+  const { cx, cy, r } = G;
   const ang = gaugeAngle(gr, scale), peakAng = gaugeAngle(peak, scale);
   const [tx1, ty1] = gaugePoint(cx, cy, r - 5, peakAng), [tx2, ty2] = gaugePoint(cx, cy, r + 3, peakAng);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => {
@@ -47,27 +54,44 @@ function GrGauge({ trackId, index, type, scale }: { trackId: string; index: numb
     const [x1, y1] = gaugePoint(cx, cy, r + 2, a), [x2, y2] = gaugePoint(cx, cy, r + 5, a);
     return <line key={f} className="tk" x1={x1.toFixed(2)} y1={y1.toFixed(2)} x2={x2.toFixed(2)} y2={y2.toFixed(2)} />;
   });
+  // The scale's numbers sit centred under the arc's two ends.
+  const [lx, ly] = gaugePoint(cx, cy, r, -GAUGE_HALF_SWEEP), [rx] = gaugePoint(cx, cy, r, GAUGE_HALF_SWEEP);
   return (
-    <div className={`pp-compressor-gauge${m ? "" : " idle"}`} data-testid="pp-compressor-gauge" data-live={m ? "" : undefined}
-      role="meter" aria-label="Gain reduction" aria-valuemin={0} aria-valuemax={scale} aria-valuenow={Number(gr.toFixed(1))}
-      aria-valuetext={m ? `${gr.toFixed(1)} dB of gain reduction` : "No signal"}
-      title={`Gain reduction applied right now (full scale ${scale} dB), with a 1 s peak hold`}>
-      <svg viewBox="0 0 80 44" aria-hidden="true">
-        <path className="trk" d={arcPath(cx, cy, r, -90, 90)} />
-        {gr > 0.01 && <path className="val" d={arcPath(cx, cy, r, ang, 90)} />}
-        {ticks}
-        {m && peak > 0.05 && <line className="pk" x1={tx1.toFixed(2)} y1={ty1.toFixed(2)} x2={tx2.toFixed(2)} y2={ty2.toFixed(2)} />}
-        <g className="needle" style={{ transform: `rotate(${ang.toFixed(2)}deg)`, transformOrigin: `${cx}px ${cy}px` }}>
-          <line x1={cx} y1={cy} x2={cx} y2={cy - r + 3} />
-        </g>
-        <circle className="hub" cx={cx} cy={cy} r={2} />
-        <text className="sc" x={4} y={43}>-{scale}</text>
-        <text className="sc" x={76} y={43} textAnchor="end">0</text>
-      </svg>
+    <div className={`pp-compressor-gauge${m ? "" : " idle"}`} data-testid="pp-compressor-gauge" data-live={m ? "" : undefined}>
+      <div className="face" role="meter" aria-label="Gain reduction" aria-valuemin={0} aria-valuemax={scale}
+        aria-valuenow={Number(gr.toFixed(1))} aria-valuetext={m ? `${gr.toFixed(1)} dB of gain reduction` : "No signal"}
+        title={`Gain reduction applied right now (full scale ${scale} dB), with a 1 s peak hold`}>
+        <svg viewBox={`0 0 ${G.w} ${G.h}`} width={G.w} height={G.h} aria-hidden="true">
+          <path className="trk" d={arcPath(cx, cy, r, -GAUGE_HALF_SWEEP, GAUGE_HALF_SWEEP)} />
+          {gr > 0.01 && <path className="val" d={arcPath(cx, cy, r, ang, GAUGE_HALF_SWEEP)} />}
+          {ticks}
+          {m && peak > 0.05 && <line className="pk" x1={tx1.toFixed(2)} y1={ty1.toFixed(2)} x2={tx2.toFixed(2)} y2={ty2.toFixed(2)} />}
+          <g className="needle" style={{ transform: `rotate(${ang.toFixed(2)}deg)`, transformOrigin: `${cx}px ${cy}px` }}>
+            <line x1={cx} y1={cy} x2={cx} y2={cy - r + 3} />
+          </g>
+          <circle className="hub" cx={cx} cy={cy} r={2} />
+          <text className="sc" x={lx.toFixed(2)} y={(ly + 10).toFixed(2)} textAnchor="middle">-{scale}</text>
+          <text className="sc" x={rx.toFixed(2)} y={(ly + 10).toFixed(2)} textAnchor="middle">0</text>
+        </svg>
+        <span className="nm">Gain reduction</span>
+      </div>
       <div className="read">
-        <span className="gr" data-testid="pp-compressor-gr">{m ? fmtGr(gr) : "–"}</span>
-        <span className="io" data-testid="pp-compressor-in">in {m ? m.inDb.toFixed(1) : "–"}</span>
-        <span className="io" data-testid="pp-compressor-out">out {m ? m.outDb.toFixed(1) : "–"}</span>
+        {/* 0.0 dB of reduction is muted, like the idle dash: a bright number would say
+            something is happening when nothing is. */}
+        <span className={`gr${m && gr < 0.05 ? " zero" : ""}`} data-testid="pp-compressor-gr">{m ? fmtGr(gr) : "–"}</span>
+        {m ? <>
+          <span className="io" data-testid="pp-compressor-in"><span className="k">in</span> <span className="n">{fmtPeak(m.inDb)}</span></span>
+          <span className="io" data-testid="pp-compressor-out"><span className="k">out</span> <span className="n">{fmtPeak(m.outDb)}</span></span>
+        </> : <>
+          <span className="io idle" data-testid="pp-compressor-nosignal">no signal</span>
+          <span className="io" aria-hidden="true">{"\u00a0"}</span>
+        </>}
+        {/* Sidechain gain only trims a sidechain input, and nothing routes one in Mosh, so
+            it lives behind a quiet text disclosure, not a switch-like button. */}
+        <button type="button" className="pp-compressor-more" data-testid="pp-compressor-more" aria-expanded={more}
+          title="Sidechain gain (no effect: Mosh routes no sidechain)" onClick={onMore}>
+          Sidechain {more ? "\u25be" : "\u25b8"}
+        </button>
       </div>
     </div>
   );
@@ -75,7 +99,7 @@ function GrGauge({ trackId, index, type, scale }: { trackId: string; index: numb
 
 /** Tracktion Compressor: the exact transfer curve with the threshold on it, a live
  *  gain-reduction gauge, and Ratio / Attack / Release / Makeup dials. Sidechain gain sits
- *  behind a disclosure: nothing routes a sidechain in Mosh, so it does nothing today. */
+ *  behind a text disclosure, inert: nothing routes a sidechain in Mosh, so it does nothing. */
 function CompressorPanel({ plugin, trackId, setParam }: PanelProps) {
   const s = compSettings(plugin);
   const [more, setMore] = useState(false);
@@ -109,7 +133,7 @@ function CompressorPanel({ plugin, trackId, setParam }: PanelProps) {
     <div className="pp-compressor" data-testid="pp-compressor">
       <div className="pp-compressor-left">
         <svg className={`pp-plot pp-compressor-plot${plugin.enabled ? "" : " bypassed"}`} viewBox={`0 0 ${PW} ${PH}`}
-          data-testid="pp-compressor-plot" role="group" aria-label="Transfer curve: detector level in, output out">
+          width={PW} height={PH} data-testid="pp-compressor-plot" role="group" aria-label="Transfer curve: detector level in, output out">
           {GRID.map((g) => (
             <g key={g}>
               <line className="grid" x1={x.to(g)} y1={0} x2={x.to(g)} y2={PH} />
@@ -121,8 +145,10 @@ function CompressorPanel({ plugin, trackId, setParam }: PanelProps) {
             x1={x.to(unity[0])} y1={y.to(unity[0])} x2={x.to(unity[1])} y2={y.to(unity[1])} />}
           <line className="pp-compressor-thr" x1={x.to(thrDb)} y1={0} x2={x.to(thrDb)} y2={PH} />
           <path className="curve" data-testid="pp-compressor-curve" d={curve} />
-          <text className="axis" x={2} y={8}>{yHi === 0 ? "0" : `+${yHi}`}</text>
-          <text className="axis" x={PW - 2} y={PH - 2} textAnchor="end">in</text>
+          {/* Out at the top-left; in along the bottom-right, where the curve never runs (it
+              starts in the bottom-left corner at 0 dB makeup). */}
+          <text className="axis" x={2} y={10}>{yHi === 0 ? "0" : `+${yHi}`} dBFS</text>
+          <text className="axis" x={PW - 2} y={PH - 3} textAnchor="end">0 dBFS in</text>
           <LiveDot trackId={trackId} index={plugin.index} type={plugin.type} x={x} y={y} yLo={yLo} yHi={yHi} />
           <DragNode x={x.to(thrDb)} y={y.to(kneeY)} r={4} active={thr.live !== null} testId="pp-compressor-thr-node"
             ariaLabel="Threshold" ariaValueText={`${thrDb.toFixed(1)} dB`} valueNow={thrDb} valueMin={-40} valueMax={0}
@@ -130,41 +156,40 @@ function CompressorPanel({ plugin, trackId, setParam }: PanelProps) {
             onMove={(pt) => thr.update(clamp(Math.round(x.from(pt.x) * 10) / 10, THR_MIN_DB, THR_MAX_DB))}
             onKeyDown={onThrKey} onDoubleClick={() => setThr(DEFAULTS.thrDb)} />
         </svg>
-        <div className="pp-compressor-under">
-          <span className="pp-compressor-thrval" data-testid="pp-compressor-thrval" title="Threshold (drag the dot on the curve)">
-            <span className="k">thr</span> {fmtThr(thrDb)}
-          </span>
-          <button type="button" className="pp-compressor-more" data-testid="pp-compressor-more" aria-expanded={more}
-            aria-label={more ? "Hide sidechain gain" : "Show sidechain gain"} title="Sidechain gain"
-            onClick={() => setMore((v) => !v)}>SC</button>
+        {/* The plot is the threshold's control; its read-out is a dial's footer, level with
+            the dials' own. */}
+        <div className="pp-dial pp-compressor-thrval" data-testid="pp-compressor-thrval" title="Threshold (drag the dot on the curve)">
+          <span className="v">{fmtThr(thrDb)}</span>
+          <span className="nm">Threshold</span>
         </div>
       </div>
       <div className="pp-compressor-side">
-        <GrGauge trackId={trackId} index={plugin.index} type={plugin.type} scale={scale} />
+        <GrGauge trackId={trackId} index={plugin.index} type={plugin.type} scale={scale} more={more} onMore={() => setMore((v) => !v)} />
         <div className="pp-compressor-dials">
-          <Dial label="Ratio" testId="pp-compressor-ratio" size={30}
+          <Dial label="Ratio" testId="pp-compressor-ratio"
             norm={ratioDialPos(p(1)?.value ?? ratioNorm(DEFAULTS.ratio))} defaultNorm={ratioDefault}
             display={fmtRatio(s.ratio)} valueText={Number.isFinite(s.ratio) ? `${s.ratio.toFixed(2)} to 1` : "infinity to 1"}
             onChange={(pos, gesture) => setParam(1, ratioNormFromDial(pos), { gesture })} />
-          <Dial label="Attack" testId="pp-compressor-attack" size={30} norm={p(2)?.value ?? normOf(undefined, DEFAULTS.attackMs, ATTACK)}
+          <Dial label="Attack" testId="pp-compressor-attack" norm={p(2)?.value ?? normOf(undefined, DEFAULTS.attackMs, ATTACK)}
             defaultNorm={normOf(p(2), DEFAULTS.attackMs, ATTACK)} display={fmtMs(s.attackMs)}
             onChange={(v, gesture) => setParam(2, v, { gesture })} />
-          <Dial label="Release" testId="pp-compressor-release" size={30} norm={p(3)?.value ?? normOf(undefined, DEFAULTS.releaseMs, RELEASE)}
+          <Dial label="Release" testId="pp-compressor-release" norm={p(3)?.value ?? normOf(undefined, DEFAULTS.releaseMs, RELEASE)}
             defaultNorm={normOf(p(3), DEFAULTS.releaseMs, RELEASE)} display={fmtMs(s.releaseMs)}
             onChange={(v, gesture) => setParam(3, v, { gesture })} />
-          <Dial label="Makeup" testId="pp-compressor-makeup" size={30} norm={p(4)?.value ?? normOf(undefined, DEFAULTS.makeupDb, MAKEUP)}
+          <Dial label="Makeup" testId="pp-compressor-makeup" norm={p(4)?.value ?? normOf(undefined, DEFAULTS.makeupDb, MAKEUP)}
+            origin={normOf(p(4), 0, MAKEUP)}
             defaultNorm={normOf(p(4), DEFAULTS.makeupDb, MAKEUP)} display={fmtDb(s.makeupDb)}
             onChange={(v, gesture) => setParam(4, v, { gesture })} />
         </div>
       </div>
       {more && (
         <div className="pp-compressor-sc" data-testid="pp-compressor-sc">
-          <Dial label="SC gain" testId="pp-compressor-scgain" size={18} bipolar
-            norm={p(5)?.value ?? normOf(undefined, DEFAULTS.sidechainDb, SIDECHAIN)}
+          <Dial label="Sidechain gain" testId="pp-compressor-scgain" inert
+            title="Sidechain gain only trims a sidechain input, and nothing routes one in Mosh yet, so it has no effect."
+            norm={p(5)?.value ?? normOf(undefined, DEFAULTS.sidechainDb, SIDECHAIN)} origin={normOf(p(5), 0, SIDECHAIN)}
             defaultNorm={normOf(p(5), DEFAULTS.sidechainDb, SIDECHAIN)} display={fmtDb(s.sidechainDb)}
             onChange={(v, gesture) => setParam(5, v, { gesture })} />
-          <span className="note" title="Sidechain gain only trims a sidechain input, and nothing routes one in Mosh yet, so it has no effect.">
-            no effect: Mosh routes no sidechain</span>
+          <span className="note">No effect in Mosh</span>
         </div>
       )}
     </div>

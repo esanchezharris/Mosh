@@ -46,8 +46,11 @@ export function stateNum(plugin: Plugin, key: string, fallback: number): number 
 /** "80 Hz", "950 Hz", "1.2k", "17k". */
 export function fmtHz(hz: number): string {
   if (!Number.isFinite(hz)) return "–";
-  if (hz < 1000) return `${Math.round(hz)} Hz`;
-  if (hz < 10000) return `${(Math.round(hz / 100) / 10).toFixed(1)}k`;
+  // Decide the form from the ROUNDED value, so 999.7 Hz is "1.0k" (not "1000 Hz") and
+  // 9960 Hz is "10k" (not "10.0k").
+  if (Math.round(hz) < 1000) return `${Math.round(hz)} Hz`;
+  const tenths = Math.round(hz / 100) / 10;
+  if (tenths < 10) return `${tenths.toFixed(1)}k`;
   return `${Math.round(hz / 1000)}k`;
 }
 
@@ -55,8 +58,9 @@ export function fmtHz(hz: number): string {
  *  shorter form for one-line summaries). */
 export function fmtFreq(hz: number): string {
   if (!Number.isFinite(hz)) return "–";
-  if (hz < 1000) return `${Math.round(hz)} Hz`;
-  return `${(hz / 1000).toFixed(hz < 10000 ? 2 : 1)} kHz`;
+  if (Math.round(hz) < 1000) return `${Math.round(hz)} Hz`;
+  const k = hz / 1000;
+  return Number(k.toFixed(2)) < 10 ? `${k.toFixed(2)} kHz` : `${k.toFixed(1)} kHz`;
 }
 
 /** "+3.0 dB", "-2.5 dB", "0.0 dB" (never "-0.0"). */

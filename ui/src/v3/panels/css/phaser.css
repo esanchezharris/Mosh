@@ -1,23 +1,31 @@
-/* Phaser panel (panels/PhaserPanel.tsx): the exact magnitude response at the sweep's place
-   over the band it travels, then three small dials and the sweep span / level lift. */
+/* Phaser panel (panels/PhaserPanel.tsx): the exact magnitude response at one sweep position
+   over the band it travels (in the shared plot frame), with the sweep span and level lift
+   as haloed read-outs in the strip above its top line; then three family-size dials (the
+   row holds only controls). */
 .v3-shell .insp .pr .pp-phaser { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.v3-shell .insp .pr .pp-phaser .pp-phaser-plot {
-  border-radius: 4px; background: color-mix(in srgb, var(--bg) 60%, transparent); touch-action: auto;
-}
+.v3-shell .insp .pr .pp-phaser .pp-phaser-plot { touch-action: auto; }
 .v3-shell .insp .pr .pp-phaser .pp-phaser-plot .axis { pointer-events: none; user-select: none; }
-.v3-shell .insp .pr .pp-phaser .pp-phaser-span { fill: color-mix(in srgb, var(--accent) 7%, transparent); }
+.v3-shell .insp .pr .pp-phaser .pp-phaser-span { fill: color-mix(in srgb, var(--accent) 6%, transparent); }
 .v3-shell .insp .pr .pp-phaser .pp-phaser-plot.bypassed .pp-phaser-span { fill: color-mix(in srgb, var(--text) 4%, transparent); }
-.v3-shell .insp .pr .pp-phaser .pp-phaser-ctl { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
-.v3-shell .insp .pr .pp-phaser .pp-phaser-ctl .pp-dial { min-width: 48px; }
-.v3-shell .insp .pr .pp-phaser .pp-phaser-read {
-  flex: 1 1 auto; min-width: 0; align-self: center; display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
-  font-family: var(--mono); font-size: 10px; color: var(--text); white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.v3-shell .insp .pr .pp-phaser .pp-phaser-read span { display: flex; gap: 5px; align-items: baseline; }
-.v3-shell .insp .pr .pp-phaser .pp-phaser-read i { font-style: normal; font-family: inherit; font-size: 9px; color: var(--muted); }
-/* The illustrative sweep position: thin and faint, so the static band reads first. */
-.v3-shell .insp .pr .pp-phaser .pp-phaser-plot .pp-phaser-now {
-  fill: none; stroke: color-mix(in srgb, var(--text) 45%, transparent); stroke-width: 0.8;
+/* The static band is context: a light fill and a faint upper edge. The sweep position is the curve. */
+.v3-shell .insp .pr .pp-phaser .pp-phaser-plot .area { fill: color-mix(in srgb, var(--accent) 8%, transparent); }
+.v3-shell .insp .pr .pp-phaser .pp-phaser-plot .pp-phaser-env {
+  fill: none; stroke: color-mix(in srgb, var(--accent) 35%, transparent); stroke-width: 1;
   vector-effect: non-scaling-stroke; stroke-linejoin: round;
 }
+.v3-shell .insp .pr .pp-phaser .pp-phaser-plot .curve { stroke-width: 1.4; }
+/* The computed read-outs: haloed axis-size text (words muted, figures in --text), as the
+   reverb and delay read-outs. Hover explains each. */
+.v3-shell .insp .pr .pp-phaser .pp-phaser-read { fill: var(--muted); font-family: var(--mono); font-size: var(--pp-fs-axis);
+  font-variant-numeric: tabular-nums; cursor: help;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-phaser .pp-phaser-read .v { fill: var(--text); }
+.v3-shell .insp .pr .pp-phaser .pp-phaser-ctl { display: flex; align-items: flex-end; justify-content: space-around; gap: 2px; min-width: 0; }
+.v3-shell .insp .pr .pp-phaser .pp-phaser-note { font-size: var(--pp-fs-cap); color: var(--muted); }
+/* The minimized thumbnail. */
+.v3-shell .insp .pr .pp-phaser-mini { display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-phaser-mini .z { stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-phaser-mini .span { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+.v3-shell .insp .pr .pp-phaser-mini .edge { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-phaser-mini.bypassed .span { fill: color-mix(in srgb, var(--text) 6%, transparent); }
+.v3-shell .insp .pr .pp-phaser-mini.bypassed .edge { stroke: var(--muted); }

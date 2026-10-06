@@ -11,7 +11,8 @@
 // triangle in octaves, rising first, period 1/rate s. Break frequency f = (fs/π)·atan(swp).
 import type { Plugin } from "../../types";
 import { logFreqs, plotTopHz } from "./dsp";
-import { fmtHz, stateNum, type Range } from "./params";
+import { firstThatFits, trimNum } from "./chorus";
+import { fmtFreq, stateNum, type Range } from "./params";
 
 export const PHASER_BASE_HZ = 100;
 
@@ -139,24 +140,40 @@ export function sweepEnvelope(fs: number, depth: number, g: number, n = 128, lo 
   return env;
 }
 
+/** The envelope's upper edge as drawn: a 3-point running max. The sweep is sampled every
+ *  sixteenth of an octave, so a resonance passing between two samples leaves a small dip
+ *  the real sweep does not have; the neighbour's maximum is the closer truth. */
+export function smoothUpper(maxDb: readonly number[]): number[] {
+  return maxDb.map((v, i) => Math.max(v, maxDb[i - 1] ?? v, maxDb[i + 1] ?? v));
+}
+
 /** With no feedback, the two notches: (fs/π)·atan(swp·tan(π/8)) and (fs/π)·atan(swp·tan(3π/8)). */
 export function notchesHz(swp: number, fs: number): [number, number] {
   return [breakHz(swp * Math.tan(Math.PI / 8), fs), breakHz(swp * Math.tan((3 * Math.PI) / 8), fs)];
 }
 
-/** "100 Hz–3.2k". */
+/** "100 Hz–3.15 kHz". */
 export function fmtSpan(fs: number, depth: number): string {
   const [lo, hi] = sweepSpanHz(fs, depth);
-  return `${fmtHz(lo)}–${fmtHz(hi)}`;
+  return `${fmtFreq(lo)}–${fmtFreq(hi)}`;
 }
 
 export const fmtOct = (oct: number): string => `${oct.toFixed(1)} oct`;
-export const fmtFeedback = (g: number): string => `${Math.round(g * 100)}%`;
+/** Feedback is bipolar: "+70%", "-40%", "0%". */
+export function fmtFeedback(g: number): string {
+  const n = Math.round(g * 100);
+  return `${n > 0 ? "+" : ""}${Object.is(n, -0) ? 0 : n}%`;
+}
 
-/** One line for the minimized row: "0.40 Hz · 5.0 oct · FB 70%" (the Hz span depends on
- *  the sample rate, which summary() is not given; the expanded panel shows it). */
+/** One short line for the minimized header, most telling first: rate and depth,
+ *  "0.40 Hz · 5 oct" (the Hz span depends on the sample rate, which summary() is not
+ *  given, and feedback is left to the panel). Where the exact figures are too long for the
+ *  row, trailing zeros go ("2.5 Hz · 3.2 oct"), then the depth is rounded and marked
+ *  ("0.45 Hz · ~3 oct"). */
 export function phaserSummary(plugin: Plugin): string {
   const s = phaserSettings(plugin);
   const rate = `${s.rate >= 10 ? s.rate.toFixed(1) : s.rate.toFixed(2)} Hz`;
-  return `${rate} · ${fmtOct(s.depth)} · FB ${fmtFeedback(s.feedback)}`;
+  const short = `${trimNum(s.rate, s.rate >= 10 ? 1 : 2)} Hz`;
+  const oct = `${trimNum(s.depth, 1)} oct`;
+  return firstThatFits([`${rate} · ${oct}`, `${short} · ${oct}`, `${short} · ~${Math.round(s.depth)} oct`]);
 }

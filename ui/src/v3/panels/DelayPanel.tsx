@@ -4,13 +4,16 @@ import { Dial } from "./Dial";
 import { DragNode } from "./DragNode";
 import { clamp, fmtDb, normOf, param, physOf } from "./params";
 import {
-  DEFAULTS, FEEDBACK, FLOOR_DB, MIX, NOTES, TIME, clampMs, delayModel, delaySummary, fmtFeedback, fmtMix, fmtTail,
-  fmtTime, matchingNote, noteMs, tailText, timeFromDrag, timeKey, viewMs, type DelayModel,
+  DEFAULTS, FEEDBACK, FLOOR_DB, MIX, NOTES, TIME, canSetTime, clampMs, delayModel, delaySummary, fmtFeedback, fmtMix,
+  fmtTail, fmtTime, matchingNote, noteMs, tailText, timeFromDrag, timeKey, viewMs, type DelayModel,
 } from "./delay";
 import type { PanelDef, PanelProps } from "./types";
 import { SETTLE_MS, useDragSend } from "./useDragSend";
 
-const STRIP = { w: 286, h: 48, padX: 4, padT: 3, padB: 3 } as const;
+/** The strip is drawn 273 px wide at the 320 px inspector (the 289 px row less 2 × 7 px
+ *  padding and the 2 px frame), so one viewBox unit is one CSS pixel and its text renders at
+ *  true size. */
+const STRIP = { w: 273, h: 48, padX: 4, padT: 3, padB: 3 } as const;
 /** A time drag must move this far (px, or strip units ≈ px) before it counts: a click with a
  *  pixel of jitter must not send a time change (each one re-indexes the buffer: a glitch). */
 const DEAD_ZONE = 3;
@@ -41,9 +44,24 @@ function envelope(m: DelayModel, view: number): { x1: number; y1: number; x2: nu
   return { x1: a.tx(first.ms), y1: a.dy(first.db), x2: a.tx(t2), y2: a.dy(db2) };
 }
 
+/** The 9 px mono read-out's advance per character (0.6 em) and its cap height, in strip units. */
+const READ_CH = 5.4, READ_H = 8;
+
+/** The read-out's baseline: top-right (baseline top + 8), or bottom-right (baseline bottom − 3)
+ *  when a handle (radius 4, plus 2 of margin) would sit under the top-right text but not
+ *  under the bottom-right one. */
+function readoutY(text: string, a: Pick<ReturnType<typeof stripAxes>, "top" | "bottom" | "right">, nodes: { x: number; y: number }[]): number {
+  const left = a.right - 2 - text.length * READ_CH;
+  const hits = (base: number) => nodes.some((n) => n.x + 6 > left && n.x - 6 < a.right && n.y + 6 > base - READ_H && n.y - 6 < base + 1);
+  const top = a.top + 8, bottom = a.bottom - 3;
+  return hits(top) && !hits(bottom) ? bottom : top;
+}
+
 /** The impulse response: a dry stem at 0, then each echo at k × the time, at its level. */
-function EchoStrip({ m, view, enabled, onTimeStart, onTimeMove, onTimeEnd, timeKeys, onFbStart, onFbMove, onFbEnd, fbKeys }: {
+function EchoStrip({ m, view, enabled, timeEditable, onTimeStart, onTimeMove, onTimeEnd, timeKeys, onFbStart, onFbMove, onFbEnd, fbKeys }: {
   m: DelayModel; view: number; enabled: boolean;
+  /** False on an engine that cannot set the time: the first echo is marked, not draggable. */
+  timeEditable: boolean;
   onTimeStart: () => void; onTimeMove: (ms: number) => void; onTimeEnd: () => void; timeKeys: (e: KeyboardEvent) => void;
   onFbStart: () => void; onFbMove: (dB: number) => void; onFbEnd: () => void; fbKeys: (e: KeyboardEvent) => void;
 }) {
@@ -58,6 +76,11 @@ function EchoStrip({ m, view, enabled, onTimeStart, onTimeMove, onTimeEnd, timeK
   const fbGrab = useRef<{ y0: number | null; db0: number } | null>(null);
   // The second-repeat handle sits where echo 2 is (or would be, with the loop off).
   const fbY = hasWet ? a.dy(first.db + (m.oneRepeat ? FEEDBACK.min : m.feedbackDb)) : a.bottom;
+  // The tail read-out sits top-right, unless a handle is under it there (a long time puts the
+  // second-echo handle at the right edge): then it drops to the bottom-right.
+  const tail = tailText(m);
+  const timeY = hasWet ? a.dy(first.db) : a.bottom;
+  const readY = readoutY(tail, a, [{ x: a.tx(m.periodMs), y: timeY }, ...(hasWet ? [{ x: a.tx(2 * m.periodMs), y: fbY }] : [])]);
   const ticks: number[] = [];
   const tickStep = view <= 600 ? 100 : view <= 2000 ? 250 : 500;
   for (let t = tickStep; t < view - 1e-6; t += tickStep) ticks.push(t);
@@ -75,8 +98,8 @@ function EchoStrip({ m, view, enabled, onTimeStart, onTimeMove, onTimeEnd, timeK
       {m.taps.map((t) => t.ms <= view && (
         <line key={t.k} className="pp-delay-tap" data-testid="pp-delay-tap" x1={a.tx(t.ms)} x2={a.tx(t.ms)} y1={a.bottom} y2={a.dy(t.db)} />
       ))}
-      <text className={`pp-delay-read${m.infinite ? " warn" : ""}`} x={a.right - 2} y={a.top + 8} textAnchor="end"
-        data-testid="pp-delay-tail">{tailText(m)}</text>
+      <text className={`pp-delay-read${m.infinite ? " warn" : ""}`} x={a.right - 2} y={readY} textAnchor="end"
+        data-testid="pp-delay-tail">{tail}</text>
       {hasWet && (
         <DragNode x={a.tx(2 * m.periodMs)} y={fbY} r={3.5} hollow={m.oneRepeat} testId="pp-delay-fb-node"
           ariaLabel="Feedback (second echo level)" ariaValueText={`${fmtFeedback(m)}, ${tailText(m)}`}
@@ -90,7 +113,12 @@ function EchoStrip({ m, view, enabled, onTimeStart, onTimeMove, onTimeEnd, timeK
             onFbMove(g.db0 + (a.yd(pt.y) - a.yd(g.y0)));
           }} />
       )}
-      <DragNode x={a.tx(m.periodMs)} y={hasWet ? a.dy(first.db) : a.bottom} r={4} testId="pp-delay-time-node"
+      {!timeEditable ? (
+        <g className="pp-node pp-delay-fixed" transform={`translate(${a.tx(m.periodMs).toFixed(2)} ${timeY.toFixed(2)})`}
+          data-testid="pp-delay-time-fixed" aria-hidden="true">
+          <circle r={4} className="dot" />
+        </g>
+      ) : <DragNode x={a.tx(m.periodMs)} y={timeY} r={4} testId="pp-delay-time-node"
         ariaLabel="Delay time (first echo)" ariaValueText={fmtTime(m.lengthMs)}
         valueNow={m.lengthMs} valueMin={1} valueMax={Math.max(2000, m.lengthMs)}
         onStart={() => { timeGrab.current = { x0: null, ms0: m.lengthMs, active: false }; onTimeStart(); }}
@@ -106,19 +134,20 @@ function EchoStrip({ m, view, enabled, onTimeStart, onTimeMove, onTimeEnd, timeK
             g.x0 += Math.sign(dx) * DEAD_ZONE;   // continue smoothly from the threshold
           }
           onTimeMove(g.ms0 + (a.xt(pt.x) - a.xt(g.x0)));
-        }} />
+        }} />}
     </svg>
   );
 }
 
-/** The delay time as a read-out you drag sideways (60 px doubles it, Shift for fine). It
- *  previews while dragging and sends ONE set_plugin_state on release: a time change in the
- *  engine re-reads its buffer and glitches, so it must not be sent on every move. */
-function TimeScrub({ ms, onStart, onPreview, onCommit, keys, onBlur }: {
-  ms: number; onStart: () => void; onPreview: (ms: number) => void; onCommit: (ms: number) => void;
+/** The delay time as a read-out you drag up or down like a dial (60 px doubles it, Shift for
+ *  fine). It previews while dragging and sends ONE set_plugin_state on release: a time
+ *  change in the engine re-reads its buffer and glitches, so it must not be sent on every
+ *  move. Disabled (never sends) on an engine that cannot set the time. */
+function TimeScrub({ ms, disabled, onStart, onPreview, onCommit, keys, onBlur }: {
+  ms: number; disabled: boolean; onStart: () => void; onPreview: (ms: number) => void; onCommit: (ms: number) => void;
   keys: (e: KeyboardEvent) => void; onBlur: () => void;
 }) {
-  const start = useRef<{ x: number; ms: number; last: number; active: boolean } | null>(null);
+  const start = useRef<{ y: number; ms: number; last: number; active: boolean } | null>(null);
   const finish = () => {
     const s = start.current;
     if (!s) return;
@@ -128,33 +157,35 @@ function TimeScrub({ ms, onStart, onPreview, onCommit, keys, onBlur }: {
     if (s.active) onCommit(s.last);
   };
   return (
-    <div className="pp-delay-time" role="slider" tabIndex={0} data-testid="pp-delay-time"
+    <div className={`pp-delay-time${disabled ? " off" : ""}`} role="slider" tabIndex={disabled ? -1 : 0} data-testid="pp-delay-time"
       aria-label="Delay time" aria-valuemin={TIME.min} aria-valuemax={Math.max(TIME.max, ms)} aria-valuenow={ms} aria-valuetext={fmtTime(ms)}
-      title="Drag sideways (Shift: fine). Arrows ±1 ms, PageUp/PageDown double or halve. Applied on release."
+      aria-disabled={disabled || undefined}
+      title={disabled ? "The delay time needs the updated Mosh engine"
+        : "Drag up or down (Shift: fine). Arrows ±1 ms, PageUp/PageDown double or halve. Applied on release."}
       onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
-        if (e.button !== 0) return;
+        if (disabled || e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
         e.currentTarget.setPointerCapture?.(e.pointerId);
         onStart();
-        start.current = { x: e.clientX, ms, last: ms, active: false };
+        start.current = { y: e.clientY, ms, last: ms, active: false };
       }}
       onPointerMove={(e) => {
         const s = start.current;
         if (!s) return;
         if (!s.active) {
-          const dx0 = e.clientX - s.x;
-          if (Math.abs(dx0) < DEAD_ZONE) return;
+          const dy0 = e.clientY - s.y;
+          if (Math.abs(dy0) < DEAD_ZONE) return;
           s.active = true;
-          s.x += Math.sign(dx0) * DEAD_ZONE;   // continue smoothly from the threshold
+          s.y += Math.sign(dy0) * DEAD_ZONE;   // continue smoothly from the threshold
         }
-        s.last = timeFromDrag(s.ms, e.clientX - s.x, e.shiftKey);
+        s.last = timeFromDrag(s.ms, s.y - e.clientY, e.shiftKey);
         onPreview(s.last);
       }}
       onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
-      onKeyDown={keys} onBlur={onBlur}
-      onDoubleClick={() => onCommit(DEFAULTS.lengthMs)}>
-      <span className="v">{ms}<small> ms</small></span>
+      onKeyDown={disabled ? undefined : keys} onBlur={onBlur}
+      onDoubleClick={() => { if (!disabled) onCommit(DEFAULTS.lengthMs); }}>
+      <span className="v">{fmtTime(ms)}</span>
       <span className="nm">Time</span>
     </div>
   );
@@ -163,6 +194,8 @@ function TimeScrub({ ms, onStart, onPreview, onCommit, keys, onBlur }: {
 /** Tracktion Delay: the echo strip, Time (applied on release), Feedback and Mix. */
 function DelayPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   const bpm = useStore((s) => s.snapshot?.session?.tempo);
+  // An older engine publishes no `state`: the time is its default, shown read-only.
+  const timeEditable = canSetTime(plugin);
   const fbDrag = useDragSend<number>((v, gesture) => setParam(0, v, { gesture }));
   const [preview, setPreview] = useState<number | null>(null);
   // The time the first-echo handle has been dragged to (readable at pointer-up even before
@@ -201,6 +234,7 @@ function DelayPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   /** Send the time once (unless it is what the engine already runs); keep showing it until
    *  the engine's patch arrives, then let the preview go. */
   const commitTime = (ms: number) => {
+    if (!timeEditable) return;
     const v = clampMs(ms);
     // An explicit commit (release, note menu, double-click) supersedes a pending key burst.
     if (keyPending.current) { clearTimeout(keyPending.current.timer); keyPending.current = null; }
@@ -222,6 +256,7 @@ function DelayPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   /** Keys preview each step at once (from the previewed value, so a burst accumulates) and
    *  send ONE set_plugin_state when the burst ends: never one per key or auto-repeat. */
   const onTimeKeys = (e: KeyboardEvent) => {
+    if (!timeEditable) return;
     const next = timeKey(m.lengthMs, e.key, e.shiftKey);
     if (next === null) return;
     e.preventDefault();
@@ -249,7 +284,7 @@ function DelayPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
 
   return (
     <div className="pp-delay" data-testid="pp-delay">
-      <EchoStrip m={m} view={view} enabled={plugin.enabled}
+      <EchoStrip m={m} view={view} enabled={plugin.enabled} timeEditable={timeEditable}
         onTimeStart={() => { flushKeys(); setHeldView(view); nodeTime.current = null; }}
         onTimeMove={(ms) => { nodeTime.current = clampMs(ms); showPreview(ms); }}
         onTimeEnd={() => { setHeldView(null); if (nodeTime.current !== null) commitTime(nodeTime.current); nodeTime.current = null; }}
@@ -259,38 +294,45 @@ function DelayPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
         onFbEnd={() => { fbDrag.end(); setHeldView(null); }}
         fbKeys={onFbKeys} />
       <div className="pp-delay-ctl">
-        <TimeScrub ms={m.lengthMs} onStart={flushKeys} onPreview={showPreview} onCommit={commitTime} keys={onTimeKeys} onBlur={flushKeys} />
-        {bpm ? (
-          <select className="pp-delay-note" data-testid="pp-delay-note" value={note ?? ""}
-            aria-label={`Set the time from a note value at ${Math.round(bpm)} BPM`}
-            title="Sets a fixed time from the tempo now. It does not follow later tempo changes."
-            onChange={(e) => {
-              const n = NOTES.find((x) => x.label === e.target.value);
-              if (n) commitTime(noteMs(n.beats, bpm));
-            }}>
-            <option value="" disabled>note</option>
-            {NOTES.map((n) => {
-              const ms = noteMs(n.beats, bpm);
-              return <option key={n.label} value={n.label} disabled={ms < TIME.min || ms > TIME.max}>{`${n.label} · ${ms} ms`}</option>;
-            })}
-          </select>
-        ) : null}
-        <span className={m.infinite ? "pp-delay-warn" : undefined}
-          title={m.infinite ? "0 dB: the echoes never decay, and nothing in the loop limits them" : m.oneRepeat ? "At the bottom the loop is off: one echo" : undefined}>
-          <Dial label="Feedback" size={30} norm={fbDrag.live ?? fbParam.value} defaultNorm={(DEFAULTS.feedbackDb - FEEDBACK.min) / (FEEDBACK.max - FEEDBACK.min)}
+        {/* Time: the note menu (a one-off "set from tempo") over the value and its caption. */}
+        <div className="pp-delay-timecol">
+          {!timeEditable ? (
+            <span className="pp-delay-legacy" data-testid="pp-delay-legacy">needs the updated Mosh engine</span>
+          ) : bpm ? (
+            <select className="pp-delay-note" data-testid="pp-delay-note" value={note ?? ""}
+              aria-label={`Set the time from a note value at ${Math.round(bpm)} BPM`}
+              title="Sets a fixed time from the tempo now. It does not follow later tempo changes."
+              onChange={(e) => {
+                const n = NOTES.find((x) => x.label === e.target.value);
+                if (n) commitTime(noteMs(n.beats, bpm));
+              }}>
+              {/* "Note…", not "Sync": it sets the time once and does not follow the tempo. */}
+              <option value="" disabled>Note…</option>
+              {NOTES.map((n) => {
+                const ms = noteMs(n.beats, bpm);
+                return <option key={n.label} value={n.label} disabled={ms < TIME.min || ms > TIME.max}>{`${n.label} · ${ms} ms`}</option>;
+              })}
+            </select>
+          ) : null}
+          <TimeScrub ms={m.lengthMs} disabled={!timeEditable} onStart={flushKeys} onPreview={showPreview} onCommit={commitTime}
+            keys={onTimeKeys} onBlur={flushKeys} />
+        </div>
+        <span className={m.infinite ? "pp-delay-warn" : "pp-delay-fbwrap"}>
+          <Dial label="Feedback" norm={fbDrag.live ?? fbParam.value} defaultNorm={(DEFAULTS.feedbackDb - FEEDBACK.min) / (FEEDBACK.max - FEEDBACK.min)}
             testId="pp-delay-feedback" display={fmtFeedback(m)}
+            title={m.infinite ? "0 dB: the echoes never decay, and nothing in the loop limits them" : m.oneRepeat ? "At the bottom the loop is off: one echo" : undefined}
             valueText={`${fmtFeedback(m)}${m.tailS !== null ? `, echoes fall 60 dB in ${fmtTail(m.tailS)}` : ""}`}
             onChange={(v, gesture) => setParam(0, v, { gesture })} />
         </span>
-        <Dial label="Mix" size={30} norm={mixNorm} defaultNorm={DEFAULTS.mix} testId="pp-delay-mix"
-          display={fmtMix(m.mix)} valueText={`${fmtMix(m.mix)}: echoes ${fmtDb(m.wetDb)}, dry ${fmtDb(m.dryDb)}`}
+        <Dial label="Mix" norm={mixNorm} defaultNorm={DEFAULTS.mix} testId="pp-delay-mix"
+          display={fmtMix(m.mix)} valueText={`${fmtMix(m.mix)} wet: echoes ${fmtDb(m.wetDb)}, dry ${fmtDb(m.dryDb)}`}
           onChange={(v, gesture) => setParam(1, v, { gesture })} />
       </div>
     </div>
   );
 }
 
-const MINI = { w: 32, h: 12 };
+const MINI = { w: 44, h: 14 };
 
 /** Minimized: the echo pattern as tiny stems (dry stem muted). */
 function DelayMini({ plugin, sampleRate }: PanelProps) {

@@ -7,7 +7,7 @@
 // the right channel's φ offset by π·width (tracktion_Chorus.cpp:56-59, 66-67, 78-80, 88),
 // then out = wet·sin(mix·π/2) + dry·cos(mix·π/2) (:69, :104). Feedback is fixed at 0 (:65).
 import type { Plugin } from "../../types";
-import { clamp, fmtMs, fmtPct, normOf, physOf, stateNum, type Range } from "./params";
+import { clamp, fmtMs, normOf, physOf, stateNum, type Range } from "./params";
 
 export const CHORUS_BASE_MS = 20;
 
@@ -23,6 +23,14 @@ export const CHORUS_SPEC: Record<ChorusKey, { def: number; range: Range; step: n
 export type ChorusSettings = Record<ChorusKey, number>;
 
 // ── state settings as dial positions (shared with the phaser) ───────────────────────────
+
+/** Can this engine set `key`? An engine that predates set_plugin_state publishes no
+ *  `plugin.state`: its controls are shown (the engine defaults are what an old session
+ *  holds) but disabled, and nothing is sent. */
+export const stateSettable = (plugin: Plugin, key: string): boolean => plugin.state?.[key] !== undefined;
+
+/** The one line a panel shows when some of its settings cannot be set by this engine. */
+export const NEEDS_ENGINE = "needs the updated Mosh engine";
 
 /** A state setting's physical range: the engine's min/max when sent, else the fallback. */
 export function stateRange(plugin: Plugin, key: string, fallback: Range): Range {
@@ -68,27 +76,6 @@ export function stateKeySteps(key: string, shift: boolean, range: Range, step: n
 export function stateStep(value: number, steps: number, range: Range, step: number): number {
   const v = clamp(Math.round(value / step + steps) * step, range.min, range.max);
   return Number(v.toFixed(decimalsOf(step)));
-}
-
-// ── the wheel, as notches (shared with the pitch shifter) ───────────────────────────────
-
-export type WheelAcc = { px: number; at: number };
-export const WHEEL_IDLE = { px: 0, at: -Infinity } as const satisfies WheelAcc;
-/** Pixels of scroll per notch once a burst is going, and the pause that ends a burst. */
-export const WHEEL_NOTCH_PX = 50;
-export const WHEEL_IDLE_MS = 150;
-
-/** Turn one wheel event into whole notches (+ = up/away). The first event of a burst is
- *  one notch at once (a mouse click-stop); after that a notch per ~50 px, so a trackpad
- *  flick, which sends dozens of tiny events, moves a controllable amount instead of one
- *  step per event. deltaMode 1 (lines) and 2 (pages) are converted to pixels. */
-export function wheelNotches(acc: WheelAcc, deltaY: number, deltaMode: number, now: number): { notches: number; acc: WheelAcc } {
-  const px = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  if (px === 0) return { notches: 0, acc };
-  if (now - acc.at > WHEEL_IDLE_MS) return { notches: px < 0 ? 1 : -1, acc: { px: 0, at: now } };
-  const sum = acc.px - px;
-  const notches = Math.trunc(sum / WHEEL_NOTCH_PX);
-  return { notches, acc: { px: sum - notches * WHEEL_NOTCH_PX, at: now } };
 }
 
 // ── chorus maths ──────────────────────────────────────────────────────────────────────
@@ -139,9 +126,27 @@ export const fmtPeriod = (hz: number): string => (hz > 0 ? fmtMs(1000 / hz) : "�
 
 export const widthDegrees = (width: number): number => Math.round(width * 180);
 
-/** One line for the minimized row: "1.00 Hz · 3.0 ms · W 50% · mix 50%"; "dry" at mix 0. */
+/** The minimized row's summary budget: its slot is 97 px of 10 px monospace (6.0 px a
+ *  character), so 16 characters fit whole. */
+export const SUMMARY_CHARS = 16;
+
+/** A number at most `decimals` places, trailing zeros dropped: 2.50 → "2.5", 20.0 → "20". */
+export const trimNum = (v: number, decimals: number): string => String(Number(v.toFixed(decimals)));
+
+/** The first line that fits the minimized row, else the last (callers make the last fit). */
+export const firstThatFits = (lines: string[]): string => lines.find((l) => l.length <= SUMMARY_CHARS) ?? lines[lines.length - 1];
+
+/** One short line for the minimized header, most telling first: rate and depth,
+ *  "1.00 Hz · 3.0 ms"; "dry · 1.00 Hz" at mix 0 (all dry: nothing else matters). Mix and
+ *  width are left to the panel. Where the exact figures are too long, trailing zeros go
+ *  ("2.98 Hz · 20 ms"), then the depth is rounded and marked ("0.25 Hz · ~12 ms"). */
 export function chorusSummary(plugin: Plugin): string {
   const s = chorusSettings(plugin);
-  if (s.mix <= 0) return `dry (mix 0%) · ${fmtRate(s.speedHz)} · ${fmtDepthMs(s.depthMs)}`;
-  return `${fmtRate(s.speedHz)} · ${fmtDepthMs(s.depthMs)} · W ${fmtPct(s.width)} · mix ${fmtPct(s.mix)}`;
+  if (s.mix <= 0) return `dry · ${fmtRate(s.speedHz)}`;
+  const rate = trimNum(s.speedHz, s.speedHz >= 10 ? 1 : 2);
+  return firstThatFits([
+    `${fmtRate(s.speedHz)} · ${fmtDepthMs(s.depthMs)}`,
+    `${rate} Hz · ${trimNum(s.depthMs, 1)} ms`,
+    `${rate} Hz · ~${Math.round(s.depthMs)} ms`,
+  ]);
 }

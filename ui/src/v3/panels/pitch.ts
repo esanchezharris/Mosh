@@ -83,8 +83,28 @@ export function pitchValueText(st: number): string {
   return `${s}${cents ? ` ${cents > 0 ? "+" : "-"}${Math.abs(cents)} cents` : ""}, ${intervalName(st)}`;
 }
 
-/** One line for the minimized row: "+7 st · perfect 5th up", or "original pitch". */
+/** The minimized row's summary budget: its slot is 97 px of 10 px monospace (6.0 px a
+ *  character), so 16 characters fit whole. */
+export const SUMMARY_CHARS = 16;
+
+/** The interval's words without the direction (the sign says it), in three lengths. */
+function intervalWords(st: number): string[] {
+  const full = intervalName(st).replace(/ (up|down)$/, "");
+  const short = full.replace(/perfect /g, "").replace(/minor /g, "min ").replace(/major /g, "maj ");
+  return [full, short];
+}
+
+/** One line for the minimized row, most telling first and at most 16 characters: the
+ *  setting, then the interval as long as it fits. "+7 st · 5th", "+4 st · maj 3rd",
+ *  "-12 st · octave", "+7 st +20¢ · 5th", "+19 st"; "original pitch" at 0. */
 export function pitchSummary(plugin: Plugin): string {
   const st = semitonesOf(plugin);
-  return isOriginal(st) ? "original pitch" : `${fmtSemitones(st)} · ${intervalName(st)}`;
+  if (isOriginal(st)) return "original pitch";
+  const head = fmtSemitones(st);
+  if (splitCents(st).semis === 0) return head;          // "0 st +20¢": a detune, no interval
+  for (const words of intervalWords(st)) {
+    const line = `${head} · ${words}`;
+    if (line.length <= SUMMARY_CHARS) return line;
+  }
+  return head;
 }

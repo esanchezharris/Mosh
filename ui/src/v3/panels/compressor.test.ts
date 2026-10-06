@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import type { Plugin, PluginParam } from "../../types";
 import {
-  ATTACK, compGrDb, compOutDb, compSettings, compSummary, curveSamples, dynamicsFrame, fmtGr, gaugeAngle, grAtFullScaleDb,
-  fmtThr, grBoundDb, grScale, MAKEUP, outRange, RELEASE, ratioDialPos, ratioNormFromDial, shortDb, SIDECHAIN, unitySpan,
+  ATTACK, compGrDb, compOutDb, compSettings, compSummary, curveSamples, dynamicsFrame, fmtGr, fmtPeak, gaugeAngle, grAtFullScaleDb,
+  fmtThr, grBoundDb, grScale, MAKEUP, outRange, RELEASE, ratioDialPos, ratioNormFromDial, shortDb, SIDECHAIN, SUMMARY_CHARS, unitySpan,
 } from "./compressor";
 import { compressorPanelDef } from "./CompressorPanel";
 import { normOf, ratioNorm, ratioOf, thresholdNorm } from "./params";
@@ -97,11 +97,12 @@ describe("settings, gauge and read-outs", () => {
     expect(grScale(10 ** (-6 / 20), 0.5)).toBe(6);
     expect(grScale(T24, 0.4)).toBe(12);
     expect(grScale(0.01, 0)).toBe(48);
-    expect(gaugeAngle(0, 12)).toBe(90);
+    // A ±50° face: at rest (no reduction) the needle leans right, full scale leans left.
+    expect(gaugeAngle(0, 12)).toBe(50);
     expect(gaugeAngle(6, 12)).toBe(0);
-    expect(gaugeAngle(12, 12)).toBe(-90);
-    expect(gaugeAngle(30, 12)).toBe(-90);
-    expect(gaugeAngle(NaN, 12)).toBe(90);
+    expect(gaugeAngle(12, 12)).toBe(-50);
+    expect(gaugeAngle(30, 12)).toBe(-50);
+    expect(gaugeAngle(NaN, 12)).toBe(50);
   });
   it("maps the ratio dial so right is harder, exactly 1 - stored", () => {
     expect(ratioOf(ratioNormFromDial(1))).toBe(Infinity);
@@ -109,12 +110,28 @@ describe("settings, gauge and read-outs", () => {
     expect(ratioDialPos(ratioNorm(4))).toBeCloseTo(0.7368, 3);
     expect(ratioOf(ratioNormFromDial(ratioDialPos(ratioNorm(2.5))))).toBeCloseTo(2.5, 9);
   });
-  it("summarises what it is doing in one short line", () => {
-    expect(compSummary(comp())).toBe("-6 dB · 2:1 · 100/100 ms");
-    expect(compSummary(comp({ thrDb: -24, ratio: 2.5, attack: 20, release: 150 }))).toBe("-24 dB · 2.5:1 · 20/150 ms");
-    // The makeup goes before the times: a narrow row truncates from the end.
-    expect(compSummary(comp({ thrDb: -18.3, ratio: Infinity, attack: 0.3, release: 10, makeup: 3 }))).toBe("-18.3 dB · ∞:1 · out +3 dB · 0.3/10 ms");
-    expect(compSummary(comp({ thrDb: -24, ratio: 2.5, attack: 20, release: 150, makeup: -4.5 }))).toBe("-24 dB · 2.5:1 · out -4.5 dB · 20/150 ms");
+  it("summarises what it is doing in one line that fits the minimized slot", () => {
+    // Ratio at threshold, in words (no bare "-6 dB"); times and makeup stay in the panel.
+    expect(compSummary(comp())).toBe("2:1 at -6 dB");
+    expect(compSummary(comp({ thrDb: -24, ratio: 2.5, attack: 20, release: 150 }))).toBe("2.5:1 at -24 dB");
+    expect(compSummary(comp({ thrDb: -18.3, ratio: Infinity, attack: 0.3, release: 10, makeup: 3 }))).toBe("∞:1 at -18.3 dB");
+    // A long pair drops the "at", never a figure: the gentlest ratio, and a stored ratio near
+    // 0 (over 1000:1).
+    expect(SUMMARY_CHARS).toBe(16);
+    expect(compSummary(comp({ thrDb: -18.3, ratio: 1.0526 }))).toBe("1.1:1 -18.3 dB");
+    const extreme = comp({ thrDb: -18.3 });
+    extreme.params[1] = { ...extreme.params[1], value: 0.001 };
+    expect(compSummary(extreme)).toBe("1053:1 -18.3 dB");
+    // The budget holds across the whole threshold and ratio range.
+    for (const thr of [-40, -33.3, -18.3, -0.1, 0]) {
+      for (const n of [0, 0.001, 0.01, 0.3, 0.5, 0.999, 1]) {
+        const pl = comp({ thrDb: thr });
+        pl.params[1] = { ...pl.params[1], value: n };
+        expect(compSummary(pl).length).toBeLessThanOrEqual(SUMMARY_CHARS);
+      }
+    }
+    expect(fmtPeak(-45.47)).toBe("-45.5 dBFS");
+    expect(fmtPeak(-0.01)).toBe("0.0 dBFS");
     expect(fmtThr(-24)).toBe("-24.0 dB");
     expect(fmtThr(-0.01)).toBe("0.0 dB");
     expect(shortDb(-0.01)).toBe("0 dB");
@@ -165,10 +182,15 @@ describe("CompressorPanel", () => {
   it("draws the engine's curve, not a dB-domain line", () => {
     render(comp({ thrDb: -24, ratio: 2.5 }));
     const d = q("pp-compressor-curve")!.getAttribute("d")!;
-    // x = -12 dB sits at 75 of 100; out = -17.18 dB on a -48..0 axis → y = 35.79.
-    expect(d).toContain("L75.00 35.79");
-    expect(d).not.toContain("L75.00 40.00");   // the textbook line (-19.2 dB)
-    expect(q("pp-compressor-thrval")!.textContent).toBe("thr -24.0 dB");
+    // The plot is 82 px with a matching viewBox (axis text at its real size). x = -12 dB
+    // sits at 61.5 of 82; out = -17.18 dB on a -48..0 axis → y = 29.35.
+    expect(q("pp-compressor-plot")!.getAttribute("viewBox")).toBe("0 0 82 82");
+    expect(d).toContain(`L61.50 ${((-compOutDb(-12, { thrLin: T24, rho: 0.4, makeupDb: 0 }) / 48) * 82).toFixed(2)}`);
+    expect(d).toContain("L61.50 29.35");
+    expect(d).not.toContain("L61.50 32.80");   // the textbook line (-19.2 dB)
+    // The threshold read-out is a dial footer: value, then its name.
+    expect(q("pp-compressor-thrval")!.querySelector(".v")!.textContent).toBe("-24.0 dB");
+    expect(q("pp-compressor-thrval")!.querySelector(".nm")!.textContent).toBe("Threshold");
   });
 
   it("keeps the unity line inside the plot at any makeup", () => {
@@ -177,21 +199,21 @@ describe("CompressorPanel", () => {
       return ["x1", "y1", "x2", "y2"].map((a) => Number(l.getAttribute(a)));
     };
     render(comp({ makeup: 24 }));   // range -24..+24: unity runs -24..0 dB
-    expect(ends()).toEqual([50, 100, 100, 50]);
+    expect(ends()).toEqual([41, 82, 82, 41]);
     render(comp({ makeup: 3 }));    // range -48..+6
     const [x1, y1, x2, y2] = ends();
-    expect([x1, y1, x2]).toEqual([0, 100, 100]);
-    expect(y2).toBeCloseTo((6 / 54) * 100, 6);
-    for (const v of ends()) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(100); }
+    expect([x1, y1, x2]).toEqual([0, 82, 82]);
+    expect(y2).toBeCloseTo((6 / 54) * 82, 6);
+    for (const v of ends()) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(82); }
   });
 
   it("draws the low end of a negative-makeup curve where it is, not on a false floor", () => {
     render(comp({ thrDb: -40, ratio: 4, makeup: -10 }));
     const d = q("pp-compressor-curve")!.getAttribute("d")!;
-    // -48 dB in → -58 dB out on a -60..0 axis: y = 96.67, not the bottom edge (100).
-    expect(d.startsWith("M0.00 96.67")).toBe(true);
-    // The threshold node sits on the real corner: -40 in → -50 out → y = 83.33.
-    expect(q("pp-compressor-thr-node")!.getAttribute("transform")).toBe("translate(16.67 83.33)");
+    // -48 dB in → -58 dB out on a -60..0 axis: y = 79.27, not the bottom edge (82).
+    expect(d.startsWith("M0.00 79.27")).toBe(true);
+    // The threshold node sits on the real corner: -40 in → -50 out → y = 68.33.
+    expect(q("pp-compressor-thr-node")!.getAttribute("transform")).toBe("translate(13.67 68.33)");
   });
 
   it("End on the ratio dial sends ∞:1 (stored 0); Home sends the gentlest (stored 1)", () => {
@@ -264,18 +286,40 @@ describe("CompressorPanel", () => {
 
   it("the gauge, dot and read-outs are idle without a frame and live with one", () => {
     render(comp({ thrDb: -24, ratio: 2.5 }));
+    const meter = () => q("pp-compressor-gauge")!.querySelector('[role="meter"]')!;
     expect(q("pp-compressor-gauge")!.hasAttribute("data-live")).toBe(false);
+    // Idle: a muted dash in the number's slot and ONE "no signal" (never "listening" or "idle").
     expect(q("pp-compressor-gr")!.textContent).toBe("–");
+    expect(q("pp-compressor-nosignal")!.textContent).toBe("no signal");
+    expect(host.textContent).not.toMatch(/listening|idle/i);
+    expect(q("pp-compressor-in")).toBeNull();
     expect(q("pp-compressor-dot")).toBeNull();
+    expect(meter().getAttribute("aria-valuetext")).toBe("No signal");
+    // The needle rests at 0 dB of reduction: leaning right, not lying flat.
+    expect(q("pp-compressor-gauge")!.querySelector(".needle")!.getAttribute("style")).toContain("rotate(50.00deg)");
     frame();
     expect(q("pp-compressor-gauge")!.hasAttribute("data-live")).toBe(true);
+    expect(q("pp-compressor-nosignal")).toBeNull();
     expect(q("pp-compressor-gr")!.textContent).toBe("-3.1 dB");
-    expect(q("pp-compressor-in")!.textContent).toBe("in -10.0");
-    expect(q("pp-compressor-out")!.textContent).toBe("out -13.1");
+    expect(q("pp-compressor-gr")!.classList.contains("zero")).toBe(false);
+    expect(q("pp-compressor-in")!.textContent).toBe("in -10.0 dBFS");
+    expect(q("pp-compressor-out")!.textContent).toBe("out -13.1 dBFS");
     const dot = q("pp-compressor-dot")!;
-    expect(Number(dot.getAttribute("cx"))).toBeCloseTo(79.17, 1);           // -10 dB on -48..0
-    expect(Number(dot.getAttribute("cy"))).toBeCloseTo((13.1 / 48) * 100, 1);
-    expect(q("pp-compressor-gauge")!.getAttribute("aria-valuenow")).toBe("3.1");
+    expect(Number(dot.getAttribute("cx"))).toBeCloseTo((38 / 48) * 82, 1);   // -10 dB on -48..0
+    expect(Number(dot.getAttribute("cy"))).toBeCloseTo((13.1 / 48) * 82, 1);
+    expect(meter().getAttribute("aria-valuenow")).toBe("3.1");
+  });
+
+  it("0.0 dB of reduction while playing reads muted, like the idle dash, not bright", () => {
+    render(comp());
+    frame({ grDb: 0, inDb: -30, outDb: -30 });
+    expect(q("pp-compressor-gr")!.textContent).toBe("0.0 dB");
+    expect(q("pp-compressor-gr")!.classList.contains("zero")).toBe(true);
+    frame({ grDb: 0.04 });
+    expect(q("pp-compressor-gr")!.classList.contains("zero")).toBe(true);
+    frame({ grDb: 0.06 });
+    expect(q("pp-compressor-gr")!.textContent).toBe("-0.1 dB");
+    expect(q("pp-compressor-gr")!.classList.contains("zero")).toBe(false);
   });
 
   it("ignores a frame that belongs to another plugin type at the same slot", () => {
@@ -285,13 +329,28 @@ describe("CompressorPanel", () => {
     expect(q("pp-compressor-dot")).toBeNull();
   });
 
-  it("keeps the inert sidechain gain behind a disclosure, still adjustable", () => {
+  it("keeps the inert sidechain gain behind a text disclosure, still adjustable", () => {
     render(comp());
+    const more = q("pp-compressor-more") as HTMLButtonElement;
     expect(q("pp-compressor-sc")).toBeNull();
-    act(() => (q("pp-compressor-more") as HTMLButtonElement).click());
-    expect(q("pp-compressor-sc")!.textContent).toMatch(/no effect/);
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    act(() => more.click());
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    expect(q("pp-compressor-sc")!.textContent).toMatch(/No effect/);
+    // Live but without effect: the shared .inert look, not a faded (disabled) dial.
+    expect(q("pp-compressor-scgain")!.classList.contains("inert")).toBe(true);
+    expect(q("pp-compressor-scgain")!.classList.contains("off")).toBe(false);
     key(sliderOf("pp-compressor-scgain"), "End");
     expect(setParam).toHaveBeenLastCalledWith(5, 1, { gesture: expect.any(String) });
+  });
+
+  it("the gain dials grow away from unity: a tick at 0 dB, no arc at 0 dB", () => {
+    render(comp({ makeup: 0 }));
+    const makeup = q("pp-compressor-makeup")!;
+    expect(makeup.querySelector(".unity")).not.toBeNull();
+    expect(makeup.querySelector(".value")!.getAttribute("d")).toBe("");
+    render(comp({ makeup: 6 }));
+    expect(q("pp-compressor-makeup")!.querySelector(".value")!.getAttribute("d")).not.toBe("");
   });
 
   it("the minimized bar is idle without a frame and fills with one", () => {

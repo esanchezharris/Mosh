@@ -83,10 +83,13 @@ export function grScale(thrLin: number, rho: number): number {
   return GAUGE_SCALES.find((s) => fs <= s) ?? 48;
 }
 
+/** Half the gauge's sweep (degrees): a ±50° meter face, so the needle at rest leans right
+ *  like a VU needle instead of lying flat along the baseline. */
+export const GAUGE_HALF_SWEEP = 50;
 /** The gauge needle's angle (degrees clockwise from 12 o'clock): 0 dB of reduction points
- *  right (+90°), the full scale points left (-90°). */
+ *  right (+50°), the full scale points left (-50°). */
 export const gaugeAngle = (grDb: number, scale: number): number =>
-  90 - 180 * clamp(Number.isFinite(grDb) ? grDb / scale : 0, 0, 1);
+  GAUGE_HALF_SWEEP - 2 * GAUGE_HALF_SWEEP * clamp(Number.isFinite(grDb) ? grDb / scale : 0, 0, 1);
 
 /** A point on a circle at a gauge angle. */
 export function gaugePoint(cx: number, cy: number, r: number, deg: number): [number, number] {
@@ -149,16 +152,22 @@ export function shortDb(db: number): string {
 /** "0.3", "4.5", "20", "150": a time without its unit. */
 export const msNum = (ms: number): string => (ms < 10 ? (Math.round(ms * 10) / 10).toString() : String(Math.round(ms)));
 
-/** The minimized line: "-24 dB · 2.5:1 · 20/150 ms", with the makeup ("out +3 dB") before
- *  the times when it is not 0. Ordered by importance: the row truncates from the end, so a
- *  narrow row loses the times, never the level change. */
+/** The minimized row's summary budget. Its slot measures 97 px at the 320 px inspector,
+ *  and 10 px mono is about 6.04 px a character: 16 fit whole. */
+export const SUMMARY_CHARS = 16;
+
+/** The minimized line: the ratio at the threshold, "2.5:1 at -24 dB" (at most
+ *  SUMMARY_CHARS: the slot shows no more). A long ratio with a fractional threshold
+ *  ("1.1:1 at -18.3 dB") drops the "at" rather than lose a figure. Times and makeup are
+ *  one click away in the panel. */
 export function compSummary(plugin: Plugin): string {
   const s = compSettings(plugin);
-  const parts = [shortDb(s.thrDb), fmtRatio(s.ratio)];
-  if (Math.abs(s.makeupDb) >= 0.05) parts.push(`out ${shortDb(s.makeupDb)}`);
-  parts.push(`${msNum(s.attackMs)}/${msNum(s.releaseMs)} ms`);
-  return parts.join(" · ");
+  const full = `${fmtRatio(s.ratio)} at ${shortDb(s.thrDb)}`;
+  return full.length <= SUMMARY_CHARS ? full : `${fmtRatio(s.ratio)} ${shortDb(s.thrDb)}`;
 }
+
+/** A measured sample peak: "-45.5 dBFS". */
+export const fmtPeak = (db: number): string => `${(Math.round(db * 10) / 10 || 0).toFixed(1)} dBFS`;
 
 /** The threshold read-out under the plot: "-24.0 dB". */
 export const fmtThr = (db: number): string => `${(Math.round(db * 10) / 10 || 0).toFixed(1)} dB`;

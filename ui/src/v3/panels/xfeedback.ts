@@ -6,7 +6,7 @@
 // threshold = 0.06 + 0.36·(1 − Sensitivity), and, with Auto Suppress on, cuts each with a
 // fixed Q = 30 RBJ notch blended by depth and Mix. Every parameter is linear.
 import type { FeedbackMeter, Plugin, PluginMeterReading } from "../../types";
-import { clamp, fmtDb, fmtMs, param, physOf, type Range } from "./params";
+import { clamp, fmtDb, fmtFreq, fmtMs, param, physOf, type Range } from "./params";
 
 export const XF_RANGES = {
   sensitivity: { min: 0, max: 1 },
@@ -35,6 +35,11 @@ export const XF_NOTCH_Q = 30;
 export const XF_SCORE_MAX = 0.75;
 /** The dB axis the hanging notches use, top = 0 dB. */
 export const XF_DEPTH_AXIS_DB = 30;
+/** The ring strip's coordinates, in CSS px at the 320 px inspector: the plot is drawn 273 px
+ *  wide (the 289 px row less its padding), so the viewBox is 1:1 and the 9 px axis text
+ *  renders at 9 px. The top `lane` px carry the status line alone; candidates, the threshold
+ *  and the hanging notches live in the band below it, so no marker is drawn through the text. */
+export const XF_STRIP = { w: 273, h: 38, lane: 13 } as const;
 /** The detector returns nothing for blocks shorter than this (MoshXFeedbackDsp.cpp:106). */
 export const XF_MIN_BLOCK = 128;
 
@@ -132,11 +137,8 @@ export function xfCurveFreqs(cuts: readonly { hz: number }[], lo: number, hi: nu
 
 // ── read-outs ──────────────────────────────────────────────────────────────────────────
 
-/** "1.26 kHz", "850 Hz". */
-export function fmtRingHz(hz: number): string {
-  if (!Number.isFinite(hz)) return "–";
-  return hz >= 1000 ? `${(hz / 1000).toFixed(2)} kHz` : `${Math.round(hz)} Hz`;
-}
+/** "1.26 kHz", "850 Hz": the shared in-panel frequency read-out. */
+export const fmtRingHz = fmtFreq;
 
 /** The attenuation a cut actually applies at its centre (dB, ≤ 0): the notch is exactly
  *  zero there, so the blend leaves 1 − m, with m = (1 − 10^(−depth/20))·Mix. At Mix 1 this
@@ -148,14 +150,14 @@ export const xfAppliedDb = (depthDb: number, mix: number): number =>
 export const xfCutChip = (cut: { hz: number; depthDb: number }, mix = 1): string =>
   `${fmtRingHz(cut.hz)} ${fmtDb(xfAppliedDb(cut.depthDb, mix))}`;
 
-/** How many chips the status line shows in full before the rest fold into "+N". The line
- *  is about 286 px of 9 px monospace: a cut chip ("1.26 kHz -12.7 dB") is about 100 px, so
- *  two fit beside "cutting" and a "+N"; a ringing chip ("2.61 kHz") is about 53 px, so all
- *  four the engine can report fit. */
+/** How many chips the status line (the strip's own lane, 267 px of 9 px monospace) shows in
+ *  full before the rest fold into "+N": a cut chip ("1.26 kHz -12.7 dB") is about 92 px, so
+ *  two fit beside "cutting" and a "+N"; a ringing chip ("2.61 kHz") is about 44 px, so all
+ *  four the engine can report fit beside "would cut". */
 export const XF_STATUS_CHIPS = { cutting: 2, ringing: 4 } as const;
 
 export type XfStatus =
-  | { kind: "bypassed" | "listening" | "quiet"; text: string; chips: [] }
+  | { kind: "bypassed" | "idle" | "quiet"; text: string; chips: [] }
   | { kind: "ringing" | "cutting"; text: string; chips: string[] };
 
 /** The chips the status line shows: up to `max` in full, the rest folded into one "+N"
@@ -166,11 +168,12 @@ export function xfVisibleChips(chips: readonly string[], max: number): { shown: 
   return { shown: chips.slice(0, max), more: `+${rest.length}`, rest };
 }
 
-/** The status line under the strip: what the detector hears right now, from the meter.
+/** The status line in the strip: what the detector hears right now, from the meter. With
+ *  no frame (transport stopped, or an engine without the meter rail) it is "no signal".
  *  Cut chips read the depth actually applied at Mix (xfAppliedDb). */
 export function xfStatus(meter: FeedbackMeter | undefined, enabled: boolean, auto: boolean, mix = 1): XfStatus {
   if (!enabled) return { kind: "bypassed", text: "bypassed", chips: [] };
-  if (!meter) return { kind: "listening", text: "listening…", chips: [] };
+  if (!meter) return { kind: "idle", text: "no signal", chips: [] };
   const cuts = meter.cuts ?? [], cands = meter.candidates ?? [];
   if (cuts.length) return { kind: "cutting", text: "cutting", chips: cuts.map((c) => xfCutChip(c, mix)) };
   if (cands.length) {
@@ -179,19 +182,34 @@ export function xfStatus(meter: FeedbackMeter | undefined, enabled: boolean, aut
   return { kind: "quiet", text: "nothing ringing", chips: [] };
 }
 
-/** The minimized line: what X-FDBK is set to do. Both cut settings are ceilings (a cut's
- *  depth is Max Depth × its score, at most about 0.71 × Max Depth for a pure tone). */
+/** The minimized row's summary budget: its slot measures 97 px at the 320 px inspector, and
+ *  10 px monospace is about 6.02 px a character, so 16 fit whole. */
+export const XF_SUMMARY_CHARS = 16;
+
+/** The minimized line, most telling first, within XF_SUMMARY_CHARS: Detect says so and its
+ *  Sensitivity ("detect sens 65%"); Suppress gives its two ceilings ("≤2 cuts · ≤18 dB":
+ *  a cut's depth is Max Depth × its score, at most about 0.71 × Max Depth for a pure tone),
+ *  then whatever else still fits whole (Release, Mix below 100%, Output). Lowercase words,
+ *  no single-letter abbreviations. */
 export function xfSummary(plugin: Plugin): string {
   const s = xfSettings(plugin);
   const out = Math.abs(s.output) >= 0.05 ? `out ${fmtDb(s.output)}` : "";
   const sens = `sens ${Math.round(s.sensitivity * 100)}%`;
-  if (!s.auto) return ["detect only", sens, out].filter(Boolean).join(" · ");
-  return [
-    `suppress ≤${s.maxCuts} ${s.maxCuts === 1 ? "cut" : "cuts"}`,
+  // One phrase ("detect · sens 65%" would be one over the budget).
+  if (!s.auto) return fitSummary([`detect ${sens}`, out]);
+  return fitSummary([
+    `≤${s.maxCuts} ${s.maxCuts === 1 ? "cut" : "cuts"}`,
     `≤${Math.round(s.maxDepth)} dB`,
     fmtMs(s.release),
-    sens,
     s.mix < 0.995 ? `mix ${Math.round(s.mix * 100)}%` : "",
     out,
-  ].filter(Boolean).join(" · ");
+  ]);
+}
+
+/** Joins `parts` with " · " in order, keeping each one only if the line still fits
+ *  XF_SUMMARY_CHARS whole (a later short part may still fit after a long one is dropped).
+ *  The first part always stays. */
+function fitSummary(parts: string[]): string {
+  const [first, ...rest] = parts.filter(Boolean);
+  return rest.reduce((line, p) => (`${line} · ${p}`.length <= XF_SUMMARY_CHARS ? `${line} · ${p}` : line), first);
 }

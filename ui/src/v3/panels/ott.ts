@@ -6,7 +6,7 @@
 // downward 4:1 above -20 dBFS (weighted 0.35), an upward lift inside -76..-38 dBFS
 // (weighted 0.25), nothing in between. Every parameter is linear in its normalised value.
 import type { OttMeter, Plugin, PluginMeterReading } from "../../types";
-import { fmtDb, fmtMs, param, physOf, type Range } from "./params";
+import { fmtDb, fmtFreq, fmtMs, param, physOf, type Range } from "./params";
 
 export const OTT_RANGES = {
   amount: { min: 0, max: 1 },
@@ -26,10 +26,11 @@ export const OTT_DEFAULTS = { amount: 0.12, time: 120, trim: 0, mix: 1, output: 
 export const OTT_SPLIT_HZ = { low: 120, high: 3500 } as const;
 
 export type OttBandDef = { key: "low" | "mid" | "high"; label: string; range: string; title: string; param: number };
+const LO = fmtFreq(OTT_SPLIT_HZ.low), HI = fmtFreq(OTT_SPLIT_HZ.high);
 export const OTT_BANDS: readonly OttBandDef[] = [
-  { key: "low", label: "LOW", range: "<120 Hz", title: "Low band: below 120 Hz", param: OTT_PARAM.low },
-  { key: "mid", label: "MID", range: "120–3.5k", title: "Mid band: 120 Hz to 3.5 kHz", param: OTT_PARAM.mid },
-  { key: "high", label: "HIGH", range: ">3.5 kHz", title: "High band: above 3.5 kHz", param: OTT_PARAM.high },
+  { key: "low", label: "Low", range: `< ${LO}`, title: `Low band: below ${LO}`, param: OTT_PARAM.low },
+  { key: "mid", label: "Mid", range: `${LO}–${HI}`, title: `Mid band: ${LO} to ${HI}`, param: OTT_PARAM.mid },
+  { key: "high", label: "High", range: `> ${HI}`, title: `High band: above ${HI}`, param: OTT_PARAM.high },
 ];
 
 /** The fixed gain law's landmarks (MoshOTTDsp.cpp:16-34). */
@@ -88,26 +89,34 @@ export function fmtAmount(amount: number): string {
   return `${Math.round(amount * 100)}%`;
 }
 
-/** A dB value with no unit, one decimal, never "-0.0": "+2.0", "-1.5", "0.0". */
-export function fmtDbBare(db: number): string {
-  return fmtDb(db).replace(/ dB$/, "");
-}
+/** The minimized row's summary budget: its slot measures 97 px at the 320 px inspector, and
+ *  10 px monospace is about 6.02 px a character, so 16 fit whole. */
+export const OTT_SUMMARY_CHARS = 16;
 
-/** The minimized line: what the OTT is doing. */
+/** The minimized line, most telling first, within OTT_SUMMARY_CHARS: Amount, then what was
+ *  moved off the engine's defaults (Time, band trims, Mix, Output, in that order), then the
+ *  Time at its default; each later fact only if it still fits whole, so a fact is dropped,
+ *  never cut ("12% · 120 ms", "12% · mix 50%"). At Amount 0 the bands are skipped:
+ *  "0% · out -1.0 dB" or "0% · flat". Lowercase words, no single-letter abbreviations. */
 export function ottSummary(plugin: Plugin): string {
   const s = ottSettings(plugin);
   const out = Math.abs(s.output) >= 0.05 ? `out ${fmtDb(s.output)}` : "";
-  if (ottOutputOnly(s.amount)) return out ? `amount 0 · ${out} only` : "flat";
-  const trims = (["low", "mid", "high"] as const)
-    .filter((k) => Math.abs(s[k]) >= 0.05)
-    .map((k) => `${k[0].toUpperCase()} ${fmtDbBare(s[k])}`);
-  return [
-    fmtAmount(s.amount),
-    fmtMs(s.time),
-    trims.length ? `${trims.join(" ")} dB` : "",
+  // At Amount 0 the engine skips the bands, the trims and Mix: only Output applies.
+  if (ottOutputOnly(s.amount)) {
+    if (!out) return "0% · flat";
+    // "0% · out -18.0 dB" is one over: whole dB below -9.95
+    return `0% · ${out}`.length <= OTT_SUMMARY_CHARS ? `0% · ${out}` : `0% · out ${fmtDb(s.output, 0)}`;
+  }
+  const moved = (v: number, d: number, eps: number) => Math.abs(v - d) >= eps;
+  const time = fmtMs(s.time), timeMoved = moved(s.time, OTT_DEFAULTS.time, 0.5);
+  const parts = [
+    timeMoved ? time : "",
+    ...(["low", "mid", "high"] as const).filter((k) => Math.abs(s[k]) >= 0.05).map((k) => `${k} ${fmtDb(s[k])}`),
     s.mix < 0.995 ? `mix ${Math.round(s.mix * 100)}%` : "",
-    out,
-  ].filter(Boolean).join(" · ");
+    moved(s.output, OTT_DEFAULTS.output, 0.05) ? out || "out 0.0 dB" : "",
+    timeMoved ? "" : time,
+  ].filter(Boolean);
+  return parts.reduce((line, p) => (`${line} · ${p}`.length <= OTT_SUMMARY_CHARS ? `${line} · ${p}` : line), fmtAmount(s.amount));
 }
 
 export type OttBandView = {

@@ -7,7 +7,7 @@ import type { FeedbackMeter, Plugin, Snapshot } from "../../types";
 import { xFeedbackPanelDef } from "./XFeedbackPanel";
 import {
   fmtRingHz, juceRoundToInt, xfAppliedDb, xfAutoOn, xfBlend, xfCurveFreqs, xfCutChip, xfCutsDb, xfCutsNorm, xfMaxCuts,
-  xfMeterOf, xfNotch, xfSettings, xfStatus, xfSummary, xfThreshold, xfTopHz, xfVisibleChips,
+  XF_STRIP, XF_SUMMARY_CHARS, xfMeterOf, xfNotch, xfSettings, xfStatus, xfSummary, xfThreshold, xfTopHz, xfVisibleChips,
 } from "./xfeedback";
 import type { PanelProps } from "./types";
 
@@ -101,7 +101,7 @@ describe("Mosh X-FDBK maths (MoshXFeedbackDsp.cpp)", () => {
   it("writes chips, status and summary", () => {
     expect(xfCutChip({ hz: 1260, depthDb: 12.7 })).toBe("1.26 kHz -12.7 dB");
     expect(fmtRingHz(850)).toBe("850 Hz");
-    expect(xfStatus(undefined, true, true)).toEqual({ kind: "listening", text: "listening…", chips: [] });
+    expect(xfStatus(undefined, true, true)).toEqual({ kind: "idle", text: "no signal", chips: [] });
     expect(xfStatus(frame([], []), false, true).kind).toBe("bypassed");
     expect(xfStatus(frame([], []), true, true)).toEqual({ kind: "quiet", text: "nothing ringing", chips: [] });
     expect(xfStatus(frame([{ hz: 2610, score: 0.4 }], []), true, false))
@@ -109,9 +109,21 @@ describe("Mosh X-FDBK maths (MoshXFeedbackDsp.cpp)", () => {
     expect(xfStatus(frame([{ hz: 1260, score: 0.6 }], [{ hz: 1260, score: 0.6, depthDb: 12.7 }]), true, true))
       .toEqual({ kind: "cutting", text: "cutting", chips: ["1.26 kHz -12.7 dB"] });
 
-    expect(xfSummary(xf())).toBe("detect only · sens 65%");
-    expect(xfSummary(xf({ 4: 1 }))).toBe("suppress ≤2 cuts · ≤18 dB · 500 ms · sens 65%");
-    expect(xfSummary(xf({ 4: 1, 1: 0, 5: 0.5, 6: 0.5 }))).toBe("suppress ≤1 cut · ≤18 dB · 500 ms · sens 65% · mix 50% · out -6.0 dB");
+    // the minimized row fits 16 characters: the mode's own facts first, whole
+    expect(xfSummary(xf())).toBe("detect sens 65%");
+    expect(xfSummary(xf({ 0: 1 }))).toBe("detect sens 100%");
+    expect(xfSummary(xf({ 0: 0, 6: 0.5 }))).toBe("detect sens 0%");   // Output does not fit whole
+    expect(xfSummary(xf({ 4: 1 }))).toBe("≤2 cuts · ≤18 dB");
+    expect(xfSummary(xf({ 4: 1, 1: 0, 5: 0.5, 6: 0.5 }))).toBe("≤1 cut · ≤18 dB");
+    expect(xfSummary(xf({ 4: 1, 2: 0 }))).toBe("≤2 cuts · ≤3 dB");
+    // every corner of every setting stays within the budget, and never ends cut mid-fact
+    for (const auto of [0, 1]) for (const sens of [0, 0.65, 1]) for (const cuts of [0, 1]) for (const depth of [0, 1])
+      for (const mix of [0, 0.5, 1]) for (const out of [0, 0.75, 1]) {
+        const t = xfSummary(xf({ 4: auto, 0: sens, 1: cuts, 2: depth, 5: mix, 6: out }));
+        expect(t.length, t).toBeLessThanOrEqual(XF_SUMMARY_CHARS);
+        expect(t).toMatch(auto ? /^≤[14] cuts? · ≤(3|36) dB/ : /^detect/);
+      }
+    expect(XF_SUMMARY_CHARS).toBe(16);
   });
 });
 
@@ -144,13 +156,20 @@ describe("Mosh X-FDBK panel", () => {
     useStore.setState({ pluginMeters: {}, snapshot: null });
   });
 
-  it("listens idly with no frame, with the threshold line where Sensitivity puts it", () => {
+  it("says 'no signal' with no frame, with the threshold line where Sensitivity puts it", () => {
     render(xf());
     expect(q("v3-xf-strip").hasAttribute("data-live")).toBe(false);
-    expect(q("v3-xf-status").textContent).toBe("listening…");
+    expect(q("v3-xf-status").textContent).toBe("no signal");
+    expect(q("v3-xf-status").getAttribute("data-kind")).toBe("idle");
+    expect(host.textContent).not.toMatch(/listening|thr 0/);
     expect(qa("v3-xf-candidate")).toHaveLength(0);
-    // 0.186 on a 0..0.75 axis 36 tall: y = (0.75 − 0.186)/0.75·36
-    expect(Number(q("v3-xf-threshold").getAttribute("y1"))).toBeCloseTo(27.072, 6);
+    // the strip is 273 × 38 (1:1 with its drawn px at the 320 px inspector), its top 13 px the
+    // status lane: 0.186 on a 0..0.75 axis 25 tall below it, y = 13 + (0.75 − 0.186)/0.75·25
+    expect(XF_STRIP).toEqual({ w: 273, h: 38, lane: 13 });
+    expect(q("v3-xf-strip").getAttribute("viewBox")).toBe("0 0 273 38");
+    expect(Number(q("v3-xf-threshold").getAttribute("y1"))).toBeCloseTo(31.8, 6);
+    // the threshold the line marks is in Sensitivity's read-out and tooltip, not its own row
+    expect(q("v3-xf-sensitivity").getAttribute("title")).toContain("0.19");
   });
 
   it("draws candidates, notches and chips from a frame", () => {
@@ -161,12 +180,17 @@ describe("Mosh X-FDBK panel", () => {
     expect(qa("v3-xf-candidate")).toHaveLength(2);
     expect(q("v3-xf-status").getAttribute("data-kind")).toBe("cutting");
     expect(qa("v3-xf-chip").map((c) => c.textContent)).toEqual(["1.26 kHz -12.7 dB", "2.51 kHz -5.4 dB"]);
-    // the notch curve reaches the real depth: 12.7 of 30 dB of a 36-unit strip at its deepest
+    // the notch curve reaches the real depth: 12.7 of 30 dB of the 25 px band below the lane,
+    // and hangs from the band's top (never up into the status lane)
     const ys = [...q("v3-xf-cutcurve").getAttribute("d")!.matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]));
-    expect(Math.max(...ys)).toBeCloseTo((12.7 / 30) * 36, 1);
-    // a candidate's stem tops out at its score
+    expect(Math.max(...ys)).toBeCloseTo(13 + (12.7 / 30) * 25, 1);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(13);
+    // a candidate's stem tops out at its score, below the lane: 13 + (0.75 − 0.6)/0.75·25
     const cap = qa("v3-xf-candidate")[0].querySelector("circle")!;
-    expect(Number(cap.getAttribute("cy"))).toBeCloseTo((0.75 - 0.6) / 0.75 * 36, 6);
+    expect(Number(cap.getAttribute("cy"))).toBeCloseTo(18, 6);
+    // even a score past the axis stops at the lane's edge, under the status text
+    send(frame([{ hz: 1260, score: 0.9 }], []));
+    expect(Number(qa("v3-xf-candidate")[0].querySelector("circle")!.getAttribute("cy"))).toBe(13);
   });
 
   it("draws candidates as stems, never as notches: 'would cut' in Detect mode with no notch curve", () => {
@@ -187,9 +211,9 @@ describe("Mosh X-FDBK panel", () => {
     expect(qa("v3-xf-chip").map((c) => c.textContent)).toEqual(["1.26 kHz -4.2 dB", "2.51 kHz -3.4 dB"]);
     expect(q("v3-xf-chip-more").textContent).toBe("+2");
     expect(q("v3-xf-chip-more").getAttribute("title")).toBe("3.98 kHz -2.9 dB, 6.30 kHz -2.3 dB");
-    // the curve's deepest point agrees with the first chip: 4.21 of 30 dB of 36
+    // the curve's deepest point agrees with the first chip: 4.21 of 30 dB of the 25 px band
     const ys = [...q("v3-xf-cutcurve").getAttribute("d")!.matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]));
-    expect(Math.max(...ys)).toBeCloseTo((4.211 / 30) * 36, 1);
+    expect(Math.max(...ys)).toBeCloseTo(13 + (4.211 / 30) * 25, 1);
   });
 
   it("never crashes on another plugin's frame at its key (delete/reorder while playing)", () => {
@@ -198,7 +222,7 @@ describe("Mosh X-FDBK panel", () => {
     expect(q("v3-xf-mini").classList.contains("idle")).toBe(true);
     render(xf({ 4: 1 }));
     expect(q("v3-xf-strip").hasAttribute("data-live")).toBe(false);
-    expect(q("v3-xf-status").textContent).toBe("listening…");
+    expect(q("v3-xf-status").textContent).toBe("no signal");
   });
 
   it("Detect | Suppress follows the radio keyboard model; the stepper keeps focus at its limits", () => {
@@ -212,6 +236,18 @@ describe("Mosh X-FDBK panel", () => {
     setParam.mockClear();
     key(q("v3-xf-detect"), "Home");                // already Detect: nothing sent
     expect(setParam).not.toHaveBeenCalled();
+    // the arrows and Home/End stay in the switch: they must not also nudge clips or move the playhead
+    const seen: string[] = [];
+    const onKey = (e: KeyboardEvent) => seen.push(e.key);
+    window.addEventListener("keydown", onKey);
+    try {
+      key(q("v3-xf-suppress"), "ArrowLeft");
+      key(q("v3-xf-detect"), "End");
+    } finally {
+      window.removeEventListener("keydown", onKey);
+    }
+    expect(seen).toEqual([]);
+    setParam.mockClear();
 
     render(xf({ 1: 1 }));                          // 4 cuts
     const more = host.querySelector('[aria-label="More cuts"]') as HTMLButtonElement;
@@ -248,8 +284,8 @@ describe("Mosh X-FDBK panel", () => {
     const slider = (id: string) => host.querySelector(`[data-testid="${id}"] [role="slider"]`)!;
     key(slider("v3-xf-sensitivity"), "End");
     expect(setParam).toHaveBeenLastCalledWith(0, 1, { gesture: expect.any(String) });
-    // the line follows before the engine's patch lands: threshold 0.06 → y = 0.69/0.75·36
-    expect(Number(q("v3-xf-threshold").getAttribute("y1"))).toBeCloseTo(33.12, 6);
+    // the line follows before the engine's patch lands: threshold 0.06 → y = 13 + 0.69/0.75·25
+    expect(Number(q("v3-xf-threshold").getAttribute("y1"))).toBeCloseTo(36, 6);
     key(slider("v3-xf-depth"), "Home");
     expect(setParam).toHaveBeenLastCalledWith(2, 0, { gesture: expect.any(String) });
     key(slider("v3-xf-release"), "End");
@@ -276,9 +312,32 @@ describe("Mosh X-FDBK panel", () => {
     render(xf({}, true), "Mini");
     expect(q("v3-xf-mini").classList.contains("idle")).toBe(false);
     expect(q("v3-xf-mini").querySelectorAll("line.cand, line.cut")).toHaveLength(2);
-    expect(Number(q("v3-xf-mini-cut").getAttribute("y2"))).toBeCloseTo(6 + (12 / 30) * 6, 6);
+    expect(Number(q("v3-xf-mini-cut").getAttribute("y2"))).toBeCloseTo(7 + (12 / 30) * 7, 6);
     // at Mix 0.5 the tick shows the applied depth, not the pre-Mix depth
     render(xf({ 5: 0.5 }, true), "Mini");
-    expect(Number(q("v3-xf-mini-cut").getAttribute("y2"))).toBeCloseTo(6 + (-xfAppliedDb(12, 0.5) / 30) * 6, 6);
+    expect(Number(q("v3-xf-mini-cut").getAttribute("y2"))).toBeCloseTo(7 + (-xfAppliedDb(12, 0.5) / 30) * 7, 6);
+    // it fits the minimized row's 44×14 slot
+    expect([q("v3-xf-mini").getAttribute("width"), q("v3-xf-mini").getAttribute("height")]).toEqual(["44", "14"]);
+  });
+
+  it("marks the suppression dials inert (still adjustable) in Detect, and draws Output from unity", () => {
+    render(xf());
+    const inert = (id: string) => q(id).classList.contains("inert");
+    expect(["v3-xf-depth", "v3-xf-release", "v3-xf-mix"].map(inert)).toEqual([true, true, true]);
+    expect(["v3-xf-sensitivity", "v3-xf-output"].map(inert)).toEqual([false, false]);
+    expect(q("v3-xf-depth").getAttribute("title")).toContain("no effect in Detect");
+    expect(host.querySelector('[data-testid="v3-xf-depth"] [role="slider"]')!.getAttribute("tabindex")).toBe("0");
+    key(host.querySelector('[data-testid="v3-xf-mix"] [role="slider"]')!, "Home");
+    expect(setParam).toHaveBeenLastCalledWith(5, 0, { gesture: expect.any(String) });
+    render(xf({ 4: 1 }));
+    expect(["v3-xf-depth", "v3-xf-release", "v3-xf-mix"].map(inert)).toEqual([false, false, false]);
+    // Output 0 dB (the default): a unity tick and no arc
+    expect(q("v3-xf-output").querySelector("line.unity")).not.toBeNull();
+    expect(q("v3-xf-output").querySelector("path.value")!.getAttribute("d")).toBe("");
+    // the pressed mode uses the shared switch (aria-checked), not a filled button
+    expect(q("v3-xf-suppress").closest(".pp-seg")).not.toBeNull();
+    expect(xFeedbackPanelDef.title).toBe("Feedback Suppressor");
+    // the minimized name column holds about 11 characters at 11 px semibold
+    expect(xFeedbackPanelDef.shortTitle).toBe("Feedback");
   });
 });

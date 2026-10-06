@@ -8,7 +8,7 @@
 // 20·log10(wet) + (k−1)·fbDb dB. At the bottom of the Feedback range the loop is OFF (one
 // echo); at 0 dB nothing in the loop limits it (the echoes never decay).
 import type { Plugin } from "../../types";
-import { clamp, param, physOf, stateNum } from "./params";
+import { clamp, fmtDb, param, physOf, stateNum, stateOf } from "./params";
 
 export const FEEDBACK = { min: -30, max: 0 } as const;
 export const MIX = { min: 0, max: 1 } as const;
@@ -31,6 +31,11 @@ export const clampMs = (ms: number): number => (Number.isFinite(ms) ? clamp(Math
  *  A loaded edit can hold more (the plugin restores lengthMs without clamping), and the
  *  panel must show that truthfully and still be able to set 2000. */
 export const engineMs = (ms: number): number => (Number.isFinite(ms) ? Math.max(TIME.min, Math.round(ms)) : TIME.def);
+
+/** Whether this engine reports (and so can set) the delay time. An older Mosh has no
+ *  `plugin.state` and answers set_plugin_state with an error: the panel then shows the
+ *  engine default, read-only. */
+export const canSetTime = (plugin: Plugin): boolean => stateOf(plugin, "lengthMs") !== undefined;
 
 /** The engine's delay in samples and the echo period it gives (seconds). */
 export function periodOf(lengthMs: number, fs: number): { samples: number; seconds: number } {
@@ -83,9 +88,10 @@ export const viewMs = (m: DelayModel): number =>
 
 // ── the time control ───────────────────────────────────────────────────────────────────
 
-/** A horizontal drag on the time read-out: 60 px doubles or halves it (240 px with Shift). */
-export const timeFromDrag = (startMs: number, dx: number, fine = false): number =>
-  clampMs(startMs * 2 ** (dx / (fine ? 240 : 60)));
+/** A drag on the time read-out, in px UP (like every dial): 60 px doubles it, 60 down
+ *  halves it (240 px with Shift). */
+export const timeFromDrag = (startMs: number, up: number, fine = false): number =>
+  clampMs(startMs * 2 ** (up / (fine ? 240 : 60)));
 
 /** Keys on the time control: arrows ±1 ms (Shift ±10), PageUp/Down double/halve, Home/End. */
 export function timeKey(ms: number, key: string, shift = false): number | null {
@@ -118,7 +124,7 @@ export function matchingNote(ms: number, bpm: number): string | null {
 // ── read-outs ──────────────────────────────────────────────────────────────────────────
 
 export const fmtTime = (ms: number): string => `${Math.round(ms)} ms`;
-export const fmtMix = (mix: number): string => `${Math.round(clamp(mix, 0, 1) * 100)}% wet`;
+export const fmtMix = (mix: number): string => `${Math.round(clamp(mix, 0, 1) * 100)}%`;
 
 /** "1.5 s", "12 s", "> 60 s", "∞". */
 export function fmtTail(s: number | null): string {
@@ -143,11 +149,26 @@ export function tailText(m: DelayModel): string {
   return `-60 dB in ${fmtTail(m.tailS)}`;
 }
 
-/** The minimized line, e.g. "150 ms · -6.0 dB (1.5 s) · 30% wet": time, feedback with the
- *  time the echoes take to fall 60 dB, and the mix. */
+/** A summary's dB: whole unless that hides a tenth ("-6", "-6.5"), without its unit. */
+function dbShort(dB: number): string {
+  const tenth = Math.round(dB * 10) / 10;
+  return fmtDb(tenth, Number.isInteger(tenth) ? 0 : 1).replace(/ dB$/, "");
+}
+
+/** The minimized row's summary slot is 97 px at the 320 px inspector: 16 monospace
+ *  characters at 10 px (about 6.04 px each). Measured, not estimated: 17 characters clip. */
+export const SUMMARY_CHARS = 16;
+
+/** The minimized line, at most SUMMARY_CHARS, most telling first: the time, then the
+ *  feedback ("150 ms · fb -6 dB"; "fb off" at the bottom, where the loop is off and there is
+ *  one echo; "fb ∞" at 0 dB, where the echoes never decay). As in the EQ's summary, the first
+ *  form that fits wins: full units, bare dB ("150 ms · fb -6"), then tight separators
+ *  ("2000 ms·fb -6.5"). The mix does not fit the slot; the panel shows it. */
 export function delaySummary(plugin: Plugin, fs = 48000): string {
   const m = delayModel(plugin, fs);
   if (m.taps.length === 0) return "dry only";
-  const echo = m.oneRepeat ? "1 repeat" : m.infinite ? "∞ repeats" : `${m.feedbackDb.toFixed(1)} dB (${fmtTail(m.tailS)})`;
-  return `${fmtTime(m.lengthMs)} · ${echo} · ${fmtMix(m.mix)}`;
+  const time = fmtTime(m.lengthMs);
+  const d = dbShort(m.feedbackDb);
+  const [fb, fbShort] = m.oneRepeat ? ["fb off", "fb off"] : m.infinite ? ["fb ∞", "fb ∞"] : [`fb ${d} dB`, `fb ${d}`];
+  return [`${time} · ${fb}`, `${time} · ${fbShort}`, `${time}·${fbShort}`].find((t) => t.length <= SUMMARY_CHARS) ?? time;
 }

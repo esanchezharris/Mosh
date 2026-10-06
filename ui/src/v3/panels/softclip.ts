@@ -9,6 +9,7 @@
 // output there is 2.37 dB under the ceiling. No oversampling: a sample peak, not true peak.
 import type { Plugin } from "../../types";
 import { clamp, fmtDb, param, physOf, type Range } from "./params";
+import { shortDb, SUMMARY_CHARS } from "./compressor";
 
 export const DRIVE: Range = { min: 0, max: 24 };
 export const CEILING: Range = { min: -12, max: 0 };
@@ -70,13 +71,18 @@ export const CLIP_ZONE_FROM_KNEE_DB = grOnsetBelowKneeDb(1);
 /** "-0.5 dBFS". */
 export const fmtDbfs = (db: number): string => `${(Math.round(db * 10) / 10 || 0).toFixed(1)} dBFS`;
 
-/** The minimized line: "drive +6.0 dB · ceiling -0.5 dBFS". */
+/** The minimized line: "+6 dB drive" (at most SUMMARY_CHARS: the slot shows no more).
+ *  Drive is the sound; the ceiling joins it, "+9 dB, ceil -3", only when moved from its
+ *  default and the pair still fits. */
 export function clipSummary(plugin: Plugin): string {
   const s = clipSettings(plugin);
-  return `drive ${fmtDb(s.driveDb)} · ceiling ${fmtDbfs(s.ceilDb)}`;
+  const drive = `${shortDb(s.driveDb)} drive`;
+  if (Math.abs(s.ceilDb - CEILING_DEFAULT_DB) < 0.05) return drive;
+  const both = `${shortDb(s.driveDb)}, ceil ${shortDb(s.ceilDb).replace(" dB", "")}`;
+  return both.length <= SUMMARY_CHARS ? both : drive;
 }
 
-/** The honest one-liner under the plot: drive is gain, and where the knee sits. */
+/** The plot's tooltip: drive is gain, and where the knee sits. */
 export function clipHint(s: ClipSettings): string {
-  return `knee ${fmtDbfs(kneeInDb(s.driveDb, s.ceilDb))} · quiet input ${fmtDb(s.driveDb)}`;
+  return `Knee at ${fmtDbfs(kneeInDb(s.driveDb, s.ceilDb))} in; quiet input comes out ${fmtDb(s.driveDb)} louder.`;
 }

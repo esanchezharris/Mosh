@@ -83,7 +83,7 @@ function PluginRow({ plugin, trackId, sampleRate, scope, prevIndex, nextIndex }:
   const hint = native && !def ? pluginHint(plugin) : null;
   const summary = def ? def.summary(plugin) : genericSummary(plugin);
   const Mini = def?.Mini;
-  const title = def?.title ?? plugin.name;
+  const title = (collapsed ? def?.shortTitle : undefined) ?? def?.title ?? plugin.name;
   return (
     <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
       data-plugin-type={plugin.type}

@@ -6,7 +6,7 @@ import { useStore } from "../../store";
 import type { OttMeter, Plugin } from "../../types";
 import { OTT_CLIP_HOLD_MS, ottPanelDef } from "./OttPanel";
 import {
-  OTT_LEVEL_AXIS, fmtAmount, ottBandView, ottGainDb, ottMeterOf, ottOutputOnly, ottSettings, ottSummary, ottTaus,
+  OTT_LEVEL_AXIS, fmtAmount, ottBandView, ottGainDb, ottMeterOf, ottOutputOnly, ottSettings, ottSummary, ottTaus, OTT_SUMMARY_CHARS,
 } from "./ott";
 import type { PanelProps } from "./types";
 
@@ -56,11 +56,26 @@ describe("Mosh OTT maths (MoshOTTDsp.cpp ottGainDb)", () => {
   });
 
   it("summarises what the OTT is doing", () => {
-    expect(ottSummary(ott())).toBe("12% · 120 ms · out -1.0 dB");
-    // Low +2 dB (14/24), High -1.5 dB (10.5/24), mix 50%, output 0 dB (18/24)
-    expect(ottSummary(ott({ 2: 14 / 24, 4: 10.5 / 24, 5: 0.5, 6: 0.75 }))).toBe("12% · 120 ms · L +2.0 H -1.5 dB · mix 50%");
-    expect(ottSummary(ott({ 0: 0 }))).toBe("amount 0 · out -1.0 dB only");
-    expect(ottSummary(ott({ 0: 0, 6: 0.75, 2: 1 }))).toBe("flat");   // the trim is skipped at Amount 0
+    // the minimized row fits 16 characters: Amount, then what moved off the defaults
+    expect(ottSummary(ott())).toBe("12% · 120 ms");
+    // Low +2 dB (14/24), High -1.5 dB (10.5/24), mix 50%, output 0 dB (18/24): each moved fact
+    // only if it fits whole ("12% · low +2.0 dB" is one over), never cut mid-fact
+    expect(ottSummary(ott({ 2: 14 / 24, 4: 10.5 / 24, 5: 0.5, 6: 0.75 }))).toBe("12% · mix 50%");
+    expect(ottSummary(ott({ 0: 0.003, 2: 14 / 24 }))).toBe("<1% · 120 ms");
+    expect(ottSummary(ott({ 5: 0.5 }))).toBe("12% · mix 50%");
+    expect(ottSummary(ott({ 1: 1 }))).toBe("12% · 500 ms");
+    expect(ottSummary(ott({ 6: 0.75 }))).toBe("12% · out 0.0 dB");
+    expect(ottSummary(ott({ 0: 1, 6: 0 }))).toBe("100% · 120 ms");
+    expect(ottSummary(ott({ 0: 0 }))).toBe("0% · out -1.0 dB");
+    expect(ottSummary(ott({ 0: 0, 6: 0 }))).toBe("0% · out -18 dB");
+    expect(ottSummary(ott({ 0: 0, 6: 0.75, 2: 1 }))).toBe("0% · flat");   // the trim is skipped at Amount 0
+    for (const a of [0, 0.003, 0.12, 1]) for (const t of [0, 1]) for (const tr of [0, 0.5, 1]) for (const m of [0, 1])
+      for (const o of [0, 0.75, 1]) {
+        const txt = ottSummary(ott({ 0: a, 1: t, 2: tr, 3: tr, 4: 1 - tr, 5: m, 6: o }));
+        expect(txt.length, txt).toBeLessThanOrEqual(OTT_SUMMARY_CHARS);
+        expect(txt).toMatch(/^(<1|\d+)% · /);
+      }
+    expect(OTT_SUMMARY_CHARS).toBe(16);
   });
 
   it("maps a meter band onto the bars", () => {
@@ -118,22 +133,33 @@ describe("Mosh OTT panel", () => {
     useStore.setState({ pluginMeters: {} });
   });
 
-  it("is idle with no meter frame, and draws the live bars from one", () => {
+  it("is idle with no meter frame (one muted 'no signal'), and draws the live bars from one", () => {
     render(ott());
     const live = () => [...host.querySelectorAll('[data-testid="v3-ott-band-live"]')];
     expect(live()).toHaveLength(3);
     expect(live().every((el) => !el.hasAttribute("data-live"))).toBe(true);
     expect([...host.querySelectorAll('[data-testid="v3-ott-gain"]')].map((e) => e.textContent)).toEqual(["–", "–", "–"]);
-    expect(host.querySelector('[data-testid="v3-ott-clip"]')!.hasAttribute("data-on")).toBe(false);
+    // one "no signal" for the whole panel, never a second "idle" per band; no clip light without a frame
+    expect(host.textContent!.match(/no signal/g)).toHaveLength(1);
+    expect(host.textContent).not.toMatch(/idle|listening/);
+    // the column's caption is always "Clip"; idle, the words sit in its value slot
+    expect(host.querySelector('[data-testid="v3-ott-status"]')!.textContent).toBe("no signalClip");
+    expect(host.querySelector('[data-testid="v3-ott-status"] .nm')!.textContent).toBe("Clip");
+    expect(host.querySelector('[data-testid="v3-ott-clip"]')).toBeNull();
+    expect([...host.querySelectorAll(".pp-ott-bh")].map((e) => e.textContent)).toEqual(["< 120 Hz", "120 Hz–3.50 kHz", "> 3.50 kHz"]);
 
     meter([{ levelDb: -50, gainDb: 1.5 }, { levelDb: -12, gainDb: -3 }, { levelDb: -30, gainDb: 0 }], true);
     expect(live().every((el) => el.hasAttribute("data-live"))).toBe(true);
     expect([...host.querySelectorAll('[data-testid="v3-ott-gain"]')].map((e) => e.textContent)).toEqual(["+1.5 dB", "-3.0 dB", "0.0 dB"]);
-    // lift = 1.5/6 of the 15-unit half bar, cut = 3/6 of it
-    expect(Number(host.querySelector('[data-testid="v3-ott-lift"]')!.getAttribute("height"))).toBeCloseTo(3.75, 6);
-    expect(Number(host.querySelector('[data-testid="v3-ott-cut"]')!.getAttribute("height"))).toBeCloseTo(7.5, 6);
+    // lift = 1.5/6 of the 10-unit half bar, cut = 3/6 of it
+    expect(Number(host.querySelector('[data-testid="v3-ott-lift"]')!.getAttribute("height"))).toBeCloseTo(2.5, 6);
+    expect(Number(host.querySelector('[data-testid="v3-ott-cut"]')!.getAttribute("height"))).toBeCloseTo(5, 6);
     expect(host.querySelectorAll('[data-testid="v3-ott-lift"]')).toHaveLength(1);
     expect(host.querySelector('[data-testid="v3-ott-clip"]')!.hasAttribute("data-on")).toBe(true);
+    expect(host.querySelector('[data-testid="v3-ott-status"]')!.textContent).toBe("Clip");
+    expect(host.textContent).not.toMatch(/no signal/);
+    // the level is in the band's tooltip, not on a second line
+    expect(live()[0].getAttribute("title")).toBe("Low band: below 120 Hz: level -50 dBFS, gain +1.5 dB");
   });
 
   it("holds the clip light for 1 s after the LAST clipped frame, then releases it", () => {
@@ -169,7 +195,8 @@ describe("Mosh OTT panel", () => {
     act(() => useStore.setState({ pluginMeters: { "t1:0": { trackId: "t1", index: 0, type: "compressor", grDb: 6, inDb: -3, outDb: -9 } } }));
     render(ott());
     expect([...host.querySelectorAll('[data-testid="v3-ott-band-live"]')].some((el) => el.hasAttribute("data-live"))).toBe(false);
-    expect(host.querySelector('[data-testid="v3-ott-clip"]')!.hasAttribute("data-on")).toBe(false);
+    expect(host.querySelector('[data-testid="v3-ott-clip"]')).toBeNull();
+    expect(host.querySelector('[data-testid="v3-ott-status"]')!.textContent).toContain("no signal");
     render(ott(), "Mini");
     expect(host.querySelector('[data-testid="v3-ott-mini"]')!.classList.contains("idle")).toBe(true);
   });
@@ -222,10 +249,14 @@ describe("Mosh OTT panel", () => {
     expect(new Set(setParam.mock.calls.map((c) => (c[2] as { gesture: string }).gesture)).size).toBe(2);
   });
 
-  it("says when Amount 0 leaves only Output, and dims Mix but keeps it adjustable", () => {
+  it("says when Amount 0 leaves only Output, and marks Mix and the trims inert but keeps them adjustable", () => {
     render(ott({ 0: 0 }));
     expect(host.querySelector('[data-testid="v3-ott-note"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="v3-ott-mixw"]')!.classList.contains("inert")).toBe(true);
+    expect(host.querySelector('[data-testid="v3-ott-mix"]')!.classList.contains("inert")).toBe(true);
+    expect(host.querySelector('[data-testid="v3-ott-mix"]')!.getAttribute("title")).toContain("skipped at Amount 0");
+    const trims = [...host.querySelectorAll('[data-testid="v3-ott-trim"]')];
+    expect(trims.every((t) => t.classList.contains("inert"))).toBe(true);
+    expect(trims[0].getAttribute("aria-valuetext")).toBe("0.0 dB, skipped at Amount 0");
     const mix = host.querySelector('[data-testid="v3-ott-mix"] [role="slider"]')!;
     expect(mix.getAttribute("tabindex")).toBe("0");
     expect(mix.getAttribute("aria-valuetext")).toBe("100%, skipped at Amount 0");
@@ -233,7 +264,24 @@ describe("Mosh OTT panel", () => {
     expect(setParam).toHaveBeenLastCalledWith(5, 0, { gesture: expect.any(String) });
     render(ott());
     expect(host.querySelector('[data-testid="v3-ott-note"]')).toBeNull();
-    expect(host.querySelector('[data-testid="v3-ott-mixw"]')!.classList.contains("inert")).toBe(false);
+    expect(host.querySelector('[data-testid="v3-ott-mix"]')!.classList.contains("inert")).toBe(false);
+    expect(host.querySelector('[data-testid="v3-ott-trim"]')!.classList.contains("inert")).toBe(false);
+  });
+
+  it("draws Output from unity: a tick at 0 dB, and no arc at 0 dB", () => {
+    render(ott({ 6: 0.75 }));                                  // Output 0 dB
+    const out = host.querySelector('[data-testid="v3-ott-output"]')!;
+    expect(out.querySelector("line.unity")).not.toBeNull();
+    expect(out.querySelector("path.value")!.getAttribute("d")).toBe("");
+    render(ott());                                             // -1 dB: a short arc down from unity
+    expect(out.querySelector("path.value")!.getAttribute("d")).not.toBe("");
+  });
+
+  it("is titled OTT and fits its thumbnail in the 44×14 slot", () => {
+    expect(ottPanelDef.title).toBe("OTT");
+    render(ott(), "Mini");
+    const mini = host.querySelector('[data-testid="v3-ott-mini"]')!;
+    expect([mini.getAttribute("width"), mini.getAttribute("height")]).toEqual(["44", "14"]);
   });
 
   it("minimized ticks are idle without a frame and follow the bands with one", () => {
@@ -244,6 +292,7 @@ describe("Mosh OTT panel", () => {
     meter([{ levelDb: -50, gainDb: 3 }, { levelDb: -10, gainDb: -6 }, { levelDb: -30, gainDb: 0 }]);
     expect(mini().classList.contains("idle")).toBe(false);
     const rects = [...mini().querySelectorAll("rect")];
-    expect(rects.map((r) => Number(r.getAttribute("height")))).toEqual([3, 6]);
+    // half-height 7: +3 dB is half the ±6 dB scale, -6 dB all of it
+    expect(rects.map((r) => Number(r.getAttribute("height")))).toEqual([3.5, 7]);
   });
 });

@@ -22,11 +22,13 @@ export const FILTER_FACTS = "12 dB/oct";
 
 /** The plot's dB window: +6 at the top, -36 at the bottom. */
 export const DB_TOP = 6, DB_BOTTOM = -36;
-/** The plot's viewBox size (the inspector card is ~286 px wide). */
-export const PLOT_W = 286, PLOT_H = 54;
+/** The plot's viewBox size, equal to its drawn size at the 320 px inspector (the 289 px row
+ *  less 2 × 7 px padding and 2 px of border = 273 px), so its 9 px axis text renders at 9 px. */
+export const PLOT_W = 273, PLOT_H = 54;
 export const PLOT_LO_HZ = 20;
 
-/** LP or HP: the `mode` setting when present, else what `type` says. */
+/** LP or HP: the `mode` setting when present, else what `type` says (an older engine
+ *  publishes no `state`, and its `type` is still right). */
 export function filterMode(plugin: Plugin): FilterMode {
   const v = plugin.state?.mode?.value;
   if (v === "lowpass" || v === "highpass") return v;
@@ -36,6 +38,10 @@ export function filterMode(plugin: Plugin): FilterMode {
 /** What a reset returns to: the engine's default for a low-pass (4 kHz), and the value
  *  load_builtin gives a high-pass (180 Hz). The engine's own getDefaultValue() says 4 kHz
  *  for both, which is wrong for a high-pass. */
+/** Whether this engine can switch LP/HP: only one that publishes `state.mode` takes
+ *  set_plugin_state (an older engine answers "unknown command"). */
+export const canSetMode = (plugin: Plugin): boolean => plugin.state?.mode !== undefined;
+
 export const defaultCutoff = (mode: FilterMode): number => (mode === "highpass" ? 180 : 4000);
 
 /** The highest cutoff the UI sends: 22 kHz, but never at or above Nyquist (JUCE asserts
@@ -71,9 +77,6 @@ export function responseDb(mode: FilterMode, fc: number, f: number, fs: number):
   return biquadDb(mode === "highpass" ? highPass(rate, c) : lowPass(rate, c), f, rate);
 }
 
-/** "180 Hz", "4238 Hz": whole hertz, as the engine's own read-out. */
-export const fmtCutoff = (hz: number): string => `${Math.round(hz)} Hz`;
-
 /** Reads what a person types for a cutoff: "180", "180 Hz", "1.2k", "1.2 kHz", "4,000". */
 export function parseHz(text: string): number | null {
   const m = /^\s*([0-9]+(?:[.,][0-9]+)?|[0-9]{1,3}(?:,[0-9]{3})+)\s*(k|khz|hz)?\s*$/i.exec(text);
@@ -86,10 +89,12 @@ export function parseHz(text: string): number | null {
   return unit === "k" || unit === "khz" ? n * 1000 : n;
 }
 
-/** The minimized line: "HP 180 Hz", "LP 4.0k" (", bypassed" when off). */
+/** The minimized line, words not letters: the type, then the cutoff ("high-pass 180 Hz",
+ *  "low-pass 4.0k"). At most 16 characters, inside the row's 17-character summary slot, so
+ *  two Filter rows read apart without their thumbnails. Bypass is the header's own on/off
+ *  LED (and the thumbnail goes flat), so it is not repeated here. */
 export function filterSummary(plugin: Plugin): string {
-  const s = `${filterMode(plugin) === "highpass" ? "HP" : "LP"} ${fmtHz(cutoffHz(plugin))}`;
-  return plugin.enabled ? s : `${s} · bypassed`;
+  return `${filterMode(plugin) === "highpass" ? "high-pass" : "low-pass"} ${fmtHz(cutoffHz(plugin))}`;
 }
 
 /** The plot's axes at a sample rate: 20 Hz to min(20 kHz, just under Nyquist). */

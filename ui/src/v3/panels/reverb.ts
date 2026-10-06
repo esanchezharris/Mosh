@@ -14,7 +14,8 @@ import { clamp, fmtDb, param } from "./params";
  *  rate, so in seconds they do not depend on it. */
 export const COMB_SAMPLES_44K = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617] as const;
 /** τ: the mean comb delay (1378 samples at 44.1 kHz ≈ 31.25 ms). The tail is eight combs
- *  of 25-37 ms, so every decay time here is approximate ("~"). */
+ *  of 25-37 ms, so every decay time here is approximate (an RT60 estimate; the panel says
+ *  "about" in its tooltips and spoken values rather than printing "~"). */
 export const COMB_TAU_S = COMB_SAMPLES_44K.reduce((a, b) => a + b, 0) / COMB_SAMPLES_44K.length / 44100;
 /** The first wet output arrives after the shortest comb (L): 1116 / 44100 s. No pre-delay. */
 export const ONSET_S = COMB_SAMPLES_44K[0] / 44100;
@@ -23,6 +24,8 @@ export const HF_HZ = 8000;
 
 export const FREEZE_PARAM = 5;
 export const DEFAULTS = { size: 0.3, damping: 0.5, wet: 1 / 3, dry: 0.5, width: 1, freeze: 0 } as const;
+/** Where each level is unity gain (0 dB): Wet is 3·v, Dry 2·v. The gain dials draw from here. */
+export const UNITY = { wet: 1 / 3, dry: 0.5 } as const;
 
 export const feedbackOf = (size: number, frozen = false): number => (frozen ? 1 : 0.7 + 0.28 * clamp(size, 0, 1));
 export const dampCoefOf = (damping: number, frozen = false): number => (frozen ? 0 : 0.4 * clamp(damping, 0, 1));
@@ -68,6 +71,17 @@ export const gainDb = (gain: number): number => (gain > 0 ? 20 * Math.log10(gain
 export const wetDb = (v: number): number => gainDb(3 * clamp(v, 0, 1));
 /** Dry Level's gain in dB (engine: gainToDbString(2·v); 0.5 is unity). */
 export const dryDb = (v: number): number => gainDb(2 * clamp(v, 0, 1));
+
+/** A level dial's read-out: one decimal below 10 dB ("+9.5 dB", "-6.0 dB"), whole dB from
+ *  there ("-30 dB"), so the widest value still fits a dial column. */
+export const fmtLevel = (db: number): string => fmtDb(db, Math.abs(db) < 9.95 ? 1 : 0);
+
+/** A summary's level: whole dB unless that hides a tenth ("-6 dB", "-0.3 dB"); "off" at -∞. */
+export function fmtLevelShort(db: number): string {
+  if (!Number.isFinite(db)) return "off";
+  const tenth = Math.round(db * 10) / 10;
+  return fmtDb(tenth, Number.isInteger(tenth) || Math.abs(tenth) >= 10 ? 0 : 1);
+}
 
 /** "0.89 s", "2.7 s", "11 s", "∞". */
 export function fmtSec(s: number): string {
@@ -115,7 +129,9 @@ export const plotSpan = (rtLowSet: number): number => clamp(1.25 * rtLowSet, 0.5
 // The tail is drawn as a SHAPE normalised to 0 dB at its onset: one straight dB-vs-time
 // line for the low-frequency decay and one for 8 kHz. The wedge between them is damping.
 // Its height is not the wet level (that depends on the input), so Wet/Dry are read-outs.
-export const PLOT = { w: 286, h: 48, padX: 3, padT: 3, padB: 3, floorDb: -60 } as const;
+// The plot is drawn 273 px wide at the 320 px inspector (the 289 px row less 2 × 7 px padding
+// and the 2 px frame), so one viewBox unit is one CSS pixel and its text renders at true size.
+export const PLOT = { w: 273, h: 48, padX: 3, padT: 3, padB: 3, floorDb: -60 } as const;
 export type Pt = { x: number; y: number };
 
 export function decayAxes(span: number) {
@@ -152,15 +168,38 @@ export function decayGeometry(rtLow: number, rtHigh: number, span: number): Deca
   return { onsetX, low, high, highMid, wedge };
 }
 
-const level = (db: number): string => (Number.isFinite(db) ? fmtDb(db) : "off");
+/** The minimized row's summary slot is 97 px at the 320 px inspector: 16 monospace
+ *  characters at 10 px (about 6.04 px each). Measured, not estimated: 17 characters clip. */
+export const SUMMARY_CHARS = 16;
 
-/** The minimized line: what the reverb is doing, e.g. "~0.89 s · highs 0.57 s · wet 0.0 dB".
- *  Dry and Width are named only when they are not at unity / full width. */
+/** The minimized line, at most SUMMARY_CHARS, most telling first: the low-frequency decay
+ *  ("0.89 s decay", or "frozen ∞"), then whatever is away from neutral, in order Wet, Dry,
+ *  Width ("2.7 s · wet off", "0.89 s · dry -6"). As in the EQ's summary, the first form that
+ *  fits wins: the word "decay", full units, bare dB, then tight separators; if the changes
+ *  still do not fit, the least telling are left to the panel. Every decay time is
+ *  approximate (eight combs of 25-37 ms). */
 export function reverbSummary(plugin: Plugin, fs = 48000): string {
   const m = reverbModel(plugin, fs);
-  const decay = m.frozen ? "frozen ∞" : `~${fmtSec(m.rtLow)} · highs ${fmtSec(m.rtHigh)}`;
-  const parts = [decay, `wet ${level(m.wetDb)}`];
-  if (!(Math.abs(m.dryDb) < 0.05)) parts.push(`dry ${level(m.dryDb)}`);
-  if (m.width < 0.995) parts.push(`${Math.round(m.width * 100)}% wide`);
-  return parts.join(" · ");
+  const head = m.frozen ? "frozen ∞" : fmtSec(m.rtLow);
+  // [full, short] forms of each change; the short one drops " dB" (and "width" for "wide").
+  const extras: [string, string][] = [];
+  const lvl = (name: string, db: number) => {
+    const t = fmtLevelShort(db);
+    extras.push([`${name} ${t}`, `${name} ${t.replace(/ dB$/, "")}`]);
+  };
+  if (!(Math.abs(m.wetDb) < 0.05)) lvl("wet", m.wetDb);
+  if (!(Math.abs(m.dryDb) < 0.05)) lvl("dry", m.dryDb);
+  if (m.width < 0.995) extras.push([`width ${Math.round(m.width * 100)}%`, `${Math.round(m.width * 100)}% wide`]);
+  for (let keep = extras.length; keep >= 0; keep -= 1) {
+    const full = extras.slice(0, keep).map((e) => e[0]), short = extras.slice(0, keep).map((e) => e[1]);
+    const forms = [
+      ...(m.frozen ? [] : [[`${head} decay`, ...full].join(" · ")]),
+      [head, ...full].join(" · "),
+      [head, ...short].join(" · "),
+      [head, ...short].join("·"),
+    ];
+    const fit = forms.find((t) => t.length <= SUMMARY_CHARS);
+    if (fit) return fit;
+  }
+  return head;
 }

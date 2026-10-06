@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import type { Plugin, Snapshot } from "../../types";
 import {
-  MAX_TAPS, delayModel, delaySummary, dryGainOf, fmtFeedback, loopGainOf, matchingNote, noteMs, periodOf, tailText,
+  MAX_TAPS, SUMMARY_CHARS, delayModel, delaySummary, dryGainOf, fmtFeedback, loopGainOf, matchingNote, noteMs, periodOf, tailText,
   timeFromDrag, timeKey, viewMs, wetGainOf,
 } from "./delay";
 import { delayPanelDef } from "./DelayPanel";
@@ -12,14 +12,15 @@ import type { PanelProps } from "./types";
 
 /** A delay as the engine sends it: Feedback (-30..0 dB) and Mix (0..1) with min/max, and
  *  the time in `state` (contract). Defaults: -6 dB = 0.8, 30 % wet, 150 ms. */
-function delay({ fb = 0.8, mix = 0.3, ms = 150, enabled = true } = {}): Plugin {
+function delay({ fb = 0.8, mix = 0.3, ms = 150, enabled = true, legacy = false } = {}): Plugin {
   return {
     index: 1, name: "Delay", type: "delay", enabled, external: false, builtin: true, isInstrument: false,
     params: [
       { index: 0, name: "Feedback", value: fb, min: -30, max: 0 },
       { index: 1, name: "Mix proportion", value: mix, min: 0, max: 1 },
     ],
-    state: { lengthMs: { value: ms, min: 1, max: 2000, step: 1, unit: "ms" } },
+    // An older engine publishes no `state` (and cannot set the time).
+    ...(legacy ? {} : { state: { lengthMs: { value: ms, min: 1, max: 2000, step: 1, unit: "ms" } } }),
   };
 }
 
@@ -70,7 +71,7 @@ describe("delay maths (te::DelayPlugin)", () => {
     expect(delayModel(delay({ mix: 0 }), 48000).taps).toHaveLength(0);
   });
 
-  it("time drag: 60 px doubles (240 with Shift), whole ms, 1..2000", () => {
+  it("time drag: 60 px up doubles, down halves (240 with Shift), whole ms, 1..2000", () => {
     expect(timeFromDrag(150, 60)).toBe(300);
     expect(timeFromDrag(150, -60)).toBe(75);
     expect(timeFromDrag(150, 60, true)).toBe(178);
@@ -97,14 +98,29 @@ describe("delay maths (te::DelayPlugin)", () => {
     expect(matchingNote(251, 120)).toBeNull();
   });
 
-  it("read-outs and the minimized line", () => {
-    expect(delaySummary(delay())).toBe("150 ms · -6.0 dB (1.5 s) · 30% wet");
-    expect(delaySummary(delay({ fb: 0, ms: 375 }))).toBe("375 ms · 1 repeat · 30% wet");
-    expect(delaySummary(delay({ fb: 1, mix: 0.5 }))).toBe("150 ms · ∞ repeats · 50% wet");
+  it("read-outs and the minimized line (at most 16 characters, lowercase words, time first)", () => {
+    expect(SUMMARY_CHARS).toBe(16);
+    expect(delaySummary(delay())).toBe("150 ms · fb -6");
+    expect(delaySummary(delay({ fb: 0, ms: 375 }))).toBe("375 ms · fb off");     // the loop is off: one echo
+    expect(delaySummary(delay({ fb: 0, ms: 1500 }))).toBe("1500 ms · fb off");
+    expect(delaySummary(delay({ fb: 1, mix: 0.5 }))).toBe("150 ms · fb ∞");       // 0 dB: never decays
     expect(delaySummary(delay({ mix: 0 }))).toBe("dry only");
-    expect(delaySummary(delay({ fb: 0.9 }))).toBe("150 ms · -3.0 dB (3.0 s) · 30% wet");
+    expect(delaySummary(delay({ fb: 0.9 }))).toBe("150 ms · fb -3");
+    expect(delaySummary(delay({ fb: 23.5 / 30 }))).toBe("150 ms · fb -6.5");
+    expect(delaySummary(delay({ ms: 1500 }))).toBe("1500 ms · fb -6");
+    expect(delaySummary(delay({ ms: 2000, fb: 23.5 / 30 }))).toBe("2000 ms·fb -6.5");   // tight separator
+    expect(delaySummary(delay({ ms: 5 }))).toBe("5 ms · fb -6 dB");                      // room for the unit
     expect(fmtFeedback(delayModel(delay({ fb: 0 }), 48000))).toBe("1 repeat");
     expect(tailText(delayModel(delay({ fb: 1 }), 48000))).toBe("∞ repeats, no decay");
+  });
+
+  it("no setting gives a summary longer than 16 characters", () => {
+    let longest = "";
+    for (const ms of [1, 5, 50, 150, 999, 1000, 1500, 2000, 3000, 10000]) for (let i = 0; i <= 60; i += 1) for (const mix of [0.01, 0.3, 1]) {
+      const t = delaySummary(delay({ fb: i / 60, mix, ms }));
+      if (t.length > longest.length) longest = t;
+    }
+    expect(longest.length).toBeLessThanOrEqual(SUMMARY_CHARS);
   });
 });
 
@@ -137,8 +153,9 @@ describe("DelayPanel", () => {
   const key = (el: Element, k: string, shiftKey = false) =>
     act(() => { el.dispatchEvent(new KeyboardEvent("keydown", { key: k, shiftKey, bubbles: true })); });
   const Ptr = (typeof PointerEvent === "function" ? PointerEvent : MouseEvent) as typeof MouseEvent;
-  const pointer = (el: Element, type: string, clientX: number) =>
-    act(() => { el.dispatchEvent(new Ptr(type, { bubbles: true, clientX, button: 0 })); });
+  /** The time read-out drags vertically, like a dial: `clientY` only. */
+  const pointer = (el: Element, type: string, clientY: number) =>
+    act(() => { el.dispatchEvent(new Ptr(type, { bubbles: true, clientY, button: 0 })); });
 
   it("draws the dry stem and the 9 echoes, with the decay in words", () => {
     render(delay());
@@ -146,8 +163,21 @@ describe("DelayPanel", () => {
     expect(host.querySelector('[data-testid="pp-delay-dry"]')).not.toBeNull();
     expect($('[data-testid="pp-delay-tail"]').textContent).toBe("-60 dB in 1.5 s");
     expect($('[data-testid="pp-delay-feedback"] .v').textContent).toBe("-6.0 dB");
-    expect($('[data-testid="pp-delay-mix"] .v').textContent).toBe("30% wet");
+    expect($('[data-testid="pp-delay-mix"] .v').textContent).toBe("30%");
+    expect($('[data-testid="pp-delay-mix"] svg').getAttribute("aria-valuetext")).toMatch(/^30% wet: /);
+    expect($('[data-testid="pp-delay-time"] .v').textContent).toBe("150 ms");
     expect($('[data-testid="pp-delay-time"]').getAttribute("aria-valuetext")).toBe("150 ms");
+  });
+
+  it("the tail read-out sits top-right, and drops to the bottom when a handle is under it", () => {
+    render(delay());
+    expect($('[data-testid="pp-delay-tail"]').getAttribute("y")).toBe("11");   // top 3 + 8
+    // 2000 ms: the view is 4 s, so the second-echo handle (4000 ms, about -13 dB) sits at the
+    // right edge under the top-right text.
+    render(delay({ ms: 2000 }));
+    const node = $('[data-testid="pp-delay-fb-node"]');
+    expect(Number(/translate\(([\d.]+)/.exec(node.getAttribute("transform")!)![1])).toBeGreaterThan(260);
+    expect($('[data-testid="pp-delay-tail"]').getAttribute("y")).toBe("42");     // bottom 45 − 3
   });
 
   it("warns at 0 dB feedback and marks a single echo at the bottom", () => {
@@ -163,18 +193,28 @@ describe("DelayPanel", () => {
     render(delay());
     const time = $('[data-testid="pp-delay-time"]');
     pointer(time, "pointerdown", 100);
-    pointer(time, "pointermove", 130);   // past the 3 px dead zone; measured from 103
-    pointer(time, "pointermove", 163);   // 60 px past the threshold: doubled
+    pointer(time, "pointermove", 70);    // up, past the 3 px dead zone; measured from 97
+    pointer(time, "pointermove", 37);    // 60 px up past the threshold: doubled
     expect(setState).not.toHaveBeenCalled();
     expect(time.getAttribute("aria-valuetext")).toBe("300 ms");
     // The strip draws the previewed time: echoes every 300 ms, the first at x = tx(300) in
     // a view of (9 + 0.6) × 300 ms.
     expect($('[data-testid="pp-delay-strip"]').getAttribute("aria-label")).toContain("Echoes every 300 ms");
     const firstTap = host.querySelector('[data-testid="pp-delay-tap"]')!;
-    expect(Number(firstTap.getAttribute("x1"))).toBeCloseTo(4 + (300 / 2880) * 278, 6);
-    pointer(time, "pointerup", 163);
+    expect(Number(firstTap.getAttribute("x1"))).toBeCloseTo(4 + (300 / 2880) * 265, 6);
+    pointer(time, "pointerup", 37);
     expect(setState).toHaveBeenCalledTimes(1);
     expect(setState).toHaveBeenCalledWith("lengthMs", 300);
+  });
+
+  it("a time drag down halves it", () => {
+    render(delay());
+    const time = $('[data-testid="pp-delay-time"]');
+    pointer(time, "pointerdown", 100);
+    pointer(time, "pointermove", 110);
+    pointer(time, "pointermove", 163);   // 60 px down past the threshold (103)
+    pointer(time, "pointerup", 163);
+    expect(setState).toHaveBeenCalledWith("lengthMs", 75);
   });
 
   it("a click, or a pixel of jitter, on the time sends nothing and previews nothing", () => {
@@ -196,11 +236,11 @@ describe("DelayPanel", () => {
       render(delay());
       const time = $('[data-testid="pp-delay-time"]');
       pointer(time, "pointerdown", 100);
-      pointer(time, "pointermove", 163);
+      pointer(time, "pointermove", 37);
       expect(time.getAttribute("aria-valuetext")).not.toBe("150 ms");
-      pointer(time, "pointermove", 103);
+      pointer(time, "pointermove", 97);
       expect(time.getAttribute("aria-valuetext")).toBe("150 ms");
-      pointer(time, "pointerup", 103);
+      pointer(time, "pointerup", 97);
       expect(setState).not.toHaveBeenCalled();
       render(delay({ ms: 400 }));   // e.g. an undo lands
       act(() => { vi.advanceTimersByTime(2000); });
@@ -257,7 +297,7 @@ describe("DelayPanel", () => {
     try {
       const long = delay({ ms: 3000 });
       expect(delayModel(long, 48000).lengthMs).toBe(3000);
-      expect(delaySummary(long)).toBe("3000 ms · -6.0 dB (30 s) · 30% wet");
+      expect(delaySummary(long)).toBe("3000 ms · fb -6");
       render(long);
       const time = $('[data-testid="pp-delay-time"]');
       expect(time.getAttribute("aria-valuetext")).toBe("3000 ms");
@@ -288,10 +328,10 @@ describe("DelayPanel", () => {
     expect(setParam.mock.calls[0][2]).toEqual({ gesture: expect.any(String) });
   });
 
-  /** The strip's SVG is 286 × 48 px on screen, so client px = viewBox units. */
+  /** The strip's SVG is 273 × 48 px on screen, so client px = viewBox units. */
   const stubStrip = () => {
     const svg = $('[data-testid="pp-delay-strip"]') as SVGSVGElement;
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 286, height: 48, right: 286, bottom: 48, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 273, height: 48, right: 273, bottom: 48, x: 0, y: 0, toJSON() {} }) as DOMRect;
   };
   const ptr = (el: Element, type: string, clientX: number, clientY: number) =>
     act(() => { el.dispatchEvent(new Ptr(type, { bubbles: true, clientX, clientY, button: 0 })); });
@@ -332,19 +372,19 @@ describe("DelayPanel", () => {
     render(delay());
     stubStrip();
     const node = $('[data-testid="pp-delay-time-node"]');
-    const x0 = 4 + (150 / 1440) * 278;   // tx(150) in the default 1440 ms view
+    const x0 = 4 + (150 / 1440) * 265;   // tx(150) in the default 1440 ms view (265 inner units)
     ptr(node, "pointerdown", x0, 10);
     ptr(node, "pointermove", x0, 10);
     ptr(node, "pointermove", x0 + 2, 10);   // inside the dead zone
     expect(host.querySelector('[data-testid="pp-delay-time"]')!.getAttribute("aria-valuetext")).toBe("150 ms");
     ptr(node, "pointermove", x0 + 30, 10);   // 27 units past the threshold, view held at 1440 ms
     expect(setState).not.toHaveBeenCalled();
-    const want = Math.round(150 + (27 / 278) * 1440);
-    expect(want).toBe(290);
-    expect($('[data-testid="pp-delay-time"]').getAttribute("aria-valuetext")).toBe("290 ms");
+    const want = Math.round(150 + (27 / 265) * 1440);
+    expect(want).toBe(297);
+    expect($('[data-testid="pp-delay-time"]').getAttribute("aria-valuetext")).toBe("297 ms");
     ptr(node, "pointerup", x0 + 30, 10);
     expect(setState).toHaveBeenCalledTimes(1);
-    expect(setState).toHaveBeenCalledWith("lengthMs", 290);
+    expect(setState).toHaveBeenCalledWith("lengthMs", 297);
   });
 
   it("End on the Feedback dial sends 1 (0 dB); Home on Mix sends 0", () => {
@@ -371,6 +411,46 @@ describe("DelayPanel", () => {
     const props: PanelProps = { plugin: delay(), trackId: "t1", sampleRate: 48000, setParam, setState };
     act(() => root.render(React.createElement(delayPanelDef.Mini!, props)));
     expect(host.querySelectorAll('[data-testid="pp-delay-mini"] line:not(.dry)')).toHaveLength(9);
-    expect(delayPanelDef.summary(delay())).toBe("150 ms · -6.0 dB (1.5 s) · 30% wet");
+    expect(delayPanelDef.summary(delay())).toBe("150 ms · fb -6");
+    // The mini fills the header's 44 × 14 thumbnail slot.
+    expect($('[data-testid="pp-delay-mini"]').getAttribute("width")).toBe("44");
+    expect($('[data-testid="pp-delay-mini"]').getAttribute("height")).toBe("14");
+  });
+
+  it("the note menu's placeholder reads as a prompt, not a value", () => {
+    render(delay({ ms: 151 }));
+    const sel = $('[data-testid="pp-delay-note"]') as HTMLSelectElement;
+    expect(sel.value).toBe("");
+    expect(sel.options[0].textContent).toBe("Note…");
+    expect(sel.options[0].disabled).toBe(true);
+  });
+
+  it("an older engine (no plugin.state): Time is read-only, says why, and never sends set_plugin_state", () => {
+    vi.useFakeTimers();
+    try {
+      render(delay({ legacy: true }));
+      const time = $('[data-testid="pp-delay-time"]');
+      expect(time.getAttribute("aria-disabled")).toBe("true");
+      expect(time.getAttribute("tabindex")).toBe("-1");
+      expect(time.getAttribute("aria-valuetext")).toBe("150 ms");   // the engine default
+      expect($('[data-testid="pp-delay-legacy"]').textContent).toBe("needs the updated Mosh engine");
+      expect(host.querySelectorAll('[data-testid="pp-delay-legacy"]')).toHaveLength(1);
+      expect(host.querySelector('[data-testid="pp-delay-note"]')).toBeNull();
+      expect(host.querySelector('[data-testid="pp-delay-time-node"]')).toBeNull();
+      expect(host.querySelector('[data-testid="pp-delay-time-fixed"]')).not.toBeNull();
+      pointer(time, "pointerdown", 100);
+      pointer(time, "pointermove", 20);
+      pointer(time, "pointerup", 20);
+      key(time, "PageUp");
+      act(() => { time.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(time.getAttribute("aria-valuetext")).toBe("150 ms");
+      expect(setState).not.toHaveBeenCalled();
+      // Feedback and Mix are parameters: they still work.
+      key($('[data-testid="pp-delay-mix"] svg'), "Home");
+      expect(setParam).toHaveBeenLastCalledWith(1, 0, { gesture: expect.any(String) });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

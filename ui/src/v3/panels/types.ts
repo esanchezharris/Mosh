@@ -20,6 +20,8 @@ export type PanelDef = {
   /** The header title, when the engine's name is unhelpful ("LPF/HPF") or repeats the
    *  MOSH chip ("Mosh Soft Clipper"). */
   title?: string;
+  /** A shorter title for the minimized row (its name column is about 76 px). */
+  shortTitle?: string;
   Panel: ComponentType<PanelProps>;
   /** One line of text for the minimized row, e.g. "Lo +3.0 dB · 3.0k -2.0 dB". */
   summary: (plugin: Plugin) => string;

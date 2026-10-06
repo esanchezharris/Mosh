@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { DragNode } from "./DragNode";
-import { fmtDb } from "./params";
+import { fmtDb, fmtFreq } from "./params";
 import { clientToSvg, fillPath } from "./plot";
 import { useDragSend } from "./useDragSend";
 import {
   BANDS, PLOT_H, PLOT_PAD, RANGES, bandValueText, changedFields, curveD, dbRange, dragTarget, editText, editToParams, eqSummary,
-  fmtFreq, fmtQ, geometry, isBandOff, maxAbsDb, nodePos, parseField, qFromDrag, readBands, scrubField, stepField,
+  fmtQ, geometry, isBandOff, maxAbsDb, nodePos, parseField, qFromDrag, readBands, scrubField, stepField,
   wheelOctaves, wheelQ, withEdit,
   type BandEdit, type BandField, type BandValues, type StepKind,
 } from "./eq";
@@ -18,7 +18,7 @@ const BURST_MS = 600;
 const WHEEL_IDLE_MS = 150;
 
 const FIELD_LABEL: Record<BandField, string> = { freq: "Freq", gain: "Gain", q: "Q" };
-const OFF_HINT = "At 0 dB this band is off (the engine skips it): its frequency and Q do nothing.";
+const OFF_HINT = "At 0 dB this band is off (the engine skips it): its frequency and Q do nothing until its gain moves.";
 
 const fieldText = (field: BandField, v: number): string =>
   field === "freq" ? fmtFreq(v) : field === "gain" ? fmtDb(v) : fmtQ(v);
@@ -27,9 +27,11 @@ type Edit = ReturnType<typeof useDragSend<BandEdit>>;
 
 /** One adjustable read-out (Freq / Gain / Q of the selected band): drag up/down to scrub
  *  (Shift for fine), arrows / PageUp / PageDown / Home / End, double-click or Enter to type. */
-function Scrub({ field, band, bandName, value, edit, nudge, base, dim }: {
+function Scrub({ field, band, bandName, value, edit, nudge, base, inert }: {
   field: BandField; band: number; bandName: string; value: number;
-  edit: Edit; nudge: (e: BandEdit) => void; base: (band: number, field: BandField) => number; dim?: boolean;
+  edit: Edit; nudge: (e: BandEdit) => void; base: (band: number, field: BandField) => number;
+  /** Adjustable, but without effect while the band sits at 0 dB. */
+  inert?: boolean;
 }) {
   const [typing, setTyping] = useState<string | null>(null);
   const start = useRef<{ y: number; v: number } | null>(null);
@@ -66,7 +68,7 @@ function Scrub({ field, band, bandName, value, edit, nudge, base, dim }: {
   };
 
   return (
-    <span className={`pp-eq-f${dim ? " dim" : ""}`} title={dim ? OFF_HINT : undefined}>
+    <span className={`pp-eq-f ${field}${inert ? " inert" : ""}`} title={inert ? OFF_HINT : undefined}>
       <span className="pp-eq-cap" aria-hidden="true">{FIELD_LABEL[field]}</span>
       {typing !== null ? (
         <input className="pp-eq-in" data-testid={`pp-eq-input-${field}`} aria-label={label} autoFocus value={typing}
@@ -78,7 +80,7 @@ function Scrub({ field, band, bandName, value, edit, nudge, base, dim }: {
       ) : (
         <span className="pp-eq-v" role="slider" tabIndex={0} data-testid={`pp-eq-field-${field}`}
           aria-label={label} aria-valuemin={r.min} aria-valuemax={r.max} aria-valuenow={Number(value.toFixed(2))}
-          aria-valuetext={dim ? `${text}, inactive while the band is at 0 dB` : text}
+          aria-valuetext={inert ? `${text}, inactive while the band is at 0 dB` : text}
           onPointerDown={(e: PointerEvent<HTMLSpanElement>) => {
             if (e.button !== 0) return;
             e.preventDefault();
@@ -241,6 +243,10 @@ function EqPanel({ plugin, sampleRate, setParam }: PanelProps) {
         {gridHz.map((f) => <line key={f} className="grid" x1={g.x.to(f)} x2={g.x.to(f)} y1={0} y2={g.h} />)}
         {[range / 2, -range / 2].map((db) => <line key={db} className="grid" x1={0} x2={g.w} y1={g.y.to(db)} y2={g.y.to(db)} />)}
         <line className="zero" x1={0} x2={g.w} y1={zeroY} y2={zeroY} />
+        <path className="area" d={fillPath(curve, 0, g.w, zeroY)} />
+        {solo && <path className="pp-eq-solo" data-testid="pp-eq-solo" d={solo} />}
+        <path className="curve" data-testid="pp-eq-curve" d={curve} />
+        {/* Axis text after the curve, so its halo keeps it legible where the curve runs through. */}
         {gridHz.map((f) => <text key={f} className="axis" x={g.x.to(f) + 2} y={g.h - 2}>{f >= 1000 ? `${f / 1000}k` : f}</text>)}
         <text className="axis" x={2} y={PLOT_PAD + 5}>+{range}</text>
         <text className="axis" x={2} y={g.h - PLOT_PAD - 1}>-{range}</text>
@@ -250,9 +256,6 @@ function EqPanel({ plugin, sampleRate, setParam }: PanelProps) {
             beyond ±{range} dB
           </text>
         )}
-        <path className="area" d={fillPath(curve, 0, g.w, zeroY)} />
-        {solo && <path className="pp-eq-solo" data-testid="pp-eq-solo" d={solo} />}
-        <path className="curve" data-testid="pp-eq-curve" d={curve} />
         {BANDS.map((b, i) => {
           const p = nodePos(bands[i], g);
           return (
@@ -267,7 +270,7 @@ function EqPanel({ plugin, sampleRate, setParam }: PanelProps) {
                 setSel(i);
                 setFrozen(range);
               }}>
-              <DragNode x={p.x} y={p.y} r={5.5} label={b.label} hollow={isBandOff(bands[i].gain)} active={sel === i}
+              <DragNode x={p.x} y={p.y} r={6.5} label={b.label} hollow={isBandOff(bands[i].gain)} active={sel === i}
                 ariaLabel={`${b.name} (drag: frequency and gain; Alt-drag or wheel: Q)`}
                 ariaValueText={bandValueText(bands[i])} testId={`pp-eq-node-${b.label}`}
                 valueNow={bands[i].gain} valueMin={-20} valueMax={20}
@@ -294,18 +297,23 @@ function EqPanel({ plugin, sampleRate, setParam }: PanelProps) {
         })}
       </svg>
       <div className="pp-eq-row">
-        <div className="pp-eq-bands" role="radiogroup" aria-label="Band" onKeyDown={bandsKey}>
-          {BANDS.map((b, i) => (
-            <button key={b.label} ref={(el) => { bandRefs.current[i] = el; }} type="button" role="radio"
-              aria-checked={sel === i} tabIndex={sel === i ? 0 : -1} title={b.name}
-              aria-label={b.name} data-testid={`pp-eq-band-${b.label}`}
-              className={`pp-eq-b${sel === i ? " on" : ""}${isBandOff(bands[i].gain) ? " off" : ""}`}
-              onClick={() => setSel(i)}>{b.label}</button>
-          ))}
+        {/* The selected band is the pressed segment; a band that is processing carries a small
+            lit LED under its letter (at 0 dB the engine skips it, and its node on the plot is hollow). */}
+        <div className="pp-seg pp-eq-bands" role="radiogroup" aria-label="Band" onKeyDown={bandsKey}>
+          {BANDS.map((b, i) => {
+            const bandOff = isBandOff(bands[i].gain);
+            return (
+              <button key={b.label} ref={(el) => { bandRefs.current[i] = el; }} type="button" role="radio"
+                aria-checked={sel === i} tabIndex={sel === i ? 0 : -1} title={bandOff ? `${b.name}: off at 0 dB` : b.name}
+                aria-label={b.name} data-testid={`pp-eq-band-${b.label}`}
+                className={`pp-eq-b${bandOff ? "" : " live"}`}
+                onClick={() => setSel(i)}>{b.label}</button>
+            );
+          })}
         </div>
-        <Scrub key={`f${sel}`} field="freq" band={sel} bandName={spec.name} value={v.freq} edit={edit} nudge={nudge} base={base} dim={off} />
+        <Scrub key={`f${sel}`} field="freq" band={sel} bandName={spec.name} value={v.freq} edit={edit} nudge={nudge} base={base} inert={off} />
         <Scrub key={`g${sel}`} field="gain" band={sel} bandName={spec.name} value={v.gain} edit={edit} nudge={nudge} base={base} />
-        <Scrub key={`q${sel}`} field="q" band={sel} bandName={spec.name} value={v.q} edit={edit} nudge={nudge} base={base} dim={off} />
+        <Scrub key={`q${sel}`} field="q" band={sel} bandName={spec.name} value={v.q} edit={edit} nudge={nudge} base={base} inert={off} />
       </div>
     </div>
   );
@@ -325,4 +333,5 @@ function EqMini({ plugin, sampleRate }: PanelProps) {
   );
 }
 
-export const eqPanelDef: PanelDef = { Panel: EqPanel, summary: eqSummary, Mini: EqMini };
+/** "4-Band EQ", not the engine's "4-Band Equaliser". */
+export const eqPanelDef: PanelDef = { title: "4-Band EQ", Panel: EqPanel, summary: eqSummary, Mini: EqMini };

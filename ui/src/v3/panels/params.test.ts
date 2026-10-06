@@ -44,6 +44,12 @@ describe("formatters", () => {
     expect(fmtFreq(80)).toBe("80 Hz");
     expect(fmtFreq(1234)).toBe("1.23 kHz");
     expect(fmtFreq(12345)).toBe("12.3 kHz");
+    // the form follows the ROUNDED value
+    expect(fmtHz(999.7)).toBe("1.0k");
+    expect(fmtHz(9960)).toBe("10k");
+    expect(fmtHz(9949)).toBe("9.9k");
+    expect(fmtFreq(999.7)).toBe("1.00 kHz");
+    expect(fmtFreq(9999)).toBe("10.0 kHz");
     expect(fmtDb(3)).toBe("+3.0 dB");
     expect(fmtDb(-0.04)).toBe("0.0 dB");
     expect(fmtDb(-2.46)).toBe("-2.5 dB");

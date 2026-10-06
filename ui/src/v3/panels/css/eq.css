@@ -2,7 +2,9 @@
    the band picker and the selected band's Freq / Gain / Q. Shared plot, node and grid looks
    come from shell.css (.pp-plot, .pp-node); only what is the EQ's own lives here. */
 .v3-shell .insp .pr .pp-eq { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.v3-shell .insp .pr .pp-eq .pp-eq-plot { border-radius: 4px; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+/* The band letters inside the nodes at the family's axis size (the shared 8 px is below the
+   9 px floor); the EQ's nodes are r 6.5 so the glyph fits. */
+.v3-shell .insp .pr .pp-eq .pp-node .lbl { font-size: var(--pp-fs-axis); }
 /* The selected band's own curve, faint and dashed, under the composite. */
 .v3-shell .insp .pr .pp-eq .pp-eq-solo {
   fill: none; stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1;
@@ -10,35 +12,39 @@
 }
 .v3-shell .insp .pr .pp-eq .pp-eq-plot.bypassed .pp-eq-solo { stroke: color-mix(in srgb, var(--text) 25%, transparent); }
 
-/* The read-out row: four band buttons, then three scrubbable values. */
+/* The read-out row: the band picker (the shared .pp-seg), then three scrubbable values.
+   Captions are sans like a dial's name; only the numbers are monospace. */
 .v3-shell .insp .pr .pp-eq .pp-eq-row {
-  display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px;
-  font-family: var(--mono); font-size: 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; height: 18px;
 }
-.v3-shell .insp .pr .pp-eq .pp-eq-bands { flex: 0 0 auto; display: flex; gap: 2px; }
-.v3-shell .insp .pr .pp-eq .pp-eq-b {
-  width: 15px; height: 15px; padding: 0; display: grid; place-items: center;
-  border: 1px solid var(--line); border-radius: 3px; background: transparent;
-  color: var(--text); font: inherit; font-size: 9px; font-weight: 700; cursor: pointer;
+.v3-shell .insp .pr .pp-eq .pp-eq-bands { flex: 0 0 auto; }
+/* Narrower than the shared segment so the row fits 273 px with the widest read-outs. The
+   letter sits a little high, leaving room for the LED under it. */
+.v3-shell .insp .pr .pp-eq .pp-eq-bands > .pp-eq-b { position: relative; min-width: 17px; padding: 0 3px 3px; font-weight: 600; }
+/* A band that is processing (gain not 0 dB) carries a small lit LED, centred under its letter. */
+.v3-shell .insp .pr .pp-eq .pp-eq-bands > .pp-eq-b.live::after {
+  content: ""; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent);
 }
-.v3-shell .insp .pr .pp-eq .pp-eq-b.off { color: var(--muted); font-weight: 400; }
-.v3-shell .insp .pr .pp-eq .pp-eq-b.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.v3-shell .insp .pr .pp-eq .pp-eq-b:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
-.v3-shell .insp .pr .pp-eq .pp-eq-f { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 3px; white-space: nowrap; }
-.v3-shell .insp .pr .pp-eq .pp-eq-f:last-child { flex: 0 0 auto; }
-.v3-shell .insp .pr .pp-eq .pp-eq-cap { flex: 0 0 auto; font-family: inherit; font-size: 8.5px; color: var(--muted); }
+.v3-shell .insp .pr .pp-eq .pp-eq-f { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 2px; white-space: nowrap; }
+.v3-shell .insp .pr .pp-eq .pp-eq-f.q { flex-shrink: 0; }
+.v3-shell .insp .pr .pp-eq .pp-eq-cap { flex: 0 0 auto; font-size: var(--pp-fs-cap); color: var(--muted); }
 .v3-shell .insp .pr .pp-eq .pp-eq-v {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text);
+  font-family: var(--mono); font-size: var(--pp-fs-val); font-variant-numeric: tabular-nums;
   cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
-  border-bottom: 1px dotted color-mix(in srgb, var(--text) 25%, transparent); outline: none;
+  border-bottom: 1px dotted var(--pp-edge); outline: none;
 }
+/* Room for the widest value ("12.0 kHz", "-20.0 dB", "4.00"), so the row does not shift while dragging. */
+.v3-shell .insp .pr .pp-eq .pp-eq-f:is(.freq, .gain) .pp-eq-v { min-width: 8ch; }
 .v3-shell .insp .pr .pp-eq .pp-eq-v:hover { border-bottom-color: var(--accent); }
 .v3-shell .insp .pr .pp-eq .pp-eq-v:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
-/* Frequency and Q of a band at 0 dB do nothing: dimmed, with the reason in the tooltip. */
-.v3-shell .insp .pr .pp-eq .pp-eq-f.dim .pp-eq-v { color: var(--muted); }
+/* Frequency and Q of a band at 0 dB do nothing: they stay readable and adjustable; the hollow
+   node, the unlit band dot and the tooltip say why. */
+.v3-shell .insp .pr .pp-eq .pp-eq-f.inert .pp-eq-v:not(:hover, :focus-visible) { border-bottom-color: color-mix(in srgb, var(--text) 12%, transparent); }
 .v3-shell .insp .pr .pp-eq .pp-eq-in {
-  width: 100%; min-width: 0; height: 15px; padding: 0 3px; border: 1px solid var(--accent); border-radius: 3px;
-  background: var(--bg); color: var(--text); font: inherit; font-size: 10px;
+  width: 9ch; min-width: 0; height: 16px; padding: 0 3px; border: 1px solid var(--accent); border-radius: 3px;
+  background: var(--bg); color: var(--text); font-family: var(--mono); font-size: var(--pp-fs-val);
 }
 
 /* The minimized row's thumbnail (the same exact curve). */

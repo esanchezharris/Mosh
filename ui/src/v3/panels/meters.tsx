@@ -81,7 +81,7 @@ export function MeterBar({ value, min = 0, max, tone = "level", vertical, label,
     <div className={`pp-bar ${tone}${vertical ? " v" : ""}${value === undefined ? " idle" : ""}`} data-testid={testId}
       role="meter" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={Number(v.toFixed(1))} aria-valuetext={valueText}>
       <i className="fill" style={{ [dim]: `${(fill * 100).toFixed(1)}%` }} />
-      {peak !== undefined && peak > min && <i className="tick" style={{ [pos]: `${(tick * 100).toFixed(1)}%` }} />}
+      {peak !== undefined && tick >= 0.02 && <i className="tick" style={{ [pos]: `${(tick * 100).toFixed(1)}%` }} />}
     </div>
   );
 }

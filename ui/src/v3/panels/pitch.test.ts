@@ -2,10 +2,10 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  fmtRatioX, fmtSemitones, intervalName, pitchLatencyMs, pitchSummary, pitchValueText, semitoneNorm, semitonesOf,
+  SUMMARY_CHARS, fmtRatioX, fmtSemitones, intervalName, pitchLatencyMs, pitchSummary, pitchValueText, semitoneNorm, semitonesOf,
   snapSemitones,
 } from "./pitch";
-import { pitchKeyTarget, pitchShifterPanelDef, pitchWheelTarget } from "./PitchPanel";
+import { MINI_H, MINI_PX_PER_ST, MINI_W, pitchKeyTarget, pitchShifterPanelDef, pitchWheelTarget } from "./PitchPanel";
 import type { Plugin } from "../../types";
 
 /** As the engine (and the mock) send it: one param, linear on -24..+24. */
@@ -57,7 +57,7 @@ describe("pitch maths (tracktion_PitchShift.cpp)", () => {
     expect(intervalName(6.5)).toBe("perfect 5th up");
     expect(fmtSemitones(-0.5)).toBe("-1 st +50¢");
     expect(intervalName(-0.5)).toBe("minor 2nd down");
-    expect(pitchSummary(shifter(-6.5))).toBe("-7 st +50¢ · perfect 5th down");
+    expect(pitchSummary(shifter(-6.5))).toBe("-7 st +50¢ · 5th");
   });
   it("snaps to whole semitones, or whole cents when fine", () => {
     expect(snapSemitones(7.04)).toBe(7);
@@ -68,10 +68,26 @@ describe("pitch maths (tracktion_PitchShift.cpp)", () => {
     expect(pitchLatencyMs(48000)).toBeCloseTo(170.67, 2);
     expect(pitchLatencyMs(44100)).toBeCloseTo(185.76, 2);
   });
-  it("summary", () => {
+  it("summary: the setting first, then the interval as long as it fits the minimized row's 16 characters", () => {
+    expect(SUMMARY_CHARS).toBe(16);
     expect(pitchSummary(shifter(0))).toBe("original pitch");
-    expect(pitchSummary(shifter(7))).toBe("+7 st · perfect 5th up");
-    expect(pitchSummary(shifter(-12))).toBe("-12 st · octave down");
+    expect(pitchSummary(shifter(7))).toBe("+7 st · 5th");
+    expect(pitchSummary(shifter(-12))).toBe("-12 st · octave");
+    expect(pitchSummary(shifter(4))).toBe("+4 st · maj 3rd");   // "major 3rd" would be 17
+    expect(pitchSummary(shifter(-3))).toBe("-3 st · min 3rd");
+    expect(pitchSummary(shifter(-24))).toBe("-24 st");             // "2 octaves" does not fit
+    expect(pitchSummary(shifter(11))).toBe("+11 st · maj 7th");
+    expect(pitchSummary(shifter(6))).toBe("+6 st · tritone");
+    expect(pitchSummary(shifter(19))).toBe("+19 st");               // "octave + 5th" does not fit
+    expect(pitchSummary(shifter(7.2))).toBe("+7 st +20¢ · 5th");
+    expect(pitchSummary(shifter(0.2))).toBe("0 st +20¢");            // a detune: no interval
+    // Every whole semitone and a cent offset on each: never past the budget, never a
+    // single-letter abbreviation.
+    for (let semis = -24; semis <= 24; semis++) for (const c of [0, 0.01, -0.01, 0.37, -0.5]) {
+      const line = pitchSummary(shifter(Math.max(-24, Math.min(24, semis + c))));
+      expect(line.length).toBeLessThanOrEqual(SUMMARY_CHARS);
+      expect(line).not.toMatch(/\b[A-Z]\b/);
+    }
   });
   it("keys: a semitone, Alt 0.1, Shift and PageUp/Down an octave; Home/End left to the dial", () => {
     const k = (key: string, mods: { altKey?: boolean; shiftKey?: boolean } = {}) =>
@@ -125,7 +141,10 @@ describe("PitchPanel", () => {
     render(shifter(7));
     expect(text("v3-pitch-st")).toBe("+7 st");
     expect(text("v3-pitch-interval")).toBe("perfect 5th up · ×1.498");
-    expect(text("v3-pitch-latency")).toBe("latency 171 ms");
+    expect(text("v3-pitch-latency")).toBe("Latency 171 ms");
+    // Numbers in mono, words in the caption face.
+    expect(host.querySelector('[data-testid="v3-pitch-interval"] .num')!.textContent).toBe("×1.498");
+    expect(host.querySelector('[data-testid="v3-pitch-chip-7"]')!.classList.contains("pp-btn")).toBe(true);
     expect(dial().getAttribute("aria-valuetext")).toBe("+7 semitones, perfect 5th up");
     expect(host.querySelector('[data-testid="v3-pitch-chip-7"]')!.getAttribute("aria-pressed")).toBe("true");
     expect(host.querySelector('[data-testid="v3-pitch-chip-0"]')!.getAttribute("aria-pressed")).toBe("false");
@@ -147,15 +166,21 @@ describe("PitchPanel", () => {
     expect(setParam.mock.calls[0][2].gesture).toBe(setParam.mock.calls[1][2].gesture);
   });
 
-  it("a trackpad flick moves per notch, not per event (30 tiny events are 2 semitones, not 24)", () => {
+  it("the wheel moves a whole semitone per notch (not per event), Alt (from the Dial's modifier keys) 10 cents, and never scrolls the inspector", () => {
     render(shifter(0));
     const svg = dial();
-    act(() => {
-      for (let i = 0; i < 30; i++) svg.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -2 }));
-    });
-    expect(setParam).toHaveBeenCalledTimes(2);
-    expect(setParam.mock.calls.map((c) => c[1])).toEqual([25 / 48, 26 / 48]);
+    // A trackpad flick: 30 events of 5 px are 150 px, one 100 px notch (the Dial's), not 30 semitones.
+    const evs = Array.from({ length: 30 }, () => new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -5 }));
+    act(() => { for (const e of evs) svg.dispatchEvent(e); });
+    expect(evs.every((e) => e.defaultPrevented)).toBe(true);
+    expect(setParam).toHaveBeenCalledTimes(1);
+    expect(setParam.mock.calls[0][1]).toBeCloseTo(25 / 48, 12);
+    // A mouse click-stop (100 px) is one more; Alt makes it 10 cents.
+    act(() => { svg.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -50 })); });   // 150 + 50 = 2 notches
     expect(text("v3-pitch-st")).toBe("+2 st");
+    act(() => { svg.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100, altKey: true })); });
+    expect(text("v3-pitch-st")).toBe("+2 st +10¢");
+    expect(setParam.mock.calls.at(-1)![1]).toBeCloseTo(26.1 / 48, 12);
   });
 
   it("ArrowDown from +7 st +20¢ lands on +7, and nothing is sent past an end", () => {
@@ -210,5 +235,30 @@ describe("PitchPanel", () => {
     expect(setParam).toHaveBeenCalledWith(0, 17 / 48);
     expect(text("v3-pitch-st")).toBe("-7 st");
     expect(host.querySelector('[data-testid="v3-pitch-chip--7"]')!.getAttribute("aria-pressed")).toBe("true");
+  });
+  it("minimized: the full name is kept; the thumbnail is a 44×14 bipolar bar from the centre", () => {
+    // "Pitch Shifter" measures 69 px at the name column's 11 px semibold: it fits the 76 px.
+    expect(pitchShifterPanelDef.shortTitle).toBeUndefined();
+    const renderMini = (plugin: Plugin) =>
+      act(() => root.render(React.createElement(pitchShifterPanelDef.Mini!, { plugin, trackId: "t1", sampleRate: 48000, setParam, setState })));
+    renderMini(shifter(7));
+    const svg = host.querySelector('[data-testid="v3-pitch-mini"]')!;
+    expect([MINI_W, MINI_H]).toEqual([44, 14]);
+    expect([svg.getAttribute("width"), svg.getAttribute("height"), svg.getAttribute("viewBox")]).toEqual(["44", "14", "0 0 44 14"]);
+    const bar = () => { const b = host.querySelector('[data-testid="v3-pitch-mini-bar"]'); return b && [Number(b.getAttribute("x")), Number(b.getAttribute("width"))]; };
+    // ±24 st across ±21 px from the centre (x 22): +7 grows right, 7 × 0.875 px.
+    expect(MINI_PX_PER_ST).toBe(0.875);
+    expect(bar()![0]).toBe(22);
+    expect(bar()![1]).toBeCloseTo(6.125, 9);
+    renderMini(shifter(-24));
+    expect(bar()![0]).toBeCloseTo(1, 9);                 // the left end, inside the box
+    expect(bar()![1]).toBeCloseTo(21, 9);
+    // The octave ticks sit where ±12 st lands.
+    const ticks = [...host.querySelectorAll('[data-testid="v3-pitch-mini"] .oct')].map((t) => Number(t.getAttribute("x1")));
+    expect(ticks).toEqual([22 - 10.5, 22 + 10.5]);
+    renderMini(shifter(0));
+    expect(bar()).toBeNull();                            // the original pitch: empty
+    renderMini({ ...shifter(5), enabled: false });
+    expect(host.querySelector('[data-testid="v3-pitch-mini"]')!.classList.contains("bypassed")).toBe(true);
   });
 });

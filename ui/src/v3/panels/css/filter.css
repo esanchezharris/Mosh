@@ -1,47 +1,44 @@
-/* Low-pass / high-pass panel (panels/FilterPanel.tsx): an LP|HP switch, the cutoff as a
-   number, the fixed slope, then the exact response with a draggable cutoff handle. */
+/* Low-pass / high-pass panel (panels/FilterPanel.tsx): an LP|HP switch (the shared .pp-seg),
+   the cutoff as a number, the fixed slope, then the exact response (the shared .pp-plot
+   frame) with a draggable cutoff handle. */
 .v3-shell .insp .pr .pp-filter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.v3-shell .insp .pr .pp-filter-top { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; }
+.v3-shell .insp .pr .pp-filter-top { display: flex; align-items: center; gap: 8px; min-width: 0; height: 18px; }
+.v3-shell .insp .pr .pp-filter-seg { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-filter-seg > button { font-weight: 600; letter-spacing: .04em; }
+.v3-shell .insp .pr .pp-filter-seg > button[aria-pressed="true"] { cursor: default; }
+/* An older engine cannot switch (the shared .pp-seg :disabled style dims both sides): the
+   pressed side keeps its accent on hover, so it still says which filter it is. */
+.v3-shell .insp .pr .pp-filter-seg > button[aria-pressed="true"]:disabled:hover { color: var(--accent); }
 
-/* LP | HP: a two-way segmented switch. */
-.v3-shell .insp .pr .pp-filter-seg {
-  display: inline-flex; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
-}
-.v3-shell .insp .pr .pp-filter-seg button {
-  border: 0; margin: 0; padding: 0 7px; height: 16px; background: transparent; color: var(--muted);
-  font: inherit; font-size: 9.5px; font-weight: 600; letter-spacing: .04em; cursor: pointer;
-}
-.v3-shell .insp .pr .pp-filter-seg button + button { border-left: 1px solid var(--line); }
-.v3-shell .insp .pr .pp-filter-seg button:hover { color: var(--text); }
-.v3-shell .insp .pr .pp-filter-seg button[aria-pressed="true"] {
-  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); cursor: default;
-}
-.v3-shell .insp .pr .pp-filter-seg button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-
-/* The cutoff read-out is also where you type one. */
-.v3-shell .insp .pr .pp-filter-hz { display: inline-flex; align-items: baseline; gap: 2px; flex: 0 0 auto; }
+/* The cutoff read-out is also where you type one: a dotted underline says so (the fixed
+   "12 dB/oct" beside it has none). */
+.v3-shell .insp .pr .pp-filter-hz { display: inline-flex; align-items: baseline; gap: 3px; flex: 0 0 auto; min-width: 62px; cursor: text; }
 .v3-shell .insp .pr .pp-filter-hz input {
-  width: 44px; height: 16px; padding: 0 3px; border: 1px solid transparent; border-radius: 3px;
-  background: transparent; color: var(--text); font-family: var(--mono); font-size: 11px;
-  text-align: right; font-variant-numeric: tabular-nums;
+  width: 62px; height: 16px; padding: 0 1px; border: 0; border-radius: 0;
+  border-bottom: 1px dotted color-mix(in srgb, var(--text) 30%, transparent);
+  background: transparent; color: var(--text); font-family: var(--mono); font-size: var(--pp-fs-val);
+  font-variant-numeric: tabular-nums; cursor: text;
 }
-.v3-shell .insp .pr .pp-filter-hz input:hover { border-color: var(--line); }
-.v3-shell .insp .pr .pp-filter-hz input:focus { outline: none; border-color: var(--accent); background: var(--bg); }
-.v3-shell .insp .pr .pp-filter-unit { color: var(--muted); font-family: var(--mono); font-size: 9.5px; }
+.v3-shell .insp .pr .pp-filter-hz input:hover { border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-filter-hz input:focus { outline: none; border-bottom: 1px solid var(--accent); }
+/* While typing the field holds the plain number, with the unit just after it (the label
+   keeps its width, so nothing beside it moves). */
+.v3-shell .insp .pr .pp-filter-unit { color: var(--muted); font-family: var(--mono); font-size: var(--pp-fs-cap); pointer-events: none; }
 
-/* "A": the cutoff follows an automation lane during playback. */
+/* "auto": the cutoff follows an automation lane during playback. */
 .v3-shell .insp .pr .pp-filter-auto {
-  flex: 0 0 auto; padding: 0 3px; border-radius: 2px; font-size: 8.5px; font-weight: 700; line-height: 12px;
+  flex: 0 0 auto; padding: 0 4px; border-radius: 3px; font-size: var(--pp-fs-axis); line-height: 12px;
   color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
 }
+/* The slope is fixed in the engine: a caption, not a control. */
 .v3-shell .insp .pr .pp-filter-facts {
-  margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 9.5px; white-space: nowrap;
+  margin-left: auto; color: var(--muted); font-size: var(--pp-fs-cap); white-space: nowrap;
 }
+/* An older engine: one short muted line. */
+.v3-shell .insp .pr .pp-filter-note { color: var(--muted); font-size: var(--pp-fs-cap); line-height: 12px; }
 
-/* The plot: shared .pp-plot look; the cutoff is a thin dashed guide under the handle. */
-.v3-shell .insp .pr .pp-filter-plot {
-  border-radius: 4px; background: color-mix(in srgb, var(--bg) 60%, transparent); cursor: ew-resize;
-}
+/* The plot: the shared .pp-plot frame; the cutoff is a thin dashed guide under the handle. */
+.v3-shell .insp .pr .pp-filter-plot { cursor: ew-resize; }
 .v3-shell .insp .pr .pp-filter-plot .pp-node { cursor: ew-resize; }
 .v3-shell .insp .pr .pp-filter-fc {
   stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1; stroke-dasharray: 2 2;
@@ -50,8 +47,8 @@
 .v3-shell .insp .pr .pp-filter-plot.bypassed .pp-filter-fc { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
 .v3-shell .insp .pr .pp-filter-plot .axis { pointer-events: none; user-select: none; }
 
-/* The minimized row's thumbnail. */
-.v3-shell .insp .pr .pp-filter-mini { flex: 0 0 auto; display: block; overflow: visible; }
+/* The minimized row's thumbnail (44×14 slot). */
+.v3-shell .insp .pr .pp-filter-mini { display: block; overflow: visible; }
 .v3-shell .insp .pr .pp-filter-mini path { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
 .v3-shell .insp .pr .pp-filter-mini .z { stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 1; }
 .v3-shell .insp .pr .pp-filter-mini.bypassed path { stroke: var(--muted); }
@@ -61,6 +58,7 @@
 .v3-shell .insp .pr .pp-filter-hz.warn input { color: var(--warn); }
 .v3-shell .insp .pr .pp-filter-plot.unstable .pp-filter-fc { stroke: color-mix(in srgb, var(--warn) 70%, transparent); }
 .v3-shell .insp .pr .pp-filter-plot .pp-filter-warn {
-  fill: var(--warn); font-size: 7.5px; pointer-events: none; user-select: none;
+  fill: var(--warn); font-size: var(--pp-fs-axis); pointer-events: none; user-select: none;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round;
 }
 .v3-shell .insp .pr .pp-filter-mini.unstable .z { stroke: var(--warn); stroke-dasharray: 2 2; }

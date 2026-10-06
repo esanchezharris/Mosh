@@ -80,7 +80,9 @@ test("apply the Mosh Clean Lead preset to an audio track, re-apply without dupli
   await expect(inspector.getByTestId("v3-plugin-preset").first()).toHaveText("Preset: Mosh Clean Lead v0");
   const highPass = rows.nth(rowsBefore);
   const compressor = rows.nth(rowsBefore + 1);
-  await expect(highPass).toContainText("High-Pass");
+  await expect(highPass).toHaveAttribute("data-plugin-type", "highpass");
+  await expect(highPass).toContainText("Filter");                             // the filter panel's title
+  await expect(highPass.getByRole("button", { name: "HP (High-pass)", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(highPass).toContainText("80 Hz");                             // readback in real units
   await expect(compressor).toContainText("Compressor");
   await expect(compressor).toContainText("2.5:1");                           // the compressor panel's ratio read-out
@@ -118,25 +120,25 @@ test("drag a plugin's header above or below another row to reorder the chain; un
   await picker.selectOption({ label: "Mosh Clean Lead v0" });
   await expect(rows).toHaveCount(first + 2);
   await picker.blur();
-  await expect(rows.nth(first)).toContainText("High-Pass");            // anti-vacuity baseline: the starting order
+  await expect(rows.nth(first)).toHaveAttribute("data-plugin-type", "highpass");   // anti-vacuity baseline: the starting order
   await expect(rows.nth(first + 1)).toContainText("Compressor");
 
   // Compressor up: drop on the UPPER half of the High-Pass row.
   await rows.nth(first + 1).getByTestId("v3-plugin-handle").dragTo(rows.nth(first), { targetPosition: { x: 24, y: 4 } });
   await expect(rows.nth(first)).toContainText("Compressor");
-  await expect(rows.nth(first + 1)).toContainText("High-Pass");
+  await expect(rows.nth(first + 1)).toHaveAttribute("data-plugin-type", "highpass");
 
   // And back down: drop on the LOWER half of the row now beneath it.
   const lower = (await rows.nth(first + 1).boundingBox())!;
   await rows.nth(first).getByTestId("v3-plugin-handle").dragTo(rows.nth(first + 1), { targetPosition: { x: 24, y: lower.height - 4 } });
-  await expect(rows.nth(first)).toContainText("High-Pass");
+  await expect(rows.nth(first)).toHaveAttribute("data-plugin-type", "highpass");
   await expect(rows.nth(first + 1)).toContainText("Compressor");
 
   // Each move is its own undo step.
   await page.keyboard.press("ControlOrMeta+z");
   await expect(rows.nth(first)).toContainText("Compressor");
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(rows.nth(first)).toContainText("High-Pass");
+  await expect(rows.nth(first)).toHaveAttribute("data-plugin-type", "highpass");
   await expect(rows).toHaveCount(first + 2);
 });
 
@@ -302,7 +304,7 @@ test("a plugin row minimizes to a one-line summary and expands again; minimizing
   await chevron.click();
   await expect(chevron).toHaveAttribute("aria-expanded", "false");
   await expect(row).toHaveAttribute("data-collapsed", "");
-  await expect(row.getByTestId("v3-plugin-summary")).toHaveText(/^A Minor · retune 80 ms$/);
+  await expect(row.getByTestId("v3-plugin-summary")).toHaveText(/^a minor 80 ms$/);
   await expect(row.getByTestId("v3-plugin-param")).toHaveCount(0);        // the controls are folded away
   await expect(row.getByTestId("v3-tuner")).toHaveCount(0);
   expect(await sent()).toEqual([]);                                        // not a command, so not an edit

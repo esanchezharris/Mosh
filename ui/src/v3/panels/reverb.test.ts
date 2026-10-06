@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import type { Plugin, Snapshot } from "../../types";
 import {
-  COMB_TAU_S, ONSET_S, dampCoefOf, dampingForHfRt60, decayEnd, decayGeometry, dryDb, feedbackOf, fmtSec, plotSpan,
-  reverbModel, reverbSummary, rt60, sizeForRt60, wetDb,
+  COMB_TAU_S, ONSET_S, dampCoefOf, dampingForHfRt60, decayEnd, decayGeometry, dryDb, feedbackOf, fmtLevel, fmtLevelShort,
+  PLOT, SUMMARY_CHARS, fmtSec, plotSpan, reverbModel, reverbSummary, rt60, sizeForRt60, wetDb,
 } from "./reverb";
 import { reverbPanelDef } from "./ReverbPanel";
 import type { PanelProps } from "./types";
@@ -79,30 +79,61 @@ describe("reverb maths (juce::Reverb / FreeVerb)", () => {
     expect(fmtSec(Infinity)).toBe("∞");
   });
 
+  it("level read-outs fit a dial column: one decimal below 10 dB, whole dB beyond", () => {
+    expect(fmtLevel(wetDb(1))).toBe("+9.5 dB");
+    expect(fmtLevel(wetDb(0.01))).toBe("-30 dB");
+    expect(fmtLevel(0)).toBe("0.0 dB");
+    expect(fmtLevel(-Infinity)).toBe("-∞ dB");
+    expect(fmtLevelShort(dryDb(0.25))).toBe("-6 dB");
+    expect(fmtLevelShort(-0.3)).toBe("-0.3 dB");
+    expect(fmtLevelShort(-Infinity)).toBe("off");
+  });
+
   it("draws the LF tail ending at -60 dB inside a span of 1.25 × its decay, and clips a longer one", () => {
     const m = reverbModel(reverb(), 48000);
     const span = plotSpan(m.rtLowSet);
     expect(span).toBeCloseTo(1.10875, 4);
     const g = decayGeometry(m.rtLow, m.rtHigh, span);
-    expect(g.low.x).toBeCloseTo(233.39, 1);
+    // The plot is drawn at its on-screen width (273 px), so its text is not scaled down.
+    expect(PLOT.w).toBe(273);
+    // x = padX 3 + (onset + 0.887 s) / span × the 267-unit inner width.
+    expect(g.low.x).toBeCloseTo(3 + ((ONSET_S + m.rtLowSet) / span) * 267, 9);
+    expect(g.low.x).toBeCloseTo(222.69, 1);
     expect(g.low.y).toBe(45);
     expect(g.high.x).toBeLessThan(g.low.x);   // highs die first
     // Size 1, no damping (10.7 s) in a held 0.5 s view: leaves the right edge near the top.
     const clipped = decayEnd(rt60(feedbackOf(1), 0, 0, 48000), 0.5);
-    expect(clipped.x).toBe(283);
+    expect(clipped.x).toBe(270);
     expect(clipped.y).toBeCloseTo(4.866, 2);
   });
 
-  it("summarises what it is doing in one line", () => {
-    expect(reverbSummary(reverb())).toBe("~0.89 s · highs 0.57 s · wet 0.0 dB");
-    expect(reverbSummary(reverb([0.3, 0.5, 1 / 3, 0.5, 1, 1]))).toBe("frozen ∞ · wet 0.0 dB");
-    expect(reverbSummary(reverb([0.3, 0.5, 1 / 3, 0.25, 0.5, 0]))).toBe("~0.89 s · highs 0.57 s · wet 0.0 dB · dry -6.0 dB · 50% wide");
-    expect(reverbSummary(reverb([0.8, 0, 0, 0.5, 1, 0]))).toBe("~2.7 s · highs 2.7 s · wet off");
+  it("summarises in at most 16 characters, decay first; levels only away from unity", () => {
+    expect(SUMMARY_CHARS).toBe(16);
+    expect(reverbSummary(reverb())).toBe("0.89 s decay");
+    expect(reverbSummary(reverb([0.3, 0.5, 1 / 3, 0.5, 1, 1]))).toBe("frozen ∞");
+    expect(reverbSummary(reverb([0.8, 0, 0, 0.5, 1, 0]))).toBe("2.7 s · wet off");
+    expect(reverbSummary(reverb([0.8, 0.5, 1 / 3, 0.25, 1, 0]))).toBe("2.7 s · dry -6");
+    expect(reverbSummary(reverb([0.3, 0.5, 1 / 3, 0.25, 1, 0]))).toBe("0.89 s · dry -6");
+    // Tight separators before a change is dropped; the least telling (Width) goes first.
+    expect(reverbSummary(reverb([0.3, 0.5, 1, 0.5, 1, 0]))).toBe("0.89 s·wet +9.5");
+    expect(reverbSummary(reverb([0.3, 0.5, 1 / 3, 0.25, 0.5, 0]))).toBe("0.89 s · dry -6");
+    expect(reverbSummary(reverb([0.3, 0.5, 1 / 3, 0.5, 0.5, 0]))).toBe("0.89 s·50% wide");
+    expect(reverbSummary(reverb([0.3, 0.5, 0, 0.5, 1, 1]))).toBe("frozen ∞·wet off");
   });
 
-  it("the row's summary uses the session's sample rate", () => {
+  it("no setting gives a summary longer than 16 characters", () => {
+    const steps = [0, 0.01, 0.1, 0.25, 1 / 3, 0.5, 0.75, 0.99, 1];
+    let longest = "";
+    for (const size of steps) for (const wet of steps) for (const dry of steps) for (const width of [0, 0.5, 1]) for (const fz of [0, 1]) {
+      const t = reverbSummary(reverb([size, 0.5, wet, dry, width, fz]));
+      if (t.length > longest.length) longest = t;
+    }
+    expect(longest.length).toBeLessThanOrEqual(SUMMARY_CHARS);
+  });
+
+  it("the row's summary leads with the low decay, which does not depend on the sample rate", () => {
     useStore.setState({ snapshot: { session: { sampleRate: 44100 } } as unknown as Snapshot });
-    expect(reverbPanelDef.summary(reverb())).toBe("~0.89 s · highs 0.54 s · wet 0.0 dB");
+    expect(reverbPanelDef.summary(reverb())).toBe("0.89 s decay");
     useStore.setState({ snapshot: null as unknown as Snapshot });
   });
 });
@@ -136,14 +167,29 @@ describe("ReverbPanel", () => {
 
   it("shows the computed decay and every control in real units", () => {
     render(reverb());
-    expect($('[data-testid="pp-reverb-decay"]').textContent).toBe("~0.89 s");
-    expect($('[data-testid="pp-reverb-size"] .v').textContent).toBe("~0.89 s");
+    // The read-outs name the band; "approximate" lives in the tooltip, not a "~".
+    expect($('[data-testid="pp-reverb-decay"]').firstChild!.textContent).toBe("lows 0.89 s");
+    expect($('[data-testid="pp-reverb-decay"] title').textContent).toMatch(/^Approximate/);
+    expect($('[data-testid="pp-reverb-highs"]').firstChild!.textContent).toBe("highs 0.57 s");
+    expect($('[data-testid="pp-reverb-size"] .v').textContent).toBe("0.89 s");
+    expect($('[data-testid="pp-reverb-size"]').getAttribute("title")).toMatch(/approximate/);
     expect($('[data-testid="pp-reverb-damping"] .v').textContent).toBe("50%");
     expect($('[data-testid="pp-reverb-wet"] .v').textContent).toBe("0.0 dB");
     expect($('[data-testid="pp-reverb-dry"] .v').textContent).toBe("0.0 dB");
     expect($('[data-testid="pp-reverb-width"] .v').textContent).toBe("100%");
     expect($('[data-testid="pp-reverb-freeze"]').getAttribute("aria-pressed")).toBe("false");
     expect($('[data-testid="pp-reverb-plot"]').classList.contains("bypassed")).toBe(false);
+    expect(host.querySelectorAll(".pp-dial.inert")).toHaveLength(0);
+  });
+
+  it("Wet and Dry draw their arcs from unity: no arc at 0 dB, a unity tick at 1/3 and 1/2", () => {
+    render(reverb());
+    for (const id of ["pp-reverb-wet", "pp-reverb-dry"]) {
+      expect($(`[data-testid="${id}"] .unity`)).not.toBeNull();
+      expect($(`[data-testid="${id}"] .value`).getAttribute("d")).toBe("");
+    }
+    render(reverb([0.3, 0.5, 0.5, 0.5, 1, 0]));
+    expect($('[data-testid="pp-reverb-wet"] .value').getAttribute("d")).not.toBe("");
   });
 
   it("End on the Size dial sends param 0 = 1 with a gesture id", () => {
@@ -183,17 +229,17 @@ describe("ReverbPanel", () => {
     expect(setParam).toHaveBeenLastCalledWith(0, 0.3, { gesture: expect.any(String) });
   });
 
-  /** The plot's SVG is 286 × 48 px on screen, so client px = viewBox units. */
+  /** The plot's SVG is 273 × 48 px on screen, so client px = viewBox units. */
   const stubPlot = () => {
     const svg = $('[data-testid="pp-reverb-plot"]') as SVGSVGElement;
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 286, height: 48, right: 286, bottom: 48, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 273, height: 48, right: 273, bottom: 48, x: 0, y: 0, toJSON() {} }) as DOMRect;
   };
   const Ptr = (typeof PointerEvent === "function" ? PointerEvent : MouseEvent) as typeof MouseEvent;
   const ptr = (el: Element, type: string, clientX: number, clientY = 20) =>
     act(() => { el.dispatchEvent(new Ptr(type, { bubbles: true, clientX, clientY, button: 0 })); });
   /** Time → x in the default view (span 1.25 × 0.887 s, held during the drag). */
   const span0 = plotSpan(rt60(feedbackOf(0.3), 0, 0, 48000));
-  const xAt = (t: number) => 3 + (t / span0) * 280;
+  const xAt = (t: number) => 3 + (t / span0) * 267;
 
   it("dragging the Size handle to a 1.0 s decay sends the inverted Size (0.37806), one gesture", () => {
     render(reverb());
@@ -233,15 +279,21 @@ describe("ReverbPanel", () => {
     expect(setParam).toHaveBeenLastCalledWith(5, 0);
   });
 
-  it("frozen: a flat tail, no Size/Damping handles, Size and Damping marked as held", () => {
+  it("frozen: a flat tail, no Size/Damping handles, Size and Damping inert (still adjustable)", () => {
     render(reverb([0.3, 0.5, 1 / 3, 0.5, 1, 1]));
     expect(host.querySelector('[data-testid="pp-reverb-frozen"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="pp-reverb-size-node"]')).toBeNull();
-    expect(host.querySelectorAll(".pp-reverb-held")).toHaveLength(2);
+    const inert = Array.from(host.querySelectorAll(".pp-dial.inert")).map((el) => el.getAttribute("data-testid"));
+    expect(inert).toEqual(["pp-reverb-size", "pp-reverb-damping"]);
+    expect(host.querySelectorAll(".pp-dial.off")).toHaveLength(0);
+    expect($('[data-testid="pp-reverb-size"]').getAttribute("title")).toMatch(/No effect while Freeze is on\.$/);
+    key($('[data-testid="pp-reverb-size"] svg'), "End");
+    expect(setParam).toHaveBeenLastCalledWith(0, 1, { gesture: expect.any(String) });
     // The sliders themselves say so (the title is only on a wrapper).
     expect($('[data-testid="pp-reverb-size"] svg').getAttribute("aria-valuetext")).toMatch(/, no effect while Freeze is on$/);
     expect($('[data-testid="pp-reverb-damping"] svg').getAttribute("aria-valuetext")).toMatch(/, no effect while Freeze is on$/);
     expect($('[data-testid="pp-reverb-freeze"]').getAttribute("aria-pressed")).toBe("true");
+    expect($('.pp-reverb-freeze-col .v').textContent).toBe("on");
   });
 
   it("a bypassed reverb draws its plot greyed", () => {
@@ -252,12 +304,12 @@ describe("ReverbPanel", () => {
   it("the mini wedge: closed through the corner past 4 s, flat when frozen", () => {
     const props = (plugin: Plugin): PanelProps => ({ plugin, trackId: "t1", sampleRate: 48000, setParam, setState });
     act(() => root.render(React.createElement(reverbPanelDef.Mini!, props(reverb()))));
-    expect($('[data-testid="pp-reverb-mini"] path').getAttribute("d")).toMatch(/^M0 0 L8\.\d 12\.0 L5\.\d 12\.0 Z$/);
-    // Size 0.9: low decay 4.39 s leaves the right edge at y = 12·4/4.39; the highs (1.17 s)
-    // reach the floor at x = 10.5. The wedge must include the bottom-right corner.
+    expect($('[data-testid="pp-reverb-mini"] path').getAttribute("d")).toMatch(/^M0 0 L9\.\d 14\.0 L6\.\d 14\.0 Z$/);
+    // Size 0.9: low decay 4.39 s leaves the right edge at y = 14·4/4.39; the highs (1.17 s)
+    // reach the floor at x = 12.8. The wedge must include the bottom-right corner.
     act(() => root.render(React.createElement(reverbPanelDef.Mini!, props(reverb([0.9, 0.5, 1 / 3, 0.5, 1, 0])))));
-    expect($('[data-testid="pp-reverb-mini"] path').getAttribute("d")).toBe("M0 0 L36.0 10.9 L36 12 L10.5 12.0 Z");
+    expect($('[data-testid="pp-reverb-mini"] path').getAttribute("d")).toBe("M0 0 L44.0 12.8 L44 14 L12.8 14.0 Z");
     act(() => root.render(React.createElement(reverbPanelDef.Mini!, props(reverb([0.3, 0.5, 1 / 3, 0.5, 1, 1])))));
-    expect($('[data-testid="pp-reverb-mini"] path').getAttribute("d")).toBe("M0 0.5 L36 0.5 L36 12 L0 12 Z");
+    expect($('[data-testid="pp-reverb-mini"] path').getAttribute("d")).toBe("M0 0.5 L44 0.5 L44 14 L0 14 Z");
   });
 });

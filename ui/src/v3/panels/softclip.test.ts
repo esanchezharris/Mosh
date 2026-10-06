@@ -6,6 +6,7 @@ import type { Plugin } from "../../types";
 import {
   CEILING, CLIP_ZONE_FROM_KNEE_DB, clipGrDb, clipHint, clipOutDb, clipSettings, clipSummary, DRIVE, fmtDbfs, kneeInDb, kneeTo,
 } from "./softclip";
+import { SUMMARY_CHARS } from "./compressor";
 import { softClipPanelDef } from "./SoftClipPanel";
 import { normOf } from "./params";
 
@@ -72,9 +73,17 @@ describe("settings and read-outs", () => {
     expect(kneeTo(-6.54321, -0.46)).toEqual({ driveDb: 6, ceilDb: -0.5 });
   });
   it("summarises in one short line and says the honest hint", () => {
-    expect(clipSummary(clip())).toBe("drive +6.0 dB · ceiling -0.5 dBFS");
-    expect(clipSummary(clip(0, 0))).toBe("drive 0.0 dB · ceiling 0.0 dBFS");
-    expect(clipHint({ driveDb: 6, ceilDb: -0.5 })).toBe("knee -6.5 dBFS · quiet input +6.0 dB");
+    // Drive first (it is the sound); the ceiling only when moved and the pair fits 16.
+    expect(clipSummary(clip())).toBe("+6 dB drive");
+    expect(clipSummary(clip(0, -0.5))).toBe("0 dB drive");
+    expect(clipSummary(clip(0, 0))).toBe("0 dB, ceil 0");
+    expect(clipSummary(clip(9, -3))).toBe("+9 dB, ceil -3");
+    expect(clipSummary(clip(12, -12))).toBe("+12 dB, ceil -12");
+    expect(clipSummary(clip(12.5, -3))).toBe("+12.5 dB drive");
+    for (const d of [0, 0.1, 6, 12.5, 23.9, 24]) {
+      for (const c of [-12, -10.5, -3.3, -0.5, -0.1, 0]) expect(clipSummary(clip(d, c)).length).toBeLessThanOrEqual(SUMMARY_CHARS);
+    }
+    expect(clipHint({ driveDb: 6, ceilDb: -0.5 })).toBe("Knee at -6.5 dBFS in; quiet input comes out +6.0 dB louder.");
     expect(fmtDbfs(-0.01)).toBe("0.0 dBFS");
   });
 });
@@ -115,10 +124,10 @@ describe("SoftClipPanel", () => {
     vi.stubGlobal("cancelAnimationFrame", () => {});
     return () => act(() => { frames.splice(0).forEach((cb) => cb(0)); });
   };
-  const xOf = (db: number) => ((db + 36) / 42) * 150, yOf = (db: number) => (-db / 36) * 84;
+  const xOf = (db: number) => ((db + 36) / 42) * 104, yOf = (db: number) => (-db / 36) * 88;
   const dragKnee = () => {
     const svg = q("pp-softclip-plot") as unknown as SVGSVGElement;
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 150, height: 84, right: 150, bottom: 84, x: 0, y: 0, toJSON: () => ({}) });
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 104, height: 88, right: 104, bottom: 88, x: 0, y: 0, toJSON: () => ({}) });
     const node = q("pp-softclip-knee")!;
     return (type: string, inDb: number, outDb: number) => act(() => {
       node.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: xOf(inDb), clientY: yOf(outDb), button: 0, pointerId: 1 }));
@@ -128,14 +137,27 @@ describe("SoftClipPanel", () => {
   it("draws the exact tanh curve on a -36..+6 / -36..0 plot", () => {
     render(clip());
     const d = q("pp-softclip-curve")!.getAttribute("d")!;
-    // The first sample is -36 dBFS in → just under -30 dBFS out (drive is gain): y ≈ 70.
+    // The plot is 104×88 px with a matching viewBox (axis text at its real size).
+    expect(q("pp-softclip-plot")!.getAttribute("viewBox")).toBe("0 0 104 88");
+    // The first sample is -36 dBFS in → just under -30 dBFS out (drive is gain): y ≈ 73.
     const out36 = clipOutDb(-36, 6, -0.5);
     expect(out36).toBeCloseTo(-30, 2);
-    expect(d.startsWith(`M0.00 ${((-out36 / 36) * 84).toFixed(2)}`)).toBe(true);
+    expect(d.startsWith(`M0.00 ${((-out36 / 36) * 88).toFixed(2)}`)).toBe(true);
     // The last sample is +6 dBFS in.
     const out6 = clipOutDb(6, 6, -0.5);
-    expect(d.endsWith(`L150.00 ${((-out6 / 36) * 84).toFixed(2)}`)).toBe(true);
-    expect(q("pp-softclip-hint")!.textContent).toBe("knee -6.5 dBFS · quiet input +6.0 dB");
+    expect(d.endsWith(`L104.00 ${((-out6 / 36) * 88).toFixed(2)}`)).toBe(true);
+    // The hint is the plot's tooltip now, not a row of its own.
+    expect(q("pp-softclip-hint")!.tagName.toLowerCase()).toBe("title");
+    expect(q("pp-softclip-hint")!.textContent).toContain("Knee at -6.5 dBFS in; quiet input comes out +6.0 dB louder.");
+    // Axes say what they measure.
+    const axes = [...host.querySelectorAll(".axis")].map((t) => t.textContent);
+    expect(axes).toEqual(expect.arrayContaining(["0 dBFS", "0 dBFS in"]));
+  });
+
+  it("is titled without the vendor tag the MOSH chip already shows", () => {
+    expect(softClipPanelDef.title).toBe("Soft Clipper");
+    // The minimized row's name column is 76 px (about 11 characters at 11 px semibold).
+    expect(softClipPanelDef.shortTitle).toBe("Soft Clip");
   });
 
   it("End on Drive sends 1 (24 dB); Home on Ceiling sends 0 (-12 dBFS)", () => {
@@ -145,7 +167,10 @@ describe("SoftClipPanel", () => {
     key(q("pp-softclip-ceiling")!.querySelector('[role="slider"]')!, "Home");
     expect(setParam).toHaveBeenLastCalledWith(1, 0, { gesture: expect.any(String) });
     expect(q("pp-softclip-drive")!.textContent).toContain("+6.0 dB");
-    expect(q("pp-softclip-ceiling")!.textContent).toContain("-0.5 dBFS");
+    expect(q("pp-softclip-ceiling")!.querySelector(".v")!.textContent).toBe("-0.5 dB");
+    expect(q("pp-softclip-ceiling")!.querySelector('[role="slider"]')!.getAttribute("aria-valuetext")).toBe("-0.5 dBFS");
+    // Drive is a gain: its arc grows from 0 dB, with the unity tick there.
+    expect(q("pp-softclip-drive")!.querySelector(".unity")).not.toBeNull();
   });
 
   it("the knee's keys move it like a drag: Up raises it straight up, Right lowers the drive, one gesture for both", () => {
@@ -211,16 +236,20 @@ describe("SoftClipPanel", () => {
     expect(keyed).toEqual([[0, 6.5 / 24], [1, 1]]);
   });
 
-  it("the dot and clipping bar are idle without a frame and live with one", () => {
+  it("the dot and clipping meter are idle without a frame and live with one", () => {
     render(clip());
     expect(q("pp-softclip-dot")).toBeNull();
     expect(q("pp-softclip-gr")!.getAttribute("data-level")).toBe("idle");
     expect(q("pp-softclip-gr-num")!.textContent).toBe("–");
+    // One muted "no signal" for the panel; the meter is named like a dial.
+    expect(q("pp-softclip-nosignal")!.textContent).toBe("no signal");
+    expect(q("pp-softclip-gr")!.querySelector(".nm")!.textContent).toBe("Clip");
     frame();
+    expect(q("pp-softclip-nosignal")).toBeNull();
     const dot = q("pp-softclip-dot")!;
-    expect(Number(dot.getAttribute("cx"))).toBeCloseTo((33 / 42) * 150, 1);
-    expect(Number(dot.getAttribute("cy"))).toBeCloseTo((-clipOutDb(-3, 6, -0.5) / 36) * 84, 1);
-    expect(q("pp-softclip-gr-num")!.textContent).toBe("2.4");
+    expect(Number(dot.getAttribute("cx"))).toBeCloseTo((33 / 42) * 104, 1);
+    expect(Number(dot.getAttribute("cy"))).toBeCloseTo((-clipOutDb(-3, 6, -0.5) / 36) * 88, 1);
+    expect(q("pp-softclip-gr-num")!.textContent).toBe("-2.4 dB");
     expect(q("pp-softclip-gr")!.getAttribute("data-level")).toBe("mid");
     frame({ grDb: 7.5, inDb: 9, outDb: -0.6 });
     expect(q("pp-softclip-dot")).toBeNull();

@@ -11,7 +11,7 @@
 // - the "Low-pass"/"High-pass" xml tags are SHELVES, not pass filters.
 import type { Plugin } from "../../types";
 import { biquadDb, highShelf, logFreqs, lowShelf, peak, plotTopHz, type Biquad } from "./dsp";
-import { clamp, fmtDb, fmtHz, normOf, param, physOf, type Range } from "./params";
+import { clamp, fmtDb, fmtFreq, fmtHz, normOf, param, physOf, type Range } from "./params";
 import { freqScale, linScale, type Scale } from "./plot";
 
 export const FREQ: Range = { min: 20, max: 20000 };
@@ -27,7 +27,7 @@ export type BandSpec = {
   label: string;
   /** Spoken / tooltip name. */
   name: string;
-  /** The word the minimized summary uses for a shelf ("Lo"/"Hi"); peaks use their frequency. */
+  /** The word the minimized summary uses for a shelf ("low"/"high"); peaks use their frequency. */
   short?: string;
   /** Parameter indices for [freq, gain, Q]. */
   index: Record<BandField, number>;
@@ -42,10 +42,10 @@ const band = (kind: BandKind, label: string, name: string, first: number, freq: 
 });
 
 export const BANDS: readonly BandSpec[] = [
-  band("lowShelf", "L", "Low shelf", 0, 80, "Lo"),
+  band("lowShelf", "L", "Low shelf", 0, 80, "low"),
   band("peak", "1", "Peak 1", 3, 3000),
   band("peak", "2", "Peak 2", 6, 5000),
-  band("highShelf", "H", "High shelf", 9, 17000, "Hi"),
+  band("highShelf", "H", "High shelf", 9, 17000, "high"),
 ];
 
 export type BandValues = { freq: number; gain: number; q: number };
@@ -123,7 +123,10 @@ export function dbRange(bands: readonly BandValues[], fs: number): number {
 
 // ── plot geometry ───────────────────────────────────────────────────────────────────────
 
-export const PLOT_W = 286;
+/** The plot's coordinate width is the width it is drawn at: the 320 px inspector's 289 px row,
+ *  less 2 × 7 px padding and 2 px of border = 273 px. One unit is one CSS pixel, so the 9 px
+ *  axis text and the node letters render at their stated size. */
+export const PLOT_W = 273;
 export const PLOT_H = 84;
 /** Vertical inset so a node at ±range is not cut by the card edge. */
 export const PLOT_PAD = 6;
@@ -313,12 +316,6 @@ export function withEdit(bands: readonly BandValues[], edit: BandEdit | null): B
 
 // ── text ────────────────────────────────────────────────────────────────────────────────
 
-/** Read-out frequency: "80 Hz", "632 Hz", "3.00 kHz", "17.0 kHz". */
-export function fmtFreq(hz: number): string {
-  if (!Number.isFinite(hz)) return "–";
-  if (hz < 1000) return `${Math.round(hz)} Hz`;
-  return `${(hz / 1000).toFixed(hz < 10000 ? 2 : 1)} kHz`;
-}
 export const fmtQ = (q: number): string => (Number.isFinite(q) ? q.toFixed(2) : "–");
 
 /** What the type-in box starts with: the value without its unit ("80", "3.00k", "-2.5", "0.71"). */
@@ -327,11 +324,11 @@ export function editText(field: BandField, v: number): string {
   return field === "gain" ? v.toFixed(1) : v.toFixed(2);
 }
 
-/** How many characters the minimized row shows before its ellipsis: the .pr content box is
- *  273 px (320 px inspector − 1 border − 2×10 .ibody − 2×5 .grp − 2×7 .pr − 2 border), the
- *  .pp-min row leaves 273 − 22 − 44 (thumbnail) − 6 = 201 px, and 10 px monospace is about
- *  6 px a character. */
-export const SUMMARY_CHARS = 33;
+/** The longest summary the minimized header is given. Measured at the 320 px inspector, the
+ *  text slot is 97 px (row 289 px: chevron 16, name 76, thumbnail 44 + 6 gap, on/off LED 16,
+ *  gaps and padding), and 10 px monospace is 6.0 px a character: 16 characters fit whole.
+ *  Whatever does not fit must be the least informative part, hence the ordering in eqSummary. */
+export const SUMMARY_CHARS = 16;
 
 /** "+3", "-2.5", "+0.4": a gain without its unit, ".0" dropped. `whole` rounds to whole dB
  *  (but never to a misleading "0"). */
@@ -341,22 +338,40 @@ function gainShort(db: number, whole: boolean): string {
   return `${r > 0 ? "+" : ""}${Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)}`;
 }
 
-/** What the minimized row says: only the bands that are doing something, or "flat". With
- *  several active bands the full form ("Lo -3.0 dB · 3.0k +2.5 dB · Hi +3.0 dB") would be cut
- *  off, losing the last band; then it drops the unit ("Lo -3 · 3.0k +2.5 · Hi +3"), then
- *  tightens the separators, and only then rounds to whole dB, until it fits SUMMARY_CHARS. */
+/** fmtHz, except that 9950..9999 Hz reads "10k" like 10 kHz does (fmtHz rounds it up to
+ *  "10.0k", a character longer than any other frequency it gives). */
+const hzShort = (hz: number): string => (hz >= 9950 && hz < 10000 ? "10k" : fmtHz(hz));
+
+/** What the minimized header says: only the bands that are doing something, biggest move
+ *  first (ties in band order), or "flat". The first form that fits SUMMARY_CHARS wins:
+ *  "low -3.0 dB", then "low -3 dB · high +3 dB", then without the dB ("low -3 · high +3"),
+ *  then with tight separators and bare peak numbers ("low -3·3.0k +2.5"), then in whole dB;
+ *  bands that still do not fit are counted, not shown ("low -3 · 2 more"). */
 export function eqSummary(plugin: Plugin): string {
-  const active = readBands(plugin).flatMap((v, i) => (isBandOff(v.gain) ? [] : [{ v, spec: BANDS[i] }]));
+  const active = readBands(plugin)
+    .flatMap((v, i) => (isBandOff(v.gain) ? [] : [{ v, spec: BANDS[i], i }]))
+    // Compared at the 0.1 dB the text shows, so float noise never reorders equal moves.
+    .sort((a, b) => Math.round(Math.abs(b.v.gain) * 10) - Math.round(Math.abs(a.v.gain) * 10) || a.i - b.i);
   if (!active.length) return "flat";
-  const full = active.map(({ v, spec }) => `${spec.short ?? fmtHz(v.freq)} ${fmtDb(v.gain)}`).join(" · ");
-  if (full.length <= SUMMARY_CHARS) return full;
-  const compact = (whole: boolean) => active.map(({ v, spec }) =>
-    `${spec.short ?? (v.freq < 1000 ? `${Math.round(v.freq)}` : fmtHz(v.freq))} ${gainShort(v.gain, whole)}`);
-  for (const sep of [" · ", "·"]) {
-    const s = compact(false).join(sep);
-    if (s.length <= SUMMARY_CHARS) return s;
+  const name = (v: BandValues, spec: BandSpec, bare: boolean) =>
+    spec.short ?? (bare && v.freq < 1000 ? `${Math.round(v.freq)}` : hzShort(v.freq));
+  const parts = (gain: (db: number) => string, bare = false) => active.map(({ v, spec }) => `${name(v, spec, bare)} ${gain(v.gain)}`);
+  const forms = [
+    parts(fmtDb).join(" · "),
+    parts((db) => `${gainShort(db, false)} dB`).join(" · "),
+    parts((db) => gainShort(db, false)).join(" · "),
+    parts((db) => gainShort(db, false), true).join("·"),
+    parts((db) => gainShort(db, true), true).join("·"),
+  ];
+  const fit = forms.find((t) => t.length <= SUMMARY_CHARS);
+  if (fit) return fit;
+  const whole = parts((db) => gainShort(db, true), true);
+  for (let keep = whole.length - 1; keep >= 1; keep--) {
+    const t = `${whole.slice(0, keep).join("·")} · ${whole.length - keep} more`;
+    if (t.length <= SUMMARY_CHARS) return t;
   }
-  return compact(true).join("·");
+  // The longest single part is 9 characters ("high -0.4"), so this (at most 16) always fits.
+  return `${whole[0]}·${whole.length - 1} more`;
 }
 
 /** What a screen reader hears for a band's node. */

@@ -26,7 +26,7 @@ import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
 import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
 import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
-import { BUILTINS, mkParams, builtinParamDisplay, mkBuiltinPlugin, STATE_SPECS } from "./mock/builtins";
+import { BUILTINS, mkParams, builtinParamDisplay, mkBuiltinPlugin, mkBuiltinState, nextMockItemId, STATE_SPECS } from "./mock/builtins";
 import { fixturePeaksForClip } from "./mock/fixturePeaks";
 import { portfolioSeed } from "./mock/portfolioSeed";
 
@@ -1104,12 +1104,12 @@ function mockTrackPresetRows(): Plugin[] {
   return [
     {
       index: 0, name: "High-Pass", type: "highpass", enabled: true, external: false, builtin: true,
-      category: "Filter", isInstrument: false, preset: tag(0),
+      category: "Filter", isInstrument: false, preset: tag(0), itemId: nextMockItemId(), state: mkBuiltinState("highpass"),
       params: [{ index: 0, name: "Frequency", value: (80 - 10) / (22000 - 10), display: "80 Hz", min: 10, max: 22000 }],
     },
     {
       index: 1, name: "Compressor", type: "compressor", enabled: true, external: false, builtin: true,
-      category: "Dynamics", isInstrument: false, preset: tag(1),
+      category: "Dynamics", isInstrument: false, preset: tag(1), itemId: nextMockItemId(),
       params: [
         { index: 0, name: "Threshold", value: (0.0630957 - 0.01) / 0.99, display: "-24.00 dB" },
         { index: 1, name: "Ratio", value: 0.4 / 0.95, display: "2.50 : 1" },

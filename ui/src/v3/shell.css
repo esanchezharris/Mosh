@@ -370,6 +370,9 @@
 .v3-shell .insp .pr[data-drop="below"] { box-shadow: 0 2px 0 0 var(--accent); }
 .v3-shell .insp .pr .hdr .nm { flex: 1 1 auto; min-width: 0; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v3-shell .insp .pr .hdr .kind { flex: 0 0 auto; font-size: 9px; letter-spacing: .06em; color: var(--muted); }
+/* A chain of native plugins does not need "MOSH" on every row: only a third-party plugin
+   is marked (its format). */
+.v3-shell .insp .pr .hdr .kind.nat { display: none; }
 .v3-shell .insp .pr .hdr .btn { flex: 0 0 auto; }
 .v3-shell .insp .pr .fader .nm { width: 86px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v3-shell .insp .pr .fader .v { width: 36px; }
@@ -399,6 +402,13 @@
 .v3-shell .insp .pr .tuner .cents { font-size: 10px; color: var(--muted); min-height: 12px; }
 .v3-shell .insp .pr .tuner.idle .heard { color: var(--muted); font-weight: 400; }
 @media (prefers-reduced-motion: reduce) { .v3-shell .insp .pr .tuner .key { transition: none; } }
+/* The same keyboard as the minimized row's thumbnail. */
+.v3-shell .insp .pr .pp-at-mini .k { stroke: var(--bg); stroke-width: .5; }
+.v3-shell .insp .pr .pp-at-mini .w.in { fill: var(--text); }
+.v3-shell .insp .pr .pp-at-mini .w.out { fill: color-mix(in srgb, var(--text) 22%, var(--surface2)); }
+.v3-shell .insp .pr .pp-at-mini .b.in { fill: var(--bg); }
+.v3-shell .insp .pr .pp-at-mini .b.out { fill: var(--bg); opacity: .3; }
+.v3-shell .insp .pr .pp-at-mini .sung { fill: var(--accent); opacity: 1; }
 /* ── Native plugin panels: the shared parts (panels/*.tsx). Each panel's own look lives in
    panels/css/<name>.css. ── */
 /* The minimize chevron: a small rotating arrow at the start of the header. */
@@ -414,7 +424,13 @@
 /* Minimized: the plugin is its header row. The name gets a fixed width and the thumbnail
    a fixed slot, so every summary down the chain starts at the same x. */
 .v3-shell .insp .pr[data-collapsed] { gap: 0; padding-top: 4px; padding-bottom: 4px; }
-.v3-shell .insp .pr[data-collapsed] .hdr .nm { flex: 0 0 82px; }
+.v3-shell .insp .pr[data-collapsed] .hdr .nm { flex: 0 0 76px; }
+/* Minimized, on/off is just its LED, so the summary gets the width (about 17 characters). */
+.v3-shell .insp .pr[data-collapsed] .hdr .btn { flex: 0 0 16px; width: 16px; min-width: 0; padding: 0; font-size: 0;
+  display: grid; place-items: center; }
+.v3-shell .insp .pr[data-collapsed] .hdr .btn::before { margin: 0; }
+.v3-shell .insp .pr[data-collapsed] .hdr .btn:not(.on)::before { content: ""; width: 5px; height: 5px; border-radius: 50%;
+  border: 1px solid currentColor; box-sizing: border-box; }
 .v3-shell .insp .pr .pp-hsum { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .v3-shell .insp .pr .pp-min-viz { flex: 0 0 44px; height: 14px; display: flex; align-items: center; overflow: hidden; }
 .v3-shell .insp .pr .pp-hsum .sum { flex: 1 1 auto; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: var(--pp-fs-cap);
@@ -453,6 +469,11 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent); position: relative; z-index: 1;
 }
 .v3-shell .insp .pr :is(.pp-btn, .pp-seg > button):focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr :is(.pp-btn, .pp-seg > button):disabled { opacity: .5; cursor: default; }
+.v3-shell .insp .pr :is(.pp-btn, .pp-seg > button):disabled:hover { color: var(--muted); }
+/* HTML text laid over a plot (status lines, read-outs): a background-coloured halo keeps it
+   legible where a curve or marker passes under it. */
+.v3-shell .insp .pr .pp-halo { text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg); }
 /* Plots: full-width SVG; grid, 0 dB line, curve and its fill. */
 .v3-shell .insp .pr .pp-plot { display: block; width: 100%; height: auto; overflow: visible; touch-action: none;
   border-radius: 4px; background: color-mix(in srgb, var(--bg) 55%, transparent); }
