@@ -194,3 +194,55 @@ test("AutoTune: Key and Scale are menus, all nine controls show with units, and 
   await key.selectOption({ label: "G" });
   await expect(key.locator("option:checked")).toHaveText("G");
 });
+
+// The tuner's live note display rides its own 30 Hz rail, outside the snapshot. The mock
+// stands in for a voice: while "playing", an enabled AutoTune hears a slow wobble around A3.
+// What this proves is the path from the rail to the strip (and that it clears), not pitch
+// detection, which is the engine's and is covered there.
+test("AutoTune: the live note display follows the tuner rail while it has a pitch, and clears after", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-add-audio").click();
+  const newTrack = page.getByTestId("v3-track").last();
+  await newTrack.getByRole("button", { name: /^Select track/ }).click();
+  const inspector = page.getByTestId("v3-inspector");
+  await expect(inspector).toHaveAttribute("data-track-id", (await newTrack.getAttribute("data-track-id"))!);
+  await expect(inspector.getByTestId("v3-tuner")).toHaveCount(0);            // no tuner, no strip
+
+  await page.getByTestId("v3-add-plugin").click();
+  const dock = page.getByTestId("v2-plugin-dock");
+  await dock.getByTestId("v2-pb-search").fill("AutoTune");
+  await dock.getByTestId("v2-pb-row").first().click();
+  const tuner = inspector.getByTestId("v3-plugin").last();
+  await expect(tuner).toHaveAttribute("data-plugin-type", "moshAutoTune");
+
+  // nothing is being sung: the strip is there and says so
+  const strip = tuner.getByTestId("v3-tuner");
+  await expect(strip).toBeVisible();
+  await expect(strip).not.toHaveAttribute("data-live", "");
+  await expect(strip).toHaveAttribute("aria-label", "Live pitch: no note");
+  await expect(strip.getByTestId("v3-tuner-cents")).toHaveText("");
+
+  // a pitch arrives: note sung, cents off, note pulled to
+  await page.getByTestId("v3-play").click();
+  await expect(strip).toHaveAttribute("data-live", "");
+  await expect(strip.getByTestId("v3-tuner-heard")).toHaveText("A3");
+  await expect(strip.getByTestId("v3-tuner-target")).toHaveText("A3");
+  await expect(strip.getByTestId("v3-tuner-cents")).toHaveText(/^[+-]?\d+ c$/);
+  // it MOVES: the reading is live, not a number captured once
+  const seen = new Set<string>();
+  await expect.poll(async () => {
+    seen.add((await strip.getByTestId("v3-tuner-cents").textContent()) ?? "");
+    return seen.size;
+  }, { timeout: 4000 }).toBeGreaterThan(2);
+
+  // bypassed, a tuner hears nothing: the strip goes away rather than sit there looking attentive
+  await tuner.getByRole("button", { name: "Bypass" }).click();
+  await expect(tuner.getByTestId("v3-tuner")).toHaveCount(0);
+  await tuner.getByRole("button", { name: "Enable" }).click();
+  await expect(strip).toHaveAttribute("data-live", "");
+
+  // the pitch stops: the strip clears (after holding the last note for a moment)
+  await page.getByTestId("v3-play").click();
+  await expect(strip).not.toHaveAttribute("data-live", "", { timeout: 3000 });
+  await expect(strip).toHaveAttribute("aria-label", "Live pitch: no note");
+});

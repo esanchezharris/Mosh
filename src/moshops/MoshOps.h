@@ -65,6 +65,17 @@ public:
         why the button tracks the playhead while the transport is STOPPED. */
     juce::var muteAutomationAtPlayhead();
 
+    /** What every Mosh AutoTune is hearing right now, for the live note display:
+        `{tuners:[{trackId, index, inputHz, targetHz, confidence}]}`. Only tuners that are
+        enabled, were run by the audio thread since the previous call, and are hearing a
+        pitch appear; `index` is the plugin's position in the track's chain, as in the
+        snapshot. Feeds the 30 Hz "tuner" rail, outside the snapshot like the meters.
+
+        Public for the same reason as muteAutomationAtPlayhead: the rail is emitted from
+        timerCallback, which a headless run never pumps. One caller at a time: each call
+        consumes the readings (that is how a stale one is told from a current one). */
+    juce::var tunerReadings();
+
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
@@ -1309,6 +1320,9 @@ private:
     // CAP-AUT-006 — did last tick's "mute_automation" rail carry anything? Drives the
     // one falling-edge emit that clears the UI when the last mute curve is deleted.
     bool        hadMuteAutomation = false;
+    // Did last tick's "tuner" rail carry a reading? Same falling-edge rule: one empty
+    // payload when the singing stops, so the display clears instead of freezing.
+    bool        hadTunerReadings = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────

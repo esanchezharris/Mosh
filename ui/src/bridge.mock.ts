@@ -909,10 +909,25 @@ function startPlayback() {
     }));
     emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) }, sends });
     emitMuteAutomation();
+    emitTuner(true);
   }, 1000 / 30);
+}
+// The tuner's live note display rail. The native engine reports what each enabled Mosh
+// AutoTune is hearing; the mock has no voice to hear, so while "playing" every enabled
+// tuner follows a slow wobble around A3 (30 cents either side), pulled to A3. One empty
+// payload on the falling edge, as the engine sends.
+let hadMockTuner = false;
+function emitTuner(playing: boolean): void {
+  const wobble = 30 * Math.sin((snapshot.transport?.position ?? 0) * 2 * Math.PI / 1.5);
+  const tuners = !playing ? [] : snapshot.tracks.flatMap((t) => (t.plugins ?? [])
+    .filter((p) => p.type === "moshAutoTune" && p.enabled)
+    .map((p) => ({ trackId: t.id, index: p.index, inputHz: 220 * 2 ** (wobble / 1200), targetHz: 220, confidence: 0.9 })));
+  if (tuners.length > 0 || hadMockTuner) emit("tuner", { tuners });
+  hadMockTuner = tuners.length > 0;
 }
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  emitTuner(false);
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
   // Drop the meters to the floor when the transport stops.
   const tracks = snapshot.tracks.filter((t) => !t.isGroup).map((t) => ({ id: t.id, l: -100, r: -100 }));

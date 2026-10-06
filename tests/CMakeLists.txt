@@ -33,6 +33,7 @@ target_sources(MoshTests PRIVATE
     # JUCE-free under src/plugins/moshfx/retune/.
     test_retune_shifter.cpp
     test_retune_core.cpp
+    test_live_pitch.cpp
     test_renderlayer.cpp
     test_render_artifacts.cpp
     test_migrations.cpp

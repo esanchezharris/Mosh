@@ -376,6 +376,19 @@
    which the 36px value column above breaks across two lines. Widen it for those rows only. */
 .v3-shell .insp .pr[data-preset] .fader .v,
 .v3-shell .insp .pr[data-units] .fader .v { width: 58px; white-space: nowrap; }
+/* Mosh AutoTune's live note display: note sung, needle (centre = on the note, the ends a
+   semitone flat and sharp), cents off, and the note it is pulling to. */
+.v3-shell .insp .pr .tuner { display: flex; align-items: center; gap: 6px; font-size: 11px; font-family: ui-monospace, monospace; }
+.v3-shell .insp .pr .tuner .heard, .v3-shell .insp .pr .tuner .target { flex: 0 0 30px; font-weight: 600; color: var(--text); }
+.v3-shell .insp .pr .tuner .target { text-align: right; }
+.v3-shell .insp .pr .tuner .meter { position: relative; flex: 1 1 auto; height: 8px; border-radius: 4px; background: var(--surface2); }
+.v3-shell .insp .pr .tuner .meter::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
+.v3-shell .insp .pr .tuner .meter i { position: absolute; top: 0; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--warn); transition: left 60ms linear; }
+.v3-shell .insp .pr .tuner .meter i.ok { background: var(--accent); }
+.v3-shell .insp .pr .tuner .cents { flex: 0 0 40px; text-align: right; color: var(--muted); font-size: 10px; }
+.v3-shell .insp .pr .tuner .arrow { color: var(--muted); }
+.v3-shell .insp .pr .tuner.idle .heard, .v3-shell .insp .pr .tuner.idle .target { color: var(--muted); font-weight: 400; }
+.v3-shell .insp .pr .tuner.idle .meter i { opacity: .25; background: var(--muted); }
 .v3-shell .insp .pr.add {
   border-style: dashed; color: var(--muted); justify-content: center; align-items: center;
   font-size: 10px; padding: 7px; cursor: pointer; background: transparent;

@@ -3,6 +3,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 #include "plugins/moshfx/MoshFxDsp.h"
 #include "plugins/moshfx/retune/RetuneCore.h"
+#include "plugins/moshfx/retune/LivePitch.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -50,12 +51,18 @@ public:
     void restorePluginStateFromValueTree (const juce::ValueTree&) override;
     juce::var describeMoshFx() const override;
 
+    /** The pitch being sung and the note it is being pulled to, for the live display.
+        Message thread, one caller (the 30 Hz telemetry tick): `live` is false unless
+        the audio thread processed this plugin since the previous call. */
+    moshfx::retune::LivePitchReading takeLivePitch() noexcept { return livePitch.take(); }
+
 protected:
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
 
 private:
     void timerCallback() override;
 
+    moshfx::retune::LivePitchLatch livePitch;
     juce::CachedValue<float> rootValue, scaleValue, retuneValue, amountValue, rangeValue, mixValue, outputValue,
                              glideValue, lookaheadValue;
     te::AutomatableParameter::Ptr rootParam, scaleParam, retuneParam, amountParam, rangeParam, mixParam, outputParam,

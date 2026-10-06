@@ -273,6 +273,16 @@ ordered Key, Scale, Retune speed, Glide, Amount, Range, Mix, Output, Look-ahead,
 so when the scale is Chromatic, because Key then changes nothing. Ids, order and ranges
 are unchanged, so saved sessions and presets load as before.
 
+**Live note display (2026-10-05, owner request).** The inspector row shows the note being
+sung, a needle for how far it is from the note the tuner is pulling to (centre is on the
+note, the ends a semitone flat and sharp), the offset in cents, and that note. The readings
+travel on a 30 Hz event of their own, `tuner` (`{tuners:[{trackId, index, inputHz,
+targetHz, confidence}]}`), outside the snapshot like the meters. Only an enabled tuner that
+the audio thread has just run and that is hearing a pitch is reported, and one empty
+payload is sent when the last one stops, so the display clears instead of freezing on a
+stale note. The strip keeps the last note for 350 ms so it does not blank on consonants.
+The hand-off from the audio thread is `retune/LivePitch.h`.
+
 Reported latency is `D` plus the look-ahead: about 1.8 ms at zero, 13.8 ms at the top.
 Voiced audio is additionally delayed by between zero and one and a half pitch periods as
 the read head moves, which is inherent to the technique; a Mix below 1 on voiced audio

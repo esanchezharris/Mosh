@@ -8,6 +8,7 @@ import { Range } from "./Range";
 import { useV3 } from "./shellState";
 import { usePresetMemory } from "./presetMemory";
 import { choiceIndex, choiceValue, inspectorParams, isChoice, pluginHint, showsEveryParam } from "./pluginParams";
+import { TunerReadout } from "./TunerReadout";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -118,6 +119,10 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
       )}
       {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
         onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
+      {/* The tuner's live note display. Only while the plugin is on: bypassed, it hears
+          nothing, and an idle strip would suggest it was listening. */}
+      {native && plugin.type === "moshAutoTune" && plugin.enabled
+        && <TunerReadout trackId={trackId} index={plugin.index} />}
       {/* Which controls show, and in what order, is pluginParams.ts. A control the engine
           offers as named choices (AutoTune's key and scale) is a menu; the rest are
           sliders that read back in the engine's own units. */}

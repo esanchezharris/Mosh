@@ -522,6 +522,19 @@ void MoshOps::timerCallback()
         hadMuteAutomation = any;
     }
 
+    // The tuner's live note display: what each Mosh AutoTune is hearing and the note it
+    // is pulling to. A rail of its own for the same reason as the two above (a pitch
+    // moving 30 times a second must not re-create the snapshot), and silent unless
+    // someone is singing through a tuner: emitted while any has a pitch, plus once, empty,
+    // when the last one stops.
+    {
+        auto payload = tunerReadings();
+        const bool any = payload.getProperty ("tuners", var()).size() > 0;
+        if (any || hadTunerReadings)
+            emit ("tuner", payload);
+        hadTunerReadings = any;
+    }
+
     // Master spectral feed (Moshi reactivity). Only live with a real playback context
     // (an audio device) — headless / --selftest has none, so the tap is NEVER inserted
     // and the edit state is untouched. One zero on the play→stop edge so Moshi settles.
@@ -3126,6 +3139,37 @@ te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
     }
 
     return nullptr;
+}
+
+juce::var MoshOps::tunerReadings()
+{
+    juce::Array<var> tuners;
+    for (auto* track : te::getAudioTracks (eng.edit()))
+    {
+        if (track == nullptr) continue;
+        const auto plugins = track->pluginList.getPlugins();
+        for (int i = 0; i < plugins.size(); ++i)
+        {
+            auto* tuner = dynamic_cast<MoshAutoTunePlugin*> (plugins[i].get());
+            if (tuner == nullptr) continue;
+            // Taken even when it will not be reported, so a reading left over from
+            // before a bypass cannot surface as current when the plugin comes back.
+            const auto reading = tuner->takeLivePitch();
+            if (! tuner->isEnabled() || ! reading.live || ! reading.voiced) continue;
+
+            auto* o = new DynamicObject();
+            o->setProperty ("trackId", track->itemID.toString());
+            o->setProperty ("index", i);
+            o->setProperty ("inputHz", reading.inputHz);
+            o->setProperty ("targetHz", reading.targetHz);
+            o->setProperty ("confidence", reading.confidence);
+            tuners.add (var (o));
+        }
+    }
+
+    auto* payload = new DynamicObject();
+    payload->setProperty ("tuners", tuners);
+    return var (payload);
 }
 
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)

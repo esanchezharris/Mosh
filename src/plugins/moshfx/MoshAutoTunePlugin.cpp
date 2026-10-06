@@ -232,6 +232,7 @@ void MoshAutoTunePlugin::applyToBuffer (const te::PluginRenderContext& fc)
     lastTargetHz.store (readout.targetHz);
     lastCorrectionCents.store (readout.correctionCents);
     lastConfidence.store (readout.confidence);
+    livePitch.publish (readout.voiced ? readout.inputHz : 0.0, readout.voiced ? readout.targetHz : 0.0, readout.confidence);
 }
 
 void MoshAutoTunePlugin::valueTreePropertyChanged (ValueTree& tree, const Identifier& property)

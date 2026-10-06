@@ -25,6 +25,8 @@ import { isV2Active } from "../v2/shellFlag";
 import { pruneOfflineLocks, type PeerInfo, type PeerPresence } from "../multiplayer/sync";
 // Type-only imports from the store module (erased at compile time — no runtime cycle).
 import type { State, Spectrum } from "../store";
+import type { TunerReading } from "../types";
+import { tunerKey } from "../ui/tuner";
 
 type Set = StoreApi<State>["setState"];
 type Get = StoreApi<State>["getState"];
@@ -70,6 +72,23 @@ export function onMuteAutomation(ev: MoshEvent, set: Set): void {
   const muteAutomation: Record<string, boolean> = {};
   for (const t of p.tracks ?? []) muteAutomation[t.id] = !!t.muted;
   set({ muteAutomation });
+}
+
+export function onTuner(ev: MoshEvent, set: Set): void {
+  // The tuner's live note display. Same rule as the mute rail above: every payload is
+  // the FULL set of tuners hearing a pitch, so the map is rebuilt, not merged, and the
+  // empty payload on the falling edge is what clears the display.
+  const p = ev.payload as { tuners?: Partial<TunerReading>[] } | undefined;
+  const tuners: Record<string, TunerReading> = {};
+  for (const t of p?.tuners ?? []) {
+    if (typeof t.trackId !== "string" || typeof t.index !== "number") continue;
+    if (!(Number(t.inputHz) > 0) || !(Number(t.targetHz) > 0)) continue;
+    tuners[tunerKey(t.trackId, t.index)] = {
+      trackId: t.trackId, index: t.index, inputHz: Number(t.inputHz), targetHz: Number(t.targetHz),
+      confidence: Number(t.confidence) || 0,
+    };
+  }
+  set({ tuners });
 }
 
 export function onSpectrum(ev: MoshEvent, set: Set): void {

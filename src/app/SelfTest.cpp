@@ -3485,6 +3485,75 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "undo")) && shown (0) == "C", "undo puts the key back to C");
         }
 
+        // The live note display's feed (the 30 Hz "tuner" rail reads this). A headless run
+        // has no audio thread, so the plugin on the track is driven by hand, block by block,
+        // the way the playback graph's PluginNode drives it.
+        auto tunerOnTrack = [&] () -> MoshAutoTunePlugin*
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == at)
+                {
+                    const auto chain = t->pluginList.getPlugins();
+                    if (atIdx >= 0 && atIdx < chain.size())
+                        return dynamic_cast<MoshAutoTunePlugin*> (chain[atIdx].get());
+                }
+            return nullptr;
+        };
+        // `hz` <= 0 is silence. A harmonic tone, because that is what a voice is.
+        auto singThroughTuner = [&] (double hz, double seconds)
+        {
+            auto* tuner = tunerOnTrack();
+            if (tuner == nullptr) return false;
+            const double rate = 48000.0;
+            const int block = 256;
+            juce::AudioBuffer<float> io (1, (int) (seconds * rate));
+            for (int i = 0; i < io.getNumSamples(); ++i)
+            {
+                double v = 0.0;
+                if (hz > 0.0)
+                    for (int h = 1; h <= 6; ++h)
+                        v += std::sin (juce::MathConstants<double>::twoPi * hz * h * i / rate) / h;
+                io.setSample (0, i, (float) (0.2 * v));
+            }
+            tuner->baseClassInitialise ({ tracktion::TimePosition(), rate, block });
+            const auto layout = juce::AudioChannelSet::mono();
+            for (int start = 0; start < io.getNumSamples(); start += block)
+            {
+                const int n = juce::jmin (block, io.getNumSamples() - start);
+                const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
+                                                 tracktion::TimePosition::fromSeconds ((start + n) / rate));
+                te::PluginRenderContext context (&io, layout, start, n, nullptr, 0.0, time,
+                                                 /*playing*/ true, /*scrubbing*/ false, /*rendering*/ true,
+                                                 /*allowBypassedProcessing*/ false);
+                tuner->applyToBufferWithAutomation (context);
+            }
+            tuner->baseClassDeinitialise();
+            return true;
+        };
+        auto liveTuners = [&] { return ops.tunerReadings().getProperty ("tuners", var()); };
+
+        check (liveTuners().size() == 0, "an AutoTune that has processed no audio reports no live pitch");
+        check (singThroughTuner (detunedHz, 0.5), "a held A3 + 35 cents was put through the tuner");
+        {
+            const auto live = liveTuners();
+            check (live.size() == 1, "one tuner reports a live pitch while it is being sung through");
+            const auto reading = live.size() > 0 ? live[0] : var();
+            check (reading.getProperty ("trackId", var()).toString() == at
+                   && (int) reading.getProperty ("index", -1) == atIdx,
+                   "the reading names its track and its place in the chain, as the snapshot does");
+            const double heardHz = (double) reading.getProperty ("inputHz", 0.0);
+            const double pulledToHz = (double) reading.getProperty ("targetHz", 0.0);
+            check (std::abs (cents (heardHz, detunedHz)) < 8.0,
+                   "it hears the sung pitch (" + String (heardHz, 2) + " Hz for " + String (detunedHz, 2) + " Hz)");
+            check (std::abs (cents (pulledToHz, 220.0)) < 0.5,
+                   "and it is pulling to A3 (" + String (pulledToHz, 2) + " Hz)");
+            check ((double) reading.getProperty ("confidence", 0.0) > 0.5, "with a confident detection");
+        }
+        check (liveTuners().size() == 0,
+               "asked again with no new audio, the reading is gone (a stale pitch is never shown as current)");
+        check (singThroughTuner (0.0, 0.3) && liveTuners().size() == 0, "silence through the tuner is no pitch");
+        check (singThroughTuner (detunedHz, 0.5) && liveTuners().size() == 1, "and the pitch comes back with the voice");
+
         // Hard tune, and the longest look-ahead so the reported latency is large
         // enough (about 14 ms) that a missing compensation cannot hide.
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 2 }, { "value", 0.0 }}))), "AutoTune retune set to hard");
@@ -3498,6 +3567,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", at }, { "index", atIdx }, { "bypassed", true }}))), "AutoTune bypassed");
         const auto dry = renderStem (at, "autotune-bypassed");
         check (! dry.samples.empty(), "AutoTune bypassed stem rendered");
+        check (singThroughTuner (detunedHz, 0.5) && liveTuners().size() == 0,
+               "a bypassed AutoTune reports no live pitch, whatever is sung at it");
         const double dryHz = toneHz (dry);
         const double dryClick = clickSeconds (dry);
         check (std::abs (cents (dryHz, detunedHz)) < 3.0, "bypassed AutoTune leaves the pitch alone (A3 + 35 cents)");

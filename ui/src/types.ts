@@ -443,6 +443,18 @@ export type Plugin = {
   catalogId?: string;
 };
 
+/** One Mosh AutoTune's live pitch reading: the 30 Hz "tuner" event, never the snapshot.
+ *  `index` is the plugin's position in its track's chain, as `Plugin.index`. */
+export type TunerReading = {
+  trackId: string;
+  index: number;
+  /** What is being sung, in Hz. */
+  inputHz: number;
+  /** The note it is being pulled to, in Hz. */
+  targetHz: number;
+  confidence: number;
+};
+
 export type AvailablePlugin = {
   id: string;
   name: string;

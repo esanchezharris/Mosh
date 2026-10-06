@@ -6,7 +6,7 @@
 // snapshot for the structural fields (recording / loop region). Pure state — the
 // rails have no actions of their own.
 import type { StateCreator } from "zustand";
-import type { Transport, Level } from "../types";
+import type { Transport, Level, TunerReading } from "../types";
 // Type-only imports from the store module (erased at compile time — no runtime cycle).
 import type { State, Spectrum } from "../store";
 
@@ -25,6 +25,11 @@ export type TelemetrySlice = {
   // re-create the snapshot object. Read it through ui/muteState.ts, never inline.
   muteAutomation: Record<string, boolean>;
 
+  // What each Mosh AutoTune is hearing, fed by the 30Hz "tuner" event. Keyed by
+  // ui/tuner.ts tunerKey(trackId, chain index). Only tuners hearing a pitch right now
+  // are present; the engine sends one empty payload when the last one stops.
+  tuners: Record<string, TunerReading>;
+
   // Live spectral feed (Moshi reactivity) — fed by the 30Hz "spectrum" event (master
   // Goertzel). bands = per-band energy 0..1 (low→high); level/flux 0..1. Pure telemetry
   // like `levels`; never a command, no audio concepts leak across the seam (just numbers).
@@ -42,6 +47,7 @@ export const createTelemetrySlice: StateCreator<State, [], [], TelemetrySlice> =
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   sendLevels: {},
   muteAutomation: {},
+  tuners: {},
   spectrum: { bands: [], level: 0, flux: 0 },
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
   reconcileTransport: (transport) => set((state) => ({
