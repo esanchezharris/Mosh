@@ -10,6 +10,7 @@
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -3706,6 +3707,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
             check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
             check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
+            // Shadow guard (MoshEngine.cpp, autoInitialiseDeviceManager): a master
+            // high-pass is Mosh's slope-capable filter too, and shows its slope read-only
+            // (set_plugin_state is track-only).
+            check (dynamic_cast<MoshLowPassPlugin*> (lp) != nullptr, "a load_master_builtin highpass is a MoshLowPassPlugin");
+            check ((int) hpMasterEntry["state"]["slope"]["value"] == 12, "the master highpass snapshot shows state.slope 12 dB/oct");
         }
         else
             check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
@@ -3762,6 +3768,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
+        // The slope persists: 24 dB/oct on the track high-pass survives save/reload, as
+        // the plugin property moshFilterSlope, on a reloaded MoshLowPassPlugin.
+        check (ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "key", "slope" }, { "value", 24 }})))
+                   && (int) trackBuiltin ("highpass")["state"]["slope"]["value"] == 24,
+               "set_plugin_state slope 24 dB/oct on the track highpass before save");
         const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
         const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
         check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
@@ -3772,6 +3783,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (masterBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz"
                    && JSON::toString (masterBuiltin ("highpass")["params"]) == masterReadbackBeforeReload,
                "reloaded master highpass retains normalized value, display and physical limits");
+        {
+            const auto reloaded = trackBuiltin ("highpass");
+            check ((int) reloaded["state"]["slope"]["value"] == 24 && (int) reloaded["state"]["slope"]["step"] == 6,
+                   "reloaded track highpass keeps state.slope 24 dB/oct (step 6)");
+            auto* m = dynamic_cast<MoshLowPassPlugin*> (liveTrackLowPass ((int) reloaded.getProperty ("index", -1)));
+            check (m != nullptr, "the reloaded track highpass is a MoshLowPassPlugin (shadow registered before the session loaded)");
+            if (m != nullptr)
+                check (m->getSlope() == 24 && (int) m->state.getProperty (MoshLowPassPlugin::slopePropertyId(), 0) == 24,
+                       "...running at 24 dB/oct, saved as moshFilterSlope = 24");
+            auto* master = dynamic_cast<MoshLowPassPlugin*> (liveMasterLowPass ((int) masterBuiltin ("highpass").getProperty ("index", -1)));
+            check (master != nullptr && master->getSlope() == 12 && ! master->state.hasProperty (MoshLowPassPlugin::slopePropertyId()),
+                   "the reloaded master highpass is a MoshLowPassPlugin at 12 dB/oct with no slope property written");
+        }
 
         // Leave the master bus as we found it: the next section ("Master bus plugins")
         // asserts it starts empty, and this section's redo'd highpass + softclip were

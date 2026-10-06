@@ -3,15 +3,21 @@
 //   SNAPSHOT   every plugin carries a stable itemId; the built-ins whose parameters are
 //              plain linear ranges publish physical min/max (the compressor's threshold
 //              and ratio deliberately do not); delay/chorus/phaser/low-/high-pass publish
-//              their CachedValue-only settings as `state`.
-//   COMMAND    set_plugin_state validates, clamps, rounds, flips the filter mode, and
-//              undoes; a `gesture` id makes a whole drag ONE undo step and nothing else.
+//              their CachedValue-only settings as `state` (integer keys with their step).
+//   COMMAND    set_plugin_state validates, clamps, rounds, snaps the filter slope onto its
+//              6 dB/oct grid, flips the filter mode, and undoes; a `gesture` id makes a
+//              whole drag ONE undo step and nothing else.
 //   METERS     MoshOps::pluginMeters (the 30 Hz "plugin_meters" rail): measured gain
 //              reduction that matches the compressor's static curve in steady state and
 //              departs from it on a transient, staleness, bypass, an undone removal, and
 //              the compressor's audio bit-identical to Tracktion's own.
 //   DELAY LINE Mosh's delay and chorus (lines pre-sized off the audio thread) are what
 //              "delay"/"chorus" load as, and their audio is Tracktion's bit for bit.
+//   SLOPE      Mosh's low/high-pass is what "lowpass"/"highpass" load as; at 12 dB/oct its
+//              audio is Tracktion's bit for bit (cutoff change and mode flip included),
+//              every slope attenuates as the Butterworth closed form says, and a slope
+//              change mid-stream crossfades without a jump.
+//   SIGNATURE  the render-layer cache key changes with plugin state and sampler sounds.
 //
 // A headless run has no audio thread, so the plugins are driven block by block the way
 // the playback graph's PluginNode drives them (as the AutoTune section does).
@@ -21,6 +27,8 @@
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/moshfx/MoshCompressorPlugin.h"
 #include "plugins/moshfx/MoshDelayLinePlugins.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "moshops/PluginState.h"
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -178,6 +186,28 @@ void driveWithChange (te::Plugin& plugin, juce::AudioBuffer<float>& io, int bloc
     plugin.baseClassDeinitialise();
 }
 
+// The same, with `beforeBlock (plugin, blockStart)` called before every block (changes at
+// chosen points of the stream).
+void driveScheduled (te::Plugin& plugin, juce::AudioBuffer<float>& io, int block,
+                     const std::function<void (te::Plugin&, int)>& beforeBlock)
+{
+    const double rate = 48000.0;
+    plugin.baseClassInitialise ({ tracktion::TimePosition(), rate, block });
+    const auto layout = io.getNumChannels() >= 2 ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
+    for (int start = 0; start < io.getNumSamples(); start += block)
+    {
+        beforeBlock (plugin, start);
+        const int n = juce::jmin (block, io.getNumSamples() - start);
+        const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
+                                         tracktion::TimePosition::fromSeconds ((start + n) / rate));
+        te::PluginRenderContext context (&io, layout, start, n, nullptr, 0.0, time,
+                                         /*playing*/ true, /*scrubbing*/ false, /*rendering*/ true,
+                                         /*allowBypassedProcessing*/ false);
+        plugin.applyToBufferWithAutomation (context);
+    }
+    plugin.baseClassDeinitialise();
+}
+
 int samplesDiffering (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
 {
     int differing = 0;
@@ -324,23 +354,26 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
     {
         const int delay = at["delay"], chorus = at["chorus"], phaser = at["phaser"];
         const int lowpass = at["lowpass"], highpass = at["highpass"];
-        auto entryIs = [&] (int index, const char* key, double value, double lo, double hi, const char* unit, bool stepped)
+        // step 0: the entry must carry no step (number kinds).
+        auto entryIs = [&] (int index, const char* key, double value, double lo, double hi, const char* unit, int step)
         {
             const auto e = stateEntry (ops, tid, index, key);
             const bool unitOk = String (unit).isEmpty() ? ! e.hasProperty ("unit") : e.getProperty ("unit", var()).toString() == unit;
-            const bool stepOk = stepped ? (int) e.getProperty ("step", 0) == 1 : ! e.hasProperty ("step");
+            const bool stepOk = step > 0 ? (int) e.getProperty ("step", 0) == step : ! e.hasProperty ("step");
             return std::abs ((double) e.getProperty ("value", -999.0) - value) < 1.0e-4
                 && std::abs ((double) e.getProperty ("min", -999.0) - lo) < 1.0e-6
                 && std::abs ((double) e.getProperty ("max", -999.0) - hi) < 1.0e-6
                 && unitOk && stepOk;
         };
-        check (entryIs (delay, "lengthMs", 150.0, 1.0, 2000.0, "ms", true), "delay state.lengthMs = 150 ms, 1..2000, step 1");
-        check (entryIs (chorus, "depthMs", 3.0, 0.1, 20.0, "ms", false) && entryIs (chorus, "speedHz", 1.0, 0.1, 10.0, "Hz", false)
-                   && entryIs (chorus, "width", 0.5, 0.0, 1.0, "", false) && entryIs (chorus, "mix", 0.5, 0.0, 1.0, "", false),
+        check (entryIs (delay, "lengthMs", 150.0, 1.0, 2000.0, "ms", 1), "delay state.lengthMs = 150 ms, 1..2000, step 1");
+        check (entryIs (chorus, "depthMs", 3.0, 0.1, 20.0, "ms", 0) && entryIs (chorus, "speedHz", 1.0, 0.1, 10.0, "Hz", 0)
+                   && entryIs (chorus, "width", 0.5, 0.0, 1.0, "", 0) && entryIs (chorus, "mix", 0.5, 0.0, 1.0, "", 0),
                "chorus state: depthMs, speedHz, width, mix with their defaults and ranges");
-        check (entryIs (phaser, "depth", 5.0, 0.0, 8.0, "oct", false) && entryIs (phaser, "rate", 0.4, 0.05, 10.0, "Hz", false)
-                   && entryIs (phaser, "feedback", 0.7, -0.95, 0.95, "", false),
+        check (entryIs (phaser, "depth", 5.0, 0.0, 8.0, "oct", 0) && entryIs (phaser, "rate", 0.4, 0.05, 10.0, "Hz", 0)
+                   && entryIs (phaser, "feedback", 0.7, -0.95, 0.95, "", 0),
                "phaser state: depth, rate, feedback with their defaults and ranges");
+        check (entryIs (lowpass, "slope", 12.0, 6.0, 48.0, "dB/oct", 6) && entryIs (highpass, "slope", 12.0, 6.0, 48.0, "dB/oct", 6),
+               "lowpass/highpass state.slope = 12 dB/oct, 6..48, step 6");
         {
             const auto lp = stateEntry (ops, tid, lowpass, "mode"), hp = stateEntry (ops, tid, highpass, "mode");
             const auto choices = lp.getProperty ("choices", var());
@@ -423,6 +456,67 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                "undo turns it back into a \"highpass\"");
         check (! ok (setState (lowpass, "mode", "bandpass")) && ! ok (setState (lowpass, "mode", 3)),
                "a mode outside its choices is refused");
+
+        // The slope: snapped onto lo + k * 6 (a tie rounds up), clamped to 6..48, undoable,
+        // and what the live filter runs at.
+        {
+            auto liveSlope = [&] (int index)
+            {
+                auto* m = dynamic_cast<MoshLowPassPlugin*> (livePlugin (eng, tid, index));
+                return m != nullptr ? m->getSlope() : -1;
+            };
+            const struct { double asked; int applied; } snaps[] = { { 25, 24 }, { 27, 30 }, { 100, 48 }, { 0, 6 }, { 33, 36 }, { 47.9, 48 }, { -7, 6 } };
+            for (const auto& c : snaps)
+            {
+                r = setState (lowpass, "slope", c.asked);
+                const String asked (c.asked);
+                check (ok (r) && (int) dataOf (r).getProperty ("value", -1) == c.applied && dataOf (r).getProperty ("key", var()).toString() == "slope"
+                           && (int) stateValue (ops, tid, lowpass, "slope") == c.applied && liveSlope (lowpass) == c.applied,
+                       "slope " + asked + " is applied as " + String (c.applied) + " dB/oct (the result, the snapshot and the live filter agree)");
+                check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, lowpass, "slope") == 12 && liveSlope (lowpass) == 12,
+                       "undo after slope " + asked + " restores 12 dB/oct");
+            }
+            r = setState (highpass, "slope", 42);
+            check (ok (r) && (int) stateValue (ops, tid, highpass, "slope") == 42 && liveSlope (highpass) == 42, "a highpass takes slope 42 dB/oct");
+            check (ok (command (ops, "undo")) && liveSlope (highpass) == 12, "undo restores the highpass to 12 dB/oct");
+
+            check (! ok (setState (lowpass, "slope", "abc")) && ! ok (setState (lowpass, "slope", "nan")) && ! ok (setState (lowpass, "slope", true)),
+                   "a string, \"nan\" or boolean slope is refused");
+            {
+                // NaN and infinities cannot ride a JSON command; the validator refuses them.
+                const auto* spec = pluginstate::find ("lowpass", "slope");
+                var applied;
+                String error;
+                check (spec != nullptr && ! pluginstate::coerce (*spec, std::numeric_limits<double>::quiet_NaN(), applied, error)
+                           && ! pluginstate::coerce (*spec, std::numeric_limits<double>::infinity(), applied, error)
+                           && ! pluginstate::coerce (*spec, -std::numeric_limits<double>::infinity(), applied, error),
+                       "a NaN or infinite slope is refused by set_plugin_state's validator");
+            }
+            check ((int) stateValue (ops, tid, lowpass, "slope") == 12 && liveSlope (lowpass) == 12, "the refused slopes changed nothing");
+
+            // The mode and the slope are separate settings: a flip keeps the slope.
+            check (ok (setState (lowpass, "slope", 36)), "slope 36 dB/oct on the lowpass");
+            check (ok (setState (lowpass, "mode", "highpass")) && pluginAt (ops, tid, lowpass).getProperty ("type", var()).toString() == "highpass"
+                       && (int) stateValue (ops, tid, lowpass, "slope") == 36 && liveSlope (lowpass) == 36,
+                   "a mode flip keeps the slope: the now-\"highpass\" runs at 36 dB/oct");
+            check (ok (command (ops, "undo")) && pluginAt (ops, tid, lowpass).getProperty ("type", var()).toString() == "lowpass"
+                       && (int) stateValue (ops, tid, lowpass, "slope") == 36,
+                   "undoing the flip keeps it too");
+            check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, lowpass, "slope") == 12 && liveSlope (lowpass) == 12,
+                   "undo the slope: 12 dB/oct");
+
+            // Without Mosh's subclass there is no slope: a plain te::LowPassPlugin.
+            if (auto* live = livePlugin (eng, tid, lowpass))
+            {
+                auto plain = tracktionTwin<te::LowPassPlugin> (eng, *live);
+                const auto* spec = pluginstate::find ("lowpass", "slope");
+                const auto described = pluginstate::describe (*plain, "lowpass");
+                check (spec != nullptr && dynamic_cast<MoshLowPassPlugin*> (plain.get()) == nullptr
+                           && pluginstate::read (*plain, *spec).isVoid() && ! pluginstate::write (*plain, *spec, 24, nullptr)
+                           && ! described.hasProperty ("slope") && described.hasProperty ("mode"),
+                       "a plain te::LowPassPlugin has no slope: read() is void (set_plugin_state refuses on it), write() refuses, the state omits it and keeps mode");
+            }
+        }
 
         // A value equal to the current one is not an edit: ok, logged undoable:false.
         // (Its other effect, not ending an open gesture window, is checked in the gesture
@@ -909,6 +1003,120 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             check (differing == 0, "MoshChorusPlugin's output is bit-identical to te::ChorusPlugin, depth 3 -> 18 ms mid-stream ("
                                        + String (differing) + " samples differ)");
             chorus->depthMs.setValue (3.0f, nullptr);
+        }
+    }
+
+    // ── Low/high-pass slope: Tracktion's filter at 12 dB/oct, a Butterworth cascade otherwise ──
+    section ("Plugin panels: low/high-pass slope (Tracktion's filter at 12 dB/oct)");
+    {
+        auto* lowpass = dynamic_cast<MoshLowPassPlugin*> (livePlugin (eng, tid, at["lowpass"]));
+        auto* highpass = dynamic_cast<MoshLowPassPlugin*> (livePlugin (eng, tid, at["highpass"]));
+        // Guards on Tracktion's init order (MoshEngine.cpp, autoInitialiseDeviceManager).
+        check (lowpass != nullptr, "a loaded \"lowpass\" is a MoshLowPassPlugin (registered before Tracktion's own)");
+        check (highpass != nullptr, "a loaded \"highpass\" is a MoshLowPassPlugin too");
+
+        if (lowpass != nullptr)
+        {
+            // Bit-identical to te::LowPassPlugin at 12 dB/oct, through a cutoff change and a
+            // mode flip mid-stream. Both are built from the live filter's state (so the
+            // session itself is not touched by the changes).
+            auto mosh = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
+            auto plain = tracktionTwin<te::LowPassPlugin> (eng, *lowpass);
+            check (dynamic_cast<MoshLowPassPlugin*> (plain.get()) == nullptr && dynamic_cast<MoshLowPassPlugin*> (mosh.get()) != nullptr
+                       && dynamic_cast<MoshLowPassPlugin*> (mosh.get())->getSlope() == 12,
+                   "the reference is Tracktion's own LowPassPlugin; Mosh's twin runs at 12 dB/oct");
+            auto music = [] (int ch, int i)
+            {
+                const float swell = 0.5f + 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1.5 * i / 48000.0);
+                return swell * (sine (220.0 + 3.0 * ch, i, 0.5f) + sine (5200.0, i, 0.2f)) + (i % 4800 < 48 ? 0.3f : 0.0f);
+            };
+            constexpr int block = 256, cutoffAt = 62 * block, flipAt = 125 * block;
+            auto schedule = [] (te::Plugin& p, int start)
+            {
+                auto* lp = dynamic_cast<te::LowPassPlugin*> (&p);
+                if (lp == nullptr) return;
+                if (start == cutoffAt) lp->frequency->setParameterWithoutUndo (1500.0f, juce::dontSendNotification);
+                if (start == flipAt) lp->mode.setValue ("highpass", nullptr);
+            };
+            auto viaMosh = signal (2, 1.0, music), viaTracktion = signal (2, 1.0, music);
+            driveScheduled (*mosh, viaMosh, block, schedule);
+            driveScheduled (*plain, viaTracktion, block, schedule);
+            const int differing = samplesDiffering (viaMosh, viaTracktion);
+            check (differing == 0, "MoshLowPassPlugin at 12 dB/oct is bit-identical to te::LowPassPlugin, 4 kHz LP -> 1.5 kHz -> high-pass mid-stream ("
+                                       + String (differing) + " samples differ)");
+            float wet = 0.0f;
+            for (int i = 0; i < viaMosh.getNumSamples(); ++i)
+                wet = juce::jmax (wet, std::abs (viaMosh.getSample (0, i) - music (0, i)));
+            check (wet > 0.05f, "...and the filter really processed (its output differs from the dry input)");
+
+            // Steady-state attenuation per slope: a sine an octave beyond a 1 kHz cutoff
+            // (2 kHz for low-pass, 500 Hz for high-pass), measured on the second half,
+            // against the Butterworth closed form (MoshFilterDesign.h).
+            for (bool lowPassMode : { true, false })
+                for (int slopeDb = 6; slopeDb <= 48; slopeDb += 6)
+                {
+                    auto twin = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
+                    auto* f = dynamic_cast<MoshLowPassPlugin*> (twin.get());
+                    if (f == nullptr) continue;
+                    f->mode.setValue (lowPassMode ? "lowpass" : "highpass", nullptr);
+                    f->slope.setValue (slopeDb, nullptr);
+                    f->frequency->setParameterWithoutUndo (1000.0f, juce::dontSendNotification);
+                    const double fc = f->frequency->getCurrentValue(), hz = lowPassMode ? 2000.0 : 500.0;
+                    auto tone = signal (1, 1.0, [hz] (int, int i) { return sine (hz, i, 0.5f); });
+                    drive (*f, tone, block);
+                    double sumOut = 0.0, sumIn = 0.0;
+                    for (int i = tone.getNumSamples() / 2; i < tone.getNumSamples(); ++i)
+                    {
+                        sumOut += (double) tone.getSample (0, i) * tone.getSample (0, i);
+                        sumIn += (double) sine (hz, i, 0.5f) * sine (hz, i, 0.5f);
+                    }
+                    const double measured = 10.0 * std::log10 (sumOut / sumIn);
+                    const double expected = moshfx::filterdesign::closedFormDb (lowPassMode, slopeDb / 6, 48000.0, fc, hz);
+                    check (f->getSlope() == slopeDb && std::abs (measured - expected) < 0.1,
+                           String (lowPassMode ? "LP" : "HP") + " 1 kHz at " + String (slopeDb) + " dB/oct: " + String (hz, 0) + " Hz measured "
+                               + String (measured, 3) + " dB vs the closed form " + String (expected, 3) + " dB (within 0.1 dB)");
+                }
+
+            // A slope change mid-stream (12 -> 48 at a block boundary) crossfades into the
+            // new cascade: every sample finite and within the +-3 clamp, no sample-to-sample
+            // jump larger than the dry signal's own largest, and once the fade is over the
+            // output converges on a filter that ran at 48 dB/oct throughout.
+            {
+                auto changed = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
+                auto steady = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
+                if (auto* s48 = dynamic_cast<MoshLowPassPlugin*> (steady.get()))
+                    s48->slope.setValue (48, nullptr);
+                auto out = signal (2, 1.0, music), ref = signal (2, 1.0, music);
+                driveWithChange (*changed, out, block, [] (te::Plugin& p)
+                {
+                    if (auto* m = dynamic_cast<MoshLowPassPlugin*> (&p))
+                        m->slope.setValue (48, nullptr);
+                });
+                drive (*steady, ref, block);
+                bool finite = true;
+                float peak = 0.0f, maxStep = 0.0f, dryStep = 0.0f, tailDiff = 0.0f;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < out.getNumSamples(); ++i)
+                    {
+                        const float y = out.getSample (ch, i);
+                        finite = finite && std::isfinite (y);
+                        peak = juce::jmax (peak, std::abs (y));
+                        if (i > 0)
+                        {
+                            maxStep = juce::jmax (maxStep, std::abs (y - out.getSample (ch, i - 1)));
+                            dryStep = juce::jmax (dryStep, std::abs (music (ch, i) - music (ch, i - 1)));
+                        }
+                        if (i >= out.getNumSamples() - 4800)
+                            tailDiff = juce::jmax (tailDiff, std::abs (y - ref.getSample (ch, i)));
+                    }
+                auto* m = dynamic_cast<MoshLowPassPlugin*> (changed.get());
+                check (m != nullptr && m->getSlope() == 48, "the twin now runs at 48 dB/oct");
+                check (finite && peak <= 3.0f, "slope 12 -> 48 mid-stream: every sample finite, peak " + String (peak, 3) + " (<= 3)");
+                check (maxStep <= dryStep, "...no sample-to-sample jump beyond the dry signal's largest (" + String (maxStep, 4)
+                                               + " <= " + String (dryStep, 4) + ")");
+                check (tailDiff < 1.0e-4f, "...and the last 0.1 s matches a filter run at 48 dB/oct throughout (max difference "
+                                               + String (tailDiff, 7) + ")");
+            }
         }
     }
 
