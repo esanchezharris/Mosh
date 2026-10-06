@@ -376,6 +376,15 @@ void pump (int ms)
         mm->runDispatchLoopUntil (ms);
 }
 
+// A sampler loads its sounds in an AsyncUpdate (handleAsyncUpdate rebuilds the list from the
+// SOUND state). Run a pending one NOW instead of hoping a pump reaches it: juce::AsyncUpdater
+// is a PRIVATE base of te::SamplerPlugin, which only a C-style cast may convert to (with the
+// right pointer adjustment).
+void flushSamplerLoad (te::SamplerPlugin& sampler)
+{
+    ((juce::AsyncUpdater*) &sampler)->handleUpdateNowIfNeeded();
+}
+
 var meterFor (const var& payload, const String& trackId, int index)
 {
     const auto entries = payload.getProperty ("plugins", var());
@@ -2206,6 +2215,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 return true;
             };
             pump (200);   // the edits above rebuilt the sounds (AsyncUpdate): settle before driving
+            flushSamplerLoad (*drums);
             (void) ops.pluginMeters();
             {
                 LiveInstrument live (*drums, 256);
@@ -2329,9 +2339,9 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 // hold, and the blip's note-off never reached the sampler on this road.
                 auto plain = tracktionTwin<te::SamplerPlugin> (eng, *drums);
                 auto* twinSampler = dynamic_cast<te::SamplerPlugin*> (plain.get());
-                pump (200);   // its sounds load on an AsyncUpdate
                 if (twinSampler != nullptr)
                 {
+                    flushSamplerLoad (*twinSampler);   // its sounds load on an AsyncUpdate
                     LiveInstrument twin (*twinSampler, 256);
                     twinSampler->playNotes (keysOf ({ 36 }));
                     const float firstTap = peakOf (twin.play (0.5));
@@ -2357,7 +2367,11 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 const auto hit1 = meter();
                 check (peak1 > 0.01f && hitsAre (hit1, { { 36, 0.75 } }), "the first tap sounds (peak " + String (peak1, 4) + ") and is a hit");
                 live.play (1.0);   // it rings out
-                pump (150);        // the 30 Hz sweep: the 20 ms blip has expired
+                // The 30 Hz sweep (MoshOps' timer) releases the 20 ms blip: pump until it has,
+                // for up to 2 s (a fixed pump can miss the tick under load). Without the fix
+                // the keys never clear and the check below fails after the 2 s.
+                for (int tick = 0; tick < 40 && ! drums->getAuditionKeys().isZero(); ++tick)
+                    pump (50);
                 check (drums->getAuditionKeys().isZero(), "the blip's expiry handed the sampler the keys still held on the track: none (36 released on the sampler road)");
                 const auto tap2 = blip();
                 check (ok (tap2) && (int) dataOf (tap2).getProperty ("held", -1) == 1, "the second tap: one held voice");
@@ -2375,7 +2389,8 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             // ── The audio is Tracktion's, bit for bit ──
             {
                 auto plain = tracktionTwin<te::SamplerPlugin> (eng, *drums);
-                pump (200);   // the twin loads its sounds on an AsyncUpdate
+                if (auto* twinSampler = dynamic_cast<te::SamplerPlugin*> (plain.get()))
+                    flushSamplerLoad (*twinSampler);   // the twin loads its sounds on an AsyncUpdate
                 check (plain != nullptr && dynamic_cast<MoshSamplerPlugin*> (plain.get()) == nullptr,
                        "the twin is a plain te::SamplerPlugin built from a copy of the drum sampler's state");
                 const MidiEvents pattern = { { 0, noteOn (36, 100) }, { 3000, noteOn (42, 80) }, { 12000, noteOn (38, 127) }, { 20000, noteOn (46, 50) },
