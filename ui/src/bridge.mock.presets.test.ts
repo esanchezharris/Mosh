@@ -18,34 +18,57 @@ describe("bridge.mock — presets mirror the engine", () => {
 
     const loaded = await run("load_preset", { trackId, index: before.index, file: "/presets/4osc/mosh-bass.json" });
     expect(loaded.ok).toBe(true);
-    // mosh-bass.json names 17 parameters, every one a real 4OSC name
-    expect(loaded.data).toEqual({ plugin: "4osc", preset: "mosh-bass", paramsApplied: 17 });
+    // mosh-bass.json names 14 parameters and 5 settings, every one a real 4OSC name
+    expect(loaded.data).toMatchObject({ plugin: "4osc", preset: "mosh-bass", paramsApplied: 14, settingsApplied: 5, changed: true });
+    expect(loaded.data).not.toHaveProperty("unknownParams");
     const after = await synthOn(1);
     const byId = (id: string) => after.params.find((p) => p.id === id)!;
-    expect(byId("level1")).toMatchObject({ value: expect.closeTo(0.85, 6), display: "-3.98dB" });    // -100 + 100·0.85^(1/4)
-    expect(byId("ampRelease")).toMatchObject({ value: expect.closeTo(0.18, 6), display: "12ms" });   // 0.001 + 59.999·0.18^5 s
-    expect(byId("filterFreq").display).toBe("159Hz");                                                // note 0.38·135.08 = 51.33 → 440·2^(-17.67/12)
-    expect(byId("tune1")).toMatchObject({ value: 0.5, display: "0st" });                              // not in the file: untouched
+    expect(byId("level1").display).toBe("-4.00dB");            // -100 + 100·v^(1/4)
+    expect(byId("ampRelease").display).toBe("80ms");           // 0.001 + 59.999·v^5 s
+    expect(byId("filterFreq").display).toBe("160Hz");
+    expect(byId("tune1")).toMatchObject({ value: 0.5, display: "0st" });   // not in the file: its default
     expect(after.params.filter((p, i) => p.value !== baseline[i]![0]).length).toBeGreaterThan(10);   // anti-vacuity
-    expect(after.state?.waveShape1?.value).toBe("sine");    // the file's waveShapes do not land (engine bug, owner-gated)
-    expect(after.state?.waveShape2?.value).toBe("off");
+    // the settings land: saw + square, two unison voices, a 24 dB/oct low-pass
+    expect(after.state?.waveShape1?.value).toBe("saw");
+    expect(after.state?.waveShape2?.value).toBe("square");
+    expect(after.state?.voices1?.value).toBe(2);
+    expect(after.state?.filterType?.value).toBe("lowpass");
+    expect(after.state?.filterSlope?.value).toBe(24);
 
+    // the patch that is already loaded: no change, no undo step
     const again = await run("load_preset", { trackId, index: before.index, file: "/presets/4osc/mosh-bass.json" });
     expect(again.ok).toBe(true);
-    expect((await synthOn(1)).params).toEqual(after.params); // deterministic
+    expect(again.data).toMatchObject({ changed: false, reset: 0 });
+    expect((await synthOn(1)).params).toEqual(after.params);
 
-    expect((await run("undo")).ok).toBe(true);
-    expect((await run("undo")).ok).toBe(true);
-    expect((await synthOn(1)).params.map((p) => [p.value, p.display])).toEqual(baseline);
+    expect((await run("undo")).ok).toBe(true);           // ONE undo takes the whole patch back
+    const undone = await synthOn(1);
+    expect(undone.params.map((p) => [p.value, p.display])).toEqual(baseline);
+    expect(undone.state?.waveShape1?.value).toBe("sine");
+    expect(undone.state?.filterType?.value).toBe("off");
   });
 
-  it("reports the names a preset matched nothing for, as the engine does (mosh-pad's bare \"Spread\")", async () => {
+  it("a patch is whole: what it does not name returns to its default (lead over bass)", async () => {
+    const trackId = (await snapshot()).tracks[1].id;
+    await run("load_builtin", { trackId, type: "4osc" });
+    await run("load_preset", { trackId, file: "/presets/4osc/mosh-bass.json" });
+    const r = await run("load_preset", { trackId, file: "/presets/4osc/mosh-lead.json" });
+    expect(r.ok).toBe(true);
+    expect(r.data).toMatchObject({ preset: "mosh-lead", paramsApplied: 10, settingsApplied: 6, changed: true });
+    const synth = await synthOn(1);
+    expect(synth.params.find((p) => p.id === "filterAmount")!.value).toBe(0.5);   // bass's +0.2 is gone
+    expect(synth.state?.filterSlope?.value).toBe(12);
+    expect(synth.state?.voices2?.value).toBe(3);
+  });
+
+  it("mosh-pad's spread now binds (\"Spread 2\"); nothing in the bank is unknown", async () => {
     const trackId = (await snapshot()).tracks[1].id;
     await run("load_builtin", { trackId, type: "4osc" });
     const r = await run("load_preset", { trackId, file: "/presets/4osc/mosh-pad.json" });
     expect(r.ok).toBe(true);
-    expect(r.data).toEqual({ plugin: "4osc", preset: "mosh-pad", paramsApplied: 11, unknownParams: "Spread" });
-    expect((await synthOn(1)).params.find((p) => p.id === "spread1")!.value).toBe(0.5);   // nothing bound to it
+    expect(r.data).toMatchObject({ plugin: "4osc", preset: "mosh-pad", paramsApplied: 10, settingsApplied: 5 });
+    expect(r.data).not.toHaveProperty("unknownParams");
+    expect((await synthOn(1)).params.find((p) => p.id === "spread2")!.value).toBeCloseTo(0.7, 6);
   });
 
   it("refuses a 4OSC preset on a track without a 4OSC, an index that is not one, and an unknown file", async () => {

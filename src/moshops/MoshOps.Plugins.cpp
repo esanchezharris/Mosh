@@ -1893,8 +1893,9 @@ juce::File MoshOps::drumKitDir() const { return drumKitDir (kDefaultKitId); }
 // Library layout: <root>/<pluginKey>/<preset file>, pluginKey ∈ {"vital","4osc",…}.
 // Two roots: the bundled bank (resolution mirrors drumKitsRoot) and the user's
 // ~/Library/Mosh/presets. `.vital` files target a hosted Vital VST3; `.json`
-// files are 4OSC patches ({"params": {"<display name>": normalized 0..1},
-// "waveShapes": [perOscInt…]}).
+// files are 4OSC patches: {"state": {<set_plugin_state key>: value}, "params":
+// {"<display name>": normalized 0..1}}. A patch is whole: what it does not name returns to
+// Tracktion's default.
 // ─────────────────────────────────────────────────────────────────────────────
 
 juce::File MoshOps::presetsBundledRoot() const
@@ -2100,19 +2101,32 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         const auto parsed = juce::JSON::parse (file.loadFileAsString());
         if (parsed.getProperty ("kind", var()).toString() == trackpreset::kKind)
             return errResult ("load_preset", wrongSeam);
+        // The first bank (2026-09-01) numbered its waves in an enum Tracktion does not use
+        // and wrote them where the synth never reads them, so they never sounded. Settings
+        // are now named, in "state"; a numbered list is refused rather than guessed at.
+        if (parsed.getDynamicObject() != nullptr && parsed.getDynamicObject()->hasProperty ("waveShapes"))
+            return errResult ("load_preset", "this preset uses the old numbered \"waveShapes\"; name the waves in "
+                                             "\"state\" instead (waveShape1..4: off|sine|square|saw|triangle|noise)");
         const auto params = parsed.getProperty ("params", var());
         auto* paramsObj = params.getDynamicObject();
-        const auto waveShapes = parsed.getProperty ("waveShapes", var());
+        const auto stateArg = parsed.getProperty ("state", var());
+        auto* stateObj = stateArg.getDynamicObject();
+        if (! stateArg.isVoid() && stateObj == nullptr)
+            return errResult ("load_preset", "\"state\" must be an object of 4OSC settings");
 
-        // Resolve every named param BEFORE the txn (G14 again): apply-all-or-error.
+        // PREFLIGHT, touching nothing (G14 again): resolve every named param, and validate
+        // every setting exactly as set_plugin_state would. A bad setting refuses the whole
+        // preset; an unknown param name is reported and skipped, as before.
+        const int numParams = fourOsc->getNumAutomatableParameters();
         struct Pending { te::AutomatableParameter* p; int index; float raw; };
         juce::Array<Pending> pending;
+        std::vector<bool> named ((size_t) juce::jmax (0, numParams), false);
         juce::StringArray unknown;
         if (paramsObj != nullptr)
             for (const auto& prop : paramsObj->getProperties())
             {
                 te::AutomatableParameter* found = nullptr; int fi = -1;
-                for (int i = 0; i < fourOsc->getNumAutomatableParameters(); ++i)
+                for (int i = 0; i < numParams; ++i)
                 {
                     auto ap = fourOsc->getAutomatableParameter (i);
                     if (ap != nullptr && ap->paramName.equalsIgnoreCase (prop.name.toString())) { found = ap.get(); fi = i; break; }
@@ -2120,39 +2134,83 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
                 if (found == nullptr) { unknown.add (prop.name.toString()); continue; }
                 const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) prop.value);
                 pending.add ({ found, fi, found->valueRange.convertFrom0to1 (norm) });
+                named[(size_t) fi] = true;
             }
-        const bool hasShapes = waveShapes.isArray() && waveShapes.size() > 0;
-        if (pending.isEmpty() && ! hasShapes)
-            return errResult ("load_preset", "preset matched no 4OSC parameters"
+
+        struct PendingSetting { const pluginstate::Spec* spec; juce::var applied; };
+        juce::Array<PendingSetting> settings;
+        juce::StringArray namedSettings;
+        if (stateObj != nullptr)
+            for (const auto& prop : stateObj->getProperties())
+            {
+                const auto key = prop.name.toString();
+                const auto* spec = pluginstate::find ("4osc", key);
+                if (spec == nullptr)
+                    return errResult ("load_preset", "unknown 4OSC setting in \"state\": " + key
+                                                     + " (settings: " + pluginstate::keysFor ("4osc").joinIntoString (", ") + ")");
+                juce::var applied; juce::String why;
+                if (! pluginstate::coerce (*spec, prop.value, applied, why) || pluginstate::fourosc::toStored (*spec, applied).isVoid())
+                    return errResult ("load_preset", "4OSC setting " + key + ": " + (why.isNotEmpty() ? why : juce::String ("not a value it can hold")));
+                settings.add ({ spec, applied });
+                namedSettings.add (key);
+            }
+        if (pending.isEmpty() && settings.isEmpty())
+            return errResult ("load_preset", "preset matched no 4OSC parameters or settings"
                               + juce::String (unknown.isEmpty() ? "" : " (unknown: " + unknown.joinIntoString (", ") + ")"));
 
-        beginTxn ("load_preset");
+        // A preset is a whole patch: every param and setting it does not name goes back to
+        // Tracktion's default, so the sound never depends on what was loaded before.
+        juce::Array<Pending> resets;
+        for (int i = 0; i < numParams; ++i)
+            if (! named[(size_t) i])
+                if (auto ap = fourOsc->getAutomatableParameter (i))
+                    if (const auto def = ap->getDefaultValue(); def.has_value() && ! juce::exactlyEqual (*def, ap->getCurrentValue()))
+                        resets.add ({ ap.get(), i, *def });
+        juce::Array<const pluginstate::Spec*> settingResets;
+        for (const auto& key : pluginstate::keysFor ("4osc"))
+            if (! namedSettings.contains (key))
+                if (const auto* spec = pluginstate::find ("4osc", key); spec != nullptr && ! pluginstate::fourosc::isUsingDefault (*fourOsc, *spec))
+                    settingResets.add (spec);
+
+        juce::Array<Pending> paramWrites;
         for (const auto& pe : pending)
-            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
-        if (hasShapes)
-        {
-            // Wave shape is a per-oscillator ValueTree property (not automatable).
-            // Find the oscillator child trees in order and set their waveShape with
-            // the undo manager, so the whole preset stays one undo step.
-            int osc = 0;
-            for (int i = 0; i < fourOsc->state.getNumChildren() && osc < waveShapes.size(); ++i)
-            {
-                auto child = fourOsc->state.getChild (i);
-                if (child.hasProperty (te::IDs::waveShape) || child.getType().toString().containsIgnoreCase ("osc"))
-                {
-                    child.setProperty (te::IDs::waveShape, (int) waveShapes[osc], &undoManager());
-                    ++osc;
-                }
-            }
-        }
-        logLine ("load_preset", args, true, {}, true);
-        emitTrackPatch (*track);
-        reactiveTouchTrack (trackId);
+            if (! juce::exactlyEqual (pe.raw, pe.p->getCurrentValue()))
+                paramWrites.add (pe);
+        juce::Array<PendingSetting> settingWrites;
+        for (const auto& st : settings)
+            if (! pluginstate::isNoChange (*fourOsc, *st.spec, st.applied))
+                settingWrites.add (st);
+
         auto* data = new DynamicObject();
         data->setProperty ("plugin", "4osc");
         data->setProperty ("preset", presetName);
         data->setProperty ("paramsApplied", pending.size());
+        data->setProperty ("settingsApplied", settings.size());
         if (! unknown.isEmpty()) data->setProperty ("unknownParams", unknown.joinIntoString (", "));
+
+        // The patch is already loaded: no edit, and no empty transaction for undo to trip on.
+        if (paramWrites.isEmpty() && settingWrites.isEmpty() && resets.isEmpty() && settingResets.isEmpty())
+        {
+            logLine ("load_preset", args, true, {}, false);
+            data->setProperty ("changed", false);
+            data->setProperty ("reset", 0);
+            return okResult ("load_preset", var (data));
+        }
+
+        beginTxn ("load_preset");
+        for (const auto& pe : paramWrites)
+            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
+        for (const auto& pe : resets)
+            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
+        for (const auto& st : settingWrites)
+            pluginstate::write (*fourOsc, *st.spec, st.applied, &undoManager());
+        for (const auto* spec : settingResets)
+            pluginstate::fourosc::resetToDefault (*fourOsc, *spec, &undoManager());
+        logLine ("load_preset", args, true, {}, true);
+        emitTrackPatch (*track);
+        reactiveTouchTrack (trackId);
+        data->setProperty ("changed", true);
+        data->setProperty ("reset", resets.size() + settingResets.size());
         return okResult ("load_preset", var (data));
     }
 

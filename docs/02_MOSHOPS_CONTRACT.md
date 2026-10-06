@@ -122,7 +122,7 @@ its public CachedValues on the plugin's root state, written through the Edit's U
 `waveShape1`…`waveShape4` (`"off"`, `"sine"`, `"square"`, `"saw"`, `"triangle"`, `"noise"`; osc 1
 defaults to `"sine"`, the others `"off"`), `voices1`…`voices4` (unison voices, integer 1–8, step
 1, default 1), `filterType` (`"off"`, `"lowpass"`, `"highpass"`, `"bandpass"`, `"notch"`; default
-`"off"`, which is every Mosh 4OSC unless a session set it), `filterSlope` (integer 12–24 dB/oct,
+`"off"`, which is a fresh 4OSC's; the bundled presets turn it on), `filterSlope` (integer 12–24 dB/oct,
 step 12, default 12), `distortionOn`, `reverbOn`, `delayOn`, `chorusOn` (`"off"`/`"on"`, default
 `"off"`), `delayBeats` (0.0625–4 beats, Tracktion's `delay`; default 1), `voiceMode` (`"mono"`,
 `"legato"`, `"poly"`; default `"poly"`) and `ampAnalog` (`"off"`/`"on"`, default `"on"`). Choices are
@@ -150,6 +150,21 @@ session carries: `[{paramIndex, id, source, depth}]` (`source` is Tracktion's id
 (`src/plugins/moshfx/MoshFourOscPlugin.h`: Tracktion's plugin, same `"4osc"` type, its audio the
 base class's own call, registered with the shadows above; `--selftest` fails if a loaded, default
 or reloaded one is not), which publishes the 4OSC's `plugin_meters` entry (see *Events*).
+
+**4OSC presets (`load_preset` with a `.json`, 2026-10-06).** A patch file is
+`{"state": {<the set_plugin_state keys above>: value}, "params": {"<parameter name>": normalized
+0–1}}` (plus ignored `_`-prefixed notes; the bundled ones carry `_physical`, what each
+normalized value is). Every `state` key and value is validated and coerced exactly as
+`set_plugin_state` does (an unknown key or bad value refuses the whole file); a param name binds
+to the first parameter with that name, case-insensitively (an unmatched name is reported in
+`unknownParams`, not fatal). The load is a WHOLE patch: every parameter and setting the file does
+not name returns to Tracktion's default, so a patch never inherits from the one before. One undo
+step; refusals and a load of the patch already loaded open none (`changed:false`). A file with the
+first bank's numbered `"waveShapes"` is refused (that enum was not Tracktion's and the loader
+wrote it where the synth never reads it, so until 2026-10-06 every preset played osc 1's sine
+through no filter). Result `data`: `{plugin:"4osc", preset, paramsApplied, settingsApplied,
+changed, reset, unknownParams?}` (`reset` = parameters and settings returned to default). The
+bundled bank (`resources/presets/4osc/`, five patches) is un-auditioned.
 
 **Sampler and drum pads (2026-10-05).** Every Mosh sampler is a `MoshSamplerPlugin`
 (`src/plugins/moshfx/MoshSamplerPlugin.h`: Tracktion's `te::SamplerPlugin`, same `"sampler"` type,

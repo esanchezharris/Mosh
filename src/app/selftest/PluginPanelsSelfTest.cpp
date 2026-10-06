@@ -2020,6 +2020,141 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         check (ok (command (ops, "remove_track", object ({ { "trackId", ft } }))), "4OSC fixture track removed");
     }
 
+    // ── 4OSC presets: the bundled patches set their waves, filter and unison ──
+    // Until 2026-10-06 load_preset wrote the bank's (differently numbered) waves onto child
+    // trees the synth never reads, and no patch could turn the filter on, so every preset
+    // played one sine through no filter. Patches now name their settings in "state" (the
+    // set_plugin_state keys) and a load sets the whole patch.
+    section ("4OSC presets: waves, filter and unison land, as one undo step and a whole patch");
+    {
+        const auto pt = dataOf (command (ops, "create_track", object ({ { "name", "4OSC Presets" } }))).getProperty ("trackId", var()).toString();
+        const int fo = (int) dataOf (command (ops, "load_builtin", object ({ { "trackId", pt }, { "type", "4osc" } }))).getProperty ("index", -1);
+        auto* synth = dynamic_cast<te::FourOscPlugin*> (livePlugin (eng, pt, fo));
+        check (pt.isNotEmpty() && synth != nullptr, "a track with a fresh 4OSC");
+
+        std::map<String, String> files;
+        {
+            const auto listed = dataOf (command (ops, "list_presets", object ({ { "plugin", "4osc" } }))).getProperty ("presets", var());
+            for (int i = 0; i < listed.size(); ++i)
+                files[listed[i].getProperty ("name", var()).toString()] = listed[i].getProperty ("file", var()).toString();
+        }
+        check (files.count ("mosh-bass") && files.count ("mosh-keys") && files.count ("mosh-lead")
+                   && files.count ("mosh-pad") && files.count ("mosh-pluck"),
+               "list_presets finds the five bundled 4OSC patches");
+        auto load = [&] (const String& file)
+        {
+            return command (ops, "load_preset", object ({ { "trackId", pt }, { "index", fo }, { "file", file } }));
+        };
+        auto st = [&] (const char* key) { return stateValue (ops, pt, fo, key); };
+        auto& um = eng.edit().getUndoManager();
+
+        // Every bundled patch loads with nothing unknown and all its settings applied.
+        for (const auto* name : { "mosh-keys", "mosh-lead", "mosh-pad", "mosh-pluck", "mosh-bass" })
+        {
+            const auto r = load (files[name]);
+            check (ok (r) && ! dataOf (r).hasProperty ("unknownParams") && (int) dataOf (r).getProperty ("settingsApplied", 0) >= 3
+                       && (int) dataOf (r).getProperty ("paramsApplied", 0) >= 8,
+                   String (name) + " loads: " + String ((int) dataOf (r).getProperty ("paramsApplied", 0)) + " params, "
+                       + String ((int) dataOf (r).getProperty ("settingsApplied", 0)) + " settings, nothing unknown");
+        }
+        // mosh-bass (loaded last): saw + square, two unison voices, a 24 dB/oct low-pass.
+        check (st ("waveShape1").toString() == "saw" && st ("waveShape2").toString() == "square"
+                   && st ("waveShape3").toString() == "off" && (int) st ("voices1") == 2,
+               "mosh-bass: osc 1 saw with 2 voices, osc 2 square, osc 3 off");
+        check (st ("filterType").toString() == "lowpass" && (int) st ("filterSlope") == 24,
+               "mosh-bass: the filter is ON, low-pass at 24 dB/oct");
+        check (synth->oscParams[0]->waveShapeValue.get() == 3 && synth->oscParams[1]->waveShapeValue.get() == 2
+                   && synth->filterTypeValue.get() == 1 && synth->filterSlopeValue.get() == 24,
+               "the live synth holds them (waves 3/2 = saw/square, filter type 1 = LP)");
+        {
+            auto release = synth->getAutomatableParameter (43);   // ampRelease, physical seconds
+            check (release != nullptr && std::abs (release->getCurrentValue() - 0.08f) < 0.002f,
+                   "mosh-bass: Amp Release is the patch's 80 ms (" + String (release != nullptr ? release->getCurrentValue() * 1000.0f : -1.0f, 1) + " ms)");
+        }
+
+        // A load is ONE undo step, and undo restores the previous patch exactly.
+        const auto lead = files["mosh-lead"];
+        check (ok (load (lead)), "load mosh-lead over mosh-bass");
+        check ((int) st ("voices1") == 3 && (int) st ("voices2") == 3 && (int) st ("filterSlope") == 12,
+               "mosh-lead: 3+3 unison voices, 12 dB/oct");
+        {
+            // A whole patch: lead names no Filter Amount or filter envelope, so bass's are gone.
+            auto amount = synth->getAutomatableParameter (51);
+            check (amount != nullptr && amount->getDefaultValue().has_value()
+                       && juce::exactlyEqual (amount->getCurrentValue(), *amount->getDefaultValue()),
+                   "loading lead returns bass's Filter Amount to its default (a patch never inherits)");
+        }
+        const int depth = um.getUndoDescriptions().size();
+        check (ok (command (ops, "undo")), "undo the lead load");
+        check (st ("waveShape2").toString() == "square" && (int) st ("voices1") == 2 && (int) st ("filterSlope") == 24
+                   && (int) st ("voices2") == 1,
+               "ONE undo brings mosh-bass back whole (osc 2 square, 2+1 voices, 24 dB/oct)");
+        check (ok (command (ops, "redo")) && (int) st ("voices2") == 3 && st ("waveShape2").toString() == "saw",
+               "redo re-applies mosh-lead");
+
+        // Loading the patch that is already loaded changes nothing and opens no step.
+        {
+            const auto again = load (lead);
+            check (ok (again) && ! (bool) dataOf (again).getProperty ("changed", true) && um.getUndoDescriptions().size() == depth,
+                   "re-loading the loaded patch: changed:false, no undo step (depth " + String (depth) + " -> "
+                       + String (um.getUndoDescriptions().size()) + ")");
+        }
+
+        // Refusals change nothing and open no step.
+        auto tempPreset = [] (const char* leaf, const String& text)
+        {
+            const auto f = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile (leaf, ".json", false);
+            f.replaceWithText (text);
+            return f;
+        };
+        const auto legacy  = tempPreset ("fo-legacy",  R"({"waveShapes":[3,3,0,0],"params":{"Level 1":0.8}})");
+        const auto badType = tempPreset ("fo-badtype", R"({"state":{"filterType":"comb"},"params":{"Level 1":0.8}})");
+        const auto unknownKey = tempPreset ("fo-badkey", R"({"state":{"lfoBeat1":0},"params":{"Level 1":0.8}})");
+        const auto notObject = tempPreset ("fo-badstate", R"({"state":[1,2],"params":{"Level 1":0.8}})");
+        for (const auto& [f, why] : std::vector<std::pair<juce::File, String>> {
+                 { legacy, "waveShapes" }, { badType, "filterType" }, { unknownKey, "lfoBeat1" }, { notObject, "state" } })
+        {
+            const auto before = juce::JSON::toString (pluginAt (ops, pt, fo), true);
+            const auto r = load (f.getFullPathName());
+            check (! ok (r) && r.getProperty ("error", var()).toString().contains (why)
+                       && juce::JSON::toString (pluginAt (ops, pt, fo), true) == before && um.getUndoDescriptions().size() == depth,
+                   "a preset with a bad " + why + " is refused, naming it, and changes nothing (" + r.getProperty ("error", var()).toString() + ")");
+            f.deleteFile();
+        }
+
+        // The filter is audible now: a bass note is far duller with mosh-bass's low-pass on
+        // than with the same patch and the filter off (first-difference energy vs signal energy).
+        {
+            check (ok (load (files["mosh-bass"])), "load mosh-bass for a listen");
+            auto brightness = [&] (const juce::AudioBuffer<float>& b)
+            {
+                double sig = 0.0, diff = 0.0;
+                const auto* x = b.getReadPointer (0);
+                for (int i = 1; i < b.getNumSamples(); ++i) { sig += (double) x[i] * x[i]; diff += (double) (x[i] - x[i - 1]) * (x[i] - x[i - 1]); }
+                return sig > 1.0e-9 ? diff / sig : -1.0;
+            };
+            auto noteOn  = [] (int n) { return juce::MidiMessage::noteOn (1, n, (juce::uint8) 100); };
+            auto noteOff = [] (int n) { return juce::MidiMessage::noteOff (1, n); };
+            double withFilter = -1.0, withoutFilter = -1.0;
+            {
+                LiveInstrument live (*synth, 256);
+                withFilter = brightness (live.play (0.3, { { 0, noteOn (60) } }));
+                live.play (0.5, { { 0, noteOff (60) } });
+            }
+            check (ok (command (ops, "set_plugin_state", object ({ { "trackId", pt }, { "index", fo }, { "key", "filterType" }, { "value", "off" } }))),
+                   "the same patch with its filter turned off");
+            {
+                LiveInstrument live (*synth, 256);
+                withoutFilter = brightness (live.play (0.3, { { 0, noteOn (60) } }));
+                live.play (0.5, { { 0, noteOff (60) } });
+            }
+            check (withFilter > 0.0 && withoutFilter > 0.0 && withFilter < 0.25 * withoutFilter,
+                   "mosh-bass's low-pass is heard: brightness " + String (withFilter, 5) + " with it vs " + String (withoutFilter, 5) + " without");
+        }
+
+        check (ok (command (ops, "remove_track", object ({ { "trackId", pt } }))), "4OSC presets track removed");
+    }
+
     check (ok (command (ops, "remove_track", object ({ { "trackId", tid } }))), "plugin panels fixture track removed");
 
     // ── The render-layer cache key covers what set_plugin_state and the pad commands change ──

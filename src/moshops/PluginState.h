@@ -251,6 +251,43 @@ namespace fourosc
         if (key == "ampAnalog")    { fo.ampAnalogValue.setValue ((int) v == 1, um); return true; }
         return false;
     }
+
+    /** Calls `fn` with the CachedValue behind `spec` (any of its value types); false when
+        the plugin has no such setting. */
+    template <typename Fn>
+    inline bool withCachedValue (te::FourOscPlugin& fo, const Spec& spec, Fn&& fn)
+    {
+        const juce::String key (spec.key);
+        if (const int osc = oscIndexOf (key, "waveShape"); osc >= 0 && osc < fo.oscParams.size())
+            { fn (fo.oscParams[osc]->waveShapeValue); return true; }
+        if (const int osc = oscIndexOf (key, "voices"); osc >= 0 && osc < fo.oscParams.size())
+            { fn (fo.oscParams[osc]->voicesValue); return true; }
+        if (key == "filterType")   { fn (fo.filterTypeValue); return true; }
+        if (key == "filterSlope")  { fn (fo.filterSlopeValue); return true; }
+        if (key == "distortionOn") { fn (fo.distortionOnValue); return true; }
+        if (key == "reverbOn")     { fn (fo.reverbOnValue); return true; }
+        if (key == "delayOn")      { fn (fo.delayOnValue); return true; }
+        if (key == "chorusOn")     { fn (fo.chorusOnValue); return true; }
+        if (key == "delayBeats")   { fn (fo.delayValue); return true; }
+        if (key == "voiceMode")    { fn (fo.voiceModeValue); return true; }
+        if (key == "ampAnalog")    { fn (fo.ampAnalogValue); return true; }
+        return false;
+    }
+
+    /** True when the setting holds Tracktion's own default (its property is absent). */
+    inline bool isUsingDefault (te::FourOscPlugin& fo, const Spec& spec)
+    {
+        bool usingDefault = true;
+        withCachedValue (fo, spec, [&] (auto& cv) { usingDefault = cv.isUsingDefault(); });
+        return usingDefault;
+    }
+
+    /** Returns the setting to Tracktion's default by removing its property, through `um`
+        (load_preset: a patch sets everything it does not name back to the default). */
+    inline bool resetToDefault (te::FourOscPlugin& fo, const Spec& spec, juce::UndoManager* um)
+    {
+        return withCachedValue (fo, spec, [&] (auto& cv) { cv.resetToDefault (um); });
+    }
 }
 
 /** The keys a plugin type has, in table order (empty for a type with no state). */

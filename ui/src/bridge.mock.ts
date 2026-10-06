@@ -27,7 +27,7 @@ import { stepBeats } from "./ui/drumGrid";
 import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
 import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
 import { BUILTINS, mkParams, builtinParamDisplay, mkBuiltinPlugin, mkBuiltinState, nextMockItemId, STATE_SPECS } from "./mock/builtins";
-import { FOUR_OSC_PARAMS, FOUR_OSC_PRESETS, applyFourOscPreset, fourOscFrom0to1, fourOscSetNorm, roundToInt } from "./mock/fourosc";
+import { FOUR_OSC_PARAMS, FOUR_OSC_PRESETS, applyFourOscPreset, coerceSetting, fourOscFrom0to1, fourOscSetNorm } from "./mock/fourosc";
 import {
   DEFAULT_KIT, MOCK_KITS, applyDrumLaneGains, importedPathFor, loadKitInto, mockFilePeaks, newSound,
   primarySampler, refreshSamplerViews, resetImportedPaths, sampleStem, soundIndexForNote, soundsOf,
@@ -4889,24 +4889,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const key = str(args.key);
       const spec = STATE_SPECS[pl.type]?.[key];
       if (!spec || !pl.state?.[key]) return err(command, `'${key}' is not a setting of ${pl.type}`);
-      let value: number | string;
-      if (spec.choices) {
-        if (typeof args.value !== "string" || !spec.choices.includes(args.value)) return err(command, `'${key}' must be one of ${spec.choices.join(", ")}`);
-        value = args.value;
-      } else {
-        if (typeof args.value !== "number" || !Number.isFinite(args.value)) return err(command, `'${key}' must be a number`);
-        const lo = spec.min ?? -Infinity, hi = spec.max ?? Infinity;
-        value = Math.min(hi, Math.max(lo, args.value));
-        // The engine's coerce (PluginState.h): a step > 1 snaps onto min + k·step (a tie
-        // rounds up: slope 25 → 24, 27 → 30, 0 → 6, 100 → 48), never past the last grid
-        // point; a step of 1 is a whole number (juce::roundToInt, a tie to even).
-        if (spec.step && spec.step > 1) {
-          const top = lo + spec.step * Math.floor((hi - lo) / spec.step);
-          value = Math.min(top, Math.max(lo, lo + spec.step * Math.floor((value - lo) / spec.step + 0.5)));
-        } else if (spec.step === 1) {
-          value = Math.min(hi, Math.max(lo, roundToInt(value)));
-        }
-      }
+      // The engine's coerce (PluginState.h), shared with load_preset's settings.
+      const coerced = coerceSetting(key, spec, args.value);
+      if ("error" in coerced) return err(command, coerced.error);
+      const value = coerced.value;
       const gesture = str(args.gesture);
       // The value it already has is not an edit (MoshOps: isNoChange): no undo step, the
       // log line says undoable:false, and an open drag's window stays open. A no-change
@@ -5745,24 +5731,26 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         // The .json branch, as cmdLoadPreset runs it on the built-in 4OSC: the file must
         // exist (here: one of the five bundled patches, an embedded copy of
         // resources/presets/4osc/*.json); the target is the plugin at `index` when given,
-        // else the track's first 4OSC, and it must BE a 4OSC. Each named param binds to the
-        // first parameter with that name (case-insensitive) and the result reports how many
-        // landed and which names matched nothing. The file's waveShapes do not land (an
-        // engine bug the owner has not decided on), so the mock does not apply them either.
+        // else the track's first 4OSC, and it must BE a 4OSC. The patch's settings ("state":
+        // waves, filter, unison...) and params land as one undo step, and it is a whole patch:
+        // what it does not name returns to its default. Already loaded: no step, changed:false.
         const preset = FOUR_OSC_PRESETS[(file.split("/").pop() ?? file).replace(/\.json$/i, "")];
         if (!file.toLowerCase().endsWith(".json") || !preset) return err(command, "preset file not found: " + file);
         const index = Math.trunc(num(args.index, -1));
         const target = index >= 0 ? (t.plugins ?? [])[index] : (t.plugins ?? []).find((p) => p.type === "4osc");
         if (!target || target.type !== "4osc")
           return err(command, "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
-        const { next, applied, unknown } = applyFourOscPreset(target.params, preset);
-        if (applied === 0 && preset.waveShapes.length === 0)
-          return err(command, "preset matched no 4OSC parameters" + (unknown.length ? ` (unknown: ${unknown.join(", ")})` : ""));
-        pushUndo();
-        target.params = next;
-        invalidate();
+        const r = applyFourOscPreset(target.params, target.state, preset);
+        if ("error" in r) return err(command, r.error);
         const name = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
-        return ok(command, { plugin: "4osc", preset: name, paramsApplied: applied, ...(unknown.length ? { unknownParams: unknown.join(", ") } : {}) });
+        const data = { plugin: "4osc", preset: name, paramsApplied: r.applied, settingsApplied: r.settingsApplied,
+          ...(r.unknown.length ? { unknownParams: r.unknown.join(", ") } : {}) };
+        if (!r.changed) { mockOpenedNoTxn = true; invalidate(); return ok(command, { ...data, changed: false, reset: 0 }); }
+        pushUndo();
+        target.params = r.next;
+        target.state = r.nextState;
+        invalidate();
+        return ok(command, { ...data, changed: true, reset: r.reset });
       }
       const inst = (t.plugins ?? []).find((p) => p.isInstrument && /vital/i.test(p.name));
       if (!inst) return err(command, "no Vital instrument on this track (a .vital preset only targets Vital)");

@@ -69,9 +69,9 @@ describe("set_plugin_param undo, as the engine makes it", () => {
     expect(await valueOf("level1")).toBeCloseTo(0.3, 6);
     await undo();
     expect(await valueOf("level1")).toBe(preset);
-    expect(await valueOf("ampRelease")).toBeCloseTo(0.18, 6);       // the rest of mosh-bass is still on
+    expect(await valueOf("ampRelease")).toBeCloseTo(0.2654, 6);     // the rest of mosh-bass is still on (80 ms)
     await undo();                                                    // and the next undo is the preset
-    expect(await valueOf("ampRelease")).not.toBeCloseTo(0.18, 6);
+    expect(await valueOf("ampRelease")).not.toBeCloseTo(0.2654, 6);
   });
 
   it("another edit between two calls of one gesture ends its step; a read does not", async () => {

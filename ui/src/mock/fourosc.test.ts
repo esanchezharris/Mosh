@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
-  FOUR_OSC_PARAMS, FOUR_OSC_PRESETS, FOUR_OSC_STATE, applyFourOscPreset, fourOscFrom0to1, fourOscParams,
+  FOUR_OSC_PARAMS, FOUR_OSC_PRESETS, FOUR_OSC_STATE, applyFourOscPreset, fourOscFrom0to1, fourOscParams, type FourOscPresetFile,
   fourOscSetNorm, fourOscTo0to1, roundToInt,
 } from "./fourosc";
 import { physOf } from "../v3/panels/params";
@@ -146,25 +146,79 @@ describe("4OSC state and presets", () => {
 
   it("the embedded presets are the bundled files, key for key (a drift guard)", () => {
     for (const name of ["mosh-bass", "mosh-keys", "mosh-lead", "mosh-pad", "mosh-pluck"]) {
-      const file = JSON.parse(readFileSync(resolve(PRESET_DIR, `${name}.json`), "utf8")) as { waveShapes: number[]; params: Record<string, number> };
-      expect(FOUR_OSC_PRESETS[name]).toEqual({ waveShapes: file.waveShapes, params: file.params });
-      expect(Object.keys(FOUR_OSC_PRESETS[name]!.params)).toEqual(Object.keys(file.params));
+      const file = JSON.parse(readFileSync(resolve(PRESET_DIR, `${name}.json`), "utf8")) as FourOscPresetFile;
+      expect(FOUR_OSC_PRESETS[name]).toEqual({ state: file.state, params: file.params });
+      expect(Object.keys(FOUR_OSC_PRESETS[name]!.params!)).toEqual(Object.keys(file.params!));
     }
   });
 
-  it("applies by first case-insensitive name and reports what matched nothing", () => {
+  it("each bundled file's _physical says what its normalized params are (through the 4OSC's own ranges)", () => {
+    for (const name of ["mosh-bass", "mosh-keys", "mosh-lead", "mosh-pad", "mosh-pluck"]) {
+      const file = JSON.parse(readFileSync(resolve(PRESET_DIR, `${name}.json`), "utf8")) as
+        { params: Record<string, number>; _physical: Record<string, { value: number; unit: string }> };
+      expect(Object.keys(file._physical)).toEqual(Object.keys(file.params));
+      for (const [param, norm] of Object.entries(file.params)) {
+        const spec = FOUR_OSC_PARAMS.find((s) => s.name === param)!;
+        expect(spec, `${name}: ${param}`).toBeDefined();
+        const phys = fourOscFrom0to1(spec, norm);
+        const want = file._physical[param]!;
+        // Filter Freq is a MIDI note in the engine; the file states Hz. Amount is -1..1.
+        const got = spec.id === "filterFreq" ? 440 * 2 ** ((phys - 69) / 12) : phys;
+        const tol = Math.max(0.02 * Math.abs(want.value), want.unit === "s" ? 0.002 : 0.02);
+        expect(Math.abs(got - want.value), `${name}: ${param} ${got} vs ${want.value} ${want.unit}`).toBeLessThanOrEqual(tol);
+      }
+    }
+  });
+
+  it("applies settings and params as a whole patch, reporting what matched nothing", () => {
     const counts = Object.fromEntries(Object.entries(FOUR_OSC_PRESETS).map(([n, p]) => {
-      const r = applyFourOscPreset(fourOscParams(), p);
-      return [n, [r.applied, r.unknown]];
+      const r = applyFourOscPreset(fourOscParams(), undefined, p);
+      if ("error" in r) throw new Error(r.error);
+      return [n, [r.applied, r.settingsApplied, r.unknown]];
     }));
     expect(counts).toEqual({
-      "mosh-bass": [17, []], "mosh-keys": [11, []], "mosh-lead": [12, []], "mosh-pad": [11, ["Spread"]], "mosh-pluck": [16, []],
+      "mosh-bass": [14, 5, []], "mosh-keys": [9, 4, []], "mosh-lead": [10, 6, []], "mosh-pad": [10, 5, []], "mosh-pluck": [13, 3, []],
     });
+    const bass = applyFourOscPreset(fourOscParams(), undefined, FOUR_OSC_PRESETS["mosh-bass"]!);
+    if ("error" in bass) throw new Error(bass.error);
+    expect(bass.nextState.waveShape1!.value).toBe("saw");
+    expect(bass.nextState.waveShape2!.value).toBe("square");
+    expect(bass.nextState.voices1!.value).toBe(2);
+    expect(bass.nextState.filterType!.value).toBe("lowpass");
+    expect(bass.nextState.filterSlope!.value).toBe(24);
+    // lead over bass: bass's Filter Amount (not named by lead) and its 24 dB/oct go back to default
+    const lead = applyFourOscPreset(bass.next, bass.nextState, FOUR_OSC_PRESETS["mosh-lead"]!);
+    if ("error" in lead) throw new Error(lead.error);
+    expect(lead.next[51]!.value).toBe(fourOscParams()[51]!.value);
+    expect(lead.nextState.filterSlope!.value).toBe(12);
+    expect(lead.nextState.voices2!.value).toBe(3);
+    expect(lead.reset).toBeGreaterThan(0);
+    // the loaded patch again: nothing changes
+    const again = applyFourOscPreset(lead.next, lead.nextState, FOUR_OSC_PRESETS["mosh-lead"]!);
+    expect("error" in again ? again.error : again.changed).toBe(false);
     // "Level 1" is the oscillator's level (index 2), never the master "Level" (67)
-    const r = applyFourOscPreset(fourOscParams(), { waveShapes: [], params: { "level 1": 0.5, MIX: 0.4 } });
+    const r = applyFourOscPreset(fourOscParams(), undefined, { params: { "level 1": 0.5, MIX: 0.4 } });
+    if ("error" in r) throw new Error(r.error);
     expect(r.next[2]!.value).toBeCloseTo(0.5, 6);
     expect(r.next[67]!.value).toBe(1);
     expect(r.next[58]!.value).toBeCloseTo(0.4, 6);      // the FIRST "Mix" is the reverb's
     expect(r.next[61]!.value).toBe(0);
+  });
+
+  it("refuses the old numbered waveShapes and any bad setting, as the engine does", () => {
+    const refuse = (preset: FourOscPresetFile) => {
+      const r = applyFourOscPreset(fourOscParams(), undefined, preset);
+      return "error" in r ? r.error : "applied";
+    };
+    expect(refuse({ waveShapes: [3, 3, 0, 0], params: { "Level 1": 0.8 } })).toMatch(/waveShapes/);
+    expect(refuse({ state: { filterType: "comb" }, params: { "Level 1": 0.8 } })).toMatch(/filterType: bad value for filterType: must be one of off, lowpass/);
+    expect(refuse({ state: { lfoBeat1: 0 } })).toMatch(/unknown 4OSC setting in "state": lfoBeat1/);
+    expect(refuse({ state: { voices1: "3" } })).toMatch(/must be a finite number/);
+    expect(refuse({ params: { Nope: 0.5 } })).toMatch(/matched no 4OSC parameters or settings \(unknown: Nope\)/);
+    // a step-12 slope snaps like set_plugin_state (18 -> 24); voices clamp to 1..8
+    const ok = applyFourOscPreset(fourOscParams(), undefined, { state: { filterSlope: 18, voices1: 12 } });
+    if ("error" in ok) throw new Error(ok.error);
+    expect(ok.nextState.filterSlope!.value).toBe(24);
+    expect(ok.nextState.voices1!.value).toBe(8);
   });
 });

@@ -1,27 +1,77 @@
 {
- "waveShapes": [
-  5,
-  0,
-  0,
-  0
- ],
- "params": {
-  "Level 1": 0.85,
-  "Pulse Width 1": 0.35,
-  "Amp Attack": 0.0,
-  "Amp Decay": 0.22,
-  "Amp Sustain": 0.0,
-  "Amp Release": 0.15,
-  "Filter Freq": 0.45,
-  "Filter Resonance": 0.35,
-  "Filter Amount": 0.85,
-  "Filter Attack": 0.0,
-  "Filter Decay": 0.2,
-  "Filter Sustain": 0.0,
-  "Filter Release": 0.15,
-  "Level 2": 0.0,
-  "Level 3": 0.0,
-  "Level 4": 0.0
+ "state": {
+  "waveShape1": "square",
+  "filterType": "lowpass",
+  "filterSlope": 24
  },
- "_note": "Bundled starter patch, authored 2026-09-01 for the P1 preset seam. Params are NORMALIZED 0..1 against 4OSC's ranges. UN-AUDITIONED: owner by-ear pass pending; edit freely."
+ "params": {
+  "Level 1": 0.8493,
+  "Pulse Width 1": 0.3469,
+  "Amp Attack": 0.0,
+  "Amp Decay": 0.3463,
+  "Amp Sustain": 0.0,
+  "Amp Release": 0.2777,
+  "Filter Freq": 0.4506,
+  "Filter Resonance": 0.35,
+  "Filter Amount": 0.725,
+  "Filter Attack": 0.0,
+  "Filter Decay": 0.3017,
+  "Filter Sustain": 0.0,
+  "Filter Release": 0.2782
+ },
+ "_physical": {
+  "Level 1": {
+   "value": -4.0,
+   "unit": "dB"
+  },
+  "Pulse Width 1": {
+   "value": 0.35,
+   "unit": ""
+  },
+  "Amp Attack": {
+   "value": 0.001,
+   "unit": "s"
+  },
+  "Amp Decay": {
+   "value": 0.3,
+   "unit": "s"
+  },
+  "Amp Sustain": {
+   "value": 0,
+   "unit": "%"
+  },
+  "Amp Release": {
+   "value": 0.1,
+   "unit": "s"
+  },
+  "Filter Freq": {
+   "value": 275,
+   "unit": "Hz"
+  },
+  "Filter Resonance": {
+   "value": 35,
+   "unit": "%"
+  },
+  "Filter Amount": {
+   "value": 0.45,
+   "unit": ""
+  },
+  "Filter Attack": {
+   "value": 0.0,
+   "unit": "s"
+  },
+  "Filter Decay": {
+   "value": 0.15,
+   "unit": "s"
+  },
+  "Filter Sustain": {
+   "value": 0,
+   "unit": "%"
+  },
+  "Filter Release": {
+   "value": 0.1,
+   "unit": "s"
+  }
+ },
+ "_note": "Bundled starter patch (first authored 2026-09-01; waves, filter and unison restored 2026-10-06 from that draft's intent). \"state\" holds the 4OSC settings by their set_plugin_state names; \"params\" are NORMALIZED 0..1 against 4OSC's own ranges (skewed: times v^5, levels v^0.25), and \"_physical\" says what each one is. Loading sets the whole patch: anything not named returns to its default. UN-AUDITIONED: owner by-ear pass pending; edit freely."
 }

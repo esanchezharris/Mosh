@@ -110,12 +110,15 @@ const kitChain = (): Plugin[] => {
   loadKitInto(plugins[0]!, "mosh-kit");
   return plugins;
 };
-/** The 808's 4OSC with the bundled "mosh-bass" preset loaded through load_preset: the
- *  preset's parameter values, and (as in the engine today) not its wave shapes, so the
- *  oscillators and the filter stay at the engine's defaults. */
+/** The 808's 4OSC with the bundled "mosh-bass" preset loaded through load_preset: its
+ *  waves (saw + square, two unison voices), its 24 dB/oct low-pass and its parameters. */
 const bassChain = (): Plugin[] => {
   const plugins = chain("4osc", "softclip");
-  plugins[0]!.params = applyFourOscPreset(plugins[0]!.params, FOUR_OSC_PRESETS["mosh-bass"]!).next;
+  const loaded = applyFourOscPreset(plugins[0]!.params, plugins[0]!.state, FOUR_OSC_PRESETS["mosh-bass"]!);
+  if (!("error" in loaded)) {
+    plugins[0]!.params = loaded.next;
+    plugins[0]!.state = loaded.nextState;
+  }
   return plugins;
 };
 
