@@ -409,7 +409,7 @@ export type MoshFxCut = {
 };
 
 export type MoshFxReadout = {
-  kind: "autotune" | "ott" | "feedback";
+  kind: "autotune" | "ott" | "feedback" | "softclip";
   inputHz?: number;
   targetHz?: number;
   correctionCents?: number;
@@ -432,6 +432,12 @@ export type Plugin = {
   params: PluginParam[];
   rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
   moshFx?: MoshFxReadout;
+  /** The plugin's stable id (Tracktion EditItemID): survives a reorder, unlike `index`. */
+  itemId?: string;
+  /** Settings that are not automatable parameters (they never appear in `params`), keyed by
+   *  name: the delay's time, chorus and phaser settings, the low/high-pass mode. Set with
+   *  `set_plugin_state`. */
+  state?: Record<string, PluginStateValue>;
   /** Present iff a track-chain preset (apply_track_preset) inserted this plugin. It says
    *  where the plugin CAME FROM — not that its values still equal the preset's, since the
    *  user may have edited them. `stage` is its 0-based position in the preset's chain. */
@@ -454,6 +460,32 @@ export type TunerReading = {
   targetHz: number;
   confidence: number;
 };
+
+/** One non-automatable plugin setting, as the engine publishes it in `Plugin.state`. */
+export type PluginStateValue = {
+  value: number | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  choices?: string[];
+};
+
+/** One plugin's live meter frame: the 30 Hz "plugin_meters" event, never the snapshot.
+ *  Only plugins that are on and processed audio since the previous frame are present.
+ *  Levels and reductions are the largest since the previous frame. */
+export type PluginMeterBase = { trackId: string; index: number; itemId?: string; type: string };
+/** Compressor and soft clipper: gain reduction (dB, ≥ 0) and sample peaks in and out (dBFS). */
+export type DynamicsMeter = PluginMeterBase & { grDb: number; inDb: number; outDb: number };
+/** Mosh OTT: per band (low, mid, high) the envelope peak and the applied gain change
+ *  (dB; positive lifts, negative cuts), and whether the output clamp engaged. */
+export type OttMeter = PluginMeterBase & { bands: { levelDb: number; gainDb: number }[]; clipped: boolean };
+/** Mosh X-FDBK: ring candidates and the notches it is cutting right now. */
+export type FeedbackMeter = PluginMeterBase & {
+  candidates: { hz: number; score: number }[];
+  cuts: { hz: number; score: number; depthDb: number }[];
+};
+export type PluginMeterReading = DynamicsMeter | OttMeter | FeedbackMeter;
 
 export type AvailablePlugin = {
   id: string;

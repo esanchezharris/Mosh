@@ -16,7 +16,7 @@
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
 import { scalePitchClasses } from "./ui/tuner";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -24,7 +24,7 @@ import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
 import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
 import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
-import { BUILTINS, mkParams, mkBuiltinParams, mkMoshFx, builtinParamDisplay } from "./mock/builtins";
+import { BUILTINS, mkParams, builtinParamDisplay, mkBuiltinPlugin, STATE_SPECS } from "./mock/builtins";
 import { fixturePeaksForClip } from "./mock/fixturePeaks";
 import { portfolioSeed } from "./mock/portfolioSeed";
 
@@ -911,7 +911,58 @@ function startPlayback() {
     emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) }, sends });
     emitMuteAutomation();
     emitTuner(true);
+    emitPluginMeters(trackFrames.map(({ track, gain }) => ({ track, inDb: toDb(gain) })), pos);
   }, 1000 / 30);
+}
+
+// The live plugin meters rail ("plugin_meters"). The engine measures the audio; the mock
+// derives plausible readings from the fake track level and each plugin's own settings,
+// with the same maths the engine's DSP uses for the static part (so a compressor below
+// threshold reads 0 dB of reduction here too). One empty payload on the falling edge.
+let hadMockMeters = false;
+function emitPluginMeters(frames: { track: Track; inDb: number }[], pos: number): void {
+  const phys = (pl: Plugin, i: number, min: number, max: number) => {
+    const p = pl.params.find((x) => x.index === i);
+    return min + Math.min(1, Math.max(0, p?.value ?? 0)) * (max - min);
+  };
+  const plugins = frames.flatMap(({ track, inDb }) => (track.plugins ?? []).filter((pl) => pl.enabled).flatMap((pl): PluginMeterReading[] => {
+    const base = { trackId: track.id, index: pl.index, itemId: pl.itemId, type: pl.type };
+    if (pl.type === "compressor") {
+      const T = phys(pl, 0, 0.01, 1), rho = phys(pl, 1, 0, 0.95), out = phys(pl, 4, -10, 24);
+      const L = 10 ** (inDb / 20);
+      const grDb = L > T ? 20 * Math.log10(L / (T + rho * (L - T))) : 0;
+      return [{ ...base, grDb, inDb, outDb: Math.max(-100, inDb - grDb + out) }];
+    }
+    if (pl.type === "softclip") {
+      const drive = phys(pl, 0, 0, 24), ceil = phys(pl, 1, -12, 0);
+      const driven = inDb + drive;
+      const outDb = ceil + 20 * Math.log10(Math.max(1e-9, Math.tanh(10 ** ((driven - ceil) / 20))));
+      return [{ ...base, grDb: Math.max(0, driven - outDb), inDb, outDb }];
+    }
+    if (pl.type === "moshOTT") {
+      const amount = phys(pl, 0, 0, 1);
+      const bands = [-4, -2, -9].map((offset, b) => {
+        const levelDb = Math.max(-100, inDb + offset + 3 * Math.sin(pos * (2 + b)));
+        const gainDb = levelDb > -20 ? -amount * (levelDb + 20) * 0.6 : amount * Math.min(12, -20 - levelDb) * 0.5;
+        return { levelDb, gainDb };
+      });
+      return [{ ...base, bands, clipped: false }];
+    }
+    if (pl.type === "moshXFeedback") {
+      const sens = phys(pl, 0, 0, 1), maxCuts = Math.round(phys(pl, 1, 1, 4)), maxDepth = phys(pl, 2, 3, 36);
+      const auto = phys(pl, 4, 0, 1) >= 0.5;
+      const threshold = 0.06 + 0.36 * (1 - sens);
+      const candidates = (pl.moshFx?.candidates ?? []).map((c, i) => ({
+        hz: c.frequencyHz, score: Math.max(0, Math.min(0.75, (c.score ?? 0) * (0.75 + 0.25 * Math.sin(pos * (1.3 + i))))),
+      }));
+      const cuts = !auto ? [] : candidates.filter((c) => c.score > threshold).slice(0, maxCuts)
+        .map((c) => ({ ...c, depthDb: Math.max(3, Math.min(maxDepth, maxDepth * Math.min(1, c.score))) }));
+      return [{ ...base, candidates, cuts }];
+    }
+    return [];
+  }));
+  if (plugins.length > 0 || hadMockMeters) emit("plugin_meters", { plugins });
+  hadMockMeters = plugins.length > 0;
 }
 // The tuner's live note display rail. The native engine reports what each enabled Mosh
 // AutoTune is hearing; the mock has no voice to hear, so while "playing" every enabled
@@ -948,6 +999,7 @@ function emitTuner(playing: boolean): void {
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
   emitTuner(false);
+  emitPluginMeters([], 0);
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
   // Drop the meters to the floor when the transport stops.
   const tracks = snapshot.tracks.filter((t) => !t.isGroup).map((t) => ({ id: t.id, l: -100, r: -100 }));
@@ -4507,7 +4559,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
       pushUndo(); t.plugins = t.plugins ?? [];
-      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
+      t.plugins.push(mkBuiltinPlugin(b, t.plugins.length));
       invalidate(); return ok(command);
     }
     case "load_plugin": {
@@ -4562,6 +4614,32 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       invalidate(); return ok(command);
     }
+    case "set_plugin_state": {
+      // Mirrors the engine's set_plugin_state: a per-type whitelist of non-automatable
+      // settings (STATE_SPECS), numbers clamped to their range (the delay time to a whole
+      // millisecond, never below 1), a mode must be one of its choices. Undoable.
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
+      const pl = f.track.plugins![f.idx];
+      const key = str(args.key);
+      const spec = STATE_SPECS[pl.type]?.[key];
+      if (!spec || !pl.state?.[key]) return err(command, `'${key}' is not a setting of ${pl.type}`);
+      let value: number | string;
+      if (spec.choices) {
+        if (typeof args.value !== "string" || !spec.choices.includes(args.value)) return err(command, `'${key}' must be one of ${spec.choices.join(", ")}`);
+        value = args.value;
+      } else {
+        if (typeof args.value !== "number" || !Number.isFinite(args.value)) return err(command, `'${key}' must be a number`);
+        value = Math.min(spec.max ?? Infinity, Math.max(spec.min ?? -Infinity, args.value));
+        if (spec.step === 1) value = Math.max(spec.min ?? 1, Math.round(value));
+      }
+      pushUndo();
+      pl.state[key] = { ...pl.state[key], value };
+      if (key === "mode" && (pl.type === "lowpass" || pl.type === "highpass")) {
+        pl.type = value as string;
+        pl.name = value === "highpass" ? "High-Pass" : "LPF/HPF";
+      }
+      invalidate(); return ok(command, { key, value });
+    }
     case "open_plugin_editor": return ok(command);
 
     // Master-bus plugins — mirrors load_builtin/load_plugin/bypass_plugin/remove_plugin/
@@ -4570,7 +4648,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "load_master_builtin": {
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
       pushUndo(); const list = masterPlugins();
-      list.push({ index: list.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
+      list.push(mkBuiltinPlugin(b, list.length));
       invalidate(); return ok(command, { index: list.length - 1 });
     }
     case "load_master_plugin": {

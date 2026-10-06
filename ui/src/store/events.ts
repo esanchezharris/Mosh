@@ -25,8 +25,8 @@ import { isV2Active } from "../v2/shellFlag";
 import { pruneOfflineLocks, type PeerInfo, type PeerPresence } from "../multiplayer/sync";
 // Type-only imports from the store module (erased at compile time — no runtime cycle).
 import type { State, Spectrum } from "../store";
-import type { TunerReading } from "../types";
-import { tunerKey } from "../ui/tuner";
+import type { TunerReading, PluginMeterReading } from "../types";
+import { pluginKey, tunerKey } from "../ui/tuner";
 
 type Set = StoreApi<State>["setState"];
 type Get = StoreApi<State>["getState"];
@@ -89,6 +89,19 @@ export function onTuner(ev: MoshEvent, set: Set): void {
     };
   }
   set({ tuners });
+}
+
+export function onPluginMeters(ev: MoshEvent, set: Set): void {
+  // Live plugin meters. Same rule as the tuner rail: every payload is the FULL set of
+  // plugins with fresh readings, so the map is rebuilt, and the empty payload on the
+  // falling edge is what clears the meters.
+  const p = ev.payload as { plugins?: Partial<PluginMeterReading>[] } | undefined;
+  const pluginMeters: Record<string, PluginMeterReading> = {};
+  for (const m of p?.plugins ?? []) {
+    if (!m || typeof m.trackId !== "string" || typeof m.index !== "number" || typeof m.type !== "string") continue;
+    pluginMeters[pluginKey(m.trackId, m.index)] = m as PluginMeterReading;
+  }
+  set({ pluginMeters });
 }
 
 export function onSpectrum(ev: MoshEvent, set: Set): void {

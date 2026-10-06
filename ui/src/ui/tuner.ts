@@ -9,6 +9,8 @@ import type { TunerReading } from "../types";
 
 /** A tuner's key in `tuners`: the track it is on and its position in that track's chain. */
 export const tunerKey = (trackId: string, index: number): string => `${trackId}:${index}`;
+/** The same key, for any plugin's live data (`pluginMeters`). */
+export const pluginKey = tunerKey;
 
 export const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 

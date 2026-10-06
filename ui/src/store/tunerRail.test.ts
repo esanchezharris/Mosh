@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { onTuner } from "./events";
+import { onPluginMeters, onTuner } from "./events";
 import { tunerKey } from "../ui/tuner";
 import type { TunerReading } from "../types";
 
@@ -45,5 +45,31 @@ describe("onTuner", () => {
     ] });
     expect(Object.keys(tuners)).toEqual(["1013:6"]);
     expect(tuners["1013:6"].confidence).toBe(0);
+  });
+});
+
+describe("onPluginMeters", () => {
+  function applyMeters(payload: unknown, before: Record<string, unknown> = {}) {
+    let state: { pluginMeters: Record<string, unknown> } = { pluginMeters: before };
+    const set = (patch: { pluginMeters: Record<string, unknown> }) => { state = { ...state, ...patch }; };
+    onPluginMeters({ type: "plugin_meters", payload } as never, set as never);
+    return state.pluginMeters;
+  }
+  const comp = { trackId: "1013", index: 3, type: "compressor", grDb: 4.2, inDb: -8, outDb: -12 };
+
+  it("keys each plugin by track and chain position and keeps its fields", () => {
+    const m = applyMeters({ plugins: [comp, { trackId: "1013", index: 4, type: "softclip", grDb: 1, inDb: -1, outDb: -2 }] });
+    expect(Object.keys(m).sort()).toEqual(["1013:3", "1013:4"]);
+    expect(m["1013:3"]).toEqual(comp);
+  });
+
+  it("replaces the whole set, and the empty payload clears it", () => {
+    const before = applyMeters({ plugins: [comp] });
+    expect(applyMeters({ plugins: [] }, before)).toEqual({});
+    expect(applyMeters(undefined, before)).toEqual({});
+  });
+
+  it("drops entries without a track, position or type", () => {
+    expect(applyMeters({ plugins: [{ index: 1, type: "compressor" }, { trackId: "1", type: "x" }, { trackId: "1", index: 2 }, null] })).toEqual({});
   });
 });

@@ -24,7 +24,7 @@ import { HISTORY_MOVES, movesUndoHead, noteUndoHeadMove, undoHeadMark } from "./
 // Per-rail "mosh_event" handler bodies (verbatim motion from init(); the dispatch
 // order + conditions stay in init() below, which is load-bearing).
 import {
-  onSnapshotInvalidated, onTransport, onLevels, onMuteAutomation, onTuner, onSpectrum, onPluginScanProgress,
+  onSnapshotInvalidated, onTransport, onLevels, onMuteAutomation, onTuner, onPluginMeters, onSpectrum, onPluginScanProgress,
   onTranscribeStatus, onBuildLyricsStatus, onSkeletonStatus, onSketchStatus,
   onLayerRenderProgress, onLayerStatus, onMpState, onWebrtcSignal,
   onPeerSelection, onPeerPresence, onMpCommitDone,
@@ -614,6 +614,8 @@ export const useStore = create<State>((set, get, api) => ({
         onMuteAutomation(ev, set);
       } else if (ev.type === "tuner") {
         onTuner(ev, set);
+      } else if (ev.type === "plugin_meters") {
+        onPluginMeters(ev, set);
       } else if (ev.type === "spectrum") {
         onSpectrum(ev, set);
       } else if (ev.type === "plugin_scan_progress") {

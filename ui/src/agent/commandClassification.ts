@@ -41,6 +41,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   unblock_plugin: "retrying one quarantined plugin is a safety decision the producer makes from the insert dialog",
   clear_plugin_blocklist: "the crash-blacklist is a safety console the producer manages",
   get_plugin_blocklist: "read-only feed for the blacklist settings panel",
+  set_plugin_state: "the plugin panels' control for built-in settings that are not parameters (delay time, chorus/phaser, filter mode); the agent's catalog does not describe these settings yet",
   list_audio_devices: "device discovery feeding the settings UI — the agent's session context is the snapshot",
   list_midi_inputs: "device discovery feeding the input picker UI",
   list_wave_inputs: "device discovery feeding the input picker UI",

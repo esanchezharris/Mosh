@@ -7,8 +7,11 @@ import { PresetPicker } from "../ui/PresetPicker";
 import { Range } from "./Range";
 import { useV3 } from "./shellState";
 import { usePresetMemory } from "./presetMemory";
-import { choiceIndex, choiceValue, inspectorParams, isChoice, pluginHint, showsEveryParam } from "./pluginParams";
-import { TunerReadout } from "./TunerReadout";
+import { pluginHint, showsEveryParam } from "./pluginParams";
+import { PANELS } from "./panels/registry";
+import { GenericParams, genericSummary } from "./panels/GenericParams";
+import { panelKey, usePanelState } from "./panels/panelState";
+import type { PanelProps } from "./panels/types";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -44,13 +47,20 @@ export function pluginDropIndex(from: number, target: number, side: PluginDropSi
   return to === from ? null : to;
 }
 
-function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
+function PluginRow({ plugin, trackId, sampleRate, prevIndex, nextIndex }: {
   plugin: Plugin; trackId: string;
+  /** The session's sample rate, for curves that depend on it. */
+  sampleRate: number;
   /** The chain indices of the visible plugins above and below, for the keyboard move. */
   prevIndex?: number; nextIndex?: number;
 }) {
   const exec = useStore((s) => s.exec);
   const native = !!plugin.builtin && !plugin.external;
+  const def = native ? PANELS[plugin.type] : undefined;
+  // Minimized is this viewer's view preference: never a command, never undoable.
+  const key = panelKey(trackId, plugin);
+  const collapsed = usePanelState((s) => !!s.collapsed[key]);
+  const toggle = usePanelState((s) => s.toggle);
   const [dropSide, setDropSide] = useState<PluginDropSide | null>(null);
   const acceptsDrag = () => draggingPlugin !== null && draggingPlugin.trackId === trackId;
   const sideUnder = (e: DragEvent<HTMLDivElement>): PluginDropSide => {
@@ -60,15 +70,23 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
   const moveTo = (toIndex: number | undefined) => {
     if (toIndex !== undefined) void exec("reorder_plugin", { trackId, index: plugin.index, toIndex });
   };
-  const setParam = (paramIndex: number, value: number) =>
-    void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex, value });
-  const hint = native ? pluginHint(plugin) : null;
+  // Every change a panel makes goes through these two. A gesture id groups one drag into
+  // one undo step (the engine coalesces calls that share it).
+  const setParam: PanelProps["setParam"] = (paramIndex, value, opts) =>
+    void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex, value, ...(opts?.gesture ? { gesture: opts.gesture } : {}) });
+  const setState: PanelProps["setState"] = (stateKey, value, opts) =>
+    void exec("set_plugin_state", { trackId, index: plugin.index, key: stateKey, value, ...(opts?.gesture ? { gesture: opts.gesture } : {}) });
+  const panelProps: PanelProps = { plugin, trackId, sampleRate, setParam, setState };
+  const hint = native && !def ? pluginHint(plugin) : null;
+  const summary = def ? def.summary(plugin) : genericSummary(plugin);
+  const Mini = def?.Mini;
   return (
     <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
       data-plugin-type={plugin.type}
       data-preset={plugin.preset ? plugin.preset.id : undefined}
       data-units={native && showsEveryParam(plugin) ? "" : undefined}
       data-drop={dropSide ?? undefined}
+      data-collapsed={collapsed ? "" : undefined}
       onDragOver={(e) => {
         if (!acceptsDrag()) return;
         e.preventDefault();
@@ -102,6 +120,12 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
           e.preventDefault();
           moveTo(e.key === "ArrowUp" ? prevIndex : nextIndex);
         }}>
+        <button type="button" className="pp-chev" data-testid="v3-plugin-minimize" draggable={false}
+          aria-expanded={!collapsed} aria-label={collapsed ? `Expand ${plugin.name}` : `Minimize ${plugin.name}`}
+          title={collapsed ? "Expand" : "Minimize"}
+          onClick={() => toggle(key)} onPointerDown={(e) => e.stopPropagation()}>
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2 L7 5 L3 8" /></svg>
+        </button>
         <span className="nm">{plugin.name}</span>
         <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
         <button type="button" className="btn ghost sm" aria-label={plugin.enabled ? "Bypass" : "Enable"}
@@ -109,6 +133,14 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
           {plugin.enabled ? "on" : "off"}
         </button>
       </div>
+      {collapsed ? (
+        // Minimized: one line that still says what the plugin is doing (and, for the
+        // plugins that have one, a tiny live element).
+        <div className="pp-min" data-testid="v3-plugin-summary">
+          {Mini && <Mini {...panelProps} />}
+          <span className="sum">{summary}</span>
+        </div>
+      ) : (<>
       {/* Its own line, not a header chip: the header is one tight row and a preset name
           is long. It names where the plugin came from; editing a value does not remove it. */}
       {plugin.preset && (
@@ -119,29 +151,9 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
       )}
       {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
         onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
-      {/* The tuner's live note display. Only while the plugin is on: bypassed, it hears
-          nothing, and an idle strip would suggest it was listening. */}
-      {native && plugin.type === "moshAutoTune" && plugin.enabled
-        && <TunerReadout plugin={plugin} trackId={trackId} />}
-      {/* Which controls show, and in what order, is pluginParams.ts. A control the engine
-          offers as named choices (AutoTune's key and scale) is a menu; the rest are
-          sliders that read back in the engine's own units. */}
-      {native && inspectorParams(plugin).map((p) => isChoice(p) ? (
-        <label className="fader" key={p.index} data-testid="v3-plugin-param" data-param-index={p.index}>
-          <span className="nm">{p.name}</span>
-          <select aria-label={p.name} value={choiceIndex(p.value, p.choices.length)}
-            onChange={(e) => setParam(p.index, choiceValue(Number(e.target.value), p.choices.length))}>
-            {p.choices.map((c, i) => <option key={c} value={i}>{c}</option>)}
-          </select>
-        </label>
-      ) : (
-        <label className="fader" key={p.index} data-testid="v3-plugin-param" data-param-index={p.index}>
-          <span className="nm">{p.name}</span>
-          <Range min={0} max={1} step={0.01} value={p.value} aria-label={p.name}
-            onChange={(e) => setParam(p.index, Number(e.target.value))} />
-          <span className="v">{p.display ?? p.value.toFixed(2)}</span>
-        </label>
-      ))}
+      {/* A plugin with a panel of its own (panels/registry.ts) draws it; any other native
+          plugin keeps the plain list of controls. */}
+      {def ? <def.Panel {...panelProps} /> : native && <GenericParams plugin={plugin} setParam={setParam} />}
       {hint && <div className="set-hint" data-testid="v3-plugin-hint">{hint}</div>}
       {!native && (
         <button type="button" className="btn pri" data-testid="v3-open-editor"
@@ -149,6 +161,7 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
           Open Editor
         </button>
       )}
+      </>)}
     </div>
   );
 }
@@ -294,6 +307,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
           <summary className="grphd"><span className="sec">Plugins</span></summary>
           <div className="grp-body chain" data-testid="v3-plugins">
             {plugins.map((p, i) => <PluginRow key={p.index} plugin={p} trackId={track.id}
+              sampleRate={snapshot.session?.sampleRate || 48000}
               prevIndex={plugins[i - 1]?.index} nextIndex={plugins[i + 1]?.index} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"
               onClick={() => useV3.getState().setPane("plugins")}>+ Add plugin</button>
