@@ -333,6 +333,26 @@ void MoshOps::sweepStuckVoices()
 
     heldVoices_.erase (std::remove_if (heldVoices_.begin(), heldVoices_.end(), expired),
                        heldVoices_.end());
+
+    // The sampler road (a clipless track, see cmdAuditionNote) has no note-off: the one
+    // releaseOneVoice injected above is swallowed, and te::SamplerPlugin::playNotes starts a
+    // voice only for a key it does not already hold. A blip that sounded there used to leave
+    // its pitch held at the sampler when it expired, so the SAME pad's next tap started
+    // nothing (silent until another pad was tapped or the sampler rebuilt). Hand the sampler
+    // the keys still held on the track, as the explicit "off" action does; only where that
+    // road was taken (the sampler still holds audition keys), so a clip-playing sampler's
+    // own MIDI keys are never touched.
+    for (auto& v : done)
+        if (auto* t = findTrack (v.track.toString()))
+            if (auto* metered = dynamic_cast<MoshSamplerPlugin*> (findSampler (*t)))
+                if (! metered->getAuditionKeys().isZero())
+                {
+                    juce::BigInteger keys;
+                    for (auto& h : heldVoices_)
+                        if (h.track == t->itemID)
+                            keys.setBit (h.pitch);
+                    metered->auditionKeys (keys);
+                }
 }
 
 } // namespace mosh
