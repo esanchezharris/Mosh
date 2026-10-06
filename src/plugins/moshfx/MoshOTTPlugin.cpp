@@ -137,7 +137,7 @@ var MoshOTTPlugin::takeLiveMeters()
     {
         auto* band = new DynamicObject();
         band->setProperty ("levelDb", dynamicsRan ? meterDb (reading.maxima[b]) : -100.0f);
-        band->setProperty ("gainDb", dynamicsRan ? reading.latest[b] : 0.0f);
+        band->setProperty ("gainDb", dynamicsRan ? finiteDb (reading.latest[b], -100.0f, 100.0f) : 0.0f);
         bands.add (var (band));
     }
     auto* o = new DynamicObject();

@@ -18,11 +18,21 @@
 #include "PluginScanPlan.h"
 #include "TrackPresetEngine.h"
 #include "PluginState.h"
+#include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include "files/ImportCopy.h"
 #include <cmath>
 #include <limits>
+
+// The delay/chorus lines are sized for set_plugin_state's ceilings (see
+// MoshDelayLinePlugins.h); raising a ceiling in PluginState.h without them would put the
+// reallocation back on the audio thread.
+static_assert ((int) mosh::pluginstate::maxOf ("delay", "lengthMs") == mosh::MoshDelayPlugin::kMaxLengthMs,
+               "MoshDelayPlugin pre-sizes for the lengthMs ceiling");
+static_assert ((int) (mosh::pluginstate::maxOf ("chorus", "depthMs") * 1000.0)
+                   == (int) (mosh::MoshChorusPlugin::kMaxDepthMs * 1000.0f),
+               "MoshChorusPlugin pre-sizes for the depthMs ceiling");
 
 namespace mosh
 {
@@ -835,10 +845,16 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
 }
 
 // ── Gesture coalescing ────────────────────────────────────────────────────────
-// See MoshOps.h (beginGestureTxn). The window is identified by everything that could
-// move the undo stack under it, so joining can never append to the wrong transaction:
-// JUCE's perform() without beginNewTransaction adds to whatever set is current, which
-// after an undo would be an EARLIER, unrelated step.
+// See MoshOps.h (joinGestureTxn). A join performs WITHOUT beginNewTransaction, and JUCE
+// adds such a perform to whatever action set is current, so the join must be sure that
+// set is still the gesture's own. The hazard is a set some OTHER command opened and
+// performed into after the gesture's last call (set_track_volume mid-drag, say):
+// joining would append the drag to that command's step. The serial (no other
+// beginUndoTransaction) and the depth/name checks rule that out. Undo and redo are a
+// lesser hazard (JUCE's undo()/redo() already end with beginNewTransaction(), so a
+// perform after them starts a fresh set either way), but they still end the window
+// here, through editRevision_, so the step a gesture opens after an undo is a normal
+// named "set_plugin_param" step and not JUCE's unnamed one.
 juce::String MoshOps::gestureArgError (const juce::var& args)
 {
     if (! args.hasProperty ("gesture"))
@@ -856,7 +872,7 @@ juce::String MoshOps::gestureArgError (const juce::var& args)
                    : juce::String ("bad gesture: must be a string of 1-64 characters from [A-Za-z0-9_.:-]");
 }
 
-void MoshOps::beginGestureTxn (const juce::String& name, const juce::String& gesture)
+bool MoshOps::joinGestureTxn (const juce::String& gesture)
 {
     auto& um = undoManager();
     const bool join = gesture.isNotEmpty() && ! inBatch
@@ -869,19 +885,23 @@ void MoshOps::beginGestureTxn (const juce::String& name, const juce::String& ges
                       && um.getCurrentTransactionName() == gestureTxnName_;
     if (! join)
     {
-        beginTxn (name);
-        return;
+        // Not this gesture's window any more (or never was): close it, so a stale
+        // inhibitor never outlives the gesture that took it.
+        if (gesture != gestureId_ || inBatch)
+            endGestureWindow();
+        return false;
     }
     // Joining: the same bookkeeping beginTxn does, minus opening a transaction.
     eng.markDirty();
     ++editRevision_;
+    return true;
 }
 
 void MoshOps::noteGestureTxn (const juce::String& gesture)
 {
     if (gesture.isEmpty() || inBatch)
     {
-        gestureId_.clear();
+        endGestureWindow();
         return;
     }
     auto& um = undoManager();
@@ -890,6 +910,32 @@ void MoshOps::noteGestureTxn (const juce::String& gesture)
     gestureRevision_ = editRevision_;
     gestureUndoDepth_ = um.getUndoDescriptions().size();
     gestureTxnName_ = um.getCurrentTransactionName();
+    gestureLastCallMs_ = juce::Time::getMillisecondCounter();
+    auto& edit = eng.edit();
+    if (gestureInhibitor_ == nullptr || gestureInhibitedEdit_ != &edit)
+    {
+        gestureInhibitor_.reset();
+        gestureInhibitor_ = std::make_unique<te::Edit::UndoTransactionInhibitor> (edit);
+        gestureInhibitedEdit_ = &edit;
+    }
+}
+
+void MoshOps::endGestureWindow()
+{
+    gestureId_.clear();
+    gestureInhibitor_.reset();
+    gestureInhibitedEdit_ = nullptr;
+}
+
+void MoshOps::expireGestureWindow()
+{
+    if (gestureInhibitor_ == nullptr)
+        return;
+    const bool idle = juce::Time::getMillisecondCounter() - gestureLastCallMs_ > kGestureIdleMs;
+    const bool invalidated = gestureRevision_ != editRevision_ || gestureTxnSerial_ != undoTxnSerial_
+                             || gestureInhibitedEdit_ != &eng.edit();
+    if (idle || invalidated)
+        endGestureWindow();
 }
 
 juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
@@ -911,7 +957,8 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
 
     // A drag that carries one `gesture` id joins the transaction its first call opened
     // (one undo step for the whole drag); without a gesture this is beginTxn.
-    beginGestureTxn ("set_plugin_param", gesture);
+    if (! joinGestureTxn (gesture))
+        beginTxn ("set_plugin_param");
     // G14-class fix — see SetPluginParamValueAction's comment. param->setParameter() directly
     // left AutomatableParameter::currentValue (and thus the snapshot's params[].value) stale
     // after undo; replaying through a custom UndoableAction keeps it correct both ways.
@@ -968,8 +1015,11 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
     if (! pluginstate::coerce (*spec, args.getProperty ("value", var()), applied, error))
         return errResult (name, error);
 
-    // Same value as now: nothing to change and NO transaction (an empty one would make
-    // the next undo pop the PREVIOUS command's step — the G14 empty-transaction class).
+    // Same value as now: nothing to change, so this is not an edit. No transaction is
+    // opened, so an open gesture window (another call's drag) is NOT ended by it; the
+    // JSONL line says undoable:false; nothing is re-bounced. (An empty transaction would
+    // be harmless to undo itself: JUCE's beginNewTransaction is lazy and CachedValue
+    // performs nothing for an equal value.)
     const auto before = pluginstate::read (*plugin, *spec);
     const bool same = spec->kind == pluginstate::Spec::Kind::choice
                           ? before.toString() == applied.toString()
@@ -979,7 +1029,8 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
     auto* track = findTrack (trackId);
     if (! same)
     {
-        beginGestureTxn (name, gesture);
+        if (! joinGestureTxn (gesture))
+            beginTxn ("set_plugin_state");
         // Through the Edit's UndoManager: a ValueTree property action, which undo/redo
         // replays and the CachedValue follows (these keys drive no parameter).
         pluginstate::write (*plugin, *spec, applied, &undoManager());

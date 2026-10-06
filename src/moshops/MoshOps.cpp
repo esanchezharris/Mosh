@@ -405,6 +405,7 @@ MoshOps::~MoshOps()
     // flush a late editor callback into the event sink. Ordinary editor close still does.
     pluginHost.closeAllEditors();
     stopTimer();
+    endGestureWindow();   // before the Edit goes (Tracktion asserts no inhibitor outlives it)
     // Balances track, send, and playback-context master clients while their measurers
     // are still alive. Main.cpp destroys MoshOps before the engine for this reason.
     unregisterAllMeterClients();
@@ -421,6 +422,7 @@ MoshOps::~MoshOps()
 void MoshOps::timerCallback()
 {
     pollDirectRenders();
+    expireGestureWindow();   // an idle drag ends its undo step after kGestureIdleMs
     // Push a decimated transport delta while playing (and once on the
     // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
     auto& transport = eng.edit().getTransport();
@@ -1161,6 +1163,7 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope,
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
+    endGestureWindow();
     const auto rackBefore = pluginRackTopology (eng.edit());
     const bool did = undoManager().undo();
     // CAP-PRJ-005 — walk the mirror's cursor with the UndoManager's. Doing it HERE
@@ -1177,6 +1180,7 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
+    endGestureWindow();
     const auto rackBefore = pluginRackTopology (eng.edit());
     const bool did = undoManager().redo();
     if (did && txnCursor_ < (int) txnIds_.size()) ++txnCursor_;   // CAP-PRJ-005 (see cmdUndo)
@@ -1211,6 +1215,7 @@ juce::var MoshOps::cmdJumpToHistory (const juce::var& args)
     if (inBatch)
         return errResult ("jump_to_history", "a batch is open; end or roll it back before jumping");
 
+    endGestureWindow();
     syncUndoMirror();
 
     if (! target.startsWith (historyToken_ + ":"))
@@ -3204,6 +3209,7 @@ juce::var MoshOps::tunerReadings()
 juce::var MoshOps::pluginMeters()
 {
     juce::Array<var> readings;
+    std::set<juce::uint64> seen;
     for (auto* track : te::getAudioTracks (eng.edit()))
     {
         if (track == nullptr) continue;
@@ -3212,11 +3218,18 @@ juce::var MoshOps::pluginMeters()
         {
             auto* metered = dynamic_cast<MoshLiveMetered*> (plugins[i].get());
             if (metered == nullptr) continue;
+            const auto rawId = plugins[i]->itemID.getRawID();
+            seen.insert (rawId);
             // Taken even when it will not be reported, so a reading left over from
             // before a bypass cannot surface as current when the plugin comes back.
             auto fields = metered->takeLiveMeters();
             auto* entry = fields.getDynamicObject();
             if (! plugins[i]->isEnabled() || entry == nullptr) continue;
+            // Not in the chain at the previous call: newly loaded, or back from an undone
+            // removal. Tracktion's PluginCache can hand an undone removal the SAME plugin
+            // object, latch included, so this reading may hold blocks the old graph ran
+            // before the removal. Consume it, report nothing; the next call is clean.
+            if (pluginMetersSeen_.count (rawId) == 0) continue;
 
             auto* o = new DynamicObject();
             o->setProperty ("trackId", track->itemID.toString());
@@ -3228,6 +3241,7 @@ juce::var MoshOps::pluginMeters()
             readings.add (var (o));
         }
     }
+    pluginMetersSeen_ = std::move (seen);
 
     auto* payload = new DynamicObject();
     payload->setProperty ("plugins", readings);
@@ -4692,6 +4706,7 @@ juce::var MoshOps::cmdOpenWithoutPlugins (const juce::var& args)
                               std::vector<juce::String> (suspects.begin(), suspects.end()));
 
     unregisterAllMeterClients();        // old measurers are still valid here; the Edit is about to swap
+    endGestureWindow();                 // the inhibitor must not outlive the Edit it holds
     int skipped = 0;
     if (auto refusal = eng.reloadInSafeMode (&skipped); refusal.isNotEmpty())
     {

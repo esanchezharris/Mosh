@@ -6,6 +6,7 @@
 #include "plugins/moshfx/LiveMeter.h"
 
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <thread>
 
@@ -116,4 +117,106 @@ TEST_CASE ("live meter: a concurrent writer and reader lose no peak and invent n
 
     CHECK (allValid);
     CHECK (largest == (float) blocks);
+}
+
+TEST_CASE ("live meter: an infinite input stays finite on the rail", "[live-meter]")
+{
+    // Tracktion's PluginNode zeroes NaN but passes +inf from an upstream plugin or a
+    // float file. JUCE writes a non-finite double as JSON null, which the UI's number
+    // types do not expect, so the latch must never hand one out.
+    using Latch = LiveMeterLatch<1, 2>;
+    Latch latch;
+    latch.accumulateMax (0, std::numeric_limits<float>::infinity());
+    latch.setLatest (0, std::numeric_limits<float>::infinity());
+    latch.setLatest (1, std::numeric_limits<float>::quiet_NaN());
+    latch.publish();
+    const auto reading = latch.take();
+    CHECK (reading.live);
+    CHECK (std::isfinite (reading.maxima[0]));
+    CHECK (reading.maxima[0] == Latch::kCeiling);   // as loud as can be, but a number
+    CHECK (reading.latest[0] == 0.0f);
+    CHECK (reading.latest[1] == 0.0f);
+
+    // A finite value above the ceiling is clamped too; a normal one is untouched.
+    latch.accumulateMax (0, 3.0e38f);
+    latch.publish();
+    CHECK (latch.take().maxima[0] == Latch::kCeiling);
+    latch.accumulateMax (0, 0.25f);
+    latch.publish();
+    CHECK (latch.take().maxima[0] == 0.25f);
+}
+
+TEST_CASE ("live meter: a take never mixes the latest slots of two blocks", "[live-meter]")
+{
+    // The writer has published block B and is part-way through writing block C when the
+    // reader takes. Without the seqlock the reader would see C's slot 0 next to B's
+    // slots 1-2: a frame no block ever produced.
+    LiveMeterLatch<0, 3> latch;
+    for (std::size_t i = 0; i < 3; ++i) latch.setLatest (i, 1.0f);
+    latch.publish();                                     // block A
+    auto a = latch.take();
+    CHECK (a.live);
+    CHECK ((a.latest[0] == 1.0f && a.latest[1] == 1.0f && a.latest[2] == 1.0f));
+
+    for (std::size_t i = 0; i < 3; ++i) latch.setLatest (i, 2.0f);
+    latch.publish();                                     // block B
+    latch.setLatest (0, 3.0f);                           // block C, half written
+    const auto mid = latch.take();
+    CHECK (mid.live);                                    // B was published since the last take
+    // Every slot from ONE block: B's slots are being overwritten, so the last whole
+    // frame the reader holds (A) is returned rather than a stitched one.
+    CHECK (mid.latest[0] == mid.latest[1]);
+    CHECK (mid.latest[1] == mid.latest[2]);
+    CHECK (mid.latest[0] != 3.0f);
+
+    latch.setLatest (1, 3.0f);
+    latch.setLatest (2, 3.0f);
+    latch.publish();                                     // block C complete
+    const auto c = latch.take();
+    CHECK (c.live);
+    CHECK ((c.latest[0] == 3.0f && c.latest[1] == 3.0f && c.latest[2] == 3.0f));
+}
+
+TEST_CASE ("live meter: concurrent takes always see one block's latest frame", "[live-meter]")
+{
+    // Block b writes the value b into every latest slot. A torn read would show two
+    // different values in one frame.
+    LiveMeterLatch<1, 8> latch;
+    constexpr int blocks = 200000;
+    std::atomic<bool> done { false };
+    std::thread writer ([&] {
+        for (int b = 1; b <= blocks; ++b)
+        {
+            for (std::size_t i = 0; i < 8; ++i)
+                latch.setLatest (i, (float) b);
+            latch.accumulateMax (0, (float) b);
+            latch.publish();
+        }
+        done.store (true, std::memory_order_release);
+    });
+
+    bool consistent = true;
+    int liveTakes = 0;
+    while (! done.load (std::memory_order_acquire))
+    {
+        const auto r = latch.take();
+        if (! r.live) continue;
+        ++liveTakes;
+        for (std::size_t i = 1; i < 8; ++i)
+            consistent = consistent && r.latest[i] == r.latest[0];
+    }
+    writer.join();
+    CHECK (consistent);
+    CHECK (liveTakes > 0);
+
+    // Quiescent: one more block, and the take is exactly that block's frame.
+    for (std::size_t i = 0; i < 8; ++i)
+        latch.setLatest (i, (float) (blocks + 1));
+    latch.publish();
+    const auto last = latch.take();
+    CHECK (last.live);
+    bool whole = true;
+    for (std::size_t i = 0; i < 8; ++i)
+        whole = whole && last.latest[i] == (float) (blocks + 1);
+    CHECK (whole);
 }

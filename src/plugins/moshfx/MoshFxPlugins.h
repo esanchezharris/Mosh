@@ -37,10 +37,21 @@ public:
     virtual ~MoshLiveMetered() = default;
     virtual juce::var takeLiveMeters() = 0;
 
-    /** A linear magnitude in dBFS, floored at -100 (and -100 for silence). */
+    /** A linear magnitude in dBFS, clamped to [-100, +100] (-100 for silence and NaN,
+        +100 for anything at or above 10^5, inf included), so the rail is always finite. */
     static float meterDb (float linear) noexcept
     {
-        return linear > 1.0e-5f ? juce::jmax (-100.0f, 20.0f * std::log10 (linear)) : -100.0f;
+        if (! (linear > 1.0e-5f))
+            return -100.0f;
+        if (! (linear < 1.0e5f))
+            return 100.0f;
+        return juce::jlimit (-100.0f, 100.0f, 20.0f * std::log10 (linear));
+    }
+
+    /** A dB value for the rail: NaN becomes `fallback`, the rest is clamped to [lo, hi]. */
+    static float finiteDb (float db, float lo, float hi, float fallback = 0.0f) noexcept
+    {
+        return std::isnan (db) ? fallback : juce::jlimit (lo, hi, db);
     }
 };
 

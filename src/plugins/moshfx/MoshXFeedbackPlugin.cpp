@@ -235,22 +235,25 @@ var MoshXFeedbackPlugin::takeLiveMeters()
     if (! reading.live)
         return {};
     const auto& v = reading.latest;
+    // The latch already stores non-finite latest values as 0; kept explicit here so the
+    // rail stays finite whatever the latch does.
+    auto finiteOr0 = [] (float x) { return std::isfinite (x) ? x : 0.0f; };
     juce::Array<var> candidates, cuts;
     const int nc = jlimit (0, 4, roundToInt (v[kMeterNumCandidates]));
     const int na = jlimit (0, 4, roundToInt (v[kMeterNumCuts]));
     for (int i = 0; i < nc; ++i)
     {
         auto* c = new DynamicObject();
-        c->setProperty ("hz", v[kMeterCandidates + 2 * (size_t) i]);
-        c->setProperty ("score", v[kMeterCandidates + 2 * (size_t) i + 1]);
+        c->setProperty ("hz", finiteOr0 (v[kMeterCandidates + 2 * (size_t) i]));
+        c->setProperty ("score", finiteOr0 (v[kMeterCandidates + 2 * (size_t) i + 1]));
         candidates.add (var (c));
     }
     for (int i = 0; i < na; ++i)
     {
         auto* c = new DynamicObject();
-        c->setProperty ("hz", v[kMeterCuts + 3 * (size_t) i]);
-        c->setProperty ("score", v[kMeterCuts + 3 * (size_t) i + 1]);
-        c->setProperty ("depthDb", v[kMeterCuts + 3 * (size_t) i + 2]);
+        c->setProperty ("hz", finiteOr0 (v[kMeterCuts + 3 * (size_t) i]));
+        c->setProperty ("score", finiteOr0 (v[kMeterCuts + 3 * (size_t) i + 1]));
+        c->setProperty ("depthDb", finiteOr0 (v[kMeterCuts + 3 * (size_t) i + 2]));
         cuts.add (var (c));
     }
     auto* o = new DynamicObject();

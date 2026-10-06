@@ -233,3 +233,38 @@ TEST_CASE ("Mosh X-FDBK notch state persists across blocks (no per-block reset t
     // re-converges; the middle is already suppressed. Persistent state keeps them level.
     CHECK (headMag <= midMag * 2.5);
 }
+
+TEST_CASE ("Mosh OTT block meter: gainDb excludes the static band trim", "[moshfx][ott][live-meter]")
+{
+    // The panel scales its gain bars for the band law's DYNAMIC movement only; the
+    // contract (docs/02_MOSHOPS_CONTRACT.md, plugin_meters moshOTT) pins gainDb as the
+    // gain change EXCLUDING the Low/Mid/High Gain trim. The trims act after detection,
+    // so the envelopes are the same with or without them and gainDb must be too.
+    mosh::moshfx::OTTSettings plain;
+    plain.amount = 1.0f;
+    auto trimmed = plain;
+    trimmed.lowGainDb = 6.0f;
+    trimmed.midGainDb = -4.0f;
+    trimmed.highGainDb = 3.0f;
+
+    // Something in every band: 110 Hz (low), 1 kHz (mid), 8 kHz (high).
+    auto make = [] {
+        auto a = sine (110.0, 24000, 0.5f), b = sine (1000.0, 24000, 0.1f), c = sine (8000.0, 24000, 0.02f);
+        for (size_t i = 0; i < a.size(); ++i) a[i] += b[i] + c[i];
+        return a;
+    };
+    auto x = make(), y = make();
+    mosh::moshfx::OTTCore p, t;
+    p.prepare (kSampleRate);
+    t.prepare (kSampleRate);
+    p.processBlock (x.data(), (int) x.size(), plain);
+    t.processBlock (y.data(), (int) y.size(), trimmed);
+
+    // The trims really were applied to the audio (else this test proves nothing).
+    CHECK (rmsDiff (x, y) > 1.0e-3);
+    for (size_t b = 0; b < 3; ++b)
+    {
+        CHECK (t.lastBlockMeter().peakEnvelope[b] == p.lastBlockMeter().peakEnvelope[b]);
+        CHECK (t.lastBlockMeter().gainDb[b] == p.lastBlockMeter().gainDb[b]);
+    }
+}

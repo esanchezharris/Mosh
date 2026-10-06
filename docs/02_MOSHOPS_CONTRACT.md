@@ -72,25 +72,37 @@ to an integer and never goes below 1 ms (Tracktion's DelayPlugin divides by the 
 samples on the audio thread). `mode` must be one of its choices; changing it flips the plugin's
 reported `type`/`name` between `"lowpass"` (name `"LPF/HPF"`) and `"highpass"` (name `"High-Pass"`). Errors: `no plugin`,
 `key '<k>' is not a state key of <type> (allowed: …)` (or `(it has none)`), `bad value for <k>: …`,
-`missing value`. A value equal to the current one is `ok` but opens no transaction (an empty
-transaction would make the next undo pop the previous command's step) and logs `undoable:false`.
-Otherwise the write goes through the Edit's UndoManager inside one transaction (a ValueTree
-property action the CachedValue follows), logs one JSONL line, emits the scoped track patch, and
-touches the reactive render loop like `set_plugin_param`. Refused on a frozen track; lock scope
-`Track`. Tracktion behaviour to know about: the chorus and the delay GROW their delay buffers
-inside `applyToBuffer` when `depthMs`/`lengthMs` grows past what `initialise` allocated
-(`tracktion_Chorus.cpp`, `tracktion_Delay.cpp` `ensureMaxBufferSize`), i.e. one allocation on the
-audio thread per growth; Mosh does not patch Tracktion.
+`missing value`. A value equal to the current one is `ok` but is not an edit: it opens no
+transaction (so it does not end an open gesture window, see below), logs `undoable:false`, and
+does not touch the reactive render loop. Otherwise the write goes through the Edit's UndoManager
+inside one transaction (a ValueTree property action the CachedValue follows), logs one JSONL
+line, emits the scoped track patch, and touches the reactive render loop like
+`set_plugin_param`. Refused on a frozen track; lock scope `Track`. **UI-only**: absent from the
+agent catalog and from `TransactionSafe.h` (fails closed inside an agent transaction). Delay
+lines: Tracktion's chorus and delay size their line in `initialise` for the CURRENT
+`depthMs`/`lengthMs` and grow it inside `applyToBuffer` (`ensureMaxBufferSize`, an allocation on
+the audio thread) when it grows. Every Mosh `delay`/`chorus` is a `MoshDelayPlugin` /
+`MoshChorusPlugin` (`src/plugins/moshfx/MoshDelayLinePlugins.h`: Tracktion's plugin, same type,
+audio bit-identical) whose `initialise` sizes the line on the message thread for this command's
+ceiling (2000 ms; a 41 ms chorus line), so a `set_plugin_state` during playback never allocates
+on the audio thread. Registered with the compressor (below); `--selftest` fails if a loaded
+delay or chorus is not one.
 
 **Gestures.** `set_plugin_param` and `set_plugin_state` take an optional `gesture` (a string of
 1–64 characters from `[A-Za-z0-9_.:-]`; anything else, including an empty string or a non-string,
 is an error, not ignored). A call whose `gesture` equals the gesture that opened the CURRENT undo
 transaction joins that transaction instead of opening a new one, so a whole drag is one undo step.
-The window ends when anything else opens a transaction (any other command), and also on undo,
-redo or `jump_to_history`, or any foreign transaction: JUCE appends a transaction-less action to
-whatever step is current, which after an undo would be an EARLIER, unrelated one, so a gesture
-that sees the stack moved under it opens a fresh step. A new gesture id starts a new step. Every
-call is still logged and still emits its track patch. Inside an agent batch (`batch_begin` …
+The window ends when anything else opens a transaction (any other undoable command: joining
+would otherwise append the drag to THAT command's step), on undo, redo or `jump_to_history`
+(JUCE's undo/redo already start a fresh step; ending the window makes the next call open a normal
+named one), on a call without `gesture` or with another one, when an agent batch begins, when
+the project is reloaded/opened/replaced, and after 3 s with no call of that gesture. While the
+window is open MoshOps holds a `te::Edit::UndoTransactionInhibitor`, because Tracktion's
+`Edit::UndoTransactionTimer` otherwise closes the current step 350 ms after any change unless a
+JUCE mouse button is down, and the panels' dials live in the WebView, whose pointer never
+reaches JUCE: without it a drag held still to listen would split into several steps. Read-only
+commands and no-change `set_plugin_state` calls do not end the window. A new gesture id starts a
+new step. Every call is still logged and still emits its track patch. Inside an agent batch (`batch_begin` …
 `batch_end`) behaviour is unchanged (the batch is the one step), and a gesture call after the
 batch never joins it. Without `gesture`, both commands behave exactly as before.
 
@@ -198,12 +210,17 @@ fields are additive.
   the native plugins that publish them (`MoshOps::pluginMeters`, public so `--selftest` asserts it).
   Volatile telemetry: never in the snapshot. An entry appears only for a TRACK plugin that is
   enabled AND was run by the audio thread since the previous tick; the rail is emitted while any
-  entry exists plus ONE empty payload on the falling edge. Peaks and gain reduction ACCUMULATE
-  (largest) between ticks — at small buffers many blocks pass per tick — and dB values are finite,
-  floored at −100. Fields by type:
+  entry exists plus ONE empty payload on the falling edge. A plugin that was not in a chain at the
+  previous tick (newly loaded, or back from an undone removal, which can return the same plugin
+  object) has its reading consumed and not reported, so it appears one tick later and never with
+  data from before its removal. Peaks and gain reduction ACCUMULATE (largest) between ticks — at
+  small buffers many blocks pass per tick. Every value is finite (a non-finite input such as +inf
+  from an upstream plugin is clamped, never sent as JSON `null`): level dB values are clamped to
+  [−100, +100], `grDb` to [0, 100]. Fields by type:
   - `compressor`: `{grDb, inDb, outDb}`. `grDb ≥ 0` is the largest gain reduction actually applied
     since the last tick, measured as |out|/|in| per sample relative to the makeup (output) gain, on
-    samples above −80 dBFS (independent of the detector's internals); `inDb`/`outDb` are sample
+    samples above −80 dBFS (independent of the detector's internals; a block during which the
+    makeup gain changed contributes no `grDb`); `inDb`/`outDb` are sample
     peaks (max over channels 0–1) in dBFS. Every Mosh `compressor` is a `MoshCompressorPlugin`
     (Tracktion's CompressorPlugin, same `"compressor"` type, audio bit-identical, measured around
     the base class), registered from `MoshEngineBehaviour::autoInitialiseDeviceManager()` before
@@ -216,7 +233,9 @@ fields are additive.
     = the output clamp (±0.999) engaged since the last tick. With Amount at 0 the band dynamics do
     not run: `levelDb` −100 and `gainDb` 0.
   - `moshXFeedback`: `{candidates: [{hz, score}], cuts: [{hz, score, depthDb}]}`, the last block's
-    (channel 0), carried with a serial so a frame is never reported twice.
+    (channel 0), carried with a serial so a frame is never reported twice. A frame is always ONE
+    block's (the latch's "latest" slots are a seqlock): if the audio thread is writing the next
+    block at the tick, the previous whole frame is reported instead of a mixture.
   Mosh AutoTune is NOT on this rail (it keeps `tuner`; its latch has a single reader). Known limit:
   an offline render (export, bounce) runs the same plugin objects, so a meter can report during an
   export as the `tuner` rail can.

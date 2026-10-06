@@ -46,6 +46,21 @@ inline constexpr Spec kSpecs[] = {
     { "highpass", "mode",     Spec::Kind::choice,  0.0,   0.0,    "",    "lowpass|highpass" },
 };
 
+/** Compile-time lookup of a spec's max (for static_asserts tying other ceilings to the
+    table, e.g. the delay-line pre-sizing in plugins/moshfx/MoshDelayLinePlugins.h). */
+constexpr bool sameText (const char* a, const char* b)
+{
+    while (*a != 0 && *a == *b) { ++a; ++b; }
+    return *a == *b;
+}
+constexpr double maxOf (const char* type, const char* key)
+{
+    for (const auto& s : kSpecs)
+        if (sameText (s.type, type) && sameText (s.key, key))
+            return s.max;
+    return -1.0;
+}
+
 inline const Spec* find (const juce::String& type, const juce::String& key)
 {
     for (auto& s : kSpecs)

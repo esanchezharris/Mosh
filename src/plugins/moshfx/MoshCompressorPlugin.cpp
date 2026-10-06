@@ -2,6 +2,7 @@
 #include "audio/RealtimeAudioGuard.h"
 
 #include <cmath>
+#include <cstring>
 
 namespace mosh
 {
@@ -37,7 +38,11 @@ void MoshCompressorPlugin::applyToBuffer (const te::PluginRenderContext& fc)
     const bool measure = channels > 0 && n > 0 && n <= scratchSamples && isEnabled();
 
     // The makeup gain the base class is about to apply, read the same way it reads it.
-    const float makeup = measure ? te::dbToGain (outputDb.getCurrentValue()) : 1.0f;
+    // The base reads outputDb again itself; a message-thread write between the two
+    // reads (an Output drag) would make |out|/|in| disagree with this makeup, so the
+    // value is re-read afterwards and the block's gain reduction dropped if it moved.
+    const float makeupDbBefore = measure ? outputDb.getCurrentValue() : 0.0f;
+    const float makeup = measure ? te::dbToGain (makeupDbBefore) : 1.0f;
     if (measure)
         for (int ch = 0; ch < channels; ++ch)
             scratch.copyFrom (ch, 0, *buf, ch, fc.bufferStartSample, n);
@@ -69,10 +74,15 @@ void MoshCompressorPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 
     meter.accumulateMax (0, inPeak);
     meter.accumulateMax (1, outPeak);
-    if (smallestGain > 0.0f && makeup > 0.0f)
-        meter.accumulateMax (2, 20.0f * std::log10 (makeup / smallestGain));
-    else if (smallestGain == 0.0f)
-        meter.accumulateMax (2, 100.0f);   // fully gated: as much reduction as we report
+    const float makeupDbAfter = outputDb.getCurrentValue();
+    const bool makeupSteady = std::memcmp (&makeupDbBefore, &makeupDbAfter, sizeof (float)) == 0;
+    if (makeupSteady)
+    {
+        if (smallestGain > 0.0f && makeup > 0.0f)
+            meter.accumulateMax (2, 20.0f * std::log10 (makeup / smallestGain));
+        else if (smallestGain == 0.0f)
+            meter.accumulateMax (2, 100.0f);   // fully gated: as much reduction as we report
+    }
     meter.publish();
 }
 
@@ -82,7 +92,7 @@ var MoshCompressorPlugin::takeLiveMeters()
     if (! reading.live)
         return {};
     auto* o = new DynamicObject();
-    o->setProperty ("grDb", jlimit (0.0f, 100.0f, reading.maxima[2]));
+    o->setProperty ("grDb", finiteDb (reading.maxima[2], 0.0f, 100.0f));
     o->setProperty ("inDb", meterDb (reading.maxima[0]));
     o->setProperty ("outDb", meterDb (reading.maxima[1]));
     return var (o);

@@ -93,7 +93,7 @@ var MoshSoftClipPlugin::takeLiveMeters()
     if (! reading.live)
         return {};
     auto* o = new DynamicObject();
-    o->setProperty ("grDb", jmax (0.0f, reading.maxima[2]));
+    o->setProperty ("grDb", finiteDb (reading.maxima[2], 0.0f, 100.0f));
     o->setProperty ("inDb", meterDb (reading.maxima[0]));
     o->setProperty ("outDb", meterDb (reading.maxima[1]));
     return var (o);

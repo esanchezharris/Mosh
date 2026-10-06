@@ -7,8 +7,11 @@
 //   COMMAND    set_plugin_state validates, clamps, rounds, flips the filter mode, and
 //              undoes; a `gesture` id makes a whole drag ONE undo step and nothing else.
 //   METERS     MoshOps::pluginMeters (the 30 Hz "plugin_meters" rail): measured gain
-//              reduction that matches the compressor's static curve, staleness, bypass,
-//              and the compressor's audio bit-identical to Tracktion's own.
+//              reduction that matches the compressor's static curve in steady state and
+//              departs from it on a transient, staleness, bypass, an undone removal, and
+//              the compressor's audio bit-identical to Tracktion's own.
+//   DELAY LINE Mosh's delay and chorus (lines pre-sized off the audio thread) are what
+//              "delay"/"chorus" load as, and their audio is Tracktion's bit for bit.
 //
 // A headless run has no audio thread, so the plugins are driven block by block the way
 // the playback graph's PluginNode drives them (as the AutoTune section does).
@@ -17,6 +20,7 @@
 #include "moshops/MoshOps.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/moshfx/MoshCompressorPlugin.h"
+#include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -149,6 +153,55 @@ void drive (te::Plugin& plugin, juce::AudioBuffer<float>& io, int block)
         plugin.applyToBufferWithAutomation (context);
     }
     plugin.baseClassDeinitialise();
+}
+
+// The same, with `change` applied to both plugins between the two halves of the signal
+// (a set_plugin_state while the plugin is playing).
+void driveWithChange (te::Plugin& plugin, juce::AudioBuffer<float>& io, int block, const std::function<void (te::Plugin&)>& change)
+{
+    const double rate = 48000.0;
+    plugin.baseClassInitialise ({ tracktion::TimePosition(), rate, block });
+    const auto layout = io.getNumChannels() >= 2 ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
+    const int half = (io.getNumSamples() / 2 / block) * block;
+    for (int start = 0; start < io.getNumSamples(); start += block)
+    {
+        if (start == half)
+            change (plugin);
+        const int n = juce::jmin (block, io.getNumSamples() - start);
+        const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
+                                         tracktion::TimePosition::fromSeconds ((start + n) / rate));
+        te::PluginRenderContext context (&io, layout, start, n, nullptr, 0.0, time,
+                                         /*playing*/ true, /*scrubbing*/ false, /*rendering*/ true,
+                                         /*allowBypassedProcessing*/ false);
+        plugin.applyToBufferWithAutomation (context);
+    }
+    plugin.baseClassDeinitialise();
+}
+
+int samplesDiffering (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+{
+    int differing = 0;
+    for (int ch = 0; ch < juce::jmin (a.getNumChannels(), b.getNumChannels()); ++ch)
+        for (int i = 0; i < juce::jmin (a.getNumSamples(), b.getNumSamples()); ++i)
+            if (std::memcmp (a.getReadPointer (ch) + i, b.getReadPointer (ch) + i, sizeof (float)) != 0)
+                ++differing;
+    return differing;
+}
+
+// A genuine Tracktion plugin of class T built from a copy of `source`'s state (fresh id).
+template <typename T>
+te::Plugin::Ptr tracktionTwin (MoshEngine& eng, te::Plugin& source)
+{
+    auto tree = source.state.createCopy();
+    tree.removeProperty (te::IDs::id, nullptr);
+    te::EditItemID::readOrCreateNewID (eng.edit(), tree);
+    return te::Plugin::Ptr (new T (te::PluginCreationInfo (eng.edit(), tree, false)));
+}
+
+void pump (int ms)
+{
+    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->runDispatchLoopUntil (ms);
 }
 
 var meterFor (const var& payload, const String& trackId, int index)
@@ -306,8 +359,12 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         check (ok (r) && (int) dataOf (r).getProperty ("value", -1) == 334 && dataOf (r).getProperty ("key", var()).toString() == "lengthMs",
                "lengthMs 333.6 is applied as the integer 334 and the result says so");
         check ((int) stateValue (ops, tid, delay, "lengthMs") == 334, "the snapshot reads lengthMs 334");
-        if (auto* live = dynamic_cast<te::DelayPlugin*> (livePlugin (eng, tid, delay)))
-            check (live->lengthMs.get() == 334, "the DelayPlugin itself holds 334 ms");
+        {
+            auto* live = dynamic_cast<te::DelayPlugin*> (livePlugin (eng, tid, delay));
+            check (live != nullptr, "the live plugin at the delay's index is a te::DelayPlugin");
+            if (live != nullptr)
+                check (live->lengthMs.get() == 334, "the DelayPlugin itself holds 334 ms");
+        }
         check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, delay, "lengthMs") == 150, "undo restores lengthMs 150");
 
         r = setState (delay, "lengthMs", 0);
@@ -351,8 +408,12 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                    && flipped.getProperty ("name", var()).toString() == "High-Pass"
                    && stateValue (ops, tid, lowpass, "mode").toString() == "highpass",
                "mode highpass turns the lowpass into a reported \"highpass\"");
-        if (auto* lp = dynamic_cast<te::LowPassPlugin*> (livePlugin (eng, tid, lowpass)))
-            check (! lp->isLowPass(), "the LowPassPlugin is really in high-pass mode");
+        {
+            auto* lp = dynamic_cast<te::LowPassPlugin*> (livePlugin (eng, tid, lowpass));
+            check (lp != nullptr, "the live plugin at the lowpass's index is a te::LowPassPlugin");
+            if (lp != nullptr)
+                check (! lp->isLowPass(), "the LowPassPlugin is really in high-pass mode");
+        }
         check (ok (command (ops, "undo")) && pluginAt (ops, tid, lowpass).getProperty ("type", var()).toString() == "lowpass",
                "undo turns it back into a \"lowpass\"");
         r = setState (highpass, "mode", "lowpass");
@@ -363,12 +424,20 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         check (! ok (setState (lowpass, "mode", "bandpass")) && ! ok (setState (lowpass, "mode", 3)),
                "a mode outside its choices is refused");
 
-        // A value equal to the current one must not leave an EMPTY transaction behind:
-        // the undo after it has to undo the real edit before it.
+        // A value equal to the current one is not an edit: ok, logged undoable:false.
+        // (Its other effect, not ending an open gesture window, is checked in the gesture
+        // section below.)
         check (ok (setState (delay, "lengthMs", 400)), "lengthMs 400");
         check (ok (setState (delay, "lengthMs", 400)), "lengthMs 400 again (no change) is still ok");
+        {
+            const auto entries = dataOf (command (ops, "get_command_log", object ({ { "limit", 1 } }))).getProperty ("entries", var());
+            const auto last = entries.size() > 0 ? entries[0] : var();
+            check (last.getProperty ("command", var()).toString() == "set_plugin_state"
+                       && last.hasProperty ("undoable") && ! (bool) last.getProperty ("undoable", true),
+                   "the no-change call's JSONL line says undoable:false");
+        }
         check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, delay, "lengthMs") == 150,
-               "one undo after a no-change call restores 150 (the no-change call opened no transaction)");
+               "one undo after the no-change call restores 150");
     }
 
     // ── Gesture coalescing ──
@@ -402,15 +471,20 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                "the next undo takes back the other command");
         check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "and the next the gesture's first half");
 
-        // An undo in the middle must end the window: JUCE appends a transaction-less
-        // perform to whatever step is current, which after an undo is an EARLIER one.
+        // An undo ends the window. (JUCE's undo() itself ends with beginNewTransaction(),
+        // so a joined perform would still land in a fresh set; that set would be JUCE's
+        // unnamed one. The window ending means the call opens a normal named step.)
+        auto& um = eng.edit().getUndoManager();
         check (ok (command (ops, "set_track_pan", object ({ { "trackId", tid }, { "pan", 0.3 } }))), "an unrelated pan edit");
         check (ok (drag ("drag-5", 0.2)) && ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0),
                "a gesture, then undo");
+        check (! ops.gestureWindowOpenForTest(), "the undo closed the gesture window");
         check (ok (drag ("drag-5", 0.3)), "the same gesture id after the undo");
+        check (um.getUndoDescription() == "set_plugin_param",
+               "after an undo the gesture opened its own named step (undo head: \"" + um.getUndoDescription() + "\")");
         check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0)
                    && std::abs ((double) trackVar (ops, tid).getProperty ("pan", 0.0) - 0.3) < 0.001,
-               "after an undo the gesture opened its own step: undo does not take the pan edit with it");
+               "undo takes back the post-undo call only, not the pan edit");
         check (ok (command (ops, "undo")) && std::abs ((double) trackVar (ops, tid).getProperty ("pan", 1.0)) < 0.001, "undo the pan edit");
 
         // Agent batch: unchanged (the batch is the one step), and a gesture call after
@@ -433,6 +507,53 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                "a lengthMs drag of three calls");
         check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, at["delay"], "lengthMs") == 150,
                "ONE undo restores the length before the drag");
+
+        // A no-change set_plugin_state (no gesture) in the middle of a drag is not an edit,
+        // so it does not end the drag's window: the drag still undoes as one step. (Were
+        // it to open a transaction, the window would end and undo would stop at 200.)
+        check (ok (len ("len-2", 200)), "a lengthMs drag starts (200)");
+        check (ok (command (ops, "set_plugin_state", object ({ { "trackId", tid }, { "index", at["delay"] }, { "key", "lengthMs" }, { "value", 200 } }))),
+               "a no-change, gesture-less set_plugin_state lands mid-drag");
+        check (ok (len ("len-2", 300)), "the drag continues (300)");
+        check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, at["delay"], "lengthMs") == 150,
+               "ONE undo restores 150: the no-change call did not split the drag");
+
+        // A drag held still. Tracktion's Edit::UndoTransactionTimer closes the current step
+        // 350 ms after a change unless a JUCE mouse button is down, and the panels' dials
+        // are in the WebView, so MoshOps holds an UndoTransactionInhibitor while a gesture
+        // window is open. Pumping the message loop lets that timer really run here.
+        {
+            auto plain = [&] (double value)
+            {
+                return command (ops, "set_plugin_param", object ({ { "trackId", tid }, { "index", eq }, { "paramIndex", 0 }, { "value", value } }));
+            };
+            // Control: the timer does run headless, so the checks after it can fail.
+            check (ok (plain (0.15)) && um.getNumActionsInCurrentTransaction() > 0, "control: a gesture-less edit leaves its step open");
+            pump (800);
+            check (um.getNumActionsInCurrentTransaction() == 0,
+                   "control: after a 0.8 s pause Tracktion's timer has closed that step by itself");
+            check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "undo the control edit");
+
+            check (ok (drag ("drag-hold", 0.2)), "a drag starts");
+            check (ops.gestureWindowOpenForTest(), "the open gesture window holds Tracktion's transaction timer");
+            pump (800);
+            check (um.getNumActionsInCurrentTransaction() > 0, "after a 0.8 s pause the drag's step is still open");
+            check (ok (drag ("drag-hold", 0.3)) && ok (drag ("drag-hold", 0.4)), "the drag resumes");
+            check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0),
+                   "ONE undo takes back a drag that paused 0.8 s mid-way");
+            check (! ops.gestureWindowOpenForTest(), "the undo released the inhibitor");
+
+            // An idle window closes by itself (MoshOps::timerCallback), and the timer then
+            // closes the step: the next call of the same id is a new step.
+            check (ok (drag ("drag-idle", 0.2)), "a drag starts and goes idle");
+            pump ((int) MoshOps::kGestureIdleMsForTest + 900);
+            check (! ops.gestureWindowOpenForTest(), "after the idle timeout the window is closed and the inhibitor released");
+            check (um.getNumActionsInCurrentTransaction() == 0, "...and Tracktion's timer has closed the step");
+            check (ok (drag ("drag-idle", 0.3)), "the same id after the timeout");
+            check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), 0.2),
+                   "undo takes back only the call after the timeout");
+            check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "undo the idle drag's first step");
+        }
 
         // A malformed gesture is an error, not silently ignored, and changes nothing.
         check (! ok (drag ("bad gesture", 0.6)), "a gesture with a space is refused");
@@ -462,93 +583,134 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         auto* comp = dynamic_cast<MoshCompressorPlugin*> (compPlugin);
         // Guard on Tracktion's init order (MoshEngine.cpp, autoInitialiseDeviceManager).
         check (comp != nullptr, "a loaded \"compressor\" is a MoshCompressorPlugin (registered before Tracktion's own)");
-        if (comp == nullptr)
-            return;
-
-        // Threshold to its floor (0.01 = -40 dB); 2:1 by the encoding (ratio slope 0.5).
-        check (setParam (compIdx, 0, 0.0) && setParam (compIdx, 1, 0.5 / 0.95), "compressor threshold -40 dB, ratio 2:1");
-        const double thresh = comp->thresholdGain.getCurrentValue(), rat = comp->ratio.getCurrentValue();
-        // A DC level of A on both channels: the detector settles at exactly A, so the
-        // static curve is exact: gain = (t + (A - t) * ratio) / A.
-        const double A = 0.5;
-        const double expectedGr = -db ((thresh + (A - thresh) * rat) / A);
-        auto dc = signal (2, 0.5, [A] (int, int) { return (float) A; });
-        drive (*comp, dc, 256);
+        if (comp != nullptr)
         {
-            const auto payload = ops.pluginMeters();
-            const auto m = meterFor (payload, tid, compIdx);
-            check (m.isObject(), "the compressor reports a live meter after processing audio");
-            check (m.getProperty ("type", var()).toString() == "compressor"
-                       && m.getProperty ("itemId", var()).toString() == pluginAt (ops, tid, compIdx).getProperty ("itemId", var()).toString(),
-                   "the meter names its type and the plugin's itemId");
-            const double gr = (double) m.getProperty ("grDb", -1.0);
-            check (std::abs (gr - expectedGr) < 0.1,
-                   "compressor grDb " + String (gr, 3) + " matches the static curve " + String (expectedGr, 3) + " dB (within 0.1 dB)");
-            check (std::abs ((double) m.getProperty ("inDb", 0.0) - db (A)) < 0.05, "compressor inDb is the input peak (-6.02 dBFS)");
-            check ((double) m.getProperty ("outDb", 0.0) <= (double) m.getProperty ("inDb", 0.0) + 0.01,
-                   "compressor outDb is no louder than its input at 0 dB makeup");
-            bool onlyMeteredTypes = true;
-            const auto entries = payload.getProperty ("plugins", var());
-            for (int i = 0; i < entries.size(); ++i)
-                onlyMeteredTypes = onlyMeteredTypes && entries[i].getProperty ("trackId", var()).toString() == tid
-                                   && (int) entries[i].getProperty ("index", -1) == compIdx;
-            check (onlyMeteredTypes, "only the plugin that processed audio is on the rail");
-        }
-        check (! meterFor (ops.pluginMeters(), tid, compIdx).isObject(),
-               "asked again with no new audio, the compressor meter is gone (never stale)");
-
-        // Makeup gain is excluded from gain reduction.
-        check (setParam (compIdx, 4, (6.0 + 10.0) / 34.0), "compressor makeup +6 dB");
-        auto dc2 = signal (2, 0.5, [A] (int, int) { return (float) A; });
-        drive (*comp, dc2, 256);
-        {
-            const auto m = meterFor (ops.pluginMeters(), tid, compIdx);
-            const double gr = (double) m.getProperty ("grDb", -1.0);
-            check (std::abs (gr - expectedGr) < 0.1, "with +6 dB makeup grDb is still " + String (gr, 3) + " dB (makeup excluded)");
-        }
-        check (ok (command (ops, "undo")), "undo the makeup change");
-
-        // Quiet input never reaches the threshold: no gain reduction.
-        auto quiet = signal (2, 0.25, [] (int, int i) { return sine (1000.0, i, 0.005f); });
-        drive (*comp, quiet, 256);
-        {
-            const auto m = meterFor (ops.pluginMeters(), tid, compIdx);
-            check (m.isObject() && (double) m.getProperty ("grDb", 99.0) < 0.05, "below threshold the compressor reports ~0 dB of reduction");
-            check (std::abs ((double) m.getProperty ("inDb", 0.0) - db (0.005)) < 0.1, "and the quiet input's peak (-46 dBFS)");
-        }
-
-        // The audio is Tracktion's, bit for bit: the same input through a genuine
-        // te::CompressorPlugin with the same state.
-        {
-            auto tree = comp->state.createCopy();
-            tree.removeProperty (te::IDs::id, nullptr);
-            te::EditItemID::readOrCreateNewID (eng.edit(), tree);
-            te::Plugin::Ptr plain (new te::CompressorPlugin (te::PluginCreationInfo (eng.edit(), tree, false)));
-            check (dynamic_cast<MoshCompressorPlugin*> (plain.get()) == nullptr, "the reference is Tracktion's own CompressorPlugin");
-            auto music = [] (int ch, int i)
+            // Threshold to its floor (0.01 = -40 dB); 2:1 by the encoding (ratio slope 0.5).
+            check (setParam (compIdx, 0, 0.0) && setParam (compIdx, 1, 0.5 / 0.95), "compressor threshold -40 dB, ratio 2:1");
+            const double thresh = comp->thresholdGain.getCurrentValue(), rat = comp->ratio.getCurrentValue();
+            // A DC level of A on both channels: the detector settles at exactly A, so the
+            // static curve is exact: gain = (t + (A - t) * ratio) / A.
+            const double A = 0.5;
+            const double expectedGr = -db ((thresh + (A - thresh) * rat) / A);
+            auto dc = signal (2, 0.5, [A] (int, int) { return (float) A; });
+            drive (*comp, dc, 256);
             {
-                const float swell = 0.5f + 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1.5 * i / 48000.0);
-                return swell * (sine (220.0 + 3.0 * ch, i, 0.6f) + sine (1760.0, i, 0.2f)) + (i % 4800 < 48 ? 0.4f : 0.0f);
-            };
-            auto viaMosh = signal (2, 1.0, music), viaTracktion = signal (2, 1.0, music);
-            drive (*comp, viaMosh, 256);
-            drive (*plain, viaTracktion, 256);
-            int differing = 0;
-            for (int ch = 0; ch < 2; ++ch)
-                for (int i = 0; i < viaMosh.getNumSamples(); ++i)
-                    if (std::memcmp (viaMosh.getReadPointer (ch) + i, viaTracktion.getReadPointer (ch) + i, sizeof (float)) != 0)
-                        ++differing;
-            check (differing == 0, "MoshCompressorPlugin's output is bit-identical to te::CompressorPlugin ("
-                                       + String (differing) + " samples differ)");
-            (void) ops.pluginMeters();
-        }
+                const auto payload = ops.pluginMeters();
+                const auto m = meterFor (payload, tid, compIdx);
+                check (m.isObject(), "the compressor reports a live meter after processing audio");
+                check (m.getProperty ("type", var()).toString() == "compressor"
+                           && m.getProperty ("itemId", var()).toString() == pluginAt (ops, tid, compIdx).getProperty ("itemId", var()).toString(),
+                       "the meter names its type and the plugin's itemId");
+                const double gr = (double) m.getProperty ("grDb", -1.0);
+                check (std::abs (gr - expectedGr) < 0.1,
+                       "compressor grDb " + String (gr, 3) + " matches the static curve " + String (expectedGr, 3) + " dB (within 0.1 dB)");
+                check (std::abs ((double) m.getProperty ("inDb", 0.0) - db (A)) < 0.05, "compressor inDb is the input peak (-6.02 dBFS)");
+                check ((double) m.getProperty ("outDb", 0.0) <= (double) m.getProperty ("inDb", 0.0) + 0.01,
+                       "compressor outDb is no louder than its input at 0 dB makeup");
+                bool onlyMeteredTypes = true;
+                const auto entries = payload.getProperty ("plugins", var());
+                for (int i = 0; i < entries.size(); ++i)
+                    onlyMeteredTypes = onlyMeteredTypes && entries[i].getProperty ("trackId", var()).toString() == tid
+                                       && (int) entries[i].getProperty ("index", -1) == compIdx;
+                check (onlyMeteredTypes, "only the plugin that processed audio is on the rail");
+            }
+            check (! meterFor (ops.pluginMeters(), tid, compIdx).isObject(),
+                   "asked again with no new audio, the compressor meter is gone (never stale)");
 
-        // A bypassed plugin is never on the rail, whatever runs through it.
-        check (ok (command (ops, "bypass_plugin", object ({ { "trackId", tid }, { "index", compIdx }, { "bypassed", true } }))), "bypass the compressor");
-        auto dc3 = signal (2, 0.25, [A] (int, int) { return (float) A; });
-        drive (*comp, dc3, 256);
-        check (! meterFor (ops.pluginMeters(), tid, compIdx).isObject(), "a bypassed compressor reports no meter");
-        check (ok (command (ops, "undo")), "un-bypass the compressor");
+            // Makeup gain is excluded from gain reduction.
+            check (setParam (compIdx, 4, (6.0 + 10.0) / 34.0), "compressor makeup +6 dB");
+            auto dc2 = signal (2, 0.5, [A] (int, int) { return (float) A; });
+            drive (*comp, dc2, 256);
+            {
+                const auto m = meterFor (ops.pluginMeters(), tid, compIdx);
+                const double gr = (double) m.getProperty ("grDb", -1.0);
+                check (std::abs (gr - expectedGr) < 0.1, "with +6 dB makeup grDb is still " + String (gr, 3) + " dB (makeup excluded)");
+            }
+            check (ok (command (ops, "undo")), "undo the makeup change");
+
+            // Quiet input never reaches the threshold: no gain reduction.
+            auto quiet = signal (2, 0.25, [] (int, int i) { return sine (1000.0, i, 0.005f); });
+            drive (*comp, quiet, 256);
+            {
+                const auto m = meterFor (ops.pluginMeters(), tid, compIdx);
+                check (m.isObject() && (double) m.getProperty ("grDb", 99.0) < 0.05, "below threshold the compressor reports ~0 dB of reduction");
+                check (std::abs ((double) m.getProperty ("inDb", 0.0) - db (0.005)) < 0.1, "and the quiet input's peak (-46 dBFS)");
+            }
+
+            // A transient: the meter MEASURES the gain applied, it does not evaluate the static
+            // curve at the input peak. Threshold -6 dB, 2:1, attack 100 ms, 10 ms of DC 0.9:
+            // the detector climbs only to about 0.33, under the 0.5 threshold, so nothing is
+            // reduced yet, while the static curve at 0.9 would say about 2.2 dB.
+            check (setParam (compIdx, 0, (0.5 - 0.01) / 0.99) && setParam (compIdx, 2, (100.0 - 0.3) / 199.7),
+                   "compressor threshold -6 dB, attack 100 ms");
+            {
+                const double t = comp->thresholdGain.getCurrentValue(), r = comp->ratio.getCurrentValue();
+                const double peak = 0.9, staticGr = -db ((t + (peak - t) * r) / peak);
+                auto burst = signal (2, 0.01, [peak] (int, int) { return (float) peak; });
+                drive (*comp, burst, 240);
+                const auto m = meterFor (ops.pluginMeters(), tid, compIdx);
+                const double gr = (double) m.getProperty ("grDb", 99.0);
+                check (staticGr > 1.5, "the static curve at the burst's peak is " + String (staticGr, 2) + " dB (so the case discriminates)");
+                check (m.isObject() && gr < 0.1,
+                       "a 10 ms burst under a 100 ms attack: grDb " + String (gr, 3) + " (measured ~0, not the static curve's "
+                           + String (staticGr, 2) + " dB)");
+            }
+            check (ok (command (ops, "undo")) && ok (command (ops, "undo")), "undo the attack and threshold changes");
+
+            // The audio is Tracktion's, bit for bit: the same input through a genuine
+            // te::CompressorPlugin with the same state.
+            {
+                auto tree = comp->state.createCopy();
+                tree.removeProperty (te::IDs::id, nullptr);
+                te::EditItemID::readOrCreateNewID (eng.edit(), tree);
+                te::Plugin::Ptr plain (new te::CompressorPlugin (te::PluginCreationInfo (eng.edit(), tree, false)));
+                check (dynamic_cast<MoshCompressorPlugin*> (plain.get()) == nullptr, "the reference is Tracktion's own CompressorPlugin");
+                auto music = [] (int ch, int i)
+                {
+                    const float swell = 0.5f + 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1.5 * i / 48000.0);
+                    return swell * (sine (220.0 + 3.0 * ch, i, 0.6f) + sine (1760.0, i, 0.2f)) + (i % 4800 < 48 ? 0.4f : 0.0f);
+                };
+                auto viaMosh = signal (2, 1.0, music), viaTracktion = signal (2, 1.0, music);
+                drive (*comp, viaMosh, 256);
+                drive (*plain, viaTracktion, 256);
+                int differing = 0;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < viaMosh.getNumSamples(); ++i)
+                        if (std::memcmp (viaMosh.getReadPointer (ch) + i, viaTracktion.getReadPointer (ch) + i, sizeof (float)) != 0)
+                            ++differing;
+                check (differing == 0, "MoshCompressorPlugin's output is bit-identical to te::CompressorPlugin ("
+                                           + String (differing) + " samples differ)");
+                (void) ops.pluginMeters();
+            }
+
+            // A bypassed plugin is never on the rail, whatever runs through it.
+            check (ok (command (ops, "bypass_plugin", object ({ { "trackId", tid }, { "index", compIdx }, { "bypassed", true } }))), "bypass the compressor");
+            auto dc3 = signal (2, 0.25, [A] (int, int) { return (float) A; });
+            drive (*comp, dc3, 256);
+            check (! meterFor (ops.pluginMeters(), tid, compIdx).isObject(), "a bypassed compressor reports no meter");
+            check (ok (command (ops, "undo")), "un-bypass the compressor");
+
+
+            // An undone removal. Tracktion's PluginCache can hand the undo the SAME plugin
+            // object, so blocks it ran before the removal are still unread in its latch;
+            // pluginMeters must consume them, not report them as live.
+            {
+                te::Plugin::Ptr held (comp);
+                auto before = signal (2, 0.25, [A] (int, int) { return (float) A; });
+                drive (*comp, before, 256);   // published, not taken
+                check (ok (command (ops, "remove_plugin", object ({ { "trackId", tid }, { "index", compIdx } }))),
+                       "remove the compressor while it holds an unread reading");
+                (void) ops.pluginMeters();   // a rail tick while it is out of the chain
+                check (ok (command (ops, "undo")), "undo the removal");
+                check (livePlugin (eng, tid, compIdx) == comp,
+                       "the undone removal brought back the same plugin object (so its latch still held the old reading)");
+                check (! meterFor (ops.pluginMeters(), tid, compIdx).isObject(),
+                       "the first tick after the undo reports nothing: the pre-removal reading is consumed, not shown");
+                auto after = signal (2, 0.25, [A] (int, int) { return (float) A; });
+                drive (*comp, after, 256);
+                check (meterFor (ops.pluginMeters(), tid, compIdx).isObject(), "audio processed after the undo is reported again");
+            }
+        }
 
         // Soft clip: y = c * tanh (g x / c); gain reduction 20 log10 (g |x| / |y|) at the peak.
         {
@@ -582,11 +744,30 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             check (m.isObject() && bands.size() == 3 && m.getProperty ("clipped", var()).isBool(), "OTT reports three bands and a clip flag");
             check ((double) bands[0].getProperty ("levelDb", -100.0) > -20.0 && (double) bands[0].getProperty ("gainDb", 0.0) < -1.0,
                    "a loud low band: level above -20 dB and a downward cut (" + bands[0].getProperty ("gainDb", 0.0).toString() + " dB)");
-            bool finite = true;
-            for (int b = 0; b < bands.size(); ++b)
-                finite = finite && std::isfinite ((double) bands[b].getProperty ("levelDb", var()))
-                         && (double) bands[b].getProperty ("levelDb", var()) >= -100.0;
-            check (finite, "every band level is finite and floored at -100 dB");
+            {
+                // levelDb is the band envelope's peak: the same signal through an OTTCore
+                // with the plugin's time constant must give the same number.
+                const auto tp = paramOf (ops, tid, ott, 1);
+                const double timeMs = (double) tp.getProperty ("min", 0.0)
+                                      + (double) tp.getProperty ("value", 0.0)
+                                            * ((double) tp.getProperty ("max", 0.0) - (double) tp.getProperty ("min", 0.0));
+                moshfx::OTTSettings reference;
+                reference.amount = 1.0f;
+                reference.timeMs = (float) timeMs;
+                moshfx::OTTCore core;
+                core.prepare (48000.0);
+                auto mono = signal (1, 1.0, [] (int, int i) { return sine (110.0, i, 0.8f); });
+                float peakEnvelope = 0.0f;
+                for (int start = 0; start < mono.getNumSamples(); start += 256)
+                {
+                    core.processBlock (mono.getWritePointer (0, start), juce::jmin (256, mono.getNumSamples() - start), reference);
+                    peakEnvelope = juce::jmax (peakEnvelope, core.lastBlockMeter().peakEnvelope[0]);
+                }
+                const double expectedLevel = MoshLiveMetered::meterDb (peakEnvelope);
+                const double level = (double) bands[0].getProperty ("levelDb", 0.0);
+                check (std::abs (level - expectedLevel) < 0.01,
+                       "the low band's levelDb " + String (level, 3) + " is its envelope peak " + String (expectedLevel, 3) + " dB");
+            }
             check (! meterFor (ops.pluginMeters(), tid, ott).isObject(), "a second take with no new audio is empty");
             auto quietLow = signal (2, 1.0, [] (int, int i) { return sine (110.0, i, 0.003f); });
             if (plugin != nullptr) drive (*plugin, quietLow, 256);
@@ -643,6 +824,73 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 stillThere = stillThere || (tuners[i].getProperty ("trackId", var()).toString() == tid
                                             && (int) tuners[i].getProperty ("index", -1) == tune);
             check (stillThere, "...and its pitch reading is still there for the tuner rail afterwards");
+        }
+    }
+
+    // ── Delay and chorus: lines sized on the message thread, audio unchanged ──
+    section ("Plugin panels: delay and chorus lines sized off the audio thread");
+    {
+        auto* delay = dynamic_cast<MoshDelayPlugin*> (livePlugin (eng, tid, at["delay"]));
+        auto* chorus = dynamic_cast<MoshChorusPlugin*> (livePlugin (eng, tid, at["chorus"]));
+        // Guards on Tracktion's init order (MoshEngine.cpp, autoInitialiseDeviceManager).
+        check (delay != nullptr, "a loaded \"delay\" is a MoshDelayPlugin (registered before Tracktion's own)");
+        check (chorus != nullptr, "a loaded \"chorus\" is a MoshChorusPlugin (registered before Tracktion's own)");
+
+        // The sizing each subclass hands its base initialise() covers what the base's
+        // applyToBuffer asks for at set_plugin_state's ceiling, at every length it can
+        // start from (ensureMaxBufferSize(n) grows only when n exceeds the sized length).
+        bool delayCovers = true, chorusCovers = true;
+        for (double rate : { 22050.0, 44100.0, 48000.0, 88200.0, 96000.0, 192000.0 })
+        {
+            const int delayCeiling = (int) (MoshDelayPlugin::kMaxLengthMs * rate / 1000.0);
+            for (int lengthMs : { 1, 2, 150, 999, 1999, 2000 })
+                delayCovers = delayCovers && (int) (lengthMs * MoshDelayPlugin::sizingRate (rate, lengthMs) / 1000.0) > delayCeiling;
+            const int chorusCeiling = juce::roundToInt ((MoshChorusPlugin::lineLengthMs (MoshChorusPlugin::kMaxDepthMs) * rate) / 1000.0);
+            for (float depthMs : { 0.1f, 0.5f, 3.0f, 7.5f, 19.9f, 20.0f })
+                chorusCovers = chorusCovers
+                               && juce::roundToInt ((MoshChorusPlugin::lineLengthMs (depthMs) * MoshChorusPlugin::sizingRate (rate, depthMs)) / 1000.0)
+                                      > chorusCeiling;
+        }
+        check (delayCovers, "MoshDelayPlugin sizes its line for 2000 ms from any starting length (22.05-192 kHz)");
+        check (chorusCovers, "MoshChorusPlugin sizes its line for a 20 ms depth from any starting depth (22.05-192 kHz)");
+        check (MoshChorusPlugin::lineLengthMs (MoshChorusPlugin::kMaxDepthMs) == 41, "the chorus ceiling line is 1 + round (20 + 20) = 41 ms");
+
+        auto music = [] (int ch, int i)
+        {
+            const float swell = 0.5f + 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1.5 * i / 48000.0);
+            return swell * (sine (220.0 + 3.0 * ch, i, 0.5f) + sine (1760.0, i, 0.2f)) + (i % 4800 < 48 ? 0.3f : 0.0f);
+        };
+        // Bit-identical to Tracktion's own, including a length that GROWS mid-stream (the
+        // case where Tracktion's would reallocate on the audio thread and Mosh's does not).
+        if (delay != nullptr)
+        {
+            auto twin = tracktionTwin<te::DelayPlugin> (eng, *delay);
+            check (dynamic_cast<MoshDelayPlugin*> (twin.get()) == nullptr, "the delay reference is Tracktion's own DelayPlugin");
+            auto grow = [] (te::Plugin& p) { if (auto* d = dynamic_cast<te::DelayPlugin*> (&p)) d->lengthMs.setValue (1200, nullptr); };
+            auto viaMosh = signal (2, 1.0, music), viaTracktion = signal (2, 1.0, music);
+            driveWithChange (*delay, viaMosh, 256, grow);
+            driveWithChange (*twin, viaTracktion, 256, grow);
+            const int differing = samplesDiffering (viaMosh, viaTracktion);
+            check (differing == 0, "MoshDelayPlugin's output is bit-identical to te::DelayPlugin, 150 -> 1200 ms mid-stream ("
+                                       + String (differing) + " samples differ)");
+            float wet = 0.0f;
+            for (int i = 0; i < viaMosh.getNumSamples(); ++i)
+                wet = juce::jmax (wet, std::abs (viaMosh.getSample (0, i) - music (0, i)));
+            check (wet > 0.01f, "...and the delay really processed (its output differs from the dry input)");
+            delay->lengthMs.setValue (150, nullptr);
+        }
+        if (chorus != nullptr)
+        {
+            auto twin = tracktionTwin<te::ChorusPlugin> (eng, *chorus);
+            check (dynamic_cast<MoshChorusPlugin*> (twin.get()) == nullptr, "the chorus reference is Tracktion's own ChorusPlugin");
+            auto deepen = [] (te::Plugin& p) { if (auto* c = dynamic_cast<te::ChorusPlugin*> (&p)) c->depthMs.setValue (18.0f, nullptr); };
+            auto viaMosh = signal (2, 1.0, music), viaTracktion = signal (2, 1.0, music);
+            driveWithChange (*chorus, viaMosh, 256, deepen);
+            driveWithChange (*twin, viaTracktion, 256, deepen);
+            const int differing = samplesDiffering (viaMosh, viaTracktion);
+            check (differing == 0, "MoshChorusPlugin's output is bit-identical to te::ChorusPlugin, depth 3 -> 18 ms mid-stream ("
+                                       + String (differing) + " samples differ)");
+            chorus->depthMs.setValue (3.0f, nullptr);
         }
     }
 

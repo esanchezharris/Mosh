@@ -355,6 +355,8 @@ if (MOSH_BUILD_APP)
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
         # Tracktion's compressor plus a live gain-reduction meter (same "compressor" type).
         src/plugins/moshfx/MoshCompressorPlugin.cpp
+        # Tracktion's delay and chorus with their delay lines pre-sized off the audio thread.
+        src/plugins/moshfx/MoshDelayLinePlugins.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
         # R3.3 — plain tanh soft clip built-in (no separate DSP TU; it's stateless math).

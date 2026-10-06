@@ -9,6 +9,7 @@
 #include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
 #include "plugins/moshfx/MoshCompressorPlugin.h"
+#include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "state/SafeMode.h"
 #include "app/MacMicrophonePermission.h"
 
@@ -71,6 +72,11 @@ namespace
             if (engine == nullptr || &engine->getEngineBehaviour() != this)
                 return;
             engine->getPluginManager().createBuiltInType<MoshCompressorPlugin>();
+            // Delay and chorus: delay lines sized for set_plugin_state's ceiling on the
+            // message thread, so a length/depth change never allocates on the audio
+            // thread (src/plugins/moshfx/MoshDelayLinePlugins.h).
+            engine->getPluginManager().createBuiltInType<MoshDelayPlugin>();
+            engine->getPluginManager().createBuiltInType<MoshChorusPlugin>();
             shadowingBuiltInsRegistered = true;
         }
         bool shadowingBuiltInsRegistered = false;

@@ -221,6 +221,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
 {
     releaseAllVoices();                 // silence held notes while their Edit still exists
     unregisterAllMeterClients();        // old measurers are still valid here
+    endGestureWindow();                 // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file on disk is refused; the current Edit is kept untouched.
     if (auto refusal = eng.reloadFromFile(); refusal.isNotEmpty())   // reconcileMeterClients() re-registers next frame
     {
@@ -1637,6 +1638,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
                        String (".") + projectname::kProjectExtension, false);
     }
 
+    endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
@@ -1710,6 +1712,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
+    endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.
     if (auto refusal = eng.openProject (file); refusal.isNotEmpty())  // else: stops transport + frees ctx before swap
     {
