@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeTuner, formatCents, noteName, tunerKey, tunerView } from "./tuner";
+import { describeTuner, formatCents, KEYBOARD_KEYS, noteName, pitchClassOf, scalePitchClasses, tunerKey, tunerView } from "./tuner";
 
 const cents = (hz: number, c: number) => hz * 2 ** (c / 1200);
 
@@ -79,5 +79,56 @@ describe("formatCents / describeTuner / tunerKey", () => {
 
   it("keys a tuner by its track and chain position", () => {
     expect(tunerKey("1013", 2)).toBe("1013:2");
+  });
+});
+
+describe("scalePitchClasses", () => {
+  const names = (set: Set<number>) => [...set].sort((a, b) => a - b).map((pc) => ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][pc]);
+
+  it("C major is the white keys, A minor the same notes from A", () => {
+    expect(names(scalePitchClasses(0, "Major"))).toEqual(["C", "D", "E", "F", "G", "A", "B"]);
+    expect(names(scalePitchClasses(9, "Minor"))).toEqual(["C", "D", "E", "F", "G", "A", "B"]);
+  });
+
+  it("follows the root: G major has F#, D minor has A# (Bb)", () => {
+    expect(names(scalePitchClasses(7, "Major"))).toEqual(["C", "D", "E", "F#", "G", "A", "B"]);
+    expect(names(scalePitchClasses(2, "Minor"))).toEqual(["C", "D", "E", "F", "G", "A", "A#"]);
+  });
+
+  it("chromatic allows all twelve, and so does a scale it does not know", () => {
+    expect(scalePitchClasses(5, "Chromatic").size).toBe(12);
+    expect(scalePitchClasses(5, "Lydian").size).toBe(12);
+  });
+
+  it("wraps a root outside 0-11", () => {
+    expect(scalePitchClasses(12, "Major")).toEqual(scalePitchClasses(0, "Major"));
+    expect(scalePitchClasses(-3, "Major")).toEqual(scalePitchClasses(9, "Major"));
+  });
+});
+
+describe("pitchClassOf", () => {
+  it("is the pitch class of the nearest note", () => {
+    expect(pitchClassOf(440)).toBe(9);
+    expect(pitchClassOf(261.63)).toBe(0);
+    expect(pitchClassOf(cents(220, 60))).toBe(10);
+    expect(pitchClassOf(0)).toBeNull();
+    expect(pitchClassOf(Number.NaN)).toBeNull();
+  });
+});
+
+describe("KEYBOARD_KEYS", () => {
+  it("is one octave: seven white keys in order and five black keys between them", () => {
+    expect(KEYBOARD_KEYS).toHaveLength(12);
+    expect(new Set(KEYBOARD_KEYS.map((k) => k.pc)).size).toBe(12);
+    expect(KEYBOARD_KEYS.filter((k) => !k.black).map((k) => k.pc)).toEqual([0, 2, 4, 5, 7, 9, 11]);
+    expect(KEYBOARD_KEYS.filter((k) => k.black).map((k) => k.pc)).toEqual([1, 3, 6, 8, 10]);
+  });
+});
+
+describe("describeTuner with a scale", () => {
+  it("names the scale too, since the keyboard shows it only by colour", () => {
+    expect(describeTuner(null, "C Major")).toBe("Live pitch: no note. Scale: C Major");
+    expect(describeTuner(tunerView({ inputHz: 220, targetHz: 220 }), "A Minor"))
+      .toBe("Live pitch: singing A3, in tune, pulling to A3. Scale: A Minor");
   });
 });

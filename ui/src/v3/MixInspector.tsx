@@ -122,7 +122,7 @@ function PluginRow({ plugin, trackId, prevIndex, nextIndex }: {
       {/* The tuner's live note display. Only while the plugin is on: bypassed, it hears
           nothing, and an idle strip would suggest it was listening. */}
       {native && plugin.type === "moshAutoTune" && plugin.enabled
-        && <TunerReadout trackId={trackId} index={plugin.index} />}
+        && <TunerReadout plugin={plugin} trackId={trackId} />}
       {/* Which controls show, and in what order, is pluginParams.ts. A control the engine
           offers as named choices (AutoTune's key and scale) is a menu; the rest are
           sliders that read back in the engine's own units. */}

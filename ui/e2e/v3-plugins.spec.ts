@@ -164,8 +164,8 @@ test("AutoTune: Key and Scale are menus, all nine controls show with units, and 
     ["Key", "Scale", "Retune speed", "Glide", "Amount", "Range", "Mix", "Output", "Look-ahead"]);
 
   // Key and Scale are menus, not sliders
-  const key = tuner.getByLabel("Key");
-  const scale = tuner.getByLabel("Scale");
+  const key = tuner.getByLabel("Key", { exact: true });
+  const scale = tuner.getByLabel("Scale", { exact: true });
   await expect(key).toHaveJSProperty("tagName", "SELECT");
   await expect(scale).toHaveJSProperty("tagName", "SELECT");
   await expect(key.locator("option")).toHaveText(["C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B"]);
@@ -195,18 +195,19 @@ test("AutoTune: Key and Scale are menus, all nine controls show with units, and 
   await expect(key.locator("option:checked")).toHaveText("G");
 });
 
-// The tuner's live note display rides its own 30 Hz rail, outside the snapshot. The mock
-// stands in for a voice: while "playing", an enabled AutoTune hears a slow wobble around A3.
-// What this proves is the path from the rail to the strip (and that it clears), not pitch
-// detection, which is the engine's and is covered there.
-test("AutoTune: the live note display follows the tuner rail while it has a pitch, and clears after", async ({ page }) => {
+// The tuner's live display is a one-octave keyboard: the chosen key and scale lit, the
+// rest greyed out, and the note being sung lit up. The readings ride their own 30 Hz rail,
+// outside the snapshot; the mock stands in for a voice (a slow wobble around A3 while
+// "playing"). What this proves is the path from the rail and the Key/Scale menus to the
+// keyboard, not pitch detection, which is the engine's and is covered there.
+test("AutoTune: the keyboard shows the scale, lights the sung note from the tuner rail, and clears after", async ({ page }) => {
   await bootV3(page);
   await page.getByTestId("v3-add-audio").click();
   const newTrack = page.getByTestId("v3-track").last();
   await newTrack.getByRole("button", { name: /^Select track/ }).click();
   const inspector = page.getByTestId("v3-inspector");
   await expect(inspector).toHaveAttribute("data-track-id", (await newTrack.getAttribute("data-track-id"))!);
-  await expect(inspector.getByTestId("v3-tuner")).toHaveCount(0);            // no tuner, no strip
+  await expect(inspector.getByTestId("v3-tuner")).toHaveCount(0);            // no tuner, no keyboard
 
   await page.getByTestId("v3-add-plugin").click();
   const dock = page.getByTestId("v2-plugin-dock");
@@ -215,18 +216,32 @@ test("AutoTune: the live note display follows the tuner rail while it has a pitc
   const tuner = inspector.getByTestId("v3-plugin").last();
   await expect(tuner).toHaveAttribute("data-plugin-type", "moshAutoTune");
 
-  // nothing is being sung: the strip is there and says so
   const strip = tuner.getByTestId("v3-tuner");
-  await expect(strip).toBeVisible();
-  await expect(strip).not.toHaveAttribute("data-live", "");
-  await expect(strip).toHaveAttribute("aria-label", "Live pitch: no note");
-  await expect(strip.getByTestId("v3-tuner-cents")).toHaveText("");
+  const keys = strip.getByTestId("v3-tuner-key");
+  const inScale = async () => (await keys.evaluateAll((els) =>
+    els.filter((e) => e.hasAttribute("data-in-scale")).map((e) => e.getAttribute("data-note")))).sort();
+  await expect(keys).toHaveCount(12);
 
-  // a pitch arrives: note sung, cents off, note pulled to
+  // a new AutoTune is chromatic: every key is available
+  await expect(strip).toHaveAttribute("data-scale", "Chromatic");
+  expect(await inScale()).toHaveLength(12);
+
+  // choosing a key and scale greys out the notes outside it
+  await tuner.getByLabel("Scale", { exact: true }).selectOption({ label: "Major" });
+  await expect(strip).toHaveAttribute("data-scale", "C Major");
+  await expect.poll(inScale).toEqual(["A", "B", "C", "D", "E", "F", "G"]);
+  await tuner.getByLabel("Key", { exact: true }).selectOption({ label: "G" });
+  await expect(strip).toHaveAttribute("data-scale", "G Major");
+  await expect.poll(inScale).toEqual(["A", "B", "C", "D", "E", "F#", "G"]);
+  await expect(strip).toHaveAttribute("aria-label", "Live pitch: no note. Scale: G Major");
+  await expect(strip.locator("[data-sung]")).toHaveCount(0);                 // nothing sung yet
+
+  // a pitch arrives: the A key lights, and the read-out names it
   await page.getByTestId("v3-play").click();
   await expect(strip).toHaveAttribute("data-live", "");
+  await expect(strip.locator("[data-sung]")).toHaveCount(1);
+  await expect(strip.locator("[data-sung]")).toHaveAttribute("data-note", "A");
   await expect(strip.getByTestId("v3-tuner-heard")).toHaveText("A3");
-  await expect(strip.getByTestId("v3-tuner-target")).toHaveText("A3");
   await expect(strip.getByTestId("v3-tuner-cents")).toHaveText(/^[+-]?\d+ c$/);
   // it MOVES: the reading is live, not a number captured once
   const seen = new Set<string>();
@@ -235,14 +250,14 @@ test("AutoTune: the live note display follows the tuner rail while it has a pitc
     return seen.size;
   }, { timeout: 4000 }).toBeGreaterThan(2);
 
-  // bypassed, a tuner hears nothing: the strip goes away rather than sit there looking attentive
+  // bypassed, a tuner hears nothing: the keyboard goes away rather than sit there looking attentive
   await tuner.getByRole("button", { name: "Bypass" }).click();
   await expect(tuner.getByTestId("v3-tuner")).toHaveCount(0);
   await tuner.getByRole("button", { name: "Enable" }).click();
   await expect(strip).toHaveAttribute("data-live", "");
 
-  // the pitch stops: the strip clears (after holding the last note for a moment)
+  // the pitch stops: the lit key goes out (after holding for a moment)
   await page.getByTestId("v3-play").click();
   await expect(strip).not.toHaveAttribute("data-live", "", { timeout: 3000 });
-  await expect(strip).toHaveAttribute("aria-label", "Live pitch: no note");
+  await expect(strip.locator("[data-sung]")).toHaveCount(0);
 });

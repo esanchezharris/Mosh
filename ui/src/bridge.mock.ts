@@ -15,6 +15,7 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
+import { scalePitchClasses } from "./ui/tuner";
 import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
@@ -914,14 +915,33 @@ function startPlayback() {
 }
 // The tuner's live note display rail. The native engine reports what each enabled Mosh
 // AutoTune is hearing; the mock has no voice to hear, so while "playing" every enabled
-// tuner follows a slow wobble around A3 (30 cents either side), pulled to A3. One empty
-// payload on the falling edge, as the engine sends.
+// tuner follows a slow wobble around A3 (30 cents either side), pulled to the nearest
+// note its Key and Scale allow, as the engine's correction would. One empty payload on
+// the falling edge, as the engine sends.
 let hadMockTuner = false;
+function mockTunerTargetMidi(plugin: Plugin, sungMidi: number): number {
+  const choice = (index: number) => {
+    const p = plugin.params.find((x) => x.index === index);
+    const n = p?.choices?.length ?? 0;
+    return n > 1 && p ? { i: Math.round(Math.min(1, Math.max(0, p.value)) * (n - 1)), name: p.choices![Math.round(Math.min(1, Math.max(0, p.value)) * (n - 1))] } : null;
+  };
+  const allowed = scalePitchClasses(choice(0)?.i ?? 0, choice(1)?.name ?? "Chromatic");
+  let best = Math.round(sungMidi);
+  for (let d = 0; d <= 6; d++) {
+    const candidates = [Math.round(sungMidi) - d, Math.round(sungMidi) + d]
+      .filter((m) => allowed.has(((m % 12) + 12) % 12))
+      .sort((a, b) => Math.abs(a - sungMidi) - Math.abs(b - sungMidi));
+    if (candidates.length) { best = candidates[0]; break; }
+  }
+  return best;
+}
 function emitTuner(playing: boolean): void {
   const wobble = 30 * Math.sin((snapshot.transport?.position ?? 0) * 2 * Math.PI / 1.5);
+  const sungMidi = 57 + wobble / 100;   // A3
+  const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
   const tuners = !playing ? [] : snapshot.tracks.flatMap((t) => (t.plugins ?? [])
     .filter((p) => p.type === "moshAutoTune" && p.enabled)
-    .map((p) => ({ trackId: t.id, index: p.index, inputHz: 220 * 2 ** (wobble / 1200), targetHz: 220, confidence: 0.9 })));
+    .map((p) => ({ trackId: t.id, index: p.index, inputHz: hz(sungMidi), targetHz: hz(mockTunerTargetMidi(p, sungMidi)), confidence: 0.9 })));
   if (tuners.length > 0 || hadMockTuner) emit("tuner", { tuners });
   hadMockTuner = tuners.length > 0;
 }

@@ -376,19 +376,28 @@
    which the 36px value column above breaks across two lines. Widen it for those rows only. */
 .v3-shell .insp .pr[data-preset] .fader .v,
 .v3-shell .insp .pr[data-units] .fader .v { width: 58px; white-space: nowrap; }
-/* Mosh AutoTune's live note display: note sung, needle (centre = on the note, the ends a
-   semitone flat and sharp), cents off, and the note it is pulling to. */
-.v3-shell .insp .pr .tuner { display: flex; align-items: center; gap: 6px; font-size: 11px; font-family: ui-monospace, monospace; }
-.v3-shell .insp .pr .tuner .heard, .v3-shell .insp .pr .tuner .target { flex: 0 0 30px; font-weight: 600; color: var(--text); }
-.v3-shell .insp .pr .tuner .target { text-align: right; }
-.v3-shell .insp .pr .tuner .meter { position: relative; flex: 1 1 auto; height: 8px; border-radius: 4px; background: var(--surface2); }
-.v3-shell .insp .pr .tuner .meter::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
-.v3-shell .insp .pr .tuner .meter i { position: absolute; top: 0; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--warn); transition: left 60ms linear; }
-.v3-shell .insp .pr .tuner .meter i.ok { background: var(--accent); }
-.v3-shell .insp .pr .tuner .cents { flex: 0 0 40px; text-align: right; color: var(--muted); font-size: 10px; }
-.v3-shell .insp .pr .tuner .arrow { color: var(--muted); }
-.v3-shell .insp .pr .tuner.idle .heard, .v3-shell .insp .pr .tuner.idle .target { color: var(--muted); font-weight: 400; }
-.v3-shell .insp .pr .tuner.idle .meter i { opacity: .25; background: var(--muted); }
+/* Mosh AutoTune's live display: a one-octave keyboard. Keys in the chosen key and scale
+   are lit, the rest greyed out; the key being sung lights in the accent colour, and the key
+   it is being pulled to (when different) gets an accent outline. */
+.v3-shell .insp .pr .tuner { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; }
+.v3-shell .insp .pr .tuner .keys { flex: 1 1 auto; min-width: 0; height: 34px; display: block; }
+.v3-shell .insp .pr .tuner .key { stroke: var(--bg); stroke-width: 1; transition: fill 60ms linear; }
+.v3-shell .insp .pr .tuner .key.white.in { fill: var(--text); }
+.v3-shell .insp .pr .tuner .key.white.out { fill: color-mix(in srgb, var(--text) 22%, var(--surface2)); }
+.v3-shell .insp .pr .tuner .key.black.in { fill: var(--bg); stroke: color-mix(in srgb, var(--text) 55%, transparent); }
+/* An out-of-scale black key is faded rather than recoloured, so it reads as "not available"
+   over whichever white keys it sits on. */
+.v3-shell .insp .pr .tuner .key.black.out { fill: var(--bg); stroke: none; opacity: .28; }
+.v3-shell .insp .pr .tuner .key.root.white { fill: color-mix(in srgb, var(--accent) 22%, var(--text)); }
+.v3-shell .insp .pr .tuner .key.root.black { fill: color-mix(in srgb, var(--accent) 30%, var(--bg)); }
+/* These two must outrank the in/out/root fills above (one more class each). */
+.v3-shell .insp .pr .tuner .key.sung.white, .v3-shell .insp .pr .tuner .key.sung.black { fill: var(--accent); opacity: 1; }
+.v3-shell .insp .pr .tuner .key.target.white, .v3-shell .insp .pr .tuner .key.target.black { stroke: var(--accent); stroke-width: 2; opacity: 1; }
+.v3-shell .insp .pr .tuner .read { flex: 0 0 42px; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+.v3-shell .insp .pr .tuner .heard { font-size: 13px; font-weight: 600; color: var(--text); }
+.v3-shell .insp .pr .tuner .cents { font-size: 10px; color: var(--muted); min-height: 12px; }
+.v3-shell .insp .pr .tuner.idle .heard { color: var(--muted); font-weight: 400; }
+@media (prefers-reduced-motion: reduce) { .v3-shell .insp .pr .tuner .key { transition: none; } }
 .v3-shell .insp .pr.add {
   border-style: dashed; color: var(--muted); justify-content: center; align-items: center;
   font-size: 10px; padding: 7px; cursor: pointer; background: transparent;

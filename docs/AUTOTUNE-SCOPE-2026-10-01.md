@@ -273,9 +273,13 @@ ordered Key, Scale, Retune speed, Glide, Amount, Range, Mix, Output, Look-ahead,
 so when the scale is Chromatic, because Key then changes nothing. Ids, order and ranges
 are unchanged, so saved sessions and presets load as before.
 
-**Live note display (2026-10-05, owner request).** The inspector row shows the note being
-sung, a needle for how far it is from the note the tuner is pulling to (centre is on the
-note, the ends a semitone flat and sharp), the offset in cents, and that note. The readings
+**Live note display (2026-10-05, owner request; keyboard version the same day).** The
+inspector row shows a one-octave keyboard: the notes of the chosen key and scale lit (the
+root tinted), the notes outside it greyed out, the note being sung lit in the accent colour,
+and an accent outline on the note it is being pulled to when that is a different one.
+Beside it, the sung note with its octave and the offset in cents from the target. The
+scale table is the engine's own (`TuneCorrection.h` `scaleAllows`), mirrored in
+`ui/src/ui/tuner.ts`. The readings
 travel on a 30 Hz event of their own, `tuner` (`{tuners:[{trackId, index, inputHz,
 targetHz, confidence}]}`), outside the snapshot like the meters. Only an enabled tuner that
 the audio thread has just run and that is hearing a pitch is reported, and one empty
