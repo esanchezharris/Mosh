@@ -304,7 +304,8 @@ limits }`, read on the message thread from the `SOUND` children of its persisted
 state (never from the list the sampler loads asynchronously). `primary` is true for
 the sampler the pad commands address (the track's first; a second sampler, or one on
 the master bus, is false and is read-only to the pad commands); `kit` is the track's
-`drumKit` id (primary only, when set); `limits` is `{maxVoices: 32, maxSounds: 64,
+`drumKit` id (primary only, when set: `load_drum_kit` records it, a drum track's
+default kit does not); `limits` is `{maxVoices: 32, maxSounds: 64,
 minGainDb: -48, maxGainDb: 48}` (Tracktion's). Each of `sounds` (in sound-index order)
 is `{index, name, file, path, missing, pitch, minNote, maxNote, gainDb, userGainDb,
 silenced, pan, openEnded, chokeGroup?, mode, addressNote?, durationSec?, sampleRate?,
@@ -313,8 +314,8 @@ sampler resolves it to (through the edit's resolver, so it stays absolute after
 Save-As makes `file` edit-relative; `""` if unresolvable), `missing` whether nothing
 is at `path`; `pitch` is the root (keyNote); `gainDb` is the live gain and
 `userGainDb` the producer's level (the parked copy while `silenced`, which is true for
-a muted lane AND for a pad silenced by another lane's solo); `chokeGroup` only when
-> 0; `mode` is `"drum"` (minNote = maxNote), `"melodic"` (0–127) or `"range"`;
+a muted lane AND for a pad silenced by another lane's solo); `chokeGroup` only when it
+is above 0; `mode` is `"drum"` (minNote = maxNote), `"melodic"` (0–127) or `"range"`;
 `addressNote` is the lowest note `set_drum_pad` / `clear_drum_pad` resolve to THIS
 sound (absent when every note it covers reaches a narrower one); `durationSec`,
 `sampleRate`, `channels` come from the file's header when it is readable.
