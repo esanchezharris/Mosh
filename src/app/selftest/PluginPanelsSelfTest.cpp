@@ -821,6 +821,24 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, at["delay"], "lengthMs") == 150,
                "ONE undo restores the length before the drag");
 
+        // One gesture id across set_plugin_state AND set_plugin_param is one step: the
+        // 4OSC panel's "+" turns an oscillator on (waveShapeN) and lifts its level in one go.
+        {
+            const int depth0 = um.getUndoDescriptions().size();
+            check (ok (len ("both-1", 220))
+                       && ok (command (ops, "set_plugin_param", object ({ { "trackId", tid }, { "index", eq }, { "paramIndex", 0 },
+                                                                          { "value", 0.33 }, { "gesture", "both-1" } }))),
+                   "one gesture: a state write then a parameter write");
+            check ((int) stateValue (ops, tid, at["delay"], "lengthMs") == 220 && near (paramValue (ops, tid, eq, 0), 0.33),
+                   "both writes landed");
+            check (um.getUndoDescriptions().size() == depth0 + 1,
+                   "the mixed gesture added exactly one undo step (depth " + String (depth0) + " -> "
+                       + String (um.getUndoDescriptions().size()) + ")");
+            check (ok (command (ops, "undo")) && (int) stateValue (ops, tid, at["delay"], "lengthMs") == 150
+                       && near (paramValue (ops, tid, eq, 0), v0),
+                   "ONE undo takes back both the state and the parameter write");
+        }
+
         // A no-change set_plugin_state (no gesture) in the middle of a drag is not an edit,
         // so it does not end the drag's window: the drag still undoes as one step. (Were
         // it to open a transaction, the window would end and undo would stop at 200.)
