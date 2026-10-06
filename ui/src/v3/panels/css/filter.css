@@ -1,0 +1,81 @@
+/* Low-pass / high-pass panel (panels/FilterPanel.tsx): an LP|HP switch (the shared .pp-seg),
+   the cutoff as a number, the slope stepper, then the exact response (the shared .pp-plot
+   frame) with a draggable cutoff handle. */
+.v3-shell .insp .pr .pp-filter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-filter-top { display: flex; align-items: center; gap: 8px; min-width: 0; height: 18px; }
+.v3-shell .insp .pr .pp-filter-seg { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-filter-seg > button { font-weight: 600; letter-spacing: .04em; }
+.v3-shell .insp .pr .pp-filter-seg > button[aria-pressed="true"] { cursor: default; }
+/* An older engine cannot switch (the shared .pp-seg :disabled style dims both sides): the
+   pressed side keeps its accent on hover, so it still says which filter it is. */
+.v3-shell .insp .pr .pp-filter-seg > button[aria-pressed="true"]:disabled:hover { color: var(--accent); }
+
+/* The cutoff read-out is also where you type one: a dotted underline says so (the fixed
+   "12 dB/oct" beside it has none). */
+.v3-shell .insp .pr .pp-filter-hz { display: inline-flex; align-items: baseline; gap: 3px; flex: 0 0 auto; min-width: 62px; cursor: text; }
+.v3-shell .insp .pr .pp-filter-hz input {
+  width: 62px; height: 16px; padding: 0 1px; border: 0; border-radius: 0;
+  border-bottom: 1px dotted color-mix(in srgb, var(--text) 30%, transparent);
+  background: transparent; color: var(--text); font-family: var(--mono); font-size: var(--pp-fs-val);
+  font-variant-numeric: tabular-nums; cursor: text;
+}
+.v3-shell .insp .pr .pp-filter-hz input:hover { border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-filter-hz input:focus { outline: none; border-bottom: 1px solid var(--accent); }
+/* While typing the field holds the plain number, with the unit just after it (the label
+   keeps its width, so nothing beside it moves). */
+.v3-shell .insp .pr .pp-filter-unit { color: var(--muted); font-family: var(--mono); font-size: var(--pp-fs-cap); pointer-events: none; }
+
+/* "auto": the cutoff follows an automation lane during playback. */
+.v3-shell .insp .pr .pp-filter-auto {
+  flex: 0 0 auto; padding: 0 4px; border-radius: 3px; font-size: var(--pp-fs-axis); line-height: 12px;
+  color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+}
+/* The slope: "− 24 dB/oct +" at the row's end. The number is a value (mono, the value size),
+   the unit a caption; the number keeps two digits' width so 6 → 12 moves nothing. Focus
+   rings the value like the shared buttons do; an end's button dims (aria-disabled). */
+.v3-shell .insp .pr .pp-filter-slope { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
+.v3-shell .insp .pr .pp-filter-slope .pp-btn { width: 18px; padding: 0; color: var(--text); font-size: var(--pp-fs-val); }
+.v3-shell .insp .pr .pp-filter-slope .pp-btn[aria-disabled="true"] { opacity: .35; cursor: default; }
+.v3-shell .insp .pr .pp-filter-slope .pp-btn[aria-disabled="true"]:hover { color: var(--text); }
+.v3-shell .insp .pr .pp-filter-slope .v {
+  display: inline-flex; align-items: baseline; gap: 3px; padding: 0 2px; height: 16px; line-height: 16px;
+  border-radius: 3px; outline: none; cursor: default; white-space: nowrap;
+}
+.v3-shell .insp .pr .pp-filter-slope .v:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr .pp-filter-slope .n {
+  min-width: 2ch; text-align: right; color: var(--text); font-family: var(--mono); font-size: var(--pp-fs-val);
+  font-variant-numeric: tabular-nums;
+}
+.v3-shell .insp .pr .pp-filter-slope .u { color: var(--muted); font-size: var(--pp-fs-cap); }
+/* An engine without the slope setting: the 12 dB/oct it runs, as a caption, not a control. */
+.v3-shell .insp .pr .pp-filter-facts {
+  margin-left: auto; color: var(--muted); font-size: var(--pp-fs-cap); white-space: nowrap;
+}
+/* An older engine: one short muted line. */
+.v3-shell .insp .pr .pp-filter-note { color: var(--muted); font-size: var(--pp-fs-cap); line-height: 12px; }
+
+/* The plot: the shared .pp-plot frame; the cutoff is a thin dashed guide under the handle. */
+.v3-shell .insp .pr .pp-filter-plot { cursor: ew-resize; }
+.v3-shell .insp .pr .pp-filter-plot .pp-node { cursor: ew-resize; }
+.v3-shell .insp .pr .pp-filter-fc {
+  stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1; stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke; pointer-events: none;
+}
+.v3-shell .insp .pr .pp-filter-plot.bypassed .pp-filter-fc { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
+.v3-shell .insp .pr .pp-filter-plot .axis { pointer-events: none; user-select: none; }
+
+/* The minimized row's thumbnail (44×14 slot). */
+.v3-shell .insp .pr .pp-filter-mini { display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-filter-mini path { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-filter-mini .z { stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-filter-mini.bypassed path { stroke: var(--muted); }
+
+/* A stored cutoff above Nyquist at this rate: the engine's biquad is unstable, so no curve
+   is drawn; the read-out, the guide and a two-line note say so in the warning tone. */
+.v3-shell .insp .pr .pp-filter-hz.warn input { color: var(--warn); }
+.v3-shell .insp .pr .pp-filter-plot.unstable .pp-filter-fc { stroke: color-mix(in srgb, var(--warn) 70%, transparent); }
+.v3-shell .insp .pr .pp-filter-plot .pp-filter-warn {
+  fill: var(--warn); font-size: var(--pp-fs-axis); pointer-events: none; user-select: none;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round;
+}
+.v3-shell .insp .pr .pp-filter-mini.unstable .z { stroke: var(--warn); stroke-dasharray: 2 2; }

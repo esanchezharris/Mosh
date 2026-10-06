@@ -9,7 +9,9 @@
 //
 // Dev/e2e only. The 3-track default seed stays the boot session for every other lane.
 import type { Clip, MidiNote, Plugin, Send, Snapshot, Track } from "../types";
-import { builtinPlugin } from "./builtins";
+import { builtinPlugin, setPhysical } from "./builtins";
+import { FOUR_OSC_PRESETS, applyFourOscPreset } from "./fourosc";
+import { loadKitInto, refreshSamplerViews } from "./sampler";
 import { FIXTURE_PREFIX, fixtureStemDuration } from "./fixturePeaks";
 
 export const PORTFOLIO_BPM = 145;
@@ -94,6 +96,31 @@ const chain = (...types: string[]): Plugin[] => types.map((t, index) => {
   if (!p) throw new Error(`portfolio seed: unknown builtin ${t}`);
   return p;
 });
+/** Dial in a seeded chain's settings in physical units ({type: {paramIndex: value}}), so the
+ *  panels show a mixed song rather than every plugin at its flat default. */
+const tuned = (plugins: Plugin[], settings: Record<string, Record<number, number>>): Plugin[] => {
+  for (const p of plugins) for (const [i, v] of Object.entries(settings[p.type] ?? {})) setPhysical(p, Number(i), v);
+  return plugins;
+};
+
+/** The drum track's sampler with the bundled kit loaded through load_drum_kit (so the kit is
+ *  named on the track), as a producer would have it. */
+const kitChain = (): Plugin[] => {
+  const plugins = chain("sampler", "softclip");
+  loadKitInto(plugins[0]!, "mosh-kit");
+  return plugins;
+};
+/** The 808's 4OSC with the bundled "mosh-bass" preset loaded through load_preset: its
+ *  waves (saw + square, two unison voices), its 24 dB/oct low-pass and its parameters. */
+const bassChain = (): Plugin[] => {
+  const plugins = chain("4osc", "softclip");
+  const loaded = applyFourOscPreset(plugins[0]!.params, plugins[0]!.state, FOUR_OSC_PRESETS["mosh-bass"]!);
+  if (!("error" in loaded)) {
+    plugins[0]!.params = loaded.next;
+    plugins[0]!.state = loaded.nextState;
+  }
+  return plugins;
+};
 
 const REVERB_BUS = 0;
 const DELAY_BUS = 1;
@@ -101,25 +128,31 @@ const DELAY_BUS = 1;
 export function portfolioTracks(): Track[] {
   seq = 0;
   const base = { volumeDb: 0, pan: 0, mute: false, solo: false };
-  return [
+  const tracks: Track[] = [
     { id: "pf-beat", index: 0, name: "Gtr A", type: "audio", ...base, volumeDb: -2,
       clips: [wave("intro", "beat", 1, 3), wave("Gtr A", "beat", 4, 24), wave("break", "beat", 25, 27),
         wave("beat B", "beat", 28, 48), wave("break", "beat", 49, 51), wave("outro", "beat", 52, 56)],
-      plugins: chain("4bandEq") },
+      plugins: tuned(chain("4bandEq"), { "4bandEq": { 9: 11000, 10: -3.5, 3: 250, 4: -2, 5: 0.9 } }) },
     { id: "pf-drums", index: 1, name: "Drums", type: "drum", ...base, volumeDb: -4, isInstrument: true,
       clips: [midi("drums", 4, 24, drumPattern(21)), midi("drums", 28, 48, drumPattern(21))],
-      plugins: chain("sampler", "softclip") },
+      plugins: kitChain(), drumKit: "mosh-kit" },
     { id: "pf-808", index: 2, name: "808", type: "audio", ...base, volumeDb: -3, isInstrument: true,
       clips: [midi("808", 4, 24, bassLine(21)), midi("808", 28, 48, bassLine(21))],
-      plugins: chain("4osc", "softclip") },
+      plugins: bassChain() },
     { id: "pf-lead", index: 3, name: "Lead", type: "audio", ...base, volumeDb: -1.5,
       clips: [wave("verse 1", "lead", 4, 11), wave("hook", "lead", 12, 19), wave("verse 2", "lead", 20, 24),
         wave("verse 3", "lead", 27, 40), wave("hook 2", "lead", 41, 48), wave("outro", "lead", 49, 53)],
-      plugins: chain("moshAutoTune", "compressor", "4bandEq"),
+      plugins: tuned(chain("moshAutoTune", "compressor", "4bandEq"), {
+        compressor: { 0: 10 ** (-24 / 20), 1: 1 / 2.5, 2: 20, 3: 150 },
+        "4bandEq": { 0: 120, 1: -3, 3: 3000, 4: 2.5, 5: 1.2, 9: 9000, 10: 3 },
+      }),
       sends: [send(REVERB_BUS, -12), send(DELAY_BUS, -18)] },
     { id: "pf-double", index: 4, name: "Double", type: "audio", ...base, volumeDb: -6, pan: -0.12,
       clips: [wave("dbl v1", "double", 5, 18), wave("dbl", "double", 25, 29), wave("dbl hook", "double", 41, 53)],
-      plugins: chain("compressor", "4bandEq"),
+      plugins: tuned(chain("compressor", "4bandEq"), {
+        compressor: { 0: 10 ** (-20 / 20), 1: 1 / 3 },
+        "4bandEq": { 6: 5000, 7: -2.5, 8: 1.5, 9: 12000, 10: 2 },
+      }),
       sends: [send(REVERB_BUS, -15), send(DELAY_BUS, -24)] },
     { id: "pf-bgv", index: 5, name: "Backgrounds", type: "audio", ...base, volumeDb: -9, pan: 0.18,
       clips: [wave("bgv", "background", 12, 16)],
@@ -134,6 +167,10 @@ export function portfolioTracks(): Track[] {
     { id: "pf-bus-delay", index: 8, name: "Delay", type: "audio", ...base, volumeDb: -8,
       clips: [], plugins: chain("delay"), isReturn: true, returnBus: DELAY_BUS },
   ];
+  // The sampler's derived view (sound index/mode/address note, track.drumPads), as a
+  // snapshot carries it.
+  for (const t of tracks) refreshSamplerViews(t);
+  return tracks;
 }
 
 const bar = (n: number) => (n - 1) * 4;   // 1-based bar → beat
