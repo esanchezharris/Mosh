@@ -3,7 +3,7 @@
 // A native plugin's CachedValue-only settings: the values Tracktion keeps in the
 // plugin's state but does NOT expose as automatable parameters, so set_plugin_param
 // cannot reach them (delay length, every chorus and phaser control, the low/high-pass
-// mode). One whitelist serves both the snapshot's `plugin.state` object
+// mode and slope). One whitelist serves both the snapshot's `plugin.state` object
 // (MoshOps::pluginToVar) and the set_plugin_state command, so what is shown and what
 // can be set cannot drift apart. docs/02_MOSHOPS_CONTRACT.md has the contract.
 //
@@ -12,6 +12,7 @@
 // outside the range; writes are validated and clamped by set_plugin_state.
 
 #include <tracktion_engine/tracktion_engine.h>
+#include "plugins/moshfx/MoshLowPassPlugin.h"
 #include <cmath>
 
 namespace mosh::pluginstate
@@ -27,6 +28,7 @@ struct Spec
     double min, max;      // number/integer only
     const char* unit;     // "" when unitless
     const char* choices;  // choice only, '|'-separated
+    int step = 0;         // integer only: values snap to min + k * step (0 or 1 = whole numbers)
 };
 
 inline constexpr Spec kSpecs[] = {
@@ -44,6 +46,12 @@ inline constexpr Spec kSpecs[] = {
     // plugin's reported type between "lowpass" and "highpass".
     { "lowpass",  "mode",     Spec::Kind::choice,  0.0,   0.0,    "",    "lowpass|highpass" },
     { "highpass", "mode",     Spec::Kind::choice,  0.0,   0.0,    "",    "lowpass|highpass" },
+    // The filter's slope in dB/oct: a Butterworth cascade of order slope / 6
+    // (plugins/moshfx/MoshLowPassPlugin.h). Only Mosh's subclass has it: on a plain
+    // te::LowPassPlugin read() is void, so the snapshot omits it and set_plugin_state
+    // refuses it.
+    { "lowpass",  "slope",    Spec::Kind::integer, 6.0,   48.0,   "dB/oct", "", 6 },
+    { "highpass", "slope",    Spec::Kind::integer, 6.0,   48.0,   "dB/oct", "", 6 },
 };
 
 /** Compile-time lookup of a spec's max (for static_asserts tying other ceilings to the
@@ -59,6 +67,20 @@ constexpr double maxOf (const char* type, const char* key)
         if (sameText (s.type, type) && sameText (s.key, key))
             return s.max;
     return -1.0;
+}
+constexpr double minOf (const char* type, const char* key)
+{
+    for (const auto& s : kSpecs)
+        if (sameText (s.type, type) && sameText (s.key, key))
+            return s.min;
+    return -1.0;
+}
+constexpr int stepOf (const char* type, const char* key)
+{
+    for (const auto& s : kSpecs)
+        if (sameText (s.type, type) && sameText (s.key, key))
+            return s.step;
+    return -1;
 }
 
 inline const Spec* find (const juce::String& type, const juce::String& key)
@@ -110,6 +132,13 @@ inline juce::var read (te::Plugin& p, const Spec& spec)
     {
         // Tracktion treats every mode string other than "highpass" as low-pass.
         if (key == "mode") return juce::String (lp->isLowPass() ? "lowpass" : "highpass");
+        // The slope the filter runs at (the saved value snapped onto the grid).
+        if (key == "slope")
+        {
+            if (auto* m = dynamic_cast<MoshLowPassPlugin*> (lp))
+                return m->getSlope();
+            return {};
+        }
     }
     return {};
 }
@@ -139,6 +168,15 @@ inline bool write (te::Plugin& p, const Spec& spec, const juce::var& value, juce
     else if (auto* lp = dynamic_cast<te::LowPassPlugin*> (&p))
     {
         if (key == "mode") { lp->mode.setValue (value.toString(), um); return true; }
+        if (key == "slope")
+        {
+            if (auto* m = dynamic_cast<MoshLowPassPlugin*> (lp))
+            {
+                m->slope.setValue ((int) value, um);
+                return true;
+            }
+            return false;
+        }
     }
     return false;
 }
@@ -170,7 +208,7 @@ inline juce::var describe (te::Plugin& p, const juce::String& type)
             entry->setProperty ("min", s.min);
             entry->setProperty ("max", s.max);
             if (s.kind == Spec::Kind::integer)
-                entry->setProperty ("step", 1);
+                entry->setProperty ("step", s.step > 1 ? s.step : 1);
             if (juce::String (s.unit).isNotEmpty())
                 entry->setProperty ("unit", juce::String (s.unit));
         }
@@ -182,7 +220,9 @@ inline juce::var describe (te::Plugin& p, const juce::String& type)
 }
 
 /** Validates and clamps a requested value for `spec`. On success returns true and sets
-    `applied` (numbers clamped to [min, max]; integers rounded; choices verbatim). On
+    `applied` (numbers clamped to [min, max]; integers rounded, or snapped onto
+    min + k * step when the spec has a step > 1, a tie rounding up as JavaScript's
+    Math.round does: slope 25 -> 24, 27 -> 30, 0 -> 6, 100 -> 48; choices verbatim). On
     failure returns false and sets `error`. */
 inline bool coerce (const Spec& spec, const juce::var& requested, juce::var& applied, juce::String& error)
 {
@@ -206,7 +246,14 @@ inline bool coerce (const Spec& spec, const juce::var& requested, juce::var& app
         return false;
     }
     const double clamped = juce::jlimit (spec.min, spec.max, v);
-    if (spec.kind == Spec::Kind::integer)
+    if (spec.kind == Spec::Kind::integer && spec.step > 1)
+    {
+        const int lo = (int) spec.min;
+        const int top = lo + spec.step * (((int) spec.max - lo) / spec.step);   // the last grid point <= max
+        const int steps = (int) std::floor ((clamped - spec.min) / spec.step + 0.5);
+        applied = juce::jlimit (lo, top, lo + spec.step * steps);
+    }
+    else if (spec.kind == Spec::Kind::integer)
         applied = juce::jlimit ((int) spec.min, (int) spec.max, juce::roundToInt (clamped));
     else
         applied = clamped;

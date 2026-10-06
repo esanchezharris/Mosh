@@ -33,6 +33,21 @@ static_assert ((int) mosh::pluginstate::maxOf ("delay", "lengthMs") == mosh::Mos
 static_assert ((int) (mosh::pluginstate::maxOf ("chorus", "depthMs") * 1000.0)
                    == (int) (mosh::MoshChorusPlugin::kMaxDepthMs * 1000.0f),
                "MoshChorusPlugin pre-sizes for the depthMs ceiling");
+// The low/high-pass slope grid IS the filter's: MoshLowPassPlugin's cascade has
+// kMaxSections sections, enough for the steepest slope the command can set, and its
+// order is slope / 6, so the grid must start at 6 and step by 6.
+static_assert ((int) mosh::pluginstate::maxOf ("lowpass", "slope") == mosh::MoshLowPassPlugin::kMaxSlopeDbPerOct
+                   && (int) mosh::pluginstate::maxOf ("highpass", "slope") == mosh::MoshLowPassPlugin::kMaxSlopeDbPerOct,
+               "set_plugin_state's slope ceiling is the cascade's");
+static_assert (mosh::moshfx::filterdesign::numSections ((int) mosh::pluginstate::maxOf ("lowpass", "slope")
+                                                         / mosh::moshfx::filterdesign::kSlopeStep)
+                   <= mosh::moshfx::filterdesign::kMaxSections,
+               "the steepest slope fits MoshLowPassPlugin's sections");
+static_assert ((int) mosh::pluginstate::minOf ("lowpass", "slope") == mosh::moshfx::filterdesign::kMinSlope
+                   && mosh::pluginstate::stepOf ("lowpass", "slope") == mosh::moshfx::filterdesign::kSlopeStep
+                   && (int) mosh::pluginstate::minOf ("highpass", "slope") == mosh::moshfx::filterdesign::kMinSlope
+                   && mosh::pluginstate::stepOf ("highpass", "slope") == mosh::moshfx::filterdesign::kSlopeStep,
+               "set_plugin_state snaps the slope onto the filter's own 6 dB/oct grid");
 
 namespace mosh
 {
@@ -1016,6 +1031,11 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
                                     + (keys.isEmpty() ? juce::String (" (it has none)")
                                                       : " (allowed: " + keys.joinIntoString (", ") + ")"));
     }
+    // A key of the type that THIS plugin object cannot hold: the low/high-pass slope on a
+    // plain te::LowPassPlugin (Mosh's subclass was not registered first). The snapshot
+    // omits it there too (describe skips a void read).
+    if (pluginstate::read (*plugin, *spec).isVoid())
+        return errResult (name, "this " + type + " cannot set '" + key + "'");
     if (! args.hasProperty ("value"))
         return errResult (name, "missing value");
     var applied;
