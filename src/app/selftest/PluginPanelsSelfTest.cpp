@@ -1940,9 +1940,12 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             const auto entry = pluginAt (ops, dt, si);
             const auto info = entry.getProperty ("sampler", var());
             const auto sounds = info.getProperty ("sounds", var());
-            check (info.isObject() && (bool) info.getProperty ("primary", false)
-                       && info.getProperty ("kit", var()).toString() == "mosh-kit" && sounds.size() == 8,
-                   "plugin.sampler on a drum track: primary, kit \"mosh-kit\", 8 sounds (" + juce::JSON::toString (info, true).substring (0, 120) + "...)");
+            // A drum track's default kit is loaded without recording a drumKit id (only
+            // load_drum_kit records one), so `kit` is absent here, exactly as track.drumKit is.
+            check (info.isObject() && (bool) info.getProperty ("primary", false) && ! info.hasProperty ("kit")
+                       && ! trackVar (ops, dt).hasProperty ("drumKit") && sounds.size() == 8,
+                   "plugin.sampler on a drum track: primary, 8 sounds, no kit (as track.drumKit: the default kit is not recorded) ("
+                       + juce::JSON::toString (info, true).substring (0, 120) + "...)");
             const auto limits = info.getProperty ("limits", var());
             check ((int) limits.getProperty ("maxVoices", 0) == 32 && (int) limits.getProperty ("maxSounds", 0) == 64
                        && (int) limits.getProperty ("minGainDb", 0) == -48 && (int) limits.getProperty ("maxGainDb", 0) == 48,
@@ -2034,7 +2037,11 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             // ── Each pad command is exactly ONE undo step ──
             // An anchor edit first; one undo after the command must restore plugin.sampler
             // exactly AND leave the anchor in place (two steps would not restore it; a merged
-            // step would take the anchor with it).
+            // step would take the anchor with it). Tracktion's Edit::UndoTransactionTimer is
+            // made DUE first (the anchor's change reaches it in a pump, then 400 ms pass with
+            // no pump, past its 350 ms), so a command that pumps the message loop mid-way
+            // (headless, the kit and sample loads do) would have its step split by it.
+            auto armUndoTimer = [] { pump (50); juce::Thread::sleep (400); };
             const auto kickPath = sounds[0].getProperty ("path", var()).toString();
             auto samplerJson = [&] { return juce::JSON::toString (pluginAt (ops, dt, si).getProperty ("sampler", var()), true); };
             auto trackName = [&] { return trackVar (ops, dt).getProperty ("name", var()).toString(); };
@@ -2043,6 +2050,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 const auto anchor = "Anchor " + what;
                 check (ok (command (ops, "rename_track", object ({ { "trackId", dt }, { "name", anchor } }))), "anchor edit before " + what);
                 const auto before = samplerJson();
+                armUndoTimer();
                 const auto result = run();
                 check (ok (result) && samplerJson() != before, what + " changes plugin.sampler" + (ok (result) ? String() : ": " + errorOf (result)));
                 inspect (dataOf (result), pluginAt (ops, dt, si).getProperty ("sampler", var()));
@@ -2097,10 +2105,25 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                      [&] { return command (ops, "load_drum_kit", object ({ { "trackId", dt } })); },
                      [&] (const var&, const var& now)
                      {
-                         check (now.getProperty ("sounds", var()).size() == 8 && isNear (now.getProperty ("sounds", var())[1].getProperty ("gainDb", 99), 0.0),
-                                "load_drum_kit reloads the 8 pads; the snare is back at 0 dB");
+                         check (now.getProperty ("sounds", var()).size() == 8 && isNear (now.getProperty ("sounds", var())[1].getProperty ("gainDb", 99), 0.0)
+                                    && now.getProperty ("kit", var()).toString() == "mosh-kit"
+                                    && trackVar (ops, dt).getProperty ("drumKit", var()).toString() == "mosh-kit",
+                                "load_drum_kit reloads the 8 pads (the snare is back at 0 dB) and records kit \"mosh-kit\", as track.drumKit");
                      });
             check (ok (command (ops, "undo")) && samplerJson() == freshKit, "undo the pad edit: plugin.sampler is the fresh kit again");
+            {
+                // A drum track's default kit is loaded by the same helper, inside create_track.
+                auto trackCount = [&] { return ops.snapshot().getProperty ("tracks", var()).size(); };
+                const auto anchor = String ("Anchor create_track");
+                check (ok (command (ops, "rename_track", object ({ { "trackId", dt }, { "name", anchor } }))), "anchor edit before create_track (drum)");
+                const int tracksBefore = trackCount();
+                armUndoTimer();
+                const auto created = command (ops, "create_track", object ({ { "name", "Sampler One Step" }, { "type", "drum" } }));
+                check (ok (created) && trackCount() == tracksBefore + 1, "create_track type drum (sampler + kit + meter) adds a track");
+                check (ok (command (ops, "undo")) && trackCount() == tracksBefore && trackName() == anchor,
+                       "one undo removes it completely and keeps the edit before it: create_track type drum is exactly one undo step");
+                check (ok (command (ops, "undo")) && trackName() != anchor, "...and a second undo takes the anchor (create_track)");
+            }
 
             // ── A silenced pad keeps the producer's level ──
             {
@@ -2325,6 +2348,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 LiveInstrument live (*drums, 256);
                 (void) ops.pluginMeters();
                 auto blip = [&] { return command (ops, "audition_note", object ({ { "trackId", dt }, { "pitch", 36 }, { "action", "blip" }, { "durationMs", 20 } })); };
+                check (ok (command (ops, "all_notes_off")) && drums->getAuditionKeys().isZero(), "nothing held anywhere before the taps (all_notes_off)");
                 const auto tap1 = blip();
                 check (ok (tap1) && (int) dataOf (tap1).getProperty ("held", -1) == 1 && dataOf (tap1).getProperty ("path", var()).toString() == "none",
                        "a blip on the clipless drum track: one held voice (headless the sampler road is out of reach: path none)");
@@ -2336,7 +2360,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 pump (150);        // the 30 Hz sweep: the 20 ms blip has expired
                 check (drums->getAuditionKeys().isZero(), "the blip's expiry handed the sampler the keys still held on the track: none (36 released on the sampler road)");
                 const auto tap2 = blip();
-                check (ok (tap2) && (int) dataOf (tap2).getProperty ("held", -1) == 1, "the second tap: one held voice (the first had expired)");
+                check (ok (tap2) && (int) dataOf (tap2).getProperty ("held", -1) == 1, "the second tap: one held voice");
                 drums->auditionKeys (keysOf ({ 36 }));
                 const float peak2 = peakOf (live.play (0.5));
                 const auto hit2 = meter();
