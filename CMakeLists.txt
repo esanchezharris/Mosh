@@ -357,6 +357,12 @@ if (MOSH_BUILD_APP)
         src/plugins/moshfx/MoshCompressorPlugin.cpp
         # Tracktion's delay and chorus with their delay lines pre-sized off the audio thread.
         src/plugins/moshfx/MoshDelayLinePlugins.cpp
+        # Tracktion's low/high-pass with a selectable 6-48 dB/oct slope (same "lowpass" type).
+        src/plugins/moshfx/MoshLowPassPlugin.cpp
+        # Tracktion's 4OSC plus a live keys/output meter (same "4osc" type).
+        src/plugins/moshfx/MoshFourOscPlugin.cpp
+        # Tracktion's sampler plus a live hits/keys/added-output meter (same "sampler" type).
+        src/plugins/moshfx/MoshSamplerPlugin.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
         # R3.3 — plain tanh soft clip built-in (no separate DSP TU; it's stateless math).

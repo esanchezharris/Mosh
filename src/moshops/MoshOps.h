@@ -77,10 +77,11 @@ public:
     juce::var tunerReadings();
 
     /** Live meters of the native plugins that publish them, for the 30 Hz
-        "plugin_meters" rail: `{plugins:[{trackId, index, itemId, type, ...fields}]}`.
+        "plugin_meters" rail: `{plugins:[{trackId, index, itemId, type, seq, ...fields}]}`.
         compressor/softclip: {grDb, inDb, outDb}; moshOTT: {bands:[{levelDb, gainDb}] x3,
-        clipped}; moshXFeedback: {candidates:[{hz, score}], cuts:[{hz, score, depthDb}]}
-        (docs/02_MOSHOPS_CONTRACT.md). Only track plugins that are enabled AND were run by
+        clipped}; moshXFeedback: {candidates:[{hz, score}], cuts:[{hz, score, depthDb}]};
+        4osc: {outDb, held:[notes], struck:[notes]}, only while not rendering offline and
+        not idle (docs/02_MOSHOPS_CONTRACT.md). `seq` counts each plugin's reported frames. Only track plugins that are enabled AND were run by
         the audio thread since the previous call appear; peaks and gain reduction are the
         largest since that call. `index` is the plugin's position in the track's chain, as
         in the snapshot. Mosh AutoTune is never here (its reading belongs to "tuner").
@@ -89,6 +90,36 @@ public:
         timerCallback, which a headless run never pumps. One caller at a time: each call
         consumes the readings, including those of plugins it does not report. */
     juce::var pluginMeters();
+
+    /** The render-layer cache's source signature for a non-wave clip, exactly as
+        render_layer folds it into the fingerprint: the clip's notes plus its track's
+        plugins (name, bypass, parameter values and curves, CachedValue-only settings,
+        sampler sounds). "" for an unknown clip. Public for --selftest, which asserts what
+        does and does not change it without paying for a render each time. */
+    juce::String renderSourceSignatureForSelfTest (const juce::String& clipId);
+
+    /** One track plugin's snapshot entry, exactly as snapshot() builds it (pluginToVar),
+        or void for no such plugin. Public for --selftest, which times it for a 4OSC (68
+        parameters) without paying for a whole snapshot. */
+    juce::var pluginVarForSelfTest (const juce::String& trackId, int index);
+
+    /** pluginToVar for any plugin object, one not on a track included (index 0, no owner).
+        Public for --selftest, which proves the 16-parameter cap with a plugin that has more
+        parameters than any built-in but the 4OSC. */
+    juce::var pluginVarForSelfTest (te::Plugin& plugin);
+
+    /** audition_note as a headless run cannot reach it: the clipless-track sampler road
+        (no audio device skips it, and the inject road would take a track with clips), with
+        the command's own voice bookkeeping, re-tap rule and reply. Not on the command
+        surface. --selftest drives the sampler's hits and keys through it. */
+    juce::var auditionNoteOnSamplerRoadForSelfTest (const juce::var& args) { return auditionNote (args, true); }
+
+    /** How many times an edit asked for the reactive re-render of a track's applied layers
+        (reactiveTouchTrack), and the track it named last. Public for --selftest: the
+        re-render itself spawns the generative service and is off headless, so the test
+        proves that each pad command asks for it. */
+    int reactiveTrackTouchesForSelfTest() const noexcept { return reactiveTrackTouches_; }
+    juce::String lastReactiveTouchTrackForSelfTest() const { return lastReactiveTouchTrack_; }
 
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
@@ -837,6 +868,8 @@ private:
     // (an instrument/FX edit changes a MIDI bounce). Message-thread only.
     void            reactiveTouch (const juce::String& clipId);
     void            reactiveTouchTrack (const juce::String& trackId);
+    int             reactiveTrackTouches_ = 0;          // --selftest's view of reactiveTouchTrack
+    juce::String    lastReactiveTouchTrack_;
     void            reactiveFire (const juce::String& clipId);
     // Per-clip debounce timers (juce::Timer holds a LambdaTimer defined in the .cpp).
     std::map<juce::String, std::unique_ptr<juce::Timer>> reactiveTimers;
@@ -948,6 +981,12 @@ private:
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
     // findSampler(): the track's te::SamplerPlugin if present (never creates one).
     te::SamplerPlugin*   findSampler (te::AudioTrack&) const;
+    // samplerToVar(): a sampler plugin entry's `sampler` object {primary, kit?, sounds,
+    // limits} (docs/02_MOSHOPS_CONTRACT.md), read from the SOUND children of its persisted
+    // state on the message thread; never from the asynchronously loaded sound list, which
+    // the audio thread's lock guards. `owner` is the track the plugin is on (nullptr on the
+    // master bus); `primary` is whether it is the sampler the pad commands address.
+    juce::var            samplerToVar (te::SamplerPlugin&, te::AudioTrack* owner);
     // applyDrumLaneGains(): silence the sampler pads whose GM pitch is muted (or, when
     // any lane is soloed, every pad EXCEPT the soloed ones), and restore a formerly-muted
     // pad to the gain it had before. Only touches pads crossing the mute threshold, so a
@@ -1219,6 +1258,10 @@ private:
         // path for both kinds, instead of a per-note timer whose destruction mid-flight
         // would be one more way to leak a stuck note.
         double ttlMs = 0.0;
+        // A blip (fire-and-forget), not a held "on". On the clipless sampler road a note-on
+        // for a pitch whose voice is a blip, or a blip for a held pitch, re-presses the key
+        // (a re-tap must sound); an "on" repeating an "on" stays one press.
+        bool   blip = false;
     };
     std::vector<HeldVoice> heldVoices_;          // message thread only
     // Every injected message is stamped notMPE ({} == 0), which is what the engine's own
@@ -1257,6 +1300,11 @@ private:
     void releaseOneVoice (te::AudioTrack&, int channel, int pitch);
 
     juce::var cmdAuditionNote (const juce::var& args);
+    // cmdAuditionNote's body. `samplerRoadOnly` (--selftest only, through
+    // auditionNoteOnSamplerRoadForSelfTest) skips the no-audio bail and the armed-input and
+    // inject roads and goes straight to the clipless sampler road, so a headless run drives
+    // that road through the command's own bookkeeping, retrigger rule and reply.
+    juce::var auditionNote (const juce::var& args, bool samplerRoadOnly);
     juce::var cmdAllNotesOff  (const juce::var& args);
     // Releases every held voice on every track (explicit note-offs, then an all-notes-off
     // per channel, then any sampler's allNotesOff — the only thing that stops an
@@ -1400,6 +1448,8 @@ private:
     // plugin not in it (new, or back from an undone removal) has its reading consumed
     // and not reported, so data from before it left the chain can never surface.
     std::set<juce::uint64> pluginMetersSeen_;
+    // Each metered plugin's rail frame counter (the entry's `seq`), by raw EditItemID.
+    std::map<juce::uint64, juce::int64> pluginMeterSeq_;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────

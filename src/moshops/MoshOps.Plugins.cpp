@@ -33,6 +33,21 @@ static_assert ((int) mosh::pluginstate::maxOf ("delay", "lengthMs") == mosh::Mos
 static_assert ((int) (mosh::pluginstate::maxOf ("chorus", "depthMs") * 1000.0)
                    == (int) (mosh::MoshChorusPlugin::kMaxDepthMs * 1000.0f),
                "MoshChorusPlugin pre-sizes for the depthMs ceiling");
+// The low/high-pass slope grid IS the filter's: MoshLowPassPlugin's cascade has
+// kMaxSections sections, enough for the steepest slope the command can set, and its
+// order is slope / 6, so the grid must start at 6 and step by 6.
+static_assert ((int) mosh::pluginstate::maxOf ("lowpass", "slope") == mosh::MoshLowPassPlugin::kMaxSlopeDbPerOct
+                   && (int) mosh::pluginstate::maxOf ("highpass", "slope") == mosh::MoshLowPassPlugin::kMaxSlopeDbPerOct,
+               "set_plugin_state's slope ceiling is the cascade's");
+static_assert (mosh::moshfx::filterdesign::numSections ((int) mosh::pluginstate::maxOf ("lowpass", "slope")
+                                                         / mosh::moshfx::filterdesign::kSlopeStep)
+                   <= mosh::moshfx::filterdesign::kMaxSections,
+               "the steepest slope fits MoshLowPassPlugin's sections");
+static_assert ((int) mosh::pluginstate::minOf ("lowpass", "slope") == mosh::moshfx::filterdesign::kMinSlope
+                   && mosh::pluginstate::stepOf ("lowpass", "slope") == mosh::moshfx::filterdesign::kSlopeStep
+                   && (int) mosh::pluginstate::minOf ("highpass", "slope") == mosh::moshfx::filterdesign::kMinSlope
+                   && mosh::pluginstate::stepOf ("highpass", "slope") == mosh::moshfx::filterdesign::kSlopeStep,
+               "set_plugin_state snaps the slope onto the filter's own 6 dB/oct grid");
 
 namespace mosh
 {
@@ -289,6 +304,9 @@ juce::var MoshOps::cmdSetTrackType (const juce::var& args)
     data->setProperty ("isInstrument", trackHasInstrument (*track));
     logLine ("set_track_type", args, true, {}, true);
     emitSnapshotInvalidated();
+    // A drum track's sampler and kit are the instrument a MIDI layer's render bounces through.
+    if (type == "drum")
+        reactiveTouchTrack (track->itemID.toString());
     return okResult ("set_track_type", var (data));
 }
 
@@ -324,6 +342,8 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     data->setProperty ("kit", kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId));
     logLine ("load_drum_kit", args, true, {}, true);
     emitSnapshotInvalidated();
+    // Every pad changed: an applied drum layer re-renders, as after set_drum_pad.
+    reactiveTouchTrack (track->itemID.toString());
     return okResult ("load_drum_kit", var (data));
 }
 
@@ -337,17 +357,29 @@ static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index);
 // command aimed at the snare would silently retune the 808 instead. A melodic sound is a
 // pitched instrument played across the keys, not a pad, so it only ever wins when nothing
 // more specific covers the note.
-static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+//
+// The rule itself, over each sound's [minNote, maxNote] in sound-index order (the first of
+// equally narrow sounds wins). Shared with samplerToVar's addressNote, so the note the
+// snapshot says reaches a sound is the note these commands resolve to it.
+static int narrowestSoundCovering (const std::vector<std::pair<int, int>>& ranges, int note)
 {
     int best = -1, bestSpan = std::numeric_limits<int>::max();
-    for (int i = 0; i < sampler.getNumSounds(); ++i)
+    for (int i = 0; i < (int) ranges.size(); ++i)
     {
-        const int lo = sampler.getMinKey (i), hi = sampler.getMaxKey (i);
+        const int lo = ranges[(size_t) i].first, hi = ranges[(size_t) i].second;
         if (lo > note || hi < note) continue;
         const int span = hi - lo;
         if (span < bestSpan) { bestSpan = span; best = i; }
     }
     return best;
+}
+
+static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+{
+    std::vector<std::pair<int, int>> ranges;
+    for (int i = 0; i < sampler.getNumSounds(); ++i)
+        ranges.emplace_back (sampler.getMinKey (i), sampler.getMaxKey (i));
+    return narrowestSoundCovering (ranges, note);
 }
 
 // ── Drum pads ────────────────────────────────────────────────────────────────────────
@@ -370,14 +402,22 @@ juce::var MoshOps::cmdSetDrumPad (const juce::var& args)
 
     if (args.hasProperty ("gainDb") || args.hasProperty ("pan"))
     {
-        const float gain = (float) (double) args.getProperty ("gainDb", sampler->getSoundGainDb (idx));
+        // While a pad is SILENCED (its lane muted, or another lane soloed) its live gain is
+        // the mute floor and the producer's real gain is parked (see applyDrumLaneGains).
+        // Writing the live gain here would be overwritten by the next unmute, so the parked
+        // copy is the one to update, and the one an edit that sends no gainDb (a pan-only
+        // edit) keeps: defaulting to the LIVE gain there wrote the -48 dB floor over the
+        // parked level, and unmuting then restored -48 (the pad stayed silent).
+        const bool parked = sound.isValid() && sound.hasProperty (ids::moshPadGainDb);
+        const float userGain = parked ? (float) (double) sound.getProperty (ids::moshPadGainDb)
+                                      : sampler->getSoundGainDb (idx);
+        const float gain = (float) (double) args.getProperty ("gainDb", userGain);
         const float pan  = (float) (double) args.getProperty ("pan",    sampler->getSoundPan (idx));
-        // While a pad is MUTED its live gain is the mute floor and the producer's real
-        // gain is parked (see applyDrumLaneGains). Writing the live gain here would be
-        // overwritten by the next unmute, so the parked copy is the one to update.
-        if (sound.isValid() && sound.hasProperty (ids::moshPadGainDb))
+        if (parked)
         {
-            sound.setProperty (ids::moshPadGainDb, gain, &undoManager());
+            // The engine's own gain clamp (setSoundGains), so the parked level is one the
+            // pad can be restored to. An unchanged value writes nothing (no undo action).
+            sound.setProperty (ids::moshPadGainDb, juce::jlimit (-48.0f, 48.0f, gain), &undoManager());
             sampler->setSoundGains (idx, sampler->getSoundGainDb (idx), pan);
         }
         else
@@ -539,11 +579,12 @@ juce::var MoshOps::cmdListPalette (const juce::var& args)
 
 // Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
 //
-// This exists because live choke cannot reach clip playback. During playback the MIDI
-// comes from the engine's own MidiNode; MoshOps is not in that path and cannot inject a
-// note-off between two clip notes at render time. Subclassing SamplerPlugin to do it
-// properly was rejected for v1: the plugin type name is persisted in every existing edit,
-// so it would change the on-disk format for every drum track already out there.
+// This exists because nothing chokes LIVE. During playback the MIDI comes from the
+// engine's own MidiNode; MoshOps is not in that path and cannot inject a note-off between
+// two clip notes at render time, and audition_note does not choke either. A sampler
+// subclass could (it sees the block's MIDI before the voices do), and one now exists
+// without changing the on-disk format (MoshSamplerPlugin shadows the same "sampler" type),
+// but it only meters: live choke is NOT implemented.
 //
 // Baking is the honest alternative rather than a hack: the notes really do get shorter,
 // which means you can SEE it in the piano roll, it survives export because the render path
@@ -648,9 +689,10 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     const auto name  = args.getProperty ("name", f.getFileNameWithoutExtension()).toString();
     const float gain = (float) (double) args.getProperty ("gainDb", 0.0);
 
-    // NB: the sampler insert is undoable, but the pad SOUND edits below go straight to
-    // the plugin (no UndoManager) — sampler sound content is non-undoable here, the same
-    // as plugin add/remove. (Undo restores a freshly-inserted sampler's removal, not pads.)
+    // One undo step: the sampler insert and every SOUND edit below go through the Edit's
+    // UndoManager inside this transaction (Tracktion's addSound, removeSound,
+    // setSoundParams and setSoundOpenEnded all write with getUndoManager()); --selftest
+    // ("Plugin panels: the Sampler") proves the one step on an existing sampler.
     beginTxn ("assign_sample");
     auto* sampler = ensureSampler (*track);
     if (sampler == nullptr) return errResult ("assign_sample", "could not create sampler");
@@ -704,6 +746,8 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     data->setProperty ("sounds", sampler->getNumSounds());
     logLine ("assign_sample", args, true, {}, true);
     emitSnapshotInvalidated();
+    // The pad's sound changed: an applied drum layer re-renders, as after set_drum_pad.
+    reactiveTouchTrack (track->itemID.toString());
     return okResult ("assign_sample", var (data));
 }
 
@@ -1016,6 +1060,11 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
                                     + (keys.isEmpty() ? juce::String (" (it has none)")
                                                       : " (allowed: " + keys.joinIntoString (", ") + ")"));
     }
+    // A key of the type that THIS plugin object cannot hold: the low/high-pass slope on a
+    // plain te::LowPassPlugin (Mosh's subclass was not registered first). The snapshot
+    // omits it there too (describe skips a void read).
+    if (pluginstate::read (*plugin, *spec).isVoid())
+        return errResult (name, "this " + type + " cannot set '" + key + "'");
     if (! args.hasProperty ("value"))
         return errResult (name, "missing value");
     var applied;
@@ -1028,12 +1077,7 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
     // JSONL line says undoable:false; nothing is re-bounced. (An empty transaction would
     // be harmless to undo itself: JUCE's beginNewTransaction is lazy and CachedValue
     // performs nothing for an equal value.)
-    const auto before = pluginstate::read (*plugin, *spec);
-    const bool same = spec->kind == pluginstate::Spec::Kind::choice
-                          ? before.toString() == applied.toString()
-                          : spec->kind == pluginstate::Spec::Kind::integer
-                                ? (int) before == (int) applied
-                                : juce::exactlyEqual ((float) (double) before, (float) (double) applied);
+    const bool same = pluginstate::isNoChange (*plugin, *spec, applied);
     auto* track = findTrack (trackId);
     // A no-change call of the open drag (the UI keeps sending a value clamped at the end of
     // the range) still counts as activity: it keeps the window from going idle.
@@ -2470,6 +2514,102 @@ void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
     }
 }
 
+// plugin.sampler (docs/02_MOSHOPS_CONTRACT.md, Snapshot): every sound of one sampler, read
+// from the SOUND children of its persisted state in one walk (the numbering every pad index
+// uses, see soundTreeAt). Never from getSoundMedia / getSoundFile / getSoundLength, which
+// read the list the sampler loads asynchronously, under the lock its audio thread takes, and
+// which is empty or stale until that load has run. track.drumPads is a separate, older
+// reading of the primary sampler and is left as it is.
+//
+// Per sound: `file` is the persisted source string; `path` is where the sampler finds it
+// (resolved through the edit's filePathResolver, as the sampler resolves it, so an
+// edit-relative source after Save-As is still absolute here; "" if it cannot be resolved);
+// `missing` is true when nothing is at `path`. `silenced` is the parked-gain flag
+// applyDrumLaneGains sets for a muted lane AND for a pad silenced by another lane's solo;
+// `userGainDb` is the producer's level (the parked copy while silenced, else the live gain).
+// `addressNote` is the lowest note the pad commands' narrowest-range rule resolves to THIS
+// sound, absent when every note it covers reaches a narrower one. The file's length, rate
+// and channels come from te::AudioFile's info (cached by the AudioFileManager; it takes
+// only that cache's lock, never the sampler's).
+juce::var MoshOps::samplerToVar (te::SamplerPlugin& sampler, te::AudioTrack* owner)
+{
+    std::vector<juce::ValueTree> sounds;
+    for (auto v : sampler.state)
+        if (v.hasType (te::IDs::SOUND))
+            sounds.push_back (v);
+    std::vector<std::pair<int, int>> ranges;
+    for (const auto& sound : sounds)
+        ranges.emplace_back ((int) sound[te::IDs::minNote], (int) sound[te::IDs::maxNote]);
+
+    auto& edit = eng.edit();
+    Array<var> list;
+    for (int i = 0; i < (int) sounds.size(); ++i)
+    {
+        const auto& sound = sounds[(size_t) i];
+        const auto source = sound[te::IDs::source].toString();
+        const auto file = te::SourceFileReference::findFileFromString (edit, source);
+        const bool resolved = file != juce::File();
+        const bool exists = resolved && file.existsAsFile();
+        const float gainDb = (float) sound[te::IDs::gainDb];
+        const bool silenced = sound.hasProperty (ids::moshPadGainDb);
+        const int lo = ranges[(size_t) i].first, hi = ranges[(size_t) i].second;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("index", i);
+        o->setProperty ("name", sound[te::IDs::name].toString());
+        o->setProperty ("file", source);
+        o->setProperty ("path", resolved ? file.getFullPathName() : juce::String());
+        o->setProperty ("missing", ! exists);
+        o->setProperty ("pitch", (int) sound[te::IDs::keyNote]);
+        o->setProperty ("minNote", lo);
+        o->setProperty ("maxNote", hi);
+        o->setProperty ("gainDb", gainDb);
+        o->setProperty ("userGainDb", silenced ? (float) sound[ids::moshPadGainDb] : gainDb);
+        o->setProperty ("silenced", silenced);
+        o->setProperty ("pan", (float) sound[te::IDs::pan]);
+        o->setProperty ("openEnded", (bool) sound[te::IDs::openEnded]);
+        if (const int group = (int) sound.getProperty (ids::moshChokeGroup, 0); group > 0)
+            o->setProperty ("chokeGroup", group);
+        o->setProperty ("mode", lo == hi ? "drum" : (lo == 0 && hi == 127 ? "melodic" : "range"));
+        for (int note = juce::jmax (0, lo); note <= juce::jmin (127, hi); ++note)
+            if (narrowestSoundCovering (ranges, note) == i)
+            {
+                o->setProperty ("addressNote", note);
+                break;
+            }
+        if (exists)
+        {
+            const auto info = te::AudioFile (eng.engine(), file).getInfo();
+            if (info.sampleRate > 0)
+            {
+                o->setProperty ("durationSec", (double) info.lengthInSamples / info.sampleRate);
+                o->setProperty ("sampleRate", info.sampleRate);
+                o->setProperty ("channels", info.numChannels);
+            }
+        }
+        list.add (var (o));
+    }
+
+    auto* o = new DynamicObject();
+    // The sampler the pad commands (set_drum_pad, clear_drum_pad, assign_sample,
+    // load_drum_kit, set_drum_lane's gains) address: the first one on the track.
+    const bool primary = owner != nullptr && findSampler (*owner) == &sampler;
+    o->setProperty ("primary", primary);
+    if (primary)
+        if (const auto kit = owner->state.getProperty (ids::drumKitId, "").toString(); kit.isNotEmpty())
+            o->setProperty ("kit", kit);
+    o->setProperty ("sounds", list);
+    // The engine's own limits (tracktion_SamplerPlugin.cpp): 32 simultaneous voices, 64
+    // sounds per sampler, every gain clamped to [-48, +48] dB.
+    auto* limits = new DynamicObject();
+    limits->setProperty ("maxVoices", 32);
+    limits->setProperty ("maxSounds", 64);
+    limits->setProperty ("minGainDb", -48);
+    limits->setProperty ("maxGainDb", 48);
+    o->setProperty ("limits", var (limits));
+    return var (o);
+}
+
 // FL drum-lane mute/solo. Stores the muted/soloed GM pitches on the track and applies
 // them as sampler pad gains (a muted lane's pad is silenced; soloing lanes silences
 // the rest). State persists with the Edit and rides the snapshot for the UI.
@@ -2538,10 +2678,19 @@ int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& ki
         ++loaded;
     }
 
-    // Resolve sample files now (see the pump note in cmdAssignSample).
+    // Resolve sample files now (see the pump note in cmdAssignSample). This pump runs in
+    // the MIDDLE of the caller's transaction (load_drum_kit then records the kit and the
+    // lane gains; create_track / set_track_type then add the track's meter), and Tracktion's
+    // Edit::UndoTransactionTimer, if it is due (350 ms after a change it was told of in an
+    // earlier pump), would call beginNewTransaction inside it and split the command into
+    // two undo steps. Inhibited for the pump; it fires again on its next tick, after the
+    // command.
     if (! eng.hasAudio())
         if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        {
+            const te::Edit::UndoTransactionInhibitor oneUndoStep (eng.edit());
             mm->runDispatchLoopUntil (5);
+        }
 
     return loaded;
 }

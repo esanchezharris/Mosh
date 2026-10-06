@@ -10,6 +10,9 @@
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -3706,6 +3709,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
             check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
             check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
+            // Shadow guard (MoshEngine.cpp, autoInitialiseDeviceManager): a master
+            // high-pass is Mosh's slope-capable filter too, and shows its slope read-only
+            // (set_plugin_state is track-only).
+            check (dynamic_cast<MoshLowPassPlugin*> (lp) != nullptr, "a load_master_builtin highpass is a MoshLowPassPlugin");
+            check ((int) hpMasterEntry["state"]["slope"]["value"] == 12, "the master highpass snapshot shows state.slope 12 dB/oct");
         }
         else
             check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
@@ -3762,16 +3770,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
+        // The slope persists: 24 dB/oct on the track high-pass survives save/reload, as
+        // the plugin property moshFilterSlope, on a reloaded MoshLowPassPlugin.
+        check (ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "key", "slope" }, { "value", 24 }})))
+                   && (int) trackBuiltin ("highpass")["state"]["slope"]["value"] == 24,
+               "set_plugin_state slope 24 dB/oct on the track highpass before save");
         const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
         const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
+        // A 4OSC rides the same save/reload: it must come back as Mosh's metered subclass,
+        // with its state keys and all 68 parameters (ids, ranges) exactly as saved.
+        const auto oscTrack = cmd (ops, "create_track", args1 ("name", "R3.3 4OSC"))["data"].getProperty ("trackId", var()).toString();
+        const int oscIdx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", oscTrack }, { "type", "4osc" }}))["data"].getProperty ("index", -1);
+        auto oscEntry = [&] () -> var {
+            auto plugins = trackById (oscTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if ((int) plugins[i].getProperty ("index", -1) == oscIdx) return plugins[i];
+            return var();
+        };
+        check (oscIdx >= 0
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "filterType" }, { "value", "lowpass" }})))
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "waveShape2" }, { "value", "saw" }})))
+                   && ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "paramIndex", 40 }, { "value", 0.5 }}))),
+               "a 4OSC with filterType lowpass, osc 2 saw and Amp Attack 0.5 before save");
+        const auto oscParamsBeforeReload = JSON::toString (oscEntry()["params"]);
+        const auto oscStateBeforeReload = JSON::toString (oscEntry()["state"]);
+        // A drum track's sampler rides it too: back as Mosh's metered subclass, with
+        // plugin.sampler (its sounds, a muted pad's parked level) exactly as saved.
+        const auto drumTrack = cmd (ops, "create_track", objN ({{ "name", "R3.3 Drums" }, { "type", "drum" }}))["data"].getProperty ("trackId", var()).toString();
+        auto samplerEntry = [&] () -> var {
+            auto plugins = trackById (drumTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "sampler") return plugins[i];
+            return var();
+        };
+        check (drumTrack.isNotEmpty()
+                   && ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "gainDb", -6.0 }})))
+                   && ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "mute", true }})))
+                   && samplerEntry()["sampler"]["sounds"].size() == 8,
+               "a drum track (8 pads) with the snare at -6 dB and its lane muted before save");
+        const auto samplerBeforeReload = JSON::toString (samplerEntry()["sampler"]);
         check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
         check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
+        {
+            te::Plugin* reloadedOsc = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == oscTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (oscIdx >= 0 && oscIdx < plugins.size())
+                        reloadedOsc = plugins[oscIdx].get();
+                }
+            check (dynamic_cast<MoshFourOscPlugin*> (reloadedOsc) != nullptr,
+                   "the reloaded 4OSC is a MoshFourOscPlugin (shadow registered before the session loaded)");
+            const auto reloaded = oscEntry();
+            check (reloaded["params"].size() == 68 && JSON::toString (reloaded["params"]) == oscParamsBeforeReload
+                       && JSON::toString (reloaded["state"]) == oscStateBeforeReload
+                       && reloaded["state"]["filterType"]["value"].toString() == "lowpass"
+                       && reloaded["state"]["waveShape2"]["value"].toString() == "saw",
+                   "the reloaded 4OSC keeps its 68 parameters and its state (filterType lowpass, osc 2 saw) exactly");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", oscTrack))), "R3.3 4OSC track removed");
+
+            const auto drums = samplerEntry();
+            te::Plugin* reloadedSampler = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == drumTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    const int index = (int) drums.getProperty ("index", -1);
+                    if (index >= 0 && index < plugins.size())
+                        reloadedSampler = plugins[index].get();
+                }
+            check (dynamic_cast<MoshSamplerPlugin*> (reloadedSampler) != nullptr,
+                   "the reloaded sampler is a MoshSamplerPlugin (shadow registered before the session loaded)");
+            const auto snare = drums["sampler"]["sounds"][1];
+            check (JSON::toString (drums["sampler"]) == samplerBeforeReload && (int) snare["pitch"] == 38 && (bool) snare["silenced"]
+                       && std::abs ((double) snare["userGainDb"] + 6.0) < 1.0e-6 && std::abs ((double) snare["gainDb"] + 48.0) < 1.0e-6,
+                   "the reloaded sampler keeps plugin.sampler exactly (the muted snare: silenced, live -48 dB, userGainDb -6)");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", drumTrack))), "R3.3 drum track removed");
+        }
         check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
                    && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,
                "reloaded track highpass retains normalized value, display and physical limits");
         check (masterBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz"
                    && JSON::toString (masterBuiltin ("highpass")["params"]) == masterReadbackBeforeReload,
                "reloaded master highpass retains normalized value, display and physical limits");
+        {
+            const auto reloaded = trackBuiltin ("highpass");
+            check ((int) reloaded["state"]["slope"]["value"] == 24 && (int) reloaded["state"]["slope"]["step"] == 6,
+                   "reloaded track highpass keeps state.slope 24 dB/oct (step 6)");
+            auto* m = dynamic_cast<MoshLowPassPlugin*> (liveTrackLowPass ((int) reloaded.getProperty ("index", -1)));
+            check (m != nullptr, "the reloaded track highpass is a MoshLowPassPlugin (shadow registered before the session loaded)");
+            if (m != nullptr)
+                check (m->getSlope() == 24 && (int) m->state.getProperty (MoshLowPassPlugin::slopePropertyId(), 0) == 24,
+                       "...running at 24 dB/oct, saved as moshFilterSlope = 24");
+            auto* master = dynamic_cast<MoshLowPassPlugin*> (liveMasterLowPass ((int) masterBuiltin ("highpass").getProperty ("index", -1)));
+            check (master != nullptr && master->getSlope() == 12 && ! master->state.hasProperty (MoshLowPassPlugin::slopePropertyId()),
+                   "the reloaded master highpass is a MoshLowPassPlugin at 12 dB/oct with no slope property written");
+        }
 
         // Leave the master bus as we found it: the next section ("Master bus plugins")
         // asserts it starts empty, and this section's redo'd highpass + softclip were
@@ -4985,6 +5080,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto rbi = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (! ok (rbi), "bypassing the INSTRUMENT -> render refuses (silent bounce guard; no stale render served)");
         cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", false } }));
+
+        // A CachedValue-only setting (set_plugin_state; here the low-pass slope) is in the
+        // source signature too: an edit is a cache MISS. (Until 2026-10-05 the signature
+        // hashed only names, bypass and parameters, so a slope, filter mode, delay length
+        // or chorus edit served the stale render.) A layer caches ONE render, its latest
+        // (node cacheKey == fingerprint), so going back to 12 re-renders once and only the
+        // identical re-render after it HITs; that the key itself returns exactly to its
+        // earlier value is PluginPanelsSelfTest's signature section.
+        {
+            auto lpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", mt }, { "type", "lowpass" }}));
+            check (ok (lpLoad), "load_builtin (lowpass FX) on the MIDI track ok");
+            const int lpIdx = (int) lpLoad["data"].getProperty ("index", -1);
+            auto renderCache = [&]
+            {
+                auto r = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+                return r["data"].getProperty ("cache", var()).toString();
+            };
+            auto slopeTo = [&] (int dbPerOct)
+            {
+                return ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", mt }, { "index", lpIdx }, { "key", "slope" }, { "value", dbPerOct }})));
+            };
+            check (renderCache() == "miss", "adding the low-pass -> source signature changed -> cache MISS");
+            check (renderCache() == "hit", "an identical re-render with the low-pass is a cache HIT");
+            check (slopeTo (24), "set_plugin_state slope 24 dB/oct on the MIDI track's low-pass ok");
+            check (renderCache() == "miss", "a slope edit (state only, no parameter) -> cache MISS (no stale render served)");
+            check (renderCache() == "hit", "an identical re-render at 24 dB/oct is a cache HIT");
+            check (slopeTo (12), "slope back to 12 dB/oct");
+            check (renderCache() == "miss", "slope back to 12 -> MISS (the layer cached only its latest, 24 dB/oct, render)");
+            check (renderCache() == "hit", "...and the identical re-render at 12 dB/oct HITs");
+            check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", mt }, { "index", lpIdx }}))), "remove the low-pass again");
+        }
 
         // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
         // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
