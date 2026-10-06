@@ -32,6 +32,7 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include <algorithm>
 
 namespace mosh
@@ -207,7 +208,12 @@ juce::var MoshOps::cmdAuditionNote (const juce::var& args)
         for (auto& v : heldVoices_)
             if (v.track == track->itemID)
                 keys.setBit (v.pitch);
-        sampler->playNotes (keys);
+        // Through the metered subclass, so the pad lights on the plugin_meters rail:
+        // playNotes is not virtual, and these notes never reach its MIDI scan.
+        if (auto* metered = dynamic_cast<MoshSamplerPlugin*> (sampler))
+            metered->auditionKeys (keys);
+        else
+            sampler->playNotes (keys);
         return reply (true, "sampler");
     }
 
@@ -295,7 +301,12 @@ int MoshOps::releaseAllVoices (te::AudioTrack* onlyThisTrack)
             for (int ch = 1; ch <= 16; ++ch)
                 t->injectLiveMidiMessage (juce::MidiMessage::allNotesOff (ch), kLiveSourceID);
         if (auto* sampler = findSampler (*t))
-            sampler->allNotesOff();
+        {
+            if (auto* metered = dynamic_cast<MoshSamplerPlugin*> (sampler))
+                metered->auditionAllNotesOff();   // the same, and it forgets the audition keys
+            else
+                sampler->allNotesOff();
+        }
     }
 
     return released;
