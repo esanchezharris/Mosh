@@ -1127,7 +1127,8 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
     // track's plugins (MoshOps.Generative.cpp, stableSourceSig). It used to hash only names,
     // bypass and parameters, so a state-only edit (filter slope or mode, delay length,
     // chorus, phaser) or any sampler pad edit served the stale render. SelfTest.cpp's MIDI
-    // render section proves the same end to end (MISS on a slope edit, HIT once it is back).
+    // render section proves it end to end through render_layer (a slope edit MISSes, an
+    // identical re-render HITs).
     section ("Plugin panels: render source signature covers plugin state and sampler sounds");
     {
         const auto st = dataOf (command (ops, "create_track", object ({ { "name", "Signature" } }))).getProperty ("trackId", var()).toString();

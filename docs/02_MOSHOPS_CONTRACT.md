@@ -118,8 +118,9 @@ values (the same whitelist, read the same way) and, for a sampler, every persist
 each `SOUND` child. Before, a state-only edit (filter slope or mode, delay length, chorus,
 phaser) or any sampler pad edit (`set_drum_pad`, `clear_drum_pad`, `assign_sample`,
 `load_drum_kit`, `set_drum_lane`) left the key unchanged, so the reactive re-render HIT the cache
-and served the stale render. The key is the state, not the edit history: putting a value back
-HITs the earlier render. Plugins with neither state keys nor sounds contribute exactly what they
+and served the stale render. The key is the state, not the edit history (an undo restores the
+earlier key exactly), but a layer caches one render, its latest, so returning to an earlier
+value re-renders once. Plugins with neither state keys nor sounds contribute exactly what they
 did before, so their chains keep their cached renders; chains with a delay, chorus, phaser,
 low/high-pass or sampler re-render once.
 

@@ -5011,10 +5011,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", false } }));
 
         // A CachedValue-only setting (set_plugin_state; here the low-pass slope) is in the
-        // source signature too: an edit is a cache MISS, and putting the value back HITs
-        // the earlier render, because the key is the plugin's state, not the edit history.
-        // (Until 2026-10-05 the signature hashed only names, bypass and parameters, so a
-        // slope, filter mode, delay length or chorus edit served the stale render.)
+        // source signature too: an edit is a cache MISS. (Until 2026-10-05 the signature
+        // hashed only names, bypass and parameters, so a slope, filter mode, delay length
+        // or chorus edit served the stale render.) A layer caches ONE render, its latest
+        // (node cacheKey == fingerprint), so going back to 12 re-renders once and only the
+        // identical re-render after it HITs; that the key itself returns exactly to its
+        // earlier value is PluginPanelsSelfTest's signature section.
         {
             auto lpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", mt }, { "type", "lowpass" }}));
             check (ok (lpLoad), "load_builtin (lowpass FX) on the MIDI track ok");
@@ -5032,8 +5034,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (renderCache() == "hit", "an identical re-render with the low-pass is a cache HIT");
             check (slopeTo (24), "set_plugin_state slope 24 dB/oct on the MIDI track's low-pass ok");
             check (renderCache() == "miss", "a slope edit (state only, no parameter) -> cache MISS (no stale render served)");
+            check (renderCache() == "hit", "an identical re-render at 24 dB/oct is a cache HIT");
             check (slopeTo (12), "slope back to 12 dB/oct");
-            check (renderCache() == "hit", "slope back to 12 -> the earlier 12 dB/oct render is a cache HIT");
+            check (renderCache() == "miss", "slope back to 12 -> MISS (the layer cached only its latest, 24 dB/oct, render)");
+            check (renderCache() == "hit", "...and the identical re-render at 12 dB/oct HITs");
             check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", mt }, { "index", lpIdx }}))), "remove the low-pass again");
         }
 
