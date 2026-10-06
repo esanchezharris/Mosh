@@ -961,6 +961,12 @@ private:
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
     // findSampler(): the track's te::SamplerPlugin if present (never creates one).
     te::SamplerPlugin*   findSampler (te::AudioTrack&) const;
+    // samplerToVar(): a sampler plugin entry's `sampler` object {primary, kit?, sounds,
+    // limits} (docs/02_MOSHOPS_CONTRACT.md), read from the SOUND children of its persisted
+    // state on the message thread; never from the asynchronously loaded sound list, which
+    // the audio thread's lock guards. `owner` is the track the plugin is on (nullptr on the
+    // master bus); `primary` is whether it is the sampler the pad commands address.
+    juce::var            samplerToVar (te::SamplerPlugin&, te::AudioTrack* owner);
     // applyDrumLaneGains(): silence the sampler pads whose GM pitch is muted (or, when
     // any lane is soloed, every pad EXCEPT the soloed ones), and restore a formerly-muted
     // pad to the gain it had before. Only touches pads crossing the mute threshold, so a

@@ -3436,6 +3436,10 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
     // absent on every other plugin type.
     if (auto state = pluginstate::describe (p, effectiveBuiltinType (p)); ! state.isVoid())
         o->setProperty ("state", state);
+    // A sampler's sounds, limits and whether the pad commands address it (samplerToVar).
+    // Additive: absent on every other plugin type.
+    if (auto* sampler = dynamic_cast<te::SamplerPlugin*> (&p))
+        o->setProperty ("sampler", samplerToVar (*sampler, owner));
     return var (o);
 }
 

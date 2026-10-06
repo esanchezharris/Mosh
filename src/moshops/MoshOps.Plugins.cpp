@@ -352,17 +352,29 @@ static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index);
 // command aimed at the snare would silently retune the 808 instead. A melodic sound is a
 // pitched instrument played across the keys, not a pad, so it only ever wins when nothing
 // more specific covers the note.
-static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+//
+// The rule itself, over each sound's [minNote, maxNote] in sound-index order (the first of
+// equally narrow sounds wins). Shared with samplerToVar's addressNote, so the note the
+// snapshot says reaches a sound is the note these commands resolve to it.
+static int narrowestSoundCovering (const std::vector<std::pair<int, int>>& ranges, int note)
 {
     int best = -1, bestSpan = std::numeric_limits<int>::max();
-    for (int i = 0; i < sampler.getNumSounds(); ++i)
+    for (int i = 0; i < (int) ranges.size(); ++i)
     {
-        const int lo = sampler.getMinKey (i), hi = sampler.getMaxKey (i);
+        const int lo = ranges[(size_t) i].first, hi = ranges[(size_t) i].second;
         if (lo > note || hi < note) continue;
         const int span = hi - lo;
         if (span < bestSpan) { bestSpan = span; best = i; }
     }
     return best;
+}
+
+static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+{
+    std::vector<std::pair<int, int>> ranges;
+    for (int i = 0; i < sampler.getNumSounds(); ++i)
+        ranges.emplace_back (sampler.getMinKey (i), sampler.getMaxKey (i));
+    return narrowestSoundCovering (ranges, note);
 }
 
 // ── Drum pads ────────────────────────────────────────────────────────────────────────
@@ -2483,6 +2495,102 @@ void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
             sampler->setSoundGains (i, parked, sampler->getSoundPan (i));
         }
     }
+}
+
+// plugin.sampler (docs/02_MOSHOPS_CONTRACT.md, Snapshot): every sound of one sampler, read
+// from the SOUND children of its persisted state in one walk (the numbering every pad index
+// uses, see soundTreeAt). Never from getSoundMedia / getSoundFile / getSoundLength, which
+// read the list the sampler loads asynchronously, under the lock its audio thread takes, and
+// which is empty or stale until that load has run. track.drumPads is a separate, older
+// reading of the primary sampler and is left as it is.
+//
+// Per sound: `file` is the persisted source string; `path` is where the sampler finds it
+// (resolved through the edit's filePathResolver, as the sampler resolves it, so an
+// edit-relative source after Save-As is still absolute here; "" if it cannot be resolved);
+// `missing` is true when nothing is at `path`. `silenced` is the parked-gain flag
+// applyDrumLaneGains sets for a muted lane AND for a pad silenced by another lane's solo;
+// `userGainDb` is the producer's level (the parked copy while silenced, else the live gain).
+// `addressNote` is the lowest note the pad commands' narrowest-range rule resolves to THIS
+// sound, absent when every note it covers reaches a narrower one. The file's length, rate
+// and channels come from te::AudioFile's info (cached by the AudioFileManager; it takes
+// only that cache's lock, never the sampler's).
+juce::var MoshOps::samplerToVar (te::SamplerPlugin& sampler, te::AudioTrack* owner)
+{
+    std::vector<juce::ValueTree> sounds;
+    for (auto v : sampler.state)
+        if (v.hasType (te::IDs::SOUND))
+            sounds.push_back (v);
+    std::vector<std::pair<int, int>> ranges;
+    for (const auto& sound : sounds)
+        ranges.emplace_back ((int) sound[te::IDs::minNote], (int) sound[te::IDs::maxNote]);
+
+    auto& edit = eng.edit();
+    Array<var> list;
+    for (int i = 0; i < (int) sounds.size(); ++i)
+    {
+        const auto& sound = sounds[(size_t) i];
+        const auto source = sound[te::IDs::source].toString();
+        const auto file = te::SourceFileReference::findFileFromString (edit, source);
+        const bool resolved = file != juce::File();
+        const bool exists = resolved && file.existsAsFile();
+        const float gainDb = (float) sound[te::IDs::gainDb];
+        const bool silenced = sound.hasProperty (ids::moshPadGainDb);
+        const int lo = ranges[(size_t) i].first, hi = ranges[(size_t) i].second;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("index", i);
+        o->setProperty ("name", sound[te::IDs::name].toString());
+        o->setProperty ("file", source);
+        o->setProperty ("path", resolved ? file.getFullPathName() : juce::String());
+        o->setProperty ("missing", ! exists);
+        o->setProperty ("pitch", (int) sound[te::IDs::keyNote]);
+        o->setProperty ("minNote", lo);
+        o->setProperty ("maxNote", hi);
+        o->setProperty ("gainDb", gainDb);
+        o->setProperty ("userGainDb", silenced ? (float) sound[ids::moshPadGainDb] : gainDb);
+        o->setProperty ("silenced", silenced);
+        o->setProperty ("pan", (float) sound[te::IDs::pan]);
+        o->setProperty ("openEnded", (bool) sound[te::IDs::openEnded]);
+        if (const int group = (int) sound.getProperty (ids::moshChokeGroup, 0); group > 0)
+            o->setProperty ("chokeGroup", group);
+        o->setProperty ("mode", lo == hi ? "drum" : (lo == 0 && hi == 127 ? "melodic" : "range"));
+        for (int note = juce::jmax (0, lo); note <= juce::jmin (127, hi); ++note)
+            if (narrowestSoundCovering (ranges, note) == i)
+            {
+                o->setProperty ("addressNote", note);
+                break;
+            }
+        if (exists)
+        {
+            const auto info = te::AudioFile (eng.engine(), file).getInfo();
+            if (info.sampleRate > 0)
+            {
+                o->setProperty ("durationSec", (double) info.lengthInSamples / info.sampleRate);
+                o->setProperty ("sampleRate", info.sampleRate);
+                o->setProperty ("channels", info.numChannels);
+            }
+        }
+        list.add (var (o));
+    }
+
+    auto* o = new DynamicObject();
+    // The sampler the pad commands (set_drum_pad, clear_drum_pad, assign_sample,
+    // load_drum_kit, set_drum_lane's gains) address: the first one on the track.
+    const bool primary = owner != nullptr && findSampler (*owner) == &sampler;
+    o->setProperty ("primary", primary);
+    if (primary)
+        if (const auto kit = owner->state.getProperty (ids::drumKitId, "").toString(); kit.isNotEmpty())
+            o->setProperty ("kit", kit);
+    o->setProperty ("sounds", list);
+    // The engine's own limits (tracktion_SamplerPlugin.cpp): 32 simultaneous voices, 64
+    // sounds per sampler, every gain clamped to [-48, +48] dB.
+    auto* limits = new DynamicObject();
+    limits->setProperty ("maxVoices", 32);
+    limits->setProperty ("maxSounds", 64);
+    limits->setProperty ("minGainDb", -48);
+    limits->setProperty ("maxGainDb", 48);
+    o->setProperty ("limits", var (limits));
+    return var (o);
 }
 
 // FL drum-lane mute/solo. Stores the muted/soloed GM pitches on the track and applies
