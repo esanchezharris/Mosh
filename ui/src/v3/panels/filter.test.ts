@@ -353,6 +353,26 @@ describe("FilterPanel wiring", () => {
     expect(setState.mock.calls[0].slice(0, 2)).toEqual(["mode", "highpass"]);
   });
 
+  it("arrows and Home/End on the LP/HP buttons pick a mode and never reach the app's shortcuts", () => {
+    render(filter("lowpass", 4000));
+    const lp = host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-mode-lowpass"]')!;
+    const leaked: string[] = [];
+    const spy = (e: Event) => leaked.push((e as KeyboardEvent).key);
+    window.addEventListener("keydown", spy);
+    try {
+      key(lp, "ArrowRight");
+      expect(setState.mock.calls.map((c) => c.slice(0, 2))).toEqual([["mode", "highpass"]]);
+      key(lp, "Home");   // already lowpass in this (unchanged) snapshot: nothing to send
+      key(lp, "End");
+      expect(setState).toHaveBeenCalledTimes(2);
+      expect(leaked).toEqual([]);
+      key(lp, "a");      // any other key still bubbles
+      expect(leaked).toEqual(["a"]);
+    } finally {
+      window.removeEventListener("keydown", spy);
+    }
+  });
+
   it("an older engine (no state.mode): LP/HP shows the reported type, disabled, with a note, and never sends", () => {
     const old = { ...filter("highpass", 180), state: undefined };
     render(old);

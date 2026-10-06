@@ -11,7 +11,9 @@
 // and the wheel: once they go quiet). Live data is only the plugin_meters rail: hits flash a
 // cell once per frame, held keys light the strip, the output bar is what the sampler adds.
 // Choke is never claimed live: the engine applies it only when Apply choke bakes a clip.
-import { useCallback, useEffect, useReducer, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+// What is quiet is the engine's own `silenced` flag; a solo left on a note no sound is
+// rooted on (which silences everything) is named in the top row with a one-click Unsolo.
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { pickFiles } from "../../bridge";
 import { noteName } from "../../musicalKey";
 import type { SamplerMeter, SamplerSound } from "../../types";
@@ -19,10 +21,10 @@ import { addRecentSample, importedFilePath } from "../../ui/sampleBrowserUtil";
 import { Dial } from "./Dial";
 import { MeterBar, useMeterEvents, usePluginMeter, type MeterFlash } from "./meters";
 import {
-  CHOKE_MAX, DEFAULT_ROOT, FIRST_PAD_NOTE, GAIN_STEP_DB, dragCarriesSample, levelKeyStep, panKeyStep, droppedSample, emptyCellCount, fileName,
-  fmtLevel, fmtPan, fmtSeconds, freeSlotNotes, gainFromNorm, gainNorm, keyCentre, laneOf,
-  limitsOf, miniDots, panFromNorm, panNorm, peaksArea, pianoKeys, rangeText, replaceText, replacedBy, samplerSummary,
-  sortSounds, soundFlash, soundKey, soundsOf, viewOf, type LaneState,
+  CHOKE_MAX, DEFAULT_ROOT, FIRST_PAD_NOTE, GAIN_STEP_DB, NO_LANE, dragCarriesSample, levelKeyStep, panKeyStep, droppedSample, emptyCellCount, fileName,
+  fmtLevel, fmtPan, fmtSeconds, freeSlotNotes, gainFromNorm, gainNorm, gridEdge, keyCentre, laneOf, laneWords,
+  limitsOf, miniDots, notesText, orphanLanes, panFromNorm, panNorm, peaksArea, pianoKeys, rangeText, replaceText, replacedBy, samplerSummary,
+  scrollToShow, sortSounds, soundFlash, soundKey, soundsOf, viewOf, type GridEdge, type LaneState,
 } from "./sampler";
 import { clamp } from "./params";
 import type { PanelDef, PanelProps, RunCommand } from "./types";
@@ -44,7 +46,7 @@ type Limits = ReturnType<typeof limitsOf>;
 type Mode = "drum" | "melodic";
 /** What the row under the grid shows besides the selected sound's controls. */
 type Slot =
-  | { kind: "confirm"; note: number; path: string; mode: Mode; replaced: SamplerSound[] }
+  | { kind: "confirm"; note: number; path: string; mode: Mode; replaced: SamplerSound[]; onto?: SamplerSound }
   | { kind: "choose"; path: string }
   | { kind: "kits" };
 
@@ -54,11 +56,15 @@ type Slot =
  *  when a burst of keys / wheel notches has been quiet KEY_COMMIT_MS, or on blur / unmount.
  *  The sent value stays on screen until the snapshot shows it (or PENDING_MS, or a refusal).
  *  `handlers` go on an element wrapping the control (pointer down is read in the capture
- *  phase: the Dial stops its own pointerdown from bubbling). */
+ *  phase: the Dial stops its own pointerdown from bubbling). Only a press on the dial itself
+ *  holds the commit (it takes pointer capture); a press on its caption or read-out does not,
+ *  and any release anywhere ends the hold, so keys and the wheel are never held back. */
 function useReleaseCommit(snap: number, commit: (v: number) => Promise<boolean>, same: (a: number, b: number) => boolean) {
   const [preview, setPreview] = useState<number | null>(null);
-  const st = useRef<{ pending: number | null; down: boolean; sent: number | null; timer?: ReturnType<typeof setTimeout>; settle?: ReturnType<typeof setTimeout> }>(
-    { pending: null, down: false, sent: null });
+  const st = useRef<{
+    pending: number | null; down: boolean; sent: number | null; off?: () => void;
+    timer?: ReturnType<typeof setTimeout>; settle?: ReturnType<typeof setTimeout>;
+  }>({ pending: null, down: false, sent: null });
   const latest = useRef({ snap, commit, same });
   latest.current = { snap, commit, same };
   // The value on screen, readable by the next key before React re-renders.
@@ -96,21 +102,41 @@ function useReleaseCommit(snap: number, commit: (v: number) => Promise<boolean>,
       setPreview(null);
     }
   }, [snap, same]);
+  const release = useCallback(() => {
+    const s = st.current;
+    s.off?.();
+    s.off = undefined;
+    if (!s.down) return;
+    s.down = false;
+    flush();
+  }, [flush]);
   // Unmounted mid-burst (another sound selected, the panel minimized): still send it.
-  useEffect(() => () => { flush(); if (st.current.settle) clearTimeout(st.current.settle); }, [flush]);
-  const release = () => {
-    if (!st.current.down) return;
+  useEffect(() => () => {
+    st.current.off?.();
     st.current.down = false;
     flush();
-  };
+    if (st.current.settle) clearTimeout(st.current.settle);
+  }, [flush]);
   const handlers = {
     onPointerDownCapture: (e: PointerEvent) => {
       if (e.button !== 0) return;
-      st.current.down = true;
-      if (st.current.timer) { clearTimeout(st.current.timer); st.current.timer = undefined; }
+      const target = e.target as Element | null;
+      if (!target?.closest?.('svg[role="slider"]')) return;
+      const s = st.current;
+      s.down = true;
+      if (s.timer) { clearTimeout(s.timer); s.timer = undefined; }
+      // The release normally comes back through the dial (it holds the pointer); a window
+      // listener (bubble phase: after the dial's own last value) is the backstop.
+      if (!s.off) {
+        const end = () => release();
+        window.addEventListener("pointerup", end);
+        window.addEventListener("pointercancel", end);
+        s.off = () => { window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end); };
+      }
     },
     onPointerUp: release, onPointerCancel: release, onLostPointerCapture: release,
-    onBlur: () => { if (!st.current.down) flush(); },
+    // Focus leaving the control ends any hold (a drag is over by then) and sends what waits.
+    onBlur: () => { st.current.off?.(); st.current.off = undefined; st.current.down = false; flush(); },
   };
   return { preview, change, handlers, shown: () => shown.current };
 }
@@ -199,7 +225,7 @@ function SoundRow({ s, lane, limits, run, readOnly, showMute, onPreviewGain, onC
 
   const why = readOnly ? "Read-only: pad edits go to the first sampler on this track"
     : note === undefined ? "Not reachable: a narrower sound covers every note it plays" : undefined;
-  const status = s.missing ? "file missing" : lane.muted ? "muted" : lane.soloedOut ? "silent (solo)" : lane.solo ? "solo" : "";
+  const status = s.missing ? "file missing" : laneWords(s, lane);
   // The root of a sound played across the keys is marked on its key strip (melodic view) or
   // its cell (grid); a partial range names it here.
   const sub = s.mode === "range" ? `${rangeText(s)} · root ${noteName(s.pitch)}` : rangeText(s);
@@ -272,17 +298,36 @@ function GainTick({ db, limits }: { db: number; limits: Limits }) {
   );
 }
 
+type LaneFn = (note: number, what: "mute" | "solo") => void;
+
+/** M and S for the lane at a note: quiet until hovered or one is on. */
+function LaneButtons({ name, note, lane, onLane }: { name: string; note: number; lane: LaneState; onLane: LaneFn }) {
+  return (
+    <span className="ms">
+      <button type="button" className={`m${lane.muted ? " on" : ""}`} aria-pressed={lane.muted} data-testid="pp-sampler-m"
+        aria-label={`Mute ${name}`} title={lane.muted ? "Unmute" : "Mute (the lane at this note)"}
+        onPointerDown={(e) => e.stopPropagation()} onClick={() => onLane(note, "mute")}>M</button>
+      <button type="button" className={`s${lane.solo ? " on" : ""}`} aria-pressed={lane.solo} data-testid="pp-sampler-s"
+        aria-label={`Solo ${name}`} title={lane.solo ? "Unsolo" : "Solo (silences the other pads)"}
+        onPointerDown={(e) => e.stopPropagation()} onClick={() => onLane(note, "solo")}>S</button>
+    </span>
+  );
+}
+
 type CellProps = {
   s: SamplerSound; lane: LaneState; limits: Limits; selected: boolean; pressed: boolean; over: boolean;
   flash: number; gainDb: number; readOnly: boolean;
-  onPress: (s: SamplerSound) => void; onLane: (s: SamplerSound, what: "mute" | "solo") => void;
+  onPress: (s: SamplerSound) => void; onLane: LaneFn;
   dropProps: DropProps;
 };
 
 function PadCell({ s, lane, limits, selected, pressed, over, flash, gainDb, readOnly, onPress, onLane, dropProps }: CellProps) {
-  const quiet = lane.muted || lane.soloedOut;
+  // Dimmed when the engine has parked it, whatever the lane lists say (a second sampler is
+  // never parked; a lane both muted and soloed plays).
+  const quiet = s.silenced;
+  const words = laneWords(s, lane);
   const label = `${s.name}, ${s.mode === "drum" ? noteName(s.pitch) : `${rangeText(s)}, root ${noteName(s.pitch)}`}`
-    + `${s.missing ? ", file missing" : ""}${lane.muted ? ", muted" : lane.soloedOut ? ", silent (solo)" : lane.solo ? ", solo" : ""}`;
+    + `${s.missing ? ", file missing" : ""}${words ? `, ${words}` : ""}`;
   const tip = [
     `${s.name} · ${s.mode === "drum" ? noteName(s.pitch) : `${rangeText(s)}, root ${noteName(s.pitch)}`} · ${fmtLevel(gainDb)}`,
     s.missing ? `File not found: ${s.path || s.file}` : "",
@@ -300,16 +345,7 @@ function PadCell({ s, lane, limits, selected, pressed, over, flash, gainDb, read
         <span className="nm">{s.name}</span>
         <GainTick db={gainDb} limits={limits} />
       </button>
-      {!readOnly && (
-        <span className="ms">
-          <button type="button" className={`m${lane.muted ? " on" : ""}`} aria-pressed={lane.muted} data-testid="pp-sampler-m"
-            aria-label={`Mute ${s.name}`} title={lane.muted ? "Unmute" : "Mute (the lane at this note)"}
-            onPointerDown={(e) => e.stopPropagation()} onClick={() => onLane(s, "mute")}>M</button>
-          <button type="button" className={`s${lane.solo ? " on" : ""}`} aria-pressed={lane.solo} data-testid="pp-sampler-s"
-            aria-label={`Solo ${s.name}`} title={lane.solo ? "Unsolo" : "Solo (silences the other pads)"}
-            onPointerDown={(e) => e.stopPropagation()} onClick={() => onLane(s, "solo")}>S</button>
-        </span>
-      )}
+      {!readOnly && <LaneButtons name={s.name} note={s.pitch} lane={lane} onLane={onLane} />}
     </div>
   );
 }
@@ -334,13 +370,13 @@ type DropProps = {
 // ── the melodic view's pictures ────────────────────────────────────────────────────────
 
 /** The file's real waveform (file_peaks), or nothing: a missing or unresolved file shows
- *  only its name, never invented peaks. */
+ *  only its name, never invented peaks. Dimmed while the engine has the sound parked. */
 function Wave({ s, run, flash }: { s: SamplerSound; run?: RunCommand; flash: number }) {
   const path = s.path && !s.missing ? s.path : null;
   const peaks = usePeaks(path, run);
   const d = peaks ? peaksArea(peaks, WAVE_W, WAVE_H) : "";
   return (
-    <svg className="pp-plot pp-sampler-wave" data-testid="pp-sampler-wave" viewBox={`0 0 ${WAVE_W} ${WAVE_H}`} width={WAVE_W} height={WAVE_H}
+    <svg className={`pp-plot pp-sampler-wave${s.silenced ? " quiet" : ""}`} data-testid="pp-sampler-wave" viewBox={`0 0 ${WAVE_W} ${WAVE_H}`} width={WAVE_W} height={WAVE_H}
       role="img" aria-label={peaks ? `Waveform of ${s.name}` : s.missing ? `${s.name}: file missing` : `${s.name}: no waveform`}>
       <line className="zero" x1={0} x2={WAVE_W} y1={WAVE_H / 2} y2={WAVE_H / 2} />
       {d && <path className="w" data-testid="pp-sampler-peaks" d={d} style={{ opacity: (0.75 + 0.25 * flash).toFixed(2) }} />}
@@ -495,10 +531,16 @@ function SamplerPanel({ plugin, trackId, track, run }: PanelProps) {
     pressTimer.current = setTimeout(() => setPressed(null), PRESS_MS);
     void audition(s.pitch);
   };
-  const lane = (s: SamplerSound, what: "mute" | "solo") => {
-    const l = laneOf(s, track);
-    void run?.("set_drum_lane", what === "mute" ? { note: s.pitch, mute: !l.muted } : { note: s.pitch, solo: !l.solo });
+  // Lanes reach only the track's first sampler: a second one shows none.
+  const laneFor = (s: Pick<SamplerSound, "pitch">) => (primary ? laneOf(s, track) : NO_LANE);
+  const lane: LaneFn = (note, what) => {
+    const l = laneOf({ pitch: note }, track);
+    void run?.("set_drum_lane", what === "mute" ? { note, mute: !l.muted } : { note, solo: !l.solo });
   };
+  // A solo on a note no sound is rooted on (its pad cleared, or set in the step sequencer)
+  // silences every sound here while no cell shows a lit S: named in the top row, one click off.
+  const orphanSolo = readOnly ? [] : orphanLanes(sounds, track).solo;
+  const unsoloOrphans = () => { for (const note of orphanSolo) void run?.("set_drum_lane", { note, solo: false }); };
   const assign = async (note: number, path: string, mode: Mode) => {
     const r = runRef.current;
     if (!r) return;
@@ -509,12 +551,15 @@ function SamplerPanel({ plugin, trackId, track, run }: PanelProps) {
       if (imported) addRecentSample(imported);
     } catch { /* the store reports a failed command */ }
   };
-  /** A sample for `note`: straight in when it replaces nothing, else asked first. */
-  const offer = (note: number, path: string, mode: Mode) => {
-    const replaced = replacedBy(sounds, note);
+  /** A sample for `note` (dropped `onto` a sound, or on an empty cell): straight in when it
+   *  replaces nothing, else asked first. */
+  const offer = (note: number, path: string, mode: Mode, onto?: SamplerSound) => {
+    const replaced = replacedBy(sounds, note, onto);
     if (replaced.length === 0) void assign(note, path, mode);
-    else setSlot({ kind: "confirm", note, path, mode, replaced });
+    else setSlot({ kind: "confirm", note, path, mode, replaced, onto });
   };
+  /** A sample dropped on a sound: its own kind at its root (a range sound becomes a pad). */
+  const offerOnto = (s: SamplerSound, path: string) => offer(s.pitch, path, s.mode === "melodic" ? "melodic" : "drum", s);
   const dropOn = (key: string, onPath: (path: string) => void): DropProps => ({
     onDragOver: (e) => {
       if (!dragCarriesSample(e.dataTransfer?.types)) return;
@@ -570,18 +615,27 @@ function SamplerPanel({ plugin, trackId, track, run }: PanelProps) {
         valueText={meter ? `${meter.outDb.toFixed(1)} dBFS` : "No signal"} testId="pp-sampler-outbar" />
     </span>
   );
+  const orphanText = notesText(orphanSolo);
   const top = (hint: string) => (
     <div className="pp-sampler-top">
       {kitButton}
-      <span className={`pp-sampler-hint${notice ? " notice" : ""}`} data-testid="pp-sampler-hint" role={notice ? "status" : undefined}
-        title={notice ?? hint}>{notice ?? hint}</span>
+      {!notice && orphanSolo.length > 0 ? (
+        <span className="pp-sampler-lanes" data-testid="pp-sampler-orphan-solo"
+          title={`${orphanText} ${orphanSolo.length === 1 ? "is" : "are"} soloed with no sound of its own there, so every sound on this sampler is silent`}>
+          <span className="t">{`Solo on empty ${orphanText}`}</span>
+          <button type="button" className="pp-btn" data-testid="pp-sampler-unsolo" onClick={unsoloOrphans}>Unsolo</button>
+        </span>
+      ) : (
+        <span className={`pp-sampler-hint${notice ? " notice" : ""}`} data-testid="pp-sampler-hint" role={notice ? "status" : undefined}
+          title={notice ?? hint}>{notice ?? hint}</span>
+      )}
       {outBar}
     </div>
   );
   const slotView = (): ReactNode => {
     if (slot?.kind === "kits" && run) return <KitRow run={run} current={kit} count={sounds.length} onDone={() => setSlot(null)} />;
     if (slot?.kind === "confirm") {
-      const t = replaceText(slot.replaced, fileName(slot.path));
+      const t = replaceText(slot.replaced, fileName(slot.path), { note: slot.note, mode: slot.mode, onto: slot.onto });
       return (
         <div className="pp-sampler-slot pp-sampler-confirm" data-testid="pp-sampler-confirm" role="alertdialog" aria-label={t.title}>
           <div className="msg"><span className="t">{t.title}</span><span className="d">{t.detail}</span></div>
@@ -649,7 +703,7 @@ function SamplerPanel({ plugin, trackId, track, run }: PanelProps) {
     const idx = Math.min(melodicIndex, keysSounds.length - 1);
     const s = keysSounds[idx]!;
     const flash = soundFlash(s, hits);
-    const replaceWith = (path: string) => offer(s.pitch, path, s.mode === "melodic" ? "melodic" : "drum");
+    const replaceWith = (path: string) => offerOnto(s, path);
     return (
       <div className={`pp-sampler${plugin.enabled ? "" : " bypassed"}`} data-testid="pp-sampler" data-view="melodic" onKeyDown={onKeyDown}>
         {top(readOnly ? "Read-only: edit the first sampler" : !plugin.enabled ? "Off: turn it on to hear it" : "Played across the keys")}
@@ -665,7 +719,7 @@ function SamplerPanel({ plugin, trackId, track, run }: PanelProps) {
           <KeyStrip s={s} held={held} hits={hits} />
         </div>
         {slotView() ?? (
-          <SoundRow key={soundKey(s)} s={s} lane={laneOf(s, track)} limits={limits} run={run} readOnly={readOnly} showMute
+          <SoundRow key={soundKey(s)} s={s} lane={laneFor(s)} limits={limits} run={run} readOnly={readOnly} showMute={primary}
             onPreviewGain={noPreview} onCleared={() => setMelodicIndex(0)} />
         )}
       </div>
@@ -674,40 +728,73 @@ function SamplerPanel({ plugin, trackId, track, run }: PanelProps) {
 
   // ── drum ──
   const emptyNotes = readOnly ? [] : freeSlotNotes(sounds, emptyCellCount(sorted.length));
+  const below = slotView() ?? (selectedSound && (
+    <SoundRow key={soundKey(selectedSound)} s={selectedSound} lane={laneFor(selectedSound)} limits={limits} run={run}
+      readOnly={readOnly} showMute={false} onPreviewGain={onPreviewGain} onCleared={() => setSelected(null)} />
+  ));
   return (
     <div className={`pp-sampler${plugin.enabled ? "" : " bypassed"}`} data-testid="pp-sampler" data-view="drum" onKeyDown={onKeyDown}>
       {top(readOnly ? "Read-only: edit the first sampler" : !plugin.enabled ? "Off: turn it on to hear taps" : "Tap to hear · drop to swap")}
-      <div className="pp-sampler-grid" role="group" aria-label="Sounds">
+      <SoundGrid tight={!!below} selected={selected} cells={sorted.length + emptyNotes.length}>
         {sorted.map((s) => {
           const key = soundKey(s);
           const gainDb = previewGain && previewGain.key === key ? previewGain.db : s.userGainDb;
           return (
-            <PadCell key={key} s={s} lane={laneOf(s, track)} limits={limits} selected={key === selected} pressed={key === pressed}
+            <PadCell key={key} s={s} lane={laneFor(s)} limits={limits} selected={key === selected} pressed={key === pressed}
               over={over === key} flash={soundFlash(s, hits)} gainDb={gainDb} readOnly={readOnly}
               onPress={press} onLane={lane}
-              dropProps={dropOn(key, (path) => offer(s.pitch, path, s.mode === "melodic" ? "melodic" : "drum"))} />
+              dropProps={dropOn(key, (path) => offerOnto(s, path))} />
           );
         })}
         {emptyNotes.map((note) => {
           const key = `empty-${note}`;
           const toNote = (path: string) => offer(note, path, "drum");
+          // A lane left on this note (its pad cleared while muted or soloed) keeps its M/S here.
+          const l = laneOf({ pitch: note }, track);
+          const laneOn = l.muted || l.solo;
           return (
             <div key={key} className={`pp-sampler-cell empty${over === key ? " over" : ""}`} data-testid="pp-sampler-slot" data-note={note}
               {...dropOn(key, toNote)}>
-              <button type="button" className="pad" aria-label={`Empty pad ${noteName(note)}: choose a sample`}
+              <button type="button" className="pad"
+                aria-label={`Empty pad ${noteName(note)}${l.solo ? ", soloed" : l.muted ? ", muted" : ""}: choose a sample`}
                 title={`Drop a sample here for ${noteName(note)} (or click to choose a file)`}
                 onClick={() => void choose(toNote)}>
                 <span className="n">{noteName(note)}</span>
                 <span className="nm">empty</span>
               </button>
+              {laneOn && <LaneButtons name={`empty ${noteName(note)}`} note={note} lane={l} onLane={lane} />}
             </div>
           );
         })}
-      </div>
-      {slotView() ?? (selectedSound && (
-        <SoundRow key={soundKey(selectedSound)} s={selectedSound} lane={laneOf(selectedSound, track)} limits={limits} run={run}
-          readOnly={readOnly} showMute={false} onPreviewGain={onPreviewGain} onCleared={() => setSelected(null)} />
-      ))}
+      </SoundGrid>
+      {below}
+    </div>
+  );
+}
+
+/** The drum grid: up to three rows of cells, two while a row is open under it (so the panel
+ *  stays compact), scrolling past that. An edge that hides cells fades, so a hidden pad is
+ *  never simply gone; the selected cell is scrolled into view when the grid tightens. */
+function SoundGrid({ tight, selected, cells, children }: { tight: boolean; selected: string | null; cells: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [edge, setEdge] = useState<GridEdge>("");
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const e = gridEdge(el.scrollTop, el.scrollHeight, el.clientHeight);
+    setEdge((p) => (p === e ? p : e));
+  }, []);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const cell = selected ? [...el.querySelectorAll<HTMLElement>(".pp-sampler-cell[data-sound]")].find((c) => c.dataset.sound === selected) : undefined;
+    if (cell) el.scrollTop = scrollToShow(el.scrollTop, el.clientHeight, cell.offsetTop, cell.offsetHeight);
+    measure();
+  }, [tight, selected, cells, measure]);
+  return (
+    <div ref={ref} className={`pp-sampler-grid${tight ? " tight" : ""}`} data-testid="pp-sampler-grid" data-more={edge || undefined}
+      role="group" aria-label="Sounds" onScroll={measure}>
+      {children}
     </div>
   );
 }
@@ -726,8 +813,8 @@ function useCallbackRef<A extends unknown[]>(fn: (...args: A) => void): (...args
 const MINI_W = 44, MINI_H = 14;
 
 /** The minimized row's thumbnail: one dot per sound in note order (a dash for a sound played
- *  across the keys), lit by the rail's hits. */
-function SamplerMini({ plugin, trackId, track, run }: PanelProps) {
+ *  across the keys), lit by the rail's hits, faint while the engine has the sound parked. */
+function SamplerMini({ plugin, trackId, run }: PanelProps) {
   const { hits } = useSamplerMeter(trackId, plugin);
   const sounds = sortSounds(soundsOf(plugin) ?? []);
   // A sampler holding one sound played across the keys: that sound's own waveform (real
@@ -739,7 +826,7 @@ function SamplerMini({ plugin, trackId, track, run }: PanelProps) {
     return (
       <svg className={`pp-sampler-mini${plugin.enabled ? "" : " bypassed"}`} data-testid="pp-sampler-mini" width={MINI_W} height={MINI_H}
         viewBox={`0 0 ${MINI_W} ${MINI_H}`} aria-hidden="true">
-        <path className={`w${lit > 0 ? " lit" : ""}`} d={peaksArea(peaks, MINI_W, MINI_H)}
+        <path className={`w${lit > 0 ? " lit" : ""}${single.silenced ? " quiet" : ""}`} d={peaksArea(peaks, MINI_W, MINI_H)}
           style={lit > 0 ? { opacity: (0.45 + 0.55 * lit).toFixed(2) } : undefined} />
       </svg>
     );
@@ -752,8 +839,7 @@ function SamplerMini({ plugin, trackId, track, run }: PanelProps) {
       {dots.map((p, i) => {
         const s = sounds[i]!;
         const lit = soundFlash(s, hits);
-        const l = laneOf(s, track);
-        const cls = `d${lit > 0 ? " lit" : ""}${l.muted || l.soloedOut ? " quiet" : ""}${s.missing ? " missing" : ""}`;
+        const cls = `d${lit > 0 ? " lit" : ""}${s.silenced ? " quiet" : ""}${s.missing ? " missing" : ""}`;
         const r = sounds.length > 8 ? 1.7 : 2.2;
         return s.mode === "drum"
           ? <circle key={soundKey(s)} className={cls} cx={p.cx.toFixed(2)} cy={p.cy.toFixed(2)} r={r} style={lit > 0 ? { opacity: (0.45 + 0.55 * lit).toFixed(2) } : undefined} />
@@ -766,6 +852,6 @@ function SamplerMini({ plugin, trackId, track, run }: PanelProps) {
 
 export const samplerPanelDef: PanelDef = {
   Panel: SamplerPanel,
-  summary: (plugin) => samplerSummary(plugin),
+  summary: (plugin, ctx) => samplerSummary(plugin, ctx?.track),
   Mini: SamplerMini,
 };

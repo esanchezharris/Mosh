@@ -7,9 +7,10 @@ import { SAMPLE_DND_MIME } from "../../ui/sampleBrowserUtil";
 import { pluginKey } from "../../ui/tuner";
 import { SUMMARY_CHARS } from "./chorus";
 import {
-  DEFAULT_LIMITS, dragCarriesSample, droppedSample, emptyCellCount, flashStrength, fmtLevel, fmtPan, fmtSeconds,
-  freeSlotNotes, gainFromNorm, gainNorm, hitLevelDb, keyCentre, laneOf, levelKeyStep, miniDots, panFromNorm, panKeyStep,
-  panNorm, peaksArea, pianoKeys, rangeText, replaceText, replacedBy, samplerSummary, sortSounds, soundFlash, viewOf,
+  DEFAULT_LIMITS, NO_LANE, dragCarriesSample, droppedSample, emptyCellCount, flashStrength, fmtLevel, fmtPan, fmtSeconds,
+  freeSlotNotes, gainFromNorm, gainNorm, gridEdge, hitLevelDb, keyCentre, laneOf, laneWords, levelKeyStep, miniDots, notesText,
+  orphanLanes, panFromNorm, panKeyStep, panNorm, peaksArea, pianoKeys, rangeText, replaceText, replacedBy, samplerSummary,
+  scrollToShow, sortSounds, soundFlash, viewOf,
 } from "./sampler";
 import { samplerPanelDef } from "./SamplerPanel";
 import type { RunCommand } from "./types";
@@ -33,6 +34,15 @@ const samplerPlugin = (sounds: SamplerSound[], info: Partial<SamplerInfo> = {}, 
   params: [], itemId: "smp1", sampler: { primary: true, sounds, limits: DEFAULT_LIMITS, ...info }, ...p,
 });
 const track = (o: Partial<Track> = {}): Track => ({ id: "t1", index: 0, name: "Drums", type: "drum", clips: [], ...o } as Track);
+/** The engine's applyDrumLaneGains on a fixture: every sound its lanes silence is parked at
+ *  −48 dB and flagged (solo wins over mute), as the snapshot carries it. */
+const parked = (sounds: SamplerSound[], t: Track): SamplerSound[] => {
+  const muted = new Set(t.drumMutedPitches ?? []), solo = new Set(t.drumSoloPitches ?? []);
+  return sounds.map((s) => {
+    const silenced = solo.size > 0 ? !solo.has(s.pitch) : muted.has(s.pitch);
+    return silenced ? { ...s, silenced, gainDb: -48, userGainDb: s.gainDb } : s;
+  });
+};
 
 // ── the model ──────────────────────────────────────────────────────────────────────────
 describe("sampler model (pure)", () => {
@@ -115,15 +125,71 @@ describe("sampler model (pure)", () => {
     expect(laneOf(sound({ pitch: 36 }), undefined)).toEqual({ muted: false, solo: false, soloedOut: false });
   });
 
+  it("what is quiet is the engine's `silenced` flag; the lane only says why", () => {
+    const t = track({ drumMutedPitches: [42, 38], drumSoloPitches: [38] });
+    expect(laneWords(sound({ pitch: 36, silenced: true }), laneOf({ pitch: 36 }, t))).toBe("silent (solo)");
+    expect(laneWords(sound({ pitch: 42, silenced: true }), laneOf({ pitch: 42 }, t))).toBe("muted");
+    // Muted AND soloed: the engine plays it (solo wins), so it reads "solo", not "muted".
+    expect(laneWords(sound({ pitch: 38 }), laneOf({ pitch: 38 }, t))).toBe("solo");
+    // A second sampler the lanes never park: lanes listed, nothing silenced, nothing said.
+    expect(laneWords(sound({ pitch: 42 }), NO_LANE)).toBe("");
+    expect(laneWords(sound({ pitch: 42, silenced: true }), NO_LANE)).toBe("silent");
+  });
+
+  it("a lane on a note no sound is rooted on is an orphan (a cleared pad's solo silences the rest)", () => {
+    const noSnare = kit().filter((s) => s.pitch !== 38);
+    expect(orphanLanes(noSnare, track({ drumSoloPitches: [38], drumMutedPitches: [36, 40] }))).toEqual({ solo: [38], mute: [40] });
+    expect(orphanLanes(kit(), track({ drumSoloPitches: [38] }))).toEqual({ solo: [], mute: [] });
+    // An 808 played across the keys is rooted on ONE note: a solo elsewhere is still an orphan.
+    expect(orphanLanes([melodic({ pitch: 36 })], track({ drumSoloPitches: [36, 41] })).solo).toEqual([41]);
+    expect(orphanLanes(kit(), undefined)).toEqual({ solo: [], mute: [] });
+    expect(notesText([38])).toBe("D2");
+    expect(notesText([38, 40])).toBe("D2, E2");
+    expect(notesText([38, 40, 41])).toBe("3 notes");
+  });
+
   it("what a drop replaces is EVERY sound covering the note, an 808 across the keys too, and the text says so", () => {
     const sounds = [...kit(), melodic()];
-    // The dropped-on pad first (the narrowest), then whatever else covers the note.
+    // The narrowest first, then whatever else covers the note.
     expect(replacedBy(sounds, 39).map((s) => s.name)).toEqual(["Clap", "808 Long"]);
     expect(replacedBy(kit(), 40)).toEqual([]);
-    const t = replaceText(replacedBy(sounds, 39), "clap909.wav");
+    const clap = sounds.find((s) => s.pitch === 39)!;
+    const t = replaceText(replacedBy(sounds, 39, clap), "clap909.wav", { note: 39, mode: "drum", onto: clap });
     expect(t.title).toBe("Replace Clap with clap909.wav?");
     expect(t.detail).toBe("Level, pan and choke start over. Also removes 808 Long (all keys).");
-    expect(replaceText([sound({ name: "Snare", pitch: 38 })], "x.wav").detail).toBe("Level, pan and choke start over.");
+    const snare = sound({ name: "Snare", pitch: 38 });
+    expect(replaceText([snare], "x.wav", { note: 38, mode: "drum", onto: snare }).detail).toBe("Level, pan and choke start over.");
+  });
+
+  it("a drop names the sound it was dropped on first, and never 'replaces' a sound whose role it does not take", () => {
+    // An empty cell under an 808: the new sound is a pad there, and the 808 goes.
+    const sounds = [...kit().slice(0, 3), melodic()];
+    const onEmpty = replaceText(replacedBy(sounds, 42), "rim.wav", { note: 42, mode: "drum" });
+    expect(onEmpty.title).toBe("Put rim.wav on F#2 as a pad?");
+    expect(onEmpty.detail).toBe("This removes 808 Long (all keys): a new sample replaces every sound that plays F#2.");
+    expect(onEmpty.title).not.toMatch(/Replace 808/);
+    // Dropped on the 808 (rooted where a pad also sits): the 808 is named, with no choke.
+    const m = melodic({ pitch: 36 });
+    const withKick = [sound({ name: "Kick", pitch: 36 }), m];
+    expect(replacedBy(withKick, 36, m).map((s) => s.name)).toEqual(["808 Long", "Kick"]);
+    const onto808 = replaceText(replacedBy(withKick, 36, m), "boom.wav", { note: 36, mode: "melodic", onto: m });
+    expect(onto808.title).toBe("Replace 808 Long with boom.wav?");
+    expect(onto808.detail).toBe("Level and pan start over. Also removes Kick (C2).");
+    // A range sound dropped on becomes a pad (assign_sample has no range mode): said so.
+    const range = sound({ name: "Keys", pitch: 40, minNote: 36, maxNote: 47, mode: "range" });
+    expect(replaceText([range], "pad.wav", { note: 40, mode: "drum", onto: range }).title).toBe("Put pad.wav on E2 as a pad?");
+    // No sound dropped on (nothing takes its place by name): what the new sound will be.
+    expect(replaceText([melodic({ pitch: 60 })], "bass.wav", { note: 60, mode: "melodic" }).title).toBe("Play bass.wav across the keys from C4?");
+  });
+
+  it("the grid's hidden edges, and the least scroll that shows a cell", () => {
+    expect(gridEdge(0, 61, 61)).toBe("");
+    expect(gridEdge(0, 125, 61)).toBe("below");
+    expect(gridEdge(64, 125, 61)).toBe("above");
+    expect(gridEdge(32, 125, 61)).toBe("both");
+    expect(scrollToShow(0, 61, 64, 29)).toBe(32);                         // row 3 under a 2-row view
+    expect(scrollToShow(64, 61, 0, 29)).toBe(0);                          // row 1 above it
+    expect(scrollToShow(32, 61, 32, 29)).toBe(32);                        // already in view: unchanged
   });
 
   it("empty cells offer the kit's free notes first; an 808 across the keys does not take a note", () => {
@@ -207,6 +273,26 @@ describe("sampler model (pure)", () => {
     // An engine that sends no sampler block: the plugin's own name, nothing invented.
     expect(samplerSummary({ ...samplerPlugin([]), sampler: undefined })).toBe("Sampler");
   });
+
+  it("a sampler whose every sound is silent says so when minimized; a partly silent one does not", () => {
+    const muted = track({ drumMutedPitches: [36] });
+    const boom = melodic({ name: "808 Boom", pitch: 36 });
+    const cases: [Plugin, Track | undefined, string][] = [
+      [samplerPlugin(parked([boom], muted)), muted, "muted · 808 Boom"],
+      [samplerPlugin(parked([melodic({ name: "Very Long Bass", pitch: 36 })], muted)), muted, "muted · Very Lo…"],
+      [samplerPlugin(parked([boom], muted)), undefined, "silent · 808 Bo…"],           // no lanes to say why
+      [samplerPlugin(parked(kit(), track({ drumSoloPitches: [40] }))), track({ drumSoloPitches: [40] }), "8 pads · silent"],
+      [samplerPlugin(parked(kit(), track({ drumMutedPitches: KIT_DEF.map(([, p]) => p) }))), track({ drumMutedPitches: KIT_DEF.map(([, p]) => p) }), "8 pads · muted"],
+      [samplerPlugin(parked([...kit(), melodic()], track({ drumSoloPitches: [40] }))), track({ drumSoloPitches: [40] }), "9 sounds, silent"],
+      [samplerPlugin(parked(kit(), muted), { kit: "mosh-kit" }), muted, "8 pads, mosh-kit"],   // one muted pad: the dots show it
+    ];
+    for (const [p, t, want] of cases) {
+      expect(samplerSummary(p, t)).toBe(want);
+      expect(want.length, want).toBeLessThanOrEqual(SUMMARY_CHARS);
+    }
+    // Through the panel definition: the row passes the track.
+    expect(samplerPanelDef.summary(samplerPlugin(parked([boom], muted)), { track: muted })).toBe("muted · 808 Boom");
+  });
 });
 
 // ── the panel ──────────────────────────────────────────────────────────────────────────
@@ -275,7 +361,8 @@ describe("Sampler panel", () => {
   const click = (el: Element) => act(() => { (el as HTMLElement).click(); });
 
   it("draws the loaded pads in note order (no empty bank), each with its note, name and lane state", () => {
-    render(samplerPlugin(kit().reverse(), { kit: "mosh-kit" }), track({ drumMutedPitches: [42] }));
+    const t = track({ drumMutedPitches: [42] });
+    render(samplerPlugin(parked(kit().reverse(), t), { kit: "mosh-kit" }), t);
     const cells = [...host.querySelectorAll('[data-testid="pp-sampler-cell"]')];
     expect(cells.map((c) => Number(c.getAttribute("data-note")))).toEqual([36, 38, 39, 42, 45, 46, 47, 49]);
     expect(host.querySelectorAll('[data-testid="pp-sampler-slot"]')).toHaveLength(0);
@@ -409,7 +496,8 @@ describe("Sampler panel", () => {
   });
 
   it("M and S toggle the lane at the sound's root without playing it", () => {
-    render(samplerPlugin(kit()), track({ drumSoloPitches: [38] }));
+    const t = track({ drumSoloPitches: [38] });
+    render(samplerPlugin(parked(kit(), t)), t);
     click(cell(36).querySelector('[data-testid="pp-sampler-m"]')!);
     click(cell(38).querySelector('[data-testid="pp-sampler-s"]')!);
     expect(calls).toEqual([["set_drum_lane", { note: 36, mute: true }], ["set_drum_lane", { note: 38, solo: false }]]);
@@ -561,6 +649,130 @@ describe("Sampler panel", () => {
     render({ ...samplerPlugin([]), sampler: undefined });
     expect(q('[data-testid="pp-sampler-old-engine"]')).not.toBeNull();
     expect(host.querySelectorAll('[data-testid="pp-sampler-cell"]')).toHaveLength(0);
+  });
+
+  it("a press on the Level read-out, released elsewhere, never holds back keys or the wheel", () => {
+    vi.useFakeTimers();
+    render(samplerPlugin(kit()));
+    tap(38);
+    calls.length = 0;
+    const readout = q('[data-testid="pp-sampler-level"] .v')!;
+    act(() => { readout.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 3, clientY: 100 })); });
+    act(() => { document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 3, clientY: 60 })); });
+    const lvl = dial("pp-sampler-level");
+    key(lvl, "ArrowUp"); key(lvl, "ArrowUp"); key(lvl, "ArrowUp");
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(sent("set_drum_pad")).toEqual([{ note: 38, gainDb: 3 }]);
+    // A press on the control's own box (not the knob), never released: nothing held either.
+    act(() => { q('[data-testid="pp-sampler-level"]')!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 4 })); });
+    key(lvl, "ArrowDown");
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(sent("set_drum_pad")).toEqual([{ note: 38, gainDb: 3 }, { note: 38, gainDb: 2 }]);
+  });
+
+  it("a Level drag released outside the panel still sends once (the window backstops the dial)", async () => {
+    render(samplerPlugin(kit()));
+    tap(38);
+    calls.length = 0;
+    const svg = dial("pp-sampler-level");
+    act(() => { svg.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 100, pointerId: 1, button: 0 })); });
+    act(() => { svg.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 70, pointerId: 1 })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+    expect(sent("set_drum_pad")).toEqual([]);
+    act(() => { document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 70, pointerId: 1, button: 0 })); });
+    expect(sent("set_drum_pad")).toEqual([{ note: 38, gainDb: 19 }]);
+  });
+
+  it("a sound reads quiet only when the engine has it parked: never a second sampler's, never a muted-and-soloed lane", () => {
+    render(samplerPlugin(kit(), { primary: false }), track({ drumMutedPitches: [38] }));
+    expect(cell(38).classList.contains("quiet")).toBe(false);             // lanes park only the first sampler
+    expect(pad(38).getAttribute("aria-label")).toBe("Snare, D2");
+    const both = track({ drumMutedPitches: [38], drumSoloPitches: [38] });
+    render(samplerPlugin(parked(kit(), both)), both);
+    expect(cell(38).classList.contains("quiet")).toBe(false);             // solo wins: it plays
+    expect(cell(36).classList.contains("quiet")).toBe(true);
+    expect(pad(36).getAttribute("aria-label")).toBe("Kick, C2, silent (solo)");
+    tap(38);
+    expect(q('[data-testid="pp-sampler-status"]')!.textContent).toBe("solo");
+  });
+
+  it("a solo left on a cleared pad's note is named in the top row, one click off; its empty cell keeps M/S", () => {
+    const t = track({ drumSoloPitches: [38] });
+    render(samplerPlugin(parked(kit().filter((s) => s.pitch !== 38), t)), t);
+    expect(host.querySelectorAll(".pp-sampler-cell.quiet")).toHaveLength(7);  // the whole kit is silent…
+    expect(q('[data-testid="pp-sampler-orphan-solo"]')!.textContent).toContain("Solo on empty D2");  // …and the panel says why
+    expect(q('[data-testid="pp-sampler-hint"]')).toBeNull();
+    const slot = q('[data-testid="pp-sampler-slot"][data-note="38"]')!;
+    expect(slot.querySelector('[data-testid="pp-sampler-s"]')!.getAttribute("aria-pressed")).toBe("true");
+    click(q('[data-testid="pp-sampler-unsolo"]')!);
+    expect(sent("set_drum_lane")).toEqual([{ note: 38, solo: false }]);
+    click(slot.querySelector('[data-testid="pp-sampler-s"]')!);
+    expect(sent("set_drum_lane")[1]).toEqual({ note: 38, solo: false });
+    // No lane on an empty cell's note: no M/S there, no chip.
+    render(samplerPlugin(kit().filter((s) => s.pitch !== 38)), track());
+    expect(q('[data-testid="pp-sampler-slot"][data-note="38"] [data-testid="pp-sampler-s"]')).toBeNull();
+    expect(q('[data-testid="pp-sampler-orphan-solo"]')).toBeNull();
+    expect(q('[data-testid="pp-sampler-hint"]')!.textContent).toBe("Tap to hear · drop to swap");
+  });
+
+  it("a full grid (no empty cell) and the melodic view still name an orphan solo; a second sampler does not", async () => {
+    const t = track({ drumSoloPitches: [40] });
+    render(samplerPlugin(parked(kit(), t)), t);
+    expect(host.querySelectorAll('[data-testid="pp-sampler-slot"]')).toHaveLength(0);
+    expect(q('[data-testid="pp-sampler-orphan-solo"]')!.textContent).toContain("Solo on empty E2");
+    const tm = track({ drumSoloPitches: [38] });
+    render(samplerPlugin(parked([melodic({ pitch: 36, path: "/imports/808-orphan.wav", file: "/imports/808-orphan.wav" })], tm)), tm);
+    await settle();
+    expect(q('[data-testid="pp-sampler"]')!.getAttribute("data-view")).toBe("melodic");
+    expect(q('[data-testid="pp-sampler-orphan-solo"]')!.textContent).toContain("Solo on empty D2");
+    expect(q('[data-testid="pp-sampler-status"]')!.textContent).toBe("silent (solo)");
+    expect(q('[data-testid="pp-sampler-wave"]')!.getAttribute("class")).toContain("quiet");   // dimmed like a muted cell
+    render(samplerPlugin(kit(), { primary: false }), t);
+    expect(q('[data-testid="pp-sampler-orphan-solo"]')).toBeNull();
+  });
+
+  it("a drop on an empty cell under an 808 says the 808 goes, not that it is swapped", () => {
+    render(samplerPlugin([...kit().slice(0, 3), melodic()]));
+    drop(q('[data-testid="pp-sampler-slot"][data-note="42"]')!, fromBrowser("/s/rim.wav"));
+    const c = q('[data-testid="pp-sampler-confirm"]')!;
+    expect(c.textContent).toContain("Put rim.wav on F#2 as a pad?");
+    expect(c.textContent).toContain("This removes 808 Long (all keys)");
+    expect(c.textContent).not.toContain("choke");
+    click(q('[data-testid="pp-sampler-replace"]')!);
+    expect(sent("assign_sample")).toEqual([{ note: 42, file: "/s/rim.wav", mode: "drum" }]);
+  });
+
+  it("the grid tightens to two rows while a sound's row is open, and marks an edge that hides cells", () => {
+    render(samplerPlugin([...kit(), sound({ index: 9, name: "Rim", pitch: 37 })]));
+    const grid = q('[data-testid="pp-sampler-grid"]')!;
+    expect(grid.classList.contains("tight")).toBe(false);
+    tap(49);
+    expect(grid.classList.contains("tight")).toBe(true);
+    // jsdom has no layout: give the grid a 2-row view over 3 rows, then scroll it.
+    Object.defineProperty(grid, "clientHeight", { configurable: true, value: 61 });
+    Object.defineProperty(grid, "scrollHeight", { configurable: true, value: 93 });
+    act(() => { grid.dispatchEvent(new Event("scroll")); });
+    expect(grid.getAttribute("data-more")).toBe("below");
+    act(() => { grid.scrollTop = 32; grid.dispatchEvent(new Event("scroll")); });
+    expect(grid.getAttribute("data-more")).toBe("above");
+    act(() => { q('[data-testid="pp-sampler"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(grid.classList.contains("tight")).toBe(false);
+  });
+
+  it("minimized, a muted 808 looks muted (a faint waveform), and only parked pads dim their dots", async () => {
+    const mini = (plugin: Plugin, t: Track) => act(() => {
+      root.render(React.createElement(samplerPanelDef.Mini!, { plugin, trackId: "t1", track: t, sampleRate: 48000, setParam: vi.fn(), setState: vi.fn(), run }));
+    });
+    const t = track({ drumMutedPitches: [36] });
+    mini(samplerPlugin(parked([melodic({ pitch: 36, path: "/imports/808-mini.wav", file: "/imports/808-mini.wav" })], t)), t);
+    await settle();
+    expect(q('[data-testid="pp-sampler-mini"] path')!.getAttribute("class")).toContain("quiet");
+    const k = track({ drumMutedPitches: [38] });
+    mini(samplerPlugin(parked(kit(), k)), k);
+    expect([...host.querySelectorAll('[data-testid="pp-sampler-mini"] circle')].map((d) => d.classList.contains("quiet")))
+      .toEqual([false, true, false, false, false, false, false, false]);
+    mini(samplerPlugin(kit(), { primary: false }), k);                    // a second sampler: never parked
+    expect(host.querySelectorAll('[data-testid="pp-sampler-mini"] circle.quiet')).toHaveLength(0);
   });
 
   it("the minimized dots light from the rail's hits", () => {

@@ -6,11 +6,11 @@ import type { CommandResult, Plugin, PluginParam, PluginStateValue } from "../..
 import { fourOscPanelDef } from "./FourOscPanel";
 import { FOUR_OSC_STATE, fourOscParams, fourOscSetNorm } from "../../mock/fourosc";
 import {
-  DELAY_NOTES, ENV_PLOT, SECOND_Q, SPECS, TCO_ANALOG, TCO_DIGITAL, ampAdsr, attackAtX, baseCutoffHz, ctl, decayAtX, decayEnd,
-  delayNote, envGeometry, envPeakNote, expAttack, expDecay, expRelease, filterChain, filterDb, filterSlopeOf, filterTypeOf,
-  fmtCents, fmtPan, fmtPct100, fmtSignedPct, fmtSt, fourOscSummary, hasFullContract, hzToNote, isBlack, keyStrip, loadSection,
-  noteName, noteToHz, paramFor, releaseAtX, releaseEnd, resonanceQ, saveSection, segTime, segWidth, stripRange, sustainAtY,
-  velocityGain, voicesOf, waveOf,
+  DELAY_NOTES, ENV_DRAG_PX_PER_DECADE, ENV_PLOT, SECOND_Q, SPECS, TCO_ANALOG, TCO_DIGITAL, addOscLevelDb, ampAdsr, baseCutoffHz,
+  ctl, decayEnd, delayNote, envDragTime, envGeometry, envPeakNote, expAttack, expDecay, expRelease, filterChain, filterDb,
+  filterSlopeOf, filterTypeOf, fmtCents, fmtPan, fmtPct100, fmtSignedPct, fmtSt, fourOscSummary, hasFullContract, hzToNote,
+  isBlack, isSilentLevel, keyStrip, loadSection, noteName, noteToHz, oscSounds, paramFor, releaseEnd, resonanceQ, reverbDryDb,
+  saveSection, segWidth, stripRange, sustainAtY, velocityGain, voicesOf, waveOf,
 } from "./fourosc";
 
 /** A 4OSC as the engine (and the engine-accurate mock) sends it: 68 params and the settings. */
@@ -155,21 +155,36 @@ describe("amp envelope (tracktion ExpEnvelope, exact)", () => {
     const crossR = rel.findIndex((e) => e <= 0);
     expect(Math.abs(crossR / N - releaseEnd(0.8, TCO_ANALOG.release))).toBeLessThan(1e-3);
   });
-  it("lays stages out by the log of their time, and inverts a drag back to the setting", () => {
+  it("lays stages out by the log of their time, each handle where its setting puts it", () => {
     expect(segWidth(0.001)).toBe(ENV_PLOT.segMin);
     expect(segWidth(60)).toBe(ENV_PLOT.segMax);
     expect(segWidth(0.1)).toBeCloseTo(35.044, 2);
-    for (const t of [0.001, 0.0123, 0.1, 1.87597, 60]) expect(segTime(segWidth(t))).toBeCloseTo(t, 6);
     const env = { attack: 0.0123, decay: 0.316, sustain: 0.8, release: 1.5 };
     const g = envGeometry(env, true);
     expect(g.nodes.attack.y).toBe(g.yTop);
-    expect(attackAtX(g.nodes.attack.x)).toBeCloseTo(env.attack, 6);
-    expect(decayAtX(g.nodes.decay.x, g.xA)).toBeCloseTo(env.decay, 6);
+    expect(g.nodes.attack.x - g.x0).toBeCloseTo(segWidth(env.attack), 9);
+    expect(g.nodes.decay.x - g.xA).toBeCloseTo(segWidth(env.decay), 9);
     expect(sustainAtY(g.nodes.decay.y)).toBeCloseTo(0.8, 9);
-    expect(releaseAtX(g.nodes.release.x)).toBeCloseTo(env.release, 6);
-    // the key-up line does not move with the settings (a release drag stays under the pointer)
+    expect(g.nodes.release.x - g.xOff).toBeCloseTo(segWidth(env.release), 9);
+    // the key-up line does not move with the settings (a release drag stays put)
     expect(envGeometry({ ...env, attack: 30, decay: 30 }, true).xOff).toBe(g.xOff);
     expect(g.xR).toBeLessThanOrEqual(ENV_PLOT.w);
+  });
+  it("drags a time at a fixed 40 px a decade (Shift: 160), not the plot's 14 px", () => {
+    expect(ENV_DRAG_PX_PER_DECADE).toBe(40);
+    // the e2e's 24 px nudge of a 100 ms attack: x3.98, not x51 (5.15 s) as following the plot did
+    expect(envDragTime(0.1, 24)).toBeCloseTo(0.1 * 10 ** 0.6, 9);
+    expect(envDragTime(0.1, 40)).toBeCloseTo(1, 9);
+    expect(envDragTime(0.1, -40)).toBeCloseTo(0.01, 9);
+    expect(envDragTime(0.1, 40, true)).toBeCloseTo(0.1 * 10 ** 0.25, 9);
+    // softening an 808's 2 ms attack to 10 ms takes 28 px (it took 10)
+    expect(40 * Math.log10(10 / 2)).toBeCloseTo(27.96, 2);
+    expect(envDragTime(0.002, 27.96)).toBeCloseTo(0.01, 4);
+    // clamped to the stage's 1 ms..60 s; travel splits into steps without changing the result
+    expect(envDragTime(30, 400)).toBe(60);
+    expect(envDragTime(0.002, -400)).toBe(0.001);
+    expect(envDragTime(envDragTime(0.05, 13), 11)).toBeCloseTo(envDragTime(0.05, 24), 12);
+    expect(envDragTime(0, 0)).toBe(0.001);
   });
   it("draws the curve through the exact values", () => {
     const env = { attack: 1, decay: 1, sustain: 0.5, release: 1 };
@@ -249,6 +264,56 @@ describe("summary (≤ 16 characters)", () => {
     for (const s of [fourOscSummary(four), fourOscSummary(synth({ waveShape2: "triangle", waveShape3: "noise" }))]) expect(s.length).toBeLessThanOrEqual(16);
     expect(fourOscSummary(four)).toBe("4 oscs Notch 440");
     expect(fourOscSummary({ ...synth(), params: synth().params.slice(0, 16), state: undefined })).toBe("4OSC");
+  });
+  it("leaves out an oscillator at the -100 dB floor: on, but silent", () => {
+    // a preset parks its unused oscillators at Level 0.0 normalised (-100 dB = gain 0)
+    expect(fourOscSummary(synth({ waveShape2: "saw" }, { level2: 0 }))).toBe("sine · no filter");
+    expect(fourOscSummary(synth({ waveShape2: "saw" }, { level1: 0, level2: 0 }))).toBe("all oscs silent");
+    expect(fourOscSummary(synth({ waveShape1: "off" }, { level1: 0 }))).toBe("all oscs off");
+  });
+});
+
+describe("oscillator levels (the -100 dB floor is silence)", () => {
+  it("knows silence from a quiet level", () => {
+    expect(ctl(synth({}, { level2: 0 }), "level2").phys).toBe(-100);
+    expect(isSilentLevel(-100)).toBe(true);
+    expect(isSilentLevel(-99.9)).toBe(false);
+    expect(isSilentLevel(-60)).toBe(false);
+    const p = synth({ waveShape2: "saw", waveShape3: "triangle" }, { level2: 0 });
+    expect(oscSounds(p, 1)).toBe(true);
+    expect(oscSounds(p, 2)).toBe(false);         // on, at the floor
+    expect(oscSounds(p, 3)).toBe(true);
+    expect(oscSounds(p, 4)).toBe(false);         // off
+  });
+  it("'+' brings a parked oscillator up to the loudest sounding one's level (0 dB when none sounds)", () => {
+    // mosh-bass: oscillator 1 at 0.85 (-4.0 dB), 3 and 4 parked at -100 dB
+    const bass = synth({}, { level1: 0.85, level3: 0, level4: 0 });
+    expect(addOscLevelDb(bass, 3)).toBeCloseTo(ctl(bass, "level1").phys, 9);
+    expect(ctl(bass, "level1").phys).toBeCloseTo(-3.98, 2);
+    // a fresh 4OSC: every level is the default 0 dB, so "+" leaves it
+    expect(addOscLevelDb(synth(), 2)).toBeNull();
+    // -50 dB is a choice; -70 dB is not heard: lifted
+    expect(addOscLevelDb(withPhys(synth(), "level2", -50), 2)).toBeNull();
+    expect(addOscLevelDb(withPhys(synth(), "level2", -70), 2)).toBe(0);
+    // nothing sounding (oscillator 1 parked too): the engine's default 0 dB
+    expect(addOscLevelDb(synth({}, { level1: 0, level2: 0 }), 2)).toBe(0);
+    // a silent but "on" oscillator does not set the level; a quieter patch never lowers it
+    expect(addOscLevelDb(synth({ waveShape2: "saw" }, { level1: 0.5, level2: 0, level3: 0 }), 3)).toBeCloseTo(-15.91, 2);
+    expect(addOscLevelDb(withPhys(withPhys(synth(), "level1", -80), "level2", -65), 2)).toBeNull();
+  });
+});
+
+describe("reverb dry level (juce::Reverb doubles the dry)", () => {
+  it("is +6 dB at Mix 0, +3 dB at 50 %, unity at 2/3, silent at 100 %", () => {
+    expect(reverbDryDb(0)).toBeCloseTo(6.0206, 4);
+    expect(reverbDryDb(0.25)).toBeCloseTo(5.3329, 3);
+    expect(reverbDryDb(0.5)).toBeCloseTo(3.0103, 4);
+    expect(reverbDryDb(2 / 3)).toBeCloseTo(0, 9);
+    expect(reverbDryDb(0.8)).toBeLessThan(0);
+    expect(reverbDryDb(1)).toBe(-Infinity);
+    // the engine's own chain in float: dryLevel = sin((1 - mix)·π/2) (Convex), × 2 in setParameters
+    const engine = (mix: number) => 20 * Math.log10(Math.fround(Math.fround(Math.sin(Math.fround((1 - mix) * (Math.PI / 2)))) * 2));
+    for (const m of [0, 0.1, 0.4, 0.6]) expect(reverbDryDb(m)).toBeCloseTo(engine(m), 4);
   });
 });
 
@@ -387,6 +452,124 @@ describe("FourOscPanel (rendered)", () => {
     const add = tid("pp-fo-add") as unknown as HTMLSelectElement;
     act(() => { add.value = "saw"; add.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(sent).toEqual([{ kind: "state", key: "waveShape2", value: "saw", gesture: undefined }]);
+  });
+
+  it("'+' on an oscillator a preset parked at -100 dB brings its level up in the same undo step", () => {
+    // mosh-bass: oscillator 1 at -4.0 dB, oscillators 3 and 4 parked at the floor
+    render(synth({ waveShape2: "saw" }, { level1: 0.85, level2: 0.6, level3: 0, level4: 0 }));
+    const add = tid("pp-fo-add") as unknown as HTMLSelectElement;
+    act(() => { add.value = "triangle"; add.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(sent.map((s) => [s.kind, s.key])).toEqual([["state", "waveShape3"], ["param", SPECS.level3!.index]]);
+    expect(sent[0]!.value).toBe("triangle");
+    expect(sent[1]!.value).toBeCloseTo(0.85, 5);                   // the loudest sounding oscillator's -4.0 dB
+    expect(sent[0]!.gesture).toBeTruthy();
+    expect(sent[1]!.gesture).toBe(sent[0]!.gesture);               // one gesture: the engine makes it one step
+  });
+
+  it("an oscillator that is on but at -100 dB is drawn silent", () => {
+    render(synth({ waveShape2: "saw" }, { level2: 0 }));
+    expect(tid("pp-fo-chip-1")!.hasAttribute("data-silent")).toBe(false);
+    const chip = tid("pp-fo-chip-2")!;
+    expect(chip.hasAttribute("data-silent")).toBe(true);
+    expect(chip.classList.contains("silent")).toBe(true);
+    expect(chip.querySelector("button")!.getAttribute("title")).toContain("Silent: level -100 dB");
+    expect(chip.querySelector('[role="slider"]')!.getAttribute("aria-valuetext")).toBe("-100.0 dB");
+  });
+
+  it("a noise oscillator has no Tune, Fine or Detune (noise never reads the note); Pan, Spread and Voices stay", () => {
+    render(synth({ waveShape1: "noise" }));
+    for (const id of ["pp-fo-tune", "pp-fo-fine", "pp-fo-detune"]) expect(tid(id), id).toBeNull();
+    for (const id of ["pp-fo-pan", "pp-fo-voices", "pp-fo-nopitch"]) expect(tid(id), id).not.toBeNull();
+    render(synth({ waveShape1: "noise", voices1: 3 }));
+    for (const id of ["pp-fo-tune", "pp-fo-fine", "pp-fo-detune", "pp-fo-pan"]) expect(tid(id), id).toBeNull();
+    expect(tid("pp-fo-spread")).not.toBeNull();
+    render(synth({ waveShape1: "saw", voices1: 3 }));
+    for (const id of ["pp-fo-tune", "pp-fo-fine", "pp-fo-detune", "pp-fo-spread"]) expect(tid(id), id).not.toBeNull();
+    expect(tid("pp-fo-nopitch")).toBeNull();
+  });
+
+  it("keys on the panel's buttons stay in the panel: the filter type and slope are radio groups", () => {
+    const leaked = vi.fn();
+    window.addEventListener("keydown", leaked);
+    try {
+      const key = (el: Element, k: string) => act(() => { el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })); });
+      render(synth());
+      act(() => tid("pp-fo-section-filter")!.click());
+      const off = tid("pp-fo-ftype-off")!;
+      expect(off.getAttribute("role")).toBe("radio");
+      expect(off.getAttribute("aria-checked")).toBe("true");
+      expect(off.tabIndex).toBe(0);
+      expect(tid("pp-fo-ftype-lowpass")!.tabIndex).toBe(-1);
+      // ArrowRight picks the next type; a quick second one builds on it, in the same gesture
+      key(off, "ArrowRight");
+      key(tid("pp-fo-ftype-lowpass")!, "ArrowRight");
+      expect(sent.map((s) => [s.key, s.value])).toEqual([["filterType", "lowpass"], ["filterType", "highpass"]]);
+      expect(sent[0]!.gesture).toBeTruthy();
+      expect(sent[1]!.gesture).toBe(sent[0]!.gesture);
+      expect(document.activeElement).toBe(tid("pp-fo-ftype-highpass"));
+      // Home and End on the slope; a click is one plain step
+      sent.length = 0;
+      render(synth({ filterType: "lowpass" }));
+      key(tid("pp-fo-slope-12")!, "End");
+      expect(sent.map((s) => [s.key, s.value])).toEqual([["filterSlope", 24]]);
+      // an oscillator chip and an effect's switch are plain buttons: their arrows and
+      // Home/End stop at the panel too (the router would nudge clips, move the playhead)
+      act(() => tid("pp-fo-section-osc")!.click());
+      for (const k of ["ArrowLeft", "ArrowRight", "Home", "End", "PageDown"]) key(tid("pp-fo-chip-1")!.querySelector("button")!, k);
+      act(() => tid("pp-fo-section-fx")!.click());
+      key(tid("pp-fo-fx-power")!, "ArrowRight");
+      // the effect picker takes Up/Down like the other radio groups
+      expect(tid("pp-fo-fx-distortion")!.getAttribute("aria-checked")).toBe("true");
+      key(tid("pp-fo-fx-distortion")!, "ArrowDown");
+      expect(tid("pp-fo-fx-chorus")!.getAttribute("aria-checked")).toBe("true");
+      key(tid("pp-fo-fx-chorus")!, "ArrowUp");
+      expect(tid("pp-fo-fx-distortion")!.getAttribute("aria-checked")).toBe("true");
+      expect(leaked).not.toHaveBeenCalled();
+      // Space and modified keys still reach the app
+      key(tid("pp-fo-fx-power")!, " ");
+      act(() => { tid("pp-fo-fx-power")!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", altKey: true, bubbles: true })); });
+      expect(leaked).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener("keydown", leaked);
+    }
+  });
+
+  it("reverb: the dry lift Tracktion's reverb adds is shown under its switch while Mix leaves it", () => {
+    render(synth({ reverbOn: "on" }));
+    act(() => tid("pp-fo-section-fx")!.click());
+    act(() => tid("pp-fo-fx-reverb")!.click());
+    expect(tid("pp-fo-reverb-dry")!.textContent).toBe("+6 dBdry");
+    expect(tid("pp-fo-fx-power")!.getAttribute("title")).toContain("+6.0 dB");
+    render(synth({ reverbOn: "on" }, { reverbMix: 0.5 }));
+    expect(tid("pp-fo-reverb-dry")!.textContent).toBe("+3 dBdry");
+    render(synth({ reverbOn: "on" }, { reverbMix: 0.7 }));            // past 2/3: no lift
+    expect(tid("pp-fo-reverb-dry")).toBeNull();
+    // off: no read-out, but the switch says what switching it on does
+    render(synth());
+    expect(tid("pp-fo-reverb-dry")).toBeNull();
+    expect(tid("pp-fo-fx-power")!.getAttribute("title")).toContain("Switching the reverb on also raises the dry sound: +6.0 dB");
+    // chorus and delay at Mix 0 are a true pass-through: nothing to say
+    render(synth({ chorusOn: "on" }));
+    act(() => tid("pp-fo-fx-chorus")!.click());
+    expect(tid("pp-fo-reverb-dry")).toBeNull();
+    expect(tid("pp-fo-fx-power")!.getAttribute("title")).toBeNull();
+  });
+
+  it("dragging the attack handle 24 px multiplies a 100 ms attack by 10^0.6, not by 51 (one gesture)", () => {
+    render(synth());
+    act(() => tid("pp-fo-section-amp")!.click());
+    const node = tid("pp-fo-env-attack")!;
+    const ptr = (type: string, clientX: number) =>
+      act(() => { node.dispatchEvent(new MouseEvent(type, { clientX, clientY: 20, button: 0, bubbles: true, cancelable: true })); });
+    ptr("pointerdown", 100);
+    ptr("pointermove", 112);
+    ptr("pointermove", 124);
+    ptr("pointerup", 124);
+    const attack = sent.filter((s) => s.key === SPECS.ampAttack!.index);
+    expect(attack.length).toBeGreaterThan(0);
+    expect(new Set(attack.map((s) => s.gesture)).size).toBe(1);
+    const c = ctl(synth({}, { ampAttack: attack[attack.length - 1]!.value as number }), "ampAttack");
+    expect(c.phys).toBeCloseTo(0.1 * 10 ** 0.6, 3);                // 0.398 s
   });
 
   it("a level read-out sends set_plugin_param on its own index, one gesture per key burst", () => {

@@ -8,14 +8,15 @@ import { DragNode } from "./DragNode";
 import { chainDb, logFreqs, plotTopHz } from "./dsp";
 import {
   DELAY_MAX_SEC, DELAY_NOTES, ENV_PLOT, FILTER_LONG, FILTER_SHORT, FILTER_TYPES, FX_LABEL, FX_NAME, FX_ORDER, FX_STATE,
-  WAVES, WAVE_LABEL, WAVE_MENU, ampAdsr, ampAnalogOf, attackAtX, baseCutoffHz, clampCutoffHz, ctl, decayAtX, delayBeatsOf, delayNote,
-  delaySeconds, envGeometry, envPeakNote, filterChain, filterSlopeOf, filterTypeOf, fmtCents, fmtCutoff, fmtFrac, fmtLevel,
-  fmtLevelBare, fmtModDepth, fmtPan, fmtPct100, fmtSignedPct, fmtSt, fmtTime, fourOscSummary, fxOn, hasFullContract, hasState,
-  hzToNote, keyStrip, loadSection, modSourceLabel, noteName, normAt, paramLabel, physAt, releaseAtX, resonanceQ, saveSection,
-  stripRange, sustainAtY, voicesOf, waveOf,
+  WAVES, WAVE_LABEL, WAVE_MENU, addOscLevelDb, ampAdsr, ampAnalogOf, baseCutoffHz, clampCutoffHz, ctl, delayBeatsOf, delayNote,
+  delaySeconds, envDragTime, envGeometry, envPeakNote, filterChain, filterSlopeOf, filterTypeOf, fmtCents, fmtCutoff, fmtFrac,
+  fmtLevel, fmtLevelBare, fmtModDepth, fmtPan, fmtPct100, fmtSignedPct, fmtSt, fmtTime, fourOscSummary, fxOn, hasFullContract,
+  hasState, hzToNote, isSilentLevel, keyStrip, loadSection, modSourceLabel, noteName, normAt, paramLabel, physAt, resonanceQ,
+  reverbDryDb, saveSection, stripRange, sustainAtY, voicesOf, waveOf,
   type Adsr, type Ctl, type EnvBox, type FilterType, type FxKey, type Section, type Wave,
 } from "./fourosc";
 import { GenericParams } from "./GenericParams";
+import { newGestureId } from "./gesture";
 import { MeterBar, meterFill, useMeterEvents, usePluginMeter } from "./meters";
 import { clamp, fmtDb } from "./params";
 import { clientToSvg, curvePath, fillPath, freqScale, linScale } from "./plot";
@@ -39,6 +40,28 @@ const OUT_FLOOR_DB = -60;
  *  window and does not skip a focused slider (Home would move the playhead, an arrow nudge
  *  the selected clips). */
 const stop = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); };
+
+/** The keys the shortcut router binds that a focused control here means for itself. */
+const NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+/** On the panel's root: a focused plain button (an oscillator chip, an effect's switch) keeps
+ *  the arrows, Home/End and PageUp/Down from the router, which would nudge the selected clips
+ *  or move the playhead. Space and Enter, and the modified keys, pass. */
+const keepNavKeys = (e: KeyboardEvent<HTMLDivElement>) => {
+  if (!NAV_KEYS.has(e.key) || e.metaKey || e.ctrlKey || e.altKey) return;
+  if ((e.target as HTMLElement).tagName === "BUTTON") e.stopPropagation();
+};
+
+/** Where a key moves the choice in a row of `n` options from `at` (the arrows wrap; Home and
+ *  End go to the ends), or null for any other key. */
+function segKeyTarget(key: string, at: number, n: number): number | null {
+  switch (key) {
+    case "ArrowRight": case "ArrowDown": return (at + 1) % n;
+    case "ArrowLeft": case "ArrowUp": return (at + n - 1) % n;
+    case "Home": return 0;
+    case "End": return n - 1;
+    default: return null;
+  }
+}
 
 /** The usual slider keys as a new 0-1 position, or null for any other key. */
 function keyStep(e: KeyboardEvent, norm: number): number | null {
@@ -166,10 +189,7 @@ function SectionSeg({ sections, value, lit, onChange }: {
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const n = sections.length, at = sections.indexOf(value);
-    const to = e.key === "ArrowRight" || e.key === "ArrowDown" ? (at + 1) % n
-      : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (at + n - 1) % n
-        : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    const to = segKeyTarget(e.key, sections.indexOf(value), sections.length);
     if (to === null) return;
     stop(e);
     onChange(sections[to]!);
@@ -181,6 +201,43 @@ function SectionSeg({ sections, value, lit, onChange }: {
         <button key={s} ref={(el) => { refs.current[i] = el; }} type="button" role="radio" aria-checked={value === s}
           tabIndex={value === s ? 0 : -1} title={SECTION_NAME[s]} data-testid={`pp-fo-section-${s}`}
           className={lit[s] ? "live" : undefined} onClick={() => onChange(s)}>{SECTION_LABEL[s]}</button>
+      ))}
+    </div>
+  );
+}
+
+/** A setting with a few choices (the filter's type, its slope) as a radio group: a click
+ *  picks one; the arrows (and Home/End) move the choice and the focus together and stop at
+ *  the panel, so they never nudge clips or move the playhead. Each click is one undo step,
+ *  and so is a burst of keys (one gesture). */
+function SettingSeg<T extends string | number>({ label, className, options, value, disabled, onPick, text, name, title, testId }: {
+  label: string; className: string; options: readonly T[]; value: T; disabled?: boolean;
+  onPick: (v: T, gesture?: string) => void;
+  text: (v: T) => string; name: (v: T) => string; title: (v: T) => string; testId: (v: T) => string;
+}) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  // A burst builds on the choice it last sent, not on a snapshot that may not have caught up.
+  const burst = useRef<{ v: T; gesture: string; at: number } | null>(null);
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const live = burst.current && Date.now() - burst.current.at < BURST_MS ? burst.current : null;
+    const from = live ? live.v : value;
+    const to = segKeyTarget(e.key, options.indexOf(from), options.length);
+    if (to === null) return;
+    stop(e);
+    if (disabled) return;
+    refs.current[to]?.focus();
+    const v = options[to]!;
+    if (v === from) return;
+    const gesture = live?.gesture ?? newGestureId();
+    burst.current = { v, gesture, at: Date.now() };
+    onPick(v, gesture);
+  };
+  return (
+    <div className={`pp-seg ${className}`} role="radiogroup" aria-label={label} onKeyDown={onKey}>
+      {options.map((o, i) => (
+        <button key={String(o)} ref={(el) => { refs.current[i] = el; }} type="button" role="radio" aria-checked={value === o}
+          tabIndex={value === o ? 0 : -1} disabled={disabled} data-testid={testId(o)} aria-label={name(o)} title={title(o)}
+          onClick={() => { if (value !== o) onPick(o); }}>{text(o)}</button>
       ))}
     </div>
   );
@@ -227,15 +284,20 @@ function OscSection({ plugin, setParam, setState }: { plugin: Plugin; setParam: 
         {on.map((n) => {
           const lv = ctl(plugin, `level${n}`);
           const wave = waveOf(plugin, n);
+          // At the -100 dB floor the voice's gain is exactly 0: on, but not in the sound.
+          const silent = lv.present && isSilentLevel(lv.phys);
           return (
-            <span key={n} className={`pp-fo-chip${f === n ? " on" : ""}`} data-testid={`pp-fo-chip-${n}`}>
-              <button type="button" className="pick" aria-pressed={f === n} title={`Oscillator ${n}: ${WAVE_LABEL[wave]}`}
-                aria-label={`Oscillator ${n}, ${WAVE_LABEL[wave]}`} onClick={() => setFocus(n)}>
+            <span key={n} className={`pp-fo-chip${f === n ? " on" : ""}${silent ? " silent" : ""}`} data-testid={`pp-fo-chip-${n}`}
+              data-silent={silent ? "" : undefined}>
+              <button type="button" className="pick" aria-pressed={f === n}
+                title={`Oscillator ${n}: ${WAVE_LABEL[wave]}${silent ? ". Silent: level -100 dB" : ""}`}
+                aria-label={`Oscillator ${n}, ${WAVE_LABEL[wave]}${silent ? ", silent" : ""}`} onClick={() => setFocus(n)}>
                 <span className="n">{n}</span><WaveGlyph wave={wave} />
               </button>
               <Scrub c={lv} label={`Level ${n}`} fmt={fmtLevelBare} valueText={fmtLevel} className="lv"
                 testId={`pp-fo-level-${n}`} onPress={() => setFocus(n)}
-                title={`Oscillator ${n} level (drag; double-click for 0 dB)`}
+                title={silent ? `Oscillator ${n} is silent: its level is -100 dB (drag up; double-click for 0 dB)`
+                  : `Oscillator ${n} level (drag; double-click for 0 dB)`}
                 onChange={(v, gesture) => setParam(lv.index, v, { gesture })}>
                 <i className="fill" style={{ width: `${(lv.norm * 100).toFixed(1)}%` }} />
               </Scrub>
@@ -249,7 +311,16 @@ function OscSection({ plugin, setParam, setState }: { plugin: Plugin; setParam: 
               onChange={(e) => {
                 const w = e.target.value;
                 if (!w) return;
-                setState(`waveShape${firstOff}`, w);
+                // An oscillator a preset parked at -100 dB would come back silent: bring its
+                // level up with the wave, in the same undo step (one gesture).
+                const lift = addOscLevelDb(plugin, firstOff);
+                if (lift === null) setState(`waveShape${firstOff}`, w);
+                else {
+                  const lv = ctl(plugin, `level${firstOff}`);
+                  const gesture = newGestureId();
+                  setState(`waveShape${firstOff}`, w, { gesture });
+                  setParam(lv.index, normAt(lv.range, lift), { gesture });
+                }
                 setFocus(firstOff);
               }}>
               <option value="" disabled>{`Add oscillator ${firstOff}`}</option>
@@ -267,6 +338,7 @@ function OscSection({ plugin, setParam, setState }: { plugin: Plugin; setParam: 
 
 function OscDetail({ n, plugin, setParam, setState }: { n: number; plugin: Plugin; setParam: SetParam; setState: SetState }) {
   const wave = waveOf(plugin, n), voices = voicesOf(plugin, n);
+  const pitched = wave !== "noise";
   const tune = ctl(plugin, `tune${n}`), fine = ctl(plugin, `fineTune${n}`);
   const pw = ctl(plugin, `pulseWidth${n}`), det = ctl(plugin, `detune${n}`), spr = ctl(plugin, `spread${n}`), pan = ctl(plugin, `pan${n}`);
   const canVoices = hasState(plugin, `voices${n}`);
@@ -284,18 +356,22 @@ function OscDetail({ n, plugin, setParam, setState }: { n: number; plugin: Plugi
           {[1, 2, 3, 4, 5, 6, 7, 8].map((k) => <option key={k} value={k}>{k === 1 ? "1 voice" : `${k} voices`}</option>)}
         </select>
       </div>
-      <ParamDial c={tune} label="Tune" fmt={fmtSt} setParam={setParam} bipolar quantize={quantizeTo(tune)} testId="pp-fo-tune" />
-      <ParamDial c={fine} label="Fine" fmt={fmtCents} setParam={setParam} bipolar testId="pp-fo-fine" />
-      {/* Inert controls are not shown: pulse width shapes only a square; detune and spread
-          need unison voices; pan acts only on a single voice. */}
+      {/* Inert controls are not shown: noise has no pitch (the engine's noise never reads
+          the note, so tune, fine and detune do nothing); pulse width shapes only a square;
+          detune and spread need unison voices; pan acts only on a single voice. */}
+      {pitched && <>
+        <ParamDial c={tune} label="Tune" fmt={fmtSt} setParam={setParam} bipolar quantize={quantizeTo(tune)} testId="pp-fo-tune" />
+        <ParamDial c={fine} label="Fine" fmt={fmtCents} setParam={setParam} bipolar testId="pp-fo-fine" />
+      </>}
       {wave === "square" && <ParamDial c={pw} label="Width" fmt={(v) => `${Math.round(v * 100)}%`} setParam={setParam} testId="pp-fo-pw"
         title="Pulse width of the square" />}
       {voices > 1 ? <>
-        <ParamDial c={det} label="Detune" fmt={(v) => fmtCents(v * 100).replace("+", "")} setParam={setParam} testId="pp-fo-detune"
-          title="Detune: the unison voices' total spread in pitch" />
+        {pitched && <ParamDial c={det} label="Detune" fmt={(v) => fmtCents(v * 100).replace("+", "")} setParam={setParam} testId="pp-fo-detune"
+          title="Detune: the unison voices' total spread in pitch" />}
         <ParamDial c={spr} label="Spread" fmt={fmtSignedPct} setParam={setParam} bipolar testId="pp-fo-spread"
           title="Spread: the unison voices' stereo spread" />
       </> : <ParamDial c={pan} label="Pan" fmt={fmtPan} setParam={setParam} bipolar testId="pp-fo-pan" />}
+      {!pitched && <span className="pp-fo-note pp-fo-nopitch" data-testid="pp-fo-nopitch">Noise has no pitch</span>}
     </div>
   );
 }
@@ -324,15 +400,18 @@ function AmpSection({ plugin, setParam }: { plugin: Plugin; setParam: SetParam }
   const analog = ampAnalogOf(plugin);
   const g = envGeometry(env, analog);
   const svgRef = useRef<SVGSVGElement>(null);
-  // A drag follows the pointer's travel from where it went down (so the node does not jump
-  // to the pointer); with Shift held it moves a quarter as far, for fine times (each stage
-  // spans 1 ms..60 s in about 67 px). Changing Shift mid-drag re-anchors, so nothing jumps.
-  const grab = useRef<{ node: EnvNode; px: number; py: number; nx: number; ny: number; fine: boolean; last: { x: number; y: number } } | null>(null);
+  // A drag moves by the pointer's travel from where it went down, step by step (so nothing
+  // jumps, and Shift can change mid-drag). Sideways it changes the time at a fixed rate,
+  // 40 px a decade (Shift: 160): a stage spans 1 ms..60 s in only about 67 px of plot, so
+  // the handle following the pointer would be far too coarse; it is drawn where its time
+  // puts it. Up and down (the sustain, a linear level) it follows the pointer (Shift: a
+  // quarter as far).
+  const grab = useRef<{ node: EnvNode; cx: number; py: number; t: number; y: number } | null>(null);
   const toNorm = (id: keyof EnvEdit, phys: number) => normAt(cs[id].range, phys);
-  const moveTo = (node: EnvNode, x: number, y: number) => {
-    if (node === "attack") edit.update({ ampAttack: toNorm("ampAttack", attackAtX(x)) });
-    else if (node === "decay") edit.update({ ampDecay: toNorm("ampDecay", decayAtX(x, g.xA)), ampSustain: toNorm("ampSustain", sustainAtY(y) * 100) });
-    else edit.update({ ampRelease: toNorm("ampRelease", releaseAtX(x)) });
+  const moveTo = (node: EnvNode, t: number, y: number) => {
+    if (node === "attack") edit.update({ ampAttack: toNorm("ampAttack", t) });
+    else if (node === "decay") edit.update({ ampDecay: toNorm("ampDecay", t), ampSustain: toNorm("ampSustain", sustainAtY(y) * 100) });
+    else edit.update({ ampRelease: toNorm("ampRelease", t) });
   };
   const last = useRef<{ e: EnvEdit; at: number } | null>(null);
   const baseNorm = (id: keyof EnvEdit) => (last.current && Date.now() - last.current.at < BURST_MS ? last.current.e[id] : undefined) ?? cs[id].norm;
@@ -369,7 +448,7 @@ function AmpSection({ plugin, setParam }: { plugin: Plugin; setParam: SetParam }
       <svg ref={svgRef} className={`pp-plot pp-fo-env${plugin.enabled ? "" : " bypassed"}`} data-testid="pp-fo-env"
         viewBox={`0 0 ${ENV_PLOT.w} ${ENV_PLOT.h}`} role="group"
         aria-label={`Amp envelope (${analog ? "analog" : "digital"} curves): ${nodeText.attack}, ${nodeText.decay}, ${nodeText.release}`}>
-        <title>{"Each stage's width grows with its time (1 ms to 60 s); inside a stage the shape is the engine's exact curve. Drag a dot (Shift: fine), or use the arrow keys; double-click for the default."}</title>
+        <title>{"Each stage's width grows with its time (1 ms to 60 s); inside a stage the shape is the engine's exact curve. Drag a dot sideways: 40 px multiply or divide its time by ten (Shift: four times finer); the decay's dot also sets the sustain up and down. Arrow keys step it; double-click for the default."}</title>
         <line className="zero" x1={g.x0} x2={ENV_PLOT.w - 2} y1={g.yBot} y2={g.yBot} />
         <line className="pp-fo-keyup" x1={g.xOff} x2={g.xOff} y1={g.yTop - 4} y2={g.yBot} />
         <text className="axis" x={g.xOff + 3} y={g.yTop + 2}>key up</text>
@@ -381,7 +460,7 @@ function AmpSection({ plugin, setParam }: { plugin: Plugin; setParam: SetParam }
             <g key={node} onPointerDownCapture={(e) => {
               if (e.button !== 0 || !svgRef.current) return;
               const pt = clientToSvg(svgRef.current, e.clientX, e.clientY);
-              grab.current = { node, px: pt.x, py: pt.y, nx: p.x, ny: p.y, fine: e.shiftKey, last: { x: p.x, y: p.y } };
+              grab.current = { node, cx: e.clientX, py: pt.y, t: node === "attack" ? env.attack : node === "decay" ? env.decay : env.release, y: p.y };
             }}>
               <DragNode x={p.x} y={p.y} r={4.5} active={edit.live !== null && grab.current?.node === node}
                 hollow={!present} testId={`pp-fo-env-${node}`}
@@ -392,10 +471,11 @@ function AmpSection({ plugin, setParam }: { plugin: Plugin; setParam: SetParam }
                 onMove={(pt, e) => {
                   const gr = grab.current;
                   if (!present || !gr) return;
-                  if (e.shiftKey !== gr.fine) Object.assign(gr, { px: pt.x, py: pt.y, nx: gr.last.x, ny: gr.last.y, fine: e.shiftKey });
-                  const k = gr.fine ? 0.25 : 1;
-                  gr.last = { x: gr.nx + (pt.x - gr.px) * k, y: gr.ny + (pt.y - gr.py) * k };
-                  moveTo(node, gr.last.x, gr.last.y);
+                  gr.t = envDragTime(gr.t, e.clientX - gr.cx, e.shiftKey);
+                  gr.y = clamp(gr.y + (pt.y - gr.py) * (e.shiftKey ? 0.25 : 1), g.yTop, g.yBot);
+                  gr.cx = e.clientX;
+                  gr.py = pt.y;
+                  moveTo(node, gr.t, gr.y);
                 }}
                 onEnd={() => { grab.current = null; if (present) edit.end(); }}
                 onKeyDown={(e) => { if (present) nodeKey(node, e); }}
@@ -426,6 +506,7 @@ function AmpSection({ plugin, setParam }: { plugin: Plugin; setParam: SetParam }
 
 const FPLOT = { w: 273, h: 34 };
 const FILTER_DB_FLOOR = -30;
+const SLOPES = [12, 24] as const;
 
 function FilterSection({ plugin, sampleRate, setParam, setState }: { plugin: Plugin; sampleRate: number; setParam: SetParam; setState: SetState }) {
   const fs = sampleRate > 0 ? sampleRate : 48000;
@@ -461,21 +542,15 @@ function FilterSection({ plugin, sampleRate, setParam, setState }: { plugin: Plu
   return (
     <div className={`pp-fo-filter${on ? "" : " off"}`} data-testid="pp-fo-filter" data-type={type}>
       <div className="pp-fo-frow">
-        <div className="pp-seg pp-fo-ftype" role="group" aria-label="Filter type">
-          {FILTER_TYPES.map((t: FilterType) => (
-            <button key={t} type="button" aria-pressed={type === t} data-testid={`pp-fo-ftype-${t}`} disabled={!canType}
-              aria-label={FILTER_LONG[t]} title={FILTER_LONG[t]}
-              onClick={() => { if (type !== t) setState("filterType", t); }}>{FILTER_SHORT[t]}</button>
-          ))}
-        </div>
+        <SettingSeg<FilterType> label="Filter type" className="pp-fo-ftype" options={FILTER_TYPES} value={type} disabled={!canType}
+          onPick={(t, gesture) => setState("filterType", t, { gesture })}
+          text={(t) => FILTER_SHORT[t]} name={(t) => FILTER_LONG[t]} title={(t) => FILTER_LONG[t]} testId={(t) => `pp-fo-ftype-${t}`} />
         {on && (
-          <div className="pp-seg pp-fo-slope" role="group" aria-label="Filter slope">
-            {([12, 24] as const).map((s) => (
-              <button key={s} type="button" aria-pressed={slope === s} data-testid={`pp-fo-slope-${s}`} disabled={!canSlope}
-                aria-label={`${s} dB per octave`} title={s === 24 ? "24 dB/oct: a second stage at Q 0.707 (the engine clips between the two)" : "12 dB/oct: one stage"}
-                onClick={() => { if (slope !== s) setState("filterSlope", s); }}>{s}</button>
-            ))}
-          </div>
+          <SettingSeg<12 | 24> label="Filter slope" className="pp-fo-slope" options={SLOPES} value={slope} disabled={!canSlope}
+            onPick={(s, gesture) => setState("filterSlope", s, { gesture })}
+            text={(s) => String(s)} name={(s) => `${s} dB per octave`}
+            title={(s) => (s === 24 ? "24 dB/oct: a second stage at Q 0.707 (the engine clips between the two)" : "12 dB/oct: one stage")}
+            testId={(s) => `pp-fo-slope-${s}`} />
         )}
       </div>
       <svg className={`pp-plot pp-fo-fplot${plugin.enabled ? "" : " bypassed"}`} data-testid="pp-fo-fplot"
@@ -563,8 +638,7 @@ function FxSection({ plugin, setParam, setState }: { plugin: Plugin; setParam: S
   const [sel, setSel] = useState<FxKey>(() => FX_ORDER.find((fx) => fxOn(plugin, fx)) ?? "distortion");
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const n = FX_ORDER.length, at = FX_ORDER.indexOf(sel);
-    const to = e.key === "ArrowRight" ? (at + 1) % n : e.key === "ArrowLeft" ? (at + n - 1) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    const to = segKeyTarget(e.key, FX_ORDER.indexOf(sel), FX_ORDER.length);
     if (to === null) return;
     stop(e);
     setSel(FX_ORDER[to]!);
@@ -572,6 +646,12 @@ function FxSection({ plugin, setParam, setState }: { plugin: Plugin; setParam: S
   };
   const on = fxOn(plugin, sel);
   const canToggle = hasState(plugin, FX_STATE[sel]);
+  // Tracktion's reverb doubles the dry signal (juce::Reverb's dry scale): switching it on
+  // makes the synth louder unless Mix is past 2/3. Said where the switch is.
+  const dryDb = sel === "reverb" ? reverbDryDb(ctl(plugin, "reverbMix").phys) : null;
+  const dryUp = dryDb !== null && Math.round(dryDb) >= 1 ? Math.round(dryDb) : null;
+  const powerTitle = dryUp === null ? undefined
+    : `${on ? "The reverb also raises" : "Switching the reverb on also raises"} the dry sound: ${fmtDb(dryDb!)} at this Mix (Tracktion's reverb doubles the dry; no change at Mix 67 %)`;
   return (
     <div className="pp-fo-fx" data-testid="pp-fo-fx">
       {/* The engine's order: distortion, chorus, delay, reverb. A lit dot = in the sound. */}
@@ -583,9 +663,16 @@ function FxSection({ plugin, setParam, setState }: { plugin: Plugin; setParam: S
         ))}
       </div>
       <div className="pp-fo-detail" role="group" aria-label={FX_NAME[sel]}>
-        <button type="button" className="pp-btn pp-fo-power" role="switch" aria-checked={on} data-testid="pp-fo-fx-power"
-          aria-label={`${FX_NAME[sel]} on`} disabled={!canToggle}
-          onClick={() => setState(FX_STATE[sel], on ? "off" : "on")}>{on ? "On" : "Off"}</button>
+        <span className="pp-fo-powercol">
+          <button type="button" className="pp-btn pp-fo-power" role="switch" aria-checked={on} data-testid="pp-fo-fx-power"
+            aria-label={`${FX_NAME[sel]} on`} disabled={!canToggle} title={powerTitle}
+            onClick={() => setState(FX_STATE[sel], on ? "off" : "on")}>{on ? "On" : "Off"}</button>
+          {on && dryUp !== null && (
+            <span className="pp-fo-dry" data-testid="pp-fo-reverb-dry" title={powerTitle}>
+              <span className="v">{`+${dryUp} dB`}</span><span className="nm">dry</span>
+            </span>
+          )}
+        </span>
         {on ? <FxKnobs fx={sel} plugin={plugin} setParam={setParam} setState={setState} />
           : <span className="pp-fo-note" data-testid="pp-fo-fx-off">{`${FX_NAME[sel]} is off: not in the sound`}</span>}
       </div>
@@ -605,7 +692,8 @@ function FxKnobs({ fx, plugin, setParam, setState }: { fx: FxKey; plugin: Plugin
   const mix = ctl(plugin, mixId);
   const dry = mix.phys <= 0;
   const why = dry ? "No effect while Mix is 0 %" : undefined;
-  const mixDial = <ParamDial c={mix} label="Mix" fmt={pct} setParam={setParam} testId="pp-fo-mix" />;
+  const mixDial = <ParamDial c={mix} label="Mix" fmt={pct} setParam={setParam} testId="pp-fo-mix"
+    title={fx === "reverb" ? `Mix: more reverb, less dry. Tracktion's reverb doubles the dry, so the dry sound is ${fmtDb(reverbDryDb(mix.phys))} here (+6.0 dB at 0 %, no change at 67 %)` : undefined} />;
   if (fx === "chorus") {
     return <>
       <ParamDial c={ctl(plugin, "chorusSpeed")} label="Speed" fmt={(v) => `${v.toFixed(1)} Hz`} setParam={setParam} inert={dry} title={why} />
@@ -712,7 +800,7 @@ function FourOscPanel(props: PanelProps) {
     // An older engine: it sends 16 parameters and no settings, so the panel cannot read the
     // amp, filter or waves. Keep the plain rows rather than draw defaults as if they were real.
     return (
-      <div className="pp-fourosc legacy" data-testid="pp-fourosc" data-legacy="">
+      <div className="pp-fourosc legacy" data-testid="pp-fourosc" data-legacy="" onKeyDown={keepNavKeys}>
         {presets}
         <GenericParams plugin={plugin} setParam={setParam} />
         <div className="pp-fo-note" data-testid="pp-fo-legacy">The full 4OSC panel needs the updated Mosh engine.</div>
@@ -729,7 +817,7 @@ function FourOscPanel(props: PanelProps) {
     mod: hasMod,
   };
   return (
-    <div className="pp-fourosc" data-testid="pp-fourosc" data-section={shown}>
+    <div className="pp-fourosc" data-testid="pp-fourosc" data-section={shown} onKeyDown={keepNavKeys}>
       <div className="pp-fo-top">
         <SectionSeg sections={sections} value={shown} lit={lit} onChange={setSection} />
         {presets}

@@ -278,12 +278,30 @@ function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
     send(t);
     return true;
   };
+  // Arrows and Home/End on the LP/HP buttons pick a mode here; left alone they would reach
+  // the app's global shortcuts (arrows nudge selected clips, Home/End move the playhead).
+  const modeRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const onModeKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const at = MODES.findIndex((m) => m.mode === mode);
+    const n = MODES.length;
+    const to = e.key === "ArrowRight" || e.key === "ArrowDown" ? (at + 1) % n
+      : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (at + n - 1) % n
+      : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (to === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    modeRefs.current[to]?.focus();
+    const next = MODES[to]!.mode;
+    if (modeSettable && next !== mode) setState("mode", next);
+  };
   return (
     <div className="pp-filter" data-testid="v3-filter" data-mode={mode}>
       <div className="pp-filter-top">
-        <div className="pp-seg pp-filter-seg" role="group" aria-label="Filter type">
-          {MODES.map((m) => (
-            <button key={m.mode} type="button" data-testid={`v3-filter-mode-${m.mode}`} aria-pressed={mode === m.mode}
+        <div className="pp-seg pp-filter-seg" role="group" aria-label="Filter type" onKeyDown={onModeKey}>
+          {MODES.map((m, i) => (
+            <button key={m.mode} ref={(el) => { modeRefs.current[i] = el; }} type="button"
+              data-testid={`v3-filter-mode-${m.mode}`} aria-pressed={mode === m.mode}
               aria-label={`${m.short} (${m.long})`} title={modeSettable ? m.long : `${m.long}: switching needs the updated Mosh engine`}
               disabled={!modeSettable}
               onClick={() => { if (modeSettable && mode !== m.mode) setState("mode", m.mode); }}>{m.short}</button>

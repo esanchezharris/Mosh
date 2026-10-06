@@ -438,6 +438,14 @@ const mockRestorableTxns = () => [
 // Agent batch grouping (mirrors the backend batch_begin/batch_end): while a batch
 // is open, per-command pushUndo() is suppressed so the whole batch is ONE undo step.
 let inBatch = false;
+// A panel drag's undo window, as MoshOps::joinGestureTxn keeps it: the gesture id that owns
+// the newest undo step, that step's txn id, and the time of the gesture's last call. See
+// gestureUndoStep().
+let mockGesture: { id: string; txn: number; at: number } | null = null;
+const GESTURE_IDLE_MS = 3000;   // MoshOps::kGestureIdleMs
+// Set by a command that ran but opened no undo step (a set_plugin_state to the value it
+// already has), so its command-log line says undoable:false, as MoshOps::logLine does.
+let mockOpenedNoTxn = false;
 
 // ── FS-B2a — the agent batch-TRANSACTION contract, mirrored ──────────────────
 // docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md. The mock implements the SAME semantics as
@@ -643,7 +651,7 @@ function applyMockLoopArgs(next: Transport, args: Record<string, unknown>): void
   }
 }
 
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
@@ -1405,6 +1413,33 @@ function pushUndo() {
   // UndoManager::dropOldTransactionsIfTooLarge. Dropping the snapshot without dropping
   // its id would shift every id one place and restore to the wrong point.
   if (history.length > 100) { history.shift(); mockTxnIds.shift(); }
+}
+
+// ── Gesture coalescing (set_plugin_param / set_plugin_state), as MoshOps does it ──────────
+// A drag sends many calls carrying one `gesture` id. The first opens an undo step; a later
+// call with the SAME id joins it while that step is still the newest one (nothing undone,
+// nothing redoable) and the gesture has not been idle for kGestureIdleMs. The window also
+// ends at any other command that is not a read (mockExecuteSync), so undo, redo,
+// jump_to_history, reload and every other edit close it. Inside a batch the batch already
+// coalesces, and the window ends. Without a gesture every call is its own step.
+const GESTURE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+/** MoshOps::gestureArgError: null when `gesture` is absent or valid. */
+function gestureArgError(args: Record<string, unknown>): string | null {
+  if (!("gesture" in args)) return null;
+  return typeof args.gesture === "string" && GESTURE_RE.test(args.gesture)
+    ? null
+    : "bad gesture: must be a string of 1-64 characters from [A-Za-z0-9_.:-]";
+}
+/** Open this call's undo step, or join the gesture's open one (no pushUndo). */
+function gestureUndoStep(gesture: string): void {
+  const g = mockGesture;
+  const top = history.length > 0 ? mockTxnIds[history.length - 1] : undefined;
+  const join = gesture !== "" && !inBatch && g !== null && g.id === gesture
+    && top === g.txn && future.length === 0 && Date.now() - g.at <= GESTURE_IDLE_MS;
+  if (!join) pushUndo();
+  mockGesture = gesture !== "" && !inBatch
+    ? { id: gesture, txn: join ? g!.txn : mockTxnIds[history.length - 1]!, at: Date.now() }
+    : null;
 }
 
 // RTG-002 — does `track`'s output chain (transitively) already feed into targetId?
@@ -4818,21 +4853,25 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo(); const [p] = f.track.plugins!.splice(f.idx, 1); f.track.plugins!.splice(to, 0, p); reindex(f.track); invalidate(); return ok(command);
     }
     case "set_plugin_param": {
+      const badGesture = gestureArgError(args); if (badGesture) return err(command, badGesture);
       const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
       const pl = f.track.plugins![f.idx];
-      const p = pl.params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      const p = pl.params?.find((x) => x.index === num(args.paramIndex)); if (!p) return err(command, "bad paramIndex");
+      // One undo step per call, or per drag when the calls share a `gesture` id (as MoshOps).
+      gestureUndoStep(str(args.gesture));
+      p.value = num(args.value);
       // 4OSC as the engine stores it: the normalised value clamped, mapped through the
       // parameter's (skewed) range in floats, read back from the raw value (no step snap:
       // Tracktion does not snap, the Tune read-out rounds).
-      if (p && pl.type === "4osc") Object.assign(p, fourOscSetNorm(p.index, num(args.value)) ?? {});
+      if (pl.type === "4osc") Object.assign(p, fourOscSetNorm(p.index, num(args.value)) ?? {});
       // A stepped parameter lands on its nearest state, and the read-out follows the
       // value, as in the engine (only where the mock knows the engine's wording).
-      if (p?.choices?.length) p.value = Math.round(Math.min(1, Math.max(0, p.value)) * (p.choices.length - 1)) / (p.choices.length - 1);
-      if (p && pl.type !== "4osc") { const shown = builtinParamDisplay(pl.type, p.index, p.value); if (shown !== undefined) p.display = shown; }
+      if (p.choices?.length) p.value = Math.round(Math.min(1, Math.max(0, p.value)) * (p.choices.length - 1)) / (p.choices.length - 1);
+      if (pl.type !== "4osc") { const shown = builtinParamDisplay(pl.type, p.index, p.value); if (shown !== undefined) p.display = shown; }
       // G10 — mirrors the native cmdSetPluginParam: when the owning track is armed
       // "write", capture a point at the current transport position in the SAME mutation
       // (touch/latch are accepted by set_track_automation_mode but inert here too, v0).
-      if (p && f.track.automationMode === "write") {
+      if (f.track.automationMode === "write") {
         p.points = p.points ?? [];
         p.points.push({ t: Math.max(0, num(snapshot.transport.position)), v: Math.min(1, Math.max(0, num(args.value))) });
         p.automated = p.points.length > 0;
@@ -4842,7 +4881,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_plugin_state": {
       // Mirrors the engine's set_plugin_state: a per-type whitelist of non-automatable
       // settings (STATE_SPECS), numbers clamped to their range (the delay time to a whole
-      // millisecond, never below 1), a mode must be one of its choices. Undoable.
+      // millisecond, never below 1), a mode must be one of its choices. Undoable, and a drag
+      // that shares a `gesture` id is one step, as for set_plugin_param.
+      const badGesture = gestureArgError(args); if (badGesture) return err(command, badGesture);
       const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
       const pl = f.track.plugins![f.idx];
       const key = str(args.key);
@@ -4866,7 +4907,16 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           value = Math.min(hi, Math.max(lo, roundToInt(value)));
         }
       }
-      pushUndo();
+      const gesture = str(args.gesture);
+      // The value it already has is not an edit (MoshOps: isNoChange): no undo step, the
+      // log line says undoable:false, and an open drag's window stays open. A no-change
+      // call of that drag (a value clamped at the end of the range) keeps it from idling.
+      if (pl.state[key].value === value) {
+        if (gesture !== "" && mockGesture?.id === gesture) mockGesture.at = Date.now();
+        mockOpenedNoTxn = true;
+        invalidate(); return ok(command, { key, value });
+      }
+      gestureUndoStep(gesture);
       pl.state[key] = { ...pl.state[key], value };
       if (key === "mode" && (pl.type === "lowpass" || pl.type === "highpass")) {
         pl.type = value as string;
@@ -4907,7 +4957,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_master_plugin_param": {
       const f = findMasterPlugin(num(args.index)); if (!f) return err(command, "plugin not found");
-      const p = masterPlugins()[f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      const p = masterPlugins()[f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (!p) return err(command, "bad paramIndex");
+      pushUndo(); p.value = num(args.value);   // one undo step per call (MoshOps: beginTxn, no gesture)
       invalidate(); return ok(command);
     }
     case "open_master_plugin_editor": return ok(command);
@@ -6198,7 +6249,20 @@ function mockExecuteSync(command: unknown): CommandResult {
     ? mockTxn.entries.findIndex((e) => e.requestId === str(c.transaction!.requestId))
     : -1;
 
+  // A panel drag's undo window ends at the next command that is not a read (MoshOps::
+  // execute ends it, and closes its step, before any command but the two gesture
+  // commands and txnsafe's reads): the drag's next call then opens a new step.
+  if (c.command !== "set_plugin_param" && c.command !== "set_plugin_state"
+      && !MOCK_TXN_READS.has(c.command) && c.command !== "get_snapshot")
+    mockGesture = null;
+
+  // Each level of a nested call (apply_agent_patch runs its commands through here) reads
+  // its own command's flag, then hands the outer command's back.
+  const outerOpenedNoTxn = mockOpenedNoTxn;
+  mockOpenedNoTxn = false;
   const res = dispatch(c.command, c.args ?? {});
+  const openedNoTxn = mockOpenedNoTxn;
+  mockOpenedNoTxn = outerOpenedNoTxn;
 
   // Mirror of txnPostDispatch: record the outcome against its manifest entry.
   if (admittedIndex >= 0 && mockTxn) {
@@ -6218,7 +6282,7 @@ function mockExecuteSync(command: unknown): CommandResult {
     // the undo point the session is at once the command has landed. A command that
     // opened no transaction therefore shares the previous line's stamp, which is the
     // divergence between this log and the undo stack made visible rather than guessed at.
-    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now(), txn: mockHistoryTxn() });
+    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command) && !openedNoTxn, ts: Date.now(), txn: mockHistoryTxn() });
   // DAW-parity P5 replay lane: a dev-only FULL trace (args + result ids) on window, so an
   // e2e run can dump the commands its UI gestures emitted and the native lane can replay
   // them through `Mosh --run-script` (scripts/daw-conformance/replay_e2e_log.py rebinds
@@ -6289,6 +6353,8 @@ export function __resetMockForTests(): void {
   mockTxnIds = [];            // CAP-PRJ-005 — the mirror follows the stacks it mirrors
   mockNextTxnId = 1;
   inBatch = false;
+  mockGesture = null;
+  mockOpenedNoTxn = false;
   mockTxn = null;          // FS-B2a — a leaked transaction would refuse the next test's mutations
   mockAgentRequests.clear();
   mockRevision = 0;

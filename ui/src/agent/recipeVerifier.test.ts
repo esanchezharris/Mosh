@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyRecipe, recipeFromSnapshot, type Recipe, type VNote, type VTrack, type VPad } from "./recipeVerifier";
+import { verifyRecipe, recipeFromSnapshot, classifyInstrument, type Recipe, type VNote, type VTrack, type VPad } from "./recipeVerifier";
 import fooling from "./__fixtures__/foolingRecipes.json";
 
 const nf = (pitch: number, start: number, length = 0.25, velocity = 100): VNote => ({ pitch, start, length, velocity });
@@ -178,5 +178,16 @@ describe("recipeFromSnapshot", () => {
     const r = recipeFromSnapshot(snap);
     expect(r.tracks.map((t) => t.role)).toEqual(["drums", "bass", "melody"]);
     expect(r.key.tonic).toBe("F");
+  });
+});
+
+// The stock-instrument names, the same table as service/teardown/flywheel/recipe_verifier_test.py.
+describe("classifyInstrument", () => {
+  const CLASSIFY: Record<string, "default" | "real"> = {
+    "4osc": "default", "4OSC": "default", "4OSC Synth": "default", sampler: "default",
+    Sampler: "default", Serum: "real", "808": "real",
+  };
+  it("matches the Python mirror's table", () => {
+    for (const [name, want] of Object.entries(CLASSIFY)) expect(classifyInstrument(name)).toBe(want);
   });
 });

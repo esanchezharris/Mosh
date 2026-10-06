@@ -12,7 +12,9 @@
 //   resets level, pan and choke. load_drum_kit replaces all sounds.
 // - Gains are clamped to ±48 dB. A voice's level is gainDb − 20·(1 − velocity) dB.
 // - Mute and solo are keyed by a sound's ROOT note (set_drum_lane); a silenced sound's live
-//   gain is parked at −48 dB and `userGainDb` keeps the producer's level.
+//   gain is parked at −48 dB and `userGainDb` keeps the producer's level. Lanes park only the
+//   track's FIRST sampler, and a lane both muted and soloed plays: what is quiet is read from
+//   `silenced`, never from the lane lists. clear_drum_pad leaves the lane at its note.
 import { noteName } from "../../musicalKey";
 import type { Plugin, SamplerInfo, SamplerSound, Track } from "../../types";
 import { SAMPLE_DND_MIME } from "../../ui/sampleBrowserUtil";
@@ -163,13 +165,39 @@ export type LaneState = {
   soloedOut: boolean;
 };
 
-/** A sound's lane, keyed by its ROOT note, from the track's lane lists. */
-export function laneOf(s: Pick<SamplerSound, "pitch" | "silenced">, track: Pick<Track, "drumMutedPitches" | "drumSoloPitches"> | undefined): LaneState {
+type Lanes = Pick<Track, "drumMutedPitches" | "drumSoloPitches">;
+
+/** No lane: a sampler the lanes do not reach (only the track's first sampler is parked). */
+export const NO_LANE: LaneState = { muted: false, solo: false, soloedOut: false };
+
+/** The lane at a note (a sound's ROOT note), from the track's lane lists: what lights M/S. */
+export function laneOf(s: Pick<SamplerSound, "pitch">, track: Lanes | undefined): LaneState {
   const muted = !!track?.drumMutedPitches?.includes(s.pitch);
   const solos = track?.drumSoloPitches ?? [];
   const solo = solos.includes(s.pitch);
   return { muted, solo, soloedOut: !muted && !solo && solos.length > 0 };
 }
+
+/** A sound's silence in words. Whether it is silent is the engine's own flag (`silenced`:
+ *  its gain is parked), never the lane lists: a second sampler is not parked by the lanes,
+ *  and a lane both muted and soloed plays (solo wins). The lane only says why. */
+export function laneWords(s: Pick<SamplerSound, "silenced">, lane: LaneState): "" | "muted" | "silent (solo)" | "silent" | "solo" {
+  if (s.silenced) return lane.soloedOut ? "silent (solo)" : lane.muted ? "muted" : "silent";
+  return lane.solo ? "solo" : "";
+}
+
+/** Lane notes no sound is rooted on: a pad soloed or muted and then cleared, or a lane set
+ *  in the step sequencer. A solo there silences every sound on the sampler while no cell
+ *  shows a lit S, so the panel names it. */
+export function orphanLanes(sounds: readonly Pick<SamplerSound, "pitch">[], track: Lanes | undefined): { solo: number[]; mute: number[] } {
+  const rooted = new Set(sounds.map((s) => s.pitch));
+  const free = (notes: readonly number[] | undefined) => [...new Set(notes ?? [])].filter((n) => !rooted.has(n)).sort((a, b) => a - b);
+  return { solo: free(track?.drumSoloPitches), mute: free(track?.drumMutedPitches) };
+}
+
+/** "D2", "D2, E2", "3 notes". */
+export const notesText = (notes: readonly number[]): string =>
+  notes.length <= 2 ? notes.map(noteName).join(", ") : `${notes.length} notes`;
 
 // ── the grid ───────────────────────────────────────────────────────────────────────────
 
@@ -194,6 +222,23 @@ export function freeSlotNotes(sounds: readonly SamplerSound[], count: number): n
 /** How many empty cells follow the sounds: up to the grid's eight (a cleared kit pad leaves a
  *  cell to drop its replacement on); a fuller sampler adds none (drop on a sound to swap it). */
 export const emptyCellCount = (cells: number): number => Math.max(0, GRID_MIN_CELLS - cells);
+
+/** Which edges of the scrolling grid hide cells (each fades): "", "above", "below", "both". */
+export type GridEdge = "" | "above" | "below" | "both";
+
+export function gridEdge(scrollTop: number, scrollHeight: number, clientHeight: number): GridEdge {
+  const above = scrollTop > 1;
+  const below = scrollTop + clientHeight < scrollHeight - 1;
+  return above && below ? "both" : above ? "above" : below ? "below" : "";
+}
+
+/** The scroll position that shows a cell (top, height) in a view (scrollTop, viewHeight),
+ *  moving as little as it can: unchanged when the cell is already in full view. */
+export function scrollToShow(scrollTop: number, viewHeight: number, top: number, height: number): number {
+  if (top < scrollTop) return top;
+  if (top + height > scrollTop + viewHeight) return Math.max(0, top + height - viewHeight);
+  return scrollTop;
+}
 
 /** A sound's range in words: "C2" for a pad, "all keys" for 0..127, "C1–B1" for a range. */
 export function rangeText(s: Pick<SamplerSound, "minNote" | "maxNote">): string {
@@ -229,21 +274,39 @@ export function dragCarriesSample(types: ArrayLike<string> | null | undefined): 
 /** "clap.wav" from a path. */
 export const fileName = (path: string): string => path.split(/[\\/]/).pop() || path;
 
-/** What assigning a sample at `note` would replace (every sound covering it), the dropped-on
- *  sound first (the narrowest, as the pad commands pick), for the confirmation: nothing → no
+/** What assigning a sample at `note` would replace (every sound covering it), for the
+ *  confirmation: the dropped-on sound first (`onto`), then the narrowest. Nothing → no
  *  question to ask. */
-export function replacedBy(sounds: readonly SamplerSound[], note: number): SamplerSound[] {
-  return sortSounds(soundsCovering(sounds, note)).sort((a, b) => (a.maxNote - a.minNote) - (b.maxNote - b.minNote));
+export function replacedBy(sounds: readonly SamplerSound[], note: number, onto?: SamplerSound): SamplerSound[] {
+  const covering = sortSounds(soundsCovering(sounds, note)).sort((a, b) => (a.maxNote - a.minNote) - (b.maxNote - b.minNote));
+  return onto && covering.includes(onto) ? [onto, ...covering.filter((s) => s !== onto)] : covering;
 }
 
-/** The confirmation's sentence for a replacement: what goes, and that the level, pan and
- *  choke start over. */
-export function replaceText(replaced: readonly SamplerSound[], newName: string): { title: string; detail: string } {
+/** Where a sample goes: assign_sample's note and mode, and the sound it was dropped on
+ *  (none for an empty cell). */
+export type ReplaceTarget = { note: number; mode: "drum" | "melodic"; onto?: SamplerSound };
+
+/** The new sound takes this one's place: a pad on that note stays a pad, a sound played
+ *  across the keys from that root stays one. */
+const keepsRole = (s: SamplerSound, t: ReplaceTarget): boolean =>
+  s.pitch === t.note && (t.mode === "melodic" ? s.mode === "melodic" : s.mode === "drum");
+
+/** The confirmation's sentence. A swap of the dropped-on sound names it and what starts
+ *  over (a pad's choke too). Anything else (a drop on an empty cell under an 808, or a
+ *  range sound becoming a pad) says what the new sound will be and what it removes, never
+ *  "Replace" a sound whose role it does not take. */
+export function replaceText(replaced: readonly SamplerSound[], newName: string, target: ReplaceTarget): { title: string; detail: string } {
   if (replaced.length === 0) return { title: `Load ${newName}?`, detail: "" };
-  const [first, ...rest] = replaced;
-  const title = `Replace ${first!.name} with ${newName}?`;
-  const extra = rest.length === 0 ? "" : ` Also removes ${rest.map((s) => `${s.name} (${rangeText(s)})`).join(", ")}.`;
-  return { title, detail: `Level, pan and choke start over.${extra}` };
+  const into = target.onto && replaced.includes(target.onto) && keepsRole(target.onto, target) ? target.onto : undefined;
+  const rest = replaced.filter((s) => s !== into);
+  const list = rest.map((s) => `${s.name} (${rangeText(s)})`).join(", ");
+  if (into) {
+    const reset = into.mode === "drum" ? "Level, pan and choke start over." : "Level and pan start over.";
+    return { title: `Replace ${into.name} with ${newName}?`, detail: rest.length === 0 ? reset : `${reset} Also removes ${list}.` };
+  }
+  const where = noteName(target.note);
+  const title = target.mode === "melodic" ? `Play ${newName} across the keys from ${where}?` : `Put ${newName} on ${where} as a pad?`;
+  return { title, detail: `This removes ${list}: a new sample replaces every sound that plays ${where}.` };
 }
 
 // ── drawing ────────────────────────────────────────────────────────────────────────────
@@ -319,8 +382,10 @@ export function clip(name: string, max: number): string {
 }
 
 /** The minimized row's line (≤ 16 characters): "8 pads, mosh-kit", "808 · root C2",
- *  "1 of 8 missing", "empty". An engine that sends no sampler block: the plugin's name. */
-export function samplerSummary(plugin: Plugin): string {
+ *  "1 of 8 missing", "empty". A sampler whose every sound is silent says so first ("muted ·
+ *  808 Boom", "8 pads · silent"): collapsed, it must not read as one that plays. An engine
+ *  that sends no sampler block: the plugin's name. */
+export function samplerSummary(plugin: Plugin, track?: Lanes): string {
   const sounds = soundsOf(plugin);
   if (!sounds) return plugin.name;
   if (sounds.length === 0) return "empty";
@@ -328,6 +393,16 @@ export function samplerSummary(plugin: Plugin): string {
   if (missing > 0) return firstThatFits([`${missing} of ${sounds.length} missing`, `${missing} missing`]);
   const sorted = sortSounds(sounds);
   const keys = sorted.filter((s) => s.mode !== "drum");
+  if (sorted.every((s) => s.silenced)) {
+    const primary = plugin.sampler?.primary !== false;
+    const word = sorted.every((s) => laneWords(s, primary ? laneOf(s, track) : NO_LANE) === "muted") ? "muted" : "silent";
+    if (sorted.length === 1) {
+      const n = sorted[0]!.name;
+      return firstThatFits([`${word} · ${n}`, `${word} · ${clip(n, SUMMARY_CHARS - word.length - 3)}`]);
+    }
+    const what = keys.length === 0 ? `${sorted.length} pads` : `${sorted.length} sounds`;
+    return firstThatFits([`${what} · ${word}`, `${what}, ${word}`, `all ${word}`]);
+  }
   if (viewOf(sounds) === "melodic") {
     const s = keys[0]!;
     if (keys.length > 1) return firstThatFits([`${keys.length} sounds · keys`, `${keys.length} sounds`]);

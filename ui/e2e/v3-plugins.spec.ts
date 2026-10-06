@@ -197,8 +197,8 @@ test("AutoTune: Key and Scale are menus, all nine controls show with units, and 
   await expect(hint).toHaveCount(0);
 
   // A picked key sticks and leaves the scale alone. (That each pick is its own undo step
-  // is the engine's doing and is checked in --selftest; the mock keeps no history for
-  // parameter edits.)
+  // is the engine's doing, checked in --selftest; the mock keeps the same rule, pinned in
+  // bridge.mock.gestureUndo.test.ts.)
   await key.selectOption({ label: "A#/Bb" });
   await expect(key.locator("option:checked")).toHaveText("A#/Bb");
   await expect(scale.locator("option:checked")).toHaveText("Minor");

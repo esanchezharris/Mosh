@@ -3,9 +3,9 @@ import { bootV3 } from "./helpers";
 
 // The 4OSC panel (instrument-panels contract §3b): one section at a time, controls that
 // do nothing right now are not shown, settings are undoable commands. Plumbing against the
-// mock; that the sound changes is the engine selftest's job. The mock does not model undo
-// for set_plugin_param, so parameter edits are checked by their read-out only; the
-// settings (set_plugin_state) are checked through undo.
+// mock; that the sound changes is the engine selftest's job. Parameter edits are checked by
+// their read-out; the undo checks run before any parameter edit, so they count settings
+// (set_plugin_state) only.
 
 test("4OSC panel: sections, an added oscillator, the filter's type and slope, the amp envelope, an effect", async ({ page }) => {
   await bootV3(page);
@@ -41,26 +41,41 @@ test("4OSC panel: sections, an added oscillator, the filter's type and slope, th
   await expect(synth.getByRole("slider", { name: "Level 2", exact: true })).toHaveCount(1);
   await expect(synth.getByTestId("pp-fo-pan")).toBeVisible();               // one voice: pan, no detune
   await expect(synth.getByTestId("pp-fo-detune")).toHaveCount(0);
+  // noise has no pitch: Tune and Fine go, Pan stays
+  await synth.getByTestId("pp-fo-wave").selectOption("noise");
+  await expect(synth.getByTestId("pp-fo-nopitch")).toBeVisible();
+  await expect(synth.getByTestId("pp-fo-tune")).toHaveCount(0);
+  await expect(synth.getByTestId("pp-fo-pan")).toBeVisible();
+  await undo();
+  await expect(synth.getByTestId("pp-fo-wave")).toHaveValue("saw");
   await undo();
   await expect(synth.locator(".pp-fo-chip")).toHaveCount(1);
 
-  // FILTER: off says so and hides its knobs; LP draws the curve; the slope is a setting
+  // FILTER: off says so and hides its knobs; LP draws the curve; the type and slope are settings
   await synth.getByTestId("pp-fo-section-filter").click();
   await expect(synth.getByTestId("pp-fo-filter-off")).toBeVisible();
   await expect(synth.getByTestId("pp-fo-cutoff")).toHaveCount(0);
   await synth.getByTestId("pp-fo-ftype-lowpass").click();
   await expect(synth.getByTestId("pp-fo-cutoff")).toBeVisible();
   await expect(synth.getByTestId("pp-fo-fcurve")).toHaveAttribute("d", /^M[\d.]+ [\d.]+ L/);
+  await synth.getByTestId("pp-fo-slope-24").click();
+  await expect(synth.getByTestId("pp-fo-slope-24")).toHaveAttribute("aria-checked", "true");
+  await undo();
+  await expect(synth.getByTestId("pp-fo-slope-12")).toHaveAttribute("aria-checked", "true");
+  await undo();
+  await expect(synth.getByTestId("pp-fo-filter-off")).toBeVisible();
+  // the type is a radio group: an arrow picks the next type (and stays in the panel)
+  await synth.getByTestId("pp-fo-ftype-off").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(synth.getByTestId("pp-fo-ftype-lowpass")).toHaveAttribute("aria-checked", "true");
+  await expect(synth.getByTestId("pp-fo-ftype-lowpass")).toBeFocused();
+  // the base cutoff's handle takes the keys (after the undo checks, which count settings only)
   const cutoff = synth.getByTestId("pp-fo-cutoff");
   const cut0 = await cutoff.textContent();
   await synth.getByTestId("pp-fo-fnode").focus();
   await page.keyboard.press("PageUp");
   await expect.poll(() => cutoff.textContent()).not.toBe(cut0);
-  await synth.getByTestId("pp-fo-slope-24").click();
-  await expect(synth.getByTestId("pp-fo-slope-24")).toHaveAttribute("aria-pressed", "true");
-  await undo();
-  await expect(synth.getByTestId("pp-fo-slope-12")).toHaveAttribute("aria-pressed", "true");
-  await undo();
+  await synth.getByTestId("pp-fo-ftype-off").click();
   await expect(synth.getByTestId("pp-fo-filter-off")).toBeVisible();
 
   // AMP: dragging the attack node lengthens the attack
@@ -80,6 +95,8 @@ test("4OSC panel: sections, an added oscillator, the filter's type and slope, th
   await expect(synth.getByTestId("pp-fo-fx-off")).toBeVisible();
   await synth.getByTestId("pp-fo-fx-power").click();
   await expect(synth.getByTestId("pp-fo-mix")).toBeVisible();
+  // Tracktion's reverb doubles the dry: at Mix 0 the synth is 6 dB louder, and it says so
+  await expect(synth.getByTestId("pp-fo-reverb-dry")).toContainText("+6 dB");
 
   // minimized: the summary and the envelope thumbnail
   await synth.getByTestId("v3-plugin-minimize").click();

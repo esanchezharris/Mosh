@@ -152,6 +152,31 @@ export function voicesOf(plugin: Plugin, n: number): number {
   return typeof v === "number" && Number.isFinite(v) ? clamp(Math.round(v), 1, 8) : 1;
 }
 
+/** The Level floor. The voice sets an oscillator's gain with juce::Decibels::decibelsToGain,
+ *  which is exactly 0 at -100 dB and below: an oscillator there is silent whatever its wave
+ *  (every bundled preset parks the oscillators it does not use there). */
+export const OSC_FLOOR_DB = -100;
+export const isSilentLevel = (db: number): boolean => db <= OSC_FLOOR_DB + 0.05;
+/** Oscillator n's level in dB. */
+export const oscLevelDb = (plugin: Plugin, n: number): number => ctl(plugin, `level${n}`).phys;
+/** Oscillator n is in the sound: its wave is on and its level is above the floor. */
+export const oscSounds = (plugin: Plugin, n: number): boolean =>
+  waveOf(plugin, n) !== "off" && !isSilentLevel(oscLevelDb(plugin, n));
+
+/** At or below this stored level, an oscillator "+" turns on would add nothing you hear. */
+export const ADD_QUIET_DB = -60;
+/** The level (dB) "+" gives oscillator n along with its wave, or null to keep its stored
+ *  level. A stored level of -60 dB or lower (a preset's parked -100 dB is silence) comes up
+ *  to the loudest sounding oscillator's level, so the new one joins the patch without
+ *  jumping over it; to 0 dB (the engine's default) when none sounds. */
+export function addOscLevelDb(plugin: Plugin, n: number): number | null {
+  const lv = ctl(plugin, `level${n}`);
+  if (!lv.present || lv.phys > ADD_QUIET_DB) return null;
+  const sounding = [1, 2, 3, 4].filter((k) => k !== n && oscSounds(plugin, k)).map((k) => oscLevelDb(plugin, k));
+  const target = sounding.length ? Math.max(...sounding) : lv.def;
+  return target > lv.phys + 0.05 ? target : null;
+}
+
 export function filterTypeOf(plugin: Plugin): FilterType {
   const v = stateStr(plugin, "filterType");
   return (FILTER_TYPES as readonly string[]).includes(v ?? "") ? (v as FilterType) : "off";
@@ -170,6 +195,15 @@ export const FX_STATE: Record<FxKey, string> = { distortion: "distortionOn", cho
 export const FX_LABEL: Record<FxKey, string> = { distortion: "Dist", chorus: "Chorus", delay: "Delay", reverb: "Reverb" };
 export const FX_NAME: Record<FxKey, string> = { distortion: "Distortion", chorus: "Chorus", delay: "Delay", reverb: "Reverb" };
 export const fxOn = (plugin: Plugin, fx: FxKey): boolean => stateStr(plugin, FX_STATE[fx]) === "on";
+
+/** The reverb's DRY gain in dB at Mix `mix` (0..1). Tracktion sets the dry level to
+ *  sin((1 − mix)·π/2) (AudioFadeCurve, Convex) and juce::Reverb doubles it (dryScaleFactor 2),
+ *  so switching the reverb on raises the dry sound: +6.0 dB at Mix 0, +3.0 dB at 50 %,
+ *  unity at 2/3, silence at 100 %. (Chorus and delay at Mix 0 are a true pass-through.) */
+export function reverbDryDb(mix: number): number {
+  const g = 2 * Math.sin(((1 - clamp(mix, 0, 1)) * Math.PI) / 2);
+  return g > 1e-9 ? 20 * Math.log10(g) : -Infinity;
+}
 
 /** The amp envelope's curve constants: Analog (the default) or Digital. */
 export const ampAnalogOf = (plugin: Plugin): boolean => stateStr(plugin, "ampAnalog") !== "off";
@@ -328,9 +362,18 @@ export const ENV_PLOT: EnvBox = { w: 273, h: 54, padL: 6, padTop: 7, padBottom: 
 const logFrac = (t: number) => clamp(Math.log(Math.max(t, ENV_T_LO) / ENV_T_LO) / Math.log(ENV_T_HI / ENV_T_LO), 0, 1);
 /** A stage's width for its time. */
 export const segWidth = (t: number, box: EnvBox = ENV_PLOT): number => box.segMin + (box.segMax - box.segMin) * logFrac(t);
-/** The time a stage width stands for (the inverse of segWidth, clamped to 1 ms..60 s). */
-export const segTime = (w: number, box: EnvBox = ENV_PLOT): number =>
-  ENV_T_LO * (ENV_T_HI / ENV_T_LO) ** clamp((w - box.segMin) / (box.segMax - box.segMin), 0, 1);
+
+/** Dragging a handle sideways changes its time by pointer travel at a fixed rate, not by
+ *  the plot's layout (where a decade is only about 14 px, so following the pointer would
+ *  turn a 24 px nudge of a 100 ms attack into 5 s): 40 px multiply or divide the time by
+ *  ten, 160 px with Shift. The handle is drawn where its new time puts it. */
+export const ENV_DRAG_PX_PER_DECADE = 40;
+export const ENV_DRAG_FINE = 4;
+/** The time `t` (seconds) becomes after `dxPx` of pointer travel, clamped to 1 ms..60 s. */
+export function envDragTime(t: number, dxPx: number, fine = false): number {
+  const perDecade = ENV_DRAG_PX_PER_DECADE * (fine ? ENV_DRAG_FINE : 1);
+  return clamp(clamp(t, ENV_T_LO, ENV_T_HI) * 10 ** (dxPx / perDecade), ENV_T_LO, ENV_T_HI);
+}
 
 export type EnvGeometry = {
   /** The curve, as an SVG path. */
@@ -376,10 +419,8 @@ export function envGeometry(env: Adsr, analog: boolean, box: EnvBox = ENV_PLOT, 
   };
 }
 
-/** A drag on the envelope plot: the settings a node position stands for. */
-export function attackAtX(x: number, box: EnvBox = ENV_PLOT): number { return segTime(x - box.padL, box); }
-export function decayAtX(x: number, xA: number, box: EnvBox = ENV_PLOT): number { return segTime(x - xA, box); }
-export function releaseAtX(x: number, box: EnvBox = ENV_PLOT): number { return segTime(x - (box.padL + 2 * box.segMax + box.holdMin), box); }
+/** The sustain level (0..1) a height on the envelope plot stands for (the decay handle's
+ *  vertical drag follows the pointer: the level axis is linear). */
 export function sustainAtY(yPx: number, box: EnvBox = ENV_PLOT): number {
   const yTop = box.padTop, yBot = box.h - box.padBottom;
   return clamp((yBot - yPx) / (yBot - yTop), 0, 1);
@@ -449,12 +490,14 @@ export function stripRange(held: readonly number[]): [number, number] {
 export const SUMMARY_MAX = 16;
 const firstThatFits = (xs: string[], max = SUMMARY_MAX): string => xs.find((s) => s.length <= max) ?? xs[xs.length - 1]!.slice(0, max);
 
-/** "saw+sq LP 1.2k", "sine · no filter", "all oscs off": the waves that sound and the
- *  filter, in at most 16 characters. */
+/** "saw+sq LP 1.2k", "sine · no filter", "all oscs off": the waves that sound (on, and
+ *  above the -100 dB floor) and the filter, in at most 16 characters. */
 export function fourOscSummary(plugin: Plugin, fs = 48000): string {
   if (!hasFullContract(plugin)) return plugin.name;
-  const waves = [1, 2, 3, 4].map((n) => waveOf(plugin, n)).filter((w) => w !== "off");
-  if (waves.length === 0) return "all oscs off";
+  const on = [1, 2, 3, 4].filter((n) => waveOf(plugin, n) !== "off");
+  if (on.length === 0) return "all oscs off";
+  const waves = on.filter((n) => oscSounds(plugin, n)).map((n) => waveOf(plugin, n));
+  if (waves.length === 0) return "all oscs silent";
   const w = waves.map((x) => WAVE_SHORT[x]).join("+");
   const n = `${waves.length} oscs`;
   const type = filterTypeOf(plugin);
