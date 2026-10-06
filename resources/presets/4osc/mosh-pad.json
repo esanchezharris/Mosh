@@ -2,7 +2,7 @@
  "state": {
   "waveShape1": "triangle",
   "waveShape2": "saw",
-  "voices2": 3,
+  "voices2": 4,
   "filterType": "lowpass",
   "filterSlope": 12
  },
@@ -60,5 +60,5 @@
    "unit": "%"
   }
  },
- "_note": "Bundled starter patch (first authored 2026-09-01; waves, filter and unison restored 2026-10-06 from that draft's intent). \"state\" holds the 4OSC settings by their set_plugin_state names; \"params\" are NORMALIZED 0..1 against 4OSC's own ranges (skewed: times v^5, levels v^0.25), and \"_physical\" says what each one is. Loading sets the whole patch: anything not named returns to its default. UN-AUDITIONED: owner by-ear pass pending; edit freely."
+ "_note": "Bundled starter patch (first drafted 2026-09-01; waves, filter and unison restored 2026-10-06 from that draft, whose wave numbers were Tracktion's LFO enum). \"state\" holds the 4OSC settings by their set_plugin_state names; \"params\" are NORMALIZED 0..1 against 4OSC's own ranges (skewed: times v^5, levels v^0.25), keyed by display name or paramID, and \"_physical\" says what each one is. Loading sets the whole patch: anything not named returns to its default. UN-AUDITIONED: owner by-ear pass pending; edit freely."
 }

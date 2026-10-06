@@ -2057,10 +2057,15 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                    String (name) + " loads: " + String ((int) dataOf (r).getProperty ("paramsApplied", 0)) + " params, "
                        + String ((int) dataOf (r).getProperty ("settingsApplied", 0)) + " settings, nothing unknown");
         }
-        // mosh-bass (loaded last): saw + square, two unison voices, a 24 dB/oct low-pass.
+        // mosh-bass (loaded last): a saw and a square sub an octave down, a 24 dB/oct low-pass.
         check (st ("waveShape1").toString() == "saw" && st ("waveShape2").toString() == "square"
-                   && st ("waveShape3").toString() == "off" && (int) st ("voices1") == 2,
-               "mosh-bass: osc 1 saw with 2 voices, osc 2 square, osc 3 off");
+                   && st ("waveShape3").toString() == "off" && (int) st ("voices1") == 1,
+               "mosh-bass: osc 1 saw, osc 2 square, osc 3 off");
+        {
+            auto tune2 = synth->getAutomatableParameter (7);   // tune2, physical semitones
+            check (tune2 != nullptr && std::abs (tune2->getCurrentValue() + 12.0f) < 0.05f,
+                   "mosh-bass: the square is a sub an octave down (Tune 2 " + String (tune2 != nullptr ? tune2->getCurrentValue() : 99.0f, 2) + " st)");
+        }
         check (st ("filterType").toString() == "lowpass" && (int) st ("filterSlope") == 24,
                "mosh-bass: the filter is ON, low-pass at 24 dB/oct");
         check (synth->oscParams[0]->waveShapeValue.get() == 3 && synth->oscParams[1]->waveShapeValue.get() == 2
@@ -2086,9 +2091,9 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         }
         const int depth = um.getUndoDescriptions().size();
         check (ok (command (ops, "undo")), "undo the lead load");
-        check (st ("waveShape2").toString() == "square" && (int) st ("voices1") == 2 && (int) st ("filterSlope") == 24
+        check (st ("waveShape2").toString() == "square" && (int) st ("voices1") == 1 && (int) st ("filterSlope") == 24
                    && (int) st ("voices2") == 1,
-               "ONE undo brings mosh-bass back whole (osc 2 square, 2+1 voices, 24 dB/oct)");
+               "ONE undo brings mosh-bass back whole (osc 2 square, 1+1 voices, 24 dB/oct)");
         check (ok (command (ops, "redo")) && (int) st ("voices2") == 3 && st ("waveShape2").toString() == "saw",
                "redo re-applies mosh-lead");
 
@@ -2111,8 +2116,9 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         const auto badType = tempPreset ("fo-badtype", R"({"state":{"filterType":"comb"},"params":{"Level 1":0.8}})");
         const auto unknownKey = tempPreset ("fo-badkey", R"({"state":{"lfoBeat1":0},"params":{"Level 1":0.8}})");
         const auto notObject = tempPreset ("fo-badstate", R"({"state":[1,2],"params":{"Level 1":0.8}})");
+        const auto badParams = tempPreset ("fo-badparams", R"({"state":{"filterType":"lowpass"},"params":[0.8]})");
         for (const auto& [f, why] : std::vector<std::pair<juce::File, String>> {
-                 { legacy, "waveShapes" }, { badType, "filterType" }, { unknownKey, "lfoBeat1" }, { notObject, "state" } })
+                 { legacy, "waveShapes" }, { badType, "filterType" }, { unknownKey, "lfoBeat1" }, { notObject, "state" }, { badParams, "params" } })
         {
             const auto before = juce::JSON::toString (pluginAt (ops, pt, fo), true);
             const auto r = load (f.getFullPathName());
@@ -2120,6 +2126,76 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                        && juce::JSON::toString (pluginAt (ops, pt, fo), true) == before && um.getUndoDescriptions().size() == depth,
                    "a preset with a bad " + why + " is refused, naming it, and changes nothing (" + r.getProperty ("error", var()).toString() + ")");
             f.deleteFile();
+        }
+
+        // A paramID reaches what a display name cannot ("Mix" is the reverb's).
+        {
+            const auto byId = tempPreset ("fo-byid", R"({"params":{"chorusMix":0.4,"delayMix":0.3}})");
+            const auto r = load (byId.getFullPathName());
+            auto chorusMix = synth->getAutomatableParameter (65), delayMix = synth->getAutomatableParameter (61),
+                 reverbMix = synth->getAutomatableParameter (58);
+            check (ok (r) && chorusMix != nullptr && delayMix != nullptr && reverbMix != nullptr
+                       && std::abs (chorusMix->getCurrentValue() - 0.4f) < 1.0e-4f && std::abs (delayMix->getCurrentValue() - 0.3f) < 1.0e-4f
+                       && juce::exactlyEqual (reverbMix->getCurrentValue(), 0.0f),
+                   "params by paramID: chorusMix 0.4 and delayMix 0.3 land, the reverb's Mix stays 0");
+            byId.deleteFile();
+        }
+
+        // A setting put back to its default by hand is not a difference: the reload of the
+        // loaded patch still changes nothing and opens no step.
+        {
+            check (ok (load (lead)), "mosh-lead again");
+            auto setChorus = [&] (const char* v)
+            {
+                return ok (command (ops, "set_plugin_state", object ({ { "trackId", pt }, { "index", fo }, { "key", "chorusOn" }, { "value", v } })));
+            };
+            check (setChorus ("on") && setChorus ("off"), "chorus on, then off again by hand");
+            const int before = um.getUndoDescriptions().size();
+            const auto r = load (lead);
+            check (ok (r) && ! (bool) dataOf (r).getProperty ("changed", true) && um.getUndoDescriptions().size() == before,
+                   "reloading after the hand-set default: changed:false, no step");
+        }
+
+        // The voice mode: a load that returns it to poly reallocates the synth's voices, and
+        // so do the load's undo and redo (Tracktion reallocates from a stale value unless the
+        // change is resynced: ResyncFourOscVoicesAction). Heard as a two-note chord.
+        {
+            auto magnitude = [] (const juce::AudioBuffer<float>& b, double hz)
+            {
+                const double w = juce::MathConstants<double>::twoPi * hz / 48000.0;
+                double re = 0.0, im = 0.0;
+                const auto* x = b.getReadPointer (0);
+                for (int i = 0; i < b.getNumSamples(); ++i) { re += x[i] * std::cos (w * i); im -= x[i] * std::sin (w * i); }
+                return std::sqrt (re * re + im * im) / juce::jmax (1, b.getNumSamples());
+            };
+            auto chord = [&]
+            {
+                LiveInstrument live (*synth, 256);
+                const auto out = live.play (0.4, { { 0, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100) },
+                                                   { 0, juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100) } });
+                live.play (0.8, { { 0, juce::MidiMessage::noteOff (1, 60) }, { 0, juce::MidiMessage::noteOff (1, 67) } });
+                const double c = magnitude (out, 261.626), g = magnitude (out, 391.995);
+                return std::make_pair (c, g);
+            };
+            auto both = [] (std::pair<double, double> m) { return juce::jmin (m.first, m.second) > 0.1 * juce::jmax (m.first, m.second); };
+            auto describe = [] (std::pair<double, double> m) { return "C " + String (m.first, 5) + ", G " + String (m.second, 5); };
+            check (ok (command (ops, "set_plugin_state", object ({ { "trackId", pt }, { "index", fo }, { "key", "voiceMode" }, { "value", "mono" } }))),
+                   "voice mode mono by hand");
+            const auto mono = chord();
+            check (! both (mono), "mono: a two-note chord sounds one note (" + describe (mono) + ")");
+            check (ok (load (files["mosh-keys"])) && st ("voiceMode").toString() == "poly", "mosh-keys returns the voice mode to poly");
+            const auto poly = chord();
+            check (both (poly), "after the load the synth really is poly: both notes sound (" + describe (poly) + ")");
+            check (ok (command (ops, "undo")) && st ("voiceMode").toString() == "mono", "undo the load: mono again");
+            const auto undone = chord();
+            check (! both (undone), "...and the synth really is mono again: one note sounds (" + describe (undone) + ")");
+            check (ok (command (ops, "redo")) && st ("voiceMode").toString() == "poly", "redo the load: poly");
+            const auto redone = chord();
+            check (both (redone), "...and both notes sound again (" + describe (redone) + ")");
+            check (ok (command (ops, "undo")) && ok (command (ops, "undo")) && st ("voiceMode").toString() == "poly",
+                   "undo the load and the mono edit");
+            const auto restored = chord();
+            check (both (restored), "undoing set_plugin_state voiceMode reallocates too: poly, both notes (" + describe (restored) + ")");
         }
 
         // The filter is audible now: a bass note is far duller with mosh-bass's low-pass on

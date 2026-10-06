@@ -169,8 +169,8 @@ export const FOUR_OSC_STATE: Record<string, PluginStateValue> = {
 export type FourOscPresetFile = { state?: Record<string, string | number>; params?: Record<string, number>; waveShapes?: unknown };
 export const FOUR_OSC_PRESETS: Record<string, FourOscPresetFile> = {
   "mosh-bass": {
-    state: { waveShape1: "saw", waveShape2: "square", voices1: 2, filterType: "lowpass", filterSlope: 24 },
-    params: { "Level 1": 0.8493, "Level 2": 0.7009, "Detune 1": 0.12, "Amp Attack": 0.0, "Amp Decay": 0.3509, "Amp Sustain": 0.8, "Amp Release": 0.2654, "Filter Freq": 0.3812, "Filter Resonance": 0.3, "Filter Amount": 0.6, "Filter Attack": 0.0, "Filter Decay": 0.3511, "Filter Sustain": 0.3, "Filter Release": 0.2661 },
+    state: { waveShape1: "saw", waveShape2: "square", filterType: "lowpass", filterSlope: 24 },
+    params: { "Level 1": 0.7807, "Level 2": 0.6416, "Tune 2": 0.3333, "Amp Attack": 0.0, "Amp Decay": 0.3509, "Amp Sustain": 0.8, "Amp Release": 0.2654, "Filter Freq": 0.3812, "Filter Resonance": 0.3, "Filter Amount": 0.6, "Filter Attack": 0.0, "Filter Decay": 0.3511, "Filter Sustain": 0.3, "Filter Release": 0.2661 },
   },
   "mosh-keys": {
     state: { waveShape1: "sine", waveShape2: "triangle", filterType: "lowpass", filterSlope: 12 },
@@ -181,12 +181,12 @@ export const FOUR_OSC_PRESETS: Record<string, FourOscPresetFile> = {
     params: { "Level 1": 0.8009, "Level 2": 0.7513, "Detune 1": 0.25, "Detune 2": 0.35, "Amp Attack": 0.0, "Amp Decay": 0.3013, "Amp Sustain": 0.75, "Amp Release": 0.3013, "Filter Freq": 0.8, "Filter Resonance": 0.25 },
   },
   "mosh-pad": {
-    state: { waveShape1: "triangle", waveShape2: "saw", voices2: 3, filterType: "lowpass", filterSlope: 12 },
+    state: { waveShape1: "triangle", waveShape2: "saw", voices2: 4, filterType: "lowpass", filterSlope: 12 },
     params: { "Level 1": 0.7513, "Level 2": 0.6503, "Detune 2": 0.4, "Spread 2": 0.7, "Amp Attack": 0.5013, "Amp Decay": 0.5013, "Amp Sustain": 0.9, "Amp Release": 0.5296, "Filter Freq": 0.5484, "Filter Resonance": 0.15 },
   },
   "mosh-pluck": {
     state: { waveShape1: "square", filterType: "lowpass", filterSlope: 24 },
-    params: { "Level 1": 0.8493, "Pulse Width 1": 0.3469, "Amp Attack": 0.0, "Amp Decay": 0.3463, "Amp Sustain": 0.0, "Amp Release": 0.2777, "Filter Freq": 0.4506, "Filter Resonance": 0.35, "Filter Amount": 0.725, "Filter Attack": 0.0, "Filter Decay": 0.3017, "Filter Sustain": 0.0, "Filter Release": 0.2782 },
+    params: { "Level 1": 0.8145, "Pulse Width 1": 0.3469, "Amp Attack": 0.0, "Amp Decay": 0.3463, "Amp Sustain": 0.0, "Amp Release": 0.2777, "Filter Freq": 0.4506, "Filter Resonance": 0.35, "Filter Amount": 0.725, "Filter Attack": 0.0, "Filter Decay": 0.3017, "Filter Sustain": 0.0, "Filter Release": 0.2782 },
   },
 };
 
@@ -218,15 +218,18 @@ export type FourOscPresetResult =
       unknown: string[]; reset: number; changed: boolean };
 
 /** load_preset's .json branch, as the engine runs it (MoshOps.Plugins.cpp cmdLoadPreset).
- *  A numbered `waveShapes` list (the first bank's) is refused. Each `state` key must be a
- *  4OSC setting with a valid value (else the whole preset is refused); each named param binds
- *  to the FIRST parameter whose name matches case-insensitively (unknown names are reported,
- *  not applied). The patch is whole: every param and setting it does not name returns to its
+ *  A numbered `waveShapes` list (the first bank's) is refused, as is a `state` or `params`
+ *  that is not an object. Each `state` key must be a 4OSC setting with a valid value (else the
+ *  whole preset is refused); each param binds by exact paramID, else to the FIRST parameter
+ *  whose name matches case-insensitively (unknown names are reported, not applied). The patch is whole: every param and setting it does not name returns to its
  *  default. `changed` is false when the patch was already loaded (the engine opens no step). */
 export function applyFourOscPreset(params: PluginParam[], state: Record<string, PluginStateValue> | undefined,
   preset: FourOscPresetFile): FourOscPresetResult {
   if (preset.waveShapes !== undefined)
     return { error: 'this preset uses the old numbered "waveShapes"; name the waves in "state" instead (waveShape1..4: off|sine|square|saw|triangle|noise)' };
+  const isObject = (v: unknown) => typeof v === "object" && v !== null && !Array.isArray(v);
+  if (preset.state !== undefined && !isObject(preset.state)) return { error: '"state" must be an object of 4OSC settings' };
+  if (preset.params !== undefined && !isObject(preset.params)) return { error: '"params" must be an object of 4OSC parameter ids or names' };
   const settings: Record<string, number | string> = {};
   for (const [key, raw] of Object.entries(preset.state ?? {})) {
     const spec = FOUR_OSC_STATE[key];
@@ -239,7 +242,9 @@ export function applyFourOscPreset(params: PluginParam[], state: Record<string, 
   const unknown: string[] = [];
   let applied = 0;
   for (const [name, value] of Object.entries(preset.params ?? {})) {
-    const i = FOUR_OSC_PARAMS.findIndex((s) => s.name.toLowerCase() === name.toLowerCase());
+    // the paramID first (exact), then the first case-insensitive display name ("Mix" is the reverb's)
+    const byId = FOUR_OSC_PARAMS.findIndex((s) => s.id === name);
+    const i = byId >= 0 ? byId : FOUR_OSC_PARAMS.findIndex((s) => s.name.toLowerCase() === name.toLowerCase());
     if (i < 0) { unknown.push(name); continue; }
     named.set(i, Math.min(1, Math.max(0, value)));
     applied += 1;

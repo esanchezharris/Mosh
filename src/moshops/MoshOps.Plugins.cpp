@@ -144,6 +144,34 @@ namespace
         const float valueBefore;
     };
 
+    // Tracktion's FourOscPlugin reallocates its voices in its (private) ValueTree listener
+    // when voiceMode changes, reading voiceModeValue — a CachedValue that refreshes in its
+    // OWN listener. JUCE calls a tree's listeners ordered by object address and the plugin's
+    // comes first, so a voiceMode change that is not CachedValue::setValue (a property
+    // removal, and every undo or redo of the change) reallocates for the OLD mode: mono
+    // stays one voice while the snapshot says poly. This action re-sends the property's
+    // change message, so the listener runs again once every CachedValue is fresh. A change
+    // is wrapped as [resync, change, resync]: perform and redo end with the second, undo
+    // with the first. Resolved by item id on every call, like SetPluginParamValueAction.
+    struct ResyncFourOscVoicesAction final : public juce::UndoableAction
+    {
+        explicit ResyncFourOscVoicesAction (te::FourOscPlugin& fo) : edit (fo.edit), pluginItemId (fo.itemID) {}
+
+        bool perform() override        { resync(); return true; }
+        bool undo() override           { resync(); return true; }
+        int  getSizeInUnits() override { return (int) sizeof (*this); }
+
+        void resync()
+        {
+            if (auto plugin = edit.getPluginCache().getPluginFor (pluginItemId))
+                if (auto* fo = dynamic_cast<te::FourOscPlugin*> (plugin.get()))
+                    fo->state.sendPropertyChangeMessage (te::IDs::voiceMode);
+        }
+
+        te::Edit& edit;
+        const te::EditItemID pluginItemId;
+    };
+
     int indexOfParameter (te::Plugin& plugin, te::AutomatableParameter& parameter)
     {
         for (int i = 0; i < plugin.getNumAutomatableParameters(); ++i)
@@ -1088,8 +1116,13 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
         if (! joinGestureTxn (gesture))
             beginTxn ("set_plugin_state");
         // Through the Edit's UndoManager: a ValueTree property action, which undo/redo
-        // replays and the CachedValue follows (these keys drive no parameter).
+        // replays and the CachedValue follows (these keys drive no parameter). A 4OSC voice
+        // mode is wrapped in resyncs so its undo/redo reallocate for the right mode
+        // (ResyncFourOscVoicesAction).
+        auto* fourOsc = juce::String (spec->key) == "voiceMode" ? dynamic_cast<te::FourOscPlugin*> (plugin) : nullptr;
+        if (fourOsc != nullptr) undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
         pluginstate::write (*plugin, *spec, applied, &undoManager());
+        if (fourOsc != nullptr) undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
         noteGestureTxn (gesture);
     }
     logLine (name, args, true, {}, ! same);
@@ -2101,9 +2134,10 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         const auto parsed = juce::JSON::parse (file.loadFileAsString());
         if (parsed.getProperty ("kind", var()).toString() == trackpreset::kKind)
             return errResult ("load_preset", wrongSeam);
-        // The first bank (2026-09-01) numbered its waves in an enum Tracktion does not use
-        // and wrote them where the synth never reads them, so they never sounded. Settings
-        // are now named, in "state"; a numbered list is refused rather than guessed at.
+        // The first bank (2026-09-01) numbered its waves in Tracktion's LFO enum
+        // (SimpleLFO::WaveShape), not the oscillator's (te::Oscillator::Waves), and wrote them
+        // where the synth never reads them, so they never sounded. Settings are now named, in
+        // "state"; a numbered list is refused rather than guessed at.
         if (parsed.getDynamicObject() != nullptr && parsed.getDynamicObject()->hasProperty ("waveShapes"))
             return errResult ("load_preset", "this preset uses the old numbered \"waveShapes\"; name the waves in "
                                              "\"state\" instead (waveShape1..4: off|sine|square|saw|triangle|noise)");
@@ -2113,6 +2147,8 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         auto* stateObj = stateArg.getDynamicObject();
         if (! stateArg.isVoid() && stateObj == nullptr)
             return errResult ("load_preset", "\"state\" must be an object of 4OSC settings");
+        if (! params.isVoid() && paramsObj == nullptr)
+            return errResult ("load_preset", "\"params\" must be an object of 4OSC parameter ids or names");
 
         // PREFLIGHT, touching nothing (G14 again): resolve every named param, and validate
         // every setting exactly as set_plugin_state would. A bad setting refuses the whole
@@ -2125,12 +2161,18 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         if (paramsObj != nullptr)
             for (const auto& prop : paramsObj->getProperties())
             {
+                // The paramID first (exact: "chorusMix"), then the first display name that
+                // matches case-insensitively. Names collide ("Mix" x3, "Width" x2: a name
+                // reaches the reverb's), so only an id reaches the delay's or chorus's.
                 te::AutomatableParameter* found = nullptr; int fi = -1;
-                for (int i = 0; i < numParams; ++i)
-                {
-                    auto ap = fourOsc->getAutomatableParameter (i);
-                    if (ap != nullptr && ap->paramName.equalsIgnoreCase (prop.name.toString())) { found = ap.get(); fi = i; break; }
-                }
+                for (int pass = 0; pass < 2 && found == nullptr; ++pass)
+                    for (int i = 0; i < numParams; ++i)
+                    {
+                        auto ap = fourOsc->getAutomatableParameter (i);
+                        if (ap != nullptr && (pass == 0 ? ap->paramID == prop.name.toString()
+                                                        : ap->paramName.equalsIgnoreCase (prop.name.toString())))
+                            { found = ap.get(); fi = i; break; }
+                    }
                 if (found == nullptr) { unknown.add (prop.name.toString()); continue; }
                 const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) prop.value);
                 pending.add ({ found, fi, found->valueRange.convertFrom0to1 (norm) });
@@ -2169,7 +2211,9 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         juce::Array<const pluginstate::Spec*> settingResets;
         for (const auto& key : pluginstate::keysFor ("4osc"))
             if (! namedSettings.contains (key))
-                if (const auto* spec = pluginstate::find ("4osc", key); spec != nullptr && ! pluginstate::fourosc::isUsingDefault (*fourOsc, *spec))
+                // On value, as for params: a property set back to its default by hand stays
+                // (harmless), so reloading the loaded patch really opens no step.
+                if (const auto* spec = pluginstate::find ("4osc", key); spec != nullptr && pluginstate::fourosc::differsFromDefault (*fourOsc, *spec))
                     settingResets.add (spec);
 
         juce::Array<Pending> paramWrites;
@@ -2197,15 +2241,23 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
             return okResult ("load_preset", var (data));
         }
 
+        bool touchesVoiceMode = false;
+        for (const auto& st : settingWrites)   touchesVoiceMode = touchesVoiceMode || juce::String (st.spec->key) == "voiceMode";
+        for (const auto* spec : settingResets) touchesVoiceMode = touchesVoiceMode || juce::String (spec->key) == "voiceMode";
+
         beginTxn ("load_preset");
         for (const auto& pe : paramWrites)
             undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
         for (const auto& pe : resets)
             undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
+        if (touchesVoiceMode)
+            undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
         for (const auto& st : settingWrites)
             pluginstate::write (*fourOsc, *st.spec, st.applied, &undoManager());
         for (const auto* spec : settingResets)
             pluginstate::fourosc::resetToDefault (*fourOsc, *spec, &undoManager());
+        if (touchesVoiceMode)
+            undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
         logLine ("load_preset", args, true, {}, true);
         emitTrackPatch (*track);
         reactiveTouchTrack (trackId);

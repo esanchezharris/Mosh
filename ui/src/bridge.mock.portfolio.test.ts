@@ -27,7 +27,7 @@ describe("portfolio seed — the Song A session", () => {
     expect(eight.plugins![0]).toMatchObject({ name: "4OSC", builtin: true, isInstrument: true, category: "Instrument" });
     // the engine's whole 4OSC surface, with the bundled mosh-bass preset loaded on it
     expect(eight.plugins![0].params).toHaveLength(68);
-    expect(eight.plugins![0].params[2]).toMatchObject({ id: "level1", name: "Level 1", value: expect.closeTo(0.8493, 6) });
+    expect(eight.plugins![0].params[2]).toMatchObject({ id: "level1", name: "Level 1", value: expect.closeTo(0.7807, 6) });
     // ...its settings too: saw + square through a 24 dB/oct low-pass
     expect(eight.plugins![0].state?.waveShape1?.value).toBe("saw");
     expect(eight.plugins![0].state?.filterType?.value).toBe("lowpass");

@@ -154,7 +154,7 @@ export function voicesOf(plugin: Plugin, n: number): number {
 
 /** The Level floor. The voice sets an oscillator's gain with juce::Decibels::decibelsToGain,
  *  which is exactly 0 at -100 dB and below: an oscillator there is silent whatever its wave
- *  (every bundled preset parks the oscillators it does not use there). */
+ *  (a session or a user preset may park an oscillator it does not use there). */
 export const OSC_FLOOR_DB = -100;
 export const isSilentLevel = (db: number): boolean => db <= OSC_FLOOR_DB + 0.05;
 /** Oscillator n's level in dB. */
@@ -166,7 +166,7 @@ export const oscSounds = (plugin: Plugin, n: number): boolean =>
 /** At or below this stored level, an oscillator "+" turns on would add nothing you hear. */
 export const ADD_QUIET_DB = -60;
 /** The level (dB) "+" gives oscillator n along with its wave, or null to keep its stored
- *  level. A stored level of -60 dB or lower (a preset's parked -100 dB is silence) comes up
+ *  level. A stored level of -60 dB or lower (a parked -100 dB is silence) comes up
  *  to the loudest sounding oscillator's level, so the new one joins the patch without
  *  jumping over it; to 0 dB (the engine's default) when none sounds. */
 export function addOscLevelDb(plugin: Plugin, n: number): number | null {

@@ -18,20 +18,20 @@ describe("bridge.mock — presets mirror the engine", () => {
 
     const loaded = await run("load_preset", { trackId, index: before.index, file: "/presets/4osc/mosh-bass.json" });
     expect(loaded.ok).toBe(true);
-    // mosh-bass.json names 14 parameters and 5 settings, every one a real 4OSC name
-    expect(loaded.data).toMatchObject({ plugin: "4osc", preset: "mosh-bass", paramsApplied: 14, settingsApplied: 5, changed: true });
+    // mosh-bass.json names 14 parameters and 4 settings, every one a real 4OSC name
+    expect(loaded.data).toMatchObject({ plugin: "4osc", preset: "mosh-bass", paramsApplied: 14, settingsApplied: 4, changed: true });
     expect(loaded.data).not.toHaveProperty("unknownParams");
     const after = await synthOn(1);
     const byId = (id: string) => after.params.find((p) => p.id === id)!;
-    expect(byId("level1").display).toBe("-4.00dB");            // -100 + 100·v^(1/4)
+    expect(byId("level1").display).toBe("-6.00dB");            // -100 + 100·v^(1/4)
+    expect(byId("tune2").display).toBe("-12st");               // the square is a sub an octave down
     expect(byId("ampRelease").display).toBe("80ms");           // 0.001 + 59.999·v^5 s
     expect(byId("filterFreq").display).toBe("160Hz");
     expect(byId("tune1")).toMatchObject({ value: 0.5, display: "0st" });   // not in the file: its default
     expect(after.params.filter((p, i) => p.value !== baseline[i]![0]).length).toBeGreaterThan(10);   // anti-vacuity
-    // the settings land: saw + square, two unison voices, a 24 dB/oct low-pass
+    // the settings land: saw + square through a 24 dB/oct low-pass
     expect(after.state?.waveShape1?.value).toBe("saw");
     expect(after.state?.waveShape2?.value).toBe("square");
-    expect(after.state?.voices1?.value).toBe(2);
     expect(after.state?.filterType?.value).toBe("lowpass");
     expect(after.state?.filterSlope?.value).toBe(24);
 
@@ -40,6 +40,9 @@ describe("bridge.mock — presets mirror the engine", () => {
     expect(again.ok).toBe(true);
     expect(again.data).toMatchObject({ changed: false, reset: 0 });
     expect((await synthOn(1)).params).toEqual(after.params);
+    const log = await run("get_command_log", { limit: 1 });
+    const last = (log.data as { entries: { command: string; undoable?: boolean }[] }).entries[0]!;
+    expect(last).toMatchObject({ command: "load_preset", undoable: false });
 
     expect((await run("undo")).ok).toBe(true);           // ONE undo takes the whole patch back
     const undone = await synthOn(1);
@@ -59,6 +62,25 @@ describe("bridge.mock — presets mirror the engine", () => {
     expect(synth.params.find((p) => p.id === "filterAmount")!.value).toBe(0.5);   // bass's +0.2 is gone
     expect(synth.state?.filterSlope?.value).toBe(12);
     expect(synth.state?.voices2?.value).toBe(3);
+  });
+
+  it("a setting the user changed is put back by a reload; one set back to its default by hand is not an edit", async () => {
+    const trackId = (await snapshot()).tracks[1].id;
+    await run("load_builtin", { trackId, type: "4osc" });
+    const index = (await synthOn(1)).index;
+    await run("load_preset", { trackId, file: "/presets/4osc/mosh-bass.json" });
+    await run("set_plugin_state", { trackId, index, key: "filterType", value: "off" });
+    const back = await run("load_preset", { trackId, file: "/presets/4osc/mosh-bass.json" });
+    expect(back.data).toMatchObject({ changed: true });
+    expect((await synthOn(1)).state?.filterType?.value).toBe("lowpass");
+    expect((await run("undo")).ok).toBe(true);
+    expect((await synthOn(1)).state?.filterType?.value).toBe("off");   // one undo: the reload only
+    // chorus on, then off again by hand: the patch is still the loaded one
+    await run("set_plugin_state", { trackId, index, key: "filterType", value: "lowpass" });
+    await run("set_plugin_state", { trackId, index, key: "chorusOn", value: "on" });
+    await run("set_plugin_state", { trackId, index, key: "chorusOn", value: "off" });
+    const same = await run("load_preset", { trackId, file: "/presets/4osc/mosh-bass.json" });
+    expect(same.data).toMatchObject({ changed: false });
   });
 
   it("mosh-pad's spread now binds (\"Spread 2\"); nothing in the bank is unknown", async () => {

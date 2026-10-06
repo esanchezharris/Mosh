@@ -177,22 +177,35 @@ describe("4OSC state and presets", () => {
       return [n, [r.applied, r.settingsApplied, r.unknown]];
     }));
     expect(counts).toEqual({
-      "mosh-bass": [14, 5, []], "mosh-keys": [9, 4, []], "mosh-lead": [10, 6, []], "mosh-pad": [10, 5, []], "mosh-pluck": [13, 3, []],
+      "mosh-bass": [14, 4, []], "mosh-keys": [9, 4, []], "mosh-lead": [10, 6, []], "mosh-pad": [10, 5, []], "mosh-pluck": [13, 3, []],
     });
     const bass = applyFourOscPreset(fourOscParams(), undefined, FOUR_OSC_PRESETS["mosh-bass"]!);
     if ("error" in bass) throw new Error(bass.error);
     expect(bass.nextState.waveShape1!.value).toBe("saw");
     expect(bass.nextState.waveShape2!.value).toBe("square");
-    expect(bass.nextState.voices1!.value).toBe(2);
+    expect(bass.nextState.voices1!.value).toBe(1);
+    expect(bass.next[7]!.display).toBe("-12st");    // Tune 2: the square is a sub an octave down
     expect(bass.nextState.filterType!.value).toBe("lowpass");
     expect(bass.nextState.filterSlope!.value).toBe(24);
-    // lead over bass: bass's Filter Amount (not named by lead) and its 24 dB/oct go back to default
+    // lead over bass: bass's Filter Amount and Tune 2 (lead names neither) go back to default
     const lead = applyFourOscPreset(bass.next, bass.nextState, FOUR_OSC_PRESETS["mosh-lead"]!);
     if ("error" in lead) throw new Error(lead.error);
     expect(lead.next[51]!.value).toBe(fourOscParams()[51]!.value);
-    expect(lead.nextState.filterSlope!.value).toBe(12);
+    expect(lead.next[7]!.value).toBe(fourOscParams()[7]!.value);
+    expect(lead.nextState.filterSlope!.value).toBe(12);   // named by lead
     expect(lead.nextState.voices2!.value).toBe(3);
-    expect(lead.reset).toBeGreaterThan(0);
+    // keys over lead: keys names no unison, so both oscillators' voices return to 1 (settings reset)
+    const keys = applyFourOscPreset(lead.next, lead.nextState, FOUR_OSC_PRESETS["mosh-keys"]!);
+    if ("error" in keys) throw new Error(keys.error);
+    expect(keys.nextState.voices1!.value).toBe(1);
+    expect(keys.nextState.voices2!.value).toBe(1);
+    expect(keys.nextState.waveShape2!.value).toBe("triangle");
+    expect(keys.reset).toBeGreaterThanOrEqual(2);
+    // pluck over lead: pluck names only osc 1, so osc 2 goes back to off
+    const pluck = applyFourOscPreset(lead.next, lead.nextState, FOUR_OSC_PRESETS["mosh-pluck"]!);
+    if ("error" in pluck) throw new Error(pluck.error);
+    expect(pluck.nextState.waveShape2!.value).toBe("off");
+    expect(pluck.nextState.filterSlope!.value).toBe(24);
     // the loaded patch again: nothing changes
     const again = applyFourOscPreset(lead.next, lead.nextState, FOUR_OSC_PRESETS["mosh-lead"]!);
     expect("error" in again ? again.error : again.changed).toBe(false);
@@ -203,6 +216,12 @@ describe("4OSC state and presets", () => {
     expect(r.next[67]!.value).toBe(1);
     expect(r.next[58]!.value).toBeCloseTo(0.4, 6);      // the FIRST "Mix" is the reverb's
     expect(r.next[61]!.value).toBe(0);
+    // a paramID reaches the one a name cannot: the chorus's Mix
+    const byId = applyFourOscPreset(fourOscParams(), undefined, { params: { chorusMix: 0.4, delayMix: 0.3 } });
+    if ("error" in byId) throw new Error(byId.error);
+    expect(byId.next[65]!.value).toBeCloseTo(0.4, 6);
+    expect(byId.next[61]!.value).toBeCloseTo(0.3, 6);
+    expect(byId.next[58]!.value).toBe(0);
   });
 
   it("refuses the old numbered waveShapes and any bad setting, as the engine does", () => {
@@ -215,6 +234,8 @@ describe("4OSC state and presets", () => {
     expect(refuse({ state: { lfoBeat1: 0 } })).toMatch(/unknown 4OSC setting in "state": lfoBeat1/);
     expect(refuse({ state: { voices1: "3" } })).toMatch(/must be a finite number/);
     expect(refuse({ params: { Nope: 0.5 } })).toMatch(/matched no 4OSC parameters or settings \(unknown: Nope\)/);
+    expect(refuse({ state: [1, 2] as unknown as Record<string, number> })).toMatch(/"state" must be an object/);
+    expect(refuse({ state: { filterType: "lowpass" }, params: [0.5] as unknown as Record<string, number> })).toMatch(/"params" must be an object/);
     // a step-12 slope snaps like set_plugin_state (18 -> 24); voices clamp to 1..8
     const ok = applyFourOscPreset(fourOscParams(), undefined, { state: { filterSlope: 18, voices1: 12 } });
     if ("error" in ok) throw new Error(ok.error);

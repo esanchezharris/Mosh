@@ -282,6 +282,15 @@ namespace fourosc
         return usingDefault;
     }
 
+    /** True when the setting's value differs from Tracktion's default (a property that is
+        present but holds the default does not count). */
+    inline bool differsFromDefault (te::FourOscPlugin& fo, const Spec& spec)
+    {
+        bool differs = false;
+        withCachedValue (fo, spec, [&] (auto& cv) { differs = ! juce::exactlyEqual (cv.get(), cv.getDefault()); });
+        return differs;
+    }
+
     /** Returns the setting to Tracktion's default by removing its property, through `um`
         (load_preset: a patch sets everything it does not name back to the default). */
     inline bool resetToDefault (te::FourOscPlugin& fo, const Spec& spec, juce::UndoManager* um)

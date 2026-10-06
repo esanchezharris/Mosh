@@ -155,16 +155,23 @@ or reloaded one is not), which publishes the 4OSC's `plugin_meters` entry (see *
 `{"state": {<the set_plugin_state keys above>: value}, "params": {"<parameter name>": normalized
 0–1}}` (plus ignored `_`-prefixed notes; the bundled ones carry `_physical`, what each
 normalized value is). Every `state` key and value is validated and coerced exactly as
-`set_plugin_state` does (an unknown key or bad value refuses the whole file); a param name binds
-to the first parameter with that name, case-insensitively (an unmatched name is reported in
-`unknownParams`, not fatal). The load is a WHOLE patch: every parameter and setting the file does
+`set_plugin_state` does (an unknown key or bad value refuses the whole file, as does a `state` or
+`params` that is not an object); a param binds by its exact paramID (`"chorusMix"`), else to the
+first parameter with that display name, case-insensitively (the names collide: `"Mix"` and
+`"Width"` reach the reverb's, so the delay's and chorus's need their ids); an unmatched one is
+reported in `unknownParams`, not fatal. The load is a WHOLE patch: every parameter and setting the file does
 not name returns to Tracktion's default, so a patch never inherits from the one before. One undo
 step; refusals and a load of the patch already loaded open none (`changed:false`). A file with the
-first bank's numbered `"waveShapes"` is refused (that enum was not Tracktion's and the loader
-wrote it where the synth never reads it, so until 2026-10-06 every preset played osc 1's sine
+first bank's numbered `"waveShapes"` is refused (it numbered the waves in Tracktion's LFO enum,
+not the oscillator's, and the loader wrote them where the synth never reads them, so until 2026-10-06 every preset played osc 1's sine
 through no filter). Result `data`: `{plugin:"4osc", preset, paramsApplied, settingsApplied,
-changed, reset, unknownParams?}` (`reset` = parameters and settings returned to default). The
-bundled bank (`resources/presets/4osc/`, five patches) is un-auditioned.
+changed, reset, unknownParams?}` (`reset` = parameters and settings returned to default; a
+setting is reset only when its value differs from the default). A load or `set_plugin_state`
+that changes `voiceMode` re-sends that property's change message after the change and before it
+(an undoable resync), because Tracktion reallocates voices from the cached value, which is stale
+for a property removal and for every undo/redo. The bundled bank (`resources/presets/4osc/`, five
+patches) is un-auditioned. It supersedes the re-voiced `Keys`/`Bass`/`Pad`/`Lead`/`Pluck` bank and
+the top-level `waveShapes`/`oscVoices` format of open PR #728, which this loader refuses.
 
 **Sampler and drum pads (2026-10-05).** Every Mosh sampler is a `MoshSamplerPlugin`
 (`src/plugins/moshfx/MoshSamplerPlugin.h`: Tracktion's `te::SamplerPlugin`, same `"sampler"` type,
