@@ -2,6 +2,7 @@
 #include "selftest/MultiplayerAudioRefSelfTest.h"
 #include "selftest/TunedLeadPresetSelfTest.h"
 #include "selftest/VocalPresetSelfTest.h"
+#include "selftest/PluginPanelsSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -3784,6 +3785,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! masterBuiltin ("softclip").isObject() && ! masterBuiltin ("highpass").isObject(),
                "R3.3 cleanup: master bus carries no R3.3 builtins afterwards");
     }
+
+    // ─── Native plugin panels: the engine seam the V3 inspector panels draw from ───
+    // itemId, physical ranges, `state` + set_plugin_state, gesture coalescing, and the
+    // "plugin_meters" rail (incl. the guard that a loaded "compressor" is Mosh's metered
+    // subclass, i.e. Tracktion's init order still lets Mosh register first). Own track,
+    // removed at the end. See src/app/selftest/PluginPanelsSelfTest.cpp.
+    runPluginPanelsSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); } });
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
     section ("PLG reorder: plugin chain ordering (reorder_plugin)");
@@ -16463,6 +16473,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                     objN ({ { "trackId", mt }, { "seconds", 2.0 }, { "freq", 220.0 } })), "clipId");
         const auto eqR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "4bandEq" } }));
         const int  eqIx = (int) eqR.getProperty ("data", var()).getProperty ("index", -1);
+        // A chorus for the set_plugin_state row (its settings are CachedValue-only state).
+        const auto chR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "chorus" } }));
+        const int  chIx = (int) chR.getProperty ("data", var()).getProperty ("index", -1);
+        check (chIx >= 0, "matrix fixture: chorus loaded for the set_plugin_state row");
         const auto mmt  = rid (cmd (ops, "create_track", args1 ("name", "MxMidi")), "trackId");
         const auto mmc  = rid (cmd (ops, "add_midi_clip",
                                     objN ({ { "trackId", mmt }, { "start", 0.0 }, { "length", 4.0 } })), "clipId");
@@ -16540,6 +16554,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "load_builtin",         objN ({ { "trackId", mt }, { "type", "compressor" } }) },
             { "bypass_plugin",        objN ({ { "trackId", mt }, { "index", eqIx }, { "bypassed", true } }) },
             { "set_plugin_param",     objN ({ { "trackId", mt }, { "index", eqIx }, { "paramIndex", 0 }, { "value", 0.7 } }) },
+            { "set_plugin_state",     objN ({ { "trackId", mt }, { "index", chIx }, { "key", "depthMs" }, { "value", 7.5 } }) },
             { "add_automation_point", objN ({ { "trackId", mt }, { "pluginIndex", eqIx }, { "paramIndex", 0 },
                                               { "time", 1.0 }, { "value", 0.5 } }) },
             { "set_master_volume",    objN ({ { "db", -5.0 } }) },
@@ -17427,6 +17442,45 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
     check (trackClips (firstTrack (ops)) == 1, "redo restored clip");
     check (ok (cmd (ops, "redo")), "redo render layer command ok");
     check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "redo restored render layer");
+
+    // ── Native plugin panels: set_plugin_state and gesture coalescing undo/redo ──
+    {
+        const auto probe = firstTrack (ops).getProperty ("id", var()).toString();
+        const int delayIx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", probe }, { "type", "delay" }}))["data"]
+                                      .getProperty ("index", -1);
+        check (delayIx >= 0, "delay loaded for the plugin-state undo checks");
+        auto lengthMs = [&ops, &probe, delayIx]() -> int {
+            auto snap = ops.snapshot();
+            auto ts = snap.getProperty ("tracks", var());
+            for (int i = 0; i < ts.size(); ++i)
+                if (ts[i].getProperty ("id", var()).toString() == probe)
+                {
+                    auto ps = ts[i].getProperty ("plugins", var());
+                    for (int j = 0; j < ps.size(); ++j)
+                        if ((int) ps[j].getProperty ("index", -1) == delayIx)
+                            return (int) ps[j].getProperty ("state", var()).getProperty ("lengthMs", var()).getProperty ("value", -1);
+                }
+            return -1;
+        };
+        auto setLength = [&ops, &probe, delayIx] (int ms, const char* gesture) {
+            auto* a = new DynamicObject();
+            a->setProperty ("trackId", probe); a->setProperty ("index", delayIx);
+            a->setProperty ("key", "lengthMs"); a->setProperty ("value", ms);
+            if (gesture != nullptr) a->setProperty ("gesture", gesture);
+            return ok (cmd (ops, "set_plugin_state", var (a)));
+        };
+        check (lengthMs() == 150, "delay lengthMs starts at 150");
+        check (setLength (420, nullptr) && lengthMs() == 420, "set_plugin_state lengthMs 420");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "undo set_plugin_state restores 150");
+        check (ok (cmd (ops, "redo")) && lengthMs() == 420, "redo set_plugin_state reapplies 420");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "undo again");
+        check (setLength (200, "undo-drag") && setLength (300, "undo-drag") && setLength (500, "undo-drag") && lengthMs() == 500,
+               "a three-call gesture on lengthMs");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "ONE undo takes back the whole gesture");
+        check (ok (cmd (ops, "redo")) && lengthMs() == 500, "ONE redo puts the whole gesture back");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "and undo once more");
+        check (ok (cmd (ops, "undo")) && lengthMs() == -1, "undo the delay load (the delay is gone)");
+    }
 
     // ── MOSHI-LOOP: Keep is one undoable transaction over a clip that moved tracks ──
     // The loop's one genuinely undoable command. Everything else it does — the listening

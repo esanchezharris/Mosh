@@ -34,6 +34,8 @@ target_sources(MoshTests PRIVATE
     test_retune_shifter.cpp
     test_retune_core.cpp
     test_live_pitch.cpp
+    # Plugin live meters (plugins/moshfx/LiveMeter.h): the 30 Hz plugin_meters latch.
+    test_live_meter.cpp
     test_renderlayer.cpp
     test_render_artifacts.cpp
     test_migrations.cpp

@@ -76,6 +76,20 @@ public:
         consumes the readings (that is how a stale one is told from a current one). */
     juce::var tunerReadings();
 
+    /** Live meters of the native plugins that publish them, for the 30 Hz
+        "plugin_meters" rail: `{plugins:[{trackId, index, itemId, type, ...fields}]}`.
+        compressor/softclip: {grDb, inDb, outDb}; moshOTT: {bands:[{levelDb, gainDb}] x3,
+        clipped}; moshXFeedback: {candidates:[{hz, score}], cuts:[{hz, score, depthDb}]}
+        (docs/02_MOSHOPS_CONTRACT.md). Only track plugins that are enabled AND were run by
+        the audio thread since the previous call appear; peaks and gain reduction are the
+        largest since that call. `index` is the plugin's position in the track's chain, as
+        in the snapshot. Mosh AutoTune is never here (its reading belongs to "tuner").
+
+        Public for the same reason as tunerReadings: the rail is emitted from
+        timerCallback, which a headless run never pumps. One caller at a time: each call
+        consumes the readings, including those of plugins it does not report. */
+    juce::var pluginMeters();
+
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
@@ -433,6 +447,9 @@ private:
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
+    // A native plugin's CachedValue-only settings (delay length, chorus/phaser, the
+    // low/high-pass mode): whitelisted per type, validated, clamped, undoable.
+    juce::var cmdSetPluginState (const juce::var& args);
     juce::var cmdBypassPlugin   (const juce::var& args);
     // INS-005 — plugin scan / blocklist / management (NON-undoable: catalog ops,
     // not Edit mutations). rescan persists the catalog; the rest are read-only or
@@ -1108,7 +1125,30 @@ private:
     {
         undoManager().beginNewTransaction (name);
         txnOpenedSinceSync_ = true;
+        ++undoTxnSerial_;
     }
+
+    // ── Gesture coalescing (set_plugin_param / set_plugin_state) ─────────────────
+    // A drag sends many commands carrying one `gesture` id. The first opens a normal
+    // transaction; each later call with the SAME id joins it instead of opening a new
+    // one, as long as that transaction is still the current one and nothing else has
+    // touched the undo stack since: no other beginUndoTransaction (any other command),
+    // no undo/redo/jump (editRevision_ and the stack depth), no foreign transaction.
+    // So a whole drag undoes as ONE step. Without a gesture, and inside an agent batch
+    // (which already coalesces), this is exactly beginTxn.
+    /** Empty when `gesture` is absent or valid; otherwise the error message. A valid
+        gesture is 1..64 characters from [A-Za-z0-9_.:-]. */
+    static juce::String gestureArgError (const juce::var& args);
+    /** beginTxn, or join the open gesture transaction. Call before performing. */
+    void beginGestureTxn (const juce::String& name, const juce::String& gesture);
+    /** After performing: remember the transaction this gesture now owns. */
+    void noteGestureTxn (const juce::String& gesture);
+    juce::uint64 undoTxnSerial_ = 0;          // bumped by every beginUndoTransaction
+    juce::String gestureId_;                  // the gesture that owns the current transaction
+    juce::uint64 gestureTxnSerial_ = 0;       // undoTxnSerial_ when it was noted
+    juce::int64  gestureRevision_ = -1;       // editRevision_ when it was noted
+    int          gestureUndoDepth_ = -1;      // undo depth when it was noted
+    juce::String gestureTxnName_;             // the transaction's name when it was noted
 
     /** The JUCE device manager under Tracktion's wrapper that the device picker drives. */
     juce::AudioDeviceManager& adm() { return eng.engine().getDeviceManager().deviceManager; }
@@ -1323,6 +1363,8 @@ private:
     // Did last tick's "tuner" rail carry a reading? Same falling-edge rule: one empty
     // payload when the singing stops, so the display clears instead of freezing.
     bool        hadTunerReadings = false;
+    // Did last tick's "plugin_meters" rail carry a reading? Same falling-edge rule.
+    bool        hadPluginMeters = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────

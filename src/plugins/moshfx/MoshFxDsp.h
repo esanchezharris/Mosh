@@ -26,7 +26,26 @@ public:
     void reset();
     void processBlock (float* samples, int numSamples, const OTTSettings& settings);
 
+    // What the last processBlock did, for the live meter (MoshOTTPlugin publishes it on
+    // the audio thread right after processing; nothing here allocates or locks).
+    // Bands are { low, mid, high }.
+    struct BlockMeter
+    {
+        // True when the band dynamics ran. False for an Amount of 0 (the block was only
+        // trimmed and limited): the envelopes did not move, so there is no band level.
+        bool dynamicsRan = false;
+        // The largest band envelope during the block (linear, as the detector sees it).
+        std::array<float, 3> peakEnvelope {};
+        // Each band's dynamic gain change at the end of the block in dB, EXCLUDING the
+        // band's static Low/Mid/High Gain trim: positive is upward lift, negative a cut.
+        std::array<float, 3> gainDb {};
+        // The output clamp (softLimit, +-0.999) engaged on at least one sample.
+        bool clipped = false;
+    };
+    const BlockMeter& lastBlockMeter() const noexcept { return meter; }
+
 private:
+    BlockMeter meter;
     double sampleRate = 48000.0;
     float lowState = 0.0f;
     float highLpState = 0.0f;

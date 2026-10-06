@@ -56,6 +56,45 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `clear_automation` | `{trackId, pluginIndex, paramIndex}` | ✓ | — | `snapshot_invalidated` |
 | `set_track_automation_mode` | `{trackId, mode: read\|touch\|latch\|write}` | ✓ | — | `snapshot_invalidated` (scoped track patch) |
 | `write_automation_curve` | `{trackId, pluginIndex, paramIndex, points: [{t,v:0-1,curve?}] \| JSON string, apply?: replace\|merge, replaceStart?: seconds, replaceEnd?: seconds}` | ✓ | `{pointCount, numPoints}` | `snapshot_invalidated` |
+| `set_plugin_param` | `{trackId, index, paramIndex, value: 0-1, gesture?}` | ✓ (one step per gesture) | — | `snapshot_invalidated` (scoped track patch) |
+| `set_plugin_state` | `{trackId, index, key, value: number\|string, gesture?}` | ✓ (one step per gesture) | `{key, value}` (the applied value) | `snapshot_invalidated` (scoped track patch) |
+
+**Native plugin panels (2026-10-05): `set_plugin_state`, gestures, `plugin_meters`.**
+`set_plugin_state` edits a native plugin's CachedValue-only settings, the ones Tracktion keeps in
+the plugin's state but does not expose as automatable parameters (so `set_plugin_param` cannot
+reach them). The whitelist, by the plugin's reported `type` (`src/moshops/PluginState.h`, shared
+with the snapshot's `plugin.state`): `delay` `lengthMs` (integer ms, 1–2000), `chorus` `depthMs`
+(0.1–20 ms), `speedHz` (0.1–10 Hz), `width` (0–1), `mix` (0–1), `phaser` `depth` (0–8 oct), `rate`
+(0.05–10 Hz), `feedback` (−0.95–0.95), and `lowpass`/`highpass` `mode` (`"lowpass"` or
+`"highpass"`). Values are physical, never normalised. Numbers must be JSON numbers and finite
+(a string, boolean or NaN is refused); they are clamped to the range, and `lengthMs` is rounded
+to an integer and never goes below 1 ms (Tracktion's DelayPlugin divides by the length in
+samples on the audio thread). `mode` must be one of its choices; changing it flips the plugin's
+reported `type`/`name` between `"lowpass"` (name `"LPF/HPF"`) and `"highpass"` (name `"High-Pass"`). Errors: `no plugin`,
+`key '<k>' is not a state key of <type> (allowed: …)` (or `(it has none)`), `bad value for <k>: …`,
+`missing value`. A value equal to the current one is `ok` but opens no transaction (an empty
+transaction would make the next undo pop the previous command's step) and logs `undoable:false`.
+Otherwise the write goes through the Edit's UndoManager inside one transaction (a ValueTree
+property action the CachedValue follows), logs one JSONL line, emits the scoped track patch, and
+touches the reactive render loop like `set_plugin_param`. Refused on a frozen track; lock scope
+`Track`. Tracktion behaviour to know about: the chorus and the delay GROW their delay buffers
+inside `applyToBuffer` when `depthMs`/`lengthMs` grows past what `initialise` allocated
+(`tracktion_Chorus.cpp`, `tracktion_Delay.cpp` `ensureMaxBufferSize`), i.e. one allocation on the
+audio thread per growth; Mosh does not patch Tracktion.
+
+**Gestures.** `set_plugin_param` and `set_plugin_state` take an optional `gesture` (a string of
+1–64 characters from `[A-Za-z0-9_.:-]`; anything else, including an empty string or a non-string,
+is an error, not ignored). A call whose `gesture` equals the gesture that opened the CURRENT undo
+transaction joins that transaction instead of opening a new one, so a whole drag is one undo step.
+The window ends when anything else opens a transaction (any other command), and also on undo,
+redo or `jump_to_history`, or any foreign transaction: JUCE appends a transaction-less action to
+whatever step is current, which after an undo would be an EARLIER, unrelated one, so a gesture
+that sees the stack moved under it opens a fresh step. A new gesture id starts a new step. Every
+call is still logged and still emits its track patch. Inside an agent batch (`batch_begin` …
+`batch_end`) behaviour is unchanged (the batch is the one step), and a gesture call after the
+batch never joins it. Without `gesture`, both commands behave exactly as before.
+
+**`plugin_meters` rail.** See *Events*.
 
 `set_track_active` is the Pro Tools-style processing-state command, distinct from both mute and UI-local Track List visibility. `active:false` persists Tracktion's undo-managed `process` property, excludes the track from playback graph construction, and disables processing for its owned plug-ins while leaving the track, clips, routing, and Track List row in the session. The snapshot exposes additive `track.active` (`true` when the field is absent for older consumers). The command is Track-scoped for multiplayer, replayable, JSONL-recorded, save/reload-safe, and a same-state request is a successful no-op that does not create an empty undo step.
 
@@ -107,14 +146,32 @@ current-value formatter; a separately supplied label is appended once and also
 exposed as `unit`. Missing text or labels leave the respective field absent.
 A formatter may include units in `display` without supplying a separate `unit`.
 
-Physical endpoints are currently qualified only for native low/high-pass
-frequency and compressor attack, release, output gain, and sidechain gain.
-They come from the live parameter range, matched by native parameter identity.
+Physical endpoints are published for native low/high-pass frequency;
+compressor attack, release, output gain, and sidechain gain; and (2026-10-05)
+every parameter of `4bandEq` (Hz 20–20000, dB −20–20, Q 0.1–4), `delay`
+(feedback −30–0 dB, mix 0–1), `pitchShifter` (−24–24 semitones), `moshOTT`,
+`softclip`, `moshXFeedback` and `moshAutoTune` (whose key 0–11 and scale 0–2
+index its `choices`). They come from the live parameter range. For all of these
+built-ins the normalisation is linear: `phys = min + value × (max − min)`.
 Other ranges are omitted, including external-plugin ranges and the builtin
-compressor's gain-domain threshold and inverse ratio. Neither endpoints nor
-display strings establish a conversion function: skew/custom mappings must use
-the processor's authoritative conversion. There is no physical-unit setter.
+compressor's gain-domain threshold and inverse ratio (map those with the
+encodings in `src/moshops/TrackPreset.h`: threshold is linear gain 0.01–1, ratio
+slope ρ = 0.95·v with N = 1/ρ and v = 0 meaning ∞:1). Neither endpoints nor
+display strings establish a conversion for any other processor. `set_plugin_param`
+stays normalised; `set_plugin_state` (above) is physical, for state keys only.
 The existing 16-parameter snapshot limit and all previous fields remain intact.
+
+Every plugin entry (track and master) also carries `itemId`, the plugin's
+EditItemID: a stable key that follows the plugin through a reorder (`index` does
+not) and survives save/reload and remove+undo. Plugins with CachedValue-only
+settings (`delay`, `chorus`, `phaser`, `lowpass`, `highpass`) carry
+`state: { <key>: { value, min?, max?, step?, unit?, choices? } }` from the same
+whitelist `set_plugin_state` accepts — e.g. `"state": {"lengthMs": {"value": 150,
+"min": 1, "max": 2000, "step": 1, "unit": "ms"}}` on a delay, `"state": {"mode":
+{"value": "highpass", "choices": ["lowpass", "highpass"]}}` on a high-pass. A
+value is what the plugin holds (a saved session can hold one outside the range);
+`step` appears only on integer keys and `unit` only when there is one. Both
+fields are additive.
 
 ```jsonc
 {
@@ -137,6 +194,32 @@ The existing 16-parameter snapshot limit and all previous fields remain intact.
 
 - `snapshot_invalidated` — structural change; the UI refetches the snapshot. This is the documented "resync" choice (`02 // VERIFY`: snapshot_invalidated vs precise inverse-deltas). Undo/redo and reload use it. Stage 2 may refine hot paths to precise deltas.
 - `transport` — `{playing, recording, position, looping, loopStart, loopEnd}`. Pushed on every `set_transport` AND **decimated to 30 Hz** by a backend timer while playing (telemetry never per-block). Drives the animated playhead without polling.
+- `plugin_meters` — `{plugins: [{trackId, index, itemId, type, …fields}]}`, the 30 Hz live meters of
+  the native plugins that publish them (`MoshOps::pluginMeters`, public so `--selftest` asserts it).
+  Volatile telemetry: never in the snapshot. An entry appears only for a TRACK plugin that is
+  enabled AND was run by the audio thread since the previous tick; the rail is emitted while any
+  entry exists plus ONE empty payload on the falling edge. Peaks and gain reduction ACCUMULATE
+  (largest) between ticks — at small buffers many blocks pass per tick — and dB values are finite,
+  floored at −100. Fields by type:
+  - `compressor`: `{grDb, inDb, outDb}`. `grDb ≥ 0` is the largest gain reduction actually applied
+    since the last tick, measured as |out|/|in| per sample relative to the makeup (output) gain, on
+    samples above −80 dBFS (independent of the detector's internals); `inDb`/`outDb` are sample
+    peaks (max over channels 0–1) in dBFS. Every Mosh `compressor` is a `MoshCompressorPlugin`
+    (Tracktion's CompressorPlugin, same `"compressor"` type, audio bit-identical, measured around
+    the base class), registered from `MoshEngineBehaviour::autoInitialiseDeviceManager()` before
+    Tracktion registers its own; `--selftest` fails if a loaded compressor is not one.
+  - `softclip`: `{grDb, inDb, outDb}`; `grDb` = max of 20·log10(|drive·x| / |y|).
+  - `moshOTT`: `{bands: [{levelDb, gainDb}] ×3 (low, mid, high), clipped}`. `levelDb` = the band's
+    envelope peak since the last tick (max over channels); `gainDb` = the band's dynamic gain change
+    at the end of the last block in dB (positive = upward lift, negative = downward cut; the static
+    Low/Mid/High Gain trim is NOT included; across channels the one furthest from 0 dB); `clipped`
+    = the output clamp (±0.999) engaged since the last tick. With Amount at 0 the band dynamics do
+    not run: `levelDb` −100 and `gainDb` 0.
+  - `moshXFeedback`: `{candidates: [{hz, score}], cuts: [{hz, score, depthDb}]}`, the last block's
+    (channel 0), carried with a serial so a frame is never reported twice.
+  Mosh AutoTune is NOT on this rail (it keeps `tuner`; its latch has a single reader). Known limit:
+  an offline render (export, bounce) runs the same plugin objects, so a meter can report during an
+  export as the `tuner` rail can.
 
 ## Undo / threading invariants
 

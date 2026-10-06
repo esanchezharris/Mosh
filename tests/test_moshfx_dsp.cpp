@@ -3,6 +3,7 @@
 
 #include "plugins/moshfx/MoshFxDsp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <vector>
@@ -85,6 +86,75 @@ TEST_CASE ("Mosh OTT is conservative by default and stronger at high amount", "[
     CHECK (peak (pushed) <= 1.0);
     CHECK (rmsDiff (input, defaults) < 0.08);
     CHECK (rmsDiff (input, pushed) > rmsDiff (input, defaults) * 1.5);
+}
+
+namespace
+{
+    // The OTT band gain law (MoshOTTDsp.cpp ottGainDb) with the static trim removed,
+    // restated here so the meter's gainDb is checked against the documented curve.
+    double ottDynamicGainDb (double levelDb, double amount, double upward, double downward)
+    {
+        double g = 0.0;
+        if (levelDb > -20.0)
+            g += ((-20.0 + (levelDb + 20.0) / 4.0) - levelDb) * downward * amount;
+        if (levelDb > -76.0 && levelDb < -38.0)
+            g += std::min (18.0, (-38.0 - levelDb) * 0.45) * upward * amount;
+        return g;
+    }
+}
+
+TEST_CASE ("Mosh OTT block meter: a loud band is cut, a quiet band is lifted", "[moshfx][ott][live-meter]")
+{
+    mosh::moshfx::OTTSettings settings;
+    settings.amount = 1.0f;
+
+    // Loud low band: 110 Hz at 0.8 sits well above -20 dB in the low band.
+    auto loud = sine (110.0, 48000, 0.8f);
+    mosh::moshfx::OTTCore loudCore;
+    loudCore.prepare (kSampleRate);
+    loudCore.processBlock (loud.data(), (int) loud.size(), settings);
+    const auto& lm = loudCore.lastBlockMeter();
+    CHECK (lm.dynamicsRan);
+    const double loudLevel = 20.0 * std::log10 ((double) lm.peakEnvelope[0]);
+    CHECK (loudLevel > -20.0);
+    CHECK (lm.gainDb[0] < -1.0);   // downward: a cut
+    // The gain at the end of the block follows the band law at the envelope's level
+    // (a steady tone: the final envelope sits within its ripple of the block peak).
+    CHECK (std::abs (lm.gainDb[0] - ottDynamicGainDb (loudLevel, 1.0, settings.upward, settings.downward)) < 0.6);
+
+    // Quiet low band: 110 Hz at 0.003 (about -50 dB) is inside the upward window.
+    auto quiet = sine (110.0, 48000, 0.003f);
+    mosh::moshfx::OTTCore quietCore;
+    quietCore.prepare (kSampleRate);
+    quietCore.processBlock (quiet.data(), (int) quiet.size(), settings);
+    const auto& qm = quietCore.lastBlockMeter();
+    const double quietLevel = 20.0 * std::log10 ((double) qm.peakEnvelope[0]);
+    CHECK (quietLevel < -38.0);
+    CHECK (quietLevel > -76.0);
+    CHECK (qm.gainDb[0] > 0.5);    // upward: a lift
+    CHECK (std::abs (qm.gainDb[0] - ottDynamicGainDb (quietLevel, 1.0, settings.upward, settings.downward)) < 0.6);
+    CHECK_FALSE (qm.clipped);
+}
+
+TEST_CASE ("Mosh OTT block meter: clamp and amount-zero reporting", "[moshfx][ott][live-meter]")
+{
+    mosh::moshfx::OTTSettings settings;
+    settings.amount = 0.0f;   // trim and limit only
+    settings.outputDb = 0.0f;
+
+    auto hot = sine (440.0, 4800, 1.5f);
+    mosh::moshfx::OTTCore core;
+    core.prepare (kSampleRate);
+    core.processBlock (hot.data(), (int) hot.size(), settings);
+    CHECK (core.lastBlockMeter().clipped);
+    CHECK_FALSE (core.lastBlockMeter().dynamicsRan);
+    CHECK (core.lastBlockMeter().gainDb[0] == 0.0f);
+    CHECK (core.lastBlockMeter().peakEnvelope[1] == 0.0f);
+
+    // The next block is metered from scratch: a quiet block does not inherit the clamp.
+    auto soft = sine (440.0, 4800, 0.2f);
+    core.processBlock (soft.data(), (int) soft.size(), settings);
+    CHECK_FALSE (core.lastBlockMeter().clipped);
 }
 
 TEST_CASE ("Mosh X-FDBK detects and optionally suppresses a narrowband squeal", "[moshfx][xfeedback]")

@@ -1,4 +1,5 @@
 #include "MoshFxPlugins.h"
+#include "audio/RealtimeAudioGuard.h"
 
 namespace mosh
 {
@@ -167,6 +168,7 @@ void MoshXFeedbackPlugin::deinitialise()
 
 void MoshXFeedbackPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 {
+    MOSH_RT_SCOPE();
     auto* buf = fc.destBuffer;
     if (buf == nullptr || ! isEnabled())
         return;
@@ -195,6 +197,22 @@ void MoshXFeedbackPlugin::applyToBuffer (const te::PluginRenderContext& fc)
         }
         numCandidates.store (nc);
         numActive.store (na);
+
+        // Live meter: this block's candidates and cuts, with a serial (publish) so a
+        // frame from before a bypass is never reported as current.
+        meter.setLatest (kMeterNumCandidates, (float) nc);
+        meter.setLatest (kMeterNumCuts, (float) na);
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto c = (size_t) i;
+            meter.setLatest (kMeterCandidates + 2 * c, i < nc ? (float) state.candidates[c].frequencyHz : 0.0f);
+            meter.setLatest (kMeterCandidates + 2 * c + 1, i < nc ? state.candidates[c].score : 0.0f);
+            meter.setLatest (kMeterCuts + 3 * c, i < na ? (float) state.activeCuts[c].frequencyHz : 0.0f);
+            meter.setLatest (kMeterCuts + 3 * c + 1, i < na ? state.activeCuts[c].score : 0.0f);
+            meter.setLatest (kMeterCuts + 3 * c + 2, i < na ? state.activeCuts[c].depthDb : 0.0f);
+        }
+        meter.publish();
+
         publishTelemetry (telemetryKey.load (std::memory_order_relaxed), candidateHz, candidateScore,
                           activeHz, activeScore, activeDepth, nc, na);
     }
@@ -209,6 +227,36 @@ void MoshXFeedbackPlugin::restorePluginStateFromValueTree (const ValueTree& v)
     telemetryKey.store (makeTelemetryKey (state), std::memory_order_relaxed);
     for (auto p : getAutomatableParameters())
         p->updateFromAttachedValue();
+}
+
+var MoshXFeedbackPlugin::takeLiveMeters()
+{
+    const auto reading = meter.take();
+    if (! reading.live)
+        return {};
+    const auto& v = reading.latest;
+    juce::Array<var> candidates, cuts;
+    const int nc = jlimit (0, 4, roundToInt (v[kMeterNumCandidates]));
+    const int na = jlimit (0, 4, roundToInt (v[kMeterNumCuts]));
+    for (int i = 0; i < nc; ++i)
+    {
+        auto* c = new DynamicObject();
+        c->setProperty ("hz", v[kMeterCandidates + 2 * (size_t) i]);
+        c->setProperty ("score", v[kMeterCandidates + 2 * (size_t) i + 1]);
+        candidates.add (var (c));
+    }
+    for (int i = 0; i < na; ++i)
+    {
+        auto* c = new DynamicObject();
+        c->setProperty ("hz", v[kMeterCuts + 3 * (size_t) i]);
+        c->setProperty ("score", v[kMeterCuts + 3 * (size_t) i + 1]);
+        c->setProperty ("depthDb", v[kMeterCuts + 3 * (size_t) i + 2]);
+        cuts.add (var (c));
+    }
+    auto* o = new DynamicObject();
+    o->setProperty ("candidates", candidates);
+    o->setProperty ("cuts", cuts);
+    return var (o);
 }
 
 var MoshXFeedbackPlugin::describeMoshFx() const

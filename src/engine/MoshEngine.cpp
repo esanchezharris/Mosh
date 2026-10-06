@@ -8,6 +8,7 @@
 #include "state/ProjectName.h"
 #include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
+#include "plugins/moshfx/MoshCompressorPlugin.h"
 #include "state/SafeMode.h"
 #include "app/MacMicrophonePermission.h"
 
@@ -38,7 +39,41 @@ namespace
     {
         bool audio;
         explicit MoshEngineBehaviour (bool a) : audio (a) {}
-        bool autoInitialiseDeviceManager() override { return false; }
+
+        // Two jobs. (1) AUD-017 above: never let the engine open the device itself.
+        // (2) The ONE hook between Tracktion constructing its PluginManager and
+        // registering its own built-in types. Engine::initialise() (tracktion_Engine.cpp,
+        // initialise()) does: pluginManager = make_unique<PluginManager>; then
+        // `if (engineBehaviour->autoInitialiseDeviceManager()) ...`; then
+        // pluginManager->initialise(), which calls createBuiltInType<CompressorPlugin>()
+        // among the rest. PluginManager::registerBuiltInType keeps the FIRST
+        // registration of a type string and ignores later ones, so registering
+        // MoshCompressorPlugin (same xmlTypeName, "compressor") here makes every
+        // compressor Mosh creates or loads a metered one (the live gain-reduction rail)
+        // while its audio stays Tracktion's. This depends on that Tracktion init order;
+        // --selftest ("plugin_meters: compressor") fails if a loaded "compressor" is not
+        // a MoshCompressorPlugin, so an engine update that moves the call cannot slip by.
+        bool autoInitialiseDeviceManager() override
+        {
+            registerShadowingBuiltIns();
+            return false;
+        }
+
+        void registerShadowingBuiltIns()
+        {
+            if (shadowingBuiltInsRegistered)
+                return;
+            // The Engine ctor adds itself to Engine::getEngines() before initialise(),
+            // so the newest engine is the one being constructed. Confirm it is OURS
+            // (it owns this behaviour) rather than trusting the list's order.
+            const auto engines = te::Engine::getEngines();
+            auto* engine = engines.isEmpty() ? nullptr : engines.getLast();
+            if (engine == nullptr || &engine->getEngineBehaviour() != this)
+                return;
+            engine->getPluginManager().createBuiltInType<MoshCompressorPlugin>();
+            shadowingBuiltInsRegistered = true;
+        }
+        bool shadowingBuiltInsRegistered = false;
         bool shouldOpenAudioInputByDefault() override { return false; }
         // No audio → don't enumerate audio I/O device types (avoids the macOS
         // mic-permission prompt on headless/no-audio launches).
