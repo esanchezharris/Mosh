@@ -65,8 +65,9 @@ the plugin's state but does not expose as automatable parameters (so `set_plugin
 reach them). The whitelist, by the plugin's reported `type` (`src/moshops/PluginState.h`, shared
 with the snapshot's `plugin.state`): `delay` `lengthMs` (integer ms, 1–2000), `chorus` `depthMs`
 (0.1–20 ms), `speedHz` (0.1–10 Hz), `width` (0–1), `mix` (0–1), `phaser` `depth` (0–8 oct), `rate`
-(0.05–10 Hz), `feedback` (−0.95–0.95), and `lowpass`/`highpass` `mode` (`"lowpass"` or
-`"highpass"`) and `slope` (integer dB/oct, 6–48 in steps of 6; 2026-10-05). Values are physical,
+(0.05–10 Hz), `feedback` (−0.95–0.95), `lowpass`/`highpass` `mode` (`"lowpass"` or
+`"highpass"`) and `slope` (integer dB/oct, 6–48 in steps of 6; 2026-10-05), and the `4osc` keys
+listed under *4OSC* below (2026-10-05). Values are physical,
 never normalised. Numbers must be JSON numbers and finite (a string, boolean or NaN is refused);
 they are clamped to the range, and `lengthMs` is rounded to an integer and never goes below 1 ms
 (Tracktion's DelayPlugin divides by the length in samples on the audio thread). An integer key
@@ -111,6 +112,40 @@ plugins only). A plain `te::LowPassPlugin` (only if Tracktion ever registered it
 has no slope: `state.slope` is absent and `set_plugin_state` refuses the key. A track preset's
 filter runs at 12 (see *Track-chain presets*).
 
+**4OSC (2026-10-05).** `set_plugin_state` keys of a `4osc` (Tracktion's `te::FourOscPlugin`;
+its public CachedValues on the plugin's root state, written through the Edit's UndoManager):
+`waveShape1`…`waveShape4` (`"off"`, `"sine"`, `"square"`, `"saw"`, `"triangle"`, `"noise"`; osc 1
+defaults to `"sine"`, the others `"off"`), `voices1`…`voices4` (unison voices, integer 1–8, step
+1, default 1), `filterType` (`"off"`, `"lowpass"`, `"highpass"`, `"bandpass"`, `"notch"`; default
+`"off"`, which is every Mosh 4OSC unless a session set it), `filterSlope` (integer 12–24 dB/oct,
+step 12, default 12), `distortionOn`, `reverbOn`, `delayOn`, `chorusOn` (`"off"`/`"on"`, default
+`"off"`), `delayBeats` (0.0625–4 beats, Tracktion's `delay`; default 1), `voiceMode` (`"mono"`,
+`"legato"`, `"poly"`; default `"poly"`) and `ampAnalog` (`"off"`/`"on"`, default `"on"`). Choices are
+the lowercase ids above (the UI owns the labels); a choice's index is Tracktion's enum value, and
+nothing outside an enum is ever written (a filter type outside 0–4 zeroes the voice filter and
+silences the synth). A stored value the synth cannot play is read as what it plays instead: a
+wave or filter type outside its enum reads `"off"`, unison voices are clamped to 1–8, a filter
+slope other than 24 reads 12 (the voice adds its second stage only for exactly 24), a voice mode
+other than 1 or 2 reads `"mono"`. For the 4OSC the no-change test compares the STORED values, so
+choosing the shown value over such a store (e.g. `"off"` over a filter type 7) is a real,
+undoable edit that repairs it. Not exposed: polyphony, the LFO wave/sync/beat, MPE and the mod
+matrix (inert without a route, reallocating, or unsafe: an LFO beat ≤ 0 hangs the audio thread).
+Changing `voiceMode` makes Tracktion reallocate voices on the message thread under the lock the
+audio thread renders under; `chorusOn` runs Tracktion's chorus, which can grow its line on the
+audio thread; `ampAnalog` changes only the envelope curve constants, so it is heard from the
+next envelope edit.
+The snapshot carries ALL 68 of a 4OSC's parameters (every other plugin keeps the 16 cap), each
+with `id` (the paramID: the names collide, "Mix" ×3, "Width" ×2, "Level" beside "Level N"),
+physical `min`/`max`, `skew` (only when ≠ 1), `symmetricSkew` (only when true; none today) and
+`step` (the range's interval, only when > 0: Tune 1–4 step 1). See *Snapshot* for the mapping.
+`plugin.modRoutes`, read-only and only when non-empty, lists mod-matrix routes an imported
+session carries: `[{paramIndex, id, source, depth}]` (`source` is Tracktion's id: `lfo1`, `lfo2`,
+`env1`, `env2`, `mpePressure`, `mpeTimbre`, `midiNote`, `midiVelocity`, `cc<N>`; only params
+0–53 can be routed). Mosh never creates a route. Every Mosh 4OSC is a `MoshFourOscPlugin`
+(`src/plugins/moshfx/MoshFourOscPlugin.h`: Tracktion's plugin, same `"4osc"` type, its audio the
+base class's own call, registered with the shadows above; `--selftest` fails if a loaded, default
+or reloaded one is not), which publishes the 4OSC's `plugin_meters` entry (see *Events*).
+
 **Render-layer cache key (2026-10-05).** A MIDI/drum clip's render is cached under a signature of
 its notes and its track's plugins (`stableSourceSig`, `src/moshops/MoshOps.Generative.cpp`): each
 plugin's name, bypass, parameter values and automation curves, and now also its `plugin.state`
@@ -122,7 +157,7 @@ and served the stale render. The key is the state, not the edit history (an undo
 earlier key exactly), but a layer caches one render, its latest, so returning to an earlier
 value re-renders once. Plugins with neither state keys nor sounds contribute exactly what they
 did before, so their chains keep their cached renders; chains with a delay, chorus, phaser,
-low/high-pass or sampler re-render once.
+low/high-pass, 4OSC (its `state` keys, 2026-10-05) or sampler re-render once.
 
 **Gestures.** `set_plugin_param` and `set_plugin_state` take an optional `gesture` (a string of
 1–64 characters from `[A-Za-z0-9_.:-]`; anything else, including an empty string or a non-string,
@@ -201,18 +236,30 @@ every parameter of `4bandEq` (Hz 20–20000, dB −20–20, Q 0.1–4), `delay`
 `softclip`, `moshXFeedback` and `moshAutoTune` (whose key 0–11 and scale 0–2
 index its `choices`). They come from the live parameter range. For all of these
 built-ins the normalisation is linear: `phys = min + value × (max − min)`.
+The `4osc` (2026-10-05) publishes min/max on all 68 parameters, but its ranges are
+JUCE NormalisableRanges that are NOT all linear, so each parameter also carries
+`skew` when it is not 1 (times 0.2, levels 4, LFO rates 0.3) and `step` when the
+range has an interval (Tune 1–4: 1): `phys = min + (max − min) · value^(1/skew)`,
+`value = ((phys − min) / (max − min))^skew`, phys snapped to `step` when present;
+no `skew` means linear (`symmetricSkew`, only when true, would mean JUCE's
+symmetric mapping; no 4OSC parameter has it). An amp time at 0.5 is 1.876 s of
+0.001–60 s; a level at 0.5 is −15.91 dB of −100–0 dB. Every 4OSC parameter also
+carries its paramID as `id`. Its `display` strings are Tracktion's (Fine Tune is
+cents and master Level is dB without a unit in the text).
 Other ranges are omitted, including external-plugin ranges and the builtin
 compressor's gain-domain threshold and inverse ratio (map those with the
 encodings in `src/moshops/TrackPreset.h`: threshold is linear gain 0.01–1, ratio
 slope ρ = 0.95·v with N = 1/ρ and v = 0 meaning ∞:1). Neither endpoints nor
 display strings establish a conversion for any other processor. `set_plugin_param`
 stays normalised; `set_plugin_state` (above) is physical, for state keys only.
-The existing 16-parameter snapshot limit and all previous fields remain intact.
+The 16-parameter snapshot limit and all previous fields remain intact for every
+plugin except the `4osc`, which publishes all 68 parameters (indices 0–67); its
+first 16 only gained `id`, `min`, `max`, `skew` and `step`.
 
 Every plugin entry (track and master) also carries `itemId`, the plugin's
 EditItemID: a stable key that follows the plugin through a reorder (`index` does
 not) and survives save/reload and remove+undo. Plugins with CachedValue-only
-settings (`delay`, `chorus`, `phaser`, `lowpass`, `highpass`) carry
+settings (`delay`, `chorus`, `phaser`, `lowpass`, `highpass`, `4osc`) carry
 `state: { <key>: { value, min?, max?, step?, unit?, choices? } }` from the same
 whitelist `set_plugin_state` accepts — e.g. `"state": {"lengthMs": {"value": 150,
 "min": 1, "max": 2000, "step": 1, "unit": "ms"}}` on a delay, `"state": {"mode":
@@ -220,8 +267,9 @@ whitelist `set_plugin_state` accepts — e.g. `"state": {"lengthMs": {"value": 1
 "min": 6, "max": 48, "step": 6, "unit": "dB/oct"}}` on a high-pass. A
 value is what the plugin holds (a saved session can hold one outside the range;
 the slope reports the snapped value the filter runs at);
-`step` appears only on integer keys (the key's own step: 6 for `slope`, 1
-otherwise; `set_plugin_state` snaps onto it) and `unit` only when there is one.
+`step` appears only on integer keys (the key's own step: 6 for `slope`, 12 for the
+4OSC's `filterSlope`, 1 otherwise; `set_plugin_state` snaps onto it) and `unit` only
+when there is one.
 `slope` is absent on a filter that is not Mosh's subclass. All of these fields
 are additive.
 
@@ -246,7 +294,7 @@ are additive.
 
 - `snapshot_invalidated` — structural change; the UI refetches the snapshot. This is the documented "resync" choice (`02 // VERIFY`: snapshot_invalidated vs precise inverse-deltas). Undo/redo and reload use it. Stage 2 may refine hot paths to precise deltas.
 - `transport` — `{playing, recording, position, looping, loopStart, loopEnd}`. Pushed on every `set_transport` AND **decimated to 30 Hz** by a backend timer while playing (telemetry never per-block). Drives the animated playhead without polling.
-- `plugin_meters` — `{plugins: [{trackId, index, itemId, type, …fields}]}`, the 30 Hz live meters of
+- `plugin_meters` — `{plugins: [{trackId, index, itemId, type, seq, …fields}]}`, the 30 Hz live meters of
   the native plugins that publish them (`MoshOps::pluginMeters`, public so `--selftest` asserts it).
   Volatile telemetry: never in the snapshot. An entry appears only for a TRACK plugin that is
   enabled AND was run by the audio thread since the previous tick; the rail is emitted while any
@@ -256,7 +304,11 @@ are additive.
   data from before its removal. Peaks and gain reduction ACCUMULATE (largest) between ticks — at
   small buffers many blocks pass per tick. Every value is finite (a non-finite input such as +inf
   from an upstream plugin is clamped, never sent as JSON `null`): level dB values are clamped to
-  [−100, +100], `grDb` to [0, 100]. Fields by type:
+  [−100, +100], `grDb` to [0, 100]. `seq` (2026-10-05, every type) is a per-plugin frame counter:
+  it rises by one on every entry reported for that plugin (keyed by its EditItemID, never reset,
+  so it keeps rising across an undone removal and a reload), so a consumer can tell a NEW frame
+  from the same frame held on screen; event fields (the 4OSC's `struck`) must fire once per `seq`.
+  Fields by type:
   - `compressor`: `{grDb, inDb, outDb}`. `grDb ≥ 0` is the largest gain reduction actually applied
     since the last tick, measured as |out|/|in| per sample relative to the makeup (output) gain, on
     samples above −80 dBFS (independent of the detector's internals; a block during which the
@@ -276,9 +328,22 @@ are additive.
     (channel 0), carried with a serial so a frame is never reported twice. A frame is always ONE
     block's (the latch's "latest" slots are a seqlock): if the audio thread is writing the next
     block at the tick, the previous whole frame is reported instead of a mixture.
+  - `4osc` (2026-10-05): `{outDb, held: [notes], struck: [notes]}`. `outDb` = the synth's output
+    sample peak since the last tick (dBFS, max over channels 0–1, floored at −100); `held` = the
+    MIDI keys down at the synth now, ascending, from the MIDI it received (KEYS, not voices: the
+    sustain pedal, voice stealing and release tails are not reflected); `struck` = the note-ons
+    since the last tick, ascending, each once. MIDI is read exactly as the synth reads it: only
+    messages whose `round(timestamp × rate)` falls inside the block, a velocity-0 note-on is a
+    note-off, and a note-off, all-notes-off or reset-all-controllers acts on its own channel
+    (JUCE's MPEInstrument in legacy mode, FourOsc's mode unless its `mpe` property is set, which
+    Mosh never does); a block flagged all-notes-off, `reset()` and `midiPanic()` drop every key.
+    Unlike the other types, an entry appears only while the synth is enabled and NOT rendering
+    offline (an export or bounce is not live), and only for a tick in which a key was down, a note
+    was struck or the peak exceeded 1e-5: an idle synth drops off the rail. No voice count and no
+    envelope position: Tracktion keeps the voices behind a private base class.
   Mosh AutoTune is NOT on this rail (it keeps `tuner`; its latch has a single reader). Known limit:
   an offline render (export, bounce) runs the same plugin objects, so a meter can report during an
-  export as the `tuner` rail can.
+  export as the `tuner` rail can (the 4OSC's entry is gated on not rendering; the others are not).
 
 ## Undo / threading invariants
 

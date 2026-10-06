@@ -77,10 +77,11 @@ public:
     juce::var tunerReadings();
 
     /** Live meters of the native plugins that publish them, for the 30 Hz
-        "plugin_meters" rail: `{plugins:[{trackId, index, itemId, type, ...fields}]}`.
+        "plugin_meters" rail: `{plugins:[{trackId, index, itemId, type, seq, ...fields}]}`.
         compressor/softclip: {grDb, inDb, outDb}; moshOTT: {bands:[{levelDb, gainDb}] x3,
-        clipped}; moshXFeedback: {candidates:[{hz, score}], cuts:[{hz, score, depthDb}]}
-        (docs/02_MOSHOPS_CONTRACT.md). Only track plugins that are enabled AND were run by
+        clipped}; moshXFeedback: {candidates:[{hz, score}], cuts:[{hz, score, depthDb}]};
+        4osc: {outDb, held:[notes], struck:[notes]}, only while not rendering offline and
+        not idle (docs/02_MOSHOPS_CONTRACT.md). `seq` counts each plugin's reported frames. Only track plugins that are enabled AND were run by
         the audio thread since the previous call appear; peaks and gain reduction are the
         largest since that call. `index` is the plugin's position in the track's chain, as
         in the snapshot. Mosh AutoTune is never here (its reading belongs to "tuner").

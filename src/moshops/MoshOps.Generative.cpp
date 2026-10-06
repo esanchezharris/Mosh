@@ -461,14 +461,14 @@ static void writeSamplerSounds (juce::MemoryOutputStream& mos, const juce::Value
 // CachedValue-only settings and sampler sounds. Used as the render-cache upstream hash for
 // non-wave clips, whose bounced audio isn't bit-stable. Editing a note, an instrument/FX
 // param, a set_plugin_state setting (delay length, chorus, phaser, the filter's mode and
-// slope) or a sampler pad changes this → cache MISS; an unchanged source → identical
+// slope, the 4OSC's waves, voices, filter type/slope and switches) or a sampler pad changes this → cache MISS; an unchanged source → identical
 // signature → cache HIT. Deliberately hashes note fields, param values, the plugin-state
 // WHITELIST (pluginstate::describe, the snapshot's `plugin.state`) and the sampler's SOUND
 // children, NOT whole clip/plugin `state` ValueTrees — a synth scribbles its free-running
 // phase into its opaque state chunk during render, which would make the signature differ
 // every render. A plugin with no state keys and no sounds contributes exactly what it did
 // before those two were folded in (2026-10-05), so such chains keep their cached renders;
-// a chain with a delay/chorus/phaser/filter or a sampler re-renders once.
+// a chain with a delay/chorus/phaser/filter, a 4OSC or a sampler re-renders once.
 static juce::String stableSourceSig (te::Clip& clip)
 {
     juce::MemoryOutputStream mos;
