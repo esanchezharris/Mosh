@@ -4986,6 +4986,33 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (rbi), "bypassing the INSTRUMENT -> render refuses (silent bounce guard; no stale render served)");
         cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", false } }));
 
+        // A CachedValue-only setting (set_plugin_state; here the low-pass slope) is in the
+        // source signature too: an edit is a cache MISS, and putting the value back HITs
+        // the earlier render, because the key is the plugin's state, not the edit history.
+        // (Until 2026-10-05 the signature hashed only names, bypass and parameters, so a
+        // slope, filter mode, delay length or chorus edit served the stale render.)
+        {
+            auto lpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", mt }, { "type", "lowpass" }}));
+            check (ok (lpLoad), "load_builtin (lowpass FX) on the MIDI track ok");
+            const int lpIdx = (int) lpLoad["data"].getProperty ("index", -1);
+            auto renderCache = [&]
+            {
+                auto r = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+                return r["data"].getProperty ("cache", var()).toString();
+            };
+            auto slopeTo = [&] (int dbPerOct)
+            {
+                return ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", mt }, { "index", lpIdx }, { "key", "slope" }, { "value", dbPerOct }})));
+            };
+            check (renderCache() == "miss", "adding the low-pass -> source signature changed -> cache MISS");
+            check (renderCache() == "hit", "an identical re-render with the low-pass is a cache HIT");
+            check (slopeTo (24), "set_plugin_state slope 24 dB/oct on the MIDI track's low-pass ok");
+            check (renderCache() == "miss", "a slope edit (state only, no parameter) -> cache MISS (no stale render served)");
+            check (slopeTo (12), "slope back to 12 dB/oct");
+            check (renderCache() == "hit", "slope back to 12 -> the earlier 12 dB/oct render is a cache HIT");
+            check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", mt }, { "index", lpIdx }}))), "remove the low-pass again");
+        }
+
         // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
         // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
         // from the snapshot (the producer hears it but never sees it), so the structural proof that

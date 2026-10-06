@@ -913,5 +913,77 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
     }
 
     check (ok (command (ops, "remove_track", object ({ { "trackId", tid } }))), "plugin panels fixture track removed");
+
+    // ── The render-layer cache key covers what set_plugin_state and the pad commands change ──
+    // render_layer keys a MIDI/drum clip's render on a signature of its notes and its
+    // track's plugins (MoshOps.Generative.cpp, stableSourceSig). It used to hash only names,
+    // bypass and parameters, so a state-only edit (filter slope or mode, delay length,
+    // chorus, phaser) or any sampler pad edit served the stale render. SelfTest.cpp's MIDI
+    // render section proves the same end to end (MISS on a slope edit, HIT once it is back).
+    section ("Plugin panels: render source signature covers plugin state and sampler sounds");
+    {
+        const auto st = dataOf (command (ops, "create_track", object ({ { "name", "Signature" } }))).getProperty ("trackId", var()).toString();
+        const auto clip = dataOf (command (ops, "add_midi_clip", object ({ { "trackId", st }, { "length", 2.0 } })))
+                              .getProperty ("clipId", var()).toString();
+        check (st.isNotEmpty() && clip.isNotEmpty(), "a MIDI clip on its own track (the default instrument loads with it)");
+        std::map<String, int> fx;
+        for (auto* type : { "lowpass", "delay", "chorus", "phaser" })
+        {
+            const auto r = command (ops, "load_builtin", object ({ { "trackId", st }, { "type", type } }));
+            fx[type] = (int) dataOf (r).getProperty ("index", -1);
+            check (ok (r) && fx[type] >= 0, String ("load_builtin ") + type + " on the signature track");
+        }
+        auto sig = [&] (const String& clipId) { return ops.renderSourceSignatureForSelfTest (clipId); };
+        auto setOn = [&] (const String& trackId, int index, const char* key, var value)
+        {
+            return ok (command (ops, "set_plugin_state", object ({ { "trackId", trackId }, { "index", index }, { "key", key }, { "value", value } })));
+        };
+        const auto s0 = sig (clip);
+        check (s0.isNotEmpty() && sig (clip) == s0, "the signature is stable across reads");
+        pump (200);
+        check (sig (clip) == s0, "...and across a message-loop pump (nothing asynchronous writes into it)");
+        check (setOn (st, fx["lowpass"], "slope", 12) && sig (clip) == s0, "a no-change set_plugin_state leaves it alone");
+        check (ok (command (ops, "rename_track", object ({ { "trackId", st }, { "name", "Signature 2" } }))) && sig (clip) == s0,
+               "renaming the track leaves it alone");
+        check (ok (command (ops, "undo")), "undo the rename");
+
+        struct StateEdit { const char* type; const char* key; var value; const char* what; };
+        const StateEdit edits[] = {
+            { "lowpass", "slope", 24, "the filter slope (12 -> 24 dB/oct)" },
+            { "lowpass", "mode", "highpass", "the filter mode (both modes are named \"LPF/HPF\")" },
+            { "delay", "lengthMs", 300, "the delay length" },
+            { "chorus", "depthMs", 7.0, "the chorus depth" },
+            { "phaser", "rate", 2.0, "the phaser rate" },
+        };
+        for (const auto& e : edits)
+        {
+            check (setOn (st, fx[e.type], e.key, e.value) && sig (clip) != s0, String ("a set_plugin_state edit of ") + e.what + " changes it");
+            check (ok (command (ops, "undo")) && sig (clip) == s0,
+                   String ("undoing it restores the signature exactly (") + e.what + "): the key is the state, not the history");
+        }
+
+        // A drum track: the sampler has no parameters; its sounds are SOUND children.
+        const auto dt = dataOf (command (ops, "create_track", object ({ { "name", "Signature Drums" }, { "type", "drum" } })))
+                            .getProperty ("trackId", var()).toString();
+        const auto drumClip = dataOf (command (ops, "add_midi_clip", object ({ { "trackId", dt }, { "length", 2.0 } })))
+                                  .getProperty ("clipId", var()).toString();
+        check (dt.isNotEmpty() && drumClip.isNotEmpty(), "a clip on a drum track (sampler + kit)");
+        pump (200);   // the sampler loads its kit on an AsyncUpdate
+        const auto d0 = sig (drumClip);
+        pump (200);
+        check (d0.isNotEmpty() && sig (drumClip) == d0, "the drum clip's signature is stable, also across a pump");
+        check (ok (command (ops, "set_drum_pad", object ({ { "trackId", dt }, { "note", 38 }, { "gainDb", -6.0 } }))) && sig (drumClip) != d0,
+               "a pad level edit (set_drum_pad gainDb) changes it");
+        check (ok (command (ops, "undo")) && sig (drumClip) == d0, "undoing it restores the signature exactly");
+        check (ok (command (ops, "set_drum_pad", object ({ { "trackId", dt }, { "note", 38 }, { "pan", 0.5 } }))) && sig (drumClip) != d0,
+               "a pad pan edit changes it");
+        check (ok (command (ops, "undo")) && sig (drumClip) == d0, "undoing the pan edit restores it");
+        check (ok (command (ops, "set_drum_lane", object ({ { "trackId", dt }, { "note", 36 }, { "mute", true } }))) && sig (drumClip) != d0,
+               "a drum lane mute (the pad's gain is parked) changes it");
+        check (ok (command (ops, "undo")) && sig (drumClip) == d0, "undoing the lane mute restores it");
+
+        check (ok (command (ops, "remove_track", object ({ { "trackId", dt } }))) && ok (command (ops, "remove_track", object ({ { "trackId", st } }))),
+               "signature fixture tracks removed");
+    }
 }
 }

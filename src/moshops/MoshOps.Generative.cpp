@@ -15,6 +15,7 @@
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
+#include "PluginState.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "generative/AudioStaging.h"
@@ -429,13 +430,45 @@ juce::var MoshOps::cmdCompileRender (const juce::var& args)
     return okResult ("compile_render", var (d));
 }
 
+// A sampler's sounds as the signature sees them: every persisted property of each SOUND
+// child (source, name, root/range, gain, pan, gate, excerpt, Mosh's parked gain and choke
+// group), in child order, each sound's properties sorted by name so the order a property
+// was first written in cannot matter. Pad edits (set_drum_pad, clear_drum_pad,
+// assign_sample, load_drum_kit, set_drum_lane) change these and nothing else.
+static void writeSamplerSounds (juce::MemoryOutputStream& mos, const juce::ValueTree& samplerState)
+{
+    for (int i = 0; i < samplerState.getNumChildren(); ++i)
+    {
+        const auto sound = samplerState.getChild (i);
+        if (! sound.hasType (te::IDs::SOUND))
+            continue;
+        mos.writeInt (i);
+        juce::StringArray names;
+        for (int k = 0; k < sound.getNumProperties(); ++k)
+            names.add (sound.getPropertyName (k).toString());
+        names.sort (false);
+        mos.writeInt (names.size());
+        for (const auto& name : names)
+        {
+            mos.writeString (name);
+            mos.writeString (sound.getProperty (juce::Identifier (name)).toString());
+        }
+    }
+}
+
 // A stable, deterministic signature of a clip's GENERATIVE SOURCE — its MIDI note content
-// plus the owning track's instrument + insert-FX names and param VALUES. Used as the
-// render-cache upstream hash for non-wave clips, whose bounced audio isn't bit-stable.
-// Editing a note OR an instrument/FX param changes this → cache MISS; an unchanged source
-// → identical signature → cache HIT. Deliberately hashes note fields + param values, NOT
-// the clip/plugin `state` ValueTrees — a synth scribbles its free-running phase into its
-// opaque state chunk during render, which would make the signature differ every render.
+// plus the owning track's instrument + insert-FX names, bypass, param VALUES (and curves),
+// CachedValue-only settings and sampler sounds. Used as the render-cache upstream hash for
+// non-wave clips, whose bounced audio isn't bit-stable. Editing a note, an instrument/FX
+// param, a set_plugin_state setting (delay length, chorus, phaser, the filter's mode and
+// slope) or a sampler pad changes this → cache MISS; an unchanged source → identical
+// signature → cache HIT. Deliberately hashes note fields, param values, the plugin-state
+// WHITELIST (pluginstate::describe, the snapshot's `plugin.state`) and the sampler's SOUND
+// children, NOT whole clip/plugin `state` ValueTrees — a synth scribbles its free-running
+// phase into its opaque state chunk during render, which would make the signature differ
+// every render. A plugin with no state keys and no sounds contributes exactly what it did
+// before those two were folded in (2026-10-05), so such chains keep their cached renders;
+// a chain with a delay/chorus/phaser/filter or a sampler re-renders once.
 static juce::String stableSourceSig (te::Clip& clip)
 {
     juce::MemoryOutputStream mos;
@@ -472,8 +505,24 @@ static juce::String stableSourceSig (te::Clip& clip)
                             }
                         }
                     }
+                // CachedValue-only settings: the same whitelist, read the same way, as the
+                // snapshot's plugin.state and set_plugin_state (PluginState.h). Not
+                // parameters, so the loop above never saw them; LowPassPlugin's name is
+                // "LPF/HPF" in both modes, so not even the mode reached the signature.
+                const auto settings = pluginstate::describe (*p, effectiveBuiltinType (*p));
+                if (! settings.isVoid())
+                    mos.writeString (juce::JSON::toString (settings, true));
+                // A sampler has no parameters at all: its sound is its SOUND children.
+                if (dynamic_cast<te::SamplerPlugin*> (p) != nullptr)
+                    writeSamplerSounds (mos, p->state);
             }
     return juce::MD5 (mos.getMemoryBlock()).toHexString();
+}
+
+juce::String MoshOps::renderSourceSignatureForSelfTest (const juce::String& clipId)
+{
+    auto* clip = findClip (clipId);
+    return clip != nullptr ? stableSourceSig (*clip) : juce::String();
 }
 
 bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav)

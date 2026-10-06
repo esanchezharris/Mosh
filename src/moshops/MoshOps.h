@@ -90,6 +90,13 @@ public:
         consumes the readings, including those of plugins it does not report. */
     juce::var pluginMeters();
 
+    /** The render-layer cache's source signature for a non-wave clip, exactly as
+        render_layer folds it into the fingerprint: the clip's notes plus its track's
+        plugins (name, bypass, parameter values and curves, CachedValue-only settings,
+        sampler sounds). "" for an unknown clip. Public for --selftest, which asserts what
+        does and does not change it without paying for a render each time. */
+    juce::String renderSourceSignatureForSelfTest (const juce::String& clipId);
+
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
