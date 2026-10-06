@@ -61,6 +61,7 @@ namespace
         // dB and mix, pitch semitones, and every Mosh FX control (AutoTune's key and scale are
         // stepped 0..11 / 0..2 indexes into their `choices`). The compressor's threshold
         // (linear gain) and ratio (inverse slope) above stay without endpoints on purpose.
+        // The 4OSC below is NOT linear.
         if (dynamic_cast<te::EqualiserPlugin*> (&plugin) != nullptr
             || dynamic_cast<te::DelayPlugin*> (&plugin) != nullptr
             || dynamic_cast<te::PitchShiftPlugin*> (&plugin) != nullptr
@@ -70,8 +71,20 @@ namespace
             || dynamic_cast<MoshAutoTunePlugin*> (&plugin) != nullptr)
             return parameter.getValueRange();
 
+        // 4OSC: every parameter's endpoints, but NOT a linear mapping. Its times, levels and
+        // LFO rates are skewed JUCE NormalisableRanges (phys = min + (max - min) *
+        // v^(1/skew): an amp time at 0.5 is 1.876 s of 0.001..60) and its tunes step by
+        // a semitone, so pluginToVar publishes `skew` and `step` beside min/max for it.
+        if (dynamic_cast<te::FourOscPlugin*> (&plugin) != nullptr)
+            return parameter.getValueRange();
+
         return std::nullopt;
     }
+
+    // The 4OSC's mod matrix covers the parameters Tracktion added before building it (the
+    // oscillators, LFOs, mod envelopes, amp and filter: indices 0..53); FourOscPlugin's
+    // isModulated/getModulationSources assert for the effect, legato and master ones.
+    constexpr int kFourOscModulatableParams = 54;
 
     juce::String pluginRackTopology (te::Edit& edit)
     {
@@ -3247,6 +3260,11 @@ juce::var MoshOps::pluginMeters()
             o->setProperty ("index", i);
             o->setProperty ("itemId", plugins[i]->itemID.toString());
             o->setProperty ("type", effectiveBuiltinType (*plugins[i]));
+            // Per plugin, +1 for every entry reported, so the UI can tell a new frame from
+            // the same one held on screen (event fields such as the 4OSC's `struck` must
+            // fire once). Keyed by EditItemID and never reset: it keeps rising across an
+            // undone removal (the same object) and a reload (the same id).
+            o->setProperty ("seq", ++pluginMeterSeq_[rawId]);
             for (auto& field : entry->getProperties())
                 o->setProperty (field.name, field.value);
             readings.add (var (o));
@@ -3257,6 +3275,12 @@ juce::var MoshOps::pluginMeters()
     auto* payload = new DynamicObject();
     payload->setProperty ("plugins", readings);
     return var (payload);
+}
+
+juce::var MoshOps::pluginVarForSelfTest (const juce::String& trackId, int index)
+{
+    auto* plugin = findPlugin (trackId, index);
+    return plugin != nullptr ? pluginToVar (*plugin, index, findTrack (trackId)) : var();
 }
 
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
@@ -3312,7 +3336,12 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
     }
 
     juce::Array<var> params;
-    const int n = juce::jmin (16, p.getNumAutomatableParameters());
+    // The snapshot carries at most 16 parameters per plugin, except the 4OSC: all 68 (its
+    // panel draws the amp/filter envelopes, the filter and the effects, which sit past
+    // index 15). Every other plugin keeps the cap, so its payload is unchanged.
+    auto* fourOsc = dynamic_cast<te::FourOscPlugin*> (&p);
+    const int n = fourOsc != nullptr ? p.getNumAutomatableParameters()
+                                     : juce::jmin (16, p.getNumAutomatableParameters());
     for (int i = 0; i < n; ++i)
     {
         auto param = p.getAutomatableParameter (i);
@@ -3321,6 +3350,22 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         po->setProperty ("name", param->getParameterName());
         po->setProperty ("value", param->getCurrentNormalisedValue());
         addPluginParameterReadback (*po, *param, pluginParameterPhysicalRange (p, *param));
+        // 4OSC only (every other payload stays byte-identical): the paramID, because names
+        // collide ("Mix" x3, "Width" x2, "Level" beside "Level N"), and the rest of the
+        // JUCE NormalisableRange: phys = min + (max - min) * v^(1/skew), v = ((phys - min) /
+        // (max - min))^skew, snapped to `step` when there is one. Only emitted when not the
+        // default (skew 1, no symmetric skew, interval 0), so absent means linear.
+        if (fourOsc != nullptr)
+        {
+            const auto& range = param->valueRange;
+            po->setProperty ("id", param->paramID);
+            if (! juce::exactlyEqual (range.skew, 1.0f))
+                po->setProperty ("skew", (double) range.skew);
+            if (range.symmetricSkew)
+                po->setProperty ("symmetricSkew", true);
+            if (range.interval > 0.0f)
+                po->setProperty ("step", (double) range.interval);
+        }
         // CAP-AUT-006 — a stepped parameter (the mute gate is the first) is applied
         // through snapToState, so the editor must snap its points to the same states
         // instead of drawing a value the engine will never use. Only emitted when true,
@@ -3357,6 +3402,35 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         params.add (var (po));
     }
     o->setProperty ("params", params);
+    // 4OSC modulation routes, read-only and only when there are any (Mosh never creates
+    // one; an imported session can carry a MODMATRIX). Read straight from the public map,
+    // which only the message thread writes, by lookup rather than through the accessors
+    // that assert for the parameters the matrix does not cover.
+    if (fourOsc != nullptr)
+    {
+        juce::Array<var> routes;
+        for (int i = 0; i < juce::jmin (n, kFourOscModulatableParams); ++i)
+        {
+            auto param = p.getAutomatableParameter (i);
+            const auto assign = fourOsc->modMatrix.find (param.get());
+            if (assign == fourOsc->modMatrix.end())
+                continue;
+            for (int s = te::FourOscPlugin::lfo1; s < te::FourOscPlugin::numModSources; ++s)
+            {
+                const float depth = assign->second.depths[s];
+                if (! (depth >= -1.0f))   // -1000: no route from this source
+                    continue;
+                auto* route = new DynamicObject();
+                route->setProperty ("paramIndex", i);
+                route->setProperty ("id", param->paramID);
+                route->setProperty ("source", fourOsc->modulationSourceToID ((te::FourOscPlugin::ModSource) s));
+                route->setProperty ("depth", (double) depth);
+                routes.add (var (route));
+            }
+        }
+        if (! routes.isEmpty())
+            o->setProperty ("modRoutes", routes);
+    }
     // CachedValue-only settings (delay length, chorus, phaser, the low/high-pass mode):
     // the same whitelist set_plugin_state accepts (src/moshops/PluginState.h). Additive:
     // absent on every other plugin type.

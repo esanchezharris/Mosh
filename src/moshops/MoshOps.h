@@ -97,6 +97,11 @@ public:
         does and does not change it without paying for a render each time. */
     juce::String renderSourceSignatureForSelfTest (const juce::String& clipId);
 
+    /** One track plugin's snapshot entry, exactly as snapshot() builds it (pluginToVar),
+        or void for no such plugin. Public for --selftest, which times it for a 4OSC (68
+        parameters) without paying for a whole snapshot. */
+    juce::var pluginVarForSelfTest (const juce::String& trackId, int index);
+
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
@@ -1407,6 +1412,8 @@ private:
     // plugin not in it (new, or back from an undone removal) has its reading consumed
     // and not reported, so data from before it left the chain can never surface.
     std::set<juce::uint64> pluginMetersSeen_;
+    // Each metered plugin's rail frame counter (the entry's `seq`), by raw EditItemID.
+    std::map<juce::uint64, juce::int64> pluginMeterSeq_;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
