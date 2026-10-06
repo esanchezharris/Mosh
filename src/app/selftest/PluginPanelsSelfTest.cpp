@@ -527,20 +527,23 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             {
                 return command (ops, "set_plugin_param", object ({ { "trackId", tid }, { "index", eq }, { "paramIndex", 0 }, { "value", value } }));
             };
+            // This is the selftest's first message-loop pump: let the backlog the earlier
+            // sections queued drain first, so the pauses below are what the timer sees.
+            pump (1000);
             // Control: the timer does run headless, so the checks after it can fail.
             check (ok (plain (0.15)) && um.getNumActionsInCurrentTransaction() > 0, "control: a gesture-less edit leaves its step open");
-            pump (800);
+            pump (1500);
             check (um.getNumActionsInCurrentTransaction() == 0,
-                   "control: after a 0.8 s pause Tracktion's timer has closed that step by itself");
+                   "control: after a 1.5 s pause Tracktion's timer has closed that step by itself");
             check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "undo the control edit");
 
             check (ok (drag ("drag-hold", 0.2)), "a drag starts");
             check (ops.gestureWindowOpenForTest(), "the open gesture window holds Tracktion's transaction timer");
-            pump (800);
-            check (um.getNumActionsInCurrentTransaction() > 0, "after a 0.8 s pause the drag's step is still open");
+            pump (1500);
+            check (um.getNumActionsInCurrentTransaction() > 0, "after a 1.5 s pause the drag's step is still open");
             check (ok (drag ("drag-hold", 0.3)) && ok (drag ("drag-hold", 0.4)), "the drag resumes");
             check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0),
-                   "ONE undo takes back a drag that paused 0.8 s mid-way");
+                   "ONE undo takes back a drag that paused 1.5 s mid-way");
             check (! ops.gestureWindowOpenForTest(), "the undo released the inhibitor");
 
             // An idle window closes by itself (MoshOps::timerCallback), and the timer then
