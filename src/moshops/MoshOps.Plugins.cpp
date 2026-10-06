@@ -2671,10 +2671,19 @@ int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& ki
         ++loaded;
     }
 
-    // Resolve sample files now (see the pump note in cmdAssignSample).
+    // Resolve sample files now (see the pump note in cmdAssignSample). This pump runs in
+    // the MIDDLE of the caller's transaction (load_drum_kit then records the kit and the
+    // lane gains; create_track / set_track_type then add the track's meter), and Tracktion's
+    // Edit::UndoTransactionTimer, if it is due (350 ms after a change it was told of in an
+    // earlier pump), would call beginNewTransaction inside it and split the command into
+    // two undo steps. Inhibited for the pump; it fires again on its next tick, after the
+    // command.
     if (! eng.hasAudio())
         if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+        {
+            const te::Edit::UndoTransactionInhibitor oneUndoStep (eng.edit());
             mm->runDispatchLoopUntil (5);
+        }
 
     return loaded;
 }
