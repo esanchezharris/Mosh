@@ -2,26 +2,36 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Plugin } from "../../types";
+import { biquadDb, highPass, logFreqs, lowPass } from "./dsp";
 import {
-  CUTOFF_RANGE, PLOT_H, PLOT_W, clampCutoff, cutoffAtX, cutoffHz, cutoffNorm, defaultCutoff, filterMode,
-  filterSummary, handleX, isUnstable, maxCutoff, parseHz, plotScales, responseDb, stepCutoff,
+  CUTOFF_RANGE, DEFAULT_SLOPE, DENSE_PER_OCTAVE, PLOT_H, PLOT_W, SLOPE_RANGE, canSetSlope, clampCutoff, closedFormDb,
+  curveFreqs, cutoffAtX, cutoffHz, cutoffNorm, defaultCutoff, filterChain, filterMode, filterSummary, handleX,
+  isUnstable, maxCutoff, orderOf, parseHz, plotScales, responseDb, slopeKeyTarget, slopeLabel, slopeOf, snapSlope,
+  stepCutoff,
 } from "./filter";
-import { MINI_H, MINI_W, filterPanelDef, keyTarget } from "./FilterPanel";
+import { MINI_H, MINI_PER_OCTAVE, MINI_POINTS, MINI_W, filterPanelDef, keyTarget } from "./FilterPanel";
 import { fmtFreq } from "./params";
 
 const FS = 48000;
 const SPAN = 22000 - 10;
 const normFor = (hz: number) => (hz - 10) / SPAN;
+const SLOPES = [6, 12, 18, 24, 30, 36, 42, 48];
 
-function filter(type: "lowpass" | "highpass", hz: number, extra: Partial<Plugin> = {}): Plugin {
+/** A low/high-pass as the updated engine publishes it: the mode and the slope settings. */
+function filter(type: "lowpass" | "highpass", hz: number, extra: Partial<Plugin> = {}, slope = 12): Plugin {
   return {
     index: 2, name: type === "highpass" ? "High-Pass" : "LPF/HPF", type, enabled: true, external: false,
     builtin: true, isInstrument: false, itemId: "1001",
     params: [{ index: 0, name: "Frequency", value: normFor(hz), display: `${Math.round(hz)} Hz`, min: 10, max: 22000 }],
-    state: { mode: { value: type, choices: ["lowpass", "highpass"] } },
+    state: {
+      mode: { value: type, choices: ["lowpass", "highpass"] },
+      slope: { value: slope, min: 6, max: 48, step: 6, unit: "dB/oct" },
+    },
     ...extra,
   };
 }
+/** The engine before the slope (it has the LP/HP mode setting only). */
+const noSlope = (p: Plugin): Plugin => ({ ...p, state: { mode: p.state!.mode } });
 
 describe("filter maths (te::LowPassPlugin: one 12 dB/oct Butterworth biquad, linear 10..22000 Hz)", () => {
   it("reads the mode from state, falling back to the type", () => {
@@ -139,6 +149,121 @@ describe("filter maths (te::LowPassPlugin: one 12 dB/oct Butterworth biquad, lin
   });
 });
 
+describe("the slope (MoshLowPassPlugin: a Butterworth of order slope/6, 6..48 dB/oct)", () => {
+  it("reads state.slope, snapped onto the engine's grid; absent (an older engine) is 12", () => {
+    expect(slopeOf(filter("lowpass", 4000, {}, 24))).toBe(24);
+    expect(slopeOf(filter("highpass", 180, {}, 48))).toBe(48);
+    expect(slopeOf(noSlope(filter("highpass", 180)))).toBe(12);
+    expect(slopeOf({ ...filter("highpass", 180), state: undefined })).toBe(12);
+    expect(canSetSlope(filter("lowpass", 4000))).toBe(true);
+    expect(canSetSlope(noSlope(filter("lowpass", 4000)))).toBe(false);
+    // the engine's coerce (contract §1a): 25 → 24, 27 → 30, 0 → 6, 100 → 48
+    expect([25, 27, 0, 100, 6, 48, 33, 39].map(snapSlope)).toEqual([24, 30, 6, 48, 6, 48, 36, 42]);
+    expect(snapSlope(Number.NaN)).toBe(DEFAULT_SLOPE);
+    expect(SLOPES.map(orderOf)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(slopeLabel(24)).toBe("24 dB/oct");
+    expect(SLOPE_RANGE).toEqual({ min: 6, max: 48, step: 6 });
+  });
+
+  it("steps by keys: arrows one order (6 dB/oct), Home/End the ends, nothing past them", () => {
+    expect(slopeKeyTarget("ArrowUp", 12)).toBe(18);
+    expect(slopeKeyTarget("ArrowRight", 12)).toBe(18);
+    expect(slopeKeyTarget("ArrowDown", 12)).toBe(6);
+    expect(slopeKeyTarget("ArrowLeft", 12)).toBe(6);
+    expect(slopeKeyTarget("ArrowUp", 48)).toBe(48);
+    expect(slopeKeyTarget("ArrowDown", 6)).toBe(6);
+    expect(slopeKeyTarget("Home", 30)).toBe(6);
+    expect(slopeKeyTarget("End", 30)).toBe(48);
+    expect(slopeKeyTarget("PageUp", 30)).toBeNull();
+    expect(slopeKeyTarget("x", 30)).toBeNull();
+  });
+
+  it("draws the exact cascade at each slope (research values at 48 kHz)", () => {
+    const hp90 = [-6.990, -12.305, -18.130, -24.101, -30.109, -36.126, -42.147, -48.167];
+    const lp8k = [-7.515, -13.532, -20.046, -26.680, -33.341, -40.007, -46.674, -53.342];
+    SLOPES.forEach((s, i) => {
+      expect(responseDb("highpass", 180, 90, FS, s)).toBeCloseTo(hp90[i], 3);
+      expect(responseDb("lowpass", 4000, 8000, FS, s)).toBeCloseTo(lp8k[i], 3);
+      expect(closedFormDb("highpass", 180, 90, FS, s)).toBeCloseTo(hp90[i], 3);
+      expect(closedFormDb("lowpass", 4000, 8000, FS, s)).toBeCloseTo(lp8k[i], 3);
+    });
+  });
+
+  it("is -3.01 dB at the cutoff for every slope, mode and rate", () => {
+    for (const fs of [44100, 48000, 96000]) {
+      for (const s of SLOPES) {
+        for (const fc of [30, 180, 1000, 4000, 15000]) {
+          expect(responseDb("lowpass", fc, fc, fs, s)).toBeCloseTo(-3.0103, 4);
+          expect(responseDb("highpass", fc, fc, fs, s)).toBeCloseTo(-3.0103, 4);
+        }
+      }
+    }
+  });
+
+  it("matches the closed form everywhere it is drawn (the cascade's sections multiply out exactly)", () => {
+    for (const s of SLOPES) {
+      for (const mode of ["lowpass", "highpass"] as const) {
+        for (const fc of [80, 1000, 9000]) {
+          for (const f of curveFreqs(fc, FS)) {
+            const want = closedFormDb(mode, fc, f, FS, s);
+            if (want < -100) continue;   // below the -120 dB per-section floor's reach
+            expect(Math.abs(responseDb(mode, fc, f, FS, s) - want)).toBeLessThan(1e-6);
+          }
+        }
+      }
+    }
+  });
+
+  it("falls by its slope per octave in the stopband (6.02·N dB: the label rounds 20·log10(2))", () => {
+    for (const s of SLOPES) {
+      const N = s / 6;
+      // a high-pass at 4 kHz, read an octave apart far below it (where the warp is nil)
+      const drop = responseDb("highpass", 4000, 100, FS, s) - responseDb("highpass", 4000, 50, FS, s);
+      expect(drop).toBeCloseTo(20 * N * Math.log10(2), 1);
+      // the low-pass mirror: a 10 Hz cutoff read at 200 and 400 Hz (low enough that the
+      // bilinear warp, which steepens a low-pass toward Nyquist, is under 0.02 dB)
+      const fall = responseDb("lowpass", 10, 200, FS, s) - responseDb("lowpass", 10, 400, FS, s);
+      expect(fall).toBeCloseTo(20 * N * Math.log10(2), 1);
+    }
+  });
+
+  it("12 dB/oct is Tracktion's own biquad, bit for bit (the default when no slope is given)", () => {
+    expect(filterChain("lowpass", 4000, FS, 12)).toEqual([lowPass(FS, 4000)]);
+    expect(filterChain("highpass", 180, FS)).toEqual([highPass(FS, 180)]);
+    for (const f of [20, 90, 180, 1000, 8000, 19000]) {
+      expect(responseDb("highpass", 180, f, FS)).toBe(biquadDb(highPass(FS, 180), f, FS));
+      expect(responseDb("lowpass", 4000, f, FS, 12)).toBe(biquadDb(lowPass(FS, 4000), f, FS));
+    }
+    // the other slopes are cascades: ⌈N/2⌉ sections (a first-order one when N is odd)
+    expect(SLOPES.map((s) => filterChain("lowpass", 1000, FS, s).length)).toEqual([1, 1, 2, 2, 3, 3, 4, 4]);
+  });
+
+  it("samples the curve densely within an octave of the cutoff, and on the log grid elsewhere", () => {
+    const top = plotScales(FS).top;
+    const freqs = curveFreqs(1000, FS);
+    expect(freqs[0]).toBe(20);
+    expect(freqs[freqs.length - 1]).toBeCloseTo(top, 9);
+    expect(freqs).toContain(1000);
+    for (let i = 1; i < freqs.length; i++) expect(freqs[i]).toBeGreaterThan(freqs[i - 1]);
+    const gaps = freqs.slice(1).map((f, i) => Math.log2(f / freqs[i]));
+    // within ±1 octave: 1/24 octave apart; the widest gap anywhere is the 96-point grid's
+    const near = freqs.filter((f) => f >= 500 && f <= 2000);
+    expect(near).toHaveLength(2 * DENSE_PER_OCTAVE + 1);
+    for (let i = 1; i < near.length; i++) expect(Math.log2(near[i] / near[i - 1])).toBeCloseTo(1 / 24, 9);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(Math.log2(top / 20) / 95 + 1e-9);
+    // a cutoff off the plot's ends: the plot's own range, still both ends
+    for (const fc of [10, 22000]) {
+      const f = curveFreqs(fc, FS);
+      expect(f[0]).toBe(20);
+      expect(f[f.length - 1]).toBeCloseTo(top, 9);
+      expect(f.every((v) => v >= 20 && v <= top)).toBe(true);
+    }
+    // the thumbnail's coarser set: 24 across, 8 per octave near the cutoff
+    const mini = curveFreqs(1000, FS, MINI_POINTS, MINI_PER_OCTAVE);
+    expect(mini.filter((f) => f >= 500 && f <= 2000)).toHaveLength(17);
+  });
+});
+
 describe("FilterPanel wiring", () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -235,7 +360,10 @@ describe("FilterPanel wiring", () => {
     const hp = host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-mode-highpass"]')!;
     expect(hp.getAttribute("aria-pressed")).toBe("true");
     expect(lp.disabled && hp.disabled).toBe(true);
-    expect(host.querySelector('[data-testid="v3-filter-old-engine"]')!.textContent).toMatch(/needs the updated Mosh engine/);
+    // no state at all: neither the mode nor the slope can be set, and one note says both
+    expect(host.querySelector('[data-testid="v3-filter-old-engine"]')!.textContent).toBe("LP/HP switch and slope need the updated Mosh engine");
+    expect(host.querySelector('[data-testid="v3-filter-slope"]')).toBeNull();
+    expect(host.querySelector('[data-testid="v3-filter-slope-fixed"]')!.textContent).toBe("12 dB/oct");
     act(() => lp.click());
     // a disabled button swallows the click; even dispatched directly, the handler refuses
     act(() => { lp.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
@@ -370,7 +498,9 @@ describe("FilterPanel wiring", () => {
       render(filter(mode, hz), fs);
       const { x, y } = plotScales(fs);
       const pts = points('[data-testid="v3-filter-curve"]');
-      expect(pts.length).toBe(96);
+      // 96 points across the plot, the octave either side of the cutoff 24 per octave
+      expect(pts.length).toBe(curveFreqs(hz, fs).length);
+      expect(pts.length).toBeGreaterThan(96);
       for (const [px, py] of pts) {
         const want = Math.min(PLOT_H, Math.max(0, y.to(responseDb(mode, hz, x.from(px), fs))));
         expect(py).toBeCloseTo(want, 1);
@@ -507,6 +637,205 @@ describe("FilterPanel wiring", () => {
       render(filter("highpass", 180 * 2 ** (3 / 12)));   // caught up
       act(() => { vi.advanceTimersByTime(1000); });
       expect(field().value).toBe(fmtFreq(180 * 2 ** (3 / 12)));
+    });
+  });
+
+  describe("the slope stepper", () => {
+    const stepper = () => host.querySelector<HTMLElement>('[data-testid="v3-filter-slope"]')!;
+    const up = () => host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-slope-up"]')!;
+    const down = () => host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-slope-down"]')!;
+    /** Every set_plugin_state the panel sent, as [key, value]; each must carry no gesture
+     *  (one change is one undo step of its own). */
+    const slopeSends = () => setState.mock.calls.map((c) => {
+      expect(c[2]?.gesture).toBeUndefined();
+      return [c[0], c[1]];
+    });
+    const curveYs = () => points('[data-testid="v3-filter-curve"]');
+    /** The drawn curve against the exact response at `slope` (0.1 px). */
+    const expectCurveAt = (mode: "lowpass" | "highpass", hz: number, slope: number) => {
+      const { x, y } = plotScales(FS);
+      const pts = curveYs();
+      expect(pts.length).toBe(curveFreqs(hz, FS).length);
+      for (const [px, py] of pts) {
+        expect(py).toBeCloseTo(Math.min(PLOT_H, Math.max(0, y.to(responseDb(mode, hz, x.from(px), FS, slope)))), 1);
+      }
+    };
+
+    it("is a spin button for 6..48 dB/oct showing the engine's value", () => {
+      render(filter("highpass", 180, {}, 24));
+      const s = stepper();
+      expect(s.getAttribute("role")).toBe("spinbutton");
+      expect(s.getAttribute("aria-valuemin")).toBe("6");
+      expect(s.getAttribute("aria-valuemax")).toBe("48");
+      expect(s.getAttribute("aria-valuenow")).toBe("24");
+      expect(s.getAttribute("aria-valuetext")).toBe("24 dB/oct");
+      expect(s.textContent).toBe("24dB/oct");
+      expect(s.tabIndex).toBe(0);
+      expect(handle().getAttribute("aria-valuetext")).toBe("180 Hz, 24 dB/oct");
+      expect(host.querySelector('[data-testid="v3-filter-slope-fixed"]')).toBeNull();
+      expect(host.querySelector('[data-testid="v3-filter-old-engine"]')).toBeNull();
+      expectCurveAt("highpass", 180, 24);
+    });
+
+    it("each click sends ONE set_plugin_state, stepping from what it last sent (not the stale snapshot)", () => {
+      render(filter("highpass", 180));
+      act(() => up().click());
+      expect(slopeSends()).toEqual([["slope", 18]]);
+      act(() => up().click());
+      act(() => up().click());
+      act(() => down().click());
+      expect(slopeSends()).toEqual([["slope", 18], ["slope", 24], ["slope", 30], ["slope", 24]]);
+      expect(setParam).not.toHaveBeenCalled();
+    });
+
+    it("keys: arrows ±6, Home/End the ends; sends only on a change; never reach the app's shortcuts", () => {
+      render(filter("lowpass", 4000));
+      const spy = vi.fn();
+      window.addEventListener("keydown", spy);
+      try {
+        key(stepper(), "ArrowUp");      // 18
+        key(stepper(), "ArrowRight");   // 24
+        key(stepper(), "End");          // 48
+        key(stepper(), "End");          // already 48: nothing
+        key(stepper(), "ArrowUp");      // past the end: nothing
+        key(stepper(), "Home");         // 6
+        key(stepper(), "ArrowDown");    // past the end: nothing
+        key(stepper(), "ArrowLeft");    // nothing
+        expect(slopeSends()).toEqual([["slope", 18], ["slope", 24], ["slope", 48], ["slope", 6]]);
+        expect(spy).not.toHaveBeenCalled();
+        key(stepper(), "x");            // not ours: it still bubbles, sends nothing
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(setState).toHaveBeenCalledTimes(4);
+      } finally {
+        window.removeEventListener("keydown", spy);
+      }
+    });
+
+    it("at an end its button is aria-disabled (it keeps focus) and sends nothing", () => {
+      render(filter("highpass", 180, {}, 48));
+      expect(up().getAttribute("aria-disabled")).toBe("true");
+      expect(up().disabled).toBe(false);
+      expect(down().getAttribute("aria-disabled")).toBe("false");
+      act(() => up().click());
+      expect(setState).not.toHaveBeenCalled();
+      render(filter("highpass", 180, {}, 6));
+      expect(down().getAttribute("aria-disabled")).toBe("true");
+      act(() => down().click());
+      expect(setState).not.toHaveBeenCalled();
+    });
+
+    it("the curve and the read-out follow a click at once; the engine's echo hands over without a flicker", () => {
+      render(filter("lowpass", 1000));
+      expectCurveAt("lowpass", 1000, 12);
+      act(() => up().click());
+      act(() => up().click());   // 24, before any patch
+      expect(stepper().getAttribute("aria-valuenow")).toBe("24");
+      expect(handle().getAttribute("aria-valuetext")).toBe("1.00 kHz, 24 dB/oct");
+      expectCurveAt("lowpass", 1000, 24);
+      render(filter("lowpass", 1000, {}, 18));   // the echo of the first click: keep 24
+      expect(stepper().getAttribute("aria-valuenow")).toBe("24");
+      expectCurveAt("lowpass", 1000, 24);
+      render(filter("lowpass", 1000, {}, 24));   // caught up
+      expect(stepper().getAttribute("aria-valuenow")).toBe("24");
+      act(() => up().click());
+      expect(slopeSends()[2]).toEqual(["slope", 30]);
+    });
+
+    it("a slope change we did not send (undo, an agent) replaces the pending value at once", () => {
+      render(filter("lowpass", 1000));
+      act(() => up().click());                   // pending 18
+      render(filter("lowpass", 1000, {}, 42));   // elsewhere
+      expect(stepper().getAttribute("aria-valuenow")).toBe("42");
+      expectCurveAt("lowpass", 1000, 42);
+      act(() => down().click());
+      expect(slopeSends()).toEqual([["slope", 18], ["slope", 36]]);
+    });
+
+    it("a refused change (no patch) falls back to the engine's value after the pending window", () => {
+      vi.useFakeTimers();
+      try {
+        render(filter("highpass", 180));
+        act(() => up().click());
+        expect(stepper().getAttribute("aria-valuenow")).toBe("18");
+        act(() => { vi.advanceTimersByTime(900); });
+        expect(stepper().getAttribute("aria-valuenow")).toBe("12");
+        expectCurveAt("highpass", 180, 12);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    /** The sharpest bend of a polyline (degrees between consecutive segments), over the
+     *  stretch drawn inside the plot (a point clamped to an edge is not a bend). */
+    const sharpestBend = (pts: readonly (readonly [number, number])[]) => {
+      let worst = 0;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [a, b, c] = [pts[i - 1], pts[i], pts[i + 1]];
+        if (![a, b, c].every((p) => p[1] > 0 && p[1] < PLOT_H)) continue;
+        const v1 = [b[0] - a[0], b[1] - a[1]], v2 = [c[0] - b[0], c[1] - b[1]];
+        const deg = Math.abs(Math.atan2(v1[0] * v2[1] - v1[1] * v2[0], v1[0] * v2[0] + v1[1] * v2[1])) * 180 / Math.PI;
+        worst = Math.max(worst, deg);
+      }
+      return worst;
+    };
+
+    it("draws each slope's exact curve, with no visible corner at the knee even at 48 dB/oct", () => {
+      for (const mode of ["lowpass", "highpass"] as const) {
+        for (const s of [6, 12, 24, 48]) {
+          render(filter(mode, 1000, {}, s));
+          expectCurveAt(mode, 1000, s);
+          // On the log axis the stopband is a straight line; what shows as a corner is a
+          // sharp bend where the knee turns into it. 1/24 octave there keeps every bend
+          // under 10° (the plain 96-point grid bends ~20° per point at 48 dB/oct).
+          expect(sharpestBend(curveYs())).toBeLessThan(10);
+        }
+      }
+      // anti-vacuity: the same check fails on the old even grid at 48 dB/oct
+      const { x, y } = plotScales(FS);
+      const even = logFreqs(96, 20, plotScales(FS).top)
+        .map((f) => [x.to(f), Math.min(PLOT_H, Math.max(0, y.to(responseDb("lowpass", 1000, f, FS, 48))))] as const);
+      expect(sharpestBend(even)).toBeGreaterThan(15);
+      // steeper is deeper: half an octave past a 1 kHz low-pass
+      expect(y.to(responseDb("lowpass", 1000, 1414, FS, 48))).toBeGreaterThan(y.to(responseDb("lowpass", 1000, 1414, FS, 12)) + 15);
+    });
+
+    it("the thumbnail is drawn at the plugin's slope", () => {
+      const mini = (s: number) => {
+        act(() => root.render(React.createElement(filterPanelDef.Mini!, { plugin: filter("lowpass", 1000, {}, s), trackId: "t1", sampleRate: FS, setParam, setState })));
+        return points('[data-testid="v3-filter-mini"] path');
+      };
+      const { x, y } = plotScales(FS, MINI_W, MINI_H);
+      for (const s of [6, 48]) {
+        const pts = mini(s);
+        expect(pts.length).toBe(curveFreqs(1000, FS, MINI_POINTS, MINI_PER_OCTAVE).length);
+        for (const [px, py] of pts) {
+          expect(py).toBeCloseTo(Math.min(MINI_H, Math.max(0, y.to(responseDb("lowpass", 1000, x.from(px), FS, s)))), 1);
+        }
+      }
+      // an engine without the slope: drawn at its fixed 12 dB/oct
+      act(() => root.render(React.createElement(filterPanelDef.Mini!, { plugin: noSlope(filter("lowpass", 1000)), trackId: "t1", sampleRate: FS, setParam, setState })));
+      const p12 = points('[data-testid="v3-filter-mini"] path');
+      expect(p12.length).toBeGreaterThan(0);
+      for (const [px, py] of p12) {
+        expect(py).toBeCloseTo(Math.min(MINI_H, Math.max(0, y.to(responseDb("lowpass", 1000, x.from(px), FS, 12)))), 1);
+      }
+    });
+
+    it("an engine without the slope: the fixed 12 dB/oct caption, a note, a 12 dB/oct curve, nothing sent", () => {
+      render(noSlope(filter("highpass", 180)));
+      expect(host.querySelector('[data-testid="v3-filter-slope"]')).toBeNull();
+      expect(host.querySelector('[data-testid="v3-filter-slope-up"]')).toBeNull();
+      const fixed = host.querySelector('[data-testid="v3-filter-slope-fixed"]')!;
+      expect(fixed.textContent).toBe("12 dB/oct");
+      expect(fixed.getAttribute("role")).toBeNull();          // a caption, not a control
+      expect(host.querySelector('[data-testid="v3-filter-old-engine"]')!.textContent).toBe("Slope setting needs the updated Mosh engine");
+      expect(handle().getAttribute("aria-valuetext")).toBe("180 Hz, 12 dB/oct");
+      expectCurveAt("highpass", 180, 12);
+      // the LP/HP switch still works on it
+      const lp = host.querySelector<HTMLButtonElement>('[data-testid="v3-filter-mode-lowpass"]')!;
+      expect(lp.disabled).toBe(false);
+      act(() => lp.click());
+      expect(setState.mock.calls).toEqual([["mode", "lowpass"]]);
     });
   });
 

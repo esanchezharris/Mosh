@@ -1,5 +1,5 @@
-// Which plugin types have a panel of their own. A type that is not here (the instruments,
-// externals, anything new) keeps the plain list of controls (GenericParams).
+// Which plugin types have a panel of their own. A type that is not here (externals, anything
+// new) keeps the plain list of controls (GenericParams).
 import type { PanelDef } from "./types";
 import { autoTunePanelDef } from "./AutoTunePanel";
 import { eqPanelDef } from "./EqPanel";
@@ -13,6 +13,8 @@ import { phaserPanelDef } from "./PhaserPanel";
 import { pitchShifterPanelDef } from "./PitchPanel";
 import { ottPanelDef } from "./OttPanel";
 import { xFeedbackPanelDef } from "./XFeedbackPanel";
+import { fourOscPanelDef } from "./FourOscPanel";
+import { samplerPanelDef } from "./SamplerPanel";
 
 export const PANELS: Partial<Record<string, PanelDef>> = {
   moshAutoTune: autoTunePanelDef,
@@ -28,4 +30,6 @@ export const PANELS: Partial<Record<string, PanelDef>> = {
   pitchShifter: pitchShifterPanelDef,
   moshOTT: ottPanelDef,
   moshXFeedback: xFeedbackPanelDef,
+  "4osc": fourOscPanelDef,
+  sampler: samplerPanelDef,
 };

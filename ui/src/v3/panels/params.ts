@@ -1,13 +1,20 @@
 // Reading and writing native plugin parameters in physical units.
 //
-// The snapshot carries each parameter's normalised 0-1 value; every Tracktion and Mosh
-// built-in maps it LINEARLY onto its physical range (no skew), so
-// physical = min + value·(max − min). The engine publishes min/max for most parameters;
-// a panel passes the documented range as the fallback for the ones it does not (and for
-// mock or older sessions).
+// The snapshot carries each parameter's normalised 0-1 value and, for most parameters, the
+// physical range it maps onto (JUCE NormalisableRange, non-symmetric):
+//   phys = min + (max − min)·v^(1/skew)        v = ((phys − min)/(max − min))^skew
+// `skew` is sent only when it is not 1, so every effect built-in (no skew) stays linear:
+// phys = min + v·(max − min). 4OSC is the skewed one: its times are skew 0.2 (v = 0.5 is
+// 1.876 s, not 30 s), its levels skew 4, its LFO rate skew 0.3. A `step` (the range's
+// interval, e.g. 4OSC Tune in whole semitones) snaps physical values to min + k·step, as
+// JUCE's snapToLegalValue does. A panel passes the documented range (and skew/step) as the
+// fallback for parameters the engine sends without a range (mock or older sessions); when
+// the engine DOES send min/max, its skew/step (or their absence) win over the fallback's.
 import type { Plugin, PluginParam, PluginStateValue } from "../../types";
 
-export type Range = { min: number; max: number };
+/** A physical range. `skew`/`symmetricSkew`/`step` follow JUCE NormalisableRange; absent
+ *  means linear and continuous. */
+export type Range = { min: number; max: number; skew?: number; symmetricSkew?: boolean; step?: number };
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -15,22 +22,74 @@ export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.ma
 export const param = (plugin: Plugin, index: number): PluginParam | undefined =>
   plugin.params.find((p) => p.index === index);
 
-function rangeOf(p: PluginParam | undefined, fallback: Range): Range {
+/** The parameter with engine id `id` (4OSC: "ampAttack", "level1", …). Names repeat inside
+ *  one plugin; ids do not. */
+export const paramById = (plugin: Plugin, id: string): PluginParam | undefined =>
+  plugin.params.find((p) => p.id === id);
+
+/** The mapping a parameter uses: the engine's when it sent a range, else the fallback. */
+export function rangeOf(p: PluginParam | undefined, fallback: Range): Range {
+  const engine = typeof p?.min === "number" && typeof p?.max === "number" && p.max > p.min;
+  if (engine) {
+    return {
+      min: p!.min!, max: p!.max!,
+      ...(typeof p!.skew === "number" && p!.skew > 0 && p!.skew !== 1 ? { skew: p!.skew } : {}),
+      ...(p!.symmetricSkew ? { symmetricSkew: true } : {}),
+      ...(typeof p!.step === "number" && p!.step > 0 ? { step: p!.step } : {}),
+    };
+  }
+  // A half-sent range (only min, or only max) keeps the engine's end, as before.
   const min = typeof p?.min === "number" ? p.min : fallback.min;
   const max = typeof p?.max === "number" ? p.max : fallback.max;
-  return max > min ? { min, max } : fallback;
+  return max > min ? { ...fallback, min, max } : fallback;
 }
 
-/** The parameter's value in physical units. */
+const skewOf = (r: Range): number => (typeof r.skew === "number" && r.skew > 0 && Number.isFinite(r.skew) ? r.skew : 1);
+
+/** JUCE NormalisableRange::convertFrom0to1 (no snapping). */
+export function from0to1(r: Range, v: number): number {
+  const p = clamp01(v);
+  const skew = skewOf(r);
+  if (!r.symmetricSkew) {
+    const q = skew !== 1 && p > 0 ? Math.exp(Math.log(p) / skew) : p;
+    return r.min + (r.max - r.min) * q;
+  }
+  let d = 2 * p - 1;
+  if (skew !== 1 && d !== 0) d = Math.exp(Math.log(Math.abs(d)) / skew) * (d < 0 ? -1 : 1);
+  return r.min + ((r.max - r.min) / 2) * (1 + d);
+}
+
+/** JUCE NormalisableRange::convertTo0to1 (clamped to 0..1). */
+export function to0to1(r: Range, phys: number): number {
+  if (!(r.max > r.min) || !Number.isFinite(phys)) return 0;
+  const p = clamp01((phys - r.min) / (r.max - r.min));
+  const skew = skewOf(r);
+  if (skew === 1) return p;
+  if (!r.symmetricSkew) return clamp01(p ** skew);
+  const d = 2 * p - 1;
+  return clamp01((1 + Math.abs(d) ** skew * (d < 0 ? -1 : 1)) / 2);
+}
+
+/** Snap a physical value to the range's step and clamp it into the range (JUCE
+ *  snapToLegalValue: start + step·floor((v − start)/step + 0.5)). No step: only clamped. */
+export function snapToRange(r: Range, phys: number): number {
+  let v = phys;
+  if (typeof r.step === "number" && r.step > 0) v = r.min + r.step * Math.floor((v - r.min) / r.step + 0.5);
+  return clamp(v, r.min, r.max);
+}
+
+/** The parameter's value in physical units (snapped to its step, when it has one). */
 export function physOf(p: PluginParam | undefined, fallback: Range): number {
   const r = rangeOf(p, fallback);
-  return r.min + clamp01(p?.value ?? 0) * (r.max - r.min);
+  const phys = from0to1(r, p?.value ?? 0);
+  return r.step ? snapToRange(r, phys) : phys;
 }
 
-/** The normalised value set_plugin_param takes for a physical value (clamped to the range). */
+/** The normalised value set_plugin_param takes for a physical value (snapped to the step,
+ *  clamped to the range). */
 export function normOf(p: PluginParam | undefined, phys: number, fallback: Range): number {
   const r = rangeOf(p, fallback);
-  return clamp01((phys - r.min) / (r.max - r.min));
+  return to0to1(r, r.step ? snapToRange(r, phys) : phys);
 }
 
 export const stateOf = (plugin: Plugin, key: string): PluginStateValue | undefined => plugin.state?.[key];

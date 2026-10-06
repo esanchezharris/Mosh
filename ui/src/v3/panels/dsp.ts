@@ -31,6 +31,59 @@ export function highPass(fs: number, fc: number, q = SQRT1_2): Biquad {
   return normalise(c1, c1 * -2, c1, 1, c1 * 2 * (n2 - 1), c1 * (1 - (1 / q) * n + n2));
 }
 
+/** JUCE IIRCoefficients::makeBandPass(fs, f, Q) (the 3-argument maker; 4OSC's band-pass). */
+export function bandPass(fs: number, f: number, q = SQRT1_2): Biquad {
+  const n = 1 / Math.tan(Math.PI * f / fs);
+  const n2 = n * n;
+  const c1 = 1 / (1 + (1 / q) * n + n2);
+  return normalise((c1 * n) / q, 0, (-c1 * n) / q, 1, c1 * 2 * (1 - n2), c1 * (1 - (1 / q) * n + n2));
+}
+
+/** JUCE IIRCoefficients::makeNotchFilter(fs, f, Q) (the 3-argument maker; 4OSC's notch). */
+export function notch(fs: number, f: number, q = SQRT1_2): Biquad {
+  const n = 1 / Math.tan(Math.PI * f / fs);
+  const n2 = n * n;
+  const c1 = 1 / (1 + n / q + n2);
+  return normalise(c1 * (1 + n2), 2 * c1 * (1 - n2), c1 * (1 + n2), 1, c1 * 2 * (1 - n2), c1 * (1 - n / q + n2));
+}
+
+/** juce_dsp ArrayCoefficients::makeFirstOrderLowPass ({n, n, n+1, n−1}, n = tan(πf/fs)),
+ *  normalised by a0 like the 6-argument IIRCoefficients constructor. 6 dB/oct. */
+export function firstOrderLowPass(fs: number, fc: number): Biquad {
+  const n = Math.tan(Math.PI * fc / fs);
+  return normalise(n, n, 0, n + 1, n - 1, 0);
+}
+
+/** juce_dsp ArrayCoefficients::makeFirstOrderHighPass ({1, −1, n+1, n−1}). 6 dB/oct. */
+export function firstOrderHighPass(fs: number, fc: number): Biquad {
+  const n = Math.tan(Math.PI * fc / fs);
+  return normalise(1, -1, 0, n + 1, n - 1, 0);
+}
+
+/** The Q of each biquad section of an order-N Butterworth (k = 1..⌊N/2⌋):
+ *  −1 / (2·cos(π(2k + N − 1)/(2N))). Order 2 is exactly the 2-argument makers' 1/√2, so a
+ *  12 dB/oct cascade is the plain biquad. An odd order adds one first-order section. */
+export function butterworthQs(order: number): number[] {
+  const N = Math.max(1, Math.min(8, Math.round(order)));
+  if (N === 2) return [SQRT1_2];
+  return Array.from({ length: Math.floor(N / 2) }, (_, i) => {
+    const k = i + 1;
+    return -1 / (2 * Math.cos((Math.PI * (2 * k + N - 1)) / (2 * N)));
+  });
+}
+
+/** The engine's low/high-pass cascade at order N (slope = 6·N dB/oct, N = 1..8): the
+ *  biquads at butterworthQs(N) through the JUCE makers, then the first-order section when
+ *  N is odd. Their dB sum (chainDb) is the filter's exact response: −3.01 dB at fc for
+ *  every order. */
+export function butterworth(mode: "lowpass" | "highpass", fs: number, fc: number, order: number): Biquad[] {
+  const N = Math.max(1, Math.min(8, Math.round(order)));
+  const make = mode === "highpass" ? highPass : lowPass;
+  const sections = N === 2 ? [make(fs, fc)] : butterworthQs(N).map((q) => make(fs, fc, q));
+  if (N % 2 === 1) sections.push(mode === "highpass" ? firstOrderHighPass(fs, fc) : firstOrderLowPass(fs, fc));
+  return sections;
+}
+
 /** JUCE Decibels::gainWithLowerBound(gain, -100 dB), as the shelf/peak makers apply it. */
 function gainWithLowerBound(gain: number): number {
   return gain <= 1e-5 ? 0 : gain;

@@ -8,10 +8,12 @@
 // entirely, so an agent following the real list_builtins vocabulary failed only in
 // dev/e2e. Display names stay the mock's shorter forms where the UI already shows them.
 import type { MoshFxReadout, Plugin, PluginParam, PluginStateValue } from "../types";
+import { FOUR_OSC_PARAMS, FOUR_OSC_STATE, fourOscParamEntry, fourOscParams, fourOscSetNorm } from "./fourosc";
+import { SAMPLER_LIMITS } from "./sampler";
 
 export const BUILTINS = [
-  { type: "4osc", name: "4OSC", category: "Instruments", isInstrument: true, builtin: true as const },
-  { type: "sampler", name: "Sampler", category: "Instruments", isInstrument: true, builtin: true as const },
+  { type: "4osc", name: "4OSC", category: "Instrument", isInstrument: true, builtin: true as const },
+  { type: "sampler", name: "Sampler", category: "Instrument", isInstrument: true, builtin: true as const },
   { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "4bandEq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
@@ -47,6 +49,7 @@ const AUTOTUNE_DEFAULTS = [0, 0, 75 / 245, 1, 1 / 3, 1, 0.75, 1, 0];
 /** What a built-in's parameter reads back as at a 0-1 `value`, where the mock knows the
  *  engine's own wording (Mosh AutoTune). Undefined elsewhere: the row shows the number. */
 export function builtinParamDisplay(type: string, index: number, value: number): string | undefined {
+  if (type === "4osc") return fourOscSetNorm(index, value)?.display;
   const native = NATIVE[type]?.[index];
   if (native) return native.fmt(native.min + Math.min(1, Math.max(0, value)) * (native.max - native.min));
   if (type !== "moshAutoTune") return undefined;
@@ -160,8 +163,18 @@ export const STATE_SPECS: Record<string, Record<string, PluginStateValue>> = {
     rate: { value: 0.4, min: 0.05, max: 10, unit: "Hz" },
     feedback: { value: 0.7, min: -0.95, max: 0.95 },
   },
-  lowpass: { mode: { value: "lowpass", choices: ["lowpass", "highpass"] } },
-  highpass: { mode: { value: "highpass", choices: ["lowpass", "highpass"] } },
+  // The slope (dB/oct, a Butterworth of order slope/6) is Mosh's low/high-pass subclass.
+  lowpass: {
+    mode: { value: "lowpass", choices: ["lowpass", "highpass"] },
+    slope: { value: 12, min: 6, max: 48, step: 6, unit: "dB/oct" },
+  },
+  highpass: {
+    mode: { value: "highpass", choices: ["lowpass", "highpass"] },
+    slope: { value: 12, min: 6, max: 48, step: 6, unit: "dB/oct" },
+  },
+  // 4OSC's CachedValue settings (wave shapes, unison voices, filter type and slope, the FX
+  // switches, delay time in beats, voice mode, analog envelopes): contract §1c.
+  "4osc": FOUR_OSC_STATE,
 };
 
 export function mkBuiltinState(type: string): Record<string, PluginStateValue> | undefined {
@@ -179,6 +192,11 @@ export function nextMockItemId(): string {
 
 /** Set a seeded plugin's parameter in physical units (keeps value and display consistent). */
 export function setPhysical(plugin: Plugin, index: number, phys: number): void {
+  if (plugin.type === "4osc") {
+    const at = plugin.params.findIndex((x) => x.index === index);
+    if (at >= 0 && FOUR_OSC_PARAMS[index]) plugin.params[at] = { ...plugin.params[at], ...fourOscParamEntry(index, phys) };
+    return;
+  }
   const q = NATIVE[plugin.type]?.[index];
   const p = plugin.params.find((x) => x.index === index);
   if (!q || !p) return;
@@ -189,15 +207,10 @@ export function setPhysical(plugin: Plugin, index: number, phys: number): void {
 export function mkParams(n: number): PluginParam[] {
   return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
 }
-function params(names: string[], values: number[]): PluginParam[] {
-  return names.map((name, index) => ({ index, name, value: values[index] ?? 0.5 }));
-}
 export function mkBuiltinParams(type: string, isInstrument: boolean): PluginParam[] {
-  // The built-in 4OSC exposes a small patch surface (native load_preset reports paramsApplied: 8),
-  // so a preset's effect is observable here as it is in the engine. Other instruments stay bare.
-  if (isInstrument) return type === "4osc"
-    ? params(["Osc 1 Level", "Osc 2 Level", "Cutoff", "Resonance", "Attack", "Decay", "Sustain", "Release"], [0.8, 0.5, 0.6, 0.2, 0.05, 0.3, 0.7, 0.25])
-    : [];
+  // The built-in 4OSC: all 68 parameters as the engine sends them (names, ids, ranges with
+  // skew/step, defaults, read-outs). The sampler has no automatable parameters.
+  if (isInstrument) return type === "4osc" ? fourOscParams() : [];
   if (type === "moshAutoTune") return AUTOTUNE_PARAMS.map((spec, index) => {
     const value = AUTOTUNE_DEFAULTS[index];
     return {
@@ -240,5 +253,7 @@ export function mkBuiltinPlugin(b: (typeof BUILTINS)[number], index: number): Pl
     index, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category,
     isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type),
     itemId: nextMockItemId(), ...(state ? { state } : {}),
+    // A new sampler holds no sounds; which one is primary is derived per snapshot.
+    ...(b.type === "sampler" ? { sampler: { primary: true, sounds: [], limits: { ...SAMPLER_LIMITS } } } : {}),
   };
 }

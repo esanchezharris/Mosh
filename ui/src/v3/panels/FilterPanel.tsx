@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { DragNode } from "./DragNode";
-import { logFreqs } from "./dsp";
+import { chainDb } from "./dsp";
 import {
-  CUTOFF_PARAM, FILTER_FACTS, PLOT_H, PLOT_LO_HZ, PLOT_W, canSetMode, clampCutoff, cutoffAtX, cutoffHz, cutoffNorm,
-  defaultCutoff, filterMode, filterSummary, handleX, isUnstable, maxCutoff, parseHz, plotScales,
-  responseDb, stepCutoff, CUTOFF_RANGE, type FilterMode,
+  CUTOFF_PARAM, DEFAULT_SLOPE, PLOT_H, PLOT_LO_HZ, PLOT_W, SLOPE_RANGE, canSetMode, canSetSlope, clampCutoff,
+  curveFreqs, cutoffAtX, cutoffHz, cutoffNorm, defaultCutoff, filterChain, filterMode, filterSummary, handleX,
+  isUnstable, maxCutoff, parseHz, plotScales, slopeKeyTarget, slopeLabel, slopeOf, snapSlope, stepCutoff,
+  CUTOFF_RANGE, type FilterMode,
 } from "./filter";
 import { clamp, fmtFreq, param } from "./params";
 import { clientToSvg, curvePath, fillPath } from "./plot";
@@ -20,6 +21,9 @@ const GRID_DB = [-12, -24];
 const AXIS_LABEL: Record<number, string> = { 100: "100", 1000: "1k", 10000: "10k" };
 /** The minimized row's thumbnail slot. */
 export const MINI_W = 44, MINI_H = 14;
+/** The thumbnail's sampling: 24 points across, 8 per octave near the cutoff (it is 4.4 px
+ *  an octave wide, so that is under a pixel apart). */
+export const MINI_POINTS = 24, MINI_PER_OCTAVE = 8;
 /** How long a keyboard/typed value stays on screen at most while the engine's patch arrives. */
 const PENDING_MS = 800;
 /** Two cutoffs closer than this are the same value (a normalised float round trip). */
@@ -37,6 +41,67 @@ export function keyTarget(e: Pick<KeyboardEvent, "key" | "shiftKey">, hz: number
     case "End": return maxCutoff(fs);
     default: return null;
   }
+}
+
+/** A value sent at once (a key, a typed number, a stepper click) is shown until the
+ *  engine's patch catches up, so the display neither flickers back to the stale snapshot
+ *  nor steps the next key from it. `same` says when two values are one value (a float
+ *  round trip). The snapshot takes over at once when it reaches the latest value sent, or
+ *  moves somewhere never sent (undo, an agent, automation); an echo of an earlier send in
+ *  the same burst keeps the newer pending value; at most PENDING_MS after the last send
+ *  the snapshot wins regardless (a refused command). */
+function usePending<T>(snap: T, same: (a: T, b: T) => boolean) {
+  const [pending, setPending] = useState<T | null>(null);
+  // What was sent while `pending` is shown, oldest first: tells our own echoes apart from
+  // a change made elsewhere.
+  const sent = useRef<T[]>([]);
+  const drop = () => { sent.current = []; setPending(null); };
+  useEffect(() => {
+    if (pending === null) return;
+    const t = setTimeout(drop, PENDING_MS);
+    return () => clearTimeout(t);
+  }, [pending]);
+  const lastSnap = useRef(snap);
+  useEffect(() => {
+    if (same(lastSnap.current, snap)) return;
+    lastSnap.current = snap;
+    if (!sent.current.length) return;
+    const echo = (v: T) => same(v, snap);
+    if (echo(sent.current[sent.current.length - 1]) || !sent.current.some(echo)) drop();
+  }, [snap]);
+  const push = (v: T) => { sent.current.push(v); setPending(v); };
+  return { pending, push, drop };
+}
+
+/** The slope as a stepper, "− 24 dB/oct +": 6..48 in steps of 6, one Butterworth order
+ *  each. Every click or key is ONE set_plugin_state (no gesture), so one undo step, and is
+ *  sent only when it changes the value. */
+function SlopeStepper({ slope, onSet }: { slope: number; onSet: (slope: number) => void }) {
+  const { min, max, step } = SLOPE_RANGE;
+  const set = (v: number) => { const s = snapSlope(v); if (s !== slope) onSet(s); };
+  const onKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
+    const t = slopeKeyTarget(e.key, slope);
+    if (t === null) return;
+    // Ours: the arrows and Home/End must not also nudge clips or move the playhead.
+    e.preventDefault();
+    e.stopPropagation();
+    set(t);
+  };
+  return (
+    <div className="pp-filter-slope" role="group" aria-label="Slope"
+      title="Slope: how steeply it cuts past the cutoff (a Butterworth, 6 dB/oct per order). Arrows step 6; Home/End: 6 and 48">
+      {/* aria-disabled, not disabled: a disabled button would drop the keyboard focus it holds */}
+      <button type="button" className="pp-btn" data-testid="v3-filter-slope-down" aria-label="Gentler slope"
+        aria-disabled={slope <= min} onClick={() => set(slope - step)}>−</button>
+      <span className="v" role="spinbutton" tabIndex={0} data-testid="v3-filter-slope" aria-label="Slope"
+        aria-valuemin={min} aria-valuemax={max} aria-valuenow={slope} aria-valuetext={slopeLabel(slope)}
+        onKeyDown={onKeyDown}>
+        <span className="n">{slope}</span><span className="u">dB/oct</span>
+      </span>
+      <button type="button" className="pp-btn" data-testid="v3-filter-slope-up" aria-label="Steeper slope"
+        aria-disabled={slope >= max} onClick={() => set(slope + step)}>+</button>
+    </div>
+  );
 }
 
 /** The cutoff read-out, which is also where you type one: it reads "4.00 kHz" at rest and
@@ -78,22 +143,26 @@ function CutoffField({ hz, warn, onSet, onStep }: { hz: number; warn: boolean; o
   );
 }
 
-/** The response: the engine's exact biquad on a log axis, its passband filled, and a handle
- *  at (cutoff, -3 dB) that drags along the frequency axis. Bypassed draws the truth: flat.
- *  A cutoff above Nyquist draws no curve: the engine's filter is unstable there. */
-function ResponsePlot({ mode, fc, fs, enabled, onDragStart, onDrag, onDragEnd, onKey, onReset }: {
-  mode: FilterMode; fc: number; fs: number; enabled: boolean;
+/** The response: the engine's exact sections (the Butterworth cascade at this slope) on a
+ *  log axis, its passband filled, and a handle at (cutoff, -3 dB) that drags along the
+ *  frequency axis. Bypassed draws the truth: flat. A cutoff above Nyquist draws no curve:
+ *  the engine's filter is unstable there. */
+function ResponsePlot({ mode, fc, fs, slope, enabled, onDragStart, onDrag, onDragEnd, onKey, onReset }: {
+  mode: FilterMode; fc: number; fs: number; slope: number; enabled: boolean;
   onDragStart: () => void; onDrag: (hz: number) => void; onDragEnd: () => void;
   onKey: (e: KeyboardEvent<SVGGElement>) => boolean; onReset: () => void;
 }) {
   const { x, y, top } = plotScales(fs);
   const unstable = isUnstable(fc, fs);
-  // 96 biquad evaluations: cheap enough to redo on every drag frame.
-  const curve = unstable ? "" : curvePath((f) => (enabled ? responseDb(mode, fc, f, fs) : 0), logFreqs(96, PLOT_LO_HZ, top), x, y, 0, PLOT_H);
+  // About 130 points (dense within an octave of the cutoff, where a steep slope bends) of
+  // at most 5 sections each: cheap enough to redo on every drag frame.
+  const chain = filterChain(mode, fc, fs, slope);
+  const db = (f: number) => (enabled ? chainDb(chain, f, fs) : 0);
+  const curve = unstable ? "" : curvePath(db, curveFreqs(fc, fs), x, y, 0, PLOT_H);
   // The handle sits ON the curve: at (cutoff, -3 dB), or at the plot's edge when the cutoff
   // is past it (the parameter reaches 10 Hz and 22 kHz; the plot shows 20 Hz..20 kHz).
   const hx = handleX(fc, fs);
-  const hy = y.to(unstable ? -3.0103 : enabled ? responseDb(mode, fc, clamp(fc, PLOT_LO_HZ, top), fs) : 0);
+  const hy = y.to(unstable ? -3.0103 : db(clamp(fc, PLOT_LO_HZ, top)));
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
   // Where the pointer went down (viewBox x), captured before the handle stops the event, so
@@ -148,7 +217,7 @@ function ResponsePlot({ mode, fc, fs, enabled, onDragStart, onDrag, onDragEnd, o
       </g>
       <DragNode x={hx} y={hy} r={4.5} hollow={!enabled || unstable} testId="v3-filter-handle"
         ariaLabel={`${label} cutoff`}
-        ariaValueText={`${fmtFreq(fc)}, ${unstable ? "above Nyquist: unstable" : FILTER_FACTS}`}
+        ariaValueText={`${fmtFreq(fc)}, ${unstable ? "above Nyquist: unstable" : slopeLabel(slope)}`}
         valueNow={Math.round(fc)} valueMin={CUTOFF_RANGE.min} valueMax={Math.round(Math.max(maxCutoff(fs), fc))}
         onStart={() => {
           // Relative drag: remember the press and the cutoff's (unclamped) axis position.
@@ -165,47 +234,40 @@ function ResponsePlot({ mode, fc, fs, enabled, onDragStart, onDrag, onDragEnd, o
   );
 }
 
-/** Low-pass / high-pass: LP|HP, the cutoff as a number, the fixed slope, and the response.
- *  An older engine (no `state.mode`) cannot switch LP/HP: the switch shows the type it
- *  reports, disabled, with a note; the cutoff (a plain parameter) still works. */
+/** Low-pass / high-pass: LP|HP, the cutoff as a number, the slope stepper, and the
+ *  response. An older engine cannot set what it does not publish: without `state.mode` the
+ *  LP/HP switch shows the type it reports, disabled; without `state.slope` the slope is the
+ *  fixed "12 dB/oct" caption it runs at; either way one note says so. The cutoff (a plain
+ *  parameter) always works. */
 function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
   const fs = sampleRate > 0 ? sampleRate : 48000;
   const mode = filterMode(plugin);
   const modeSettable = canSetMode(plugin);
+  const slopeSettable = canSetSlope(plugin);
   const automated = !!param(plugin, CUTOFF_PARAM)?.automated;
   const drag = useDragSend<number>((hz, gesture) => setParam(CUTOFF_PARAM, cutoffNorm(plugin, hz, fs), { gesture }));
-  const snapHz = cutoffHz(plugin);
-  // A key or a typed value is sent at once; show it until the engine's patch catches up,
-  // and step the next key from it (not from the snapshot that has not caught up yet).
-  const [pending, setPending] = useState<number | null>(null);
-  // What was sent while `pending` is shown, oldest first: tells our own echoes apart from
-  // a change made elsewhere (undo, an agent, automation).
-  const sent = useRef<number[]>([]);
-  const dropPending = () => { sent.current = []; setPending(null); };
-  useEffect(() => {
-    if (pending === null) return;
-    const t = setTimeout(dropPending, PENDING_MS);
-    return () => clearTimeout(t);
-  }, [pending]);
-  const lastSnap = useRef(snapHz);
-  useEffect(() => {
-    if (Math.abs(lastSnap.current - snapHz) < SAME_HZ) return;
-    lastSnap.current = snapHz;
-    if (!sent.current.length) return;
-    const same = (v: number) => Math.abs(v - snapHz) < SAME_HZ;
-    // Caught up with the latest send, or moved somewhere we never sent: the snapshot wins
-    // at once. An echo of an earlier key in the same burst keeps the newer pending value.
-    if (same(sent.current[sent.current.length - 1]) || !sent.current.some(same)) dropPending();
-  }, [snapHz]);
+  // A key or a typed cutoff is sent at once; it is shown (and the next key steps from it)
+  // until the engine's patch catches up.
+  const cutoffSent = usePending(cutoffHz(plugin), (a, b) => Math.abs(a - b) < SAME_HZ);
   // The newest intent wins: a key/typed value over a settling drag (a drag start clears it).
-  const fc = pending ?? drag.live ?? snapHz;
-  const send = (hz: number) => {
-    const v = clampCutoff(hz, fs);
-    sent.current.push(v);
-    setPending(v);
-    drag.nudge(v);
+  const fc = cutoffSent.pending ?? drag.live ?? cutoffHz(plugin);
+  const send = (v: number) => {
+    const c = clampCutoff(v, fs);
+    cutoffSent.push(c);
+    drag.nudge(c);
   };
-  const dragStart = () => { dropPending(); drag.begin(); };
+  const dragStart = () => { cutoffSent.drop(); drag.begin(); };
+  // The slope: a stepper click is sent at once, and the curve redraws at the new slope
+  // right away (not when the patch lands).
+  const slopeSent = usePending(slopeOf(plugin), (a, b) => a === b);
+  const slope = slopeSettable ? (slopeSent.pending ?? slopeOf(plugin)) : DEFAULT_SLOPE;
+  const sendSlope = (s: number) => {
+    slopeSent.push(s);
+    setState("slope", s);
+  };
+  const note = !modeSettable
+    ? (slopeSettable ? "LP/HP switch needs the updated Mosh engine" : "LP/HP switch and slope need the updated Mosh engine")
+    : !slopeSettable ? "Slope setting needs the updated Mosh engine" : null;
   const onKey = (e: KeyboardEvent<Element>): boolean => {
     const t = keyTarget(e, fc, fs);
     if (t === null) return false;
@@ -235,25 +297,30 @@ function FilterPanel({ plugin, sampleRate, setParam, setState }: PanelProps) {
         {automated && <span className="pp-filter-auto" data-testid="v3-filter-automated" role="img"
           aria-label="Cutoff automated: during playback the automation lane overrides edits here"
           title="Automated: during playback the automation lane sets the cutoff and overrides edits here">auto</span>}
-        <span className="pp-filter-facts" title="One 2nd-order Butterworth stage (Q 0.707): fixed in the engine">{FILTER_FACTS}</span>
+        {slopeSettable
+          ? <SlopeStepper slope={slope} onSet={sendSlope} />
+          : <span className="pp-filter-facts" data-testid="v3-filter-slope-fixed"
+              title="One 2nd-order Butterworth stage (Q 0.707): this engine has no slope setting">{slopeLabel(DEFAULT_SLOPE)}</span>}
       </div>
-      {!modeSettable && <div className="pp-filter-note" data-testid="v3-filter-old-engine">LP/HP switch needs the updated Mosh engine</div>}
-      <ResponsePlot mode={mode} fc={fc} fs={fs} enabled={plugin.enabled}
+      {note && <div className="pp-filter-note" data-testid="v3-filter-old-engine">{note}</div>}
+      <ResponsePlot mode={mode} fc={fc} fs={fs} slope={slope} enabled={plugin.enabled}
         onDragStart={dragStart} onDrag={(hz) => drag.update(hz)} onDragEnd={drag.end}
         onKey={onKey} onReset={() => send(defaultCutoff(mode))} />
     </div>
   );
 }
 
-/** The minimized row's thumbnail: the same exact curve, 44×14, no handle. Above Nyquist
- *  (unstable in the engine) it draws no curve, only a dashed warning baseline. */
+/** The minimized row's thumbnail: the same exact curve at the same slope, 44×14, no
+ *  handle (so a steep filter reads as a cliff). Above Nyquist (unstable in the engine) it
+ *  draws no curve, only a dashed warning baseline. */
 function FilterMini({ plugin, sampleRate }: PanelProps) {
   const fs = sampleRate > 0 ? sampleRate : 48000;
   const mode = filterMode(plugin), fc = cutoffHz(plugin);
   const unstable = isUnstable(fc, fs);
   const W = MINI_W, H = MINI_H;
-  const { x, y, top } = plotScales(fs, W, H);
-  const d = unstable ? "" : curvePath((f) => (plugin.enabled ? responseDb(mode, fc, f, fs) : 0), logFreqs(24, PLOT_LO_HZ, top), x, y, 0, H);
+  const { x, y } = plotScales(fs, W, H);
+  const chain = filterChain(mode, fc, fs, slopeOf(plugin));
+  const d = unstable ? "" : curvePath((f) => (plugin.enabled ? chainDb(chain, f, fs) : 0), curveFreqs(fc, fs, MINI_POINTS, MINI_PER_OCTAVE), x, y, 0, H);
   return (
     <svg className={`pp-filter-mini${plugin.enabled ? "" : " bypassed"}${unstable ? " unstable" : ""}`} data-testid="v3-filter-mini"
       width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">

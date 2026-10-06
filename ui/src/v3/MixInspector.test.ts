@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MixInspector, acceptsTrackPreset, inspectorHasForbiddenTabs, pluginDropIndex, trackPresetLabel } from "./MixInspector";
 import { useStore } from "../store";
 import type { CommandResult, Plugin, Snapshot, Track } from "../types";
+import { PANELS } from "./panels/registry";
+import type { PanelDef, PanelProps, SummaryContext } from "./panels/types";
 
 vi.mock("../ui/GenDrawer", () => ({ GenDrawer: () => React.createElement("div", { "data-testid": "v3-gen" }, "gen") }));
 
@@ -183,6 +185,64 @@ describe("v3 Mix inspector", () => {
       { trackId: "t1", index: 2, toIndex: 3 },
       { trackId: "t1", index: 2, toIndex: 1 },
     ]);
+  });
+
+  it("hands a panel its track, a run() scoped to that track, and its summary the track", async () => {
+    const seen: { props?: PanelProps; ctx?: SummaryContext } = {};
+    const def: PanelDef = {
+      Panel: (props) => { seen.props = props; return null; },
+      summary: (_plugin, ctx) => { seen.ctx = ctx; return "probe summary"; },
+    };
+    PANELS.probeInstrument = def;
+    try {
+      const snap = snapshot();
+      snap.tracks[0]!.plugins = [{ index: 0, name: "Probe", type: "probeInstrument", enabled: true, external: false, builtin: true, isInstrument: true, params: [] } as unknown as Plugin];
+      useStore.setState({ snapshot: snap });
+      act(() => root.render(React.createElement(MixInspector, { snapshot: snap })));
+      expect(seen.props?.track?.id).toBe("t1");
+      expect(seen.props?.trackId).toBe("t1");
+      // the row adds THIS track's id to the commands that take one (a panel cannot aim
+      // one elsewhere), and leaves the read-only path commands alone
+      await act(async () => { await seen.props!.run!("set_drum_pad", { note: 36, gainDb: -3 }); });
+      await act(async () => { await seen.props!.run!("clear_drum_pad", { note: 38, trackId: "other" } as never); });
+      await act(async () => { await seen.props!.run!("file_peaks", { path: "/a.wav", buckets: 64 }); });
+      await act(async () => { await seen.props!.run!("list_drum_kits", {}); });
+      expect(calls.slice(-4)).toEqual([
+        { command: "set_drum_pad", args: { note: 36, gainDb: -3, trackId: "t1" } },
+        { command: "clear_drum_pad", args: { note: 38, trackId: "t1" } },
+        { command: "file_peaks", args: { path: "/a.wav", buckets: 64 } },
+        { command: "list_drum_kits", args: {} },
+      ]);
+      // minimized: the summary is given the track too
+      const row = host.querySelector<HTMLElement>('[data-testid="v3-plugin"]')!;
+      act(() => row.querySelector<HTMLButtonElement>('[data-testid="v3-plugin-minimize"]')!.click());
+      expect(row.querySelector('[data-testid="v3-plugin-summary"]')!.textContent).toBe("probe summary");
+      expect(seen.ctx?.track?.id).toBe("t1");
+      act(() => row.querySelector<HTMLButtonElement>('[data-testid="v3-plugin-minimize"]')!.click());
+    } finally {
+      delete PANELS.probeInstrument;
+    }
+  });
+
+  it("an instrument panel that owns its presets replaces the row's preset menu", async () => {
+    const exec = vi.fn(async (command: string): Promise<CommandResult> => (command === "list_presets"
+      ? { ok: true, command, data: { presets: [{ name: "mosh-bass", file: "/presets/4osc/mosh-bass.json" }] } }
+      : { ok: true, command }));
+    useStore.setState({ exec });
+    const snap = snapshot();
+    snap.tracks[0]!.plugins = [{ index: 0, name: "4OSC", type: "4osc", enabled: true, external: false, builtin: true, isInstrument: true, params: [] } as unknown as Plugin];
+    useStore.setState({ snapshot: snap });
+    await act(async () => { root.render(React.createElement(MixInspector, { snapshot: snap })); });
+    expect(host.querySelectorAll('[data-testid="preset-pick"]')).toHaveLength(1);       // the row's own menu
+    const original = PANELS["4osc"]!;
+    PANELS["4osc"] = { ...original, ownsPresets: true, Panel: () => React.createElement("span", { "data-testid": "own-presets" }) };
+    try {
+      await act(async () => { root.render(React.createElement(MixInspector, { snapshot: { ...snap } })); });
+      expect(host.querySelector('[data-testid="own-presets"]')).not.toBeNull();
+      expect(host.querySelectorAll('[data-testid="preset-pick"]')).toHaveLength(0);
+    } finally {
+      PANELS["4osc"] = original;
+    }
   });
 
   it("pluginDropIndex is the index a plugin ends up at once it has left its old slot", () => {

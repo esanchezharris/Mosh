@@ -25,15 +25,20 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   await expect(rows).toHaveCount(rowsBefore + 1);
   const synth = rows.last();
   await expect(synth).toContainText("4OSC");
-  const fader = synth.locator('input[type="range"]').first();
-  await expect(fader).toBeVisible();                       // the native patch surface is inline
-  const before = await fader.inputValue();
+  // Oscillator 1's level: a control the bundled mosh-bass preset really moves (0 dB → about
+  // -4 dB; the presets never set Tune 1, the first parameter). Read through its accessible
+  // name and value, so it holds for a range input and for a panel's role="slider" dial.
+  const level = synth.getByRole("slider", { name: "Level 1", exact: true }).first();
+  await expect(level).toBeVisible();                        // the native patch surface is inline
+  const reading = () => level.evaluate((el) =>
+    el.getAttribute("aria-valuetext") ?? el.getAttribute("aria-valuenow") ?? (el as HTMLInputElement).value);
+  const before = await reading();
 
   const picker = synth.getByTestId("preset-pick");
   await expect(picker).toBeVisible();
   expect(await picker.locator("option").count()).toBeGreaterThan(1);
   await picker.selectOption({ label: "mosh-bass" });
-  await expect(fader).not.toHaveValue(before);              // readback: the preset moved the patch
+  await expect.poll(reading).not.toBe(before);              // readback: the preset moved the patch
 
   // the Browser's Presets tab offers the same picker for the selected track, and names the sound
   // that is on (the picker itself snaps back to "Presets…" after every pick)
@@ -52,7 +57,7 @@ test("insert 4OSC from Plugins, apply a preset in the inspector, undo the preset
   await expect(page.getByTestId("v3-preset-current")).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(fader).toHaveValue(before);
+  await expect.poll(reading).toBe(before);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(rows).toHaveCount(rowsBefore);
 });

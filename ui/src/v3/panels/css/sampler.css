@@ -1,0 +1,176 @@
+/* Sampler panel (panels/SamplerPanel.tsx). Drum view: a top row (kit menu, hint, the
+   sampler's own output), the sounds as a 4-column grid of compact cells, and ONE row for the
+   selected sound (or a confirmation / the kit list in its place). Melodic view: the same top
+   row, the file's real waveform, a 128-key strip, the row. About 120-140 px tall. */
+.v3-shell .insp .pr .pp-sampler { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* ── top row ── */
+.v3-shell .insp .pr .pp-sampler-top { display: flex; align-items: center; gap: 6px; height: 18px; min-width: 0; }
+.v3-shell .insp .pr .pp-sampler-kitbtn { flex: 0 0 auto; max-width: 104px; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .insp .pr .pp-sampler-kitbtn span { color: var(--muted); font-size: var(--pp-fs-axis); }
+.v3-shell .insp .pr .pp-sampler-kitbtn[aria-expanded="true"] {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.v3-shell .insp .pr .pp-sampler-hint {
+  flex: 1 1 auto; min-width: 0; font-size: var(--pp-fs-cap); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.v3-shell .insp .pr .pp-sampler-hint.notice { color: var(--warn); }
+/* What the sampler adds (its own sounds): a thin live bar with a caption. */
+.v3-shell .insp .pr .pp-sampler-out { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; width: 58px; }
+.v3-shell .insp .pr .pp-sampler-out .k { font-size: var(--pp-fs-axis); color: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-out .pp-bar { flex: 1 1 auto; min-width: 0; }
+
+/* ── the grid ── */
+.v3-shell .insp .pr .pp-sampler-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; min-width: 0;
+  /* More than twelve sounds scroll inside the grid rather than growing the panel. */
+  max-height: calc(29px * 3 + 3px * 2); overflow-y: auto;
+}
+.v3-shell .insp .pr .pp-sampler-cell { position: relative; height: 29px; min-width: 0; }
+.v3-shell .insp .pr .pp-sampler-cell .pad {
+  position: absolute; inset: 0; width: 100%; margin: 0; padding: 1px 4px 0;
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
+  border: 1px solid color-mix(in srgb, var(--text) 13%, transparent); border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 45%, transparent); color: var(--text);
+  font: inherit; text-align: left; cursor: pointer; overflow: hidden;
+}
+.v3-shell .insp .pr .pp-sampler-cell .pad:hover { border-color: var(--pp-edge); }
+.v3-shell .insp .pr .pp-sampler-cell .pad:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.v3-shell .insp .pr .pp-sampler-cell .pad:disabled { cursor: default; }
+.v3-shell .insp .pr .pp-sampler-cell .pad:disabled:hover { border-color: color-mix(in srgb, var(--text) 13%, transparent); }
+.v3-shell .insp .pr .pp-sampler-cell .pad .n {
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 2px; height: 10px; padding-right: 26px;
+  font-family: var(--mono); font-size: var(--pp-fs-axis); line-height: 10px; color: var(--muted); white-space: nowrap; overflow: hidden;
+}
+/* A sound played across the keys: a tiny keyboard after its root. */
+.v3-shell .insp .pr .pp-sampler-cell .pad .n .kb { flex: 0 0 auto; display: block; }
+.v3-shell .insp .pr .pp-sampler-cell .pad .n .kb .w { fill: color-mix(in srgb, var(--text) 55%, transparent); }
+.v3-shell .insp .pr .pp-sampler-cell .pad .n .kb .b { fill: var(--bg); }
+.v3-shell .insp .pr .pp-sampler-cell .pad .nm {
+  position: relative; z-index: 1; margin-top: 1px; font-size: var(--pp-fs-cap); line-height: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* A hit: the cell lights by how loud the hit plays it, then fades (data-driven, from the rail). */
+.v3-shell .insp .pr .pp-sampler-cell .pad .fl {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0;
+  background: color-mix(in srgb, var(--accent) 40%, transparent); transition: opacity 180ms ease-out;
+}
+/* The level: a hairline from 0 dB (the mark) to the pad's level, across −48..+48 dB. */
+.v3-shell .insp .pr .pp-sampler-cell .pad .g {
+  position: absolute; left: 4px; right: 4px; bottom: 2px; height: 2px; z-index: 1; border-radius: 1px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+}
+.v3-shell .insp .pr .pp-sampler-cell .pad .g .f { position: absolute; top: 0; bottom: 0; border-radius: 1px; background: var(--accent); }
+.v3-shell .insp .pr .pp-sampler-cell .pad .g .f.cut { background: color-mix(in srgb, var(--accent) 50%, var(--muted)); }
+.v3-shell .insp .pr .pp-sampler-cell .pad .g .z { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: color-mix(in srgb, var(--text) 45%, transparent); }
+/* Selected: an accent outline only (a hit is a fill, so the two never read alike). */
+.v3-shell .insp .pr .pp-sampler-cell .pad[aria-current="true"] { border-color: color-mix(in srgb, var(--accent) 70%, transparent); }
+.v3-shell .insp .pr .pp-sampler-cell .pad[aria-current="true"] .n { color: var(--accent); }
+/* The tap's own feedback, before the rail's hit arrives. */
+.v3-shell .insp .pr .pp-sampler-cell .pad.pressed { box-shadow: inset 0 0 0 1px var(--accent); }
+/* Muted, or silent because another pad is soloed. */
+.v3-shell .insp .pr .pp-sampler-cell.quiet .pad :is(.n, .nm, .g) { opacity: .45; }
+.v3-shell .insp .pr .pp-sampler-cell.missing .pad .n { color: var(--warn); }
+.v3-shell .insp .pr .pp-sampler-cell.over .pad { border-style: dashed; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.v3-shell .insp .pr .pp-sampler-cell.empty .pad { border-style: dashed; background: transparent; }
+.v3-shell .insp .pr .pp-sampler-cell.empty .pad .nm { color: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-cell.empty.over .pad { border-color: var(--accent); }
+/* Mute / solo: quiet until the cell is hovered or one is on (then the accent, as a track's). */
+.v3-shell .insp .pr .pp-sampler-cell .ms { position: absolute; top: 1px; right: 2px; z-index: 2; display: flex; gap: 1px; }
+.v3-shell .insp .pr .pp-sampler-cell .ms button {
+  width: 12px; height: 11px; padding: 0; border: 0; border-radius: 2px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 8px; font-weight: 700; line-height: 11px; text-align: center;
+  cursor: pointer; opacity: .35;
+}
+.v3-shell .insp .pr .pp-sampler-cell:hover .ms button, .v3-shell .insp .pr .pp-sampler-cell .ms button:focus-visible { opacity: 1; }
+.v3-shell .insp .pr .pp-sampler-cell .ms button:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+.v3-shell .insp .pr .pp-sampler-cell .ms button:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
+.v3-shell .insp .pr .pp-sampler-cell .ms button.on { opacity: 1; color: var(--bg); background: var(--accent); }
+
+/* ── the selected sound's row ── */
+.v3-shell .insp .pr .pp-sampler-row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+.v3-shell .insp .pr .pp-sampler-info {
+  flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px;
+}
+.v3-shell .insp .pr .pp-sampler-info > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .insp .pr .pp-sampler-info .nm { font-size: var(--pp-fs-val); font-weight: 600; color: var(--text); }
+.v3-shell .insp .pr .pp-sampler-info .sub { font-family: var(--mono); font-size: var(--pp-fs-axis); color: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-info .st { min-height: 12px; font-size: var(--pp-fs-cap); line-height: 12px; color: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-info .st.warn { color: var(--warn); }
+.v3-shell .insp .pr .pp-sampler-ctl { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-sampler-ctl .pp-dial { min-width: 44px; }
+/* Level: wide enough for "-48.0 dB" so the row does not shift mid-drag. */
+.v3-shell .insp .pr .pp-sampler-ctl:first-of-type .pp-dial { width: 54px; }
+.v3-shell .insp .pr .pp-sampler-choke { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.v3-shell .insp .pr .pp-sampler-choke select {
+  width: 52px; height: 18px; padding: 0 16px 0 6px; border-radius: 4px; font-size: var(--pp-fs-cap);
+  background-position: right 5px center;
+}
+.v3-shell .insp .pr .pp-sampler-choke .nm { font-size: var(--pp-fs-cap); color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-sampler-choke .pp-btn { width: 26px; padding: 0; }
+/* Level with the choke menu (its caption's height above the row's bottom). */
+.v3-shell .insp .pr .pp-sampler-clear { flex: 0 0 auto; margin-bottom: 13px; }
+
+/* ── a confirmation, or the kit list, in the row's place ── */
+/* No box: it takes the row's place at the row's height (two lines and the buttons). */
+.v3-shell .insp .pr .pp-sampler-slot { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-top: 1px; }
+.v3-shell .insp .pr .pp-sampler-slot .msg { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.v3-shell .insp .pr .pp-sampler-slot .msg .t { font-size: var(--pp-fs-val); color: var(--text); overflow-wrap: anywhere; }
+.v3-shell .insp .pr .pp-sampler-slot .msg .d { font-size: var(--pp-fs-cap); color: var(--muted); line-height: 1.25; }
+.v3-shell .insp .pr .pp-sampler-slot .acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+/* A refused drop: the message and its dismiss on one line's width. */
+.v3-shell .insp .pr .pp-sampler-refusal { flex-direction: row; align-items: flex-start; gap: 8px; }
+.v3-shell .insp .pr .pp-sampler-refusal .msg { flex: 1 1 auto; }
+.v3-shell .insp .pr .pp-sampler-refusal .msg .t { color: var(--warn); }
+.v3-shell .insp .pr .pp-sampler-refusal > .pp-btn { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-sampler .pp-btn.on {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.v3-shell .insp .pr .pp-sampler .pp-btn.ghost { border-color: transparent; }
+.v3-shell .insp .pr .pp-sampler .pp-btn.ghost:hover { border-color: var(--pp-edge); }
+
+/* ── empty ── */
+.v3-shell .insp .pr .pp-sampler-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 58px; padding: 8px;
+  border: 1px dashed color-mix(in srgb, var(--text) 18%, transparent); border-radius: 5px; text-align: center;
+}
+.v3-shell .insp .pr .pp-sampler-empty .t { font-size: var(--pp-fs-val); color: var(--text); }
+.v3-shell .insp .pr .pp-sampler-empty .acts { display: flex; gap: 6px; }
+.v3-shell .insp .pr .pp-sampler-empty .pp-sampler-hint { flex: 0 0 auto; max-width: 100%; white-space: normal; }
+.v3-shell .insp .pr .pp-sampler-empty.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+/* ── melodic ── */
+.v3-shell .insp .pr .pp-sampler-which { align-self: flex-start; max-width: 100%; overflow: hidden; }
+.v3-shell .insp .pr .pp-sampler-melodic { display: flex; flex-direction: column; gap: 3px; min-width: 0; border-radius: 4px; }
+.v3-shell .insp .pr .pp-sampler-melodic.over { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.v3-shell .insp .pr .pp-sampler-wave .w { fill: color-mix(in srgb, var(--accent) 70%, transparent); stroke: none; }
+.v3-shell .insp .pr .pp-sampler.bypassed .pp-sampler-wave .w { fill: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-wave .axis.warn { fill: var(--warn); }
+.v3-shell .insp .pr .pp-sampler-keys { display: block; width: 100%; height: auto; overflow: visible; }
+.v3-shell .insp .pr .pp-sampler-keys .k.w.in { fill: color-mix(in srgb, var(--text) 58%, var(--surface2)); }
+.v3-shell .insp .pr .pp-sampler-keys .k.w.out { fill: color-mix(in srgb, var(--text) 14%, var(--surface2)); }
+.v3-shell .insp .pr .pp-sampler-keys .k.b { fill: var(--bg); }
+.v3-shell .insp .pr .pp-sampler-keys .k.b.out { opacity: .5; }
+.v3-shell .insp .pr .pp-sampler-keys .k.root.w { fill: color-mix(in srgb, var(--accent) 45%, var(--text)); }
+.v3-shell .insp .pr .pp-sampler-keys .k.root.b { fill: color-mix(in srgb, var(--accent) 55%, var(--bg)); }
+/* Held at the sampler right now, or hit this frame (outranks root and range). */
+.v3-shell .insp .pr .pp-sampler-keys .k.lit.w, .v3-shell .insp .pr .pp-sampler-keys .k.lit.b { fill: var(--accent); opacity: 1; }
+.v3-shell .insp .pr .pp-sampler-keys .caret { fill: var(--accent); }
+.v3-shell .insp .pr .pp-sampler-keys .rootlbl { fill: var(--muted); font-family: var(--mono); font-size: var(--pp-fs-axis); }
+
+/* ── minimized: a dot per sound, lit by the rail's hits ── */
+.v3-shell .insp .pr .pp-sampler-mini { display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-sampler-mini .d { fill: color-mix(in srgb, var(--text) 38%, transparent); }
+.v3-shell .insp .pr .pp-sampler-mini .d.quiet { fill: color-mix(in srgb, var(--text) 16%, transparent); }
+.v3-shell .insp .pr .pp-sampler-mini .d.missing { fill: var(--warn); }
+.v3-shell .insp .pr .pp-sampler-mini .d.lit { fill: var(--accent); }
+.v3-shell .insp .pr .pp-sampler-mini.bypassed .d.lit { fill: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-mini .w { fill: color-mix(in srgb, var(--text) 45%, transparent); }
+.v3-shell .insp .pr .pp-sampler-mini .w.lit { fill: var(--accent); }
+.v3-shell .insp .pr .pp-sampler-mini.bypassed .w.lit { fill: var(--muted); }
+.v3-shell .insp .pr .pp-sampler-mini .none { stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 1; stroke-dasharray: 2 2; }
+
+@media (prefers-reduced-motion: reduce) { .v3-shell .insp .pr .pp-sampler-cell .pad .fl { transition: none; } }

@@ -11,7 +11,7 @@ import { pluginHint, showsEveryParam } from "./pluginParams";
 import { PANELS } from "./panels/registry";
 import { GenericParams, genericSummary } from "./panels/GenericParams";
 import { panelKey, usePanelState } from "./panels/panelState";
-import type { PanelProps } from "./panels/types";
+import { TRACK_SCOPED_COMMANDS, type PanelProps, type RunCommand } from "./panels/types";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -47,8 +47,10 @@ export function pluginDropIndex(from: number, target: number, side: PluginDropSi
   return to === from ? null : to;
 }
 
-function PluginRow({ plugin, trackId, sampleRate, scope, prevIndex, nextIndex }: {
+function PluginRow({ plugin, trackId, track, sampleRate, scope, prevIndex, nextIndex }: {
   plugin: Plugin; trackId: string;
+  /** The track the plugin is on, for panels that read track state (a sampler's lanes). */
+  track?: Track;
   /** The session's sample rate, for curves that depend on it. */
   sampleRate: number;
   /** The open project (its edit file), so a minimized plugin stays minimized in this
@@ -79,9 +81,13 @@ function PluginRow({ plugin, trackId, sampleRate, scope, prevIndex, nextIndex }:
     void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex, value, ...(opts?.gesture ? { gesture: opts.gesture } : {}) });
   const setState: PanelProps["setState"] = (stateKey, value, opts) =>
     void exec("set_plugin_state", { trackId, index: plugin.index, key: stateKey, value, ...(opts?.gesture ? { gesture: opts.gesture } : {}) });
-  const panelProps: PanelProps = { plugin, trackId, sampleRate, setParam, setState };
+  // The sampler's own commands (pads, kits, lanes, auditions, peaks): the row adds this
+  // track's id where the command takes one, so a panel cannot aim one at another track.
+  const run = ((command, args) => Promise.resolve(exec(command,
+    TRACK_SCOPED_COMMANDS.has(command) ? { ...args, trackId } : { ...args }))) as RunCommand;
+  const panelProps: PanelProps = { plugin, trackId, track, sampleRate, setParam, setState, run };
   const hint = native && !def ? pluginHint(plugin) : null;
-  const summary = def ? def.summary(plugin) : genericSummary(plugin);
+  const summary = def ? def.summary(plugin, { track }) : genericSummary(plugin);
   const Mini = def?.Mini;
   const title = (collapsed ? def?.shortTitle : undefined) ?? def?.title ?? plugin.name;
   return (
@@ -156,7 +162,8 @@ function PluginRow({ plugin, trackId, sampleRate, scope, prevIndex, nextIndex }:
           Preset: {plugin.preset.name}
         </div>
       )}
-      {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
+      {/* A panel that owns its preset menu draws it in its own top row instead. */}
+      {plugin.isInstrument && !def?.ownsPresets && <PresetPicker plugin={plugin} trackId={trackId}
         onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
       {/* A plugin with a panel of its own (panels/registry.ts) draws it; any other native
           plugin keeps the plain list of controls. */}
@@ -313,7 +320,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
         <details className="grp quiet" open>
           <summary className="grphd"><span className="sec">Plugins</span></summary>
           <div className="grp-body chain" data-testid="v3-plugins">
-            {plugins.map((p, i) => <PluginRow key={p.itemId ?? `slot-${p.index}`} plugin={p} trackId={track.id}
+            {plugins.map((p, i) => <PluginRow key={p.itemId ?? `slot-${p.index}`} plugin={p} trackId={track.id} track={track}
               sampleRate={snapshot.session?.sampleRate || 48000} scope={snapshot.session?.editFile ?? ""}
               prevIndex={plugins[i - 1]?.index} nextIndex={plugins[i + 1]?.index} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"

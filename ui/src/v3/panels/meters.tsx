@@ -34,6 +34,91 @@ export function usePluginMeter<T extends PluginMeterReading>(
   return current ?? last.current;
 }
 
+// ── event-like meter fields (4OSC `struck`, sampler `hits`) ─────────────────────────────
+// A level is a STATE: holding the last frame on screen is right. A struck key or a pad hit
+// is an EVENT: the frame says "this happened since the previous frame", so it must fire once
+// per frame, and the same frame held on screen (usePluginMeter keeps it for METER_HOLD_MS)
+// must never fire it again. A frame is told apart by its `seq` (the engine counts frames per
+// plugin); a frame without one (an older engine) by its object identity, since the store
+// builds a new object for every payload.
+
+/** One event a frame reports: a 4OSC key struck (velocity unknown: 1) or a sampler hit. */
+export type MeterEvent = { note: number; vel: number };
+export type MeterEventField = "struck" | "hits";
+
+/** How long a struck key / a pad hit stays lit after its frame: one short flash. */
+export const METER_FLASH_MS = 140;
+
+/** The events in `reading[field]`, as {note, vel} (largest velocity per note). */
+export function meterEventsOf(reading: PluginMeterReading | undefined, field: MeterEventField): MeterEvent[] {
+  const raw = (reading as Record<string, unknown> | undefined)?.[field];
+  if (!Array.isArray(raw)) return [];
+  const best = new Map<number, number>();
+  for (const e of raw) {
+    const note = typeof e === "number" ? e : (e as { note?: unknown })?.note;
+    const vel = typeof e === "number" ? 1 : (e as { vel?: unknown })?.vel;
+    if (typeof note !== "number" || !Number.isInteger(note) || note < 0 || note > 127) continue;
+    const v = typeof vel === "number" && Number.isFinite(vel) ? Math.min(1, Math.max(0, vel)) : 1;
+    best.set(note, Math.max(best.get(note) ?? 0, v));
+  }
+  return [...best].map(([note, vel]) => ({ note, vel }));
+}
+
+/** A frame's identity: its `seq` when the engine sends one, else the frame object. */
+export const meterFrameKey = (reading: PluginMeterReading | undefined): unknown =>
+  reading === undefined ? undefined : typeof reading.seq === "number" ? `seq:${reading.seq}` : reading;
+
+/** One step of event consumption: the events of `reading` if it is a frame not consumed
+ *  yet (its key differs from `lastKey`), else none. Pure: the hook below and tests use it. */
+export function takeNewMeterEvents(
+  lastKey: unknown, reading: PluginMeterReading | undefined, field: MeterEventField,
+): { key: unknown; events: MeterEvent[] } {
+  const key = meterFrameKey(reading);
+  if (reading === undefined || key === lastKey) return { key: lastKey, events: [] };
+  return { key, events: meterEventsOf(reading, field) };
+}
+
+/** A lit event: `serial` goes up every time the note fires again (key a CSS flash on it so
+ *  a re-strike restarts it); `at` is when it fired (ms, Date.now()). */
+export type MeterFlash = MeterEvent & { serial: number; at: number };
+
+/** The notes `field` struck in the last `holdMs`, from a meter frame (usePluginMeter's
+ *  result): each new frame's events fire ONCE, a held frame never re-fires, a note hit in
+ *  two frames in a row fires twice (its serial goes up). Expired flashes clear by themselves. */
+export function useMeterEvents(
+  reading: PluginMeterReading | undefined, field: MeterEventField, holdMs = METER_FLASH_MS,
+): ReadonlyMap<number, MeterFlash> {
+  const state = useRef<{ key: unknown; serial: number; active: Map<number, MeterFlash> }>({
+    key: undefined, serial: 0, active: new Map(),
+  });
+  const [, expire] = useReducer((n: number) => n + 1, 0);
+  const s = state.current;
+  const now = Date.now();
+  // Consumed during render, like usePluginMeter's held frame: idempotent for a given frame
+  // (a second render of the same frame finds its key already taken).
+  const { key, events } = takeNewMeterEvents(s.key, reading, field);
+  // A returned map is never mutated: any change makes a new one (so it can be a memo key).
+  let next: Map<number, MeterFlash> | null = null;
+  const edit = () => (next ??= new Map(s.active));
+  for (const [note, f] of s.active) if (now - f.at >= holdMs) edit().delete(note);   // expired first,
+  if (key !== s.key) {                                                                 // then this frame's
+    s.key = key;
+    if (events.length > 0) {
+      s.serial += 1;
+      for (const e of events) edit().set(e.note, { ...e, serial: s.serial, at: now });
+    }
+  }
+  if (next) s.active = next;
+  const active = s.active;
+  useEffect(() => {
+    if (active.size === 0) return;
+    const next = Math.min(...[...active.values()].map((f) => f.at + holdMs)) - Date.now();
+    const timer = setTimeout(expire, Math.max(0, next) + 1);
+    return () => clearTimeout(timer);
+  }, [active, holdMs]);
+  return active;
+}
+
 /** Whether the transport is playing: illustrative motion (an LFO dot) rests while it is not,
  *  so nothing moves that is not being heard. */
 export function useTransportPlaying(): boolean {
