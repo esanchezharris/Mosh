@@ -12,6 +12,7 @@
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/moshfx/MoshLowPassPlugin.h"
 #include "plugins/moshfx/MoshFourOscPlugin.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -3793,6 +3794,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "a 4OSC with filterType lowpass, osc 2 saw and Amp Attack 0.5 before save");
         const auto oscParamsBeforeReload = JSON::toString (oscEntry()["params"]);
         const auto oscStateBeforeReload = JSON::toString (oscEntry()["state"]);
+        // A drum track's sampler rides it too: back as Mosh's metered subclass, with
+        // plugin.sampler (its sounds, a muted pad's parked level) exactly as saved.
+        const auto drumTrack = cmd (ops, "create_track", objN ({{ "name", "R3.3 Drums" }, { "type", "drum" }}))["data"].getProperty ("trackId", var()).toString();
+        auto samplerEntry = [&] () -> var {
+            auto plugins = trackById (drumTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "sampler") return plugins[i];
+            return var();
+        };
+        check (drumTrack.isNotEmpty()
+                   && ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "gainDb", -6.0 }})))
+                   && ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "mute", true }})))
+                   && samplerEntry()["sampler"]["sounds"].size() == 8,
+               "a drum track (8 pads) with the snare at -6 dB and its lane muted before save");
+        const auto samplerBeforeReload = JSON::toString (samplerEntry()["sampler"]);
         check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
         check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
         {
@@ -3813,6 +3829,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        && reloaded["state"]["waveShape2"]["value"].toString() == "saw",
                    "the reloaded 4OSC keeps its 68 parameters and its state (filterType lowpass, osc 2 saw) exactly");
             check (ok (cmd (ops, "remove_track", args1 ("trackId", oscTrack))), "R3.3 4OSC track removed");
+
+            const auto drums = samplerEntry();
+            te::Plugin* reloadedSampler = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == drumTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    const int index = (int) drums.getProperty ("index", -1);
+                    if (index >= 0 && index < plugins.size())
+                        reloadedSampler = plugins[index].get();
+                }
+            check (dynamic_cast<MoshSamplerPlugin*> (reloadedSampler) != nullptr,
+                   "the reloaded sampler is a MoshSamplerPlugin (shadow registered before the session loaded)");
+            const auto snare = drums["sampler"]["sounds"][1];
+            check (JSON::toString (drums["sampler"]) == samplerBeforeReload && (int) snare["pitch"] == 38 && (bool) snare["silenced"]
+                       && std::abs ((double) snare["userGainDb"] + 6.0) < 1.0e-6 && std::abs ((double) snare["gainDb"] + 48.0) < 1.0e-6,
+                   "the reloaded sampler keeps plugin.sampler exactly (the muted snare: silenced, live -48 dB, userGainDb -6)");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", drumTrack))), "R3.3 drum track removed");
         }
         check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
                    && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,

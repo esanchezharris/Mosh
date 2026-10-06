@@ -23,6 +23,12 @@
 //              parameters byte-identical to before; its state keys; read-only mod routes;
 //              and its live rail entry (output peak, held keys, struck notes), driven with
 //              MIDI through a live (not rendering) context.
+//   SAMPLER    every sampler Mosh makes or loads is Mosh's metered subclass, its audio
+//              Tracktion's bit for bit; plugin.sampler read from the SOUND state (paths,
+//              modes, address notes, the parked level of a silenced pad); the rail's hits,
+//              held keys and added peak, auditions included; a re-tapped pad sounds again
+//              after its blip expires; a pan-only edit keeps a silenced pad's level; and each
+//              pad command is exactly one undo step.
 //
 // A headless run has no audio thread, so the plugins are driven block by block the way
 // the playback graph's PluginNode drives them (as the AutoTune section does).
@@ -34,6 +40,7 @@
 #include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "plugins/moshfx/MoshLowPassPlugin.h"
 #include "plugins/moshfx/MoshFourOscPlugin.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "moshops/PluginState.h"
 #include "moshops/PluginParameterReadback.h"
 #include <cmath>
@@ -227,6 +234,9 @@ void driveScheduled (te::Plugin& plugin, juce::AudioBuffer<float>& io, int block
 // (FourOsc keeps a message when round (timestamp * rate) lands inside the block).
 // `strays` go into the FIRST block's MIDI only, whatever their sample: a stray past the
 // first block is handed to a block it does not belong to, so the synth must ignore it.
+// `input`, when given, fills the buffer before it is rendered (input (channel, sample), the
+// sample counted from the first play() call, so a signal runs on across calls): an
+// instrument that passes its input through (the sampler) is heard over it.
 using MidiEvents = std::vector<std::pair<int, juce::MidiMessage>>;
 struct LiveInstrument
 {
@@ -237,10 +247,15 @@ struct LiveInstrument
     ~LiveInstrument() { plugin.baseClassDeinitialise(); }
 
     juce::AudioBuffer<float> play (double seconds, const MidiEvents& events = {}, bool rendering = false,
-                                   const MidiEvents& strays = {})
+                                   const MidiEvents& strays = {},
+                                   const std::function<float (int, juce::int64)>& input = {})
     {
         juce::AudioBuffer<float> io (2, (int) (seconds * rate));
         io.clear();
+        if (input)
+            for (int ch = 0; ch < io.getNumChannels(); ++ch)
+                for (int i = 0; i < io.getNumSamples(); ++i)
+                    io.setSample (ch, i, input (ch, position + i));
         for (int start = 0; start < io.getNumSamples(); start += block)
         {
             const int n = juce::jmin (block, io.getNumSamples() - start);
@@ -1864,6 +1879,522 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
 
         check (ok (command (ops, "remove_track", object ({ { "trackId", dt } }))) && ok (command (ops, "remove_track", object ({ { "trackId", st } }))),
                "signature fixture tracks removed");
+    }
+
+    // ── The Sampler: the metered subclass, plugin.sampler, the rail, the pad commands ──
+    // Every sampler Mosh makes or loads is a MoshSamplerPlugin (Tracktion's sampler, same
+    // "sampler" type, its audio the base class's own call). plugin.sampler is read from the
+    // SOUND children of the persisted state. The rail's hits / held keys / added peak are
+    // driven with MIDI through a live (not rendering) context, as PluginNode drives them.
+    section ("Plugin panels: the Sampler (sounds, live hits, pad edits)");
+    {
+        auto samplerIndexOn = [&] (const String& trackId)
+        {
+            const auto plugins = pluginsOf (ops, trackId);
+            for (int i = 0; i < plugins.size(); ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "sampler")
+                    return (int) plugins[i].getProperty ("index", -1);
+            return -1;
+        };
+        auto metered = [&] (const String& trackId, int index) { return dynamic_cast<MoshSamplerPlugin*> (livePlugin (eng, trackId, index)); };
+        auto trackIdOf = [] (const var& result) { return dataOf (result).getProperty ("trackId", var()).toString(); };
+        auto isNear = [] (const var& value, double expected, double tolerance = 1.0e-6) { return std::abs ((double) value - expected) < tolerance; };
+        auto keysOf = [] (std::initializer_list<int> notes)
+        {
+            juce::BigInteger keys;
+            for (int note : notes)
+                keys.setBit (note);
+            return keys;
+        };
+        auto peakOf = [] (const juce::AudioBuffer<float>& buffer)
+        {
+            float peak = 0.0f;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                peak = juce::jmax (peak, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
+            return peak;
+        };
+        const auto sineIn = [] (int, juce::int64 i) { return 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * (double) i / 48000.0); };
+
+        // ── Every road to a sampler yields the subclass (init-order guard) ──
+        const auto dt = trackIdOf (command (ops, "create_track", object ({ { "name", "Sampler Drums" }, { "type", "drum" } })));
+        pump (200);   // the sampler loads its kit on an AsyncUpdate
+        const int si = samplerIndexOn (dt);
+        auto* drums = metered (dt, si);
+        check (dt.isNotEmpty() && si >= 0 && drums != nullptr, "a drum track's sampler (create_track type drum) is a MoshSamplerPlugin");
+        {
+            const auto bt = trackIdOf (command (ops, "create_track", object ({ { "name", "Sampler Builtin" } })));
+            const auto loaded = command (ops, "load_builtin", object ({ { "trackId", bt }, { "type", "sampler" } }));
+            check (ok (loaded) && metered (bt, (int) dataOf (loaded).getProperty ("index", -1)) != nullptr,
+                   "a load_builtin \"sampler\" is a MoshSamplerPlugin");
+            const auto kt = trackIdOf (command (ops, "create_track", object ({ { "name", "Sampler Kit" } })));
+            const auto kit = command (ops, "load_drum_kit", object ({ { "trackId", kt } }));
+            check (ok (kit) && metered (kt, (int) dataOf (kit).getProperty ("index", -1)) != nullptr,
+                   "the sampler load_drum_kit creates on a track without one is a MoshSamplerPlugin");
+            check (ok (command (ops, "remove_track", object ({ { "trackId", bt } }))) && ok (command (ops, "remove_track", object ({ { "trackId", kt } }))),
+                   "load_builtin / load_drum_kit sampler fixture tracks removed");
+        }
+
+        if (drums != nullptr)
+        {
+            // ── plugin.sampler on a loaded kit ──
+            const auto entry = pluginAt (ops, dt, si);
+            const auto info = entry.getProperty ("sampler", var());
+            const auto sounds = info.getProperty ("sounds", var());
+            check (info.isObject() && (bool) info.getProperty ("primary", false)
+                       && info.getProperty ("kit", var()).toString() == "mosh-kit" && sounds.size() == 8,
+                   "plugin.sampler on a drum track: primary, kit \"mosh-kit\", 8 sounds (" + juce::JSON::toString (info, true).substring (0, 120) + "...)");
+            const auto limits = info.getProperty ("limits", var());
+            check ((int) limits.getProperty ("maxVoices", 0) == 32 && (int) limits.getProperty ("maxSounds", 0) == 64
+                       && (int) limits.getProperty ("minGainDb", 0) == -48 && (int) limits.getProperty ("maxGainDb", 0) == 48,
+                   "limits: 32 voices, 64 sounds, gains -48..+48 dB (the engine's)");
+            {
+                bool onlySounds = true;
+                for (auto child : drums->state)
+                    onlySounds = onlySounds && child.hasType (te::IDs::SOUND);
+                check (entry.getProperty ("params", var()).size() == 0 && drums->getNumAutomatableParameters() == 0
+                           && drums->state.getNumChildren() == 8 && onlySounds,
+                       "the subclass adds no parameters and no children: 0 params, and its state holds only its 8 SOUND children (the pad commands index them raw)");
+            }
+            {
+                struct Pad { int pitch; const char* name; const char* file; };
+                const Pad kit[] = { { 36, "Kick", "kick.wav" }, { 38, "Snare", "snare.wav" }, { 39, "Clap", "clap.wav" },
+                                    { 42, "Closed Hat", "hat_closed.wav" }, { 46, "Open Hat", "hat_open.wav" },
+                                    { 45, "Low Tom", "tom_low.wav" }, { 47, "Mid Tom", "tom_mid.wav" }, { 49, "Crash", "crash.wav" } };
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                int good = 0;
+                String firstBad, kickInfo;
+                for (int k = 0; k < juce::jmin (8, sounds.size()); ++k)
+                {
+                    const auto sound = sounds[k];
+                    const auto path = sound.getProperty ("path", var()).toString();
+                    double duration = -1.0, rate = -1.0;
+                    int channels = -1;
+                    if (juce::File::isAbsolutePath (path))
+                        if (std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (juce::File (path)) })
+                        {
+                            rate = reader->sampleRate;
+                            channels = (int) reader->numChannels;
+                            duration = (double) reader->lengthInSamples / reader->sampleRate;
+                        }
+                    const int pitch = kit[k].pitch;
+                    const bool fine = (int) sound.getProperty ("index", -1) == k
+                        && (int) sound.getProperty ("pitch", -1) == pitch && (int) sound.getProperty ("minNote", -1) == pitch
+                        && (int) sound.getProperty ("maxNote", -1) == pitch && (int) sound.getProperty ("addressNote", -1) == pitch
+                        && sound.getProperty ("mode", var()).toString() == "drum"
+                        && sound.getProperty ("name", var()).toString() == kit[k].name
+                        && sound.getProperty ("file", var()).toString() == path && path.endsWith (String ("/") + kit[k].file)
+                        && juce::File::isAbsolutePath (path) && juce::File (path).existsAsFile()
+                        && ! (bool) sound.getProperty ("missing", true) && (bool) sound.getProperty ("openEnded", false)
+                        && ! (bool) sound.getProperty ("silenced", true) && isNear (sound.getProperty ("gainDb", 99), 0.0)
+                        && isNear (sound.getProperty ("userGainDb", 99), 0.0) && isNear (sound.getProperty ("pan", 99), 0.0)
+                        && ! sound.hasProperty ("chokeGroup")
+                        && duration > 0.0 && isNear (sound.getProperty ("durationSec", -1), duration, 1.0e-9)
+                        && isNear (sound.getProperty ("sampleRate", -1), rate, 1.0e-9) && (int) sound.getProperty ("channels", -1) == channels;
+                    if (fine)
+                        ++good;
+                    else if (firstBad.isEmpty())
+                        firstBad = juce::JSON::toString (sound, true);
+                    if (k == 0)
+                        kickInfo = sound.getProperty ("durationSec", var()).toString() + " s, " + sound.getProperty ("sampleRate", var()).toString()
+                                 + " Hz, " + sound.getProperty ("channels", var()).toString() + " ch";
+                }
+                check (good == 8,
+                       "each sound: its index, pitch = minNote = maxNote = addressNote, mode drum, name, file = path (absolute, existing), "
+                       "not missing, open-ended, 0 dB, pan 0, not silenced, and durationSec / sampleRate / channels equal to the file's own header ("
+                           + String (good) + "/8; the kick " + kickInfo + (firstBad.isEmpty() ? String() : "; first wrong: " + firstBad) + ")");
+            }
+            {
+                // track.drumPads is left as it was (a separate reading of the same sampler).
+                const auto pads = trackVar (ops, dt).getProperty ("drumPads", var());
+                bool agree = pads.size() == sounds.size();
+                for (int k = 0; agree && k < pads.size(); ++k)
+                    agree = (int) pads[k].getProperty ("pitch", -1) == (int) sounds[k].getProperty ("pitch", -2)
+                         && pads[k].getProperty ("name", var()).toString() == sounds[k].getProperty ("name", var()).toString()
+                         && ! pads[k].hasProperty ("userGainDb") && ! pads[k].hasProperty ("path");
+                bool onlySamplers = true;
+                const auto plugins = pluginsOf (ops, dt);
+                for (int i = 0; i < plugins.size(); ++i)
+                    onlySamplers = onlySamplers && (plugins[i].hasProperty ("sampler") == (plugins[i].getProperty ("type", var()).toString() == "sampler"));
+                check (agree && onlySamplers, "track.drumPads is unchanged and agrees (pitch, name) with plugin.sampler; only a sampler carries `sampler`");
+            }
+
+            // ── A second sampler: not the one the pad commands address ──
+            {
+                const auto second = command (ops, "load_builtin", object ({ { "trackId", dt }, { "type", "sampler" } }));
+                const int s2 = (int) dataOf (second).getProperty ("index", -1);
+                const auto other = pluginAt (ops, dt, s2).getProperty ("sampler", var());
+                check (ok (second) && s2 > si && other.isObject() && ! (bool) other.getProperty ("primary", true) && ! other.hasProperty ("kit")
+                           && other.getProperty ("sounds", var()).size() == 0
+                           && (bool) pluginAt (ops, dt, si).getProperty ("sampler", var()).getProperty ("primary", false),
+                       "a second sampler on the track: primary false, no kit, its own (empty) sounds; the first stays primary");
+                check (ok (command (ops, "undo")) && ! pluginAt (ops, dt, s2).isObject(), "undo removes the second sampler");
+            }
+
+            // ── Each pad command is exactly ONE undo step ──
+            // An anchor edit first; one undo after the command must restore plugin.sampler
+            // exactly AND leave the anchor in place (two steps would not restore it; a merged
+            // step would take the anchor with it).
+            const auto kickPath = sounds[0].getProperty ("path", var()).toString();
+            auto samplerJson = [&] { return juce::JSON::toString (pluginAt (ops, dt, si).getProperty ("sampler", var()), true); };
+            auto trackName = [&] { return trackVar (ops, dt).getProperty ("name", var()).toString(); };
+            auto oneStep = [&] (const String& what, const std::function<var()>& run, const std::function<void (const var&, const var&)>& inspect)
+            {
+                const auto anchor = "Anchor " + what;
+                check (ok (command (ops, "rename_track", object ({ { "trackId", dt }, { "name", anchor } }))), "anchor edit before " + what);
+                const auto before = samplerJson();
+                const auto result = run();
+                check (ok (result) && samplerJson() != before, what + " changes plugin.sampler" + (ok (result) ? String() : ": " + errorOf (result)));
+                inspect (dataOf (result), pluginAt (ops, dt, si).getProperty ("sampler", var()));
+                check (ok (command (ops, "undo")) && samplerJson() == before && trackName() == anchor,
+                       "one undo restores plugin.sampler exactly and keeps the edit before it: " + what + " is exactly one undo step");
+                check (ok (command (ops, "undo")) && trackName() != anchor, "...and a second undo takes the anchor (" + what + ")");
+            };
+            const auto freshKit = samplerJson();
+            oneStep ("set_drum_pad",
+                     [&] { return command (ops, "set_drum_pad", object ({ { "trackId", dt }, { "note", 38 }, { "gainDb", -6.0 }, { "pan", 0.25 },
+                                                                         { "name", "Snare 2" }, { "chokeGroup", 2 } })); },
+                     [&] (const var&, const var& now)
+                     {
+                         const auto snare = now.getProperty ("sounds", var())[1];
+                         check (isNear (snare.getProperty ("gainDb", 0), -6.0) && isNear (snare.getProperty ("userGainDb", 0), -6.0)
+                                    && isNear (snare.getProperty ("pan", 0), 0.25) && snare.getProperty ("name", var()).toString() == "Snare 2"
+                                    && (int) snare.getProperty ("chokeGroup", 0) == 2 && ! (bool) snare.getProperty ("openEnded", true),
+                                "set_drum_pad on 38: gain -6 dB, pan 0.25, name \"Snare 2\", choke group 2 (and gated)");
+                     });
+            oneStep ("clear_drum_pad",
+                     [&] { return command (ops, "clear_drum_pad", object ({ { "trackId", dt }, { "note", 39 } })); },
+                     [&] (const var&, const var& now)
+                     {
+                         const auto list = now.getProperty ("sounds", var());
+                         bool clapGone = list.size() == 7;
+                         for (int k = 0; k < list.size(); ++k)
+                             clapGone = clapGone && (int) list[k].getProperty ("pitch", -1) != 39 && (int) list[k].getProperty ("index", -1) == k;
+                         check (clapGone, "clear_drum_pad on 39: the clap is gone, 7 sounds indexed 0..6");
+                     });
+            oneStep ("assign_sample (melodic)",
+                     [&] { return command (ops, "assign_sample", object ({ { "trackId", dt }, { "note", 60 }, { "mode", "melodic" }, { "file", kickPath } })); },
+                     [&] (const var& result, const var& now)
+                     {
+                         const auto list = now.getProperty ("sounds", var());
+                         const auto melodic = list[8];
+                         const auto imported = result.getProperty ("file", var()).toString();
+                         bool padsAddressed = true;
+                         for (int k = 0; k < 8; ++k)
+                             padsAddressed = padsAddressed && (int) list[k].getProperty ("addressNote", -1) == (int) list[k].getProperty ("pitch", -2);
+                         check (list.size() == 9 && melodic.getProperty ("mode", var()).toString() == "melodic"
+                                    && (int) melodic.getProperty ("pitch", -1) == 60 && (int) melodic.getProperty ("minNote", -1) == 0
+                                    && (int) melodic.getProperty ("maxNote", -1) == 127 && ! (bool) melodic.getProperty ("openEnded", true)
+                                    && (int) melodic.getProperty ("addressNote", -1) == 0 && padsAddressed
+                                    && melodic.getProperty ("path", var()).toString() == imported && juce::File (imported).existsAsFile()
+                                    && ! (bool) melodic.getProperty ("missing", true) && (double) melodic.getProperty ("durationSec", 0) > 0.0,
+                                "assign_sample melodic at 60: a 9th sound, mode melodic, root 60 over 0..127, gated, addressNote 0 (every note a pad "
+                                "covers reaches the narrower pad, whose addressNote stays its pitch), path = the imported copy");
+                     });
+            check (ok (command (ops, "set_drum_pad", object ({ { "trackId", dt }, { "note", 38 }, { "gainDb", -6.0 } }))),
+                   "an edited pad (38 at -6 dB) for load_drum_kit to reset");
+            oneStep ("load_drum_kit",
+                     [&] { return command (ops, "load_drum_kit", object ({ { "trackId", dt } })); },
+                     [&] (const var&, const var& now)
+                     {
+                         check (now.getProperty ("sounds", var()).size() == 8 && isNear (now.getProperty ("sounds", var())[1].getProperty ("gainDb", 99), 0.0),
+                                "load_drum_kit reloads the 8 pads; the snare is back at 0 dB");
+                     });
+            check (ok (command (ops, "undo")) && samplerJson() == freshKit, "undo the pad edit: plugin.sampler is the fresh kit again");
+
+            // ── A silenced pad keeps the producer's level ──
+            {
+                auto pad = [&] (int pitch) -> var
+                {
+                    const auto list = pluginAt (ops, dt, si).getProperty ("sampler", var()).getProperty ("sounds", var());
+                    for (int k = 0; k < list.size(); ++k)
+                        if ((int) list[k].getProperty ("pitch", -1) == pitch)
+                            return list[k];
+                    return {};
+                };
+                auto setPad = [&] (std::initializer_list<std::pair<const char*, var>> fields)
+                {
+                    auto args = object (fields);
+                    args.getDynamicObject()->setProperty ("trackId", dt);
+                    return ok (command (ops, "set_drum_pad", args));
+                };
+                auto lane = [&] (int note, const char* key, bool on)
+                {
+                    return ok (command (ops, "set_drum_lane", object ({ { "trackId", dt }, { "note", note }, { key, on } })));
+                };
+                auto level = [&] (int pitch) { return pad (pitch).getProperty ("userGainDb", var()).toString() + " dB"; };
+                check (setPad ({ { "note", 38 }, { "gainDb", -6.0 } }) && isNear (pad (38).getProperty ("gainDb", 0), -6.0)
+                           && isNear (pad (38).getProperty ("userGainDb", 0), -6.0) && ! (bool) pad (38).getProperty ("silenced", true),
+                       "the snare at -6 dB: gainDb = userGainDb = -6, not silenced");
+                check (lane (38, "mute", true) && (bool) pad (38).getProperty ("silenced", false) && isNear (pad (38).getProperty ("gainDb", 0), -48.0)
+                           && isNear (pad (38).getProperty ("userGainDb", 0), -6.0),
+                       "set_drum_lane mute 38: silenced, the live gain is the -48 dB floor, userGainDb keeps -6");
+                check (setPad ({ { "note", 38 }, { "pan", 0.5 } }) && isNear (pad (38).getProperty ("userGainDb", 0), -6.0)
+                           && isNear (pad (38).getProperty ("pan", 0), 0.5) && isNear (pad (38).getProperty ("gainDb", 0), -48.0)
+                           && (bool) pad (38).getProperty ("silenced", false),
+                       "a pan-only set_drum_pad on the muted pad keeps its level (userGainDb " + level (38) + "; it used to park the -48 floor)");
+                check (setPad ({ { "note", 38 }, { "name", "Snare M" } }) && setPad ({ { "note", 38 }, { "chokeGroup", 3 } })
+                           && isNear (pad (38).getProperty ("userGainDb", 0), -6.0),
+                       "name-only and choke-only edits on the muted pad keep it too (" + level (38) + ")");
+                check (setPad ({ { "note", 38 }, { "gainDb", 60.0 } }) && isNear (pad (38).getProperty ("userGainDb", 0), 48.0)
+                           && isNear (pad (38).getProperty ("gainDb", 0), -48.0),
+                       "a parked level is clamped as the engine clamps a gain: +60 dB parks +48 (" + level (38) + ")");
+                check (setPad ({ { "note", 38 }, { "gainDb", -100.0 } }) && isNear (pad (38).getProperty ("userGainDb", 0), -48.0),
+                       "...and -100 dB parks -48 (" + level (38) + ")");
+                check (setPad ({ { "note", 38 }, { "gainDb", -3.0 } }) && isNear (pad (38).getProperty ("userGainDb", 0), -3.0)
+                           && isNear (pad (38).getProperty ("gainDb", 0), -48.0),
+                       "a level edit on the muted pad parks -3 dB; the pad stays silent (-48)");
+                check (lane (38, "mute", false) && ! (bool) pad (38).getProperty ("silenced", true) && isNear (pad (38).getProperty ("gainDb", 0), -3.0)
+                           && isNear (pad (38).getProperty ("userGainDb", 0), -3.0) && isNear (pad (38).getProperty ("pan", 0), 0.5),
+                       "unmuted: the snare comes back at -3 dB, pan 0.5");
+                check (lane (36, "solo", true) && (bool) pad (38).getProperty ("silenced", false) && isNear (pad (38).getProperty ("userGainDb", 0), -3.0)
+                           && ! (bool) pad (36).getProperty ("silenced", true),
+                       "soloing the kick silences the snare the same way (silenced, userGainDb -3); the kick is not silenced");
+                check (setPad ({ { "note", 38 }, { "pan", -0.5 } }) && isNear (pad (38).getProperty ("userGainDb", 0), -3.0),
+                       "a pan-only edit on a solo-silenced pad keeps its level too (" + level (38) + ")");
+                check (lane (36, "solo", false) && ! (bool) pad (38).getProperty ("silenced", true) && isNear (pad (38).getProperty ("gainDb", 0), -3.0),
+                       "un-solo: the snare is back at -3 dB");
+            }
+
+            // ── The live rail: hits, held keys, the added peak ──
+            auto noteOn = [] (int note, int velocity) { return juce::MidiMessage::noteOn (1, note, (juce::uint8) velocity); };
+            auto noteOff = [] (int note) { return juce::MidiMessage::noteOff (1, note); };
+            auto meter = [&] { return meterFor (ops.pluginMeters(), dt, si); };
+            auto hitsOf = [] (const var& reading)
+            {
+                std::vector<std::pair<int, double>> hits;
+                const auto list = reading.getProperty ("hits", var());
+                for (int i = 0; i < list.size(); ++i)
+                    hits.emplace_back ((int) list[i].getProperty ("note", -1), (double) list[i].getProperty ("vel", -1.0));
+                return hits;
+            };
+            auto hitsAre = [&] (const var& reading, std::initializer_list<std::pair<int, double>> expected)
+            {
+                const auto hits = hitsOf (reading);
+                if (hits.size() != expected.size())
+                    return false;
+                size_t k = 0;
+                for (const auto& [note, vel] : expected)
+                {
+                    if (hits[k].first != note || std::abs (hits[k].second - vel) > 1.0e-6)
+                        return false;
+                    ++k;
+                }
+                return true;
+            };
+            pump (200);   // the edits above rebuilt the sounds (AsyncUpdate): settle before driving
+            (void) ops.pluginMeters();
+            {
+                LiveInstrument live (*drums, 256);
+                live.play (0.25);
+                check (! meter().isObject(), "a sampler that played nothing is not on the rail (idle)");
+
+                live.play (0.25, { { 0, noteOn (36, 100) }, { 2400, noteOn (38, 64) }, { 4800, noteOn (38, 90) } });
+                const auto first = meter();
+                check (first.isObject() && first.getProperty ("type", var()).toString() == "sampler"
+                           && first.getProperty ("itemId", var()).toString() == pluginAt (ops, dt, si).getProperty ("itemId", var()).toString(),
+                       "after note-ons the sampler is on the rail, with its type and itemId");
+                check (hitsAre (first, { { 36, 100.0 / 127.0 }, { 38, 90.0 / 127.0 } }),
+                       "hits [{36, 100/127}, {38, 90/127}]: each note once, ascending, at its largest velocity (" + juce::JSON::toString (first.getProperty ("hits", var()), true) + ")");
+                check (notesIn (first.getProperty ("held", var())) == std::vector<int> { 36, 38 }, "held [36, 38] (no note-off yet)");
+                check ((double) first.getProperty ("outDb", -100.0) > -100.0, "outDb " + first.getProperty ("outDb", var()).toString() + " dBFS: what the voices added (> -100)");
+                check (! meter().isObject(), "asked again with no new audio, the entry is gone (never stale)");
+
+                live.play (0.05, { { 0, noteOff (36) }, { 0, noteOff (38) } });
+                const auto released = meter();
+                check (released.isObject() && released.getProperty ("held", var()).size() == 0 && released.getProperty ("hits", var()).size() == 0
+                           && (double) released.getProperty ("outDb", -100.0) > -100.0,
+                       "note-offs release the keys; the open-ended one-shots ring on (outDb " + released.getProperty ("outDb", var()).toString() + ")");
+                check ((juce::int64) released.getProperty ("seq", 0) == (juce::int64) first.getProperty ("seq", 0) + 1,
+                       "seq " + released.getProperty ("seq", var()).toString() + " follows " + first.getProperty ("seq", var()).toString());
+
+                live.play (1.0);   // kick 0.36 s, snare 0.22 s
+                (void) ops.pluginMeters();
+                live.play (0.25);
+                check (! meter().isObject(), "once the one-shots have rung out, the idle sampler drops off the rail");
+
+                live.play (0.1, { { 0, noteOn (60, 127) } });
+                const auto unmapped = meter();
+                check (hitsAre (unmapped, { { 60, 1.0 } }) && notesIn (unmapped.getProperty ("held", var())) == std::vector<int> { 60 }
+                           && isNear (unmapped.getProperty ("outDb", 0.0), -100.0),
+                       "a note no sound covers is still a hit and a held key, and adds nothing (outDb -100)");
+                live.play (0.05, { { 0, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 0) } });
+                check (! meter().isObject(), "a velocity-0 note-on releases it: nothing held, nothing added, off the rail");
+                live.play (0.05, { { 0, noteOn (61, 50) }, { 0, juce::MidiMessage::noteOn (3, 62, (juce::uint8) 50) } });
+                check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 61, 62 }, "keys 61 and 62 down (two channels)");
+                live.play (0.05, { { 0, juce::MidiMessage::allNotesOff (7) } });
+                check (! meter().isObject(), "an all-notes-off on any channel releases every key, as in the sampler: off the rail");
+
+                const auto passed = live.play (0.25, {}, false, {}, sineIn);
+                check (! meter().isObject() && peakOf (passed) > 0.45f,
+                       "a 0.5 sine passing through with no hit: the output peaks at " + String (peakOf (passed), 3) + " but nothing was added, so off the rail");
+            }
+            {
+                // outDb is what the sampler ADDED (out - in), with or without a signal through it.
+                double onSilence = 0.0, onSine = 0.0;
+                (void) ops.pluginMeters();
+                {
+                    LiveInstrument live (*drums, 256);
+                    live.play (0.2, { { 0, noteOn (36, 100) } });
+                    onSilence = (double) meter().getProperty ("outDb", 0.0);
+                }
+                (void) ops.pluginMeters();
+                {
+                    LiveInstrument live (*drums, 256);
+                    live.play (0.2, { { 0, noteOn (36, 100) } }, false, {}, sineIn);
+                    onSine = (double) meter().getProperty ("outDb", 0.0);
+                }
+                check (onSilence > -60.0 && std::abs (onSine - onSilence) < 0.01,
+                       "the kick's outDb is its own peak with or without a 0.5 sine through the sampler (" + String (onSilence, 3) + " on silence, "
+                           + String (onSine, 3) + " over the sine)");
+            }
+            {
+                (void) ops.pluginMeters();
+                LiveInstrument live (*drums, 256);
+                live.play (0.25, { { 0, noteOn (36, 100) } }, /*rendering*/ true);
+                check (! meter().isObject(), "a hit played while rendering offline (export/bounce) is not on the rail");
+                live.play (1.0, {}, true);   // it rings out inside the render
+                live.play (0.25);
+                check (! meter().isObject(), "...and nothing from the render surfaces afterwards");
+            }
+            check (ok (command (ops, "bypass_plugin", object ({ { "trackId", dt }, { "index", si }, { "bypassed", true } }))), "bypass the sampler");
+            {
+                LiveInstrument live (*drums, 256);
+                live.play (0.25, { { 0, noteOn (36, 100) } });
+                check (! meter().isObject(), "a bypassed sampler reports nothing, whatever it is handed");
+                drums->auditionKeys (keysOf ({ 38 }));
+                (void) ops.pluginMeters();   // taken while bypassed: the audition is dropped
+                drums->auditionAllNotesOff();
+            }
+            check (ok (command (ops, "undo")), "un-bypass the sampler");
+            pump (200);   // the bypass flip rebuilt the sounds
+            (void) ops.pluginMeters();
+            {
+                LiveInstrument live (*drums, 256);
+                live.play (0.25);
+                check (! meter().isObject(), "back on and idle: an audition made while it was bypassed does not surface");
+            }
+
+            // ── Auditions (audition_note's clipless-track road: playNotes, not MIDI) ──
+            {
+                (void) ops.pluginMeters();
+                LiveInstrument live (*drums, 256);
+                drums->auditionKeys (keysOf ({ 36 }));
+                live.play (0.1);
+                const auto tapped = meter();
+                check (hitsAre (tapped, { { 36, 0.75 } }) && notesIn (tapped.getProperty ("held", var())) == std::vector<int> { 36 }
+                           && (double) tapped.getProperty ("outDb", -100.0) > -100.0,
+                       "an audition is a hit at 0.75 (playNotes' velocity) with its key held, and sounds (outDb " + tapped.getProperty ("outDb", var()).toString() + ")");
+                drums->auditionKeys (keysOf ({ 36 }));
+                live.play (0.05);
+                const auto same = meter();
+                check (same.isObject() && same.getProperty ("hits", var()).size() == 0 && notesIn (same.getProperty ("held", var())) == std::vector<int> { 36 },
+                       "the same keys again: no new hit, still held");
+                drums->auditionKeys ({});
+                live.play (0.05);
+                const auto up = meter();
+                check (up.isObject() && up.getProperty ("held", var()).size() == 0 && up.getProperty ("hits", var()).size() == 0
+                           && (double) up.getProperty ("outDb", -100.0) > -100.0,
+                       "keys up: nothing held, the one-shot rings on");
+                live.play (1.0);
+                (void) ops.pluginMeters();
+            }
+
+            // ── A re-tapped pad on a clipless track sounds again ──
+            {
+                // Why: Tracktion's playNotes starts a voice only for a key it does not already
+                // hold, and the blip's note-off never reached the sampler on this road.
+                auto plain = tracktionTwin<te::SamplerPlugin> (eng, *drums);
+                auto* twinSampler = dynamic_cast<te::SamplerPlugin*> (plain.get());
+                pump (200);   // its sounds load on an AsyncUpdate
+                if (twinSampler != nullptr)
+                {
+                    LiveInstrument twin (*twinSampler, 256);
+                    twinSampler->playNotes (keysOf ({ 36 }));
+                    const float firstTap = peakOf (twin.play (0.5));
+                    twin.play (1.0);
+                    twinSampler->playNotes (keysOf ({ 36 }));
+                    const float secondTap = peakOf (twin.play (0.5));
+                    check (firstTap > 0.01f && secondTap == 0.0f,
+                           "Tracktion's playNotes starts nothing for a key it still holds (a plain sampler: first tap peak " + String (firstTap, 3)
+                               + ", the same keys again " + String (secondTap, 3) + "): a blip's expiry must release the key on the sampler road");
+                }
+            }
+            {
+                pump (200);   // nothing may be pending that would clear the sampler's keys behind the test's back
+                LiveInstrument live (*drums, 256);
+                (void) ops.pluginMeters();
+                auto blip = [&] { return command (ops, "audition_note", object ({ { "trackId", dt }, { "pitch", 36 }, { "action", "blip" }, { "durationMs", 20 } })); };
+                const auto tap1 = blip();
+                check (ok (tap1) && (int) dataOf (tap1).getProperty ("held", -1) == 1 && dataOf (tap1).getProperty ("path", var()).toString() == "none",
+                       "a blip on the clipless drum track: one held voice (headless the sampler road is out of reach: path none)");
+                drums->auditionKeys (keysOf ({ 36 }));   // what audition_note does on that road (MoshOps.Live.cpp)
+                const float peak1 = peakOf (live.play (0.5));
+                const auto hit1 = meter();
+                check (peak1 > 0.01f && hitsAre (hit1, { { 36, 0.75 } }), "the first tap sounds (peak " + String (peak1, 4) + ") and is a hit");
+                live.play (1.0);   // it rings out
+                pump (150);        // the 30 Hz sweep: the 20 ms blip has expired
+                check (drums->getAuditionKeys().isZero(), "the blip's expiry handed the sampler the keys still held on the track: none (36 released on the sampler road)");
+                const auto tap2 = blip();
+                check (ok (tap2) && (int) dataOf (tap2).getProperty ("held", -1) == 1, "the second tap: one held voice (the first had expired)");
+                drums->auditionKeys (keysOf ({ 36 }));
+                const float peak2 = peakOf (live.play (0.5));
+                const auto hit2 = meter();
+                check (peak2 > 0.01f && std::abs (peak2 - peak1) < 1.0e-4f && hitsAre (hit2, { { 36, 0.75 } }),
+                       "the second tap of the same pad sounds again (peak " + String (peak2, 4) + ", as the first) and is a new hit");
+                check (ok (command (ops, "all_notes_off", object ({ { "trackId", dt } }))) && drums->getAuditionKeys().isZero(),
+                       "all_notes_off forgets the sampler road's keys too");
+                live.play (1.0);
+                (void) ops.pluginMeters();
+            }
+
+            // ── The audio is Tracktion's, bit for bit ──
+            {
+                auto plain = tracktionTwin<te::SamplerPlugin> (eng, *drums);
+                pump (200);   // the twin loads its sounds on an AsyncUpdate
+                check (plain != nullptr && dynamic_cast<MoshSamplerPlugin*> (plain.get()) == nullptr,
+                       "the twin is a plain te::SamplerPlugin built from a copy of the drum sampler's state");
+                const MidiEvents pattern = { { 0, noteOn (36, 100) }, { 3000, noteOn (42, 80) }, { 12000, noteOn (38, 127) }, { 20000, noteOn (46, 50) },
+                                             { 30000, noteOff (46) }, { 36000, noteOn (49, 110) }, { 40000, noteOn (45, 60) }, { 44000, noteOn (47, 70) },
+                                             { 50000, noteOn (39, 100) }, { 60000, noteOn (60, 100) }, { 61000, noteOn (36, 30) },
+                                             { 70000, juce::MidiMessage::allNotesOff (1) }, { 72000, noteOn (38, 90) } };
+                for (const bool rendering : { false, true })
+                {
+                    if (plain == nullptr)
+                        break;
+                    const int block = rendering ? 480 : 256;
+                    juce::AudioBuffer<float> outMosh, outPlain;
+                    {
+                        LiveInstrument a (*drums, block);
+                        outMosh = a.play (2.0, pattern, rendering, {}, sineIn);
+                    }
+                    {
+                        LiveInstrument b (*plain, block);
+                        outPlain = b.play (2.0, pattern, rendering, {}, sineIn);
+                    }
+                    float added = 0.0f;
+                    for (int ch = 0; ch < outMosh.getNumChannels(); ++ch)
+                        for (int i = 0; i < outMosh.getNumSamples(); ++i)
+                            added = juce::jmax (added, std::abs (outMosh.getSample (ch, i) - sineIn (ch, i)));
+                    check (samplesDiffering (outMosh, outPlain) == 0 && added > 0.05f,
+                           String ("MoshSamplerPlugin is bit-identical to te::SamplerPlugin, ") + (rendering ? "rendering, 480-sample blocks" : "live, 256-sample blocks")
+                               + ", 13 MIDI events over a 220 Hz input (" + String (samplesDiffering (outMosh, outPlain)) + " samples differ; the pads added up to "
+                               + String (added, 3) + ")");
+                }
+                (void) ops.pluginMeters();
+            }
+
+            // assign_sample is the last road to a sampler.
+            {
+                const auto assignTrack = trackIdOf (command (ops, "create_track", object ({ { "name", "Sampler Assign" } })));
+                const auto assigned = command (ops, "assign_sample", object ({ { "trackId", assignTrack }, { "note", 36 }, { "file", kickPath } }));
+                check (ok (assigned) && metered (assignTrack, (int) dataOf (assigned).getProperty ("index", -1)) != nullptr,
+                       "the sampler assign_sample creates on a track without one is a MoshSamplerPlugin");
+                check (ok (command (ops, "remove_track", object ({ { "trackId", assignTrack } }))), "assign_sample fixture track removed");
+            }
+        }
+
+        check (ok (command (ops, "remove_track", object ({ { "trackId", dt } }))), "sampler fixture track removed");
     }
 }
 }
