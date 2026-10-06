@@ -18,6 +18,11 @@
 //              every slope attenuates as the Butterworth closed form says, and a slope
 //              change mid-stream crossfades without a jump.
 //   SIGNATURE  the render-layer cache key changes with plugin state and sampler sounds.
+//   4OSC       a loaded or default "4osc" is Mosh's metered subclass; all 68 parameters with
+//              their paramIDs and full JUCE ranges (skew, step), every other type's
+//              parameters byte-identical to before; its state keys; read-only mod routes;
+//              and its live rail entry (output peak, held keys, struck notes), driven with
+//              MIDI through a live (not rendering) context.
 //
 // A headless run has no audio thread, so the plugins are driven block by block the way
 // the playback graph's PluginNode drives them (as the AutoTune section does).
@@ -28,12 +33,16 @@
 #include "plugins/moshfx/MoshCompressorPlugin.h"
 #include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
 #include "moshops/PluginState.h"
+#include "moshops/PluginParameterReadback.h"
 #include <cmath>
 #include <cstring>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
+#include <vector>
 
 namespace mosh
 {
@@ -206,6 +215,110 @@ void driveScheduled (te::Plugin& plugin, juce::AudioBuffer<float>& io, int block
         plugin.applyToBufferWithAutomation (context);
     }
     plugin.baseClassDeinitialise();
+}
+
+// An instrument, the way the playback graph drives it during LIVE playback: rendering
+// false (the drive helpers above pass true), and each block handed the MIDI that falls in
+// it. `events` are (sample, message) pairs; a message's timestamp is its sample over the
+// rate, measured, like the block's bufferStartSample, from the start of `io` (FourOsc
+// keeps a message when round (timestamp * rate) lands inside the block). `strays` go into
+// the FIRST block's MIDI only, whatever their sample: a stray past the first block is
+// handed to a block it does not belong to, so the synth must ignore it.
+juce::AudioBuffer<float> driveMidi (te::Plugin& plugin, double seconds, int block,
+                                    const std::vector<std::pair<int, juce::MidiMessage>>& events,
+                                    bool rendering = false,
+                                    const std::vector<std::pair<int, juce::MidiMessage>>& strays = {})
+{
+    const double rate = 48000.0;
+    juce::AudioBuffer<float> io (2, (int) (seconds * rate));
+    io.clear();
+    plugin.baseClassInitialise ({ tracktion::TimePosition(), rate, block });
+    te::MidiMessageArray midi;
+    const auto source = te::createUniqueMPESourceID();
+    for (int start = 0; start < io.getNumSamples(); start += block)
+    {
+        const int n = juce::jmin (block, io.getNumSamples() - start);
+        midi.clear();
+        for (const auto& [at, message] : events)
+            if (at >= start && at < start + n)
+                midi.addMidiMessage (message, at / rate, source);
+        if (start == 0)
+            for (const auto& [at, message] : strays)
+                midi.addMidiMessage (message, at / rate, source);
+        const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
+                                         tracktion::TimePosition::fromSeconds ((start + n) / rate));
+        te::PluginRenderContext context (&io, juce::AudioChannelSet::stereo(), start, n, &midi, 0.0, time,
+                                         /*playing*/ true, /*scrubbing*/ false, rendering,
+                                         /*allowBypassedProcessing*/ false);
+        plugin.applyToBufferWithAutomation (context);
+    }
+    plugin.baseClassDeinitialise();
+    return io;
+}
+
+// A parameter object exactly as pluginToVar built it before the 4OSC work (2026-10-05):
+// index, name, value, the readback (display/unit, and min/max when `range` is given), the
+// stepped-parameter fields, automated and its points. Used to prove that the payload of
+// every other plugin type is byte-identical, and that the 4OSC's first 16 only GAINED keys.
+var legacyParamVar (te::AutomatableParameter& param, int index, std::optional<juce::Range<float>> range)
+{
+    auto* po = new juce::DynamicObject();
+    po->setProperty ("index", index);
+    po->setProperty ("name", param.getParameterName());
+    po->setProperty ("value", param.getCurrentNormalisedValue());
+    addPluginParameterReadback (*po, param, range);
+    if (param.isDiscrete())
+    {
+        po->setProperty ("discrete", true);
+        po->setProperty ("states", juce::jmax (2, param.getNumberOfStates()));
+        if (param.hasLabels())
+        {
+            juce::Array<var> choices;
+            for (const auto& label : param.getAllLabels())
+                choices.add (label);
+            po->setProperty ("choices", choices);
+        }
+    }
+    const bool automated = param.hasAutomationPoints();
+    po->setProperty ("automated", automated);
+    if (automated)
+    {
+        auto& curve = param.getCurve();
+        juce::Array<var> pts;
+        for (int j = 0; j < curve.getNumPoints(); ++j)
+        {
+            auto* pt = new juce::DynamicObject();
+            pt->setProperty ("t", curve.getPointTime (j).inSeconds());
+            pt->setProperty ("v", param.valueRange.convertTo0to1 (curve.getPointValue (j)));
+            pts.add (var (pt));
+        }
+        po->setProperty ("points", pts);
+    }
+    return var (po);
+}
+
+// `entry` without the keys named in `drop` (a copy; the property order is kept).
+var withoutKeys (const var& entry, std::initializer_list<const char*> drop)
+{
+    auto* copy = new juce::DynamicObject();
+    if (auto* object = entry.getDynamicObject())
+        for (const auto& property : object->getProperties())
+        {
+            bool dropped = false;
+            for (auto* key : drop)
+                dropped = dropped || property.name.toString() == key;
+            if (! dropped)
+                copy->setProperty (property.name, property.value);
+        }
+    return var (copy);
+}
+
+std::vector<int> notesIn (const var& array)
+{
+    std::vector<int> notes;
+    for (int i = 0; i < array.size(); ++i)
+        notes.push_back ((int) array[i]);
+    return notes;
 }
 
 int samplesDiffering (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
@@ -706,6 +819,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             const double expectedGr = -db ((thresh + (A - thresh) * rat) / A);
             auto dc = signal (2, 0.5, [A] (int, int) { return (float) A; });
             drive (*comp, dc, 256);
+            juce::int64 firstSeq = -1;
             {
                 const auto payload = ops.pluginMeters();
                 const auto m = meterFor (payload, tid, compIdx);
@@ -713,6 +827,8 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 check (m.getProperty ("type", var()).toString() == "compressor"
                            && m.getProperty ("itemId", var()).toString() == pluginAt (ops, tid, compIdx).getProperty ("itemId", var()).toString(),
                        "the meter names its type and the plugin's itemId");
+                firstSeq = m.hasProperty ("seq") ? (juce::int64) m.getProperty ("seq", -1) : -1;
+                check (firstSeq >= 1, "...and carries a frame counter seq (" + m.getProperty ("seq", var()).toString() + ")");
                 const double gr = (double) m.getProperty ("grDb", -1.0);
                 check (std::abs (gr - expectedGr) < 0.1,
                        "compressor grDb " + String (gr, 3) + " matches the static curve " + String (expectedGr, 3) + " dB (within 0.1 dB)");
@@ -737,6 +853,8 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 const auto m = meterFor (ops.pluginMeters(), tid, compIdx);
                 const double gr = (double) m.getProperty ("grDb", -1.0);
                 check (std::abs (gr - expectedGr) < 0.1, "with +6 dB makeup grDb is still " + String (gr, 3) + " dB (makeup excluded)");
+                check ((juce::int64) m.getProperty ("seq", -1) == firstSeq + 1,
+                       "the compressor's next reported frame has seq " + String (firstSeq + 1) + " (an empty take in between does not count)");
             }
             check (ok (command (ops, "undo")), "undo the makeup change");
 
@@ -1120,6 +1238,521 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
         }
     }
 
+    // ── 4OSC: every parameter with its JUCE range, its state keys, its live keys ──
+    section ("Plugin panels: 4OSC parameters, state and live keys");
+    {
+        // Every other type's parameters are byte-identical to what pluginToVar emitted
+        // before the 4OSC work: at most 16, and each object exactly the legacy one (no id,
+        // skew, symmetricSkew or step), and no plugin but the 4OSC carries modRoutes.
+        {
+            const auto plugins = pluginsOf (ops, tid);
+            int compared = 0, expectedCount = 0, differing = 0;
+            std::set<String> typesCompared;
+            bool noModRoutes = true, capped = true;
+            String firstDifference;
+            for (int k = 0; k < plugins.size(); ++k)
+            {
+                const int index = (int) plugins[k].getProperty ("index", -1);
+                auto* live = livePlugin (eng, tid, index);
+                if (live == nullptr || dynamic_cast<te::FourOscPlugin*> (live) != nullptr)
+                    continue;
+                typesCompared.insert (plugins[k].getProperty ("type", var()).toString());
+                expectedCount += juce::jmin (16, live->getNumAutomatableParameters());
+                noModRoutes = noModRoutes && ! plugins[k].hasProperty ("modRoutes");
+                const auto params = plugins[k].getProperty ("params", var());
+                capped = capped && params.size() == juce::jmin (16, live->getNumAutomatableParameters());
+                for (int i = 0; i < params.size(); ++i)
+                {
+                    auto param = live->getAutomatableParameter (i);
+                    const std::optional<juce::Range<float>> range = params[i].hasProperty ("min")
+                        ? std::optional<juce::Range<float>> (param->getValueRange()) : std::nullopt;
+                    const auto expected = juce::JSON::toString (legacyParamVar (*param, i, range), true);
+                    const auto actual = juce::JSON::toString (params[i], true);
+                    ++compared;
+                    if (expected != actual)
+                    {
+                        ++differing;
+                        if (firstDifference.isEmpty())
+                            firstDifference = plugins[k].getProperty ("type", var()).toString() + " #" + String (i) + ": " + actual;
+                    }
+                }
+            }
+            check (typesCompared.size() >= 12 && compared == expectedCount && compared >= 40 && differing == 0,
+                   "every other plugin type's params are byte-identical to the legacy payload (" + String (compared)
+                       + " parameter objects over " + String ((int) typesCompared.size()) + " types, " + String (differing) + " differ"
+                       + (firstDifference.isEmpty() ? String() : ": " + firstDifference) + ")");
+            check (capped, "every other plugin type keeps the 16-parameter cap");
+            check (noModRoutes, "no other plugin type carries modRoutes");
+        }
+
+        const auto ft = dataOf (command (ops, "create_track", object ({ { "name", "4OSC Panel" } }))).getProperty ("trackId", var()).toString();
+        const auto loaded = command (ops, "load_builtin", object ({ { "trackId", ft }, { "type", "4osc" } }));
+        const int fo = (int) dataOf (loaded).getProperty ("index", -1);
+        check (ft.isNotEmpty() && ok (loaded) && fo >= 0, "load_builtin 4osc on its own track");
+        auto* synth = dynamic_cast<MoshFourOscPlugin*> (livePlugin (eng, ft, fo));
+        // Guard on Tracktion's init order (MoshEngine.cpp, autoInitialiseDeviceManager).
+        check (synth != nullptr, "a loaded \"4osc\" is a MoshFourOscPlugin (registered before Tracktion's own)");
+        {
+            // The default instrument a MIDI clip brings (ensureDefaultInstrument).
+            const auto dt = dataOf (command (ops, "create_track", object ({ { "name", "4OSC Default" } }))).getProperty ("trackId", var()).toString();
+            const bool clipOk = ok (command (ops, "add_midi_clip", object ({ { "trackId", dt }, { "length", 1.0 } })));
+            bool isMosh = false, sawFourOsc = false;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == dt)
+                    for (auto* plugin : t->pluginList.getPlugins())
+                        if (plugin != nullptr && plugin->getPluginType() == "4osc")
+                        {
+                            sawFourOsc = true;
+                            isMosh = dynamic_cast<MoshFourOscPlugin*> (plugin) != nullptr;
+                        }
+            check (clipOk && sawFourOsc && isMosh, "the default instrument a MIDI clip brings is a MoshFourOscPlugin");
+            check (ok (command (ops, "remove_track", object ({ { "trackId", dt } }))), "remove the default-instrument track");
+        }
+
+        // ── All 68 parameters, with paramIDs and the full JUCE range ──
+        {
+            const auto params = pluginAt (ops, ft, fo).getProperty ("params", var());
+            bool shape = params.size() == 68;
+            std::set<String> ids;
+            int stepped = 0, symmetric = 0;
+            for (int i = 0; i < params.size(); ++i)
+            {
+                shape = shape && (int) params[i].getProperty ("index", -1) == i && params[i].hasProperty ("id")
+                        && params[i].hasProperty ("min") && params[i].hasProperty ("max") && params[i].hasProperty ("display");
+                ids.insert (params[i].getProperty ("id", var()).toString());
+                stepped += params[i].hasProperty ("step") ? 1 : 0;
+                symmetric += params[i].hasProperty ("symmetricSkew") ? 1 : 0;
+            }
+            check (shape, "4OSC publishes all 68 parameters (indices 0..67), each with id, min, max and display");
+            check (ids.size() == 68, "the 68 paramIDs are distinct (the names are not: \"Mix\" x3, \"Width\" x2)");
+            auto idAt = [&] (int i) { return params[i].getProperty ("id", var()).toString(); };
+            check (idAt (0) == "tune1" && idAt (6) == "pan1" && idAt (27) == "pan4" && idAt (28) == "lfoRate1" && idAt (40) == "ampAttack"
+                       && idAt (49) == "filterFreq" && idAt (54) == "distortion" && idAt (58) == "reverbMix" && idAt (61) == "delayMix"
+                       && idAt (65) == "chorusMix" && idAt (66) == "legato" && idAt (67) == "masterLevel",
+                   "4OSC paramIDs by index: tune1, pan1, pan4, lfoRate1, ampAttack (40), filterFreq (49), distortion (54), the three Mix, legato, masterLevel (67)");
+            check (params[58].getProperty ("name", var()).toString() == "Mix" && params[61].getProperty ("name", var()).toString() == "Mix"
+                       && params[67].getProperty ("name", var()).toString() == "Level",
+                   "...whose names collide (58 and 61 are both \"Mix\", 67 is \"Level\")");
+            auto near = [] (const var& v, double expected, double tolerance) { return ! v.isVoid() && std::abs ((double) v - expected) < tolerance; };
+            const auto attack = params[40];
+            check (near (attack.getProperty ("skew", var()), 0.2, 1.0e-6) && ! attack.hasProperty ("step")
+                       && near (attack.getProperty ("min", var()), 0.001, 1.0e-6) && near (attack.getProperty ("max", var()), 60.0, 1.0e-6),
+                   "ampAttack: 0.001..60 s, skew 0.2, no step");
+            check (near (params[2].getProperty ("skew", var()), 4.0, 1.0e-6) && near (params[67].getProperty ("skew", var()), 4.0, 1.0e-6)
+                       && near (params[59].getProperty ("skew", var()), 4.0, 1.0e-6)
+                       && near (params[2].getProperty ("min", var()), -100.0, 1.0e-6) && near (params[2].getProperty ("max", var()), 0.0, 1.0e-6),
+                   "levels (Level 1, master Level, delay Feedback): -100..0 dB, skew 4");
+            check (near (params[28].getProperty ("skew", var()), 0.3, 1.0e-6), "LFO rate: skew 0.3");
+            bool tunes = stepped == 4;
+            for (int osc = 0; osc < 4; ++osc)
+                tunes = tunes && near (params[osc * 7].getProperty ("step", var()), 1.0, 1.0e-9) && ! params[osc * 7].hasProperty ("skew")
+                        && near (params[osc * 7].getProperty ("min", var()), -36.0, 1.0e-6) && near (params[osc * 7].getProperty ("max", var()), 36.0, 1.0e-6);
+            check (tunes, "Tune 1..4: -36..36 st, step 1, linear; no other parameter has a step");
+            check (symmetric == 0, "no 4OSC parameter has a symmetric skew");
+            check (! params[1].hasProperty ("skew") && ! params[49].hasProperty ("skew") && ! params[54].hasProperty ("skew"),
+                   "linear parameters (Fine Tune 1, Filter Freq, Distortion) carry no skew");
+            check (near (params[49].getProperty ("max", var()), 135.076232, 1.0e-4) && near (params[49].getProperty ("min", var()), 0.0, 1.0e-9),
+                   "filterFreq: 0..135.076232 (MIDI note numbers)");
+            // The first 16 only gained keys: without them each is the legacy object.
+            bool firstSixteen = true;
+            for (int i = 0; i < 16 && synth != nullptr; ++i)
+                firstSixteen = firstSixteen
+                               && juce::JSON::toString (withoutKeys (params[i], { "id", "min", "max", "skew", "symmetricSkew", "step" }), true)
+                                      == juce::JSON::toString (legacyParamVar (*synth->getAutomatableParameter (i), i, std::nullopt), true);
+            check (firstSixteen, "the 4OSC's first 16 parameters are the legacy objects plus id/min/max/skew/step (index, name, value, display, automated unchanged)");
+            check (! pluginAt (ops, ft, fo).hasProperty ("modRoutes"), "a 4OSC with no modulation carries no modRoutes");
+        }
+
+        // ── The mapping, end to end at v = 0.5: the snapshot's own fields give the engine's value ──
+        {
+            auto setParam = [&] (int paramIndex, double value)
+            {
+                return ok (command (ops, "set_plugin_param", object ({ { "trackId", ft }, { "index", fo }, { "paramIndex", paramIndex }, { "value", value } })));
+            };
+            auto physOf = [] (const var& p)
+            {
+                const double lo = p["min"], hi = p["max"], v = p["value"];
+                const double skew = p.hasProperty ("skew") ? (double) p["skew"] : 1.0;
+                return lo + (hi - lo) * std::pow (v, 1.0 / skew);
+            };
+            auto normOf = [] (const var& p, double phys)
+            {
+                const double lo = p["min"], hi = p["max"];
+                const double skew = p.hasProperty ("skew") ? (double) p["skew"] : 1.0;
+                return std::pow ((phys - lo) / (hi - lo), skew);
+            };
+            const double attackBefore = paramValue (ops, ft, fo, 40), levelBefore = paramValue (ops, ft, fo, 2), tuneBefore = paramValue (ops, ft, fo, 0);
+            check (setParam (40, 0.5), "ampAttack to 0.5");
+            {
+                const auto p = paramOf (ops, ft, fo, 40);
+                const double phys = physOf (p);
+                const double engine = synth != nullptr ? synth->ampAttack->getCurrentValue() : -1.0;
+                check (std::abs (phys - 1.87597) < 1.0e-4 && std::abs (engine - phys) < 1.0e-4 && std::abs (normOf (p, phys) - 0.5) < 1.0e-6,
+                       "ampAttack at 0.5: the snapshot's min/max/skew give " + String (phys, 5) + " s, the engine holds " + String (engine, 5)
+                           + " s (1.87597), and the inverse returns 0.5; display " + p.getProperty ("display", var()).toString());
+            }
+            check (setParam (2, 0.5), "Level 1 to 0.5");
+            {
+                const auto p = paramOf (ops, ft, fo, 2);
+                const double phys = physOf (p);
+                const double engine = synth != nullptr ? synth->oscParams[0]->level->getCurrentValue() : 1.0;
+                check (std::abs (phys + 15.910) < 1.0e-3 && std::abs (engine - phys) < 1.0e-3 && std::abs (normOf (p, phys) - 0.5) < 1.0e-6,
+                       "Level 1 at 0.5: " + String (phys, 3) + " dB from the snapshot, " + String (engine, 3) + " dB in the engine (-15.910)");
+            }
+            check (setParam (0, 0.6), "Tune 1 to 0.6");
+            {
+                const auto p = paramOf (ops, ft, fo, 0);
+                const double phys = physOf (p), step = p["step"], snapped = (double) p["min"] + step * std::round ((phys - (double) p["min"]) / step);
+                check (std::abs (snapped - 7.0) < 1.0e-9 && p.getProperty ("display", var()).toString() == "7st",
+                       "Tune 1 at 0.6: 7.2 snapped to its step is " + String (snapped, 1) + " st, as the engine shows it (" + p.getProperty ("display", var()).toString() + ")");
+            }
+            check (ok (command (ops, "undo")) && ok (command (ops, "undo")) && ok (command (ops, "undo"))
+                       && std::abs (paramValue (ops, ft, fo, 40) - attackBefore) < 1.0e-6 && std::abs (paramValue (ops, ft, fo, 2) - levelBefore) < 1.0e-6
+                       && std::abs (paramValue (ops, ft, fo, 0) - tuneBefore) < 1.0e-6,
+                   "undo the three parameter edits (each one step)");
+        }
+
+        // ── Mod routes: read-only, from an imported MODMATRIX ──
+        if (synth != nullptr)
+        {
+            auto matrix = synth->state.getChildWithName (te::IDs::MODMATRIX);
+            const bool created = ! matrix.isValid();
+            if (created)
+            {
+                matrix = juce::ValueTree (te::IDs::MODMATRIX);
+                synth->state.addChild (matrix, -1, nullptr);
+            }
+            juce::ValueTree item (te::IDs::MODMATRIXITEM);
+            item.setProperty (te::IDs::modParam, "filterFreq", nullptr);
+            item.setProperty (te::IDs::modItem, "lfo1", nullptr);
+            item.setProperty (te::IDs::modDepth, 0.25f, nullptr);
+            matrix.addChild (item, -1, nullptr);   // FourOsc reloads its matrix on an AsyncUpdate
+            pump (150);
+            const auto routes = pluginAt (ops, ft, fo).getProperty ("modRoutes", var());
+            check (routes.size() == 1 && (int) routes[0].getProperty ("paramIndex", -1) == 49
+                       && routes[0].getProperty ("id", var()).toString() == "filterFreq"
+                       && routes[0].getProperty ("source", var()).toString() == "lfo1"
+                       && std::abs ((double) routes[0].getProperty ("depth", 0.0) - 0.25) < 1.0e-6,
+                   "an imported LFO 1 -> Filter Freq route shows as modRoutes [{paramIndex 49, id filterFreq, source lfo1, depth 0.25}]");
+            if (created)
+                synth->state.removeChild (matrix, nullptr);
+            else
+                matrix.removeChild (item, nullptr);
+            pump (150);
+            check (! pluginAt (ops, ft, fo).hasProperty ("modRoutes"), "with the route gone, modRoutes is absent again");
+        }
+
+        // ── pluginToVar's cost for one 4OSC (measured and logged, not asserted) ──
+        {
+            constexpr int runs = 200;
+            auto timeIt = [&] (const String& trackId, int index, int& params)
+            {
+                const double t0 = juce::Time::getMillisecondCounterHiRes();
+                for (int r = 0; r < runs; ++r)
+                    params = ops.pluginVarForSelfTest (trackId, index).getProperty ("params", var()).size();
+                return (juce::Time::getMillisecondCounterHiRes() - t0) * 1000.0 / runs;
+            };
+            int fourOscParams = 0, eqParams = 0;
+            const double fourOscUs = timeIt (ft, fo, fourOscParams), eqUs = timeIt (tid, at["4bandEq"], eqParams);
+            check (fourOscParams == 68 && eqParams == 12,
+                   "pluginToVar for one 4OSC (68 params): " + String (fourOscUs, 1) + " us per call; a 4bandEq (12 params): "
+                       + String (eqUs, 1) + " us (mean of " + String (runs) + " calls; logged, not asserted)");
+        }
+
+        // ── State: every key, its default, writes, undo, refusals ──
+        {
+            const char* keys[] = { "waveShape1", "waveShape2", "waveShape3", "waveShape4", "voices1", "voices2", "voices3", "voices4",
+                                   "filterType", "filterSlope", "distortionOn", "reverbOn", "delayOn", "chorusOn", "delayBeats",
+                                   "voiceMode", "ampAnalog" };
+            {
+                const auto state = pluginAt (ops, ft, fo).getProperty ("state", var());
+                bool inOrder = state.getDynamicObject() != nullptr && state.getDynamicObject()->getProperties().size() == (int) std::size (keys);
+                for (int k = 0; inOrder && k < (int) std::size (keys); ++k)
+                    inOrder = state.getDynamicObject()->getProperties().getName (k).toString() == keys[k];
+                check (inOrder, "4OSC state carries the 17 keys in table order (waveShape1..4, voices1..4, filterType, filterSlope, the 4 FX switches, delayBeats, voiceMode, ampAnalog)");
+            }
+            auto entry = [&] (const char* key) { return stateEntry (ops, ft, fo, key); };
+            auto valueOf = [&] (const char* key) { return stateValue (ops, ft, fo, key); };
+            auto choicesAre = [&] (const char* key, std::initializer_list<const char*> expected)
+            {
+                const auto choices = entry (key).getProperty ("choices", var());
+                bool same = choices.size() == (int) expected.size() && ! entry (key).hasProperty ("min");
+                int i = 0;
+                for (auto* c : expected)
+                    same = same && choices[i++].toString() == c;
+                return same;
+            };
+            bool waves = valueOf ("waveShape1").toString() == "sine";
+            for (auto* key : { "waveShape1", "waveShape2", "waveShape3", "waveShape4" })
+                waves = waves && choicesAre (key, { "off", "sine", "square", "saw", "triangle", "noise" })
+                        && (String (key) == "waveShape1" || valueOf (key).toString() == "off");
+            check (waves, "waveShape1..4: choices off, sine, square, saw, triangle, noise; osc 1 sine, the others off");
+            bool voices = true;
+            for (auto* key : { "voices1", "voices2", "voices3", "voices4" })
+                voices = voices && (int) valueOf (key) == 1 && (int) entry (key).getProperty ("min", -1) == 1
+                         && (int) entry (key).getProperty ("max", -1) == 8 && (int) entry (key).getProperty ("step", -1) == 1 && ! entry (key).hasProperty ("unit");
+            check (voices, "voices1..4: 1, 1..8, step 1");
+            check (choicesAre ("filterType", { "off", "lowpass", "highpass", "bandpass", "notch" }) && valueOf ("filterType").toString() == "off",
+                   "filterType: off (Tracktion's default), choices off, lowpass, highpass, bandpass, notch");
+            check ((int) valueOf ("filterSlope") == 12 && (int) entry ("filterSlope").getProperty ("min", -1) == 12
+                       && (int) entry ("filterSlope").getProperty ("max", -1) == 24 && (int) entry ("filterSlope").getProperty ("step", -1) == 12
+                       && entry ("filterSlope").getProperty ("unit", var()).toString() == "dB/oct",
+                   "filterSlope: 12 dB/oct, 12..24, step 12");
+            bool switches = true;
+            for (auto* key : { "distortionOn", "reverbOn", "delayOn", "chorusOn" })
+                switches = switches && choicesAre (key, { "off", "on" }) && valueOf (key).toString() == "off";
+            check (switches, "distortionOn, reverbOn, delayOn, chorusOn: off (choices off, on)");
+            check (std::abs ((double) valueOf ("delayBeats") - 1.0) < 1.0e-9 && std::abs ((double) entry ("delayBeats").getProperty ("min", 0.0) - 0.0625) < 1.0e-9
+                       && std::abs ((double) entry ("delayBeats").getProperty ("max", 0.0) - 4.0) < 1.0e-9
+                       && entry ("delayBeats").getProperty ("unit", var()).toString() == "beats" && ! entry ("delayBeats").hasProperty ("step"),
+                   "delayBeats: 1 beat, 0.0625..4, unit beats, no step");
+            check (choicesAre ("voiceMode", { "mono", "legato", "poly" }) && valueOf ("voiceMode").toString() == "poly",
+                   "voiceMode: poly (choices mono, legato, poly)");
+            check (choicesAre ("ampAnalog", { "off", "on" }) && valueOf ("ampAnalog").toString() == "on", "ampAnalog: on");
+
+            auto setState = [&] (const char* key, var value)
+            {
+                return command (ops, "set_plugin_state", object ({ { "trackId", ft }, { "index", fo }, { "key", key }, { "value", value } }));
+            };
+            auto undoOk = [&] { return ok (command (ops, "undo")); };
+
+            if (synth != nullptr)
+            {
+                auto& osc = *synth;
+                // Waves: every choice lands as its enum int; undo restores sine.
+                const char* waveIds[] = { "off", "sine", "square", "saw", "triangle", "noise" };
+                for (int w = 0; w < 6; ++w)
+                {
+                    if (w == 1) continue;   // sine is the current value: a no-change call
+                    const auto r = setState ("waveShape1", waveIds[w]);
+                    check (ok (r) && dataOf (r).getProperty ("value", var()).toString() == waveIds[w] && valueOf ("waveShape1").toString() == waveIds[w]
+                               && osc.oscParams[0]->waveShapeValue.get() == w,
+                           String ("waveShape1 \"") + waveIds[w] + "\" is stored as Tracktion's wave " + String (w));
+                    check (undoOk() && valueOf ("waveShape1").toString() == "sine" && osc.oscParams[0]->waveShapeValue.get() == 1,
+                           String ("undo after \"") + waveIds[w] + "\" restores sine (1)");
+                }
+                bool otherOscs = true;
+                for (int o = 1; o < 4; ++o)
+                {
+                    const auto key = "waveShape" + String (o + 1);
+                    otherOscs = otherOscs && ok (setState (key.toRawUTF8(), "saw")) && osc.oscParams[o]->waveShapeValue.get() == 3
+                                && valueOf (key.toRawUTF8()).toString() == "saw" && undoOk() && osc.oscParams[o]->waveShapeValue.get() == 0;
+                }
+                check (otherOscs, "waveShape2..4 \"saw\" each store 3 on their own oscillator; undo restores off");
+
+                // Unison voices: rounded and clamped to 1..8.
+                const struct { double asked; int applied; } voiceCases[] = { { 5, 5 }, { 2.6, 3 }, { 9, 8 }, { 0, 1 }, { -4, 1 } };
+                for (const auto& c : voiceCases)
+                {
+                    const auto r = setState ("voices3", c.asked);
+                    const bool edit = c.applied != 1;
+                    check (ok (r) && (int) dataOf (r).getProperty ("value", -1) == c.applied && (int) valueOf ("voices3") == c.applied
+                               && osc.oscParams[2]->voicesValue.get() == c.applied,
+                           "voices3 " + String (c.asked) + " is applied as " + String (c.applied));
+                    if (edit)
+                        check (undoOk() && osc.oscParams[2]->voicesValue.get() == 1, "undo after voices3 " + String (c.asked) + " restores 1");
+                }
+
+                // Filter type: every choice is its enum int; undo restores off (0).
+                const char* filterIds[] = { "off", "lowpass", "highpass", "bandpass", "notch" };
+                for (int f = 1; f < 5; ++f)
+                {
+                    check (ok (setState ("filterType", filterIds[f])) && valueOf ("filterType").toString() == filterIds[f] && osc.filterTypeValue.get() == f,
+                           String ("filterType \"") + filterIds[f] + "\" is stored as " + String (f));
+                    check (undoOk() && osc.filterTypeValue.get() == 0 && valueOf ("filterType").toString() == "off",
+                           String ("undo after filterType \"") + filterIds[f] + "\" restores off (0)");
+                }
+
+                // Filter slope: snapped onto 12 or 24.
+                const struct { double asked; int applied; } slopeCases[] = { { 24, 24 }, { 18, 24 }, { 17, 12 }, { 100, 24 }, { 0, 12 } };
+                for (const auto& c : slopeCases)
+                {
+                    const auto r = setState ("filterSlope", c.asked);
+                    check (ok (r) && (int) dataOf (r).getProperty ("value", -1) == c.applied && osc.filterSlopeValue.get() == c.applied,
+                           "filterSlope " + String (c.asked) + " is applied as " + String (c.applied) + " dB/oct");
+                    if (c.applied == 24)
+                        check (undoOk() && osc.filterSlopeValue.get() == 12, "undo after filterSlope " + String (c.asked) + " restores 12");
+                }
+
+                // The FX switches and analog envelopes.
+                struct Flag { const char* key; juce::CachedValue<bool>* value; bool initial; };
+                Flag flags[] = { { "distortionOn", &osc.distortionOnValue, false }, { "reverbOn", &osc.reverbOnValue, false },
+                                 { "delayOn", &osc.delayOnValue, false }, { "chorusOn", &osc.chorusOnValue, false },
+                                 { "ampAnalog", &osc.ampAnalogValue, true } };
+                for (auto& f : flags)
+                {
+                    const char* flipped = f.initial ? "off" : "on";
+                    check (ok (setState (f.key, flipped)) && valueOf (f.key).toString() == flipped && f.value->get() == ! f.initial,
+                           String (f.key) + " \"" + flipped + "\" sets the engine's switch " + (f.initial ? "false" : "true"));
+                    check (undoOk() && f.value->get() == f.initial, String ("undo restores ") + f.key);
+                }
+
+                // Delay length in beats: clamped to 0.0625..4.
+                const struct { double asked; double applied; } beatCases[] = { { 0.5, 0.5 }, { 10.0, 4.0 }, { 0.0, 0.0625 }, { 1.5, 1.5 } };
+                for (const auto& c : beatCases)
+                {
+                    const auto r = setState ("delayBeats", c.asked);
+                    check (ok (r) && std::abs ((double) dataOf (r).getProperty ("value", -1.0) - c.applied) < 1.0e-6
+                               && std::abs ((double) osc.delayValue.get() - c.applied) < 1.0e-6,
+                           "delayBeats " + String (c.asked) + " is applied as " + String (c.applied) + " beats (Tracktion's \"delay\")");
+                    check (undoOk() && std::abs ((double) osc.delayValue.get() - 1.0) < 1.0e-9, "undo after delayBeats " + String (c.asked) + " restores 1 beat");
+                }
+
+                // Voice mode.
+                const char* modeIds[] = { "mono", "legato", "poly" };
+                for (int m = 0; m < 2; ++m)
+                {
+                    check (ok (setState ("voiceMode", modeIds[m])) && valueOf ("voiceMode").toString() == modeIds[m] && osc.voiceModeValue.get() == m,
+                           String ("voiceMode \"") + modeIds[m] + "\" is stored as " + String (m));
+                    check (undoOk() && osc.voiceModeValue.get() == 2 && valueOf ("voiceMode").toString() == "poly",
+                           String ("undo after voiceMode \"") + modeIds[m] + "\" restores poly (2)");
+                }
+
+                // Refusals: ids are exact lowercase strings, numbers must be numbers.
+                const auto before = juce::JSON::toString (pluginAt (ops, ft, fo).getProperty ("state", var()), true);
+                check (! ok (setState ("waveShape1", "Saw")) && ! ok (setState ("waveShape1", 3)) && ! ok (setState ("waveShape1", "pulse")),
+                       "a wave that is not one of the ids (\"Saw\", 3, \"pulse\") is refused");
+                check (! ok (setState ("filterType", "lowshelf")) && ! ok (setState ("filterType", 1)), "a filter type outside its ids is refused");
+                check (! ok (setState ("voiceMode", 2)) && ! ok (setState ("distortionOn", true)) && ! ok (setState ("ampAnalog", "yes")),
+                       "voiceMode 2, distortionOn true and ampAnalog \"yes\" are refused (choices are ids)");
+                check (! ok (setState ("voices1", "abc")) && ! ok (setState ("filterSlope", "24")) && ! ok (setState ("delayBeats", true)),
+                       "non-numeric voices / filterSlope / delayBeats are refused");
+                {
+                    const auto r = setState ("polyphony", 4);
+                    check (! ok (r) && errorOf (r).contains ("not a state key") && errorOf (r).contains ("waveShape1") && errorOf (r).contains ("ampAnalog"),
+                           "an excluded key (polyphony) is refused and the error names the 4OSC's keys");
+                    check (! ok (setState ("lfoBeat1", 0)) && ! ok (setState ("mpe", 1)) && ! ok (setState ("voices", 8)),
+                           "lfoBeat1, mpe and the global voices are not state keys");
+                }
+                check (juce::JSON::toString (pluginAt (ops, ft, fo).getProperty ("state", var()), true) == before
+                           && osc.oscParams[0]->waveShapeValue.get() == 1 && osc.filterTypeValue.get() == 0,
+                       "the refused calls changed nothing");
+
+                // Out-of-range stored ints (a hand-edited or foreign session) read as what the
+                // synth does with them; picking the shown value still repairs the store.
+                osc.state.setProperty ("waveShape3", 9, nullptr);
+                osc.state.setProperty (te::IDs::filterType, 7, nullptr);
+                osc.state.setProperty (te::IDs::filterSlope, 18, nullptr);
+                osc.state.setProperty ("voices2", 20, nullptr);
+                osc.state.setProperty ("voices4", 0, nullptr);
+                osc.state.setProperty (te::IDs::voiceMode, 5, nullptr);
+                check (valueOf ("waveShape3").toString() == "off" && valueOf ("filterType").toString() == "off" && (int) valueOf ("filterSlope") == 12
+                           && (int) valueOf ("voices2") == 8 && (int) valueOf ("voices4") == 1 && valueOf ("voiceMode").toString() == "mono",
+                       "stored wave 9 / filter 7 / slope 18 / voices 20 and 0 / voice mode 5 read off / off / 12 / 8 and 1 / mono");
+                {
+                    // Filter type 7 silences the voice (zeroed coefficients), so "off" must write 0.
+                    const auto r = setState ("filterType", "off");
+                    check (ok (r) && osc.filterTypeValue.get() == 0, "choosing the shown \"off\" over a stored filter type 7 really writes 0");
+                    check (undoOk() && osc.filterTypeValue.get() == 7, "...as one undoable edit (undo puts the 7 back)");
+                    check (ok (setState ("voices4", 1)) && osc.oscParams[3]->voicesValue.get() == 1 && undoOk(),
+                           "choosing the shown 1 over stored unison voices 0 writes 1 (undone)");
+                }
+                for (const auto& id : { juce::Identifier ("waveShape3"), te::IDs::filterType, te::IDs::filterSlope,
+                                        juce::Identifier ("voices2"), juce::Identifier ("voices4"), te::IDs::voiceMode })
+                    osc.state.removeProperty (id, nullptr);
+                check (osc.oscParams[2]->waveShapeValue.get() == 0 && osc.filterTypeValue.get() == 0 && osc.filterSlopeValue.get() == 12
+                           && osc.voiceModeValue.get() == 2 && osc.oscParams[1]->voicesValue.get() == 1,
+                       "the out-of-range fixture is cleared (Tracktion's defaults again)");
+
+                // A no-change write is not an edit (the stored value already equals it).
+                check (ok (setState ("waveShape1", "sine")), "waveShape1 \"sine\" again (no change) is still ok");
+                {
+                    const auto entries = dataOf (command (ops, "get_command_log", object ({ { "limit", 1 } }))).getProperty ("entries", var());
+                    const auto last = entries.size() > 0 ? entries[0] : var();
+                    check (last.getProperty ("command", var()).toString() == "set_plugin_state" && ! (bool) last.getProperty ("undoable", true),
+                           "...and logged undoable:false");
+                }
+            }
+        }
+
+        // ── The live rail: output peak, held keys, struck notes ──
+        if (synth != nullptr)
+        {
+            auto noteOn = [] (int note) { return juce::MidiMessage::noteOn (1, note, (juce::uint8) 100); };
+            auto noteOff = [] (int note) { return juce::MidiMessage::noteOff (1, note); };
+            auto meter = [&] { return meterFor (ops.pluginMeters(), ft, fo); };
+            using Events = std::vector<std::pair<int, juce::MidiMessage>>;
+
+            (void) ops.pluginMeters();   // the 4OSC is now in the chain the rail last saw
+            driveMidi (*synth, 0.25, 256, {});
+            check (! meter().isObject(), "a 4OSC that played nothing is not on the rail (idle)");
+
+            driveMidi (*synth, 0.25, 256, Events { { 0, noteOn (60) } });
+            const auto first = meter();
+            check (first.isObject() && first.getProperty ("type", var()).toString() == "4osc"
+                       && first.getProperty ("itemId", var()).toString() == pluginAt (ops, ft, fo).getProperty ("itemId", var()).toString(),
+                   "after a note-on the 4OSC is on the rail, with its type and itemId");
+            check (notesIn (first.getProperty ("held", var())) == std::vector<int> { 60 } && notesIn (first.getProperty ("struck", var())) == std::vector<int> { 60 },
+                   "held [60] and struck [60]");
+            check ((double) first.getProperty ("outDb", -100.0) > -100.0,
+                   "outDb " + first.getProperty ("outDb", var()).toString() + " dBFS is the synth's output peak (> -100)");
+            check (! meter().isObject(), "asked again with no new audio, the entry is gone (never stale)");
+
+            driveMidi (*synth, 0.1, 256, {});
+            const auto holding = meter();
+            check (holding.isObject() && notesIn (holding.getProperty ("held", var())) == std::vector<int> { 60 }
+                       && holding.getProperty ("struck", var()).size() == 0,
+                   "the key still down: held [60], nothing struck again");
+            check (first.hasProperty ("seq") && (juce::int64) holding.getProperty ("seq", 0) == (juce::int64) first.getProperty ("seq", 0) + 1,
+                   "seq " + holding.getProperty ("seq", var()).toString() + " follows " + first.getProperty ("seq", var()).toString() + " (a new frame is told from a held one)");
+
+            driveMidi (*synth, 0.05, 256, Events { { 100, noteOff (60) } });
+            const auto released = meter();
+            check (released.isObject() && released.getProperty ("held", var()).size() == 0 && released.getProperty ("struck", var()).size() == 0,
+                   "a note-off clears held (the release tail keeps it on the rail: outDb " + released.getProperty ("outDb", var()).toString() + ")");
+
+            driveMidi (*synth, 3.0, 256, {});   // the release dies away
+            (void) ops.pluginMeters();
+            driveMidi (*synth, 0.25, 256, {});
+            check (! meter().isObject(), "once the release has died away the idle 4OSC drops off the rail");
+
+            // Several keys in one block, ascending; a velocity-0 note-on is a note-off.
+            driveMidi (*synth, 0.1, 256, Events { { 10, noteOn (67) }, { 10, noteOn (60) }, { 20, noteOn (64) } });
+            const auto chord = meter();
+            check (notesIn (chord.getProperty ("held", var())) == std::vector<int> { 60, 64, 67 }
+                       && notesIn (chord.getProperty ("struck", var())) == std::vector<int> { 60, 64, 67 },
+                   "a chord: held and struck [60, 64, 67], ascending");
+            driveMidi (*synth, 0.05, 256, Events { { 0, juce::MidiMessage::noteOn (1, 64, (juce::uint8) 0) } });
+            check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 60, 67 }, "a velocity-0 note-on releases 64: held [60, 67]");
+            synth->midiPanic();
+            driveMidi (*synth, 0.05, 256, Events { { 0, noteOn (72) } });
+            check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 72 }, "midiPanic() drops the held keys: after it only the new key 72 is held");
+            // As in the synth (JUCE's MPEInstrument, legacy mode), an all-notes-off acts on
+            // its own channel only.
+            driveMidi (*synth, 0.05, 256, Events { { 0, juce::MidiMessage::allNotesOff (2) } });
+            check (notesIn (meter().getProperty ("held", var())) == std::vector<int> { 72 }, "an all-notes-off on channel 2 leaves channel 1's key 72 held");
+            driveMidi (*synth, 0.05, 256, Events { { 0, juce::MidiMessage::allNotesOff (1) } });
+            const auto allOff = meter();
+            check (! allOff.isObject() || allOff.getProperty ("held", var()).size() == 0, "an all-notes-off on channel 1 releases it: held []");
+            synth->midiPanic();
+            driveMidi (*synth, 3.0, 256, {});
+            (void) ops.pluginMeters();
+
+            // FourOsc's own in-block filter: a message whose timestamp falls outside the block
+            // it was handed in is ignored by the synth, and by the rail.
+            driveMidi (*synth, 0.1, 256, {}, false, Events { { 300, noteOn (62) } });
+            check (! meter().isObject(), "a note-on timestamped past its block is ignored, as FourOsc ignores it (nothing held, struck or heard)");
+
+            // Offline renders and a bypassed synth never reach the rail.
+            driveMidi (*synth, 0.25, 256, Events { { 0, noteOn (60) } }, /*rendering*/ true);
+            check (! meter().isObject(), "a note played while rendering offline (export/bounce) is not on the rail");
+            synth->midiPanic();
+            driveMidi (*synth, 3.0, 256, {});
+            (void) ops.pluginMeters();
+            check (ok (command (ops, "bypass_plugin", object ({ { "trackId", ft }, { "index", fo }, { "bypassed", true } }))), "bypass the 4OSC");
+            driveMidi (*synth, 0.25, 256, Events { { 0, noteOn (60) } });
+            check (! meter().isObject(), "a bypassed 4OSC reports nothing, whatever it is handed");
+            check (ok (command (ops, "undo")), "un-bypass the 4OSC");
+            synth->midiPanic();
+            driveMidi (*synth, 3.0, 256, {});
+            (void) ops.pluginMeters();
+            driveMidi (*synth, 0.25, 256, {});
+            check (! meter().isObject(), "back on and idle: still nothing on the rail (no held key survived the bypass)");
+        }
+
+        check (ok (command (ops, "remove_track", object ({ { "trackId", ft } }))), "4OSC fixture track removed");
+    }
+
     check (ok (command (ops, "remove_track", object ({ { "trackId", tid } }))), "plugin panels fixture track removed");
 
     // ── The render-layer cache key covers what set_plugin_state and the pad commands change ──
@@ -1169,6 +1802,17 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             check (setOn (st, fx[e.type], e.key, e.value) && sig (clip) != s0, String ("a set_plugin_state edit of ") + e.what + " changes it");
             check (ok (command (ops, "undo")) && sig (clip) == s0,
                    String ("undoing it restores the signature exactly (") + e.what + "): the key is the state, not the history");
+        }
+        {
+            // The default instrument is a 4OSC: its state keys reach the signature too.
+            int synthIndex = -1;
+            const auto plugins = pluginsOf (ops, st);
+            for (int i = 0; i < plugins.size(); ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "4osc")
+                    synthIndex = (int) plugins[i].getProperty ("index", -1);
+            check (synthIndex >= 0 && setOn (st, synthIndex, "waveShape2", "saw") && sig (clip) != s0,
+                   "a 4OSC state edit (osc 2 wave off -> saw) changes it");
+            check (ok (command (ops, "undo")) && sig (clip) == s0, "undoing the 4OSC wave edit restores it exactly");
         }
 
         // A drum track: the sampler has no parameters; its sounds are SOUND children.

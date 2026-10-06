@@ -11,6 +11,7 @@
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -3775,8 +3776,44 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "set_plugin_state slope 24 dB/oct on the track highpass before save");
         const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
         const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
+        // A 4OSC rides the same save/reload: it must come back as Mosh's metered subclass,
+        // with its state keys and all 68 parameters (ids, ranges) exactly as saved.
+        const auto oscTrack = cmd (ops, "create_track", args1 ("name", "R3.3 4OSC"))["data"].getProperty ("trackId", var()).toString();
+        const int oscIdx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", oscTrack }, { "type", "4osc" }}))["data"].getProperty ("index", -1);
+        auto oscEntry = [&] () -> var {
+            auto plugins = trackById (oscTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if ((int) plugins[i].getProperty ("index", -1) == oscIdx) return plugins[i];
+            return var();
+        };
+        check (oscIdx >= 0
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "filterType" }, { "value", "lowpass" }})))
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "waveShape2" }, { "value", "saw" }})))
+                   && ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "paramIndex", 40 }, { "value", 0.5 }}))),
+               "a 4OSC with filterType lowpass, osc 2 saw and Amp Attack 0.5 before save");
+        const auto oscParamsBeforeReload = JSON::toString (oscEntry()["params"]);
+        const auto oscStateBeforeReload = JSON::toString (oscEntry()["state"]);
         check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
         check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
+        {
+            te::Plugin* reloadedOsc = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == oscTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (oscIdx >= 0 && oscIdx < plugins.size())
+                        reloadedOsc = plugins[oscIdx].get();
+                }
+            check (dynamic_cast<MoshFourOscPlugin*> (reloadedOsc) != nullptr,
+                   "the reloaded 4OSC is a MoshFourOscPlugin (shadow registered before the session loaded)");
+            const auto reloaded = oscEntry();
+            check (reloaded["params"].size() == 68 && JSON::toString (reloaded["params"]) == oscParamsBeforeReload
+                       && JSON::toString (reloaded["state"]) == oscStateBeforeReload
+                       && reloaded["state"]["filterType"]["value"].toString() == "lowpass"
+                       && reloaded["state"]["waveShape2"]["value"].toString() == "saw",
+                   "the reloaded 4OSC keeps its 68 parameters and its state (filterType lowpass, osc 2 saw) exactly");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", oscTrack))), "R3.3 4OSC track removed");
+        }
         check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
                    && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,
                "reloaded track highpass retains normalized value, display and physical limits");
