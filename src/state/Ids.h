@@ -154,13 +154,14 @@ namespace mosh::ids
     // This is a MOSH-SIDE property with NO engine backing: te::SamplerPlugin has no choke
     // concept, its playingNotes list is private, and an open-ended voice ignores note-off
     // entirely (the only stops it offers kill every voice on the track at once). It is
-    // therefore enforced by exactly two mechanisms, and nothing else:
-    //   - live triggering, where MoshOps owns the injected stream (audition_note); and
-    //   - apply_choke, which BAKES it into note lengths so clip playback and export obey
-    //     it too. During playback the MIDI comes from the engine's own MidiNode, which
-    //     MoshOps is not in the path of, so there is no third way to do this short of a
-    //     custom sampler subclass — rejected for v1 because the plugin type name is
-    //     persisted in every existing edit.
+    // enforced by ONE mechanism: apply_choke, which BAKES it into note lengths so clip
+    // playback and export obey it. Nothing chokes live: audition_note does not (it has no
+    // choke handling), and during playback the MIDI comes from the engine's own MidiNode,
+    // which MoshOps is not in the path of. (set_drum_pad does make a choked pad note-GATED,
+    // so a baked shorter note really cuts it.) A sampler subclass could choke live, since it
+    // sees each block's MIDI before the voices do, and one now exists without changing the
+    // saved format (MoshSamplerPlugin shadows the same "sampler" type, 2026-10-05), but it
+    // only meters: live choke is NOT implemented.
     MOSH_DECLARE_ID (moshChokeGroup)
     // The kit a drum track last loaded, so the picker can show what is on it.
     MOSH_DECLARE_ID (drumKitId)

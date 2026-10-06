@@ -574,11 +574,12 @@ juce::var MoshOps::cmdListPalette (const juce::var& args)
 
 // Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
 //
-// This exists because live choke cannot reach clip playback. During playback the MIDI
-// comes from the engine's own MidiNode; MoshOps is not in that path and cannot inject a
-// note-off between two clip notes at render time. Subclassing SamplerPlugin to do it
-// properly was rejected for v1: the plugin type name is persisted in every existing edit,
-// so it would change the on-disk format for every drum track already out there.
+// This exists because nothing chokes LIVE. During playback the MIDI comes from the
+// engine's own MidiNode; MoshOps is not in that path and cannot inject a note-off between
+// two clip notes at render time, and audition_note does not choke either. A sampler
+// subclass could (it sees the block's MIDI before the voices do), and one now exists
+// without changing the on-disk format (MoshSamplerPlugin shadows the same "sampler" type),
+// but it only meters: live choke is NOT implemented.
 //
 // Baking is the honest alternative rather than a hack: the notes really do get shorter,
 // which means you can SEE it in the piano roll, it survives export because the render path
@@ -683,9 +684,10 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     const auto name  = args.getProperty ("name", f.getFileNameWithoutExtension()).toString();
     const float gain = (float) (double) args.getProperty ("gainDb", 0.0);
 
-    // NB: the sampler insert is undoable, but the pad SOUND edits below go straight to
-    // the plugin (no UndoManager) — sampler sound content is non-undoable here, the same
-    // as plugin add/remove. (Undo restores a freshly-inserted sampler's removal, not pads.)
+    // One undo step: the sampler insert and every SOUND edit below go through the Edit's
+    // UndoManager inside this transaction (Tracktion's addSound, removeSound,
+    // setSoundParams and setSoundOpenEnded all write with getUndoManager()); --selftest
+    // ("Plugin panels: the Sampler") proves the one step on an existing sampler.
     beginTxn ("assign_sample");
     auto* sampler = ensureSampler (*track);
     if (sampler == nullptr) return errResult ("assign_sample", "could not create sampler");

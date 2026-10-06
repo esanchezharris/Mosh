@@ -146,6 +146,32 @@ session carries: `[{paramIndex, id, source, depth}]` (`source` is Tracktion's id
 base class's own call, registered with the shadows above; `--selftest` fails if a loaded, default
 or reloaded one is not), which publishes the 4OSC's `plugin_meters` entry (see *Events*).
 
+**Sampler and drum pads (2026-10-05).** Every Mosh sampler is a `MoshSamplerPlugin`
+(`src/plugins/moshfx/MoshSamplerPlugin.h`: Tracktion's `te::SamplerPlugin`, same `"sampler"` type,
+saved format unchanged, its audio the base class's own call and bit-identical to it; registered
+with the shadows above; `--selftest` fails if one made by `load_builtin`, a drum track,
+`load_drum_kit`, `assign_sample` or a reload is not), which publishes the sampler's
+`plugin_meters` entry (see *Events*) and adds no parameters or children to its state (the pad
+commands address `SOUND` children by raw index). The pad commands address the track's FIRST
+sampler (`plugin.sampler.primary`) and a pad by the NOTE that reaches it: the narrowest sound
+covering the note, the first on a tie (`plugin.sampler.sounds[].addressNote` is that note).
+`set_drum_pad {trackId, note, gainDb?, pan?, name?, chokeGroup? 0–16}`, `clear_drum_pad
+{trackId, note}`, `assign_sample {trackId, note, file, mode?, name?, gainDb?}` (REPLACES every
+sound covering the note, a melodic one included, and resets level, pan and choke) and
+`load_drum_kit {trackId, kit?}` (replaces ALL sounds) are each exactly one undo step
+(`--selftest` proves it on an existing sampler against an anchor edit); every `SOUND` write rebuilds
+the sampler's sound list, which cuts ringing voices, so a UI commits pad edits on release. A pad
+silenced by `set_drum_lane` (its lane muted, or another lane soloed) keeps the producer's level
+parked (`moshPadGainDb`; `sounds[].silenced` / `userGainDb`): `set_drum_pad`'s `gainDb` writes the
+parked level, clamped to the engine's −48…+48 dB, and an edit without `gainDb` (pan, name or
+choke only) keeps it (before 2026-10-05 a pan-only edit parked the −48 dB floor, so unmuting
+restored silence). A `chokeGroup` > 0 makes the pad note-gated; choke is enforced only by
+`apply_choke` (baked note lengths): nothing chokes live. `audition_note` on a track with no clips
+plays the sampler directly (path `"sampler"`, velocity fixed at 0.75); a blip's expiry now hands
+the sampler the keys still held on that track, so tapping the same pad again sounds (before, the
+key stayed held at the sampler and the next tap of that pad was silent until another pad was
+tapped or the sampler rebuilt), and these auditions are reported as hits on the rail.
+
 **Render-layer cache key (2026-10-05).** A MIDI/drum clip's render is cached under a signature of
 its notes and its track's plugins (`stableSourceSig`, `src/moshops/MoshOps.Generative.cpp`): each
 plugin's name, bypass, parameter values and automation curves, and now also its `plugin.state`
@@ -273,6 +299,27 @@ when there is one.
 `slope` is absent on a filter that is not Mosh's subclass. All of these fields
 are additive.
 
+Every sampler plugin entry (2026-10-05) carries `sampler: { primary, kit?, sounds,
+limits }`, read on the message thread from the `SOUND` children of its persisted
+state (never from the list the sampler loads asynchronously). `primary` is true for
+the sampler the pad commands address (the track's first; a second sampler, or one on
+the master bus, is false and is read-only to the pad commands); `kit` is the track's
+`drumKit` id (primary only, when set); `limits` is `{maxVoices: 32, maxSounds: 64,
+minGainDb: -48, maxGainDb: 48}` (Tracktion's). Each of `sounds` (in sound-index order)
+is `{index, name, file, path, missing, pitch, minNote, maxNote, gainDb, userGainDb,
+silenced, pan, openEnded, chokeGroup?, mode, addressNote?, durationSec?, sampleRate?,
+channels?}`: `file` is the persisted source string, `path` the absolute file the
+sampler resolves it to (through the edit's resolver, so it stays absolute after
+Save-As makes `file` edit-relative; `""` if unresolvable), `missing` whether nothing
+is at `path`; `pitch` is the root (keyNote); `gainDb` is the live gain and
+`userGainDb` the producer's level (the parked copy while `silenced`, which is true for
+a muted lane AND for a pad silenced by another lane's solo); `chokeGroup` only when
+> 0; `mode` is `"drum"` (minNote = maxNote), `"melodic"` (0–127) or `"range"`;
+`addressNote` is the lowest note `set_drum_pad` / `clear_drum_pad` resolve to THIS
+sound (absent when every note it covers reaches a narrower one); `durationSec`,
+`sampleRate`, `channels` come from the file's header when it is readable.
+`track.drumPads` / `drumKit` / `drumMutedPitches` / `drumSoloPitches` are unchanged.
+
 ```jsonc
 {
   "schemaVersion": 1,
@@ -341,9 +388,23 @@ are additive.
     offline (an export or bounce is not live), and only for a tick in which a key was down, a note
     was struck or the peak exceeded 1e-5: an idle synth drops off the rail. No voice count and no
     envelope position: Tracktion keeps the voices behind a private base class.
+  - `sampler` (2026-10-05): `{outDb, held: [notes], hits: [{note, vel}]}`. `hits` = the note-ons
+    the sampler received since the last tick, ascending by note, each once at its largest
+    velocity (`vel` 0–1 = MIDI velocity / 127), including `audition_note`'s clipless-track road
+    (Tracktion's `playNotes`, reported at 0.75, the velocity it plays at); a hit is MIDI
+    RECEIVED, not a voice started (a note no sound covers is still a hit). `held` = the keys
+    down now (MIDI, read as the sampler reads it: any channel, a velocity-0 note-on is a
+    note-off, an all-notes-off or all-sound-off releases every key; plus the audition road's
+    keys); a one-shot pad rings past its note-off. `outDb` = the peak of what the sampler ADDED
+    (max |out − in| over channels 0–1, dBFS, floored at −100): it passes its input through, so
+    a signal before it in the chain does not count. Gated like the 4OSC: only while enabled
+    and not rendering offline, and only for a tick with a hit, a key down or an added peak
+    above 1e-5. An audition made while the sampler is bypassed is dropped. No voice count:
+    Tracktion keeps the voices private.
   Mosh AutoTune is NOT on this rail (it keeps `tuner`; its latch has a single reader). Known limit:
   an offline render (export, bounce) runs the same plugin objects, so a meter can report during an
-  export as the `tuner` rail can (the 4OSC's entry is gated on not rendering; the others are not).
+  export as the `tuner` rail can (the 4OSC's and the sampler's entries are gated on not rendering;
+  the others are not).
 
 ## Undo / threading invariants
 
