@@ -49,9 +49,15 @@ public:
     explicit MoshFourOscPlugin (te::PluginCreationInfo);
     ~MoshFourOscPlugin() override;
 
-    void applyToBuffer (const te::PluginRenderContext&) override;
+    // Each drops the held keys, then calls the base: FourOsc's reset() and midiPanic()
+    // turn every voice off, and so does its initialise() (setCurrentPlaybackSampleRate:
+    // MPESynthesiser turns all voices off and its MPEInstrument releases every note, so a
+    // key still down at that moment is no longer held by the synth either).
+    void initialise (const te::PluginInitialisationInfo&) override;
     void reset() override;
     void midiPanic() override;
+
+    void applyToBuffer (const te::PluginRenderContext&) override;
 
     /** `{ outDb, held: [notes], struck: [notes] }`: the output sample peak since the
         previous take (dBFS, max over channels 0-1, floored at -100), the keys down now
@@ -76,8 +82,8 @@ private:
     // struck: note-ons OR-ed in by the audio thread, exchanged to 0 by the take.
     std::array<std::atomic<std::uint32_t>, 4> heldBits {};
     std::array<std::atomic<std::uint32_t>, 4> struckBits {};
-    // reset() / midiPanic() (any thread): the audio thread drops its held keys at the
-    // start of its next block.
+    // initialise() / reset() / midiPanic() (any thread): the audio thread drops its held
+    // keys at the start of its next block.
     std::atomic<bool> clearHeld { false };
     // maxima: output peak (linear).
     moshfx::LiveMeterLatch<1, 0> meter;

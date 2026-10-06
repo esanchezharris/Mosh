@@ -34,6 +34,12 @@ void MoshFourOscPlugin::clearHeldNow() noexcept
         word.store (0, std::memory_order_relaxed);
 }
 
+void MoshFourOscPlugin::initialise (const te::PluginInitialisationInfo& info)
+{
+    clearHeldNow();
+    te::FourOscPlugin::initialise (info);
+}
+
 void MoshFourOscPlugin::reset()
 {
     clearHeldNow();
