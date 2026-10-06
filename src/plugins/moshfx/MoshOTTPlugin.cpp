@@ -1,4 +1,5 @@
 #include "MoshFxPlugins.h"
+#include "audio/RealtimeAudioGuard.h"
 
 namespace mosh
 {
@@ -86,6 +87,7 @@ void MoshOTTPlugin::deinitialise()
 
 void MoshOTTPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 {
+    MOSH_RT_SCOPE();
     auto* buf = fc.destBuffer;
     if (buf == nullptr || ! isEnabled())
         return;
@@ -94,8 +96,54 @@ void MoshOTTPlugin::applyToBuffer (const te::PluginRenderContext& fc)
                                        midGainValue.get(), highGainValue.get(), mixValue.get(),
                                        outputValue.get());
     const int channels = jmin (buf->getNumChannels(), (int) cores.size());
+    // Live meter: per band, the largest envelope over every channel, and the gain
+    // change of the channel that moved that band furthest (sign kept), so a stereo
+    // track with one hot side shows the hot side.
+    std::array<float, 3> gainDb {};
+    bool dynamicsRan = false, clipped = false;
     for (int ch = 0; ch < channels; ++ch)
-        cores[(size_t) ch].processBlock (buf->getWritePointer (ch, fc.bufferStartSample), fc.bufferNumSamples, settings);
+    {
+        auto& core = cores[(size_t) ch];
+        core.processBlock (buf->getWritePointer (ch, fc.bufferStartSample), fc.bufferNumSamples, settings);
+        const auto& m = core.lastBlockMeter();
+        dynamicsRan = dynamicsRan || m.dynamicsRan;
+        clipped = clipped || m.clipped;
+        for (size_t b = 0; b < 3; ++b)
+        {
+            meter.accumulateMax (b, m.peakEnvelope[b]);
+            if (std::abs (m.gainDb[b]) > std::abs (gainDb[b]))
+                gainDb[b] = m.gainDb[b];
+        }
+    }
+    if (channels <= 0)
+        return;
+    meter.accumulateMax (3, clipped ? 1.0f : 0.0f);
+    for (size_t b = 0; b < 3; ++b)
+        meter.setLatest (b, gainDb[b]);
+    meter.setLatest (3, dynamicsRan ? 1.0f : 0.0f);
+    meter.publish();
+}
+
+var MoshOTTPlugin::takeLiveMeters()
+{
+    const auto reading = meter.take();
+    if (! reading.live)
+        return {};
+    // With Amount at 0 the band dynamics did not run: there is no band level to show,
+    // and no band gain change (the block was only trimmed and limited).
+    const bool dynamicsRan = reading.latest[3] > 0.5f;
+    juce::Array<var> bands;
+    for (size_t b = 0; b < 3; ++b)
+    {
+        auto* band = new DynamicObject();
+        band->setProperty ("levelDb", dynamicsRan ? meterDb (reading.maxima[b]) : -100.0f);
+        band->setProperty ("gainDb", dynamicsRan ? finiteDb (reading.latest[b], -100.0f, 100.0f) : 0.0f);
+        bands.add (var (band));
+    }
+    auto* o = new DynamicObject();
+    o->setProperty ("bands", bands);
+    o->setProperty ("clipped", reading.maxima[3] > 0.5f);
+    return var (o);
 }
 
 void MoshOTTPlugin::restorePluginStateFromValueTree (const ValueTree& v)

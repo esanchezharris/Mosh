@@ -234,6 +234,7 @@ set_master_volume	SessionGlobal
 set_metronome	SessionGlobal
 set_note	Clip
 set_plugin_param	Track
+set_plugin_state	Track
 set_project_settings	Unguarded
 set_rave_param	Track
 set_record_options	SessionGlobal

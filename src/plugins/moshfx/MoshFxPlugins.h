@@ -4,8 +4,10 @@
 #include "plugins/moshfx/MoshFxDsp.h"
 #include "plugins/moshfx/retune/RetuneCore.h"
 #include "plugins/moshfx/retune/LivePitch.h"
+#include "plugins/moshfx/LiveMeter.h"
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -18,6 +20,39 @@ class MoshFxDescribable
 public:
     virtual ~MoshFxDescribable() = default;
     virtual juce::var describeMoshFx() const = 0;
+};
+
+// A plugin that feeds the 30 Hz "plugin_meters" rail (MoshOps::pluginMeters,
+// docs/02_MOSHOPS_CONTRACT.md). The audio thread publishes into a LiveMeterLatch once
+// per processed block; takeLiveMeters() turns what accumulated since the previous take
+// into the per-type fields of one rail entry.
+//
+// Message thread, ONE caller (MoshOps::pluginMeters): each call consumes the reading.
+// Returns a void var when no block was processed since the previous call, so a
+// bypassed or idle plugin never reports stale numbers. Mosh AutoTune is deliberately
+// NOT one of these: its pitch latch is single-reader and belongs to the "tuner" rail.
+class MoshLiveMetered
+{
+public:
+    virtual ~MoshLiveMetered() = default;
+    virtual juce::var takeLiveMeters() = 0;
+
+    /** A linear magnitude in dBFS, clamped to [-100, +100] (-100 for silence and NaN,
+        +100 for anything at or above 10^5, inf included), so the rail is always finite. */
+    static float meterDb (float linear) noexcept
+    {
+        if (! (linear > 1.0e-5f))
+            return -100.0f;
+        if (! (linear < 1.0e5f))
+            return 100.0f;
+        return juce::jlimit (-100.0f, 100.0f, 20.0f * std::log10 (linear));
+    }
+
+    /** A dB value for the rail: NaN becomes `fallback`, the rest is clamped to [lo, hi]. */
+    static float finiteDb (float db, float lo, float hi, float fallback = 0.0f) noexcept
+    {
+        return std::isnan (db) ? fallback : juce::jlimit (lo, hi, db);
+    }
 };
 
 // Vocal pitch correction (docs/AUTOTUNE-SCOPE-2026-10-01.md). The engine is
@@ -79,7 +114,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshAutoTunePlugin)
 };
 
-class MoshOTTPlugin : public te::Plugin, public MoshFxDescribable
+class MoshOTTPlugin : public te::Plugin, public MoshFxDescribable, public MoshLiveMetered
 {
 public:
     static const char* xmlTypeName;
@@ -98,11 +133,16 @@ public:
     int getNumOutputChannelsGivenInputs (int n) override { return n; }
     void restorePluginStateFromValueTree (const juce::ValueTree&) override;
     juce::var describeMoshFx() const override;
+    /** `{ bands: [{levelDb, gainDb}] x3 (low, mid, high), clipped }` — see MoshLiveMetered. */
+    juce::var takeLiveMeters() override;
 
 private:
     juce::CachedValue<float> amountValue, timeValue, lowGainValue, midGainValue, highGainValue, mixValue, outputValue;
     te::AutomatableParameter::Ptr amountParam, timeParam, lowGainParam, midGainParam, highGainParam, mixParam, outputParam;
     std::array<moshfx::OTTCore, 8> cores;
+    // maxima: band envelope peaks (low, mid, high; linear), clipped (0/1).
+    // latest: band gain change in dB (low, mid, high), dynamics ran (0/1).
+    moshfx::LiveMeterLatch<4, 4> meter;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOTTPlugin)
 };
@@ -111,7 +151,7 @@ private:
 // latency. Two AutomatableParameters (drive in dB, ceiling in dBFS); see
 // MoshSoftClipPlugin.cpp's applyToBuffer for the exact formula and the honest
 // aliasing caveat that comes with skipping oversampling.
-class MoshSoftClipPlugin : public te::Plugin, public MoshFxDescribable
+class MoshSoftClipPlugin : public te::Plugin, public MoshFxDescribable, public MoshLiveMetered
 {
 public:
     static const char* xmlTypeName;
@@ -130,15 +170,19 @@ public:
     int getNumOutputChannelsGivenInputs (int n) override { return n; }
     void restorePluginStateFromValueTree (const juce::ValueTree&) override;
     juce::var describeMoshFx() const override;
+    /** `{ grDb, inDb, outDb }` — see MoshLiveMetered and applyToBuffer. */
+    juce::var takeLiveMeters() override;
 
 private:
     juce::CachedValue<float> driveValue, ceilingValue;
     te::AutomatableParameter::Ptr driveParam, ceilingParam;
+    // maxima: input peak (linear), output peak (linear), gain reduction (dB, >= 0).
+    moshfx::LiveMeterLatch<3, 0> meter;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshSoftClipPlugin)
 };
 
-class MoshXFeedbackPlugin : public te::Plugin, public MoshFxDescribable
+class MoshXFeedbackPlugin : public te::Plugin, public MoshFxDescribable, public MoshLiveMetered
 {
 public:
     static const char* xmlTypeName;
@@ -157,8 +201,17 @@ public:
     int getNumOutputChannelsGivenInputs (int n) override { return n; }
     void restorePluginStateFromValueTree (const juce::ValueTree&) override;
     juce::var describeMoshFx() const override;
+    /** `{ candidates: [{hz, score}], cuts: [{hz, score, depthDb}] }`, the last block's
+        (channel 0, as describeMoshFx) — see MoshLiveMetered. */
+    juce::var takeLiveMeters() override;
+
+    // Layout of the meter latch's "latest" slots.
+    static constexpr std::size_t kMeterNumCandidates = 0, kMeterCandidates = 1,   // + 2*i: hz, score
+                                 kMeterNumCuts = 9, kMeterCuts = 10,               // + 3*i: hz, score, depthDb
+                                 kMeterSlots = 22;
 
 private:
+    moshfx::LiveMeterLatch<0, kMeterSlots> meter;
     juce::CachedValue<float> sensitivityValue, maxCutsValue, maxDepthValue, releaseValue, autoSuppressValue, mixValue, outputValue;
     te::AutomatableParameter::Ptr sensitivityParam, maxCutsParam, maxDepthParam, releaseParam, autoSuppressParam, mixParam, outputParam;
     std::array<moshfx::XFeedbackCore, 8> cores;

@@ -17,11 +17,22 @@
 #include "AutomationCurveWrite.h"
 #include "PluginScanPlan.h"
 #include "TrackPresetEngine.h"
+#include "PluginState.h"
+#include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include "files/ImportCopy.h"
 #include <cmath>
 #include <limits>
+
+// The delay/chorus lines are sized for set_plugin_state's ceilings (see
+// MoshDelayLinePlugins.h); raising a ceiling in PluginState.h without them would put the
+// reallocation back on the audio thread.
+static_assert ((int) mosh::pluginstate::maxOf ("delay", "lengthMs") == mosh::MoshDelayPlugin::kMaxLengthMs,
+               "MoshDelayPlugin pre-sizes for the lengthMs ceiling");
+static_assert ((int) (mosh::pluginstate::maxOf ("chorus", "depthMs") * 1000.0)
+                   == (int) (mosh::MoshChorusPlugin::kMaxDepthMs * 1000.0f),
+               "MoshChorusPlugin pre-sizes for the depthMs ceiling");
 
 namespace mosh
 {
@@ -833,8 +844,105 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     return okResult ("reorder_plugin");
 }
 
+// ── Gesture coalescing ────────────────────────────────────────────────────────
+// See MoshOps.h (joinGestureTxn). A join performs WITHOUT beginNewTransaction, and JUCE
+// adds such a perform to whatever action set is current, so the join must be sure that
+// set is still the gesture's own. The hazard is a set some OTHER command opened and
+// performed into after the gesture's last call (set_track_volume mid-drag, say):
+// joining would append the drag to that command's step. The serial (no other
+// beginUndoTransaction) and the depth/name checks rule that out. Undo and redo are a
+// lesser hazard (JUCE's undo()/redo() already end with beginNewTransaction(), so a
+// perform after them starts a fresh set either way), but they still end the window
+// here, through editRevision_, so the step a gesture opens after an undo is a normal
+// named "set_plugin_param" step and not JUCE's unnamed one.
+juce::String MoshOps::gestureArgError (const juce::var& args)
+{
+    if (! args.hasProperty ("gesture"))
+        return {};
+    const auto g = args.getProperty ("gesture", var());
+    const auto text = g.toString();
+    bool okChars = g.isString() && text.length() >= 1 && text.length() <= 64;
+    for (int i = 0; okChars && i < text.length(); ++i)
+    {
+        const auto c = text[i];
+        okChars = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                  || c == '_' || c == '.' || c == ':' || c == '-';
+    }
+    return okChars ? juce::String()
+                   : juce::String ("bad gesture: must be a string of 1-64 characters from [A-Za-z0-9_.:-]");
+}
+
+bool MoshOps::joinGestureTxn (const juce::String& gesture)
+{
+    auto& um = undoManager();
+    const bool join = gesture.isNotEmpty() && ! inBatch
+                      && gesture == gestureId_
+                      && gestureTxnSerial_ == undoTxnSerial_          // no other transaction opened
+                      && gestureRevision_ == editRevision_            // no other mutation, undo, redo or jump
+                      && gestureUndoDepth_ == um.getUndoDescriptions().size()
+                      && ! um.canRedo()
+                      && um.getNumActionsInCurrentTransaction() > 0   // the set exists and is current
+                      && um.getCurrentTransactionName() == gestureTxnName_;
+    if (! join)
+    {
+        // Not this gesture's window any more (or never was): close it, so a stale
+        // inhibitor never outlives the gesture that took it.
+        if (gesture != gestureId_ || inBatch)
+            endGestureWindow();
+        return false;
+    }
+    // Joining: the same bookkeeping beginTxn does, minus opening a transaction.
+    eng.markDirty();
+    ++editRevision_;
+    return true;
+}
+
+void MoshOps::noteGestureTxn (const juce::String& gesture)
+{
+    if (gesture.isEmpty() || inBatch)
+    {
+        endGestureWindow();
+        return;
+    }
+    auto& um = undoManager();
+    gestureId_ = gesture;
+    gestureTxnSerial_ = undoTxnSerial_;
+    gestureRevision_ = editRevision_;
+    gestureUndoDepth_ = um.getUndoDescriptions().size();
+    gestureTxnName_ = um.getCurrentTransactionName();
+    gestureLastCallMs_ = juce::Time::getMillisecondCounter();
+    auto& edit = eng.edit();
+    if (gestureInhibitor_ == nullptr || gestureInhibitedEdit_ != &edit)
+    {
+        gestureInhibitor_.reset();
+        gestureInhibitor_ = std::make_unique<te::Edit::UndoTransactionInhibitor> (edit);
+        gestureInhibitedEdit_ = &edit;
+    }
+}
+
+void MoshOps::endGestureWindow()
+{
+    gestureId_.clear();
+    gestureInhibitor_.reset();
+    gestureInhibitedEdit_ = nullptr;
+}
+
+void MoshOps::expireGestureWindow()
+{
+    if (gestureInhibitor_ == nullptr)
+        return;
+    const bool idle = juce::Time::getMillisecondCounter() - gestureLastCallMs_ > kGestureIdleMs;
+    const bool invalidated = gestureRevision_ != editRevision_ || gestureTxnSerial_ != undoTxnSerial_
+                             || gestureInhibitedEdit_ != &eng.edit();
+    if (idle || invalidated)
+        endGestureWindow();
+}
+
 juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
 {
+    if (const auto gestureError = gestureArgError (args); gestureError.isNotEmpty())
+        return errResult ("set_plugin_param", gestureError);
+    const auto gesture = args.getProperty ("gesture", var()).toString();
     const auto trackId = args.getProperty ("trackId", var()).toString();
     auto* plugin = findPlugin (trackId, (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("set_plugin_param", "no plugin");
@@ -847,7 +955,10 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     const float raw  = param->valueRange.convertFrom0to1 (norm);
     auto* track = findTrack (trackId);   // resolved once — also gates G10 write-mode capture below
 
-    beginTxn ("set_plugin_param");
+    // A drag that carries one `gesture` id joins the transaction its first call opened
+    // (one undo step for the whole drag); without a gesture this is beginTxn.
+    if (! joinGestureTxn (gesture))
+        beginTxn ("set_plugin_param");
     // G14-class fix — see SetPluginParamValueAction's comment. param->setParameter() directly
     // left AutomatableParameter::currentValue (and thus the snapshot's params[].value) stale
     // after undo; replaying through a custom UndoableAction keeps it correct both ways.
@@ -866,6 +977,7 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
         const auto posSec = eng.edit().getTransport().getPosition().inSeconds();
         param->getCurve().addPoint (tracktion::TimePosition::fromSeconds (posSec), raw, 0.0f, &undoManager());
     }
+    noteGestureTxn (gesture);
     logLine ("set_plugin_param", args, true, {}, true);
     // Scoped — param tweaks are the other rapid-fire case. A param that changes plugin
     // LATENCY leaves the session PDC readout briefly stale (self-corrects on the next
@@ -874,6 +986,66 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     else emitSnapshotInvalidated();
     reactiveTouchTrack (trackId);   // Phase 3 — param change → re-bounce
     return okResult ("set_plugin_param");
+}
+
+juce::var MoshOps::cmdSetPluginState (const juce::var& args)
+{
+    static const juce::String name ("set_plugin_state");
+    if (const auto gestureError = gestureArgError (args); gestureError.isNotEmpty())
+        return errResult (name, gestureError);
+    const auto gesture = args.getProperty ("gesture", var()).toString();
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* plugin = findPlugin (trackId, (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult (name, "no plugin");
+
+    const auto type = effectiveBuiltinType (*plugin);
+    const auto key = args.getProperty ("key", var()).toString();
+    const auto* spec = pluginstate::find (type, key);
+    if (spec == nullptr)
+    {
+        const auto keys = pluginstate::keysFor (type);
+        return errResult (name, "key '" + key + "' is not a state key of " + type
+                                    + (keys.isEmpty() ? juce::String (" (it has none)")
+                                                      : " (allowed: " + keys.joinIntoString (", ") + ")"));
+    }
+    if (! args.hasProperty ("value"))
+        return errResult (name, "missing value");
+    var applied;
+    juce::String error;
+    if (! pluginstate::coerce (*spec, args.getProperty ("value", var()), applied, error))
+        return errResult (name, error);
+
+    // Same value as now: nothing to change, so this is not an edit. No transaction is
+    // opened, so an open gesture window (another call's drag) is NOT ended by it; the
+    // JSONL line says undoable:false; nothing is re-bounced. (An empty transaction would
+    // be harmless to undo itself: JUCE's beginNewTransaction is lazy and CachedValue
+    // performs nothing for an equal value.)
+    const auto before = pluginstate::read (*plugin, *spec);
+    const bool same = spec->kind == pluginstate::Spec::Kind::choice
+                          ? before.toString() == applied.toString()
+                          : spec->kind == pluginstate::Spec::Kind::integer
+                                ? (int) before == (int) applied
+                                : juce::exactlyEqual ((float) (double) before, (float) (double) applied);
+    auto* track = findTrack (trackId);
+    if (! same)
+    {
+        if (! joinGestureTxn (gesture))
+            beginTxn ("set_plugin_state");
+        // Through the Edit's UndoManager: a ValueTree property action, which undo/redo
+        // replays and the CachedValue follows (these keys drive no parameter).
+        pluginstate::write (*plugin, *spec, applied, &undoManager());
+        noteGestureTxn (gesture);
+    }
+    logLine (name, args, true, {}, ! same);
+    if (track != nullptr) emitTrackPatch (*track);
+    else emitSnapshotInvalidated();
+    if (! same)
+        reactiveTouchTrack (trackId);   // a state change alters the bounce like a param does
+
+    auto* data = new DynamicObject();
+    data->setProperty ("key", key);
+    data->setProperty ("value", pluginstate::read (*plugin, *spec));
+    return okResult (name, var (data));
 }
 
 juce::var MoshOps::cmdBypassPlugin (const juce::var& args)

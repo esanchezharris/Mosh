@@ -280,6 +280,7 @@ if (MOSH_BUILD_APP)
         src/app/selftest/MultiplayerAudioRefSelfTest.cpp
         src/app/selftest/VocalPresetSelfTest.cpp
         src/app/selftest/TunedLeadPresetSelfTest.cpp
+        src/app/selftest/PluginPanelsSelfTest.cpp
         src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
@@ -352,6 +353,10 @@ if (MOSH_BUILD_APP)
         # Mosh-native FX suite — in-app Tracktion built-ins.
         src/plugins/moshfx/retune/RetuneCore.cpp
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
+        # Tracktion's compressor plus a live gain-reduction meter (same "compressor" type).
+        src/plugins/moshfx/MoshCompressorPlugin.cpp
+        # Tracktion's delay and chorus with their delay lines pre-sized off the audio thread.
+        src/plugins/moshfx/MoshDelayLinePlugins.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
         # R3.3 — plain tanh soft clip built-in (no separate DSP TU; it's stateless math).

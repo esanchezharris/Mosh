@@ -3,6 +3,7 @@
 
 #include "plugins/moshfx/MoshFxDsp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <vector>
@@ -87,6 +88,75 @@ TEST_CASE ("Mosh OTT is conservative by default and stronger at high amount", "[
     CHECK (rmsDiff (input, pushed) > rmsDiff (input, defaults) * 1.5);
 }
 
+namespace
+{
+    // The OTT band gain law (MoshOTTDsp.cpp ottGainDb) with the static trim removed,
+    // restated here so the meter's gainDb is checked against the documented curve.
+    double ottDynamicGainDb (double levelDb, double amount, double upward, double downward)
+    {
+        double g = 0.0;
+        if (levelDb > -20.0)
+            g += ((-20.0 + (levelDb + 20.0) / 4.0) - levelDb) * downward * amount;
+        if (levelDb > -76.0 && levelDb < -38.0)
+            g += std::min (18.0, (-38.0 - levelDb) * 0.45) * upward * amount;
+        return g;
+    }
+}
+
+TEST_CASE ("Mosh OTT block meter: a loud band is cut, a quiet band is lifted", "[moshfx][ott][live-meter]")
+{
+    mosh::moshfx::OTTSettings settings;
+    settings.amount = 1.0f;
+
+    // Loud low band: 110 Hz at 0.8 sits well above -20 dB in the low band.
+    auto loud = sine (110.0, 48000, 0.8f);
+    mosh::moshfx::OTTCore loudCore;
+    loudCore.prepare (kSampleRate);
+    loudCore.processBlock (loud.data(), (int) loud.size(), settings);
+    const auto& lm = loudCore.lastBlockMeter();
+    CHECK (lm.dynamicsRan);
+    const double loudLevel = 20.0 * std::log10 ((double) lm.peakEnvelope[0]);
+    CHECK (loudLevel > -20.0);
+    CHECK (lm.gainDb[0] < -1.0);   // downward: a cut
+    // The gain at the end of the block follows the band law at the envelope's level
+    // (a steady tone: the final envelope sits within its ripple of the block peak).
+    CHECK (std::abs (lm.gainDb[0] - ottDynamicGainDb (loudLevel, 1.0, settings.upward, settings.downward)) < 0.6);
+
+    // Quiet low band: 110 Hz at 0.003 (about -50 dB) is inside the upward window.
+    auto quiet = sine (110.0, 48000, 0.003f);
+    mosh::moshfx::OTTCore quietCore;
+    quietCore.prepare (kSampleRate);
+    quietCore.processBlock (quiet.data(), (int) quiet.size(), settings);
+    const auto& qm = quietCore.lastBlockMeter();
+    const double quietLevel = 20.0 * std::log10 ((double) qm.peakEnvelope[0]);
+    CHECK (quietLevel < -38.0);
+    CHECK (quietLevel > -76.0);
+    CHECK (qm.gainDb[0] > 0.5);    // upward: a lift
+    CHECK (std::abs (qm.gainDb[0] - ottDynamicGainDb (quietLevel, 1.0, settings.upward, settings.downward)) < 0.6);
+    CHECK_FALSE (qm.clipped);
+}
+
+TEST_CASE ("Mosh OTT block meter: clamp and amount-zero reporting", "[moshfx][ott][live-meter]")
+{
+    mosh::moshfx::OTTSettings settings;
+    settings.amount = 0.0f;   // trim and limit only
+    settings.outputDb = 0.0f;
+
+    auto hot = sine (440.0, 4800, 1.5f);
+    mosh::moshfx::OTTCore core;
+    core.prepare (kSampleRate);
+    core.processBlock (hot.data(), (int) hot.size(), settings);
+    CHECK (core.lastBlockMeter().clipped);
+    CHECK_FALSE (core.lastBlockMeter().dynamicsRan);
+    CHECK (core.lastBlockMeter().gainDb[0] == 0.0f);
+    CHECK (core.lastBlockMeter().peakEnvelope[1] == 0.0f);
+
+    // The next block is metered from scratch: a quiet block does not inherit the clamp.
+    auto soft = sine (440.0, 4800, 0.2f);
+    core.processBlock (soft.data(), (int) soft.size(), settings);
+    CHECK_FALSE (core.lastBlockMeter().clipped);
+}
+
 TEST_CASE ("Mosh X-FDBK detects and optionally suppresses a narrowband squeal", "[moshfx][xfeedback]")
 {
     auto input = noise (8192);
@@ -162,4 +232,39 @@ TEST_CASE ("Mosh X-FDBK notch state persists across blocks (no per-block reset t
     // Per-block reset leaks the tone across the head of the block while the notch
     // re-converges; the middle is already suppressed. Persistent state keeps them level.
     CHECK (headMag <= midMag * 2.5);
+}
+
+TEST_CASE ("Mosh OTT block meter: gainDb excludes the static band trim", "[moshfx][ott][live-meter]")
+{
+    // The panel scales its gain bars for the band law's DYNAMIC movement only; the
+    // contract (docs/02_MOSHOPS_CONTRACT.md, plugin_meters moshOTT) pins gainDb as the
+    // gain change EXCLUDING the Low/Mid/High Gain trim. The trims act after detection,
+    // so the envelopes are the same with or without them and gainDb must be too.
+    mosh::moshfx::OTTSettings plain;
+    plain.amount = 1.0f;
+    auto trimmed = plain;
+    trimmed.lowGainDb = 6.0f;
+    trimmed.midGainDb = -4.0f;
+    trimmed.highGainDb = 3.0f;
+
+    // Something in every band: 110 Hz (low), 1 kHz (mid), 8 kHz (high).
+    auto make = [] {
+        auto a = sine (110.0, 24000, 0.5f), b = sine (1000.0, 24000, 0.1f), c = sine (8000.0, 24000, 0.02f);
+        for (size_t i = 0; i < a.size(); ++i) a[i] += b[i] + c[i];
+        return a;
+    };
+    auto x = make(), y = make();
+    mosh::moshfx::OTTCore p, t;
+    p.prepare (kSampleRate);
+    t.prepare (kSampleRate);
+    p.processBlock (x.data(), (int) x.size(), plain);
+    t.processBlock (y.data(), (int) y.size(), trimmed);
+
+    // The trims really were applied to the audio (else this test proves nothing).
+    CHECK (rmsDiff (x, y) > 1.0e-3);
+    for (size_t b = 0; b < 3; ++b)
+    {
+        CHECK (t.lastBlockMeter().peakEnvelope[b] == p.lastBlockMeter().peakEnvelope[b]);
+        CHECK (t.lastBlockMeter().gainDb[b] == p.lastBlockMeter().gainDb[b]);
+    }
 }
