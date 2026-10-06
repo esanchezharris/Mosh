@@ -1048,12 +1048,7 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
     // JSONL line says undoable:false; nothing is re-bounced. (An empty transaction would
     // be harmless to undo itself: JUCE's beginNewTransaction is lazy and CachedValue
     // performs nothing for an equal value.)
-    const auto before = pluginstate::read (*plugin, *spec);
-    const bool same = spec->kind == pluginstate::Spec::Kind::choice
-                          ? before.toString() == applied.toString()
-                          : spec->kind == pluginstate::Spec::Kind::integer
-                                ? (int) before == (int) applied
-                                : juce::exactlyEqual ((float) (double) before, (float) (double) applied);
+    const bool same = pluginstate::isNoChange (*plugin, *spec, applied);
     auto* track = findTrack (trackId);
     // A no-change call of the open drag (the UI keeps sending a value clamped at the end of
     // the range) still counts as activity: it keeps the window from going idle.
