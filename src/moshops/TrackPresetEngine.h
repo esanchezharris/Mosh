@@ -7,6 +7,7 @@
 
 #include "TrackPreset.h"
 #include "state/Ids.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
 #include <tracktion_engine/tracktion_engine.h>
 
 namespace te = tracktion::engine;
@@ -73,7 +74,12 @@ inline bool nativeMatches (float actual, float wanted)
 }
 
 /** Does the LIVE plugin hold exactly what `stage` says? Reads the parameters the DSP
-    reads (getCurrentValue), not the request and not the tree. Empty string == yes. */
+    reads (getCurrentValue), not the request and not the tree. Empty string == yes.
+
+    Also: a setting Mosh's own plugin adds outside the preset table must hold Tracktion's
+    value. A preset file cannot name a filter slope, so a preset's low/high-pass is
+    12 dB/oct (makeStageState never writes "moshFilterSlope"); one the user steepened is
+    not the preset any more, and re-applying the preset replaces it at 12. */
 inline juce::String stageMismatch (te::Plugin& plugin, const Stage& stage)
 {
     if (plugin.getPluginType() != stage.processor->type)
@@ -103,11 +109,18 @@ inline juce::String stageMismatch (te::Plugin& plugin, const Stage& stage)
         if (! same)
             return juce::String (s.spec->key) + " is '" + actual.toString() + "'";
     }
+
+    if (auto* filter = dynamic_cast<MoshLowPassPlugin*> (&plugin))
+        if (filter->getSlope() != moshfx::filterdesign::kDefaultSlope)
+            return "slope is " + juce::String (filter->getSlope()) + " dB/oct (the preset's filter is "
+                 + juce::String (moshfx::filterdesign::kDefaultSlope) + " dB/oct)";
     return {};
 }
 
 /** The readback a result reports for one stage: every value taken from the live plugin
-    and converted to the preset's unit, alongside the engine's own display string. */
+    and converted to the preset's unit, alongside the engine's own display string. A
+    low/high-pass stage also reports the slope it runs at (`state.slope`, dB/oct), which
+    a preset cannot set but stageMismatch requires to be 12. */
 inline juce::var stageReadback (te::Plugin& plugin, const Stage& stage, int listIndex)
 {
     auto* o = new juce::DynamicObject();
@@ -122,6 +135,8 @@ inline juce::var stageReadback (te::Plugin& plugin, const Stage& stage, int list
         state->setProperty (s.spec->key, s.spec->kind == StateSpec::Kind::boolean ? juce::var ((bool) actual)
                                                                                  : juce::var (actual.toString()));
     }
+    if (auto* filter = dynamic_cast<MoshLowPassPlugin*> (&plugin))
+        state->setProperty ("slope", filter->getSlope());
     o->setProperty ("state", juce::var (state));
 
     juce::Array<juce::var> params;

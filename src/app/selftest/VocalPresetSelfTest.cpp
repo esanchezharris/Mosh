@@ -846,6 +846,41 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         check (canon (ops) == tweaked, "ONE undo of a re-apply restores the user's tweaked chain exactly");
         check (ok (command (ops, "redo")), "redo the re-apply");
 
+        // A steepened preset filter is no longer the preset: re-applying restores
+        // 12 dB/oct. (A preset file cannot name a slope, so the filter it builds runs at
+        // Tracktion's 12; stageMismatch requires that, TrackPresetEngine.h.)
+        {
+            auto hpSlope = [&]
+            {
+                const auto group = presetRows (ops, vox, preset.id);
+                return group.size() == 2 ? (int) group[0].getProperty ("state", var()).getProperty ("slope", var()).getProperty ("value", -1)
+                                         : -1;
+            };
+            const auto rowsBefore = presetRows (ops, vox, preset.id);
+            const int hpIndex = rowsBefore.size() == 2 ? (int) rowsBefore[0].getProperty ("index", -1) : -1;
+            check (hpSlope() == 12, "the preset's high-pass runs at 12 dB/oct");
+            check (ok (command (ops, "set_plugin_state", object ({ { "trackId", vox }, { "index", hpIndex },
+                                                                    { "key", "slope" }, { "value", 48 } })))
+                       && hpSlope() == 48,
+                   "user steepens the preset's high-pass to 48 dB/oct");
+            const auto mismatch = liveGroupMismatch (eng, vox, preset);
+            check (mismatch.contains ("slope is 48 dB/oct"), "the steepened group no longer equals the preset (" + mismatch + ")");
+            const auto steep = canon (ops);
+            const auto restored = apply (vox, presetFile);
+            check (ok (restored) && (bool) dataOf (restored).getProperty ("changed", false)
+                       && (bool) dataOf (restored).getProperty ("replaced", false),
+                   "re-applying over the steepened filter reports changed:true, replaced:true");
+            check (hpSlope() == 12 && liveGroupMismatch (eng, vox, preset).isEmpty() && presetRows (ops, vox, preset.id).size() == 2,
+                   "...the preset's high-pass is back at 12 dB/oct, still exactly two preset rows");
+            const auto stages = dataOf (restored).getProperty ("stages", var());
+            check (stages.size() == 2 && (int) stages[0].getProperty ("state", var()).getProperty ("slope", -1) == 12
+                       && stages[0].getProperty ("state", var()).getProperty ("mode", var()).toString() == "highpass",
+                   "...and the high-pass stage reads back slope 12 beside mode 'highpass'");
+            check (ok (command (ops, "undo")) && canon (ops) == steep && hpSlope() == 48,
+                   "ONE undo brings the user's 48 dB/oct filter back exactly");
+            check (ok (command (ops, "redo")) && hpSlope() == 12, "redo the re-apply (12 dB/oct)");
+        }
+
         // A partial group (the user deleted one stage) is completed, not doubled.
         const auto rowsNow = presetRows (ops, vox, preset.id);
         check (ok (command (ops, "remove_plugin", object ({ { "trackId", vox },
