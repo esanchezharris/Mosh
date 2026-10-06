@@ -158,8 +158,11 @@ covering the note, the first on a tie (`plugin.sampler.sounds[].addressNote` is 
 `set_drum_pad {trackId, note, gainDb?, pan?, name?, chokeGroup? 0–16}`, `clear_drum_pad
 {trackId, note}`, `assign_sample {trackId, note, file, mode?, name?, gainDb?}` (REPLACES every
 sound covering the note, a melodic one included, and resets level, pan and choke) and
-`load_drum_kit {trackId, kit?}` (replaces ALL sounds) are each exactly one undo step
-(`--selftest` proves it on an existing sampler against an anchor edit); every `SOUND` write rebuilds
+`load_drum_kit {trackId, kit?}` (replaces ALL sounds) are each exactly one undo step, and so is
+`create_track {type: "drum"}` (track, sampler, kit and meter) (`--selftest` proves each against an
+anchor edit with Tracktion's 350 ms undo-transaction timer due; before 2026-10-05 a kit load with no
+audio device pumped the message loop mid-command and that timer could split `load_drum_kit` and a
+drum `create_track` into two steps, so the load now inhibits it); every `SOUND` write rebuilds
 the sampler's sound list, which cuts ringing voices, so a UI commits pad edits on release. A pad
 silenced by `set_drum_lane` (its lane muted, or another lane soloed) keeps the producer's level
 parked (`moshPadGainDb`; `sounds[].silenced` / `userGainDb`): `set_drum_pad`'s `gainDb` writes the
