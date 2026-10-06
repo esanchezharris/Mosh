@@ -397,14 +397,22 @@ juce::var MoshOps::cmdSetDrumPad (const juce::var& args)
 
     if (args.hasProperty ("gainDb") || args.hasProperty ("pan"))
     {
-        const float gain = (float) (double) args.getProperty ("gainDb", sampler->getSoundGainDb (idx));
+        // While a pad is SILENCED (its lane muted, or another lane soloed) its live gain is
+        // the mute floor and the producer's real gain is parked (see applyDrumLaneGains).
+        // Writing the live gain here would be overwritten by the next unmute, so the parked
+        // copy is the one to update, and the one an edit that sends no gainDb (a pan-only
+        // edit) keeps: defaulting to the LIVE gain there wrote the -48 dB floor over the
+        // parked level, and unmuting then restored -48 (the pad stayed silent).
+        const bool parked = sound.isValid() && sound.hasProperty (ids::moshPadGainDb);
+        const float userGain = parked ? (float) (double) sound.getProperty (ids::moshPadGainDb)
+                                      : sampler->getSoundGainDb (idx);
+        const float gain = (float) (double) args.getProperty ("gainDb", userGain);
         const float pan  = (float) (double) args.getProperty ("pan",    sampler->getSoundPan (idx));
-        // While a pad is MUTED its live gain is the mute floor and the producer's real
-        // gain is parked (see applyDrumLaneGains). Writing the live gain here would be
-        // overwritten by the next unmute, so the parked copy is the one to update.
-        if (sound.isValid() && sound.hasProperty (ids::moshPadGainDb))
+        if (parked)
         {
-            sound.setProperty (ids::moshPadGainDb, gain, &undoManager());
+            // The engine's own gain clamp (setSoundGains), so the parked level is one the
+            // pad can be restored to. An unchanged value writes nothing (no undo action).
+            sound.setProperty (ids::moshPadGainDb, juce::jlimit (-48.0f, 48.0f, gain), &undoManager());
             sampler->setSoundGains (idx, sampler->getSoundGainDb (idx), pan);
         }
         else
