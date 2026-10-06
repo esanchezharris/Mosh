@@ -558,6 +558,21 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "undo the idle drag's first step");
         }
 
+        // A command that opens no transaction of its own (here: stopping the transport,
+        // which is how a recorded take lands) ends the drag's window AND closes its step,
+        // so a Tracktion-side write after it (the take, written straight through the
+        // Edit's UndoManager) is its own step: one undo must not take the drag with it.
+        {
+            check (ok (drag ("drag-take", 0.2)), "a drag starts");
+            check (ok (command (ops, "set_transport", object ({ { "action", "stop" } }))), "stop (no transaction of its own)");
+            check (! ops.gestureWindowOpenForTest(), "the stop ended the drag's window");
+            eng.edit().state.setProperty ("moshSelftestTakeMark", 1, &um);   // stands in for the take
+            check (ok (command (ops, "undo")) && ! eng.edit().state.hasProperty ("moshSelftestTakeMark")
+                       && near (paramValue (ops, tid, eq, 0), 0.2),
+                   "undo takes back only the write after the stop, not the drag");
+            check (ok (command (ops, "undo")) && near (paramValue (ops, tid, eq, 0), v0), "the next undo takes back the drag");
+        }
+
         // A malformed gesture is an error, not silently ignored, and changes nothing.
         check (! ok (drag ("bad gesture", 0.6)), "a gesture with a space is refused");
         check (! ok (drag ("", 0.6)), "an empty gesture is refused");

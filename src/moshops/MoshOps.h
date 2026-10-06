@@ -1144,8 +1144,11 @@ private:
     // the WebView, whose pointer never reaches JUCE, so a drag held still to listen
     // would split into several steps. The window (and the inhibitor) ends at any
     // beginUndoTransaction, undo/redo/jump_to_history, a call without or with another
-    // gesture, an agent batch, before the Edit is replaced, and after kGestureIdleMs
-    // without a call of the gesture (checked from timerCallback).
+    // gesture, an agent batch, before the Edit is replaced, after kGestureIdleMs without
+    // a call of the gesture (checked from timerCallback), and before ANY other command
+    // that is not a read (execute()): a command that opens no transaction (stop_recording,
+    // whose take Tracktion lands through the Edit's UndoManager) must not let Tracktion's
+    // writes join a drag's step.
     /** Empty when `gesture` is absent or valid; otherwise the error message. A valid
         gesture is 1..64 characters from [A-Za-z0-9_.:-]. */
     static juce::String gestureArgError (const juce::var& args);
@@ -1154,8 +1157,12 @@ private:
     bool joinGestureTxn (const juce::String& gesture);
     /** After performing: remember the transaction this gesture now owns. */
     void noteGestureTxn (const juce::String& gesture);
-    /** Close the gesture window: forget the gesture and release the inhibitor. */
-    void endGestureWindow();
+    /** Close the gesture window: forget the gesture and release the inhibitor. With
+        `closeStep`, also close the gesture's undo step (what Tracktion's own timer would
+        have done had the inhibitor not held it), so a later write that opens no
+        transaction of its own (a take landing at stop, a by-hash repoint) cannot join the
+        drag's step. */
+    void endGestureWindow (bool closeStep = false);
     /** timerCallback: end a window that went idle or that something else invalidated. */
     void expireGestureWindow();
     static constexpr juce::uint32 kGestureIdleMs = 3000;

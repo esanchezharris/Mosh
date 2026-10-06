@@ -664,6 +664,17 @@ juce::var MoshOps::execute (const juce::var& command)
             return early;   // refused or replayed: no dispatch, no mutation, no journal
     }
 
+    // A panel drag's undo window (set_plugin_param / set_plugin_state with a `gesture`)
+    // ends at the next command that is not a read, and its step is closed then: some
+    // commands open no transaction of their own (stop_recording lands its take through
+    // the Edit's UndoManager), and their writes must not join the drag's step.
+    if (outermost)
+    {
+        const auto name = command.getProperty ("command", var()).toString();
+        if (name != "set_plugin_param" && name != "set_plugin_state" && ! txnsafe::isReadOnlyDuringTransaction (name))
+            endGestureWindow (true);
+    }
+
     prepareDirectCommand (command);
     auto result = executeImpl (command);
     pollDirectRenders();

@@ -920,11 +920,19 @@ void MoshOps::noteGestureTxn (const juce::String& gesture)
     }
 }
 
-void MoshOps::endGestureWindow()
+void MoshOps::endGestureWindow (bool closeStep)
 {
+    const bool held = gestureInhibitor_ != nullptr && gestureInhibitedEdit_ == &eng.edit();
     gestureId_.clear();
     gestureInhibitor_.reset();
     gestureInhibitedEdit_ = nullptr;
+    if (closeStep && held)
+    {
+        // An unnamed new set, as Edit::UndoTransactionTimer would start. JUCE creates the
+        // set lazily, so this leaves no empty step behind if nothing follows.
+        undoManager().beginNewTransaction();
+        ++undoTxnSerial_;
+    }
 }
 
 void MoshOps::expireGestureWindow()
@@ -935,7 +943,7 @@ void MoshOps::expireGestureWindow()
     const bool invalidated = gestureRevision_ != editRevision_ || gestureTxnSerial_ != undoTxnSerial_
                              || gestureInhibitedEdit_ != &eng.edit();
     if (idle || invalidated)
-        endGestureWindow();
+        endGestureWindow (idle);
 }
 
 juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
@@ -1027,6 +1035,10 @@ juce::var MoshOps::cmdSetPluginState (const juce::var& args)
                                 ? (int) before == (int) applied
                                 : juce::exactlyEqual ((float) (double) before, (float) (double) applied);
     auto* track = findTrack (trackId);
+    // A no-change call of the open drag (the UI keeps sending a value clamped at the end of
+    // the range) still counts as activity: it keeps the window from going idle.
+    if (same && gesture.isNotEmpty() && gesture == gestureId_ && gestureInhibitor_ != nullptr)
+        gestureLastCallMs_ = juce::Time::getMillisecondCounter();
     if (! same)
     {
         if (! joinGestureTxn (gesture))
