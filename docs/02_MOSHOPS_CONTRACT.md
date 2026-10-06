@@ -66,13 +66,18 @@ reach them). The whitelist, by the plugin's reported `type` (`src/moshops/Plugin
 with the snapshot's `plugin.state`): `delay` `lengthMs` (integer ms, 1–2000), `chorus` `depthMs`
 (0.1–20 ms), `speedHz` (0.1–10 Hz), `width` (0–1), `mix` (0–1), `phaser` `depth` (0–8 oct), `rate`
 (0.05–10 Hz), `feedback` (−0.95–0.95), and `lowpass`/`highpass` `mode` (`"lowpass"` or
-`"highpass"`). Values are physical, never normalised. Numbers must be JSON numbers and finite
-(a string, boolean or NaN is refused); they are clamped to the range, and `lengthMs` is rounded
-to an integer and never goes below 1 ms (Tracktion's DelayPlugin divides by the length in
-samples on the audio thread). `mode` must be one of its choices; changing it flips the plugin's
-reported `type`/`name` between `"lowpass"` (name `"LPF/HPF"`) and `"highpass"` (name `"High-Pass"`). Errors: `no plugin`,
-`key '<k>' is not a state key of <type> (allowed: …)` (or `(it has none)`), `bad value for <k>: …`,
-`missing value`. A value equal to the current one is `ok` but is not an edit: it opens no
+`"highpass"`) and `slope` (integer dB/oct, 6–48 in steps of 6; 2026-10-05). Values are physical,
+never normalised. Numbers must be JSON numbers and finite (a string, boolean or NaN is refused);
+they are clamped to the range, and `lengthMs` is rounded to an integer and never goes below 1 ms
+(Tracktion's DelayPlugin divides by the length in samples on the audio thread). An integer key
+with a `step` above 1 (the slope) is snapped onto `min + step·k`, `k = round((value − min) /
+step)` with a tie rounding up as JavaScript's `Math.round` does: slope 25 → 24, 27 → 30, 0 → 6,
+100 → 48. The result's `value` is the applied (snapped) value. `mode` must be one of its choices;
+changing it flips the plugin's reported `type`/`name` between `"lowpass"` (name `"LPF/HPF"`) and
+`"highpass"` (name `"High-Pass"`), and leaves the slope as it is. Errors: `no plugin`,
+`key '<k>' is not a state key of <type> (allowed: …)` (or `(it has none)`), `this <type> cannot set
+'<k>'` (the plugin object lacks that setting: `slope` on a plain Tracktion filter, see below),
+`bad value for <k>: …`, `missing value`. A value equal to the current one is `ok` but is not an edit: it opens no
 transaction (so it does not end an open gesture window, see below), logs `undoable:false`, and
 does not touch the reactive render loop. Otherwise the write goes through the Edit's UndoManager
 inside one transaction (a ValueTree property action the CachedValue follows), logs one JSONL
@@ -87,6 +92,36 @@ audio bit-identical) whose `initialise` sizes the line on the message thread for
 ceiling (2000 ms; a 41 ms chorus line), so a `set_plugin_state` during playback never allocates
 on the audio thread. Registered with the compressor (below); `--selftest` fails if a loaded
 delay or chorus is not one.
+
+**Low/high-pass slope (2026-10-05).** Every Mosh `lowpass`/`highpass` is a `MoshLowPassPlugin`
+(`src/plugins/moshfx/MoshLowPassPlugin.h`: Tracktion's `te::LowPassPlugin`, same `"lowpass"`
+type, registered with the shadows above; `--selftest` fails if a created or reloaded one is not).
+`slope` selects a Butterworth cascade of order `slope / 6` (`MoshFilterDesign.h`: at most four
+sections, the closed form `|H|² = 1 / (1 + (tan(πf/fs) / tan(πfc/fs))^(2N))`, inverted for
+high-pass, so every slope is −3.01 dB at the cutoff). At 12 dB/oct the subclass makes exactly
+the calls Tracktion's filter makes, so its audio is bit-identical (`--selftest` compares it with a
+directly constructed `te::LowPassPlugin` through a cutoff change and a mode flip). A slope change
+during playback crossfades over about 20 ms into a freshly reset cascade; nothing allocates on
+the audio thread. Saved as the plugin property `moshFilterSlope` (dB/oct, through the Edit's
+UndoManager, so undoable like every `set_plugin_state`); the default 12 is never written, so a
+session or preset tree without it plays at 12, a saved value off the grid plays snapped, and an
+older Mosh opening a session saved at another slope plays it at 12 without warning. The snapshot
+shows `state.slope` on master-bus filters too, read-only (`set_plugin_state` resolves track
+plugins only). A plain `te::LowPassPlugin` (only if Tracktion ever registered its own first)
+has no slope: `state.slope` is absent and `set_plugin_state` refuses the key. A track preset's
+filter runs at 12 (see *Track-chain presets*).
+
+**Render-layer cache key (2026-10-05).** A MIDI/drum clip's render is cached under a signature of
+its notes and its track's plugins (`stableSourceSig`, `src/moshops/MoshOps.Generative.cpp`): each
+plugin's name, bypass, parameter values and automation curves, and now also its `plugin.state`
+values (the same whitelist, read the same way) and, for a sampler, every persisted property of
+each `SOUND` child. Before, a state-only edit (filter slope or mode, delay length, chorus,
+phaser) or any sampler pad edit (`set_drum_pad`, `clear_drum_pad`, `assign_sample`,
+`load_drum_kit`, `set_drum_lane`) left the key unchanged, so the reactive re-render HIT the cache
+and served the stale render. The key is the state, not the edit history: putting a value back
+HITs the earlier render. Plugins with neither state keys nor sounds contribute exactly what they
+did before, so their chains keep their cached renders; chains with a delay, chorus, phaser,
+low/high-pass or sampler re-render once.
 
 **Gestures.** `set_plugin_param` and `set_plugin_state` take an optional `gesture` (a string of
 1–64 characters from `[A-Za-z0-9_.:-]`; anything else, including an empty string or a non-string,
@@ -146,7 +181,7 @@ Hosted plugin snapshots/results include external-plugin diagnostics when Trackti
 
 **Master-bus plugins (post-Stage-6): host plugins (limiter, bus EQ, …) on the master output.** `load_master_plugin {pluginId, index?}` / `load_master_builtin {type, index?}` / `remove_master_plugin {index}` / `reorder_master_plugin {index, toIndex}` / `bypass_master_plugin {index, bypassed}` / `set_master_plugin_param {index, paramIndex, value: 0-1}` / `open_master_plugin_editor {index}` — the SAME seven-command shape as `load_plugin` / `load_builtin` / `remove_plugin` / `reorder_plugin` / `bypass_plugin` / `set_plugin_param` / `open_plugin_editor`, one level up: they address `eng.edit().getMasterPluginList()` instead of a track's `pluginList`, so there is no `trackId` arg. All undoable except `open_master_plugin_editor` (a native pop-out, same as its per-track counterpart). Snapshot gains `master.plugins` (an array of the same plugin shape as `tracks[].plugins`, via `pluginToVar`). **Internal-plugin invariant:** the master plugin list also carries Mosh's own internal utility plugins (currently only `MasterSpectralTapPlugin`, the Moshi-reactivity tap `ensureMasterSpectralTap()` appends lazily during live playback) — these are never user-visible or user-addressable. `isInternalMasterPlugin()` filters them out of `master.plugins`, and `masterVisibleBoundary()` (the physical index of the first internal plugin, or the list's true size if none exists yet) is the one invariant every master-plugin command clamps inserts/reorders inside — so a tap created later still taps the fully-processed master signal, and a user-facing index never means "some internal plugin." Classified `SessionGlobal` (fail-closed default, same posture as `set_master_volume`/`set_master_pan` — the master bus is the session's one shared resource, not a track) except `open_master_plugin_editor`, which is `Unguarded` like `open_plugin_editor` (a viewer-local pop-out, nothing to sync). MP sync for the six mutating commands rides the same LWW `broadcastStructuralIfActive` replay as `set_master_volume`/`set_master_pan` — a peer without the same VST3 installed will fail to replay `load_master_plugin` locally, the same inherent limitation any VST3-identity-dependent sync has.
 
-**Track-chain presets (2026-10-01): one preset applies an ordered group of BUILT-IN effects to one audio track.** `apply_track_preset {trackId, file}` — `file` is a schema-1 `mosh.track-chain` JSON from the preset library (`list_presets {plugin:"track-chain"}`; bundled: `resources/presets/track-chain/`). One undo step. **UI-only**: absent from the agent catalog and from `TransactionSafe.h` (fails closed inside an agent transaction); `load_preset` refuses a track-chain file by name. Preflight performs no mutation and opens no transaction — it refuses a missing/unknown `trackId` (no fallback to a selected track), a non-audio, instrument, return or frozen track, a recording transport, a missing or invalid file, any processor/parameter/state/unit/value the pinned table in `src/moshops/TrackPreset.h` does not admit (values are never clamped), and a track without room. Each stage is created from a finished `PLUGIN` state tree, so the only undoable action is adding it; stages are inserted after the user's existing inserts and ahead of the first send and the fader. Every inserted plugin carries ownership tags (`moshPresetId` / `moshPresetRevision` / `moshPresetStage` / `moshPresetName`): re-applying an untouched group returns `changed:false` without a transaction, and re-applying over an edited or partial group replaces **only** that group. Result `data`: `{trackId, presetId, revision, name, changed, replaced, stages:[{index, processor, enabled, state, params:[{id, unit, native, value, display}]}]}` — values read back from the live plugins. Snapshot: `tracks[].plugins[].preset {id, name, revision, stage}` (additive; absent on plugins a user loaded; it records origin, not that the values still equal the preset's). Lock scope `Track`; in the freeze guard. Not broadcast to multiplayer peers (no per-track plugin command is). See `docs/vocal-presets/`.
+**Track-chain presets (2026-10-01): one preset applies an ordered group of BUILT-IN effects to one audio track.** `apply_track_preset {trackId, file}` — `file` is a schema-1 `mosh.track-chain` JSON from the preset library (`list_presets {plugin:"track-chain"}`; bundled: `resources/presets/track-chain/`). One undo step. **UI-only**: absent from the agent catalog and from `TransactionSafe.h` (fails closed inside an agent transaction); `load_preset` refuses a track-chain file by name. Preflight performs no mutation and opens no transaction — it refuses a missing/unknown `trackId` (no fallback to a selected track), a non-audio, instrument, return or frozen track, a recording transport, a missing or invalid file, any processor/parameter/state/unit/value the pinned table in `src/moshops/TrackPreset.h` does not admit (values are never clamped), and a track without room. Each stage is created from a finished `PLUGIN` state tree, so the only undoable action is adding it; stages are inserted after the user's existing inserts and ahead of the first send and the fader. Every inserted plugin carries ownership tags (`moshPresetId` / `moshPresetRevision` / `moshPresetStage` / `moshPresetName`): re-applying an untouched group returns `changed:false` without a transaction, and re-applying over an edited or partial group replaces **only** that group. A preset file cannot name a filter slope, so a preset's low/high-pass runs at 12 dB/oct; a stage the user set to another slope counts as edited (2026-10-05), and re-applying replaces it at 12. Result `data`: `{trackId, presetId, revision, name, changed, replaced, stages:[{index, processor, enabled, state, params:[{id, unit, native, value, display}]}]}` — values read back from the live plugins; a low/high-pass stage's `state` also carries `slope` (dB/oct, the slope it runs at). Snapshot: `tracks[].plugins[].preset {id, name, revision, stage}` (additive; absent on plugins a user loaded; it records origin, not that the values still equal the preset's). Lock scope `Track`; in the freeze guard. Not broadcast to multiplayer peers (no per-track plugin command is). See `docs/vocal-presets/`.
 
 *The MP-001 multiplayer commands (`mp_create_session`, `mp_commit_track`, `mp_apply_bootstrap`, etc.) are backend-only — not in this Stage-1 catalog, not in the agent catalog — see [docs/MULTIPLAYER.md](MULTIPLAYER.md) for the collaboration model. One addition of note: **`mp_fetch_missing_stems`** `{wait?}` → `✗` (non-undoable, Unguarded) → `{fetched, failed, stillMissing}` — self-heals a wave clip whose audio is `sourceMissing` by re-deriving the missing hash/ext from its own by-hash source ref (`audio/by-hash/<64-hex>.<ext>`) and retrying the download; `wait:true` runs synchronously (harness/agents), otherwise it's async (mirrors `transcribe_clip`'s dual-mode shape). Fires automatically at the end of `mp_apply_bootstrap` so a late-joiner's audio self-heals without a manual retry. Closes the "one transient upload/download failure strands a clip forever" gap (previously the only recovery was the host re-committing that track).*
 
@@ -180,10 +215,14 @@ settings (`delay`, `chorus`, `phaser`, `lowpass`, `highpass`) carry
 `state: { <key>: { value, min?, max?, step?, unit?, choices? } }` from the same
 whitelist `set_plugin_state` accepts — e.g. `"state": {"lengthMs": {"value": 150,
 "min": 1, "max": 2000, "step": 1, "unit": "ms"}}` on a delay, `"state": {"mode":
-{"value": "highpass", "choices": ["lowpass", "highpass"]}}` on a high-pass. A
-value is what the plugin holds (a saved session can hold one outside the range);
-`step` appears only on integer keys and `unit` only when there is one. Both
-fields are additive.
+{"value": "highpass", "choices": ["lowpass", "highpass"]}, "slope": {"value": 12,
+"min": 6, "max": 48, "step": 6, "unit": "dB/oct"}}` on a high-pass. A
+value is what the plugin holds (a saved session can hold one outside the range;
+the slope reports the snapped value the filter runs at);
+`step` appears only on integer keys (the key's own step: 6 for `slope`, 1
+otherwise; `set_plugin_state` snaps onto it) and `unit` only when there is one.
+`slope` is absent on a filter that is not Mosh's subclass. All of these fields
+are additive.
 
 ```jsonc
 {
