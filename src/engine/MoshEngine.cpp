@@ -10,6 +10,7 @@
 #include "plugins/mixer/TrackMutePlugin.h"
 #include "plugins/moshfx/MoshCompressorPlugin.h"
 #include "plugins/moshfx/MoshDelayLinePlugins.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
 #include "plugins/moshfx/MoshLowPassPlugin.h"
 #include "state/SafeMode.h"
 #include "app/MacMicrophonePermission.h"
@@ -55,8 +56,8 @@ namespace
         // while its audio stays Tracktion's. This depends on that Tracktion init order;
         // --selftest ("plugin_meters: compressor") fails if a loaded "compressor" is not
         // a MoshCompressorPlugin, so an engine update that moves the call cannot slip by.
-        // The delay, chorus and low/high-pass shadows below ride the same hook and have
-        // the same guard.
+        // The delay, chorus, low/high-pass and 4OSC shadows below ride the same hook and
+        // have the same guard.
         bool autoInitialiseDeviceManager() override
         {
             registerShadowingBuiltIns();
@@ -83,6 +84,9 @@ namespace
             // Low/high-pass with a selectable slope (6-48 dB/oct); at 12 dB/oct its audio
             // is Tracktion's bit for bit (src/plugins/moshfx/MoshLowPassPlugin.h).
             engine->getPluginManager().createBuiltInType<MoshLowPassPlugin>();
+            // The 4OSC synth with a live keys/output entry on the plugin_meters rail; its
+            // audio is Tracktion's (src/plugins/moshfx/MoshFourOscPlugin.h).
+            engine->getPluginManager().createBuiltInType<MoshFourOscPlugin>();
             shadowingBuiltInsRegistered = true;
         }
         bool shadowingBuiltInsRegistered = false;
