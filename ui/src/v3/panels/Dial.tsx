@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { useDragSend } from "./useDragSend";
 
 const START = -135, SWEEP = 270;   // degrees, 0 = up, clockwise
@@ -89,18 +89,41 @@ export function Dial({ label, norm, display, onChange, defaultNorm, quantize, bi
     e.preventDefault();
     k();
   };
-  const onWheel = (e: WheelEvent<SVGSVGElement>) => {
-    if (disabled || e.deltaY === 0) return;
-    step((e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 0.002 : 0.01));
-  };
+  // The wheel turns the dial and must not also scroll the inspector, which needs a
+  // non-passive native listener (React's onWheel cannot preventDefault). Trackpads send
+  // many small deltas: they are summed into notches of ~100 px (3 lines) each.
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const wheelState = useRef({ acc: 0, norm, disabled, quantize: q, nudge: drag.nudge });
+  wheelState.current.norm = drag.live ?? norm;
+  wheelState.current.disabled = !!disabled;
+  wheelState.current.quantize = q;
+  wheelState.current.nudge = drag.nudge;
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const st = wheelState.current;
+      if (st.disabled || e.deltaY === 0) return;
+      e.preventDefault();
+      st.acc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const notches = Math.trunc(st.acc / 100);
+      if (notches === 0) return;
+      st.acc -= notches * 100;
+      const next = st.quantize(st.norm - notches * (e.shiftKey ? 0.002 : 0.01));
+      st.norm = next;
+      st.nudge(next);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   return (
     <div className={`pp-dial${disabled ? " off" : ""}`} data-testid={testId}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="slider" tabIndex={disabled ? -1 : 0}
+      <svg ref={svgRef} width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="slider" tabIndex={disabled ? -1 : 0}
         aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(shown * 100)}
         aria-valuetext={valueText ?? display} aria-disabled={disabled || undefined}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finish} onPointerCancel={finish}
-        onLostPointerCapture={finish} onKeyDown={onKeyDown} onWheel={onWheel}
+        onLostPointerCapture={finish} onKeyDown={onKeyDown}
         onDoubleClick={() => { if (!disabled && defaultNorm !== undefined) drag.nudge(q(defaultNorm)); }}>
         <path className="track" d={arcPath(c, c, r, START, START + SWEEP)} />
         <path className="value" d={arcPath(c, c, r, from, to)} />

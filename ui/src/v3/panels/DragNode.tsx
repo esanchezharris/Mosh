@@ -11,6 +11,10 @@ type Props = {
   active?: boolean;
   ariaLabel: string;
   ariaValueText: string;
+  /** aria-valuenow/min/max (ARIA requires a value on a slider), in the value's own units. */
+  valueNow?: number;
+  valueMin?: number;
+  valueMax?: number;
   testId?: string;
   onStart?: () => void;
   /** The pointer's position in the SVG's viewBox coordinates. */
@@ -23,7 +27,7 @@ type Props = {
 
 /** A focusable, draggable handle on a panel plot. It reports positions in the plot's own
  *  coordinates; the panel turns those into parameter values. */
-export function DragNode({ x, y, r = 5, label, hollow, active, ariaLabel, ariaValueText, testId, onStart, onMove, onEnd, onKeyDown, onDoubleClick, onFocus }: Props) {
+export function DragNode({ x, y, r = 5, label, hollow, active, ariaLabel, ariaValueText, valueNow, valueMin, valueMax, testId, onStart, onMove, onEnd, onKeyDown, onDoubleClick, onFocus }: Props) {
   const dragging = useRef(false);
   const svgOf = (el: Element) => (el as SVGElement).ownerSVGElement;
   const finish = () => {
@@ -35,6 +39,8 @@ export function DragNode({ x, y, r = 5, label, hollow, active, ariaLabel, ariaVa
     <g className={`pp-node${hollow ? " hollow" : ""}${active ? " active" : ""}`} data-testid={testId}
       transform={`translate(${x.toFixed(2)} ${y.toFixed(2)})`} tabIndex={0} role="slider"
       aria-label={ariaLabel} aria-valuetext={ariaValueText}
+      aria-valuenow={valueNow === undefined ? undefined : Number(valueNow.toFixed(3))}
+      aria-valuemin={valueMin} aria-valuemax={valueMax}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.preventDefault();

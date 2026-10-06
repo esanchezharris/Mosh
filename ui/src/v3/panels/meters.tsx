@@ -9,8 +9,18 @@ export const METER_HOLD_MS = 350;
 
 /** This plugin's live meter frame from the 30 Hz "plugin_meters" rail, held briefly after
  *  it stops. Subscribes to this one plugin only, so only the component using it re-renders. */
-export function usePluginMeter<T extends PluginMeterReading>(trackId: string, index: number): T | undefined {
-  const current = useStore((s) => s.pluginMeters[pluginKey(trackId, index)]) as T | undefined;
+export function usePluginMeter<T extends PluginMeterReading>(
+  trackId: string, index: number, expect?: { type?: string | readonly string[]; itemId?: string },
+): T | undefined {
+  // A frame is keyed by chain position, so right after a reorder or delete a frame can
+  // belong to the plugin that used to sit here: check its type and id when given.
+  const current = useStore((s) => {
+    const m = s.pluginMeters[pluginKey(trackId, index)];
+    if (!m) return undefined;
+    if (expect?.type !== undefined && !(Array.isArray(expect.type) ? expect.type.includes(m.type) : m.type === expect.type)) return undefined;
+    if (expect?.itemId && m.itemId && m.itemId !== expect.itemId) return undefined;
+    return m;
+  }) as T | undefined;
   const [held, setHeld] = useState<T | undefined>(current);
   useEffect(() => {
     if (current) { setHeld(current); return; }

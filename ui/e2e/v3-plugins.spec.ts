@@ -83,8 +83,12 @@ test("apply the Mosh Clean Lead preset to an audio track, re-apply without dupli
   await expect(highPass).toContainText("High-Pass");
   await expect(highPass).toContainText("80 Hz");                             // readback in real units
   await expect(compressor).toContainText("Compressor");
-  await expect(compressor).toContainText("2.50 : 1");
-  await expect(compressor.locator('input[type="range"]')).toHaveCount(6);    // every parameter, trim included
+  await expect(compressor).toContainText("2.5:1");                           // the compressor panel's ratio read-out
+  await expect(compressor).toContainText("-24.0 dB");                        // and its threshold
+  // every parameter is reachable: the threshold handle on the curve and four dials (the
+  // inert sidechain gain behind "more")
+  for (const name of ["Threshold", "Ratio", "Attack", "Release", "Makeup"])
+    await expect(compressor.getByRole("slider", { name, exact: true })).toHaveCount(1);
   await expect(compressor.getByRole("button", { name: "Bypass" })).toBeVisible();
 
   await expect(picker).toHaveValue("");                                      // snaps back, so it can be picked again
@@ -260,4 +264,52 @@ test("AutoTune: the keyboard shows the scale, lights the sung note from the tune
   await page.getByTestId("v3-play").click();
   await expect(strip).not.toHaveAttribute("data-live", "", { timeout: 3000 });
   await expect(strip.locator("[data-sung]")).toHaveCount(0);
+});
+
+// Every plugin row can be minimized to one line that still says what the plugin is doing.
+// Minimized is this viewer's view preference: it sends no command and is not an undo step.
+test("a plugin row minimizes to a one-line summary and expands again; minimizing is not an edit", async ({ page }) => {
+  await bootV3(page);
+  await page.getByTestId("v3-add-audio").click();
+  const newTrack = page.getByTestId("v3-track").last();
+  await newTrack.getByRole("button", { name: /^Select track/ }).click();
+  const inspector = page.getByTestId("v3-inspector");
+  await expect(inspector).toHaveAttribute("data-track-id", (await newTrack.getAttribute("data-track-id"))!);
+  await page.getByTestId("v3-add-plugin").click();
+  const dock = page.getByTestId("v2-plugin-dock");
+  await dock.getByTestId("v2-pb-search").fill("AutoTune");
+  await dock.getByTestId("v2-pb-row").first().click();
+  const row = inspector.getByTestId("v3-plugin").last();
+  await row.getByLabel("Scale", { exact: true }).selectOption({ label: "Minor" });
+  await row.getByLabel("Key", { exact: true }).selectOption({ label: "A" });
+
+  const chevron = row.getByTestId("v3-plugin-minimize");
+  await expect(chevron).toHaveAttribute("aria-expanded", "true");
+  await expect(row.getByTestId("v3-plugin-summary")).toHaveCount(0);
+  // Record every command the UI sends from here on (through the dev-only store handle).
+  await page.evaluate(() => {
+    type Exec = (c: string, ...rest: unknown[]) => unknown;
+    const store = (window as unknown as { __moshStore: { getState(): { exec: Exec }; setState(p: { exec: Exec }): void } }).__moshStore;
+    const original = store.getState().exec;
+    const sent: string[] = [];
+    (window as unknown as { __sent: string[] }).__sent = sent;
+    store.setState({ exec: (c, ...rest) => { sent.push(c); return original(c, ...rest); } });
+  });
+  // Reads (list_*/get_*) are not edits; swapping exec re-runs effects that fetch with it.
+  const sent = async () => (await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent))
+    .filter((c) => !/^(list_|get_)/.test(c));
+
+  await chevron.click();
+  await expect(chevron).toHaveAttribute("aria-expanded", "false");
+  await expect(row).toHaveAttribute("data-collapsed", "");
+  await expect(row.getByTestId("v3-plugin-summary")).toHaveText(/^A Minor · retune 80 ms$/);
+  await expect(row.getByTestId("v3-plugin-param")).toHaveCount(0);        // the controls are folded away
+  await expect(row.getByTestId("v3-tuner")).toHaveCount(0);
+  expect(await sent()).toEqual([]);                                        // not a command, so not an edit
+
+  await chevron.click();
+  await expect(chevron).toHaveAttribute("aria-expanded", "true");
+  await expect(row.getByTestId("v3-plugin-param")).toHaveCount(9);
+  await expect(row.getByTestId("v3-plugin-summary")).toHaveCount(0);
+  expect(await sent()).toEqual([]);
 });

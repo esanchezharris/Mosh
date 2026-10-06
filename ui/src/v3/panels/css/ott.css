@@ -1,0 +1,54 @@
+/* Mosh OTT panel (panels/OttPanel.tsx): three band columns (live level + bipolar gain, trim
+   under each) over a row of dials. Tokens only. */
+.v3-shell .insp .pr .pp-ott { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.v3-shell .insp .pr .pp-ott.off .pp-ott-bands { opacity: .6; }
+.v3-shell .insp .pr .pp-ott-bands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.v3-shell .insp .pr .pp-ott-bands.skipped .pp-ott-band { opacity: .45; }
+.v3-shell .insp .pr .pp-ott-band { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 3px 4px;
+  border-radius: 4px; background: color-mix(in srgb, var(--bg) 45%, transparent); }
+.v3-shell .insp .pr .pp-ott-bh { font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v3-shell .insp .pr .pp-ott-bh b { color: var(--text); font-weight: 600; letter-spacing: .04em; }
+
+/* Live bars: level (left) and bipolar gain (right), then the read-outs. */
+.v3-shell .insp .pr .pp-ott-live { display: flex; align-items: center; gap: 5px; height: 30px; min-width: 0; }
+.v3-shell .insp .pr .pp-ott-live svg { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-ott-trk { fill: color-mix(in srgb, var(--text) 10%, transparent); }
+.v3-shell .insp .pr .pp-ott-window { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+.v3-shell .insp .pr .pp-ott-level { fill: color-mix(in srgb, var(--text) 62%, transparent); }
+.v3-shell .insp .pr .pp-ott-thr { stroke: var(--warn); stroke-width: 1; }
+.v3-shell .insp .pr .pp-ott-mid { stroke: color-mix(in srgb, var(--text) 40%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-ott-lift { fill: var(--accent); }
+.v3-shell .insp .pr .pp-ott-cut { fill: var(--warn); }
+.v3-shell .insp .pr .pp-ott-read { display: flex; flex-direction: column; min-width: 0; font-family: ui-monospace, monospace; line-height: 1.15; }
+.v3-shell .insp .pr .pp-ott-read .g { font-size: 10px; color: var(--text); white-space: nowrap; }
+.v3-shell .insp .pr .pp-ott-read .g.up { color: var(--accent); }
+.v3-shell .insp .pr .pp-ott-read .g.dn { color: var(--warn); }
+.v3-shell .insp .pr .pp-ott-read .l { font-size: 9px; color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-ott-live.idle svg { opacity: .55; }
+
+/* Band trim: a thin bipolar bar with its read-out. */
+.v3-shell .insp .pr .pp-ott-trim { display: flex; align-items: center; gap: 4px; height: 14px; min-width: 0;
+  cursor: ew-resize; touch-action: none; outline: none; border-radius: 3px; }
+.v3-shell .insp .pr .pp-ott-trim:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr .pp-ott-trimbar { position: relative; flex: 1 1 auto; min-width: 14px; height: 3px; border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 12%, transparent); }
+.v3-shell .insp .pr .pp-ott-trimbar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; }
+.v3-shell .insp .pr .pp-ott-trimbar .ctr { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px;
+  background: color-mix(in srgb, var(--text) 45%, transparent); }
+.v3-shell .insp .pr .pp-ott-trim .v { flex: 0 0 auto; font-family: ui-monospace, monospace; font-size: 9px; color: var(--muted); }
+.v3-shell .insp .pr .pp-ott-trim .v.set { color: var(--text); }
+
+/* Dials: Amount (larger) leads; Output carries the clip light. */
+.v3-shell .insp .pr .pp-ott-dials { display: flex; align-items: flex-end; justify-content: space-between; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-ott-mixw { display: flex; }
+.v3-shell .insp .pr .pp-ott-mixw.inert .pp-dial { opacity: .45; }
+.v3-shell .insp .pr .pp-ott-out { display: flex; align-items: flex-start; gap: 3px; }
+.v3-shell .insp .pr .pp-ott-clip { margin-top: 2px; padding: 0 3px; border-radius: 3px; font-size: 8px; line-height: 12px;
+  font-family: ui-monospace, monospace; text-transform: uppercase; color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); }
+.v3-shell .insp .pr .pp-ott-clip.on { color: var(--bg); background: var(--record); border-color: var(--record); }
+.v3-shell .insp .pr .pp-ott-note { font-size: 9px; color: var(--muted); }
+
+/* Minimized: three tiny bipolar ticks. */
+.v3-shell .insp .pr .pp-ott-mini { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-ott-mini.idle { opacity: .5; }

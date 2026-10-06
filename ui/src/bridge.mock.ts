@@ -16,6 +16,8 @@
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
 import { scalePitchClasses } from "./ui/tuner";
+import { ottGainDb } from "./v3/panels/ott";
+import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
 import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
@@ -940,23 +942,28 @@ function emitPluginMeters(frames: { track: Track; inDb: number }[], pos: number)
       return [{ ...base, grDb: Math.max(0, driven - outDb), inDb, outDb }];
     }
     if (pl.type === "moshOTT") {
+      // The engine's exact band law (MoshOTTDsp.cpp, mirrored in panels/ott.ts); gainDb is
+      // the dynamic movement only, without the band's static trim (contract).
       const amount = phys(pl, 0, 0, 1);
       const bands = [-4, -2, -9].map((offset, b) => {
         const levelDb = Math.max(-100, inDb + offset + 3 * Math.sin(pos * (2 + b)));
-        const gainDb = levelDb > -20 ? -amount * (levelDb + 20) * 0.6 : amount * Math.min(12, -20 - levelDb) * 0.5;
-        return { levelDb, gainDb };
+        return { levelDb, gainDb: ottGainDb(levelDb, amount) };
       });
       return [{ ...base, bands, clipped: false }];
     }
     if (pl.type === "moshXFeedback") {
-      const sens = phys(pl, 0, 0, 1), maxCuts = Math.round(phys(pl, 1, 1, 4)), maxDepth = phys(pl, 2, 3, 36);
+      // As the engine's detector reports them: only bins at or above the Sensitivity
+      // threshold are candidates, strongest first, at most Max Cuts of them; cuts exist
+      // only with Auto Suppress on.
+      const sens = phys(pl, 0, 0, 1), maxCuts = xfMaxCuts(phys(pl, 1, 1, 4)), maxDepth = phys(pl, 2, 3, 36);
       const auto = phys(pl, 4, 0, 1) >= 0.5;
-      const threshold = 0.06 + 0.36 * (1 - sens);
-      const candidates = (pl.moshFx?.candidates ?? []).map((c, i) => ({
-        hz: c.frequencyHz, score: Math.max(0, Math.min(0.75, (c.score ?? 0) * (0.75 + 0.25 * Math.sin(pos * (1.3 + i))))),
-      }));
-      const cuts = !auto ? [] : candidates.filter((c) => c.score > threshold).slice(0, maxCuts)
-        .map((c) => ({ ...c, depthDb: Math.max(3, Math.min(maxDepth, maxDepth * Math.min(1, c.score))) }));
+      const threshold = xfThreshold(sens);
+      const candidates = (pl.moshFx?.candidates ?? [])
+        .map((c, i) => ({ hz: c.frequencyHz, score: Math.max(0, Math.min(0.75, (c.score ?? 0) * (0.75 + 0.25 * Math.sin(pos * (1.3 + i))))) }))
+        .filter((c) => c.score >= threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxCuts);
+      const cuts = !auto ? [] : candidates.map((c) => ({ ...c, depthDb: Math.max(3, Math.min(maxDepth, maxDepth * Math.min(1, c.score))) }));
       return [{ ...base, candidates, cuts }];
     }
     return [];

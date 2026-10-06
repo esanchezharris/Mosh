@@ -307,7 +307,7 @@ describe("v3 Mix inspector — vocal preset", () => {
     expect(alert?.textContent).toMatch(/while recording/);
   });
 
-  it("a preset's rows name the preset and show every parameter; an ordinary native row still shows four", async () => {
+  it("a preset's rows name the preset; a compressor, preset or not, gets its panel with every control reachable", async () => {
     const params = (n: number) => Array.from({ length: n }, (_, i) => ({ index: i, name: `P${i}`, value: 0.5, display: `${i} dB` }));
     const tag = (stage: number) => ({ id: "mosh.clean-lead", name: "Mosh Clean Lead v0", revision: 0, stage });
     const plugins = [
@@ -318,10 +318,19 @@ describe("v3 Mix inspector — vocal preset", () => {
     await mount(vocalSnapshot({ plugins }));
     const row = (i: number) => host.querySelector<HTMLElement>(`[data-testid="v3-plugin"][data-plugin-index="${i}"]`)!;
     expect(row(0).querySelector('[data-testid="v3-plugin-preset"]')).toBeNull();
-    expect(row(0).querySelectorAll('input[type="range"]')).toHaveLength(4);        // the user's own compressor: unchanged
     expect(row(1).querySelector('[data-testid="v3-plugin-preset"]')!.textContent).toBe("Preset: Mosh Clean Lead v0");
-    expect(row(2).querySelectorAll('input[type="range"]')).toHaveLength(6);        // the preset's: all six, trim included
-    expect([...row(2).querySelectorAll(".fader .v")].map((el) => el.textContent)).toContain("4 dB");
+    // Both compressors draw the compressor panel instead of plain sliders: the threshold is
+    // a handle on the curve, then ratio, attack, release and makeup dials (the inert
+    // sidechain gain sits behind "more"). So every control the preset set is on screen.
+    for (const i of [0, 2]) {
+      expect(row(i).querySelector('[data-testid="pp-compressor"]')).not.toBeNull();
+      expect(row(i).querySelectorAll('input[type="range"]')).toHaveLength(0);
+      const sliders = [...row(i).querySelectorAll('[role="slider"]')].map((el) => el.getAttribute("aria-label"));
+      expect(sliders).toEqual(expect.arrayContaining(["Threshold", "Ratio", "Attack", "Release", "Makeup"]));
+    }
+    expect(row(2).querySelector('[data-testid="pp-compressor-more"]')).not.toBeNull();
+    // A type with no panel of its own keeps the plain rows: the high-pass has one now, so
+    // that rule is pinned in the panels' own tests and in pluginParams.test.ts.
     // the existing per-row bypass still drives bypass_plugin on the owned row
     await act(async () => { row(2).querySelector<HTMLButtonElement>('button[aria-label="Bypass"]')!.click(); });
     expect(calls).toContainEqual({ command: "bypass_plugin", args: { trackId: "vox", index: 2, bypassed: true } });

@@ -306,7 +306,7 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
         <details className="grp quiet" open>
           <summary className="grphd"><span className="sec">Plugins</span></summary>
           <div className="grp-body chain" data-testid="v3-plugins">
-            {plugins.map((p, i) => <PluginRow key={p.index} plugin={p} trackId={track.id}
+            {plugins.map((p, i) => <PluginRow key={p.itemId ?? `slot-${p.index}`} plugin={p} trackId={track.id}
               sampleRate={snapshot.session?.sampleRate || 48000}
               prevIndex={plugins[i - 1]?.index} nextIndex={plugins[i + 1]?.index} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"

@@ -1,0 +1,66 @@
+/* Low-pass / high-pass panel (panels/FilterPanel.tsx): an LP|HP switch, the cutoff as a
+   number, the fixed slope, then the exact response with a draggable cutoff handle. */
+.v3-shell .insp .pr .pp-filter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-filter-top { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; }
+
+/* LP | HP: a two-way segmented switch. */
+.v3-shell .insp .pr .pp-filter-seg {
+  display: inline-flex; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+}
+.v3-shell .insp .pr .pp-filter-seg button {
+  border: 0; margin: 0; padding: 0 7px; height: 16px; background: transparent; color: var(--muted);
+  font: inherit; font-size: 9.5px; font-weight: 600; letter-spacing: .04em; cursor: pointer;
+}
+.v3-shell .insp .pr .pp-filter-seg button + button { border-left: 1px solid var(--line); }
+.v3-shell .insp .pr .pp-filter-seg button:hover { color: var(--text); }
+.v3-shell .insp .pr .pp-filter-seg button[aria-pressed="true"] {
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); cursor: default;
+}
+.v3-shell .insp .pr .pp-filter-seg button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* The cutoff read-out is also where you type one. */
+.v3-shell .insp .pr .pp-filter-hz { display: inline-flex; align-items: baseline; gap: 2px; flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-filter-hz input {
+  width: 44px; height: 16px; padding: 0 3px; border: 1px solid transparent; border-radius: 3px;
+  background: transparent; color: var(--text); font-family: ui-monospace, monospace; font-size: 11px;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.v3-shell .insp .pr .pp-filter-hz input:hover { border-color: var(--line); }
+.v3-shell .insp .pr .pp-filter-hz input:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+.v3-shell .insp .pr .pp-filter-unit { color: var(--muted); font-family: ui-monospace, monospace; font-size: 9.5px; }
+
+/* "A": the cutoff follows an automation lane during playback. */
+.v3-shell .insp .pr .pp-filter-auto {
+  flex: 0 0 auto; padding: 0 3px; border-radius: 2px; font-size: 8.5px; font-weight: 700; line-height: 12px;
+  color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+}
+.v3-shell .insp .pr .pp-filter-facts {
+  margin-left: auto; color: var(--muted); font-family: ui-monospace, monospace; font-size: 9.5px; white-space: nowrap;
+}
+
+/* The plot: shared .pp-plot look; the cutoff is a thin dashed guide under the handle. */
+.v3-shell .insp .pr .pp-filter-plot {
+  border-radius: 4px; background: color-mix(in srgb, var(--bg) 60%, transparent); cursor: ew-resize;
+}
+.v3-shell .insp .pr .pp-filter-plot .pp-node { cursor: ew-resize; }
+.v3-shell .insp .pr .pp-filter-fc {
+  stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1; stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke; pointer-events: none;
+}
+.v3-shell .insp .pr .pp-filter-plot.bypassed .pp-filter-fc { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
+.v3-shell .insp .pr .pp-filter-plot .axis { pointer-events: none; user-select: none; }
+
+/* The minimized row's thumbnail. */
+.v3-shell .insp .pr .pp-filter-mini { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-filter-mini path { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-filter-mini .z { stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-filter-mini.bypassed path { stroke: var(--muted); }
+
+/* A stored cutoff above Nyquist at this rate: the engine's biquad is unstable, so no curve
+   is drawn; the read-out, the guide and a two-line note say so in the warning tone. */
+.v3-shell .insp .pr .pp-filter-hz.warn input { color: var(--warn); }
+.v3-shell .insp .pr .pp-filter-plot.unstable .pp-filter-fc { stroke: color-mix(in srgb, var(--warn) 70%, transparent); }
+.v3-shell .insp .pr .pp-filter-plot .pp-filter-warn {
+  fill: var(--warn); font-size: 7.5px; pointer-events: none; user-select: none;
+}
+.v3-shell .insp .pr .pp-filter-mini.unstable .z { stroke: var(--warn); stroke-dasharray: 2 2; }

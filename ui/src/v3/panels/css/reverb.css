@@ -1,0 +1,37 @@
+/* Reverb panel (ReverbPanel.tsx): the decay shape, then five dials and the Freeze toggle. */
+.v3-shell .insp .pr .pp-reverb { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-plot { border-radius: 4px; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+/* The combs' own delay before the first reflection. */
+.v3-shell .insp .pr .pp-reverb .pp-reverb-onset { fill: color-mix(in srgb, var(--text) 6%, transparent); }
+/* The 8 kHz decay: a thinner, dimmer line; the filled wedge between it and the LF line is damping. */
+.v3-shell .insp .pr .pp-reverb .pp-reverb-hf { stroke: color-mix(in srgb, var(--accent) 55%, var(--muted)); stroke-width: 1;
+  stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-read { fill: var(--text); font-family: ui-monospace, monospace; font-size: 7.5px;
+  /* A halo so the read-out stays legible where a curve runs through it. */
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-read.hf { fill: var(--muted); }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-plot.frozen .curve { stroke-width: 2.4; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-plot.bypassed .pp-reverb-hf { stroke: var(--muted); }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-plot.bypassed .pp-reverb-read { fill: var(--muted); }
+/* Controls: five dials and the toggle on one row. */
+.v3-shell .insp .pr .pp-reverb .pp-reverb-ctl { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-ctl .pp-dial { min-width: 40px; }
+/* Size and Damping do nothing while frozen (the engine forces feedback 1, damping 0). */
+.v3-shell .insp .pr .pp-reverb .pp-reverb-held { opacity: .5; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-freeze {
+  flex: 0 0 auto; width: 40px; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 3px 0 2px; margin-top: 2px; border: 1px solid var(--line); border-radius: 6px;
+  background: transparent; color: var(--muted); cursor: pointer; font: inherit;
+}
+.v3-shell .insp .pr .pp-reverb .pp-reverb-freeze .g { font-size: 13px; line-height: 14px; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-freeze .nm { font-size: 9px; }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-freeze:hover { color: var(--text); }
+.v3-shell .insp .pr .pp-reverb .pp-reverb-freeze[aria-pressed="true"] {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.v3-shell .insp .pr .pp-reverb .pp-reverb-freeze:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* Minimized: the decay wedge thumbnail. */
+.v3-shell .insp .pr .pp-reverb.pp-reverb-mini { flex: 0 0 auto; display: block; }
+.v3-shell .insp .pr .pp-reverb.pp-reverb-mini path { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: var(--accent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-reverb.pp-reverb-mini.bypassed path { fill: color-mix(in srgb, var(--text) 8%, transparent); stroke: var(--muted); }

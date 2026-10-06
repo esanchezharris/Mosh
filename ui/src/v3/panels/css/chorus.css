@@ -1,0 +1,26 @@
+/* Chorus panel (panels/ChorusPanel.tsx): one LFO cycle of the delay with L/R riding it,
+   then four small dials and the pitch wobble they make. */
+.v3-shell .insp .pr .pp-chorus { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-lane {
+  border-radius: 4px; background: color-mix(in srgb, var(--bg) 60%, transparent); touch-action: auto;
+}
+.v3-shell .insp .pr .pp-chorus .pp-chorus-lane .axis { pointer-events: none; user-select: none; }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-dot circle { stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-dot.l circle { fill: var(--accent); stroke: var(--bg); }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-dot.r circle { fill: var(--surface2); stroke: var(--accent); }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-dot text {
+  fill: var(--muted); font-size: 6.5px; font-weight: 700; font-family: ui-monospace, monospace; pointer-events: none;
+}
+.v3-shell .insp .pr .pp-chorus .pp-chorus-lane.bypassed .pp-chorus-dot.l circle { fill: var(--muted); }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-lane.bypassed .pp-chorus-dot.r circle { stroke: var(--muted); }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-ctl { display: flex; align-items: flex-start; justify-content: space-between; gap: 2px; min-width: 0; }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-ctl .pp-dial { min-width: 46px; }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-wob {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+  align-self: stretch; gap: 1px; padding-right: 2px;
+}
+.v3-shell .insp .pr .pp-chorus .pp-chorus-wob .v {
+  font-family: ui-monospace, monospace; font-size: 11px; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.v3-shell .insp .pr .pp-chorus .pp-chorus-wob .nm { font-size: 9px; color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-chorus .pp-chorus-wob.dry .v { color: var(--muted); }

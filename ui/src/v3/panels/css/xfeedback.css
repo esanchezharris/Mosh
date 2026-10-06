@@ -1,0 +1,57 @@
+/* Mosh X-FDBK panel (panels/XFeedbackPanel.tsx): mode + cuts row, the ring strip, a status
+   line of chips, then the dials. Tokens only. */
+.v3-shell .insp .pr .pp-xf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-xf.off .pp-xf-strip { opacity: .5; }
+
+/* Controls row: Detect | Suppress, the cuts stepper, the threshold read-out. */
+.v3-shell .insp .pr .pp-xf-ctl { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; }
+.v3-shell .insp .pr .pp-xf-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-xf-mode button { border: 0; padding: 1px 7px; font: inherit; font-size: 10px; line-height: 14px;
+  color: var(--muted); background: transparent; cursor: pointer; }
+.v3-shell .insp .pr .pp-xf-mode button + button { border-left: 1px solid var(--line); }
+.v3-shell .insp .pr .pp-xf-mode button.on { color: var(--bg); background: var(--accent); }
+.v3-shell .insp .pr .pp-xf-mode button:not(.on):hover { color: var(--text); }
+.v3-shell .insp .pr .pp-xf-step { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-xf-step button { width: 16px; height: 16px; padding: 0; border: 1px solid var(--line); border-radius: 3px;
+  background: transparent; color: var(--text); font: inherit; font-size: 11px; line-height: 13px; cursor: pointer; }
+.v3-shell .insp .pr .pp-xf-step button[aria-disabled="true"] { opacity: .35; cursor: default; }
+.v3-shell .insp .pr .pp-xf-step button:focus-visible, .v3-shell .insp .pr .pp-xf-mode button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr .pp-xf-step .v { min-width: 40px; text-align: center; font-family: ui-monospace, monospace; font-size: 10px;
+  color: var(--text); outline: none; border-radius: 3px; }
+.v3-shell .insp .pr .pp-xf-step .v:focus-visible { outline: 1px solid var(--accent); }
+.v3-shell .insp .pr .pp-xf-thrv { margin-left: auto; font-family: ui-monospace, monospace; font-size: 9px; color: var(--muted); white-space: nowrap; }
+
+/* The ring strip. */
+.v3-shell .insp .pr .pp-xf-strip { border-radius: 3px; background: color-mix(in srgb, var(--bg) 45%, transparent); }
+.v3-shell .insp .pr .pp-xf-thr { stroke: color-mix(in srgb, var(--accent) 70%, transparent); stroke-width: 1; stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-xf-cand line { stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-xf-cand circle { fill: var(--accent); }
+.v3-shell .insp .pr .pp-xf-cand.would line { stroke: color-mix(in srgb, var(--accent) 60%, transparent); stroke-dasharray: 2 1.5; }
+.v3-shell .insp .pr .pp-xf-cand.would circle { fill: var(--surface2); stroke: var(--accent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-xf-cutline { fill: none; stroke: var(--warn); stroke-width: 1.4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-xf-cutarea { fill: color-mix(in srgb, var(--warn) 22%, transparent); stroke: none; }
+.v3-shell .insp .pr .pp-xf-strip.idle .grid, .v3-shell .insp .pr .pp-xf-strip.idle .pp-xf-thr { opacity: .55; }
+
+/* Status line: what it hears now, with chips. */
+.v3-shell .insp .pr .pp-xf-status { display: flex; align-items: center; gap: 4px; height: 14px; min-width: 0; overflow: hidden;
+  font-family: ui-monospace, monospace; font-size: 9px; color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-xf-status.cutting .t { color: var(--warn); }
+.v3-shell .insp .pr .pp-xf-status.ringing .t { color: var(--accent); }
+.v3-shell .insp .pr .pp-xf-chip { flex: 0 0 auto; padding: 0 4px; border-radius: 3px; line-height: 12px; font-size: 9px; color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.v3-shell .insp .pr .pp-xf-chip.cut { border-color: color-mix(in srgb, var(--warn) 60%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.v3-shell .insp .pr .pp-xf-chip.more { color: var(--muted); cursor: default; }
+.v3-shell .insp .pr .pp-xf-note { font-size: 9px; color: var(--warn); }
+
+/* Dials: the suppression settings dim (but stay adjustable) while only detecting. */
+.v3-shell .insp .pr .pp-xf-dials { display: flex; align-items: flex-end; justify-content: space-between; gap: 2px; min-width: 0; }
+.v3-shell .insp .pr .pp-xf-dials.detect > .pp-dial:nth-child(n+2):nth-child(-n+4) { opacity: .55; }
+
+/* Minimized micro strip. */
+.v3-shell .insp .pr .pp-xf-mini { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-xf-mini .base { stroke: color-mix(in srgb, var(--text) 25%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-xf-mini .cand { stroke: var(--accent); stroke-width: 1.5; }
+.v3-shell .insp .pr .pp-xf-mini .cut { stroke: var(--warn); stroke-width: 1.5; }
+.v3-shell .insp .pr .pp-xf-mini.idle { opacity: .5; }

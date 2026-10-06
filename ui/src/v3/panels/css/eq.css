@@ -1,0 +1,51 @@
+/* 4-band EQ panel (EqPanel.tsx): the exact response with four band nodes, then one row with
+   the band picker and the selected band's Freq / Gain / Q. Shared plot, node and grid looks
+   come from shell.css (.pp-plot, .pp-node); only what is the EQ's own lives here. */
+.v3-shell .insp .pr .pp-eq { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-eq .pp-eq-plot { border-radius: 4px; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+/* The selected band's own curve, faint and dashed, under the composite. */
+.v3-shell .insp .pr .pp-eq .pp-eq-solo {
+  fill: none; stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1;
+  stroke-dasharray: 2 2; vector-effect: non-scaling-stroke;
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-plot.bypassed .pp-eq-solo { stroke: color-mix(in srgb, var(--text) 25%, transparent); }
+
+/* The read-out row: four band buttons, then three scrubbable values. */
+.v3-shell .insp .pr .pp-eq .pp-eq-row {
+  display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px;
+  font-family: ui-monospace, monospace; font-size: 10px;
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-bands { flex: 0 0 auto; display: flex; gap: 2px; }
+.v3-shell .insp .pr .pp-eq .pp-eq-b {
+  width: 15px; height: 15px; padding: 0; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 3px; background: transparent;
+  color: var(--text); font: inherit; font-size: 9px; font-weight: 700; cursor: pointer;
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-b.off { color: var(--muted); font-weight: 400; }
+.v3-shell .insp .pr .pp-eq .pp-eq-b.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.v3-shell .insp .pr .pp-eq .pp-eq-b:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.v3-shell .insp .pr .pp-eq .pp-eq-f { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+.v3-shell .insp .pr .pp-eq .pp-eq-f:last-child { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-eq .pp-eq-cap { flex: 0 0 auto; font-family: inherit; font-size: 8.5px; color: var(--muted); }
+.v3-shell .insp .pr .pp-eq .pp-eq-v {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text);
+  cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--text) 25%, transparent); outline: none;
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-v:hover { border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-eq .pp-eq-v:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+/* Frequency and Q of a band at 0 dB do nothing: dimmed, with the reason in the tooltip. */
+.v3-shell .insp .pr .pp-eq .pp-eq-f.dim .pp-eq-v { color: var(--muted); }
+.v3-shell .insp .pr .pp-eq .pp-eq-in {
+  width: 100%; min-width: 0; height: 15px; padding: 0 3px; border: 1px solid var(--accent); border-radius: 3px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 10px;
+}
+
+/* The minimized row's thumbnail (the same exact curve). */
+.v3-shell .insp .pr .pp-eq.pp-eq-mini { display: block; flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-eq.pp-eq-mini .z { stroke: color-mix(in srgb, var(--text) 18%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-eq.pp-eq-mini .c { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-eq.pp-eq-mini.bypassed .c { stroke: var(--muted); }
+
+/* Shown only when the composite response runs past the plot's largest range (±40 dB). */
+.v3-shell .insp .pr .pp-eq .pp-eq-plot .pp-eq-clip { fill: var(--warn); }

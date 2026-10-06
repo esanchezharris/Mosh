@@ -451,7 +451,7 @@
 .v3-shell .insp .pr .pp-bar .fill { position: absolute; left: 0; bottom: 0; top: 0; background: var(--accent); }
 .v3-shell .insp .pr .pp-bar.v .fill { top: auto; right: 0; }
 .v3-shell .insp .pr .pp-bar.gr .fill { left: auto; right: 0; background: var(--warn); }
-.v3-shell .insp .pr .pp-bar.gr.v .fill { bottom: auto; top: 0; }
+.v3-shell .insp .pr .pp-bar.gr.v .fill { bottom: auto; top: 0; left: 0; }
 .v3-shell .insp .pr .pp-bar .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text); }
 .v3-shell .insp .pr .pp-bar.v .tick { top: auto; left: 0; right: 0; width: auto; height: 1px; }
 .v3-shell .insp .pr .pp-bar.idle { opacity: .5; }

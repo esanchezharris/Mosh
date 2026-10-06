@@ -477,8 +477,9 @@ export type PluginStateValue = {
 export type PluginMeterBase = { trackId: string; index: number; itemId?: string; type: string };
 /** Compressor and soft clipper: gain reduction (dB, ≥ 0) and sample peaks in and out (dBFS). */
 export type DynamicsMeter = PluginMeterBase & { grDb: number; inDb: number; outDb: number };
-/** Mosh OTT: per band (low, mid, high) the envelope peak and the applied gain change
- *  (dB; positive lifts, negative cuts), and whether the output clamp engaged. */
+/** Mosh OTT: per band (low, mid, high) the envelope peak and the applied DYNAMIC gain
+ *  change (dB; positive lifts, negative cuts; the band's static trim is NOT included), and
+ *  whether the output clamp engaged. */
 export type OttMeter = PluginMeterBase & { bands: { levelDb: number; gainDb: number }[]; clipped: boolean };
 /** Mosh X-FDBK: ring candidates and the notches it is cutting right now. */
 export type FeedbackMeter = PluginMeterBase & {
