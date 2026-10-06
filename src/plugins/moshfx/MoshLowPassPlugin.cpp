@@ -13,6 +13,18 @@ const juce::Identifier& MoshLowPassPlugin::slopePropertyId()
     return id;
 }
 
+int MoshLowPassPlugin::slopeWarmupSamples (int order, double cutoff, double rate) noexcept
+{
+    const double seconds = juce::jlimit (kSlopeWarmupMinSeconds, kSlopeWarmupMaxSeconds,
+                                         kSlopeWarmupTimeConstants * design::slowestTimeConstantSeconds (order, cutoff));
+    return juce::jmax (1, juce::roundToInt (seconds * rate));
+}
+
+int MoshLowPassPlugin::slopeCrossfadeSamples (double rate) noexcept
+{
+    return juce::jmax (1, juce::roundToInt (kSlopeCrossfadeSeconds * rate));
+}
+
 MoshLowPassPlugin::MoshLowPassPlugin (te::PluginCreationInfo info) : te::LowPassPlugin (info)
 {
     slope.referTo (state, slopePropertyId(), getUndoManager(), design::kDefaultSlope);
@@ -38,14 +50,14 @@ void MoshLowPassPlugin::initialise (const te::PluginInitialisationInfo& info)
     for (int b = 0; b < kBanks; ++b)
         resetBank (b);
     live = 0;
-    fadeDone = -1;
+    switchPos = -1;
     bankOrder[0] = bankOrder[1] = design::orderOf (getSlope());
     lastFreq = frequency->getCurrentValue();
     lastHighPass = highPassMirror.load();
     // An IIRFilter passes audio through untouched until it has coefficients.
     designBank (live, lastFreq, lastHighPass);
 
-    fadeTotal = juce::jmax (1, juce::roundToInt (kSlopeCrossfadeSeconds * info.sampleRate));
+    fadeTotal = slopeCrossfadeSamples (info.sampleRate);
     const int wanted = juce::jmax (info.blockSizeSamples, 4096);
     if (wanted > scratchSamples)
     {
@@ -95,29 +107,40 @@ void MoshLowPassPlugin::applyToBuffer (const te::PluginRenderContext& fc)
         lastFreq = freq;
         lastHighPass = highPass;
         designBank (live, freq, highPass);
-        if (fadeDone >= 0)
+        if (switchPos >= 0)
+        {
             designBank (1 - live, freq, highPass);
+            // Still warming: a lower cutoff settles more slowly, so it may need longer.
+            if (switchPos < warmTotal)
+                warmTotal = juce::jmax (warmTotal, slopeWarmupSamples (bankOrder[1 - live], freq, sampleRate));
+        }
     }
 
-    // A slope change: start the new cascade from silence and crossfade into it. A change
-    // that lands mid-crossfade waits for it to finish, then starts its own.
+    // A slope change: start the new cascade from silence, warm it (unheard) until it has
+    // settled on the input, then crossfade into it. A change that lands while one is
+    // running waits for it to finish, then starts its own.
     const int wanted = design::orderOf (getSlope());
-    if (fadeDone < 0 && wanted != bankOrder[live])
+    if (switchPos < 0 && wanted != bankOrder[live])
     {
         const int next = 1 - live;
         bankOrder[next] = wanted;
         resetBank (next);
         designBank (next, lastFreq, lastHighPass);
         if (scratchSamples > 0)
-            fadeDone = 0;
+        {
+            switchPos = 0;
+            warmTotal = slopeWarmupSamples (wanted, lastFreq, sampleRate);
+        }
         else
+        {
             live = next;   // never initialised with scratch: switch without a fade
+        }
     }
 
     te::clearChannels (buffer, 2, -1, start, n);
     const int channels = juce::jmin (kChannels, buffer.getNumChannels());
 
-    if (fadeDone < 0)
+    if (switchPos < 0)
     {
         for (int ch = channels; --ch >= 0;)
             runBank (live, ch, buffer.getWritePointer (ch, start), n);
@@ -135,19 +158,21 @@ void MoshLowPassPlugin::applyToBuffer (const te::PluginRenderContext& fc)
                 std::memcpy (in, out, sizeof (float) * (size_t) chunk);
                 runBank (live, ch, out, chunk);
                 runBank (next, ch, in, chunk);
-                for (int i = 0; i < chunk; ++i)
+                // The warm-up's samples (g == 0) leave the running cascade's output as is.
+                const int fadeAt = switchPos + done - warmTotal;   // the first sample's fade position
+                for (int i = juce::jmax (0, -fadeAt); i < chunk; ++i)
                 {
-                    const float g = juce::jmin (1.0f, (float) (fadeDone + done + i + 1) / (float) fadeTotal);
+                    const float g = juce::jmin (1.0f, (float) (fadeAt + i + 1) / (float) fadeTotal);
                     out[i] += g * (in[i] - out[i]);
                 }
             }
             done += chunk;
         }
-        fadeDone += n;
-        if (fadeDone >= fadeTotal)
+        switchPos += n;
+        if (switchPos >= warmTotal + fadeTotal)
         {
             live = next;
-            fadeDone = -1;
+            switchPos = -1;
         }
     }
 

@@ -169,3 +169,53 @@ TEST_CASE ("filter design: slope snapping", "[lowpass-design]")
     CHECK (fd::orderOf (48) == 8);
     CHECK (fd::orderOf (1000) == 8);
 }
+
+TEST_CASE ("filter design: the slowest time constant predicts how a reset cascade settles", "[lowpass-design]")
+{
+    // The formula: Q_1 / (pi fc) for an order >= 2 cascade, 1 / (2 pi fc) for order 1.
+    CHECK (std::abs (fd::slowestTimeConstantSeconds (8, 80.0) - 2.562915 / (juce::MathConstants<double>::pi * 80.0)) < 1.0e-8);
+    CHECK (std::abs (fd::slowestTimeConstantSeconds (2, 1000.0) - (1.0 / juce::MathConstants<double>::sqrt2) / (juce::MathConstants<double>::pi * 1000.0)) < 1.0e-12);
+    CHECK (std::abs (fd::slowestTimeConstantSeconds (1, 40.0) - 1.0 / (juce::MathConstants<double>::twoPi * 40.0)) < 1.0e-12);
+
+    // MoshLowPassPlugin warms a freshly reset cascade for five of these before it is heard.
+    // Five constants after the reset, the reset cascade (real juce::IIRFilters, float state)
+    // follows one that ran all along to within -30 dB of the input's level, for every order,
+    // both modes, bass to mid cutoffs and a tone at, below and above the cutoff (where the
+    // high-Q section rings longest): -39 dB at worst. Half the constant (2 pi in place of pi)
+    // would leave -17 dB.
+    const double rate = 48000.0;
+    double worstDb = -200.0;
+    for (double fc : { 40.0, 80.0, 200.0, 1000.0 })
+        for (bool lowPass : { true, false })
+            for (int order = 1; order <= fd::kMaxOrder; ++order)
+                for (double m : { 0.8, 1.0, 1.25 })
+                {
+                    juce::IIRCoefficients sections[fd::kMaxSections];
+                    const int count = fd::design (lowPass, order, rate, fc, sections);
+                    juce::IIRFilter warm[fd::kMaxSections], cold[fd::kMaxSections];
+                    for (int s = 0; s < count; ++s)
+                    {
+                        warm[s].setCoefficients (sections[s]);
+                        cold[s].setCoefficients (sections[s]);
+                    }
+                    const int reset = (int) rate;
+                    const int settled = reset + (int) std::lround (5.0 * fd::slowestTimeConstantSeconds (order, fc) * rate);
+                    const int end = settled + (int) (0.2 * rate);
+                    double err = 0.0;
+                    for (int i = 0; i < end; ++i)
+                    {
+                        const float x = (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * fc * m * i / rate));
+                        float a = x, b = x;
+                        for (int s = 0; s < count; ++s)
+                            warm[s].processSamples (&a, 1);
+                        if (i >= reset)
+                            for (int s = 0; s < count; ++s)
+                                cold[s].processSamples (&b, 1);
+                        if (i >= settled)
+                            err = std::max (err, (double) std::abs (a - b));
+                    }
+                    worstDb = std::max (worstDb, 20.0 * std::log10 (err / 0.5 + 1.0e-15));
+                }
+    INFO ("worst residual five constants after the reset: " << worstDb << " dB re the input");
+    CHECK (worstDb < -30.0);
+}

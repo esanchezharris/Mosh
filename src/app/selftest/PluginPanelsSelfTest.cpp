@@ -16,19 +16,29 @@
 //   SLOPE      Mosh's low/high-pass is what "lowpass"/"highpass" load as; at 12 dB/oct its
 //              audio is Tracktion's bit for bit (cutoff change and mode flip included),
 //              every slope attenuates as the Butterworth closed form says, and a slope
-//              change mid-stream crossfades without a jump.
-//   SIGNATURE  the render-layer cache key changes with plugin state and sampler sounds.
+//              change mid-stream warms the new cascade unheard, then is exactly the blend
+//              of two warm filters (12 and 48 dB/oct) through the fade and the 48 after it,
+//              at 4 kHz and at bass cutoffs (LP 80 Hz, HP 40 Hz) to -40 dB.
+//   SIGNATURE  the render-layer cache key changes with plugin state and with what a
+//              sampler's sounds sound like, not with a pad's name, choke number, parked
+//              level or a copy of its file elsewhere; and every pad command that changes the
+//              sound asks for the reactive re-render.
 //   4OSC       a loaded or default "4osc" is Mosh's metered subclass; all 68 parameters with
 //              their paramIDs and full JUCE ranges (skew, step), every other type's
-//              parameters byte-identical to before; its state keys; read-only mod routes;
+//              parameters byte-identical to before and capped at 16 (proven on a 20-parameter
+//              plugin); its state keys; read-only mod routes;
 //              and its live rail entry (output peak, held keys, struck notes), driven with
 //              MIDI through a live (not rendering) context.
 //   SAMPLER    every sampler Mosh makes or loads is Mosh's metered subclass, its audio
 //              Tracktion's bit for bit; plugin.sampler read from the SOUND state (paths,
-//              modes, address notes, the parked level of a silenced pad); the rail's hits,
-//              held keys and added peak, auditions included; a re-tapped pad sounds again
-//              after its blip expires; a pan-only edit keeps a silenced pad's level; and each
-//              pad command is exactly one undo step.
+//              relative, deleted and unresolvable sources, modes, address notes, the parked
+//              level of a silenced pad); the rail's hits, held keys and added peak (equal to
+//              the rendered buffer's), auditions included; audition_note's clipless road
+//              driven through the command's own code: a re-tapped pad sounds again inside
+//              and after its blip, a roll plays every tap, a repeated "on" is one press, and
+//              a blip's expiry keeps the track's other held keys; a pan-only edit keeps a
+//              silenced pad's level; and each pad command is exactly one undo step.
+//   RT GUARD   in a Debug build, no allocation inside a MOSH_RT_SCOPE across the suite.
 //
 // A headless run has no audio thread, so the plugins are driven block by block the way
 // the playback graph's PluginNode drives them (as the AutoTune section does).
@@ -43,7 +53,9 @@
 #include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "moshops/PluginState.h"
 #include "moshops/PluginParameterReadback.h"
+#include "audio/RealtimeAudioGuard.h"
 #include <cmath>
+#include <iostream>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -385,6 +397,50 @@ void flushSamplerLoad (te::SamplerPlugin& sampler)
     ((juce::AsyncUpdater*) &sampler)->handleUpdateNowIfNeeded();
 }
 
+// The 4OSC reloads its mod matrix (the map pluginToVar reads modRoutes from) in an
+// AsyncUpdate when a MODMATRIXITEM is added or removed. Run it NOW, as flushSamplerLoad does
+// for a sampler: a fixed pump can miss it under load. juce::AsyncUpdater is a private base of
+// te::FourOscPlugin too (neither te::Plugin nor juce::MPESynthesiser has one).
+void flushFourOscMatrix (te::FourOscPlugin& synth)
+{
+    ((juce::AsyncUpdater*) &synth)->handleUpdateNowIfNeeded();
+}
+
+// The largest |sample| over channels [0, 2) and samples [from, to) (to < 0: the end).
+float bufferPeak (const juce::AudioBuffer<float>& buffer, int from = 0, int to = -1)
+{
+    if (to < 0)
+        to = buffer.getNumSamples();
+    float peak = 0.0f;
+    for (int ch = 0; ch < juce::jmin (2, buffer.getNumChannels()); ++ch)
+        for (int i = juce::jmax (0, from); i < juce::jmin (to, buffer.getNumSamples()); ++i)
+            peak = juce::jmax (peak, std::abs (buffer.getSample (ch, i)));
+    return peak;
+}
+
+// A plugin with more parameters than any built-in but the 4OSC (20), so the snapshot's
+// 16-parameter cap has something to cut. Built directly, never put on a track.
+class ManyParamsPlugin : public te::Plugin
+{
+public:
+    static constexpr const char* xmlTypeName = "moshSelfTestManyParams";
+    static constexpr int kParams = 20;
+
+    explicit ManyParamsPlugin (te::PluginCreationInfo info) : te::Plugin (info)
+    {
+        for (int i = 0; i < kParams; ++i)
+            addParam ("p" + String (i), "Param " + String (i), { 0.0f, 1.0f });
+    }
+    ~ManyParamsPlugin() override { notifyListenersOfDeletion(); }
+
+    juce::String getName() const override { return "Many Params"; }
+    juce::String getPluginType() override { return xmlTypeName; }
+    juce::String getSelectableDescription() override { return getName(); }
+    void initialise (const te::PluginInitialisationInfo&) override {}
+    void deinitialise() override {}
+    void applyToBuffer (const te::PluginRenderContext&) override {}
+};
+
 var meterFor (const var& payload, const String& trackId, int index)
 {
     const auto entries = payload.getProperty ("plugins", var());
@@ -402,6 +458,18 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
 {
     const auto& section = cb.section;
     const auto& check = cb.check;
+
+    // The real-time tripwire (src/audio/RealtimeAudioGuard.h): every plugin this suite drives
+    // block by block (compressor, OTT, soft clip, X-FDBK, delay, chorus, low/high-pass, the
+    // 4OSC and the sampler) wraps only its own code in MOSH_RT_SCOPE, never a base render that
+    // allocates. In a build with the tripwire (Debug) an allocation inside a scope is counted
+    // and checked at the end of the suite; the default handler (jassertfalse) neither stops
+    // nor fails a run without a debugger, so it is replaced by count-only here. A Release
+    // build compiles the tripwire out and says so.
+   #if MOSH_RT_GUARD
+    const long rtViolationsBefore = rtguard::violationCount();
+    rtguard::setViolationHandler (nullptr);
+   #endif
 
     // ── Fixture: one track carrying every in-scope native type, plus AutoTune ──
     section ("Plugin panels: itemId and physical parameter ranges");
@@ -1233,45 +1301,148 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                                + String (measured, 3) + " dB vs the closed form " + String (expected, 3) + " dB (within 0.1 dB)");
                 }
 
-            // A slope change mid-stream (12 -> 48 at a block boundary) crossfades into the
-            // new cascade: every sample finite and within the +-3 clamp, no sample-to-sample
-            // jump larger than the dry signal's own largest, and once the fade is over the
-            // output converges on a filter that ran at 48 dB/oct throughout.
+            // A slope change mid-stream (12 -> 48 dB/oct at a block boundary), measured against
+            // twins that ran at 12 and at 48 from the start. The new cascade first WARMS,
+            // unheard: the output stays the 12 dB/oct filter's, sample for sample. Then it
+            // crossfades: every sample of the fade is y12 + g (y48 - y12), g rising linearly
+            // to 1 (a hard switch anywhere in it, or a cascade still ringing up from silence,
+            // misses that by up to |y48 - y12|), and no sample-to-sample step exceeds 1.5x the
+            // larger of the two steady filters' own steps there (a hard switch is ~4.7x). From
+            // the fade's end on the output IS the 48 dB/oct filter. The change lands near the
+            // swell's top on a click-free signal, so a jump would show. (The plugin clamps its
+            // output to +-3 and zeroes a NaN, so "finite and <= 3" could not fail; the peak is
+            // bounded by the dry signal's instead.)
+            auto smooth = [] (int ch, int i)
             {
-                auto changed = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
-                auto steady = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
-                if (auto* s48 = dynamic_cast<MoshLowPassPlugin*> (steady.get()))
-                    s48->slope.setValue (48, nullptr);
-                auto out = signal (2, 1.0, music), ref = signal (2, 1.0, music);
-                driveWithChange (*changed, out, block, [] (te::Plugin& p)
+                const float swell = 0.5f + 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 1.5 * i / 48000.0);
+                return swell * (sine (220.0 + 3.0 * ch, i, 0.5f) + sine (5200.0, i, 0.2f));
+            };
+            struct SlopeChange
+            {
+                juce::AudioBuffer<float> out, y12, y48;
+                int switchAt = 0, fadeStart = 0, fadeEnd = 0;
+                bool slope48 = false;
+            };
+            // Twins of the live filter in `mode` at `cutoff`, one switched 12 -> 48 at block
+            // `switchBlock`, the others at 12 and at 48 throughout.
+            auto runSlopeChange = [&] (bool highPassMode, float cutoff, double seconds, int switchBlock,
+                                       const std::function<float (int, int)>& input)
+            {
+                SlopeChange r;
+                r.switchAt = switchBlock * block;
+                te::Plugin::Ptr twins[3];
+                for (int k = 0; k < 3; ++k)
                 {
-                    if (auto* m = dynamic_cast<MoshLowPassPlugin*> (&p))
-                        m->slope.setValue (48, nullptr);
-                });
-                drive (*steady, ref, block);
-                bool finite = true;
-                float peak = 0.0f, maxStep = 0.0f, dryStep = 0.0f, tailDiff = 0.0f;
-                for (int ch = 0; ch < 2; ++ch)
-                    for (int i = 0; i < out.getNumSamples(); ++i)
+                    twins[k] = tracktionTwin<MoshLowPassPlugin> (eng, *lowpass);
+                    if (auto* f = dynamic_cast<MoshLowPassPlugin*> (twins[k].get()))
                     {
-                        const float y = out.getSample (ch, i);
-                        finite = finite && std::isfinite (y);
-                        peak = juce::jmax (peak, std::abs (y));
-                        if (i > 0)
-                        {
-                            maxStep = juce::jmax (maxStep, std::abs (y - out.getSample (ch, i - 1)));
-                            dryStep = juce::jmax (dryStep, std::abs (music (ch, i) - music (ch, i - 1)));
-                        }
-                        if (i >= out.getNumSamples() - 4800)
-                            tailDiff = juce::jmax (tailDiff, std::abs (y - ref.getSample (ch, i)));
+                        f->mode.setValue (highPassMode ? "highpass" : "lowpass", nullptr);
+                        f->frequency->setParameterWithoutUndo (cutoff, juce::dontSendNotification);
+                        if (k == 2)
+                            f->slope.setValue (48, nullptr);
                     }
-                auto* m = dynamic_cast<MoshLowPassPlugin*> (changed.get());
-                check (m != nullptr && m->getSlope() == 48, "the twin now runs at 48 dB/oct");
-                check (finite && peak <= 3.0f, "slope 12 -> 48 mid-stream: every sample finite, peak " + String (peak, 3) + " (<= 3)");
-                check (maxStep <= dryStep, "...no sample-to-sample jump beyond the dry signal's largest (" + String (maxStep, 4)
-                                               + " <= " + String (dryStep, 4) + ")");
-                check (tailDiff < 1.0e-4f, "...and the last 0.1 s matches a filter run at 48 dB/oct throughout (max difference "
-                                               + String (tailDiff, 7) + ")");
+                }
+                r.out = signal (2, seconds, input);
+                r.y12 = signal (2, seconds, input);
+                r.y48 = signal (2, seconds, input);
+                const int switchAt = r.switchAt;
+                driveScheduled (*twins[0], r.out, block, [switchAt] (te::Plugin& p, int start)
+                {
+                    if (start == switchAt)
+                        if (auto* m = dynamic_cast<MoshLowPassPlugin*> (&p))
+                            m->slope.setValue (48, nullptr);
+                });
+                drive (*twins[1], r.y12, block);
+                drive (*twins[2], r.y48, block);
+                auto* changedFilter = dynamic_cast<MoshLowPassPlugin*> (twins[0].get());
+                r.slope48 = changedFilter != nullptr && changedFilter->getSlope() == 48;
+                const double fc = changedFilter != nullptr ? (double) changedFilter->frequency->getCurrentValue() : (double) cutoff;
+                r.fadeStart = r.switchAt + MoshLowPassPlugin::slopeWarmupSamples (8, fc, 48000.0);
+                r.fadeEnd = r.fadeStart + MoshLowPassPlugin::slopeCrossfadeSamples (48000.0);
+                return r;
+            };
+            // max |out - y12| over the warm-up, max |out - blend| over the fade, max |out - y48|
+            // from the fade's end, and the reference peak after the change.
+            struct SlopeErrors { float warm = 0, fade = 0, after = 0, peak = 0; int distinct = 0; };
+            auto slopeErrors = [] (const SlopeChange& r)
+            {
+                SlopeErrors e;
+                const int fade = r.fadeEnd - r.fadeStart;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = r.switchAt; i < r.out.getNumSamples(); ++i)
+                    {
+                        const float y = r.out.getSample (ch, i), a = r.y12.getSample (ch, i), b = r.y48.getSample (ch, i);
+                        e.peak = juce::jmax (e.peak, std::abs (a), std::abs (b));
+                        if (i < r.fadeStart)
+                            e.warm = juce::jmax (e.warm, std::abs (y - a));
+                        else if (i < r.fadeEnd)
+                        {
+                            const float g = (float) (i - r.fadeStart + 1) / (float) fade;
+                            e.fade = juce::jmax (e.fade, std::abs (y - (a + g * (b - a))));
+                            if (std::abs (b - a) > 0.05f)
+                                ++e.distinct;
+                        }
+                        else
+                            e.after = juce::jmax (e.after, std::abs (y - b));
+                    }
+                return e;
+            };
+            {
+                const auto r = runSlopeChange (false, 4000.0f, 1.0, 31, smooth);   // the swell near its top
+                const auto e = slopeErrors (r);
+                check (r.slope48 && r.fadeStart - r.switchAt == 1440 && r.fadeEnd - r.fadeStart == 960,
+                       "slope 12 -> 48 mid-stream at 4 kHz: the twin now runs at 48 dB/oct; a 30 ms warm-up (the floor: 5 time constants is 0.8 ms) "
+                       "and a 20 ms fade at 48 kHz (" + String (r.fadeStart - r.switchAt) + " + " + String (r.fadeEnd - r.fadeStart) + " samples)");
+                check (e.warm == 0.0f, "...the warm-up is unheard: the output is the 12 dB/oct filter's, sample for sample (max difference "
+                                           + String (e.warm, 9) + ")");
+                check (e.distinct > 200 && e.fade < 1.0e-4f,
+                       "...through the fade every sample is y12 + g (y48 - y12), g rising linearly (max difference " + String (e.fade, 7)
+                           + "; " + String (e.distinct) + " samples where the two filters differ by more than 0.05)");
+                float step = 0.0f, steadyStep = 0.0f, dryPeak = 0.0f, peak = 0.0f;
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    for (int i = r.fadeStart; i <= r.fadeEnd + 1; ++i)
+                    {
+                        step = juce::jmax (step, std::abs (r.out.getSample (ch, i) - r.out.getSample (ch, i - 1)));
+                        steadyStep = juce::jmax (steadyStep, std::abs (r.y12.getSample (ch, i) - r.y12.getSample (ch, i - 1)),
+                                                 std::abs (r.y48.getSample (ch, i) - r.y48.getSample (ch, i - 1)));
+                    }
+                    for (int i = 0; i < r.out.getNumSamples(); ++i)
+                    {
+                        dryPeak = juce::jmax (dryPeak, std::abs (smooth (ch, i)));
+                        peak = juce::jmax (peak, std::abs (r.out.getSample (ch, i)));
+                    }
+                }
+                check (step <= 1.5f * steadyStep, "...no sample-to-sample step in the fade beyond 1.5x the steady filters' own there ("
+                                                      + String (step, 4) + " vs " + String (steadyStep, 4) + ")");
+                check (e.after < 1.0e-5f && peak <= 1.5f * dryPeak,
+                       "...from the fade's end on it IS the 48 dB/oct filter (max difference " + String (e.after, 8) + "), and the output peaks at "
+                           + String (peak, 3) + " (the dry signal " + String (dryPeak, 3) + ")");
+            }
+
+            // Bass-range cutoffs, where the steep cascade's highest-Q section (Q 2.56 at 48
+            // dB/oct) settles in Q / (pi fc): 10 ms at 80 Hz, 20 ms at 40 Hz. Without the
+            // warm-up the fade ended while the reset cascade was still ringing up from silence
+            // (-7.8 dB re peak off the blend at LP 80 Hz, -5 dB at HP 40 Hz with a 45 Hz tone,
+            // and -19 / -5 dB still after the fade). With it, both stay under -40 dB re the
+            // filters' peak, through the fade and after it.
+            {
+                struct Low { bool highPassMode; float cutoff; const char* what; std::function<float (int, int)> input; };
+                const Low lows[] = {
+                    { false, 80.0f, "LP 80 Hz, 50 Hz + 2 kHz", [] (int, int i) { return sine (50.0, i, 0.5f) + sine (2000.0, i, 0.2f); } },
+                    { true, 40.0f, "HP 40 Hz, a 45 Hz tone", [] (int, int i) { return sine (45.0, i, 0.6f); } },
+                };
+                for (const auto& c : lows)
+                {
+                    const auto r = runSlopeChange (c.highPassMode, c.cutoff, 1.2, 125, c.input);
+                    const auto e = slopeErrors (r);
+                    const double warmMs = (r.fadeStart - r.switchAt) / 48.0;
+                    const double fadeDb = db (e.fade / e.peak), afterDb = db (e.after / e.peak);
+                    check (r.slope48 && e.warm == 0.0f && fadeDb < -40.0 && afterDb < -40.0,
+                           String ("slope 12 -> 48 at ") + c.what + ": " + String (warmMs, 1) + " ms of unheard warm-up, then the fade is the blend of two warm "
+                               "filters to " + String (fadeDb, 1) + " dB re their peak, and after it the 48 dB/oct filter to " + String (afterDb, 1)
+                               + " dB (both under -40)");
+                }
             }
         }
     }
@@ -1319,8 +1490,26 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                    "every other plugin type's params are byte-identical to the legacy payload (" + String (compared)
                        + " parameter objects over " + String ((int) typesCompared.size()) + " types, " + String (differing) + " differ"
                        + (firstDifference.isEmpty() ? String() : ": " + firstDifference) + ")");
-            check (capped, "every other plugin type keeps the 16-parameter cap");
+            check (capped, "every other plugin type's params are all of its parameters (none of these has more than 16)");
             check (noModRoutes, "no other plugin type carries modRoutes");
+        }
+        {
+            // The cap itself. No built-in but the 4OSC has more than 16 parameters (the
+            // fixture's largest is the EQ's 12), so the checks above hold with or without it;
+            // a 20-parameter plugin, built directly, shows it. Without the cap every VST3
+            // instrument (hundreds of parameters) would ride every snapshot and track patch.
+            juce::ValueTree tree (te::IDs::PLUGIN);
+            tree.setProperty (te::IDs::type, ManyParamsPlugin::xmlTypeName, nullptr);
+            te::EditItemID::readOrCreateNewID (eng.edit(), tree);
+            te::Plugin::Ptr many (new ManyParamsPlugin (te::PluginCreationInfo (eng.edit(), tree, true)));
+            const auto params = ops.pluginVarForSelfTest (*many).getProperty ("params", var());
+            bool firstSixteen = params.size() == 16;
+            for (int i = 0; firstSixteen && i < params.size(); ++i)
+                firstSixteen = (int) params[i].getProperty ("index", -1) == i
+                               && params[i].getProperty ("name", var()).toString() == "Param " + String (i);
+            check (many->getNumAutomatableParameters() == ManyParamsPlugin::kParams && firstSixteen,
+                   "the 16-parameter cap: a plugin with " + String (many->getNumAutomatableParameters()) + " parameters publishes "
+                       + String (params.size()) + ", its first 16 in order");
         }
 
         const auto ft = dataOf (command (ops, "create_track", object ({ { "name", "4OSC Panel" } }))).getProperty ("trackId", var()).toString();
@@ -1464,8 +1653,8 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
             item.setProperty (te::IDs::modParam, "filterFreq", nullptr);
             item.setProperty (te::IDs::modItem, "lfo1", nullptr);
             item.setProperty (te::IDs::modDepth, 0.25f, nullptr);
-            matrix.addChild (item, -1, nullptr);   // FourOsc reloads its matrix on an AsyncUpdate
-            pump (150);
+            matrix.addChild (item, -1, nullptr);
+            flushFourOscMatrix (*synth);   // FourOsc reloads its matrix on an AsyncUpdate: run it now
             const auto routes = pluginAt (ops, ft, fo).getProperty ("modRoutes", var());
             check (routes.size() == 1 && (int) routes[0].getProperty ("paramIndex", -1) == 49
                        && routes[0].getProperty ("id", var()).toString() == "filterFreq"
@@ -1476,7 +1665,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 synth->state.removeChild (matrix, nullptr);
             else
                 matrix.removeChild (item, nullptr);
-            pump (150);
+            flushFourOscMatrix (*synth);
             check (! pluginAt (ops, ft, fo).hasProperty ("modRoutes"), "with the route gone, modRoutes is absent again");
         }
 
@@ -1716,7 +1905,7 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 live.play (0.25);
                 check (! meter().isObject(), "a 4OSC that played nothing is not on the rail (idle)");
 
-                live.play (0.25, { { 0, noteOn (60) } });
+                const auto attack = live.play (0.25, { { 0, noteOn (60) } });
                 const auto first = meter();
                 check (first.isObject() && first.getProperty ("type", var()).toString() == "4osc"
                            && first.getProperty ("itemId", var()).toString() == pluginAt (ops, ft, fo).getProperty ("itemId", var()).toString(),
@@ -1725,6 +1914,15 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                        "held [60] and struck [60]");
                 check ((double) first.getProperty ("outDb", -100.0) > -100.0,
                        "outDb " + first.getProperty ("outDb", var()).toString() + " dBFS is the synth's output peak (> -100)");
+                {
+                    // ...and it IS the rendered take's peak: both channels, every block since the
+                    // previous take. The attack is louder than the take's last block, so a
+                    // meter that kept only the last block (or one channel) would read lower.
+                    const double whole = db (bufferPeak (attack)), lastBlock = db (bufferPeak (attack, attack.getNumSamples() - 256));
+                    check (std::abs ((double) first.getProperty ("outDb", 0.0) - whole) < 1.0e-3 && lastBlock < whole - 0.5,
+                           "outDb " + first.getProperty ("outDb", var()).toString() + " equals the take's own peak over both channels and all its blocks ("
+                               + String (whole, 4) + " dBFS; its last block alone " + String (lastBlock, 2) + ")");
+                }
                 check (! meter().isObject(), "asked again with no new audio, the entry is gone (never stale)");
 
                 live.play (0.1);
@@ -1886,6 +2084,103 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                "a drum lane mute (the pad's gain is parked) changes it");
         check (ok (command (ops, "undo")) && sig (drumClip) == d0, "undoing the lane mute restores it");
 
+        // What the bounce does NOT hear leaves it alone (each of these used to re-render an
+        // applied drum layer): a pad's name, its choke NUMBER once it is gated, the level a
+        // silenced pad has parked, and the same sample at another path (Save-As copies kit and
+        // imported samples into the project and rewrites the source relative).
+        auto drumPad = [&] (std::initializer_list<std::pair<const char*, var>> fields)
+        {
+            auto args = object (fields);
+            args.getDynamicObject()->setProperty ("trackId", dt);
+            return ok (command (ops, "set_drum_pad", args));
+        };
+        check (drumPad ({ { "note", 38 }, { "name", "Snare Renamed" } }) && sig (drumClip) == d0, "renaming a pad leaves it alone");
+        check (ok (command (ops, "undo")) && sig (drumClip) == d0, "undo the rename");
+        check (drumPad ({ { "note", 38 }, { "chokeGroup", 1 } }) && sig (drumClip) != d0, "choke group 1 (the pad becomes note-gated) changes it");
+        {
+            const auto gated = sig (drumClip);
+            check (drumPad ({ { "note", 38 }, { "chokeGroup", 2 } }) && sig (drumClip) == gated,
+                   "renumbering its choke group 1 -> 2 leaves it alone (nothing chokes live; the pad stays gated)");
+        }
+        check (ok (command (ops, "undo")) && ok (command (ops, "undo")) && sig (drumClip) == d0, "undo both choke edits");
+        check (ok (command (ops, "set_drum_lane", object ({ { "trackId", dt }, { "note", 38 }, { "mute", true } }))), "mute lane 38");
+        {
+            const auto muted = sig (drumClip);
+            check (muted != d0 && drumPad ({ { "note", 38 }, { "gainDb", -3.0 } }) && sig (drumClip) == muted,
+                   "a level edit on the muted pad (only its parked level changes; it plays at the -48 dB floor) leaves it alone");
+        }
+        check (ok (command (ops, "undo")) && ok (command (ops, "undo")) && sig (drumClip) == d0, "undo the parked level and the mute");
+        {
+            te::SamplerPlugin* drumSampler = nullptr;
+            const auto plugins = pluginsOf (ops, dt);
+            for (int i = 0; i < plugins.size() && drumSampler == nullptr; ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "sampler")
+                    drumSampler = dynamic_cast<te::SamplerPlugin*> (livePlugin (eng, dt, (int) plugins[i].getProperty ("index", -1)));
+            auto kickSound = drumSampler != nullptr ? drumSampler->state.getChild (0) : juce::ValueTree();
+            const auto originalSource = kickSound[te::IDs::source].toString();
+            const auto kickFile = te::SourceFileReference::findFileFromString (eng.edit(), originalSource);
+            const auto copyDir = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("mosh-signature-copy", {}, false);
+            const auto copied = copyDir.getChildFile (kickFile.getFileName());
+            const bool copiedOk = kickSound.isValid() && kickFile.existsAsFile() && copyDir.createDirectory().wasOk() && kickFile.copyFileTo (copied);
+            if (copiedOk)
+            {
+                kickSound.setProperty (te::IDs::source, copied.getFullPathName(), nullptr);
+                check (sig (drumClip) == d0, "the kick's source pointed at a copy of its file elsewhere (what Save-As consolidation does) leaves it alone");
+                const auto snareFile = te::SourceFileReference::findFileFromString (eng.edit(), drumSampler->state.getChild (1)[te::IDs::source].toString());
+                kickSound.setProperty (te::IDs::source, snareFile.getFullPathName(), nullptr);
+                check (snareFile.existsAsFile() && sig (drumClip) != d0, "...while pointing it at another sample (the snare's) changes it");
+                kickSound.setProperty (te::IDs::source, originalSource, nullptr);
+                check (sig (drumClip) == d0, "...and putting the source back restores it");
+                flushSamplerLoad (*drumSampler);
+            }
+            else
+            {
+                check (false, "could not copy the kick sample for the Save-As signature check (" + kickFile.getFullPathName() + ")");
+            }
+            copyDir.deleteRecursively();
+        }
+
+        // The pad commands that change the sound ask for the reactive re-render of the
+        // track's applied layers (it spawns the generative service, so a headless run counts
+        // the asks instead). set_drum_pad always did; assign_sample, load_drum_kit and a
+        // drum set_track_type did not, so an applied drum layer kept the old kit's render.
+        {
+            auto asks = [&] (const String& what, const std::function<var()>& run, const String& trackId = {})
+            {
+                const auto expectedTrack = trackId.isNotEmpty() ? trackId : dt;
+                const int before = ops.reactiveTrackTouchesForSelfTest();
+                const auto result = run();
+                check (ok (result) && ops.reactiveTrackTouchesForSelfTest() == before + 1 && ops.lastReactiveTouchTrackForSelfTest() == expectedTrack,
+                       what + " asks for the reactive re-render of the track's applied layers ("
+                           + String (ops.reactiveTrackTouchesForSelfTest() - before) + " ask)" + (ok (result) ? String() : ": " + errorOf (result)));
+                if (trackId.isEmpty())
+                    check (ok (command (ops, "undo")), "undo " + what);
+            };
+            const auto kickPath = te::SourceFileReference::findFileFromString (eng.edit(), [&]
+            {
+                for (auto* t : te::getAudioTracks (eng.edit()))
+                    if (t != nullptr && t->itemID.toString() == dt)
+                        for (auto* p : t->pluginList.getPlugins())
+                            if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
+                                return s->state.getChild (0)[te::IDs::source].toString();
+                return String();
+            }()).getFullPathName();
+            asks ("set_drum_pad", [&] { return command (ops, "set_drum_pad", object ({ { "trackId", dt }, { "note", 38 }, { "gainDb", -6.0 } })); });
+            asks ("assign_sample", [&]
+            {
+                const auto r = command (ops, "assign_sample", object ({ { "trackId", dt }, { "note", 50 }, { "file", kickPath } }));
+                check (ok (r) && sig (drumClip) != d0, "assign_sample on a new pad changes the signature");
+                return r;
+            });
+            asks ("load_drum_kit", [&] { return command (ops, "load_drum_kit", object ({ { "trackId", dt } })); });
+            check (sig (drumClip) == d0, "after the undos the signature is the fresh kit's again");
+            // An audio track turned into a drum track gets its sampler and kit (the type was
+            // already "drum" on dt, which would be an empty edit).
+            const auto at2 = dataOf (command (ops, "create_track", object ({ { "name", "Signature Type" } }))).getProperty ("trackId", var()).toString();
+            asks ("set_track_type drum", [&] { return command (ops, "set_track_type", object ({ { "trackId", at2 }, { "type", "drum" } })); }, at2);
+            check (ok (command (ops, "remove_track", object ({ { "trackId", at2 } }))), "set_track_type fixture track removed");
+        }
+
         check (ok (command (ops, "remove_track", object ({ { "trackId", dt } }))) && ok (command (ops, "remove_track", object ({ { "trackId", st } }))),
                "signature fixture tracks removed");
     }
@@ -2029,6 +2324,75 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                 for (int i = 0; i < plugins.size(); ++i)
                     onlySamplers = onlySamplers && (plugins[i].hasProperty ("sampler") == (plugins[i].getProperty ("type", var()).toString() == "sampler"));
                 check (agree && onlySamplers, "track.drumPads is unchanged and agrees (pitch, name) with plugin.sampler; only a sampler carries `sampler`");
+            }
+
+            // ── Sources a kit never has: relative, deleted, unresolvable; range sounds ──
+            // `file` is the persisted source string as written, `path` the file it resolves
+            // to (absolute; "" when it resolves to nothing), `missing` whether that file is
+            // absent; a sound whose every note a narrower one reaches has no addressNote.
+            // SOUND children written straight into a sampler on its own track.
+            {
+                const auto ft = trackIdOf (command (ops, "create_track", object ({ { "name", "Sampler Sources" } })));
+                const auto loaded = command (ops, "load_builtin", object ({ { "trackId", ft }, { "type", "sampler" } }));
+                const int fi = (int) dataOf (loaded).getProperty ("index", -1);
+                auto* fixture = metered (ft, fi);
+                const juce::File kickFile (sounds[0].getProperty ("path", var()).toString());
+                const auto relName = "panels-fixture-" + String (juce::Random::getSystemRandom().nextInt (1 << 30)) + ".wav";
+                const auto relFile = eng.editFile().getParentDirectory().getChildFile (relName);
+                const auto gone = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("panels-fixture-gone", ".wav", false);
+                const bool filesOk = kickFile.existsAsFile() && kickFile.copyFileTo (relFile) && kickFile.copyFileTo (gone) && gone.deleteFile();
+                check (ok (loaded) && fixture != nullptr && filesOk, "a sampler on its own track, a copy of the kick next to the edit file, and a deleted file");
+                if (fixture != nullptr && filesOk)
+                {
+                    auto addSound = [&] (const String& source, int key, int lo, int hi)
+                    {
+                        juce::ValueTree s (te::IDs::SOUND);
+                        s.setProperty (te::IDs::source, source, nullptr);
+                        s.setProperty (te::IDs::name, "Fixture " + String (fixture->state.getNumChildren()), nullptr);
+                        s.setProperty (te::IDs::keyNote, key, nullptr);
+                        s.setProperty (te::IDs::minNote, lo, nullptr);
+                        s.setProperty (te::IDs::maxNote, hi, nullptr);
+                        s.setProperty (te::IDs::gainDb, 0.0, nullptr);
+                        s.setProperty (te::IDs::pan, 0.0, nullptr);
+                        fixture->state.addChild (s, -1, nullptr);
+                    };
+                    const String unresolvable ("7f/1a2b");   // a project item id that no project holds
+                    addSound (relName, 60, 60, 60);
+                    addSound (gone.getFullPathName(), 61, 61, 61);
+                    addSound (unresolvable, 62, 62, 62);
+                    addSound (kickFile.getFullPathName(), 40, 40, 40);
+                    addSound (kickFile.getFullPathName(), 41, 41, 41);
+                    addSound (kickFile.getFullPathName(), 40, 40, 41);
+                    addSound (kickFile.getFullPathName(), 50, 50, 52);
+                    flushSamplerLoad (*fixture);
+                    const auto list = pluginAt (ops, ft, fi).getProperty ("sampler", var()).getProperty ("sounds", var());
+                    auto field = [&] (int k, const char* key) { return list[k].getProperty (key, var()); };
+                    check (list.size() == 7, "seven sounds (" + String (list.size()) + ")");
+                    if (list.size() == 7)
+                    {
+                        check (field (0, "file").toString() == relName && field (0, "path").toString() == relFile.getFullPathName()
+                                   && juce::File::isAbsolutePath (field (0, "path").toString()) && ! (bool) field (0, "missing")
+                                   && (double) field (0, "durationSec") > 0.0,
+                               "a source relative to the edit: file is the string as written (" + field (0, "file").toString() + "), path the absolute file it resolves to ("
+                                   + field (0, "path").toString() + "), not missing, with its duration");
+                        check (field (1, "file").toString() == gone.getFullPathName() && field (1, "path").toString() == gone.getFullPathName()
+                                   && (bool) field (1, "missing") && ! list[1].hasProperty ("durationSec") && ! list[1].hasProperty ("sampleRate"),
+                               "a deleted file: path is still where it was, missing true, no duration or rate");
+                        check (field (2, "file").toString() == unresolvable && field (2, "path").toString().isEmpty() && (bool) field (2, "missing")
+                                   && ! list[2].hasProperty ("durationSec"),
+                               "a source that resolves to nothing (a project item no project holds): file as written, path \"\", missing true");
+                        check (field (3, "mode").toString() == "drum" && (int) field (3, "addressNote") == 40
+                                   && field (4, "mode").toString() == "drum" && (int) field (4, "addressNote") == 41,
+                               "pads at 40 and 41: drum, each addressed by its own note");
+                        check (field (5, "mode").toString() == "range" && ! list[5].hasProperty ("addressNote") && (int) field (5, "minNote") == 40
+                                   && (int) field (5, "maxNote") == 41,
+                               "a 40..41 range under those pads: mode range, and no addressNote (every note it covers reaches a narrower pad)");
+                        check (field (6, "mode").toString() == "range" && (int) field (6, "addressNote") == 50,
+                               "a 50..52 range with nothing narrower: mode range, addressNote 50");
+                    }
+                }
+                relFile.deleteFile();
+                check (ok (command (ops, "remove_track", object ({ { "trackId", ft } }))), "sources fixture track removed");
             }
 
             // ── A second sampler: not the one the pad commands address ──
@@ -2263,23 +2627,34 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                        "a 0.5 sine passing through with no hit: the output peaks at " + String (peakOf (passed), 3) + " but nothing was added, so off the rail");
             }
             {
-                // outDb is what the sampler ADDED (out - in), with or without a signal through it.
-                double onSilence = 0.0, onSine = 0.0;
+                // outDb is what the sampler ADDED (out - in), with or without a signal through it,
+                // and it is the rendered take's own: max |out - in| over both channels and every
+                // block of the take, computed here from the buffer play() returned.
+                double onSilence = 0.0, onSine = 0.0, addedSilence = 0.0, addedSine = 0.0;
                 (void) ops.pluginMeters();
                 {
                     LiveInstrument live (*drums, 256);
-                    live.play (0.2, { { 0, noteOn (36, 100) } });
+                    const auto out = live.play (0.2, { { 0, noteOn (36, 100) } });
                     onSilence = (double) meter().getProperty ("outDb", 0.0);
+                    addedSilence = db (bufferPeak (out));
                 }
                 (void) ops.pluginMeters();
                 {
                     LiveInstrument live (*drums, 256);
-                    live.play (0.2, { { 0, noteOn (36, 100) } }, false, {}, sineIn);
+                    const auto out = live.play (0.2, { { 0, noteOn (36, 100) } }, false, {}, sineIn);
                     onSine = (double) meter().getProperty ("outDb", 0.0);
+                    float added = 0.0f;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < out.getNumSamples(); ++i)
+                            added = juce::jmax (added, std::abs (out.getSample (ch, i) - sineIn (ch, i)));
+                    addedSine = db (added);
                 }
                 check (onSilence > -60.0 && std::abs (onSine - onSilence) < 0.01,
                        "the kick's outDb is its own peak with or without a 0.5 sine through the sampler (" + String (onSilence, 3) + " on silence, "
                            + String (onSine, 3) + " over the sine)");
+                check (std::abs (onSilence - addedSilence) < 1.0e-3 && std::abs (onSine - addedSine) < 1.0e-3,
+                       "...and each equals the take's own added peak, max |out - in| over both channels and all its blocks (" + String (addedSilence, 4)
+                           + " and " + String (addedSine, 4) + " dBFS from the buffers)");
             }
             {
                 (void) ops.pluginMeters();
@@ -2353,33 +2728,128 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
                                + ", the same keys again " + String (secondTap, 3) + "): a blip's expiry must release the key on the sampler road");
                 }
             }
+            // ── audition_note's clipless road, through the command's own code ──
+            // Headless there is no device, so audition_note answers path "none" before that
+            // road. auditionNoteOnSamplerRoadForSelfTest runs the same command (its voice
+            // bookkeeping, re-tap rule, the auditionKeys call and its reply) with the road
+            // forced, so the sampler's keys and hits below come from audition_note itself.
             {
                 pump (200);   // nothing may be pending that would clear the sampler's keys behind the test's back
                 LiveInstrument live (*drums, 256);
                 (void) ops.pluginMeters();
-                auto blip = [&] { return command (ops, "audition_note", object ({ { "trackId", dt }, { "pitch", 36 }, { "action", "blip" }, { "durationMs", 20 } })); };
+                auto audition = [&] (int pitch, const char* action, int durationMs = 0)
+                {
+                    auto args = object ({ { "trackId", dt }, { "pitch", pitch }, { "action", action } });
+                    if (durationMs > 0)
+                        args.getDynamicObject()->setProperty ("durationMs", durationMs);
+                    return ops.auditionNoteOnSamplerRoadForSelfTest (args);
+                };
+                auto onSamplerRoad = [] (const var& result, int held)
+                {
+                    return ok (result) && (bool) dataOf (result).getProperty ("audible", false)
+                        && dataOf (result).getProperty ("path", var()).toString() == "sampler" && (int) dataOf (result).getProperty ("held", -1) == held;
+                };
+                // The 30 Hz sweep (MoshOps' timer) releases an expired blip: pump until `note`
+                // has left the sampler's keys, for up to 2 s (a fixed pump can miss the tick).
+                auto awaitRelease = [&] (int note)
+                {
+                    for (int tick = 0; tick < 40 && drums->getAuditionKeys()[note]; ++tick)
+                        pump (50);
+                };
                 check (ok (command (ops, "all_notes_off")) && drums->getAuditionKeys().isZero(), "nothing held anywhere before the taps (all_notes_off)");
-                const auto tap1 = blip();
-                check (ok (tap1) && (int) dataOf (tap1).getProperty ("held", -1) == 1 && dataOf (tap1).getProperty ("path", var()).toString() == "none",
-                       "a blip on the clipless drum track: one held voice (headless the sampler road is out of reach: path none)");
-                drums->auditionKeys (keysOf ({ 36 }));   // what audition_note does on that road (MoshOps.Live.cpp)
+                {
+                    const auto plain = command (ops, "audition_note", object ({ { "trackId", dt }, { "pitch", 36 }, { "action", "blip" }, { "durationMs", 20 } }));
+                    check (ok (plain) && dataOf (plain).getProperty ("path", var()).toString() == "none" && (int) dataOf (plain).getProperty ("held", -1) == 1
+                               && drums->getAuditionKeys().isZero(),
+                           "audition_note itself, headless: one held voice, path none (no device), the sampler untouched");
+                    check (ok (command (ops, "all_notes_off", object ({ { "trackId", dt } }))), "release it");
+                }
+
+                // A tap, its expiry, and the same pad again.
+                const auto tap1 = audition (36, "blip", 20);
+                check (onSamplerRoad (tap1, 1) && drums->getAuditionKeys() == keysOf ({ 36 }),
+                       "a blip on the clipless drum track takes the sampler road (audible, path sampler, one held voice) and the sampler holds exactly the track's held keys [36]");
                 const float peak1 = peakOf (live.play (0.5));
                 const auto hit1 = meter();
                 check (peak1 > 0.01f && hitsAre (hit1, { { 36, 0.75 } }), "the first tap sounds (peak " + String (peak1, 4) + ") and is a hit");
                 live.play (1.0);   // it rings out
-                // The 30 Hz sweep (MoshOps' timer) releases the 20 ms blip: pump until it has,
-                // for up to 2 s (a fixed pump can miss the tick under load). Without the fix
-                // the keys never clear and the check below fails after the 2 s.
-                for (int tick = 0; tick < 40 && ! drums->getAuditionKeys().isZero(); ++tick)
-                    pump (50);
+                awaitRelease (36);
                 check (drums->getAuditionKeys().isZero(), "the blip's expiry handed the sampler the keys still held on the track: none (36 released on the sampler road)");
-                const auto tap2 = blip();
-                check (ok (tap2) && (int) dataOf (tap2).getProperty ("held", -1) == 1, "the second tap: one held voice");
-                drums->auditionKeys (keysOf ({ 36 }));
+                const auto tap2 = audition (36, "blip", 20);
                 const float peak2 = peakOf (live.play (0.5));
                 const auto hit2 = meter();
-                check (peak2 > 0.01f && std::abs (peak2 - peak1) < 1.0e-4f && hitsAre (hit2, { { 36, 0.75 } }),
-                       "the second tap of the same pad sounds again (peak " + String (peak2, 4) + ", as the first) and is a new hit");
+                check (onSamplerRoad (tap2, 1) && peak2 > 0.01f && std::abs (peak2 - peak1) < 1.0e-4f && hitsAre (hit2, { { 36, 0.75 } }),
+                       "after the expiry the same pad sounds again (peak " + String (peak2, 4) + ", as the first) and is a new hit");
+                live.play (1.0);
+                awaitRelease (36);
+
+                // A re-tap INSIDE the blip (5 s, so the sweep cannot release it first): the key
+                // is still down at the sampler, and playNotes alone would start nothing.
+                const auto long1 = audition (36, "blip", 5000);
+                const float peakA = peakOf (live.play (0.5));
+                const auto hitA = meter();
+                const bool stillDown = drums->getAuditionKeys() == keysOf ({ 36 });
+                const auto long2 = audition (36, "blip", 5000);
+                const float peakB = peakOf (live.play (0.5));
+                const auto hitB = meter();
+                check (onSamplerRoad (long1, 1) && onSamplerRoad (long2, 1) && stillDown && peakA > 0.01f && hitsAre (hitA, { { 36, 0.75 } })
+                           && std::abs (peakB - peakA) < 1.0e-4f && hitsAre (hitB, { { 36, 0.75 } }) && drums->getAuditionKeys() == keysOf ({ 36 }),
+                       "a re-tap while its blip still holds the key sounds again (peak " + String (peakB, 4) + ", as the first " + String (peakA, 4)
+                           + ") and is a new hit; still one held voice");
+                check (ok (command (ops, "all_notes_off", object ({ { "trackId", dt } }))) && drums->getAuditionKeys().isZero(), "release the long blip");
+                live.play (1.0);
+                (void) ops.pluginMeters();
+
+                // A roll: three default (250 ms) blips 150 ms apart, each inside the previous
+                // one's. Every tap is a voice (the one-shots layer) and a hit: the audio equals
+                // Tracktion's own sampler pressed afresh for each tap, bit for bit.
+                {
+                    auto plain = tracktionTwin<te::SamplerPlugin> (eng, *drums);
+                    auto* twinSampler = dynamic_cast<te::SamplerPlugin*> (plain.get());
+                    if (twinSampler != nullptr)
+                    {
+                        flushSamplerLoad (*twinSampler);
+                        LiveInstrument twin (*twinSampler, 256);
+                        int hits = 0, differing = 0;
+                        for (int tap = 0; tap < 3; ++tap)
+                        {
+                            const bool road = onSamplerRoad (audition (36, "blip"), 1);
+                            twinSampler->playNotes ({});
+                            twinSampler->playNotes (keysOf ({ 36 }));
+                            const auto rolled = live.play (0.15);
+                            const auto reference = twin.play (0.15);
+                            differing += samplesDiffering (rolled, reference);
+                            if (road && hitsAre (meter(), { { 36, 0.75 } }))
+                                ++hits;
+                        }
+                        check (hits == 3 && differing == 0,
+                               "a roll of three taps 150 ms apart (each inside the last one's blip): " + String (hits) + " hits, and the audio is a fresh voice per tap ("
+                                   + String (differing) + " samples differ from Tracktion's sampler pressed three times)");
+                    }
+                    check (twinSampler != nullptr, "the roll's reference is a plain te::SamplerPlugin");
+                }
+                check (ok (command (ops, "all_notes_off", object ({ { "trackId", dt } }))), "release the roll");
+                live.play (1.0);
+                (void) ops.pluginMeters();
+
+                // An "on" repeating an "on" (a held QWERTY key repeats) is ONE press.
+                const auto on1 = audition (38, "on");
+                live.play (0.1);
+                const auto onHit = meter();
+                const auto on2 = audition (38, "on");
+                live.play (0.1);
+                const auto onAgain = meter();
+                check (onSamplerRoad (on1, 1) && onSamplerRoad (on2, 1) && hitsAre (onHit, { { 38, 0.75 } }) && onAgain.isObject()
+                           && onAgain.getProperty ("hits", var()).size() == 0 && notesIn (onAgain.getProperty ("held", var())) == std::vector<int> { 38 },
+                       "\"on\" for 38 is a hit; the same \"on\" again is no new hit, 38 still held (one press)");
+
+                // A blip's expiry hands the sampler the track's OTHER held keys: 38 (held "on")
+                // stays down while 36's 20 ms blip is released.
+                const auto blipOver = audition (36, "blip", 20);
+                const bool bothDown = drums->getAuditionKeys() == keysOf ({ 36, 38 });
+                awaitRelease (36);
+                check (onSamplerRoad (blipOver, 2) && bothDown && drums->getAuditionKeys() == keysOf ({ 38 }),
+                       "with 38 held and 36 blipped the sampler holds [36, 38]; the blip's expiry leaves exactly [38] down (the held key is not released with it)");
                 check (ok (command (ops, "all_notes_off", object ({ { "trackId", dt } }))) && drums->getAuditionKeys().isZero(),
                        "all_notes_off forgets the sampler road's keys too");
                 live.play (1.0);
@@ -2435,5 +2905,18 @@ void runPluginPanelsSelfTest (MoshEngine& eng, MoshOps& ops, const PluginPanelsS
 
         check (ok (command (ops, "remove_track", object ({ { "trackId", dt } }))), "sampler fixture track removed");
     }
+
+   #if MOSH_RT_GUARD
+    section ("Plugin panels: the real-time tripwire");
+    {
+        const long violations = rtguard::violationCount() - rtViolationsBefore;
+        rtguard::setViolationHandler ([] { jassertfalse; });   // the default again
+        check (violations == 0, "no allocation inside a MOSH_RT_SCOPE while this suite drove its plugins ("
+                                    + String ((juce::int64) violations) + " counted)");
+    }
+   #else
+    std::cerr << "  note the real-time tripwire is compiled out of this (Release) build: the MOSH_RT_SCOPE "
+                 "allocation check runs only in a Debug --selftest" << std::endl;
+   #endif
 }
 }

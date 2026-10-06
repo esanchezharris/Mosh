@@ -103,6 +103,24 @@ public:
         parameters) without paying for a whole snapshot. */
     juce::var pluginVarForSelfTest (const juce::String& trackId, int index);
 
+    /** pluginToVar for any plugin object, one not on a track included (index 0, no owner).
+        Public for --selftest, which proves the 16-parameter cap with a plugin that has more
+        parameters than any built-in but the 4OSC. */
+    juce::var pluginVarForSelfTest (te::Plugin& plugin);
+
+    /** audition_note as a headless run cannot reach it: the clipless-track sampler road
+        (no audio device skips it, and the inject road would take a track with clips), with
+        the command's own voice bookkeeping, re-tap rule and reply. Not on the command
+        surface. --selftest drives the sampler's hits and keys through it. */
+    juce::var auditionNoteOnSamplerRoadForSelfTest (const juce::var& args) { return auditionNote (args, true); }
+
+    /** How many times an edit asked for the reactive re-render of a track's applied layers
+        (reactiveTouchTrack), and the track it named last. Public for --selftest: the
+        re-render itself spawns the generative service and is off headless, so the test
+        proves that each pad command asks for it. */
+    int reactiveTrackTouchesForSelfTest() const noexcept { return reactiveTrackTouches_; }
+    juce::String lastReactiveTouchTrackForSelfTest() const { return lastReactiveTouchTrack_; }
+
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
@@ -850,6 +868,8 @@ private:
     // (an instrument/FX edit changes a MIDI bounce). Message-thread only.
     void            reactiveTouch (const juce::String& clipId);
     void            reactiveTouchTrack (const juce::String& trackId);
+    int             reactiveTrackTouches_ = 0;          // --selftest's view of reactiveTouchTrack
+    juce::String    lastReactiveTouchTrack_;
     void            reactiveFire (const juce::String& clipId);
     // Per-clip debounce timers (juce::Timer holds a LambdaTimer defined in the .cpp).
     std::map<juce::String, std::unique_ptr<juce::Timer>> reactiveTimers;
@@ -1238,6 +1258,10 @@ private:
         // path for both kinds, instead of a per-note timer whose destruction mid-flight
         // would be one more way to leak a stuck note.
         double ttlMs = 0.0;
+        // A blip (fire-and-forget), not a held "on". On the clipless sampler road a note-on
+        // for a pitch whose voice is a blip, or a blip for a held pitch, re-presses the key
+        // (a re-tap must sound); an "on" repeating an "on" stays one press.
+        bool   blip = false;
     };
     std::vector<HeldVoice> heldVoices_;          // message thread only
     // Every injected message is stamped notMPE ({} == 0), which is what the engine's own
@@ -1276,6 +1300,11 @@ private:
     void releaseOneVoice (te::AudioTrack&, int channel, int pitch);
 
     juce::var cmdAuditionNote (const juce::var& args);
+    // cmdAuditionNote's body. `samplerRoadOnly` (--selftest only, through
+    // auditionNoteOnSamplerRoadForSelfTest) skips the no-audio bail and the armed-input and
+    // inject roads and goes straight to the clipless sampler road, so a headless run drives
+    // that road through the command's own bookkeeping, retrigger rule and reply.
+    juce::var auditionNote (const juce::var& args, bool samplerRoadOnly);
     juce::var cmdAllNotesOff  (const juce::var& args);
     // Releases every held voice on every track (explicit note-offs, then an all-notes-off
     // per channel, then any sampler's allNotesOff — the only thing that stops an

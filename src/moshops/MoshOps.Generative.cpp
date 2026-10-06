@@ -430,29 +430,39 @@ juce::var MoshOps::cmdCompileRender (const juce::var& args)
     return okResult ("compile_render", var (d));
 }
 
-// A sampler's sounds as the signature sees them: every persisted property of each SOUND
-// child (source, name, root/range, gain, pan, gate, excerpt, Mosh's parked gain and choke
-// group), in child order, each sound's properties sorted by name so the order a property
-// was first written in cannot matter. Pad edits (set_drum_pad, clear_drum_pad,
-// assign_sample, load_drum_kit, set_drum_lane) change these and nothing else.
-static void writeSamplerSounds (juce::MemoryOutputStream& mos, const juce::ValueTree& samplerState)
+// A sampler's sounds as the signature sees them: what each SOUND child makes the bounce sound
+// like, in child order, read exactly as te::SamplerPlugin reads it when it builds its sound
+// list (handleAsyncUpdate and SamplerSound: root and range clamped to 0..127, the live gain
+// to -48..+48 dB, pan to -1..1, the gate, the excerpt's start and length), plus the file the
+// source resolves to, identified by its name and size. Deliberately NOT the raw `source`
+// string (Save-As consolidation copies a sample into the project's audio/ folder and rewrites
+// the source from an absolute to a relative path, the same audio), the sound's name, its
+// choke group (only apply_choke enforces one, by baking note lengths, which the notes hash
+// already sees) or the level a silenced pad has parked (moshPadGainDb: the pad plays at the
+// live -48 dB floor). Hashing those re-rendered an applied drum layer for a pad rename, a
+// choke renumber, a parked-level edit or a Save-As (2026-10-06). Pad edits that change the
+// sound (set_drum_pad gain/pan/choke-on-or-off, clear_drum_pad, assign_sample, load_drum_kit,
+// set_drum_lane) change these.
+static void writeSamplerSounds (juce::MemoryOutputStream& mos, te::SamplerPlugin& sampler)
 {
+    const auto& samplerState = sampler.state;
     for (int i = 0; i < samplerState.getNumChildren(); ++i)
     {
         const auto sound = samplerState.getChild (i);
         if (! sound.hasType (te::IDs::SOUND))
             continue;
         mos.writeInt (i);
-        juce::StringArray names;
-        for (int k = 0; k < sound.getNumProperties(); ++k)
-            names.add (sound.getPropertyName (k).toString());
-        names.sort (false);
-        mos.writeInt (names.size());
-        for (const auto& name : names)
-        {
-            mos.writeString (name);
-            mos.writeString (sound.getProperty (juce::Identifier (name)).toString());
-        }
+        mos.writeInt (juce::jlimit (0, 127, (int) sound[te::IDs::keyNote]));
+        mos.writeInt (juce::jlimit (0, 127, (int) sound[te::IDs::minNote]));
+        mos.writeInt (juce::jlimit (0, 127, (int) sound[te::IDs::maxNote]));
+        mos.writeFloat (juce::jlimit (-48.0f, 48.0f, (float) sound[te::IDs::gainDb]));
+        mos.writeFloat (juce::jlimit (-1.0f, 1.0f, (float) sound[te::IDs::pan]));
+        mos.writeBool ((bool) sound[te::IDs::openEnded]);
+        mos.writeDouble ((double) sound[te::IDs::startTime]);
+        mos.writeDouble ((double) sound[te::IDs::length]);
+        const auto file = te::SourceFileReference::findFileFromString (sampler.edit, sound[te::IDs::source].toString());
+        mos.writeString (file.getFileName());
+        mos.writeInt64 (file.existsAsFile() ? file.getSize() : (juce::int64) -1);
     }
 }
 
@@ -513,8 +523,8 @@ static juce::String stableSourceSig (te::Clip& clip)
                 if (! settings.isVoid())
                     mos.writeString (juce::JSON::toString (settings, true));
                 // A sampler has no parameters at all: its sound is its SOUND children.
-                if (dynamic_cast<te::SamplerPlugin*> (p) != nullptr)
-                    writeSamplerSounds (mos, p->state);
+                if (auto* sampler = dynamic_cast<te::SamplerPlugin*> (p))
+                    writeSamplerSounds (mos, *sampler);
             }
     return juce::MD5 (mos.getMemoryBlock()).toHexString();
 }
@@ -1444,6 +1454,8 @@ void MoshOps::reactiveTouchTrack (const juce::String& trackId)
     // An instrument/FX edit changes a MIDI clip's bounce (the stableSourceSig folds the track's
     // plugins in) → re-touch every applied NON-wave clip on the track. Wave in-place renders stage
     // the clip's own audio (independent of track FX), so they're not affected.
+    ++reactiveTrackTouches_;
+    lastReactiveTouchTrack_ = trackId;
     auto* track = findTrack (trackId);
     if (track == nullptr) return;
     for (auto* c : track->getClips())

@@ -27,9 +27,17 @@ namespace te = tracktion::engine;
 // dB/oct is bit-identical to Tracktion's filter (--selftest compares it with a directly
 // constructed te::LowPassPlugin, including a cutoff change and a mode flip mid-stream).
 //
-// A slope change while audio runs crossfades over about 20 ms from the running cascade
-// to a freshly reset one (two banks; the scratch for the second is allocated in
-// initialise, so the audio thread never allocates). The mode is mirrored into an atomic
+// A slope change while audio runs resets a second cascade and WARMS it on the input with
+// its output unheard (the running cascade is still what plays) for five of its slowest
+// section's time constants (MoshFilterDesign.h: 51 ms at 80 Hz and 48 dB/oct, 102 ms at
+// 40 Hz; at least 30 ms, at most 200 ms), and only then crossfades over about 20 ms from
+// the running cascade to it (two banks; the scratch for the second is allocated in
+// initialise, so the audio thread never allocates). Without the warm-up a bass-range
+// cutoff's high-Q section was still ringing up from silence when the fade ended (LP 80 Hz
+// 12 -> 48 dB/oct: -7.8 dB re peak off a crossfade of two warm filters during the fade,
+// -19.4 dB after it); with it, under -45 dB for 40-80 Hz content at the cutoff (below about
+// 20 Hz the 200 ms cap leaves more). So the new slope is heard 30-200 ms after the change,
+// and a change that lands while one is running waits for it. The mode is mirrored into an atomic
 // from valueTreePropertyChanged, reading the tree rather than the CachedValue (whose own
 // listener may run after this one), so the audio thread never reads the mode String.
 //
@@ -45,6 +53,16 @@ public:
     static constexpr int kMaxSlopeDbPerOct = moshfx::filterdesign::kMaxSlope;
     /** The crossfade from the old cascade to the new one when the slope changes. */
     static constexpr double kSlopeCrossfadeSeconds = 0.020;
+    /** The new cascade's unheard warm-up before that crossfade: this many of its slowest
+        section's time constants, clamped to [min, max] seconds. */
+    static constexpr double kSlopeWarmupTimeConstants = 5.0;
+    static constexpr double kSlopeWarmupMinSeconds = 0.030;
+    static constexpr double kSlopeWarmupMaxSeconds = 0.200;
+
+    /** The warm-up, in samples, of a change to `order` at `cutoff` Hz. */
+    static int slopeWarmupSamples (int order, double cutoff, double rate) noexcept;
+    /** The crossfade, in samples, at `rate` (what initialise sizes it as). */
+    static int slopeCrossfadeSamples (double rate) noexcept;
 
     /** "moshFilterSlope": the saved slope in dB/oct. */
     static const juce::Identifier& slopePropertyId();
@@ -74,7 +92,9 @@ private:
     juce::IIRFilter banks[kBanks][kChannels][kSections];
     int bankOrder[kBanks] { 2, 2 };
     int live = 0;
-    int fadeTotal = 1, fadeDone = -1;   // fadeDone < 0: no crossfade running
+    // A slope change: switchPos < 0 when none is running, else the samples since it began.
+    // The new bank warms for warmTotal of them (unheard), then the crossfade runs fadeTotal.
+    int switchPos = -1, warmTotal = 0, fadeTotal = 1;
     float lastFreq = 0.0f;
     bool lastHighPass = false;
     std::atomic<bool> highPassMirror { false };

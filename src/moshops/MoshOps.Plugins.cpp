@@ -304,6 +304,9 @@ juce::var MoshOps::cmdSetTrackType (const juce::var& args)
     data->setProperty ("isInstrument", trackHasInstrument (*track));
     logLine ("set_track_type", args, true, {}, true);
     emitSnapshotInvalidated();
+    // A drum track's sampler and kit are the instrument a MIDI layer's render bounces through.
+    if (type == "drum")
+        reactiveTouchTrack (track->itemID.toString());
     return okResult ("set_track_type", var (data));
 }
 
@@ -339,6 +342,8 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     data->setProperty ("kit", kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId));
     logLine ("load_drum_kit", args, true, {}, true);
     emitSnapshotInvalidated();
+    // Every pad changed: an applied drum layer re-renders, as after set_drum_pad.
+    reactiveTouchTrack (track->itemID.toString());
     return okResult ("load_drum_kit", var (data));
 }
 
@@ -741,6 +746,8 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     data->setProperty ("sounds", sampler->getNumSounds());
     logLine ("assign_sample", args, true, {}, true);
     emitSnapshotInvalidated();
+    // The pad's sound changed: an applied drum layer re-renders, as after set_drum_pad.
+    reactiveTouchTrack (track->itemID.toString());
     return okResult ("assign_sample", var (data));
 }
 

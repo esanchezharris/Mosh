@@ -102,8 +102,13 @@ sections, the closed form `|H|² = 1 / (1 + (tan(πf/fs) / tan(πfc/fs))^(2N))`,
 high-pass, so every slope is −3.01 dB at the cutoff). At 12 dB/oct the subclass makes exactly
 the calls Tracktion's filter makes, so its audio is bit-identical (`--selftest` compares it with a
 directly constructed `te::LowPassPlugin` through a cutoff change and a mode flip). A slope change
-during playback crossfades over about 20 ms into a freshly reset cascade; nothing allocates on
-the audio thread. Saved as the plugin property `moshFilterSlope` (dB/oct, through the Edit's
+during playback resets a second cascade, warms it on the input unheard for five of its slowest
+section's time constants (`Q₁ / (π·fc)`; 30–200 ms: 51 ms at 80 Hz and 48 dB/oct, 102 ms at
+40 Hz) and then crossfades over about 20 ms into it, so the new slope is heard 30–200 ms after the
+change and a change that lands while one runs waits for it (2026-10-06: without the warm-up a
+bass-range cutoff's steep cascade was still ringing up from silence when the fade ended, −7.8 dB
+re peak off a crossfade of two warm filters at LP 80 Hz; `--selftest` now holds LP 80 Hz and HP
+40 Hz under −40 dB through and after the fade); nothing allocates on the audio thread. Saved as the plugin property `moshFilterSlope` (dB/oct, through the Edit's
 UndoManager, so undoable like every `set_plugin_state`); the default 12 is never written, so a
 session or preset tree without it plays at 12, a saved value off the grid plays snapped, and an
 older Mosh opening a session saved at another slope plays it at 12 without warning. The snapshot
@@ -170,19 +175,33 @@ parked level, clamped to the engine's −48…+48 dB, and an edit without `gainD
 choke only) keeps it (before 2026-10-05 a pan-only edit parked the −48 dB floor, so unmuting
 restored silence). A `chokeGroup` > 0 makes the pad note-gated; choke is enforced only by
 `apply_choke` (baked note lengths): nothing chokes live. `audition_note` on a track with no clips
-plays the sampler directly (path `"sampler"`, velocity fixed at 0.75); a blip's expiry now hands
-the sampler the keys still held on that track, so tapping the same pad again sounds (before, the
-key stayed held at the sampler and the next tap of that pad was silent until another pad was
-tapped or the sampler rebuilt), and these auditions are reported as hits on the rail.
+plays the sampler directly (path `"sampler"`, velocity fixed at 0.75). Tapping the same pad again
+sounds and is a new hit, whether its earlier blip has expired or not: a blip's expiry hands the
+sampler the keys still held on that track, and (2026-10-06) a blip, or any note-on whose earlier
+voice for that pitch was a blip, releases the key at the sampler and presses it again, so a
+double-tap or a roll on one pad plays every tap (a one-shot layers over the ringing one, a gated
+one is shortened, as a repeated MIDI note-on does). Before, the key stayed held at the sampler and
+a re-tap within the blip (250 ms by default, restarted by each tap) was silent and unreported. An
+`"on"` repeating an `"on"` stays one press. These auditions are reported as hits on the rail;
+`--selftest` drives this road through the command's own code (`MoshOps::auditionNote` with the
+road forced, as no device is present headless).
 
 **Render-layer cache key (2026-10-05).** A MIDI/drum clip's render is cached under a signature of
 its notes and its track's plugins (`stableSourceSig`, `src/moshops/MoshOps.Generative.cpp`): each
 plugin's name, bypass, parameter values and automation curves, and now also its `plugin.state`
-values (the same whitelist, read the same way) and, for a sampler, every persisted property of
-each `SOUND` child. Before, a state-only edit (filter slope or mode, delay length, chorus,
-phaser) or any sampler pad edit (`set_drum_pad`, `clear_drum_pad`, `assign_sample`,
-`load_drum_kit`, `set_drum_lane`) left the key unchanged, so the reactive re-render HIT the cache
-and served the stale render. The key is the state, not the edit history (an undo restores the
+values (the same whitelist, read the same way) and, for a sampler, what each `SOUND` child makes
+the bounce sound like, read as the sampler reads it: root, range, live gain, pan, gate, excerpt,
+and the file its source resolves to, by name and size (2026-10-06: not the raw source string,
+which Save-As consolidation rewrites from absolute to relative for the same audio, nor a pad's
+name, choke group or the level a silenced pad has parked, none of which the bounce hears; hashing
+them re-rendered a drum layer for a rename). Before, a state-only edit (filter slope or mode,
+delay length, chorus, phaser) or a sampler pad edit left the key unchanged, so a re-render HIT
+the cache and served the stale render. The pad commands that change the sound ask for the
+reactive re-render of the track's applied layers: `set_drum_pad`, `clear_drum_pad`,
+`set_drum_lane`, and since 2026-10-06 also `assign_sample`, `load_drum_kit` and `set_track_type
+{type:"drum"}` (before, those three changed the key but asked for no re-render, so an applied
+drum layer kept the old kit's render until some other edit touched the track; `--selftest`
+proves each asks). The key is the state, not the edit history (an undo restores the
 earlier key exactly), but a layer caches one render, its latest, so returning to an earlier
 value re-renders once. Plugins with neither state keys nor sounds contribute exactly what they
 did before, so their chains keep their cached renders; chains with a delay, chorus, phaser,

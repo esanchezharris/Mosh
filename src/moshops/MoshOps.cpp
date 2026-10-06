@@ -3283,6 +3283,11 @@ juce::var MoshOps::pluginVarForSelfTest (const juce::String& trackId, int index)
     return plugin != nullptr ? pluginToVar (*plugin, index, findTrack (trackId)) : var();
 }
 
+juce::var MoshOps::pluginVarForSelfTest (te::Plugin& plugin)
+{
+    return pluginToVar (plugin, 0, nullptr);
+}
+
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
 {
     auto* o = new DynamicObject();

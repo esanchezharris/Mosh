@@ -96,6 +96,22 @@ inline int design (bool lowPass, int order, double sampleRate, double cutoff, ju
     return written;
 }
 
+/** The slowest-decaying section's time constant in seconds (the envelope of its free
+    response falls by e per constant): Q / (pi fc) for the highest-Q biquad of an order >= 2
+    cascade (Q_1, which is 2.56 at order 8), 1 / (2 pi fc) for the first-order section of
+    order 1. The analog poles' decay rate (fc << fs, where the bilinear transform barely
+    moves them). A cascade reset to silence and then fed audio settles on one that was
+    running all along at this pace, which is what MoshLowPassPlugin's slope warm-up is
+    sized from. */
+inline double slowestTimeConstantSeconds (int order, double cutoff) noexcept
+{
+    order = juce::jlimit (1, kMaxOrder, order);
+    const double fc = juce::jmax (1.0, cutoff);
+    if (order == 1)
+        return 1.0 / (juce::MathConstants<double>::twoPi * fc);
+    return butterworthQ (order, 1) / (juce::MathConstants<double>::pi * fc);
+}
+
 /** The cascade's exact magnitude in dB (the Butterworth closed form through the bilinear
     transform), the reference the tests and the UI's curve follow. */
 inline double closedFormDb (bool lowPass, int order, double sampleRate, double cutoff, double hz) noexcept
