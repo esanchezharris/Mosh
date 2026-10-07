@@ -217,6 +217,15 @@ TEST_CASE ("fingerprint: STABLE across declared volatile change", "[agenttxn]")
     renamedDevice.getDynamicObject()->getProperty ("session")
         .getDynamicObject()->setProperty ("audioDeviceName", "Another Interface");
     REQUIRE (tx::fingerprint (renamedDevice) == tx::fingerprint (base));
+
+    // The training registry is machine-local and non-undoable (no training command opens
+    // a transaction): a job-status poll or a source approval must not move the fingerprint,
+    // and its presence must leave a fingerprint captured without it byte-identical.
+    auto withTraining = snapshotFixture (-6.0, 0.0, false);
+    withTraining.getDynamicObject()->setProperty ("training",
+        obj ({ { "sources", arr ({ obj ({ { "source_id", String ("src1") }, { "eligible", true } }) }) },
+               { "jobs", arr ({ obj ({ { "job_id", String ("job1") }, { "status", String ("running") } }) }) } }));
+    REQUIRE (tx::fingerprint (withTraining) == tx::fingerprint (base));
 }
 
 TEST_CASE ("fingerprint: the volatile declaration excludes only leaves it names", "[agenttxn]")
@@ -228,6 +237,7 @@ TEST_CASE ("fingerprint: the volatile declaration excludes only leaves it names"
     REQUIRE_FALSE (tx::isVolatilePath ("tracks"));
     REQUIRE_FALSE (tx::isVolatilePath ("session.tempo"));
     REQUIRE (tx::isVolatilePath ("transport"));
+    REQUIRE (tx::isVolatilePath ("training"));
 
     // And the canonical form of a real snapshot still CONTAINS the song. If a future
     // volatile entry ever swallowed the arrangement, this fails.

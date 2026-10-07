@@ -3860,6 +3860,14 @@ juce::var MoshOps::snapshot()
         root->setProperty ("trackGroupsSuspended",
                            (bool) groups.getProperty (ids::trackGroupsSuspended, false));
 
+    // Stage 7 — the rights registry with its adapters and jobs (additive). The training
+    // popover and the LoRA Lab render from this block and nothing else: no UI code calls
+    // list_training_sources. The registry serves it from memory, not from disk — see
+    // TrainerRegistry::snapshot() for the cost that decided that. Training commands never
+    // open a transaction or bump editRevision_, so the block is declared volatile in
+    // agenttxn::volatilePaths(): it must stay out of the agent transaction fingerprint.
+    root->setProperty ("training", trainerRegistry.snapshot());
+
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())
     {

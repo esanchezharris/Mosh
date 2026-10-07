@@ -5076,6 +5076,84 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                  "LoRA overdrive (value > 100) survives unclamped"); }
     }
 
+    // ── LoRA Lab: the snapshot carries the training registry ─────────────────
+    // The training popover's Sources and Jobs lists and the Lab's Train button
+    // render from snapshot.training and from nothing else — no UI code calls
+    // list_training_sources. TrainerRegistry::snapshot() built that block and had
+    // no caller, so in the native app the lists stayed empty and Train could never
+    // enable, while the dev mock (the only thing that filled the key) kept e2e green.
+    //
+    // Hermetic: the registry is files under this run's session dir, and eligibility
+    // only asks whether the source file exists. No service, no job.
+    section ("LoRA Lab: the snapshot carries the training registry");
+    {
+        auto training = [&ops] { return ops.snapshot().getProperty ("training", var()); };
+        auto sourceIn = [] (const var& block, const String& sourceId)
+        {
+            const auto sources = block.getProperty ("sources", var());
+            for (int i = 0; i < sources.size(); ++i)
+                if (sources[i].getProperty ("source_id", var()).toString() == sourceId)
+                    return sources[i];
+            return var();
+        };
+
+        const auto before = training();
+        check (before.isObject(), "snapshot has a `training` block");
+        check (before.getProperty ("sources", var()).isArray()
+                   && before.getProperty ("jobs", var()).isArray()
+                   && before.getProperty ("adapters", var()).isArray(),
+               "...whose sources, jobs and adapters are lists even when empty (the UI maps over them)");
+        const int sourcesBefore = before.getProperty ("sources", var()).size();
+
+        auto beat = eng.sessionDir().getChildFile ("selftest-training-source.wav");
+        beat.replaceWithText ("the registry only asks whether this file exists");
+
+        eventTypes.clear();
+        auto imported = cmd (ops, "import_training_source",
+                             objN ({{ "title", "Selftest Beat" }, { "creator", "selftest" },
+                                    { "localPath", beat.getFullPathName() },
+                                    { "userClaimedLicense", "own work" },
+                                    { "proofOfRights", "made for this check" }}));
+        check (ok (imported), "import_training_source ok");
+        check (hadEvent ("snapshot_invalidated"), "...and it tells the UI to re-read the snapshot");
+        const auto sourceId = imported["data"].getProperty ("source_id", var()).toString();
+        check (sourceId.isNotEmpty(), "...and returns the new source's id");
+
+        const auto listed = sourceIn (training(), sourceId);
+        check (listed.isObject(), "the imported source is in snapshot.training.sources");
+        check (training().getProperty ("sources", var()).size() == sourcesBefore + 1, "...exactly once");
+        check (listed.getProperty ("title", var()).toString() == "Selftest Beat", "...under its title");
+        check (! (bool) listed.getProperty ("eligible", true)
+                   && listed.getProperty ("blocked_reason", var()).toString() == "not approved_for_training",
+               "...not yet eligible, and saying it needs approval (the popover's Approve button)");
+
+        eventTypes.clear();
+        check (ok (cmd (ops, "approve_training_source", objN ({{ "sourceId", sourceId }, { "approved", true }}))),
+               "approve_training_source ok");
+        check (hadEvent ("snapshot_invalidated"), "...and it tells the UI to re-read the snapshot");
+        const auto approved = sourceIn (training(), sourceId);
+        check ((bool) approved.getProperty ("approved_for_training", false)
+                   && (bool) approved.getProperty ("eligible", false),
+               "after approval the next snapshot shows the source eligible (what the Lab's Train button counts)");
+
+        const auto direct = cmd (ops, "list_training_sources")["data"];
+        check (training().getProperty ("registryPath", var()).toString()
+                   == direct.getProperty ("registryPath", var()).toString(),
+               "snapshot.training names the registry list_training_sources reads");
+
+        // Eligibility is a fact about a file the registry does not own. The snapshot
+        // keeps the answer from the registry's last look instead of stat-ing every
+        // source after every command; a direct read is a fresh look, and the snapshot
+        // must not go on contradicting it.
+        beat.deleteFile();
+        const auto gone = sourceIn (cmd (ops, "list_training_sources")["data"], sourceId);
+        check (! (bool) gone.getProperty ("eligible", true)
+                   && gone.getProperty ("blocked_reason", var()).toString().startsWith ("missing local file"),
+               "list_training_sources notices the source file is gone");
+        check (! (bool) sourceIn (training(), sourceId).getProperty ("eligible", true),
+               "...and the snapshot agrees with that read");
+    }
+
     // ── LoRA Lab: render_lora_take's ARGUMENT surface (hermetic, no service).
     //
     // Scope, stated plainly so nobody later mistakes this for more than it is:
