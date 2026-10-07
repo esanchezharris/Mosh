@@ -18,6 +18,7 @@ import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../t
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { trainingPreviewLabel } from "../capabilities";
+import { trainingBlockedText, trainingSourceStatus } from "./trainingSourceView";
 import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
@@ -236,34 +237,6 @@ export function TrainingTool({
   const readyToBuild = sources.length > 0 && blockedSources.length === 0;
   const blockedReasons = blockedSources.map((s) => `${s.source_id}: ${s.blocked_reason || "Blocked"}`);
   const missingSourceInput = localPath.trim().length === 0 && sourceUrl.trim().length === 0;
-  const sourceStatus = (s: TrainingState["sources"][number]) => {
-    if (s.eligible) return "Ready for training";
-    switch (s.blocked_reason) {
-      case "not approved_for_training": return "Needs approval";
-      case "missing proof_of_rights": return "Add rights proof";
-      case "missing local_path": return "Add a local file";
-      default: return s.blocked_reason ?? "Blocked";
-    }
-  };
-  const blockedReasonText = (reason: string) => {
-    switch (reason) {
-      case "missing source_id":
-        return "Missing source id";
-      case "missing title":
-        return "Add a title";
-      case "missing creator":
-        return "Add a creator";
-      case "missing user_claimed_license":
-        return "Add your claimed license text";
-      case "missing proof_of_rights":
-        return "Add rights proof";
-      case "missing source_url or local_path":
-      case "missing local file":
-        return "Add a local file";
-      default:
-        return reason ? `Missing: ${reason}` : "Needs review";
-    }
-  };
   const canStartTraining = blockedSources.length === 0 && sources.length > 0;
   const canAddSource = title.trim().length > 0
     && creator.trim().length > 0
@@ -366,15 +339,15 @@ export function TrainingTool({
             {!canAddSource && title.trim().length === 0 && <div className="pop-note">Add the beat title.</div>}
             {!canAddSource && creator.trim().length === 0 && <div className="pop-note">Add the creator name.</div>}
           </div>
-          <div className="pop-group">
+          <div className="pop-group" data-testid="training-sources">
             <div className="pop-label">Sources</div>
-            <div className="training-status" role="status">{canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? "" : "s"} need review`}</div>
+            <div className="training-status" role="status">{canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? " needs" : "s need"} review`}</div>
             <div className="modal-list training-list">
               {sources.length === 0 && <div className="rack-empty">no sources yet</div>}
               {sources.map((s) => (
                 <div key={s.source_id} className="plugin-row">
                   <span className="pr-name">{s.title}</span>
-                  <span className={`cmdlog-badge${s.eligible ? "" : " err"}`}>{sourceStatus(s)}</span>
+                  <span className={`cmdlog-badge${s.eligible ? "" : " err"}`}>{trainingSourceStatus(s)}</span>
                   {!s.approved_for_training && <button className="btn" onClick={() => void exec("approve_training_source", { sourceId: s.source_id, approved: true }).then(refresh)}>Approve</button>}
                 </div>
               ))}
@@ -385,7 +358,7 @@ export function TrainingTool({
                 <ul className="training-blocker-list">
                   {sources.filter((s) => !s.eligible).map((s) => (
                     <li key={`blocked-${s.source_id}`}>
-                      {s.source_id}: {blockedReasonText(s.blocked_reason || "blocked")}
+                      {s.source_id}: {trainingBlockedText(s.blocked_reason)}
                     </li>
                   ))}
                 </ul>

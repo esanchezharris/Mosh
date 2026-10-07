@@ -139,7 +139,7 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
             logLine ("set_transport", args, false, reason, false);
             return errResult ("set_transport", reason);
         }
-        transport.record (false);
+        eng.startRecord();
     }
 
     if (action == "to_end")

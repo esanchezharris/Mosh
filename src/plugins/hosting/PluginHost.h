@@ -15,11 +15,16 @@ namespace te = tracktion::engine;
 class PluginHost
 {
 public:
-    explicit PluginHost (te::Engine& e);
+    /** @param stateDirectory  where the catalog, block reasons and scan pedal are
+                                read + written (MoshEngine::pluginStateDir()).
+        @param seedDirectory   read-only fallback for a catalog / reasons file not yet
+                                written in stateDirectory; empty = none. */
+    PluginHost (te::Engine& e, juce::File stateDirectory, juce::File seedDirectory);
     ~PluginHost();
 
     /** Initialise formats + load/scan plugins into the KnownPluginList. The
-        catalog is PERSISTED (plugin-catalog.xml beside the session dir) and
+        catalog is PERSISTED (plugin-catalog.xml in the state directory: the shared
+        ~/Library/Mosh copy for the GUI, a private one for harness runs) and
         restored on startup; the curated VST3 scan runs only on a cold catalog.
         Metadata scans are in-process; bundles without VST3 moduleinfo use the
         slow scan only when MOSH_SCAN_SLOW_VST3=1 is set, with each bundle loaded
@@ -29,8 +34,8 @@ public:
         watchdog rescan() uses, so a HANGING AudioUnit is killed (~25 s) instead of
         freezing first launch; a CRASH is still recovered next launch via the
         dead-mans-pedal/blocklist. VST3 (the primary format) is always scanned + safe.
-        NOTE: only one Mosh process should scan AUs at a time -- the dead-mans-pedal
-        file is shared under ~/Library/Application Support/Mosh/ and is not
+        NOTE: only one GUI / deep-scan process should scan AUs at a time -- their
+        dead-mans-pedal file is shared under ~/Library/Mosh/ and is not
         multi-process-safe.  INS-002 / INS-005. */
     void initialise();
 
@@ -82,6 +87,9 @@ public:
         same code path a real hang's next launch runs). */
     void debugSimulateCrashRecovery (const juce::String& pluginId);
 
+    /** Where this host reads + writes its catalog, block reasons and scan pedal. */
+    juce::File stateDirectory() const { return stateDir; }
+
     /** Find a description by Tracktion identifier string; scans the file lazily
         if the id looks like a path we haven't seen. Slow VST3 scanning is
         opt-in via MOSH_SCAN_SLOW_VST3=1. Returns false if unknown. */
@@ -112,6 +120,7 @@ private:
     void finishWatchedPluginScan (const juce::String&);  // reset + persist an AU watchdog quarantine
     juce::File catalogFile()   const;
     juce::File deadMansPedal() const;
+    juce::File readableStateFile (const juce::File& own) const;   // own copy, else the seed's
     void closeEditorByKey (const juce::String& key);
 
     // FIT-003 — WHY each blocklist entry was added, keyed by the raw fileOrIdentifier
@@ -125,6 +134,8 @@ private:
     juce::StringPairArray blockReasons;
 
     te::Engine& engine;
+    const juce::File stateDir;
+    const juce::File seedDir;
     juce::OwnedArray<juce::DocumentWindow> editorWindows;
     juce::HashMap<juce::String, juce::DocumentWindow*> windowByPlugin;
     bool initialised = false;

@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
@@ -141,6 +142,12 @@ public:
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
+    /** True while any Direct Re-Imagine work could still land: MoshOps holds a request
+        (generation or decision validation) or a worker is still running, including one whose
+        request was already cancelled. Read-only; the headless `--run-script`
+        `__wait_until direct_render_idle` condition polls it instead of sleeping a fixed time. */
+    bool hasDirectRenderWork() const;
+
     void applyMultiplayerCommitForSelfTest (const juce::var& msg);
 
     /** apply_track_preset's two selftest inputs. `faultPoint` makes the next apply fail
@@ -154,6 +161,11 @@ public:
         trackPresetFaultPoint_ = faultPoint;
         trackPresetPretendRecording_ = pretendRecording;
     }
+
+    /** The playback timer's spectrum step (timerCallback → emitSpectrum), which headless
+        runs never reach because it is gated on a live playback context. Lets --selftest
+        drive the production tap insertion without an audio device. */
+    void emitSpectrumForSelfTest (bool playing) { emitSpectrum (playing); }
 
     /** Direct plugin-host access for the headless deep-scan CLI (--scan-plugins-deep),
         which runs a synchronous OOP + hang-watchdog rescan off the message thread.
@@ -563,6 +575,14 @@ private:
     // The shared offline-render body behind both bounce wrappers (nullptr = all clips).
     bool bounceRenderToWavImpl (te::Track& track, double startSec, double endSec, const juce::File& destWav,
                                 const juce::Array<te::Clip*>* onlyTheseClips);
+    // Before an offline render: waits (bounded, servicing the message loop) until every
+    // background-generated file the render will read for these tracks' audio clips exists
+    // (warp proxies, reversed sources, decoded copies), starting any that never started.
+    // "" when ready, else a per-clip error. nullptr/empty onlyTheseClips = every clip.
+    juce::String prepareRenderSources (const juce::Array<te::Track*>& tracks,
+                                       const juce::Array<te::Clip*>* onlyTheseClips);
+    // Why the last bounceRenderToWavImpl failed, for the bounce/freeze command's error.
+    juce::String lastBounceError_;
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
@@ -1056,6 +1076,12 @@ private:
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
     // sampler's async file load headless. Returns the number of pads loaded.
     int                  loadDrumKitInto (te::SamplerPlugin&, const juce::String& kitId = {});
+    // settleSamplers(): bring every sampler's LOADED sound list up to its state now. A
+    // te::SamplerPlugin plays from that list, which Tracktion rebuilds only on an
+    // AsyncUpdate after any sound edit (load, replace, pad gain/pan/key, reload/open), and
+    // an offline render runs on the message thread without dispatching one. Every render
+    // entry calls this first; otherwise it plays what the list held before the edit.
+    void                 settleSamplers();
     // ensureDefaultInstrument(): if the track has no instrument, auto-load the sane
     // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
     // audible immediately. No-op when an instrument is already present.
@@ -1394,6 +1420,15 @@ private:
     juce::var decideDirectRender (const juce::String&, const juce::var&);
     void pollDirectRenders();
     void cancelDirectRenders (const juce::String& reason);
+    // Undo/redo/history-jump and project-replacing commands must never race a Keep
+    // (accept_render) decision that is still validating: cancelling it (as every other
+    // in-flight direct-render job is) could silently drop the user's Keep. Decision
+    // validation is bounded and fully local (a clonefile snapshot + two SHA256 reads,
+    // no network, no model) -- measured ~2.7s for a 200s clip -- so it is safe to block
+    // the message thread on briefly here instead. Only "accept" decisions are waited
+    // for; "result" (audition) validations and generation jobs still cancel as before.
+    // See FINDINGS.md #7 (2026-09-23 demo walkthrough).
+    void completePendingAcceptDecisions();
     void restoreDirectAuditions();
     void prepareDirectCommand (const juce::var&);
     void appendDirectRenderSnapshot (juce::DynamicObject&, te::Clip&, const juce::ValueTree&);
@@ -1509,6 +1544,58 @@ private:
     std::map<juce::uint64, juce::int64> pluginMeterSeq_;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
+    // FU1 (2026-09-24 investor-demo walkthrough, finding 4) — a real Tracktion Edit runs
+    // te::Edit::UndoTransactionTimer (tracktion_Edit.cpp), which fires 350 ms after ANY
+    // change and calls beginNewTransaction() unless edit.numUndoTransactionInhibitors > 0.
+    // A multi-step Moshi agent task's LLM round-trip between steps routinely exceeds that
+    // window, so an unguarded batch_begin..batch_end could still split into two or more
+    // real undo transactions even though `inBatch` stayed true the whole time — the mock
+    // e2e's "one task = one undo" is vacuous because the mock has no Tracktion timer.
+    //
+    // batchInhibitor_ holds the real te::Edit::UndoTransactionInhibitor (tracktion_Edit.h)
+    // for exactly as long as `inBatch` is true. setInBatch() below is the ONLY place that
+    // may change `inBatch`, so every existing writer (batch_begin/batch_end/batch_rollback
+    // in both legacy and transactional mode, their error/needs-recovery branches, and the
+    // two ownBatch composites cmdSketchBeatbox/cmdGenerateBeatRecipe) toggles the inhibitor
+    // the same way and none of them can leak or double-release it.
+    //
+    // UndoTransactionInhibitor stores a SafeSelectable<Edit>, so its destructor is a no-op
+    // once the Edit is gone — it can never dereference a dangling Edit even if held across
+    // an Edit teardown. That is only a safety net, though: ~Edit asserts
+    // numUndoTransactionInhibitors == 0 (tracktion_Edit.cpp), so an inhibitor must never
+    // outlive the Edit it holds. Main.cpp destroys MoshOps (and so batchInhibitor_) BEFORE
+    // the engine/Edit on ordinary shutdown, and EVERY command that replaces the Edit —
+    // new_project, open_project/open_recent, reload and open_without_plugins — calls
+    // closeBatchForEditSwap() before the swap, so a batch left open across it neither leaks
+    // its inhibitor onto the dying Edit nor wedges `inBatch` true on the fresh one.
+    std::optional<te::Edit::UndoTransactionInhibitor> batchInhibitor_;
+
+    /** The only place `inBatch` is assigned. Toggling it also holds/releases the real
+        undo-transaction inhibitor so a whole agent batch coalesces into ONE undo step. */
+    void setInBatch (bool shouldBeInBatch)
+    {
+        if (shouldBeInBatch == inBatch) return;
+        inBatch = shouldBeInBatch;
+        if (shouldBeInBatch) batchInhibitor_.emplace (eng.edit());
+        else                 batchInhibitor_.reset();
+    }
+
+    /** Force-close an open LEGACY batch because the Edit is about to be REPLACED
+        (new_project, open_project/open_recent, reload, open_without_plugins). Call it
+        BEFORE the engine swaps the Edit: the abandoned batch has nothing left to commit
+        onto, its inhibitor must be released while its Edit still exists, and `inBatch`
+        must not stay true on the fresh Edit (batch_begin would refuse forever and the
+        rest of the batch would run with no inhibitor). batchTurnId_ goes with it, like
+        every other batch-closing path, so the swap's own log line is not stamped with
+        the abandoned batch's turn id. (In transactional mode txnPreDispatch already
+        refuses a foreign project swap while txn_ is open, so this is the legacy path.) */
+    void closeBatchForEditSwap()
+    {
+        if (! inBatch) return;
+        setInBatch (false);
+        batchTurnId_.clear();
+    }
+
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
     // `inBatch` above keeps its EXACT prior meaning (undo coalescing) and is still set
     // and cleared by the internal composites' ownBatch pattern (cmdSketchBeatbox,
@@ -1526,6 +1613,16 @@ private:
     juce::File        txnLedgerFile;
     juce::int64       editRevision_ = 0;   // bumped by beginTxn / cmdUndo / cmdRedo
     int               execDepth_    = 0;   // the guard governs the OUTERMOST execute only
+    // True while prepareRenderSources services the message loop inside a render command;
+    // execute() refuses any command that arrives then (a UI click, a queued async call).
+    bool              preparingRenderSources_ = false;
+    // Multiplayer applies (a peer commit, structural op or bootstrap adoption) arrive by
+    // callAsync; one delivered while a render waits would be refused and lost, so it is
+    // held here instead, in arrival order, and the next timer tick after the render runs it.
+    std::vector<std::function<void()>> heldMpApplies_;
+    bool mpAppliesHeld() const noexcept { return preparingRenderSources_ || ! heldMpApplies_.empty(); }
+    void runOrHoldMpApply (std::function<void()> apply);
+    void runHeldMpApplies();
     // Step-1 slice 6 — provenance stamped on every JSONL line (ADDITIVE fields; a reader
     // treats absence as unknown). currentOrigin_ is owned by the OUTERMOST execute(): the
     // envelope's non-empty "origin" sibling, else "ui" when the call came through
