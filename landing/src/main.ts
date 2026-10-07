@@ -1,35 +1,19 @@
-import '@fontsource-variable/bricolage-grotesque'
-import '@fontsource/ibm-plex-mono/400.css'
-import '@fontsource/ibm-plex-mono/500.css'
-import '@fontsource/ibm-plex-mono/600.css'
+import { initShared, onReady } from './shared'
+import './styles/home.css'
 
-import './styles/tokens.css'
-import './styles/base.css'
-import './styles/components.css'
-import './styles/sections.css'
-import './styles/motion.css'
+import { initMoods } from './moods'
+import { initMoshiDemo } from './moshiDemo'
+import { initWaitlistForms, waitlistConfigured } from './waitlist'
 
-import { initThemeToggle } from './theme'
-import { initScrollReveal } from './reveal'
-import { initWaveform } from './waveform'
-import { initWaitlistForms } from './waitlist'
+onReady(() => {
+  initShared()
+  initMoshiDemo()
+  initMoods()
 
-function init(): void {
-  const themeToggle = document.querySelector<HTMLButtonElement>('[data-theme-toggle]')
-  if (themeToggle) initThemeToggle(themeToggle)
-
-  const scope = document.querySelector<HTMLElement>('[data-scope]')
-  if (scope) initWaveform(scope)
-
-  initScrollReveal()
-  initWaitlistForms()
-
-  const yearEl = document.querySelector<HTMLElement>('[data-year]')
-  if (yearEl) yearEl.textContent = String(new Date().getFullYear())
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init)
-} else {
-  init()
-}
+  // The waitlist only appears on builds that have somewhere to send a signup.
+  const waitlist = document.querySelector<HTMLElement>('[data-waitlist-block]')
+  if (waitlist && waitlistConfigured()) {
+    waitlist.hidden = false
+    initWaitlistForms()
+  }
+})

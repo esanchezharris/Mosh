@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // No-flash bootstrap: runs synchronously, before first paint. The storage keys
+      // must match the literals in src/theme.ts and src/colorway.ts.
+      (function () {
+        var root = document.documentElement;
+        var theme = null;
+        var colorway = 'lime';
+        try {
+          var t = localStorage.getItem('mosh-landing-theme');
+          if (t === 'light' || t === 'dark') theme = t;
+          var c = localStorage.getItem('mosh-landing-colorway');
+          if (c === 'lime' || c === 'bone' || c === 'violet' || c === 'coral') colorway = c;
+        } catch (e) {}
+        if (!theme) theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        root.setAttribute('data-theme', theme);
+        root.setAttribute('data-colorway', colorway);
+        root.style.colorScheme = theme;
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mosh playtest guide</title>
+    <meta
+      name="description"
+      content="You're invited to playtest Mosh, a native music studio for the Mac. Download the build, make some noise, and say what broke."
+    />
+    <!-- An invite page for friends, not a public download page. -->
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#0b0c0c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#faf0e8" media="(prefers-color-scheme: light)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Mosh" />
+    <meta property="og:title" content="You're invited to playtest Mosh" />
+    <meta
+      property="og:description"
+      content="A native music studio for the Mac. Download the build, make some noise, and say what broke. About ten minutes to set up."
+    />
+    <meta property="og:image" content="/img/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" type="image/png" sizes="64x64" href="/icon-64.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-nav">
+      <div class="container site-nav__inner">
+        <a class="brand" href="/" aria-label="Mosh home">
+          <img class="app-icon" src="/icon-128.png" width="128" height="128" alt="" />
+          Mosh
+        </a>
+        <nav class="nav-actions" aria-label="Primary">
+          <a class="nav-link" href="/">About Mosh</a>
+          <button class="theme-toggle" data-theme-toggle type="button" aria-label="Toggle color theme">
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.2" />
+              <path d="M12 2.5v3M12 18.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="guide-top">
+        <div class="container guide-top__grid">
+          <div class="guide-hero">
+            <h1 class="guide-hero__title">You&rsquo;re <span class="clip-word">in.</span></h1>
+            <p class="lede">
+              This is the Mosh playtest guide. It gets you from the download to making sound in about
+              ten minutes, with no account and nothing to sign up for.
+            </p>
+          </div>
+
+          <aside class="download" aria-labelledby="download-heading">
+            <div class="download__head">
+              <img class="app-icon download__icon" src="/icon-256.png" width="256" height="256" alt="" />
+              <div>
+                <h2 class="download__title" id="download-heading">Mosh for Mac</h2>
+                <p class="download__build mono" data-build-label hidden></p>
+              </div>
+            </div>
+            <a class="btn btn--primary btn--lg download__btn" data-download hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M6.5 10.5 12 16l5.5-5.5M5 20h14" /></svg>
+              Download the build
+            </a>
+            <p class="download__fallback" data-download-fallback>
+              <strong>Ask your host for the build.</strong> They&rsquo;ll send you the download
+              directly, then you can carry on from step 2.
+            </p>
+            <p class="fine">Apple Silicon Mac, macOS 11 or later, about 1 GB free.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="guide">
+        <div class="container guide__grid">
+          <nav class="toc" aria-label="Steps">
+            <span class="toc__label">Steps</span>
+            <ol class="toc__list">
+              <li><a href="#before"><span class="mono">01</span>Before you start</a></li>
+              <li><a href="#install"><span class="mono">02</span>Install</a></li>
+              <li><a href="#first-launch"><span class="mono">03</span>First launch</a></li>
+              <li><a href="#sound-check"><span class="mono">04</span>Sound check</a></li>
+              <li><a href="#together"><span class="mono">05</span>Play together</a></li>
+              <li><a href="#try"><span class="mono">06</span>Things to try</a></li>
+              <li><a href="#quirks"><span class="mono">07</span>Good to know</a></li>
+              <li><a href="#feedback"><span class="mono">08</span>Tell me what happened</a></li>
+            </ol>
+          </nav>
+
+          <ol class="steps">
+            <li class="step" id="before">
+              <span class="step__num mono">01</span>
+              <div class="step__body">
+                <h2>Before you start</h2>
+                <ul class="ticks">
+                  <li>An <strong>Apple Silicon Mac</strong>: any M1 or newer. This build does not run on Intel Macs.</li>
+                  <li><strong>macOS 11 (Big Sur)</strong> or newer.</li>
+                  <li>About <strong>1 GB</strong> of free disk space.</li>
+                  <li>Headphones help. A microphone is only needed if you want to record.</li>
+                  <li>Playing with someone? Keep a voice call open on the side. Mosh syncs the song, not your voices.</li>
+                </ul>
+              </div>
+            </li>
+
+            <li class="step" id="install">
+              <span class="step__num mono">02</span>
+              <div class="step__body">
+                <h2>Install</h2>
+                <ol class="numbered">
+                  <li>Download the build with the button at the top of this page.</li>
+                  <li>Open the download and drag <strong>Mosh</strong> into your <strong>Applications</strong> folder.</li>
+                  <li>Open Mosh from Applications.</li>
+                </ol>
+                <p class="note">
+                  The build is signed and notarized with Apple, so it opens with a normal double-click.
+                  If macOS asks whether to open an app downloaded from the internet, choose
+                  <strong>Open</strong>.
+                </p>
+              </div>
+            </li>
+
+            <li class="step" id="first-launch">
+              <span class="step__num mono">03</span>
+              <div class="step__body">
+                <h2>First launch</h2>
+                <ul class="ticks">
+                  <li>
+                    The very first launch takes a little longer than usual. Mosh is scanning your Mac
+                    for instruments and effects you already own. Give it a few seconds.
+                  </li>
+                  <li>
+                    Mosh does not ask for the microphone on launch. macOS only asks when you pick an
+                    audio input or arm a track to record. Say yes if you want to record.
+                  </li>
+                </ul>
+              </div>
+            </li>
+
+            <li class="step" id="sound-check">
+              <span class="step__num mono">04</span>
+              <div class="step__body">
+                <h2>Sound check</h2>
+                <ol class="numbered">
+                  <li>Click <span class="ui">+ Drum beat</span> above the timeline, then press play. You should hear the built-in kit.</li>
+                  <li>
+                    No sound? Check the output device in two places: macOS <strong>Sound</strong>
+                    settings and Mosh&rsquo;s own <strong>Settings</strong>. They can differ, for
+                    example speakers in one and headphones in the other.
+                  </li>
+                  <li>
+                    Crackles or stutters? Raise <span class="ui">Buffer</span> in Mosh&rsquo;s Settings.
+                    A bigger buffer trades a little delay for stability.
+                  </li>
+                </ol>
+              </div>
+            </li>
+
+            <li class="step" id="together">
+              <span class="step__num mono">05</span>
+              <div class="step__body">
+                <h2>Play together <span class="aside">optional</span></h2>
+                <ol class="numbered">
+                  <li>Both of you click <span class="ui">Invite</span> at the top right of the window.</li>
+                  <li>The host clicks <span class="ui">Create session</span> and sends the room code.</li>
+                  <li>The guest types a name, pastes the room code, and clicks <span class="ui">Join</span>.</li>
+                  <li>You should both see two names in the session. Same song, two windows.</li>
+                </ol>
+                <p class="note note--warn">
+                  <strong>Joining replaces the project open on your Mac</strong> with the host&rsquo;s,
+                  and that cannot be undone. Join from a new, empty project.
+                </p>
+              </div>
+            </li>
+
+            <li class="step" id="try">
+              <span class="step__num mono">06</span>
+              <div class="step__body">
+                <h2>Things to try</h2>
+                <p class="step__intro">
+                  No need to do all of these. Tick them off as you go; the list remembers on this
+                  device.
+                </p>
+                <ul class="checklist" data-checklist="mosh-playtest-checklist-v1">
+                  <li><label><input type="checkbox" data-check="beat" /><span>Drop in a drum beat and loop it</span></label></li>
+                  <li><label><input type="checkbox" data-check="midi" /><span>Add a MIDI track and write a bassline. Double-click a MIDI clip to open the editor</span></label></li>
+                  <li><label><input type="checkbox" data-check="record" /><span>Add an audio track, arm it, set a count-in, and record something</span></label></li>
+                  <li><label><input type="checkbox" data-check="tune" /><span>Put <strong>Mosh AutoTune</strong> on that take with <span class="ui">+ Add plugin</span></span></label></li>
+                  <li><label><input type="checkbox" data-check="moshi" /><span>Ask Moshi for a change, like &ldquo;more reverb on lead&rdquo;, then undo it</span></label></li>
+                  <li><label><input type="checkbox" data-check="history" /><span>Open <span class="ui">History</span> and step back through what you did</span></label></li>
+                  <li><label><input type="checkbox" data-check="colorway" /><span>Change the colorway in Settings</span></label></li>
+                  <li><label><input type="checkbox" data-check="reopen" /><span>Save, quit, and reopen. Is everything still there?</span></label></li>
+                  <li><label><input type="checkbox" data-check="duo" /><span>With a friend: take one track each and build something</span></label></li>
+                </ul>
+                <p class="checklist__count mono" data-checklist-count aria-live="polite"></p>
+              </div>
+            </li>
+
+            <li class="step" id="quirks">
+              <span class="step__num mono">07</span>
+              <div class="step__body">
+                <h2>Good to know</h2>
+                <ul class="ticks">
+                  <li><strong>You each have your own playhead and your own undo.</strong> Pressing play on your Mac does not move your friend&rsquo;s.</li>
+                  <li><strong>Agree on tempo out loud.</strong> If you both change it at once, the last change wins.</li>
+                  <li><strong>A short freeze after the host adds an audio clip is normal.</strong> The audio file is transferring. It clears in a few seconds.</li>
+                  <li><strong>A clip that says &ldquo;source missing&rdquo;</strong> has not finished arriving yet. Ask the host to select that track again so it re-sends.</li>
+                  <li><strong>Re-Imagine may say it is unavailable.</strong> Its audio model is a separate, much larger install and is not part of this download. Skip it this round.</li>
+                </ul>
+              </div>
+            </li>
+
+            <li class="step" id="feedback">
+              <span class="step__num mono">08</span>
+              <div class="step__body">
+                <h2>Tell me what happened</h2>
+                <p class="step__intro">
+                  The whole point is to find out where Mosh breaks or confuses you. No report is too
+                  small, and the good parts are worth hearing too.
+                </p>
+                <ul class="ticks">
+                  <li>What you were doing, what you expected, and what happened instead.</li>
+                  <li>A screenshot (<kbd>&#8679;</kbd> <kbd>&#8984;</kbd> <kbd>4</kbd>) or a screen recording (<kbd>&#8679;</kbd> <kbd>&#8984;</kbd> <kbd>5</kbd>) if you can.</li>
+                  <li>Your Mac model and macOS version, from the Apple menu under <strong>About This Mac</strong>.</li>
+                  <li>Anywhere you got stuck, even if nothing technically broke.</li>
+                </ul>
+                <div class="feedback">
+                  <a class="btn btn--primary btn--lg" data-feedback hidden>Send feedback</a>
+                  <p data-feedback-fallback><strong>Send it to whoever invited you</strong>, however you normally talk.</p>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container site-footer__inner">
+        <span>Mosh, a native macOS music studio. &copy; <span data-year>2026</span></span>
+        <span>Pre-release software. Save often. <a href="/">About Mosh</a></span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/playtest.ts"></script>
+  </body>
+</html>

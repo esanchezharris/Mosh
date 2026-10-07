@@ -2,8 +2,10 @@
 
 #if ! JUCE_WINDOWS
 
+#include <cctype>
 #include <cerrno>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
 #include <optional>
@@ -245,6 +247,161 @@ namespace mosh::sessionpaths::detail
         return true;
     }
 
+    // --- Quarantine reclaim --------------------------------------------------------
+    // Everything below walks a tree through descriptors only. An entry is inspected with
+    // fstatat(AT_SYMLINK_NOFOLLOW); a directory is entered with O_NOFOLLOW and only when
+    // the opened descriptor is the inode that fstatat saw, on the tree's own device.
+
+    inline constexpr int kMaxReclaimDepth = 64;
+
+    inline std::string lowercase (std::string text)
+    {
+        for (auto& c : text)
+            c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+        return text;
+    }
+
+    /** Model, adapter and checkpoint files (or bundle directories) a reclaim must keep. */
+    inline bool isModelFileName (const std::string& name)
+    {
+        static constexpr const char* suffixes[] = {
+            ".safetensors", ".ckpt", ".pt", ".pth", ".gguf", ".onnx", ".npz", ".h5",
+            ".tflite", ".mlmodel", ".mlpackage", ".mlmodelc" };
+        const auto lower = lowercase (name);
+        for (const auto* suffix : suffixes)
+        {
+            const auto length = std::strlen (suffix);
+            if (lower.size() > length
+                && lower.compare (lower.size() - length, length, suffix) == 0)
+                return true;
+        }
+        return false;
+    }
+
+    /** True when a word of the name (split on - _ . and space) says adapter, checkpoint,
+        LoRA or evaluation. Such a directory is evidence once it has any content. */
+    inline bool isEvidenceDirectoryName (const std::string& name)
+    {
+        static constexpr const char* words[] = {
+            "adapter", "adapters", "checkpoint", "checkpoints", "lora", "loras",
+            "eval", "evals", "evaluation", "evaluations" };
+        const auto lower = lowercase (name);
+        size_t start = 0;
+        while (start <= lower.size())
+        {
+            auto end = lower.find_first_of ("-_. ", start);
+            if (end == std::string::npos)
+                end = lower.size();
+            const auto word = lower.substr (start, end - start);
+            for (const auto* evidence : words)
+                if (word == evidence)
+                    return true;
+            start = end + 1;
+        }
+        return false;
+    }
+
+    inline bool readEntryNames (int directoryFd, std::vector<std::string>& names)
+    {
+        const auto copy = ::dup (directoryFd);   // fdopendir owns and closes its descriptor
+        if (copy < 0)
+            return false;
+        auto* directory = ::fdopendir (copy);
+        if (directory == nullptr)
+        {
+            ::close (copy);
+            return false;
+        }
+        ::rewinddir (directory);
+        errno = 0;
+        while (const auto* entry = ::readdir (directory))
+        {
+            const std::string name (entry->d_name);
+            if (name != "." && name != "..")
+                names.push_back (name);
+        }
+        const auto readAll = errno == 0;
+        ::closedir (directory);
+        return readAll;
+    }
+
+    inline OwnedFd openVerifiedChildDirectory (int parentFd, const std::string& name,
+                                               dev_t device)
+    {
+        const auto seen = identityAt (parentFd, name);
+        if (! seen || ! S_ISDIR (seen->mode) || seen->device != device)
+            return {};
+        auto child = openChildDirectory (parentFd, name);
+        const auto opened = child ? identityForFd (child.get()) : std::nullopt;
+        if (! opened || ! sameIdentity (*seen, *opened))
+            return {};
+        return child;
+    }
+
+    /** True if the tree holds evidence, or if it could not be fully inspected. */
+    inline bool containsRetainedEvidence (int directoryFd, dev_t device, int depth)
+    {
+        std::vector<std::string> names;
+        if (depth > kMaxReclaimDepth || ! readEntryNames (directoryFd, names))
+            return true;
+
+        for (const auto& name : names)
+        {
+            const auto identity = identityAt (directoryFd, name);
+            if (! identity)
+                return true;
+            if (isModelFileName (name))
+                return true;
+            if (! S_ISDIR (identity->mode))
+                continue;
+
+            auto child = openVerifiedChildDirectory (directoryFd, name, device);
+            if (! child)
+                return true;
+            if (isEvidenceDirectoryName (name))
+            {
+                std::vector<std::string> children;
+                if (! readEntryNames (child.get(), children) || ! children.empty())
+                    return true;
+                continue;
+            }
+            if (containsRetainedEvidence (child.get(), device, depth + 1))
+                return true;
+        }
+        return false;
+    }
+
+    /** Unlinks everything below the directory; returns false if anything remains. */
+    inline bool removeTreeContents (int directoryFd, dev_t device, int depth)
+    {
+        std::vector<std::string> names;
+        if (depth > kMaxReclaimDepth || ! readEntryNames (directoryFd, names))
+            return false;
+
+        auto removedAll = true;
+        for (const auto& name : names)
+        {
+            const auto identity = identityAt (directoryFd, name);
+            if (! identity)
+            {
+                removedAll = removedAll && errno == ENOENT;
+                continue;
+            }
+
+            if (S_ISDIR (identity->mode))
+            {
+                auto child = openVerifiedChildDirectory (directoryFd, name, device);
+                if (! child || ! removeTreeContents (child.get(), device, depth + 1)
+                    || ::unlinkat (directoryFd, name.c_str(), AT_REMOVEDIR) != 0)
+                    removedAll = false;
+            }
+            else if (::unlinkat (directoryFd, name.c_str(), 0) != 0 && errno != ENOENT)
+            {
+                removedAll = false;
+            }
+        }
+        return removedAll;
+    }
 }
 
 #endif

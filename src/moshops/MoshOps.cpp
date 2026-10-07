@@ -15,6 +15,7 @@
 #include "StemExport.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
+#include "engine/UndoTrace.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
 #include "state/RenderLayer.h"
@@ -342,7 +343,8 @@ namespace
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
-    : eng (engineToUse), pluginHost (engineToUse.engine()),
+    : eng (engineToUse),
+      pluginHost (engineToUse.engine(), engineToUse.pluginStateDir(), engineToUse.pluginSeedDir()),
       trainerRegistry (engineToUse.sessionDir())
 {
     eng.beforePersist = [this] { restoreDirectAuditions(); };
@@ -381,7 +383,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     // message thread) to apply peer commits, feed the lock guard, and push presence
     // to the WebView. No relay echo: a remote apply repaints locally only.
     mpSession_ = std::make_unique<MultiplayerSession> (
-        [this] (const juce::var& msg) { applyMultiplayerCommitMessage (msg); },
+        [this] (const juce::var& msg) { runOrHoldMpApply ([this, msg] { applyMultiplayerCommitMessage (msg); }); },
         [this] (const juce::String& type, juce::var payload) { emit (type, payload); },
         [this] (bool active, const juce::String& self, const std::map<juce::String, juce::String>& locks)
         {
@@ -397,12 +399,36 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
         [this] (const juce::var& bundle) { return validateBootstrapBundle (bundle); },  // preflight
         [this] (const juce::var& bundle)
         {
-            auto* command = new DynamicObject();
-            command->setProperty ("command", "mp_apply_bootstrap");
-            command->setProperty ("args", bundle);
-            return execute (var (command));
+            auto adopt = [this, bundle]
+            {
+                auto* command = new DynamicObject();
+                command->setProperty ("command", "mp_apply_bootstrap");
+                command->setProperty ("args", bundle);
+                return execute (var (command));
+            };
+            if (! mpAppliesHeld())
+                return adopt();
+
+            // Held behind a render (see heldMpApplies_): report the rejection the session
+            // would have reported, if it comes to that, when the adoption actually runs.
+            runOrHoldMpApply ([this, adopt]
+            {
+                if (! (bool) adopt().getProperty ("ok", false))
+                {
+                    auto* diagnostic = new DynamicObject();
+                    diagnostic->setProperty ("stage", "apply");
+                    diagnostic->setProperty ("reason", "rejected");
+                    emit ("mp_bootstrap_rejected", var (diagnostic));
+                }
+            });
+            auto* held = new DynamicObject();
+            held->setProperty ("held", true);
+            return okResult ("mp_apply_bootstrap", var (held));
         },                                                                              // adopt
-        [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
+        [this] (const juce::var& msg)
+        {
+            runOrHoldMpApply ([this, msg] { cmdMpApplyStructural (msg); });
+        });                                                                             // structural
     refreshMpStemDir();
 }
 
@@ -434,6 +460,7 @@ MoshOps::~MoshOps()
 
 void MoshOps::timerCallback()
 {
+    runHeldMpApplies();
     pollDirectRenders();
     expireGestureWindow();   // an idle drag ends its undo step after kGestureIdleMs
     // Push a decimated transport delta while playing (and once on the
@@ -649,6 +676,15 @@ juce::var MoshOps::executeFromUi (const juce::var& command)
 
 juce::var MoshOps::execute (const juce::var& command)
 {
+    // A render command that waits for warped/reversed clip audio services the message loop
+    // (prepareRenderSources), so a UI click or queued async call can arrive in the middle
+    // of it, against an edit the render is about to read. Refuse it before it starts
+    // (multiplayer applies never get here mid-wait: runOrHoldMpApply holds them).
+    if (preparingRenderSources_)
+        return errResult (command.getProperty ("command", var()).toString(),
+                          "busy: a render is waiting for warped or reversed clip audio to finish "
+                          "generating; try again when it completes");
+
     // FS-B2a — re-entrancy depth. execute() is re-entered from INSIDE handlers (the
     // multiplayer apply path, cmdSketchBeatbox, cmdGenerateBeatRecipe), so the
     // transaction guard must govern the OUTERMOST call only: a manifested composite
@@ -661,6 +697,7 @@ juce::var MoshOps::execute (const juce::var& command)
         ~DepthGuard() { --depth; }
         int& depth;
     } depthGuard (execDepth_);
+    const undotrace::ScopedCommand traceCommand (command.getProperty ("command", var()).toString());
 
     // Step-1 slice 6 — the OUTERMOST call owns the origin for every line it logs; a
     // re-entered execute (composites, the multiplayer apply path) inherits it unchanged,
@@ -1331,7 +1368,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
             return errResult ("batch_begin", "a batch is already open");
         const auto label = args.getProperty ("name", var ("agent edit")).toString();
         beginUndoTransaction (label);
-        inBatch = true;
+        setInBatch (true);
         batchTurnId_ = turnIdOf (args);   // step-1 slice 6 — stamps this line and every line through batch_end
         logLine ("batch_begin", args, true, {}, false);
         return okResult ("batch_begin");
@@ -1414,7 +1451,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
     // stack completely untouched — which is what lets rollback distinguish "we own a
     // non-empty head" from "there is nothing of ours to undo".
     beginUndoTransaction (record->label);
-    inBatch = true;
+    setInBatch (true);
     txn_ = std::move (record);
     batchTurnId_ = turnIdOf (args);   // step-1 slice 6 — same sibling stamp as the legacy mode
 
@@ -1432,7 +1469,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
         // ── LEGACY MODE (unchanged) ──
         if (! inBatch)
             return errResult ("batch_end", "no batch is open");
-        inBatch = false;
+        setInBatch (false);
         logLine ("batch_end", args, true, {}, false);
         batchTurnId_.clear();   // step-1 slice 6 — batch_end is the turn's last stamped line
         emitSnapshotInvalidated();
@@ -1476,7 +1513,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
     {
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeUndoHeadMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_end",
@@ -1489,7 +1526,7 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
         // outside the one mutation path. Refuse rather than commit an unprovable edit.
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeFingerprintMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_end",
@@ -1500,14 +1537,14 @@ juce::var MoshOps::cmdBatchEnd (const juce::var& args)
     {
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeFingerprintMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_end",
                           agenttxn::codeFingerprintMismatch() + ": edit revision went backwards");
     }
 
-    inBatch        = false;
+    setInBatch (false);
     txn_->status   = agenttxn::statusCommitted();
     txn_->failureCode.clear();
     logLine ("batch_end", args, true, {}, false);
@@ -1595,7 +1632,7 @@ juce::var MoshOps::cmdBatchRollback (const juce::var& args)
     {
         txn_->status      = agenttxn::statusNeedsRecovery();
         txn_->failureCode = agenttxn::codeUndoHeadMismatch();
-        inBatch = false;
+        setInBatch (false);
         batchTurnId_.clear();
         appendTxnLedger (*txn_);
         return errResult ("batch_rollback",
@@ -1610,7 +1647,7 @@ juce::var MoshOps::cmdBatchRollback (const juce::var& args)
         ++editRevision_;
         emitSnapshotInvalidated();
     }
-    inBatch = false;
+    setInBatch (false);
 
     // Exactness check: the session must be back at the captured pre-state.
     const auto now = txnFingerprint();
@@ -2338,7 +2375,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
         // strands an empty drum track + altered tempo). Reuse the batch flag the agent uses
         // (beginTxn skips its own beginNewTransaction while inBatch); respect an outer batch.
         const bool ownBatch = ! inBatch;
-        if (ownBatch) { beginUndoTransaction ("sketch_beatbox"); inBatch = true; }
+        if (ownBatch) { beginUndoTransaction ("sketch_beatbox"); setInBatch (true); }
 
         juce::Array<var> emitted;
 
@@ -2362,7 +2399,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
           clipId = r.getProperty ("data", var()).getProperty ("clipId", var()).toString();
           emitted.add (recordOp ("add_midi_clip", av)); }
 
-        if (ownBatch) inBatch = false;
+        if (ownBatch) setInBatch (false);
 
         // §6 training byproduct — append the session tuple (RETAIN the user's own audio
         // ref: it is clean, owned provenance). Cheap to log now, expensive to reconstruct.
@@ -2469,7 +2506,7 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     if (ownBatch)
     {
         beginUndoTransaction ("generate_beat_recipe");
-        inBatch = true;
+        setInBatch (true);
     }
 
     juce::NamedValueSet refs;
@@ -2520,7 +2557,7 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     }
 
     if (ownBatch)
-        inBatch = false;
+        setInBatch (false);
 
     if (failure.isNotEmpty())
     {
@@ -3823,6 +3860,14 @@ juce::var MoshOps::snapshot()
         root->setProperty ("trackGroupsSuspended",
                            (bool) groups.getProperty (ids::trackGroupsSuspended, false));
 
+    // Stage 7 — the rights registry with its adapters and jobs (additive). The training
+    // popover and the LoRA Lab render from this block and nothing else: no UI code calls
+    // list_training_sources. The registry serves it from memory, not from disk — see
+    // TrainerRegistry::snapshot() for the cost that decided that. Training commands never
+    // open a transaction or bump editRevision_, so the block is declared volatile in
+    // agenttxn::volatilePaths(): it must stay out of the agent transaction fingerprint.
+    root->setProperty ("training", trainerRegistry.snapshot());
+
     // Master bus (Wave 5) — the edit's master VolumeAndPan, always present.
     if (auto mvp = edit.getMasterVolumePlugin())
     {
@@ -3883,31 +3928,37 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // write, so reading it back is the only honest way to tell a restored pad from a
     // still-silenced one. minNote/maxNote are carried because assign_sample's melodic
     // mode maps one sound across the whole keyboard, which is not a pad at all.
+    //
+    // Every field is read from the persisted SOUND children, as the index getters below
+    // already do. `file` is taken from the child itself: the engine's getter for it,
+    // getSoundMedia, reads the LOADED sound list instead, which Tracktion rebuilds only in
+    // handleAsyncUpdate on the message thread. Right after a kit load, assign_sample or
+    // reload that has not run yet (always with an audio device open, since MoshOps pumps
+    // for it only headless) that list is empty or still names the replaced sample.
     if (auto* sampler = findSampler (t))
     {
         Array<var> pads;
-        for (int i = 0; i < sampler->getNumSounds(); ++i)
+        int i = 0;
+        for (auto sound : sampler->state)
         {
+            if (! sound.hasType (te::IDs::SOUND))
+                continue;   // the getters index SOUND children only
             auto* p = new DynamicObject();
             p->setProperty ("index",     i);
             p->setProperty ("pitch",     sampler->getKeyNote (i));
             p->setProperty ("minNote",   sampler->getMinKey (i));
             p->setProperty ("maxNote",   sampler->getMaxKey (i));
             p->setProperty ("name",      sampler->getSoundName (i));
-            p->setProperty ("file",      sampler->getSoundMedia (i));
+            p->setProperty ("file",      sound[te::IDs::source].toString());
             p->setProperty ("gainDb",    sampler->getSoundGainDb (i));
             p->setProperty ("pan",       sampler->getSoundPan (i));
             p->setProperty ("openEnded", sampler->isSoundOpenEnded (i));
             // Choke group is a Mosh-side property on the SOUND tree (see Ids.h) — the
             // engine has no such concept, so it can only be read back from where we put it.
-            {
-                int n = 0, group = 0;
-                for (auto v : sampler->state)
-                    if (v.hasType (te::IDs::SOUND))
-                        if (n++ == i) { group = (int) v.getProperty (ids::moshChokeGroup, 0); break; }
-                if (group > 0) p->setProperty ("chokeGroup", group);
-            }
+            if (const int group = (int) sound.getProperty (ids::moshChokeGroup, 0); group > 0)
+                p->setProperty ("chokeGroup", group);
             pads.add (var (p));
+            ++i;
         }
         o->setProperty ("drumPads", pads);
         const auto kit = t.state.getProperty (ids::drumKitId, "").toString();
@@ -4794,6 +4845,11 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
 // existing block_plugin command rather than reaching into PluginHost directly.
 juce::var MoshOps::cmdOpenWithoutPlugins (const juce::var& args)
 {
+    // FU1 — safe mode REPLACES the Edit (eng.reloadInSafeMode), so a legacy batch left open
+    // across it is force-closed FIRST, the same as new_project/open_project/reload: the
+    // batch's inhibitor must not outlive its Edit, and `inBatch` must not wedge true.
+    closeBatchForEditSwap();
+
     // Read the suspects BEFORE the reload clears them.
     const auto suspects = eng.pluginCrashSuspects();
     const auto target   = mosh::safemode::quarantineTarget (

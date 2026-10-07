@@ -1836,11 +1836,29 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, record)
         elif path == "/training/cancel":
+            # Answer what was found, not just "ok". This used to say {"ok": true}
+            # for any id, so the caller could not tell a job it had stopped from
+            # one that never existed and recorded both as cancelled.
+            #
+            # `status` is the state the job was in when the request arrived. Only
+            # a queued or running job has anything to stop; the worker moves it
+            # to "cancelled" once the stop has actually reached the trainer, and
+            # /training/status reports that. A finished job is left alone.
             jid = data.get("jobId", "")
             with _training_lock:
-                if jid in _training_jobs:
-                    _training_jobs[jid]["cancel"] = True
-            self._send(200, {"ok": True})
+                job = _training_jobs.get(jid)
+                if job is None:
+                    self._send(404, {"ok": False, "error": "unknown jobId"})
+                    return
+                if job["status"] in ("queued", "running"):
+                    job["cancel"] = True
+                self._send(200, {
+                    "ok": True,
+                    "jobId": jid,
+                    "status": job["status"],
+                    "progress": job.get("progress", 0.0),
+                    "cancelRequested": bool(job.get("cancel")),
+                })
         elif path == "/training/import-registry":
             # A garbled, empty, or registry-less body must NOT clobber the rights
             # registry: reject it with 400 and leave the on-disk registry untouched.
