@@ -20,12 +20,26 @@ target_sources(MoshTests PRIVATE
     test_automation_curve_write.cpp
     test_clip_loop_phase.cpp
     test_render_source_window.cpp
+    test_render_watchdog.cpp
     test_export_range.cpp
     test_export_dither.cpp
     test_plugin_editor_param_gesture.cpp
     test_plugin_parameter_readback.cpp
+    # Track-chain presets ("Mosh Clean Lead v0") — the engine-free half: schema, the
+    # pinned processor table, and the dB/ratio unit adapter (src/moshops/TrackPreset.h).
+    test_track_preset.cpp
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
+    # Low/high-pass slope: the Butterworth cascade MoshLowPassPlugin runs
+    # (plugins/moshfx/MoshFilterDesign.h, header-only, juce_audio_basics).
+    test_lowpass_design.cpp
+    # Native AutoTune engine (docs/AUTOTUNE-SCOPE-2026-10-01.md). Header-only and
+    # JUCE-free under src/plugins/moshfx/retune/.
+    test_retune_shifter.cpp
+    test_retune_core.cpp
+    test_live_pitch.cpp
+    # Plugin live meters (plugins/moshfx/LiveMeter.h): the 30 Hz plugin_meters latch.
+    test_live_meter.cpp
     test_renderlayer.cpp
     test_render_artifacts.cpp
     test_migrations.cpp
@@ -96,6 +110,10 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineCore.cpp
     ${CMAKE_SOURCE_DIR}/src/reimagine/ReImagineService.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
+    test_combined_audio_device.cpp
+    ${CMAKE_SOURCE_DIR}/src/audio/CombinedAudioDevice.cpp
+    # macOS only by its own #if; carries the hidden real-hardware test [.audio-combine-live].
+    ${CMAKE_SOURCE_DIR}/src/audio/MacCoreAudioAggregateType.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/AudioRefValidation.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
@@ -116,7 +134,7 @@ target_sources(MoshTests PRIVATE
     # is exactly what test_rave_engine.cpp exercises (AL-022's additive
     # lastError() surface, compile-safe in the default anira-off build).
     ${CMAKE_SOURCE_DIR}/src/plugins/transform/RaveEngine.cpp
-    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/retune/RetuneCore.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)
 
@@ -162,6 +180,8 @@ endif()
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
 add_test(NAME HarnessSessionShell
          COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
+add_test(NAME InstalledAppGateShell
+         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/auto-loop/installed-app-gate-selftest.sh)
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
 if (APPLE)

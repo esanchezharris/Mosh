@@ -387,6 +387,71 @@ export type PluginParam = {
    *  editor snaps its points to the same grid. Absent means continuous. */
   discrete?: boolean;
   states?: number;
+  /** The names of a stepped parameter's states, in order, when it has them (AutoTune's
+   *  key and scale). The inspector offers these as a menu instead of a slider. */
+  choices?: string[];
+  /** The engine's own parameter id (Tracktion paramID, e.g. "ampAttack", "level1"). Names
+   *  repeat inside one plugin (4OSC has three "Mix"), ids never do: bind controls by id or
+   *  index, never by name. Sent for 4OSC. */
+  id?: string;
+  /** The range's skew (JUCE NormalisableRange), sent only when it is not 1: the value maps
+   *  to physical units as min + (max − min)·value^(1/skew). Absent = linear. */
+  skew?: number;
+  /** Sent only when true: the skew is applied symmetrically about the range's centre. */
+  symmetricSkew?: boolean;
+  /** The range's interval, sent only when > 0 (4OSC's Tune: whole semitones). Physical
+   *  values snap to min + k·step. */
+  step?: number;
+};
+
+/** A 4OSC modulation-matrix route (read-only: Mosh never creates one, an imported session
+ *  can carry them). `paramIndex`/`id` name the modulated parameter. */
+export type ModRoute = { paramIndex: number; id: string; source: string; depth: number };
+
+/** One sound loaded in a sampler (`Plugin.sampler.sounds`). `index` is the sampler's own
+ *  sound index; pad commands address a sound by `addressNote`, the note the engine's
+ *  narrowest-range rule maps to it. */
+export type SamplerSound = {
+  index: number;
+  name: string;
+  /** The sound's persisted source string (may be edit-relative after Save-As). */
+  file: string;
+  /** The absolute resolved file ("" when it cannot be resolved): what file_peaks takes. */
+  path: string;
+  /** The file is not on disk. */
+  missing: boolean;
+  /** The root (key) note. */
+  pitch: number;
+  minNote: number;
+  maxNote: number;
+  /** The live gain (dB). A silenced pad reads the engine's −48 dB floor here. */
+  gainDb: number;
+  /** The producer's own level: the parked copy while the pad is silenced, else gainDb. */
+  userGainDb: number;
+  /** The gain is parked by a lane mute or by solo (another lane soloed). */
+  silenced: boolean;
+  pan: number;
+  openEnded: boolean;
+  /** 1-16, absent = none. */
+  chokeGroup?: number;
+  /** "drum" (min == max), "melodic" (0..127) or "range" (anything else). */
+  mode: "drum" | "melodic" | "range";
+  /** The note set_drum_pad / clear_drum_pad need to reach THIS sound; absent if none can. */
+  addressNote?: number;
+  durationSec?: number;
+  sampleRate?: number;
+  channels?: number;
+};
+
+/** A sampler plugin's sounds (`Plugin.sampler`, on every sampler entry). */
+export type SamplerInfo = {
+  /** This is the sampler the pad commands address (the track's first sampler). Any other
+   *  sampler on the track is read-only from the UI. */
+  primary: boolean;
+  /** The track's kit id (primary only, when one was loaded with load_drum_kit). */
+  kit?: string;
+  sounds: SamplerSound[];
+  limits: { maxVoices: number; maxSounds: number; minGainDb: number; maxGainDb: number };
 };
 
 // Route C.2 — the real-time RAVE insert's snapshot view (present iff this plugin is one).
@@ -406,7 +471,7 @@ export type MoshFxCut = {
 };
 
 export type MoshFxReadout = {
-  kind: "autotune" | "ott" | "feedback";
+  kind: "autotune" | "ott" | "feedback" | "softclip";
   inputHz?: number;
   targetHz?: number;
   correctionCents?: number;
@@ -429,12 +494,79 @@ export type Plugin = {
   params: PluginParam[];
   rave?: RaveInsert;       // present iff this is a real-time RAVE insert (anira build)
   moshFx?: MoshFxReadout;
+  /** The plugin's stable id (Tracktion EditItemID): survives a reorder, unlike `index`. */
+  itemId?: string;
+  /** Settings that are not automatable parameters (they never appear in `params`), keyed by
+   *  name: the delay's time, chorus and phaser settings, the low/high-pass mode. Set with
+   *  `set_plugin_state`. */
+  state?: Record<string, PluginStateValue>;
+  /** Present iff a track-chain preset (apply_track_preset) inserted this plugin. It says
+   *  where the plugin CAME FROM — not that its values still equal the preset's, since the
+   *  user may have edited them. `stage` is its 0-based position in the preset's chain. */
+  preset?: { id: string; name: string; revision: number; stage: number };
+  /** 4OSC only, and only when non-empty: its modulation routes (read-only). */
+  modRoutes?: ModRoute[];
+  /** Every sampler: its loaded sounds and which one the pad commands address. */
+  sampler?: SamplerInfo;
   // Stable plugin-catalog identity (PluginHost::idFor), set for every external plugin —
   // the Skill Foundry's plugin_instance_added_once predicate compares this against a
   // resolved plugin_by_name binding's identity (docs/superpowers/plans/
   // 2026-08-14-moshi-skill-foundry-slice-a-contract-registry.md, Task 2).
   catalogId?: string;
 };
+
+/** One Mosh AutoTune's live pitch reading: the 30 Hz "tuner" event, never the snapshot.
+ *  `index` is the plugin's position in its track's chain, as `Plugin.index`. */
+export type TunerReading = {
+  trackId: string;
+  index: number;
+  /** What is being sung, in Hz. */
+  inputHz: number;
+  /** The note it is being pulled to, in Hz. */
+  targetHz: number;
+  confidence: number;
+};
+
+/** One non-automatable plugin setting, as the engine publishes it in `Plugin.state`. */
+export type PluginStateValue = {
+  value: number | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  choices?: string[];
+};
+
+/** One plugin's live meter frame: the 30 Hz "plugin_meters" event, never the snapshot.
+ *  Only plugins that are on and processed audio since the previous frame are present.
+ *  Levels and reductions are the largest since the previous frame. */
+export type PluginMeterBase = {
+  trackId: string; index: number; itemId?: string; type: string;
+  /** A per-plugin frame counter: it goes up on every frame that carries this plugin, so a
+   *  NEW frame can be told from the same frame held on screen (event fields like `struck`
+   *  and `hits` must fire once per frame). Absent on an older engine. */
+  seq?: number;
+};
+/** Compressor and soft clipper: gain reduction (dB, ≥ 0) and sample peaks in and out (dBFS). */
+export type DynamicsMeter = PluginMeterBase & { grDb: number; inDb: number; outDb: number };
+/** Mosh OTT: per band (low, mid, high) the envelope peak and the applied DYNAMIC gain
+ *  change (dB; positive lifts, negative cuts; the band's static trim is NOT included), and
+ *  whether the output clamp engaged. */
+export type OttMeter = PluginMeterBase & { bands: { levelDb: number; gainDb: number }[]; clipped: boolean };
+/** Mosh X-FDBK: ring candidates and the notches it is cutting right now. */
+export type FeedbackMeter = PluginMeterBase & {
+  candidates: { hz: number; score: number }[];
+  cuts: { hz: number; score: number; depthDb: number }[];
+};
+/** 4OSC: its output sample peak (dBFS, floored −100) since the previous frame, the MIDI keys
+ *  held down at the synth (from the MIDI it received: keys, not voices), and the note-ons
+ *  since the previous frame. */
+export type FourOscMeter = PluginMeterBase & { outDb: number; held: number[]; struck: number[] };
+/** Sampler: the note-ons it received since the previous frame (vel 0..1, the largest per
+ *  note; the panel's own auditions included), the signal the sampler ADDED (out − in) as a
+ *  peak in dBFS, and the keys held down. */
+export type SamplerMeter = PluginMeterBase & { outDb: number; held: number[]; hits: { note: number; vel: number }[] };
+export type PluginMeterReading = DynamicsMeter | OttMeter | FeedbackMeter | FourOscMeter | SamplerMeter;
 
 export type AvailablePlugin = {
   id: string;
@@ -610,6 +742,13 @@ export type AudioSelection = {
   requestedOutputDevice?: string;
   activeOutputDevice?: string;
   audioReady?: boolean;
+  /** How the open device joins its input and output: one device, two devices opened as
+   *  one (macOS aggregate), two devices through a FIFO (the slow fallback), or "none"
+   *  when no input is open. */
+  combining?: "none" | "single" | "aggregate" | "fifo";
+  /** Estimated microphone-to-headphone delay of the device path, in ms. Absent with no
+   *  input open. Plugin latency on the monitored track is extra. */
+  monitorLatencyMs?: number;
 };
 
 // Full device enumeration from list_audio_devices (on-demand, NOT in the snapshot).
