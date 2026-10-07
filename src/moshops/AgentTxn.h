@@ -101,6 +101,10 @@ inline const juce::StringArray& volatilePaths()
         "controller",
         // Live audio-device selection — machine state, not the song.
         "audio",
+        // The LoRA rights registry and training jobs: machine-local, non-undoable
+        // registry state, not the song. Training commands never open a transaction,
+        // so a job-status poll or a source approval must not move the fingerprint.
+        "training",
         // markDirty() is one-way: a rollback restores CONTENT but the edit is still
         // legitimately unsaved, so `dirty` must not be part of the identity.
         "session.dirty",

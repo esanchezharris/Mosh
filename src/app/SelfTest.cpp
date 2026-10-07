@@ -4529,7 +4529,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (before.getProperty ("sources", var()).isArray()
                    && before.getProperty ("jobs", var()).isArray()
                    && before.getProperty ("adapters", var()).isArray(),
-               "…whose sources, jobs and adapters are lists even when empty (the UI maps over them)");
+               "...whose sources, jobs and adapters are lists even when empty (the UI maps over them)");
         const int sourcesBefore = before.getProperty ("sources", var()).size();
 
         auto beat = eng.sessionDir().getChildFile ("selftest-training-source.wav");
@@ -4542,22 +4542,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                     { "userClaimedLicense", "own work" },
                                     { "proofOfRights", "made for this check" }}));
         check (ok (imported), "import_training_source ok");
-        check (hadEvent ("snapshot_invalidated"), "…and it tells the UI to re-read the snapshot");
+        check (hadEvent ("snapshot_invalidated"), "...and it tells the UI to re-read the snapshot");
         const auto sourceId = imported["data"].getProperty ("source_id", var()).toString();
-        check (sourceId.isNotEmpty(), "…and returns the new source's id");
+        check (sourceId.isNotEmpty(), "...and returns the new source's id");
 
         const auto listed = sourceIn (training(), sourceId);
         check (listed.isObject(), "the imported source is in snapshot.training.sources");
-        check (training().getProperty ("sources", var()).size() == sourcesBefore + 1, "…exactly once");
-        check (listed.getProperty ("title", var()).toString() == "Selftest Beat", "…under its title");
+        check (training().getProperty ("sources", var()).size() == sourcesBefore + 1, "...exactly once");
+        check (listed.getProperty ("title", var()).toString() == "Selftest Beat", "...under its title");
         check (! (bool) listed.getProperty ("eligible", true)
                    && listed.getProperty ("blocked_reason", var()).toString() == "not approved_for_training",
-               "…not yet eligible, and saying it needs approval (the popover's Approve button)");
+               "...not yet eligible, and saying it needs approval (the popover's Approve button)");
 
         eventTypes.clear();
         check (ok (cmd (ops, "approve_training_source", objN ({{ "sourceId", sourceId }, { "approved", true }}))),
                "approve_training_source ok");
-        check (hadEvent ("snapshot_invalidated"), "…and it tells the UI to re-read the snapshot");
+        check (hadEvent ("snapshot_invalidated"), "...and it tells the UI to re-read the snapshot");
         const auto approved = sourceIn (training(), sourceId);
         check ((bool) approved.getProperty ("approved_for_training", false)
                    && (bool) approved.getProperty ("eligible", false),
@@ -4578,7 +4578,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && gone.getProperty ("blocked_reason", var()).toString().startsWith ("missing local file"),
                "list_training_sources notices the source file is gone");
         check (! (bool) sourceIn (training(), sourceId).getProperty ("eligible", true),
-               "…and the snapshot agrees with that read");
+               "...and the snapshot agrees with that read");
     }
 
     // ── LoRA Lab: render_lora_take's ARGUMENT surface (hermetic, no service).
