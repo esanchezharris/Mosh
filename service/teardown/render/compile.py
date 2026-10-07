@@ -42,8 +42,13 @@ DEFAULT_CLIP_LEN_S = 8.0
 #    real, not an artifact, and only a render can say how hot it actually gets. So
 #    `_predict_peak_at_0db` reads the ACTUAL palette one-shot bytes the compiled
 #    `assign_sample` commands reference and sums them at the compiled note positions/
-#    velocities at 0 dB gain — a real measurement, not a formula — and the ONE per-recipe
-#    trim is `min(HEADROOM_TRIM_DB, TARGET_PEAK_DB - predicted_peak)`: HEADROOM_TRIM_DB is
+#    velocities at 0 dB gain — a real measurement, not a formula. Each voice lasts as long
+#    as the engine lets it sound: a drum-mode pad is open-ended (the whole one-shot rings),
+#    but a melodic-mode sound (808/bass/pad/lead/pluck) is NOTE-GATED — the MIDI note
+#    length cuts it, then a short release fade (see _gated_voice). Summing an 808's whole
+#    3 s one-shot per note stacked tails the engine never plays and over-trimmed hot seeds
+#    by 3-4 dB (2026-10-06 PR #738 review). The ONE per-recipe trim is
+#    `min(HEADROOM_TRIM_DB, TARGET_PEAK_DB - predicted_peak)`: HEADROOM_TRIM_DB is
 #    the loudest any recipe ever gets (matches balance.py's own flat first-pass baseline —
 #    unchanged, so nothing there needs rescaling), and a hot recipe gets cut further, just
 #    enough to land at TARGET_PEAK_DB. A quiet recipe (predicted_peak already under target)
@@ -283,6 +288,29 @@ def _dedupe_drum_onsets(notes, epsilon: float = _ONSET_EPSILON_BEATS) -> list:
 
 _MIX_SAMPLE_RATE = 44100.0
 
+# A note-gated sampler voice's release, mirrored from Tracktion's SamplerPlugin (the engine
+# behind assign_sample): at note-off a voice whose sound is NOT open-ended keeps sounding
+# for a linear fade from full gain to silence over at most 100 output samples
+# (SampledNote::addNextBlock), then stops. MoshOps.Plugins.cpp's assign_sample makes
+# mode="melodic" sounds note-gated (setSoundOpenEnded (idx, false)); mode="drum" (the
+# default) sounds are open-ended (setSoundOpenEnded (idx, true)) and ring out whole.
+_GATED_RELEASE_SAMPLES = 100
+
+
+def _gated_voice(samp, hold: int, np_mod) -> Any:
+    """What a note-gated (melodic-mode) voice actually plays: the first `hold` samples of
+    the one-shot (the MIDI note's length), then up to _GATED_RELEASE_SAMPLES more under a
+    linear 1 -> 0 fade, never past the sample's own end. Not modelled: a same-pitch note-on
+    also cuts an earlier, still-sounding voice of that pitch (a retrigger). None of the six
+    canonical demo seeds has overlapping same-pitch melodic notes, so their numbers do not
+    depend on it."""
+    hold = max(1, int(hold))
+    if hold >= len(samp):
+        return samp
+    tail = samp[hold:hold + _GATED_RELEASE_SAMPLES]
+    ramp = 1.0 - np_mod.arange(len(tail), dtype=np_mod.float64) / _GATED_RELEASE_SAMPLES
+    return np_mod.concatenate([samp[:hold], tail * ramp])
+
 
 def _read_wav_mono(path: str, np_mod) -> Any:
     """A palette one-shot's samples as a mono numpy float array in [-1, 1] (16- or 24-bit
@@ -313,6 +341,12 @@ def _predict_peak_at_0db(commands: list[dict], tempo: Optional[float]) -> Option
     reads the ACTUAL palette one-shot audio the already-compiled `assign_sample` commands
     reference, and sums it at the compiled `add_midi_clip` note positions, scaled by each
     note's own velocity — the same arithmetic a render would show, without an engine.
+    Each placement is as long as the engine sounds it: a drum-mode (open-ended) one-shot is
+    summed WHOLE; a melodic-mode (note-gated) one is cut to the note's own length plus the
+    short release fade (_gated_voice) — summing an 808's whole one-shot per note would stack
+    tails the engine cuts off, over-predicting the peak and over-trimming the recipe.
+    Not modelled (stated gaps): repitching (a melodic note plays the file at its own rate
+    here) and the source file's own sample rate (everything sits on a 44.1 kHz grid).
     Returns the summed-mix peak in dBFS, or None if numpy is unavailable, or not one track's
     sample file could be read (missing palette, unreadable format, ...) — callers must fall
     back to a fixed, documented margin rather than pretending a number this couldn't back
@@ -322,6 +356,10 @@ def _predict_peak_at_0db(commands: list[dict], tempo: Optional[float]) -> Option
                       for c in commands if c["command"] == "assign_sample"}
     if not file_by_track:
         return None
+    # the engine's own default when `mode` is absent is "drum" (open-ended) — only an
+    # explicit "melodic" is note-gated (MoshOps.Plugins.cpp assign_sample).
+    gated_tracks = {c["args"]["trackId"] for c in commands
+                    if c["command"] == "assign_sample" and c["args"].get("mode") == "melodic"}
     try:
         import numpy as np
     except ImportError:
@@ -332,6 +370,7 @@ def _predict_peak_at_0db(commands: list[dict], tempo: Optional[float]) -> Option
     # needed — ONE allocation, not a Python list that regrows per note.
     placements: list[tuple[Any, int, float]] = []
     sample_cache: dict[str, Any] = {}
+    voice_cache: dict[tuple[str, int], Any] = {}   # (file, gated length) -> gated voice
     end = 0
     for c in commands:
         if c["command"] != "add_midi_clip":
@@ -339,6 +378,7 @@ def _predict_peak_at_0db(commands: list[dict], tempo: Optional[float]) -> Option
         fpath = file_by_track.get(c["args"]["trackId"])
         if not fpath:
             continue
+        gated = c["args"]["trackId"] in gated_tracks
         if fpath not in sample_cache:
             try:
                 sample_cache[fpath] = _read_wav_mono(fpath, np)
@@ -350,8 +390,15 @@ def _predict_peak_at_0db(commands: list[dict], tempo: Optional[float]) -> Option
         for note in c["args"].get("notes", []):
             start_i = int(round(float(note["start"]) * spb * _MIX_SAMPLE_RATE))
             vel_gain = max(1, min(127, int(note.get("velocity", 100)))) / 127.0
-            placements.append((samp, start_i, vel_gain))
-            end = max(end, start_i + len(samp))
+            voice = samp
+            if gated:
+                hold = max(1, int(round(float(note.get("length", 0.0)) * spb * _MIX_SAMPLE_RATE)))
+                key = (fpath, hold)
+                if key not in voice_cache:
+                    voice_cache[key] = _gated_voice(samp, hold, np)
+                voice = voice_cache[key]
+            placements.append((voice, start_i, vel_gain))
+            end = max(end, start_i + len(voice))
     if not placements:
         return None
 
