@@ -141,6 +141,12 @@ public:
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
+    /** True while any Direct Re-Imagine work could still land: MoshOps holds a request
+        (generation or decision validation) or a worker is still running, including one whose
+        request was already cancelled. Read-only; the headless `--run-script`
+        `__wait_until direct_render_idle` condition polls it instead of sleeping a fixed time. */
+    bool hasDirectRenderWork() const;
+
     void applyMultiplayerCommitForSelfTest (const juce::var& msg);
 
     /** apply_track_preset's two selftest inputs. `faultPoint` makes the next apply fail

@@ -18456,6 +18456,101 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
             continue;
         }
 
+        // __wait_until pseudo-command: pump like __wait, but stop as soon as args.condition
+        // holds, or fail once args.maxMs (default 30000) has passed. A fixed __wait bets a
+        // number against machine load; this waits for the async work itself. Read-only: the
+        // conditions read the same snapshot() the WebView sees (plus whether MoshOps still
+        // has Direct Re-Imagine work in flight). Emits one result line with ok = the
+        // condition held and data.waitedMs; a miss counts as a failure, never a silent pass.
+        //   direct_render_idle   no Direct Re-Imagine request or worker is in flight and no
+        //                        render layer reads queued/rendering: nothing more can land.
+        //   render_job_submitted args.clipId's render layer carries a service jobId. Stops
+        //                        early (a miss) if the layer settles or disappears without one.
+        //   file_exists          args.file exists. A relative path resolves against this
+        //                        script's directory, for a handshake with an observer process.
+        if (name == "__wait_until")
+        {
+            const auto args = subst (command.getProperty ("args", var()));
+            const auto condition = args.getProperty ("condition", var()).toString();
+            const int maxMs = jmax (0, (int) args.getProperty ("maxMs", 30000));
+            const auto clipId = args.getProperty ("clipId", var()).toString();
+            const auto fileArg = args.getProperty ("file", var()).toString();
+            const auto marker = fileArg.isEmpty() ? File() : scriptFile.getParentDirectory().getChildFile (fileArg);
+            const auto busy = [] (const var& layer)
+            {
+                const auto status = layer.getProperty ("status", var()).toString();
+                return status == "queued" || status == "rendering";
+            };
+            const auto layers = [&ops]
+            {
+                std::map<String, var> byClip;
+                const auto snap = ops.snapshot();
+                if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                    for (const auto& track : *tracks)
+                        if (auto* clips = track.getProperty ("clips", var()).getArray())
+                            for (const auto& clip : *clips)
+                                byClip[clip.getProperty ("id", var()).toString()] = clip.getProperty ("renderLayer", var());
+                return byClip;
+            };
+            enum class Poll { waiting, met, missed };
+            const auto check = [&]() -> Poll
+            {
+                if (condition == "file_exists")
+                    return marker == File() ? Poll::missed : marker.existsAsFile() ? Poll::met : Poll::waiting;
+                if (condition == "direct_render_idle")
+                {
+                    if (ops.hasDirectRenderWork()) return Poll::waiting;
+                    for (const auto& entry : layers())
+                        if (busy (entry.second)) return Poll::waiting;
+                    return Poll::met;
+                }
+                if (condition == "render_job_submitted" && clipId.isNotEmpty())
+                {
+                    const auto all = layers();
+                    const auto it = all.find (clipId);
+                    const auto layer = it == all.end() ? var() : it->second;
+                    if (layer.getProperty ("jobId", var()).toString().isNotEmpty()) return Poll::met;
+                    return busy (layer) ? Poll::waiting : Poll::missed;
+                }
+                return Poll::missed;
+            };
+
+            const auto start = Time::getMillisecondCounter();
+            auto state = check();
+            while (state == Poll::waiting && (int) (Time::getMillisecondCounter() - start) < maxMs)
+            {
+                if (mm != nullptr) mm->runDispatchLoopUntil (20);
+                else Thread::sleep (20);
+                state = check();
+            }
+            const auto waitedMs = (int) (Time::getMillisecondCounter() - start);
+
+            auto* d = new DynamicObject();
+            d->setProperty ("condition", condition);
+            d->setProperty ("met", state == Poll::met);
+            d->setProperty ("waitedMs", waitedMs);
+            d->setProperty ("maxMs", maxMs);
+            if (clipId.isNotEmpty()) d->setProperty ("clipId", clipId);
+            if (marker != File()) d->setProperty ("file", marker.getFullPathName());
+            auto* wo = new DynamicObject();
+            wo->setProperty ("command", "__wait_until");
+            wo->setProperty ("ok", state == Poll::met);
+            if (auto lbl = args.getProperty ("label", var()); ! lbl.isVoid())
+                wo->setProperty ("label", lbl);
+            wo->setProperty ("data", var (d));
+            if (state != Poll::met)
+            {
+                ++failures;
+                wo->setProperty ("error", state == Poll::waiting
+                    ? "condition not met within " + String (maxMs) + " ms"
+                    : "condition cannot be met (unknown condition, missing argument, or the layer settled first)");
+            }
+            const auto waitLine = JSON::toString (var (wo), true);
+            outLines.add (waitLine);
+            std::cout << waitLine.toStdString() << std::endl;
+            continue;
+        }
+
         // __snapshot pseudo-command: emit the current session snapshot as a result line
         // (read-only — no mutation, no transaction, no JSONL log; mirrors get_command_log's
         // read-only posture). Lets the DAW-conformance harness assert expected_state / undo
