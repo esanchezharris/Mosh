@@ -12,9 +12,11 @@
 // anonymous namespace, verbatim.
 
 #include "MoshOps.h"
+#include "BoundedRender.h"
 #include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
+#include "audio/CombinedAudioDevice.h"
 #include "audio/DitheringAudioFormat.h"
 #include "ExportRange.h"
 #include "RenderSourceWindow.h"
@@ -430,6 +432,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
 {
     releaseAllVoices();                 // silence held notes while their Edit still exists
     unregisterAllMeterClients();        // old measurers are still valid here
+    endGestureWindow();                 // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file on disk is refused; the current Edit is kept untouched.
     if (auto refusal = eng.reloadFromFile(); refusal.isNotEmpty())   // reconcileMeterClients() re-registers next frame
     {
@@ -672,6 +675,7 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    settleSamplers();                      // play what each sampler holds, not a stale loaded copy
 
     file.getParentDirectory().createDirectory();
     file.deleteFile();
@@ -698,25 +702,9 @@ juce::var MoshOps::cmdExportClipConsolidated (const juce::var& args)
         const te::Edit::ScopedRenderStatus srs (edit, true);
         te::TransportControl::stopAllTransports (edit.engine, false, true);
         te::Renderer::turnOffAllPlugins (edit);
-        te::Renderer::RenderTask task ("Mosh consolidated clip export", params, nullptr, nullptr);
-        const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-        const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, endSec * 8000.0 + 60000.0);
-        const juce::uint32 stallMs    = 20000;
-        float  lastProgress   = -1.0f;
-        juce::uint32 lastProgressMs = startMs;
-        while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-        {
-            const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-            const float p = task.getCurrentTaskProgress();
-            if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-            if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-            {
-                if (task.errorMessage.isEmpty()) task.errorMessage = "consolidated export stalled";
-                break;
-            }
-        }
+        renderError = mosh::runBoundedRender (params, "Mosh consolidated clip export", endSec,
+                                              "consolidated export stalled");
         te::Renderer::turnOffAllPlugins (edit);
-        renderError = task.errorMessage;
     }
     if (renderError.isNotEmpty() || ! file.existsAsFile() || file.getSize() == 0)
     {
@@ -910,6 +898,10 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     unregisterAllMeterClients();           // master tap follows the context being freed
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    // The render below runs on this thread without a message-loop pass, so a sampler edit
+    // or reload/open just before this command would otherwise render from the sampler's
+    // stale loaded copy: silent after a reload, a muted lane still at full gain.
+    settleSamplers();
 
     const double len = juce::jmax (0.1, rEnd - rStart);
 
@@ -978,42 +970,18 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
             && params.destFile.hasWriteAccess()
             && ! params.destFile.isDirectory())
         {
-            te::Renderer::RenderTask task ("Mosh export", params, nullptr, nullptr);
-
-            // Defense-in-depth: bound the render loop. runJob() returns jobNeedsRunningAgain
-            // once per block; if a leaf node can NEVER become ready (e.g. a clip whose source
-            // file can't be opened), progress stalls and this loop would otherwise spin
-            // forever. A no-progress watchdog + an absolute deadline (scaled to the edit
-            // length to allow legitimate realtime renders) turn any such stall into a clean
-            // error instead of an app hang.
-            const double renderSpan   = (rEnd - rStart) + tailSeconds;   // actual rendered span, not the whole edit
-            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, renderSpan * 8000.0 + 60000.0);
-            const juce::uint32 stallMs    = 20000;   // abort if progress doesn't advance for 20s
-            float  lastProgress   = -1.0f;
-            juce::uint32 lastProgressMs = startMs;
-
-            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-            {
-                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                const float p = task.getCurrentTaskProgress();
-                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-
-                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                {
-                    if (task.errorMessage.isEmpty())
-                        task.errorMessage = "export render stalled (a clip's audio source could not be read)";
-                    break;
-                }
-            }
+            // Defense-in-depth: bound the render loop. If a leaf node can NEVER become ready
+            // (e.g. a clip whose source file can't be opened) the loop would otherwise spin
+            // forever; runBoundedRender turns that into a clean error instead of an app hang,
+            // without mistaking a slow render on a loaded machine for a stuck one.
+            const double renderSpan = (rEnd - rStart) + tailSeconds;   // actual rendered span, not the whole edit
+            renderError = mosh::runBoundedRender (params, "Mosh export", renderSpan,
+                                                  "export render stalled (a clip's audio source could not be read)");
 
             te::Renderer::turnOffAllPlugins (edit);
 
-            if (task.errorMessage.isNotEmpty())
-            {
-                renderError = task.errorMessage;
+            if (renderError.isNotEmpty())
                 file.deleteFile();
-            }
         }
         else
         {
@@ -1273,6 +1241,7 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
     unregisterAllMeterClients();
     edit.getTransport().stop (false, false);
     edit.getTransport().freePlaybackContext();
+    settleSamplers();                      // as cmdExportAudio: no stale sampler sound lists
 
     // Edit-wide render mode: one realtime-only hosted synth (e.g. Serum) anywhere in
     // the edit forces ALL stems to render realtime — a safe superset, computed once
@@ -1337,38 +1306,16 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
                 && params.destFile.hasWriteAccess()
                 && ! params.destFile.isDirectory())
             {
-                te::Renderer::RenderTask task ("Mosh stem export", params, nullptr, nullptr);
-
-                // Same no-progress watchdog + absolute deadline as cmdExportAudio /
-                // bounceClipToWav, so ONE bad track's stalled render (e.g. an unreadable
-                // source) errors cleanly instead of hanging the whole stem set.
-                const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-                const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, len * 8000.0 + 60000.0);
-                const juce::uint32 stallMs    = 20000;
-                float  lastProgress   = -1.0f;
-                juce::uint32 lastProgressMs = startMs;
-
-                while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-                {
-                    const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                    const float p = task.getCurrentTaskProgress();
-                    if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-
-                    if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                    {
-                        if (task.errorMessage.isEmpty())
-                            task.errorMessage = "stem render stalled (a clip's audio source could not be read)";
-                        break;
-                    }
-                }
+                // Same bounded loop as cmdExportAudio / bounceTrackToWav, so ONE bad track's
+                // stalled render (e.g. an unreadable source) errors cleanly instead of
+                // hanging the whole stem set.
+                renderError = mosh::runBoundedRender (params, "Mosh stem export", len,
+                                                      "stem render stalled (a clip's audio source could not be read)");
 
                 te::Renderer::turnOffAllPlugins (edit);
 
-                if (task.errorMessage.isNotEmpty())
-                {
-                    renderError = task.errorMessage;
+                if (renderError.isNotEmpty())
                     file.deleteFile();
-                }
             }
             else
             {
@@ -1457,6 +1404,26 @@ juce::var MoshOps::currentAudioSelection (const juce::String& requestedOutput)
                     dm.getCurrentAudioDevice() != nullptr
                         ? dm.getCurrentAudioDevice()->getName() : String());
     o->setProperty ("audioReady", eng.audioReady());
+
+    // Monitoring delay, as the open device reports it (additive, read-only). `combining`
+    // says how the input and output are joined: one device ("single"), two devices as one
+    // private CoreAudio aggregate ("aggregate"), or two devices through JUCE's FIFO
+    // ("fifo", the slow fallback) — see audio/CombinedAudioDevice.h. The estimate is the
+    // device path only; plugin latency on the monitored track is extra.
+    if (auto* device = dm.getCurrentAudioDevice())
+    {
+        const auto mode = audio::combineModeOf (device, setup.inputDeviceName, setup.outputDeviceName);
+        const double rate = device->getCurrentSampleRate();
+        o->setProperty ("combining", audio::combineModeName (mode));
+        if (mode != audio::CombineMode::none && rate > 0.0)
+        {
+            const auto ms = [rate] (int samples) { return std::round (samples * 10000.0 / rate) / 10.0; };
+            o->setProperty ("monitorLatencyMs",
+                            ms (audio::estimatedRoundTripSamples (mode, device->getInputLatencyInSamples(),
+                                                                  device->getOutputLatencyInSamples(),
+                                                                  device->getCurrentBufferSizeSamples())));
+        }
+    }
     return var (o);
 }
 
@@ -1855,6 +1822,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
                        String (".") + projectname::kProjectExtension, false);
     }
 
+    endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
@@ -1928,6 +1896,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
+    endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.
     if (auto refusal = eng.openProject (file); refusal.isNotEmpty())  // else: stops transport + frees ctx before swap
     {
