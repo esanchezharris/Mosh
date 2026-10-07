@@ -2146,7 +2146,7 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
         // so a file picked from list_presets gets "wrong command" on any track rather
         // than "no 4OSC instrument" on the vocal track it was meant for; and by the
         // file's own `kind` once it is parsed, for one that was copied somewhere else.
-        static const juce::String wrongSeam ("this is a track preset, not an instrument patch — "
+        static const juce::String wrongSeam ("this is a track preset, not an instrument patch -- "
                                              "apply it from the track's Vocal preset menu");
         if (file.getParentDirectory().getFileName() == trackpreset::kLibraryKey)
             return errResult ("load_preset", wrongSeam);
@@ -2350,7 +2350,7 @@ juce::var MoshOps::cmdApplyTrackPreset (const juce::var& args)
     // fall back to; an id that no longer resolves is an error, not a retarget.
     const auto trackId = args.getProperty ("trackId", var()).toString();
     if (trackId.isEmpty())
-        return errResult (cmd, "trackId is required — a preset is applied to one named track");
+        return errResult (cmd, "trackId is required -- a preset is applied to one named track");
     auto* track = findTrack (trackId);
     if (track == nullptr)
         return errResult (cmd, "no track: " + trackId);
@@ -2363,7 +2363,7 @@ juce::var MoshOps::cmdApplyTrackPreset (const juce::var& args)
     if (firstAuxReturnOn (*track) != nullptr)
         return errResult (cmd, "this is a return track; apply the preset to the vocal track that feeds it");
     if (eng.edit().getTransport().isRecording() || trackPresetPretendRecording_)
-        return errResult (cmd, "cannot apply a preset while recording — stop recording first");
+        return errResult (cmd, "cannot apply a preset while recording -- stop recording first");
 
     // ── preflight: the preset ────────────────────────────────────────────────────────
     const auto fileArg = args.getProperty ("file", var()).toString();

@@ -4502,7 +4502,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 p->state.getParent().removeChild (p->state, nullptr);
                 break;
             }
-        check (! tapPresent(), "spectral tap removed — master bus clean for later sections");
+        check (! tapPresent(), "spectral tap removed -- master bus clean for later sections");
     }
 
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
@@ -5360,9 +5360,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto unknown = cmd (ops, "cancel_training_job", args1 ("jobId", ghost));
         check (! ok (unknown), "cancel_training_job refuses a jobId no service knows (it does not report success)");
         check (unknown.getProperty ("error", var()).toString().isNotEmpty(),
-               "…and says why");
+               "...and says why");
         check (! recordedJob (ghost),
-               "…and records no job for it (no phantom \"cancelled\" job in the registry)");
+               "...and records no job for it (no phantom \"cancelled\" job in the registry)");
     }
 
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
@@ -18972,9 +18972,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto coincidence = "{\"v\": 1, \"transactionId\": \"txn-x\", \"revision\": " + tid
                                + ", \"fingerprint\": \"9f" + tid + "e0c4d1b27a6f38e5c0d9a4b1f7\""
                                + ", \"transactionKey\": \"request-" + tid + "ab12cd34\"}";
-        check (coincidence.contains (tid), "…the old substring check DOES trip on a digest/revision collision");
+        check (coincidence.contains (tid), "...the old substring check DOES trip on a digest/revision collision");
         check (whereLedgerCarries (coincidence, tid).isEmpty(),
-               "…the field check does not (digits inside a digest, a revision equal to the id)");
+               "...the field check does not (digits inside a digest, a revision equal to the id)");
         // …and it still catches the id wherever it really is data.
         for (const auto& leak : { "{\"v\": 1, \"target\": \"" + tid + "\"}",
                                   "{\"v\": 1, \"note\": \"moved track " + tid + " to -3 dB\"}",

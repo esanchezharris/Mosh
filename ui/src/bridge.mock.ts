@@ -5724,14 +5724,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // the display strings the pinned engine produces for the preset's values.
     case "apply_track_preset": {
       const trackId = str(args.trackId);
-      if (!trackId) return err(command, "trackId is required — a preset is applied to one named track");
+      if (!trackId) return err(command, "trackId is required -- a preset is applied to one named track");
       const t = findTrack(trackId);
       if (!t) return err(command, "no track: " + trackId);
       if (t.type === "drum") return err(command, "a vocal preset applies to an audio track; this is a drum track");
       if (t.isInstrument || (t.plugins ?? []).some((p) => p.isInstrument))
         return err(command, "this track hosts an instrument; a vocal preset applies to an audio track");
       if (t.isReturn) return err(command, "this is a return track; apply the preset to the vocal track that feeds it");
-      if (snapshot.transport.recording) return err(command, "cannot apply a preset while recording — stop recording first");
+      if (snapshot.transport.recording) return err(command, "cannot apply a preset while recording -- stop recording first");
       const file = str(args.file, "");
       if (file !== MOCK_TRACK_PRESET.file) return err(command, "preset file not found: " + file);
 
@@ -5770,7 +5770,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!file) return err(command, "preset file not found: ");
       // Mirrors native: a track-chain preset is refused by name on the instrument seam.
       if (file.includes("/track-chain/"))
-        return err(command, "this is a track preset, not an instrument patch — apply it from the track's Vocal preset menu");
+        return err(command, "this is a track preset, not an instrument patch -- apply it from the track's Vocal preset menu");
       const isVital = file.endsWith(".vital");
       if (!isVital) {
         // The .json branch, as cmdLoadPreset runs it on the built-in 4OSC: the file must
