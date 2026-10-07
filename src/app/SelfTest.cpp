@@ -184,6 +184,81 @@ namespace
             juce::StringArray::fromLines (ledger.loadFileAsString()));
     }
 
+    /** True when `text` holds `token` as a WHOLE token: bounded on each side by the text's
+        edge or a character that is not a letter or digit. "1085", "id=1085", "[1085]" and
+        "track_1085" match; "9ab1085cd" does not, because a run of hex is one token. */
+    bool containsWholeToken (const juce::String& text, const juce::String& token)
+    {
+        if (token.isEmpty()) return false;
+        const auto isWord = [] (juce::juce_wchar c) { return juce::CharacterFunctions::isLetterOrDigit (c); };
+        for (int at = text.indexOf (token); at >= 0; at = text.indexOf (at + 1, token))
+        {
+            const int end = at + token.length();
+            if ((at == 0 || ! isWord (text[at - 1])) && (end >= text.length() || ! isWord (text[end])))
+                return true;
+        }
+        return false;
+    }
+
+    /** The path under `path` at which `v` carries `id` as data, or "" if it does not. */
+    juce::String varPlaceCarrying (const juce::var& v, const juce::String& path, const juce::String& id)
+    {
+        if (auto* o = v.getDynamicObject())
+        {
+            for (auto& p : o->getProperties())
+            {
+                const auto at = path + "/" + p.name.toString();
+                if (containsWholeToken (p.name.toString(), id)) return at + " (key)";
+                if (auto hit = varPlaceCarrying (p.value, at, id); hit.isNotEmpty()) return hit;
+            }
+            return {};
+        }
+        if (auto* a = v.getArray())
+        {
+            for (int i = 0; i < a->size(); ++i)
+                if (auto hit = varPlaceCarrying (a->getReference (i), path + "[" + juce::String (i) + "]", id);
+                    hit.isNotEmpty())
+                    return hit;
+            return {};
+        }
+        if (v.isString())
+            return containsWholeToken (v.toString(), id) ? path : juce::String();
+        // `revision` is the edit-revision counter, not a track id, but it shares their number
+        // space: bootstrap-refusal-txn's revision drifts run to run (1057..1093 in the ledgers
+        // on disk, 2026-09-30) around the fixture's id (1085), and five 2026-08-07 ledgers
+        // carry revision 1073 beside trackId 1073. Equality there is a coincidence.
+        if ((v.isInt() || v.isInt64() || v.isDouble()) && path != "/revision")
+            return id.containsOnly ("0123456789") && (double) v == id.getDoubleValue() ? path : juce::String();
+        return {};
+    }
+
+    /** Where the durable txn ledger carries `id` as DATA ("line N /key"), or "" if nowhere.
+        A substring test over the whole file is not exact for a short numeric id (the
+        2026-09-30 selftest flake): a revision can equal it (above), and the ledger is mostly
+        32-char MD5 hex (two fingerprints per txn record, up to six digests per request
+        record) that holds a given 4 digits in about 1 run in 130. So each line is parsed,
+        and every key and string value, at any depth, is checked for the id as a whole
+        token, and every number except `revision` for equality with it. A line that does not
+        parse — a torn crash tail — is scanned raw, token-wise, so malformed text cannot
+        hide a leak. */
+    juce::String whereLedgerCarries (const juce::String& ledgerText, const juce::String& id)
+    {
+        const auto lines = juce::StringArray::fromLines (ledgerText);
+        for (int n = 0; n < lines.size(); ++n)
+        {
+            const auto line = lines[n].trim();
+            if (line.isEmpty()) continue;
+            const auto record = juce::JSON::parse (line);
+            const auto where = record.getDynamicObject() != nullptr
+                                   ? varPlaceCarrying (record, {}, id)
+                                   : (containsWholeToken (line, id) ? juce::String ("(unparsed line)")
+                                                                    : juce::String());
+            if (where.isNotEmpty())
+                return "line " + juce::String (n + 1) + " " + where;
+        }
+        return {};
+    }
+
     // A fixed filename in the shared, machine-wide system temp dir collides when two
     // `Mosh --selftest` processes run at once on the same host (a self-hosted CI runner
     // racing a dev's local run, or two concurrent worktree gates): one process's
@@ -17417,7 +17492,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ledgerText.contains ("\"args\"") == false, "no args key");
         check (ledgerText.contains ("trackId") == false, "no trackId");
         check (ledgerText.contains ("/Users/") == false, "no owner-home path");
-        check (ledgerText.contains (tid) == false, "not even the fixture's own track id");
+        const auto tidPlace = whereLedgerCarries (ledgerText, tid);
+        check (tidPlace.isEmpty(), "not even the fixture's own track id"
+                                       + (tidPlace.isEmpty() ? juce::String() : " (found at " + tidPlace + ")"));
+
+        // EXACTNESS, proven both ways with the fixture's REAL id. A digest that happens to
+        // contain the id's digits and a revision equal to it are coincidences: the old
+        // `ledgerText.contains (tid)` trips on this line, the field check must not.
+        const auto coincidence = "{\"v\": 1, \"transactionId\": \"txn-x\", \"revision\": " + tid
+                               + ", \"fingerprint\": \"9f" + tid + "e0c4d1b27a6f38e5c0d9a4b1f7\""
+                               + ", \"transactionKey\": \"request-" + tid + "ab12cd34\"}";
+        check (coincidence.contains (tid), "…the old substring check DOES trip on a digest/revision collision");
+        check (whereLedgerCarries (coincidence, tid).isEmpty(),
+               "…the field check does not (digits inside a digest, a revision equal to the id)");
+        // …and it still catches the id wherever it really is data.
+        for (const auto& leak : { "{\"v\": 1, \"target\": \"" + tid + "\"}",
+                                  "{\"v\": 1, \"note\": \"moved track " + tid + " to -3 dB\"}",
+                                  "{\"v\": 1, \"applied\": " + tid + "}",
+                                  "{\"v\": 1, \"steps\": [{\"t\": \"" + tid + "\"}]}",
+                                  "{\"v\": 1, \"" + tid + "\": true}",
+                                  "{\"v\": 1, \"target\": \"" + tid })   // torn: does not parse
+            check (whereLedgerCarries (leak, tid).isNotEmpty(), "yet the id IS caught as data: " + leak);
 
         // The RESTART-BLOCK fixture. An unresolved transaction is exactly what a crash
         // leaves behind: a `begin` record with no terminal record after it. Read the ledger
