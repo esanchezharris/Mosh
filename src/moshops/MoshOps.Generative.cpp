@@ -1271,8 +1271,10 @@ bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTre
     beginTxn ("apply_render_beneath");
     auto* hiddenTrack = findOrCreateHiddenRenderTrack();
     if (hiddenTrack == nullptr) return false;
-    auto landed = hiddenTrack->insertWaveClip ("mosh-render-" + midi->getName(), dest,
-        { { pos.getStart(), pos.getLength() }, {} }, false);
+    // Plain: the render stands in for the MIDI clip at the MIDI clip's own span, whatever loop
+    // metadata the artifact carries (insertPlainWaveClip, MoshOpsInternal.h).
+    auto landed = insertPlainWaveClip (*hiddenTrack, "mosh-render-" + midi->getName(), dest,
+        { { pos.getStart(), pos.getLength() }, {} });
     if (landed == nullptr) return false;
     landed->state.setProperty (ids::moshHidden, true, &undoManager());
     midi->setMuted (true);
@@ -2367,8 +2369,9 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
             landLen   = tracktion::TimeDuration::fromSeconds (re - rs);
         }
     }
-    auto landed = lane->insertWaveClip ("neural-" + clip->getName(), dest,
-        { { landStart, landLen }, {} }, false);
+    // Plain, so the render covers exactly the span it was made for.
+    auto landed = insertPlainWaveClip (*lane, "neural-" + clip->getName(), dest,
+        { { landStart, landLen }, {} });
 
     node.setProperty (ids::userKept, true, &undoManager());
     node.setProperty (ids::status, "ready", &undoManager());

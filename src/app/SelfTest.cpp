@@ -15200,7 +15200,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // message-loop pump.
     //
     // te::insertWaveClip acts on a file's loop metadata (insertPlainWaveClip in
-    // MoshOps.Clips.cpp has the mechanism). Three shapes, each from real material:
+    // MoshOpsInternal.h has the mechanism). Three shapes, each from real material:
     //   • an ACID chunk with a root note and zero beats (what Sony ACID writes on a one-shot
     //     a cappella) → the clip came in auto-PITCHED: transposed to the session key;
     //   • an ACID chunk with a beat count → auto-TEMPO: stretched to the session tempo;
@@ -15383,6 +15383,290 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         outDir.deleteRecursively();
         fixtureDir.deleteRecursively();
+    }
+
+    // Regression: audio Mosh writes ITSELF lands as is, whatever its file is called or carries.
+    //
+    // The section above covers files a producer drops in. The same adoption
+    // (insertPlainWaveClip in MoshOpsInternal.h has the mechanism) reached Mosh's own renders:
+    //   • bounce_track, freeze_track and consolidate_clips name the render
+    //     "<track>-<trackId>-<n>.wav", and the engine reads a tempo out of a file's NAME: a
+    //     bare number 51–249 between separators, when the file is a whole number of bars long
+    //     at it. Four seconds bounced off a track called "Beat 120" is "8 beats at 120", so in
+    //     a 100 bpm session it landed auto-tempo'd and 4.8 s long.
+    //   • a generative render lands the service's artifact under a layer-id name, which cannot
+    //     read as a tempo. Loop metadata INSIDE the artifact is acted on all the same, and
+    //     lands the render at some other length than the span it was made for.
+    // A recorded take is exposed too ("<track>_Take_<n>"), but the engine lands it and nothing
+    // records without a device: that half is the last part of `Mosh --v3-vocal-smoke`.
+    {
+        section ("Render landings: a tempo-named track's bounce / freeze / consolidate, and a loop-tagged render, land as is");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "render-as-is-selftest"))),
+               "render-as-is: fresh project ok");
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 100.0))), "render-as-is: session at 100 bpm");
+
+        auto engineClip = [&] (const String& id) -> te::Clip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))   // the hidden render track included
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return c;
+            return nullptr;
+        };
+
+        // "As is": neither follow switch on, nothing left for a stretcher to do, and exactly
+        // `seconds` of timeline.
+        auto landsAsIs = [&] (const String& id, double seconds)
+        {
+            auto* w = dynamic_cast<te::WaveAudioClip*> (engineClip (id));
+            return w != nullptr && ! w->getAutoTempo() && ! w->getAutoPitch() && ! w->usesTimeStretchedProxy()
+                   && std::abs (w->getPosition().getLength().inSeconds() - seconds) < 1.0e-3;
+        };
+
+        auto readsAsLoop = [&] (const File& f)
+        {
+            return te::AudioFile (eng.engine(), f).getInfo().loopInfo.isLoopable();
+        };
+
+        // ── renders named after a track ──
+        constexpr double toneSeconds = 4.0;   // 8 beats at the "120" in the track's name
+        auto tonedTrack = [&] (String& trackId, String& clipId)
+        {
+            trackId = cmd (ops, "create_track", args1 ("name", "Beat 120"))["data"]
+                          .getProperty ("trackId", var()).toString();
+            clipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", toneSeconds },
+                                                            { "freq", 220.0 }}))["data"]
+                         .getProperty ("clipId", var()).toString();
+        };
+
+        // The render must read as a loop, or the landing check proves nothing.
+        auto checkLanding = [&] (const String& what, const var& result, const char* clipKey)
+        {
+            const String tag = "render-as-is [" + what + "]: ";
+            check (ok (result), tag + "ok" + (ok (result) ? String() : " (" + result.getProperty ("error", var()).toString() + ")"));
+            const auto data = result.getProperty ("data", var());
+            const File rendered (data.getProperty ("file", var()).toString());
+            check (rendered.existsAsFile() && readsAsLoop (rendered),
+                   tag + "the render reads as a loop, its tempo taken from the track's name (" + rendered.getFileName() + ")");
+            check (landsAsIs (data.getProperty (clipKey, var()).toString(), toneSeconds),
+                   tag + "the landed clip is the render's own length with warp and key-follow off");
+        };
+
+        {
+            String trackId, clipId;
+            tonedTrack (trackId, clipId);
+            checkLanding ("bounce to a new track",
+                          cmd (ops, "bounce_track", objN ({{ "trackId", trackId }, { "mode", "newTrack" }})), "clipId");
+            checkLanding ("bounce in place",
+                          cmd (ops, "bounce_track", objN ({{ "trackId", trackId }, { "mode", "inPlace" }})), "clipId");
+        }
+        {
+            String trackId, clipId;
+            tonedTrack (trackId, clipId);
+            checkLanding ("freeze", cmd (ops, "freeze_track", args1 ("trackId", trackId)), "clipId");
+        }
+        {
+            String trackId, clipId;
+            tonedTrack (trackId, clipId);
+            const auto secondHalf = cmd (ops, "split_clip", objN ({{ "clipId", clipId }, { "time", 2.0 }}))["data"]
+                                        .getProperty ("newClipId", var()).toString();
+            checkLanding ("consolidate",
+                          cmd (ops, "consolidate_clips", objN ({{ "clipIds", Array<var> { clipId, secondHalf } }})),
+                          "newClipId");
+        }
+
+        // ── renders that carry loop metadata ──
+        // The service's WAVs carry none today, so tag one on disk between the render and its
+        // landing: an ACID chunk saying "8 beats", on 3 s of tone. Adopted, that lands as 8
+        // beats of the session tempo — 4.8 s — instead of the span the render was made for.
+        auto tagAsLoop = [&] (const File& f) -> bool
+        {
+            constexpr double rate = 44100.0;
+            const int n = roundToInt (3.0 * rate);
+            AudioBuffer<float> buf (1, n);
+            for (int i = 0; i < n; ++i)
+                buf.setSample (0, i, 0.5f * (float) std::sin (MathConstants<double>::twoPi * 220.0 * i / rate));
+
+            StringPairArray acid;
+            acid.set (WavAudioFormat::acidOneShot, "0");
+            acid.set (WavAudioFormat::acidStretch, "1");
+            acid.set (WavAudioFormat::acidDiskBased, "1");
+            acid.set (WavAudioFormat::acidizerFlag, "1");
+            acid.set (WavAudioFormat::acidRootSet, "0");
+            acid.set (WavAudioFormat::acidBeats, "8");
+            acid.set (WavAudioFormat::acidDenominator, "4");
+            acid.set (WavAudioFormat::acidNumerator, "4");
+            acid.set (WavAudioFormat::acidTempo, "160");
+
+            bool written = false;
+            f.deleteFile();
+            if (auto os = std::unique_ptr<FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<AudioFormatWriter> w (eng.engine().getAudioFileFormatManager().getWavFormat()
+                                                          ->createWriterFor (os.get(), rate, 1u, 16, acid, 0));
+                if (w != nullptr) { os.release(); written = w->writeFromAudioSampleBuffer (buf, 0, n); }
+            }
+            // The engine may have read this path before; make it read the new contents.
+            eng.engine().getAudioFileManager().forceFileUpdate (te::AudioFile (eng.engine(), f));
+            return written && readsAsLoop (f);
+        };
+
+        auto renderLayerNode = [&] (const String& clipId) -> ValueTree
+        {
+            if (auto* c = engineClip (clipId))
+                return c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+            return {};
+        };
+        const Identifier landedClipId ("landedClipId");   // kLandedClipId, MoshOpsInternal.h
+
+        // accept_render: a sub-region render lands on the "Neural Renders" lane, over its region.
+        {
+            const String tag = "render-as-is [accepted render]: ";
+            const auto trackId = cmd (ops, "create_track", args1 ("name", "Scoped"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            const auto clipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 2.0 },
+                                                                        { "freq", 220.0 }}))["data"]
+                                    .getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", clipId }, { "adapter", "fake" },
+                                                               { "regionStart", 0.5 }, { "regionEnd", 1.0 }}))),
+                   tag + "create_render_layer over [0.5, 1.0] ok");
+            check (ok (cmd (ops, "render_layer", objN ({{ "clipId", clipId }, { "wait", true }}))), tag + "render_layer ok");
+
+            const File artifact (renderLayerNode (clipId).getProperty (ids::cacheArtifact).toString());
+            check (artifact.existsAsFile() && tagAsLoop (artifact), tag + "the render artifact now reads as an 8-beat loop");
+            check (ok (cmd (ops, "accept_render", args1 ("clipId", clipId))), tag + "accept_render ok");
+            check (landsAsIs (renderLayerNode (clipId).getProperty (landedClipId).toString(), 0.5),
+                   tag + "the landed clip covers the 0.5 s region with warp and key-follow off");
+        }
+
+        // The render beneath a MIDI clip: reset it, tag the landed file, and let the identical
+        // re-render (a cache hit) land that file again.
+        {
+            const String tag = "render-as-is [render beneath MIDI]: ";
+            const auto trackId = cmd (ops, "create_track", args1 ("name", "Keys"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            Array<var> notes;
+            for (int i = 0; i < 4; ++i)
+                notes.add (objN ({{ "pitch", 60 + i * 2 }, { "start", (double) i * 0.5 }, { "length", 0.5 }, { "velocity", 100 }}));
+            const auto midiId = cmd (ops, "add_midi_clip", objN ({{ "trackId", trackId }, { "length", 2.0 }, { "notes", notes }}))["data"]
+                                    .getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", midiId }, { "adapter", "fake" }}))),
+                   tag + "create_render_layer on a MIDI clip ok");
+            check (ok (cmd (ops, "render_layer", objN ({{ "clipId", midiId }, { "wait", true }}))), tag + "render_layer ok");
+
+            const File landedFile (renderLayerNode (midiId).getProperty (ids::cacheArtifact).toString());
+            check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", midiId))), tag + "reset_render_layer ok");
+            check (landedFile.existsAsFile() && tagAsLoop (landedFile), tag + "the landed render file now reads as an 8-beat loop");
+
+            auto again = cmd (ops, "render_layer", objN ({{ "clipId", midiId }, { "wait", true }}));
+            check (ok (again) && again["data"].getProperty ("cache", var()).toString() == "hit",
+                   tag + "the identical re-render is a cache hit, so it lands the file on disk");
+            auto* midi = engineClip (midiId);
+            check (midi != nullptr
+                       && landsAsIs (renderLayerNode (midiId).getProperty (landedClipId).toString(),
+                                     midi->getPosition().getLength().inSeconds()),
+                   tag + "the hidden clip covers the MIDI clip's span with warp and key-follow off");
+        }
+    }
+
+    // Regression: a copy of a warped clip is warped the same way.
+    //
+    // duplicate_clip and paste_clip insert the source file plain and then carry the clip's gain
+    // across. They did not carry its warp: the copy of a clip stretched from 4 s to 5 s kept the
+    // 5 s of timeline, played the file unstretched for 4 of them, and then nothing. So the
+    // copies are judged by what they render as well as by their state: the tone has to run to
+    // the end of each.
+    {
+        section ("Copies: duplicate_clip and paste_clip keep a clip's warp");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "warp-copy-selftest"))), "warp-copy: fresh project ok");
+
+        auto engineClip = [&] (const String& id) -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+
+        const auto trackId = cmd (ops, "create_track", args1 ("name", "Loop"))["data"]
+                                 .getProperty ("trackId", var()).toString();
+        const auto sourceId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 4.0 },
+                                                                      { "freq", 220.0 }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        constexpr double warpedSeconds = 5.0;
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", sourceId }, { "length", warpedSeconds }}))),
+               "warp-copy: stretch_clip, 4 s of file across 5 s, ok");
+
+        auto* source = engineClip (sourceId);
+        check (source != nullptr && source->getAutoTempo(), "warp-copy: the source clip is warped");
+        const auto sourceMode = source != nullptr ? source->getTimeStretchMode() : te::TimeStretcher::disabled;
+        const double sourceBpm = source != nullptr ? source->getLoopInfo().getBpm (source->getAudioFile().getInfo()) : 0.0;
+
+        auto warpedLikeSource = [&] (const String& id, double start)
+        {
+            auto* w = engineClip (id);
+            return w != nullptr && w->getAutoTempo() && w->getTimeStretchMode() == sourceMode
+                   && std::abs (w->getLoopInfo().getBpm (w->getAudioFile().getInfo()) - sourceBpm) < 1.0e-6
+                   && std::abs (w->getPosition().getStart().inSeconds() - start) < 1.0e-6
+                   && std::abs (w->getPosition().getLength().inSeconds() - warpedSeconds) < 1.0e-6;
+        };
+
+        auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", sourceId));
+        const auto dupId = dup["data"].getProperty ("newClipId", var()).toString();
+        check (ok (dup) && warpedLikeSource (dupId, warpedSeconds),
+               "warp-copy: duplicate_clip's copy has the source's warp (stretch mode, source tempo, length)");
+
+        var clipDesc;
+        {
+            const auto snap = ops.snapshot();
+            if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                for (auto& t : *tracks)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == sourceId)
+                                clipDesc = c;
+        }
+        constexpr double pasteStart = 20.0;
+        auto pasted = cmd (ops, "paste_clip", objN ({{ "trackId", trackId }, { "start", pasteStart }, { "clip", clipDesc }}));
+        const auto pastedId = pasted["data"].getProperty ("clipId", var()).toString();
+        check (ok (pasted) && warpedLikeSource (pastedId, pasteStart),
+               "warp-copy: paste_clip's copy has the source's warp (stretch mode, source tempo, length)");
+
+        // The peak of channel 0 over [fromSec, toSec) of a rendered file; -1 if unreadable.
+        auto levelIn = [] (const File& f, double fromSec, double toSec) -> float
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) };
+            if (reader == nullptr) return -1.0f;
+            const auto first = (int64) (fromSec * reader->sampleRate);
+            const int n = (int) jmin ((int64) ((toSec - fromSec) * reader->sampleRate), reader->lengthInSamples - first);
+            if (n < 1) return -1.0f;
+            AudioBuffer<float> buf ((int) reader->numChannels, n);
+            reader->read (&buf, 0, n, first, true, true);
+            return buf.getMagnitude (0, 0, n);
+        };
+
+        // Unstretched, the 4 s file is over well before the last half second of a 5 s clip.
+        auto out = eng.sessionDir().getChildFile ("exports").getChildFile ("warp-copy-selftest.wav");
+        out.getParentDirectory().createDirectory();
+        out.deleteFile();
+        auto exp = cmd (ops, "export_audio", objN ({{ "file", out.getFullPathName() }, { "format", "wav" },
+                                                    { "bitDepth", 24 }, { "tail", "cut" }}));
+        check (ok (exp), "warp-copy: export ok" + (ok (exp) ? String() : " (" + exp.getProperty ("error", var()).toString() + ")"));
+        check (levelIn (out, warpedSeconds + 4.4, warpedSeconds + 4.9) > 0.05f,
+               "warp-copy: the duplicate's tone runs to the end of the clip");
+        check (levelIn (out, pasteStart + 4.4, pasteStart + 4.9) > 0.05f,
+               "warp-copy: the pasted copy's tone runs to the end of the clip");
+        out.deleteFile();
+
+        // The warp is part of the copy's own undo step.
+        check (ok (cmd (ops, "undo")) && engineClip (pastedId) == nullptr, "warp-copy: one undo removes the pasted copy");
+        check (ok (cmd (ops, "undo")) && engineClip (dupId) == nullptr
+                   && engineClip (sourceId) != nullptr && engineClip (sourceId)->getAutoTempo(),
+               "warp-copy: one more removes the duplicate, and the source is still warped");
     }
 
     // Regression: export after relink_clip to a project-LOCAL copy. relink_clip rewrites a
@@ -19470,8 +19754,181 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
             }
         }
     }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
     return failures;
+}
+
+// ── Take landing — a recorded take is the recording: its own length, not warped, not
+// transposed. The live half of --selftest's "Render landings" section, run as the last part of
+// --v3-vocal-smoke: nothing records without a device. The engine lands a take itself, through
+// te::insertWaveClip, which reads a tempo out of a file's NAME (any bare number 51–249 between
+// separators, when the file is a whole number of bars long at it), and it names take files
+// "<track>_Take_<n>". After an ordinary take for reference, three ways in:
+//   • the TRACK name: one bar at 60 on a track called "Vox 60". Adopted, it lands as 4 beats
+//     of the session tempo: at 120 bpm, 2 s of a 4 s recording;
+//   • the TAKE NUMBER, on a plainly named track: it is the name's last token, so take 51 is
+//     "at 51 bpm". Takes 1–50 are occupied with placeholder files first;
+//   • a track named with the SESSION's tempo ("Vox 120"), recorded behind a 1-bar count-in.
+//     Adopted, its length is unchanged and it is simply left warped; and the count-in trim
+//     (RecordingLanding.h) runs on whatever the landing left. ──
+static void checkTakesLandAsRecorded (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    section ("Take landing live: a take whose file name reads as a tempo still lands as recorded");
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (5);
+            else Thread::sleep (5);
+        }
+    };
+
+    const double sessionBpm = eng.edit().tempoSequence.getBpmAt (tracktion::TimePosition());
+    check (sessionBpm > 50.0 && sessionBpm < 250.0 && sessionBpm == std::floor (sessionBpm) && sessionBpm != 60.0,
+           "the session tempo is a whole number a track can be named after, and not 60 (" + String (sessionBpm) + " bpm)");
+
+    // Only the track under test may record: the Booth's Takes track is still armed.
+    {
+        const auto snap = ops.snapshot();
+        if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+            for (auto& t : *tracks)
+                if ((bool) t.getProperty ("armed", false))
+                    cmd (ops, "arm_track", objN ({{ "trackId", t.getProperty ("id", var()) }, { "armed", false }}));
+    }
+
+    auto propertyNames = [] (const ValueTree& v)
+    {
+        StringArray names;
+        for (int i = 0; i < v.getNumProperties(); ++i)
+            names.add (v.getPropertyName (i).toString());
+        names.sort (false);
+        return names.joinIntoString (" ");
+    };
+    String ordinaryTakeProperties;   // the clip state of a take whose file name reads as nothing
+    File takeDir;                    // where the engine writes this project's takes
+
+    // Records `takeBeats` session beats from `punchIn` on a new track called `trackName`, then
+    // checks the take. A file expected to read as a loop must do so, or the run proves nothing.
+    struct TakeCase { String trackName, stem; double punchIn, takeBeats; int countInBars; bool readsAsLoop; };
+    auto recordAndCheck = [&] (const TakeCase& tc)
+    {
+        const String tag = "[" + tc.stem + "] ";
+        const double takeSeconds = tc.takeBeats * 60.0 / sessionBpm;
+
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", tc.countInBars))),
+               tag + "count-in of " + String (tc.countInBars) + " bar(s)");
+        const auto trackId = cmd (ops, "create_track", args1 ("name", tc.trackName))["data"]
+                                 .getProperty ("trackId", var()).toString();
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+        check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), tag + "track armed on the live input");
+        check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", trackId }, { "mode", "off" }}))),
+               tag + "input monitoring off");
+        check (ok (cmd (ops, "set_transport", args1 ("position", tc.punchIn))), tag + "seek to the punch-in");
+        auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), tag + "recording started");
+
+        // Roll until the transport has covered the take, then stop: the name's tolerance is a
+        // tenth of a beat either side, a good deal wider than a pump tick. A count-in rolls
+        // up to the punch-in first.
+        const auto deadline = Time::getMillisecondCounter() + (uint32) ((takeSeconds + 15.0) * 1000.0);
+        while (eng.edit().getTransport().getPosition().inSeconds() < tc.punchIn + takeSeconds - 0.01
+               && Time::getMillisecondCounter() < deadline)
+            pump (5);
+        auto stop = cmd (ops, "stop_recording");
+        const auto clips = stop["data"].getProperty ("clips", var());
+        check (ok (stop) && clips.size() == 1, tag + "one take landed");
+        cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+        if (clips.size() != 1)
+            return;
+
+        const auto clipId = clips[0].getProperty ("id", var()).toString();
+        const File source (clips[0].getProperty ("sourceFile", var()).toString());
+        check (source.getFileNameWithoutExtension() == tc.stem,
+               tag + "the engine named the take file as expected (" + source.getFileName() + ")");
+        const te::AudioFile takeFile (eng.engine(), source);
+        const double fileSeconds = takeFile.getLength();
+        check (takeFile.getInfo().loopInfo.isLoopable() == tc.readsAsLoop,
+               tag + (tc.readsAsLoop ? "the take file reads as a loop, its tempo taken from its name ("
+                                     : "the take file does not read as a loop (")
+                   + String (fileSeconds, 3) + " s)");
+
+        auto findTake = [&] () -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == clipId)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+        auto* take = findTake();
+        check (take != nullptr, tag + "the take is a wave clip in the edit");
+        if (take == nullptr)
+            return;
+
+        const auto pos = take->getPosition();
+        const double start = pos.getStart().inSeconds(), length = pos.getLength().inSeconds(),
+                     offset = pos.getOffset().inSeconds();
+        std::cerr << "  ..   " << source.getFileName() << ": file=" << fileSeconds << " s clip start=" << start
+                  << " length=" << length << " offset=" << offset
+                  << " autoTempo=" << (int) take->getAutoTempo() << " autoPitch=" << (int) take->getAutoPitch() << "\n";
+        check (! take->getAutoTempo() && ! take->getAutoPitch() && ! take->usesTimeStretchedProxy(),
+               tag + "the take is not warped and does not follow the key");
+        check (std::abs (start - tc.punchIn) < 0.05, tag + "the take starts at the punch-in (" + String (start, 3) + " s)");
+        check (std::abs (offset + length - fileSeconds) < 0.05,
+               tag + "the take plays through to the end of its recording (offset " + String (offset, 3)
+                   + " + length " + String (length, 3) + " of " + String (fileSeconds, 3) + " s)");
+
+        if (! tc.readsAsLoop)
+        {
+            ordinaryTakeProperties = propertyNames (take->state);
+            takeDir = source.getParentDirectory();
+            return;
+        }
+        check (propertyNames (take->state) == ordinaryTakeProperties,
+               tag + "the take's clip state has exactly an ordinary take's properties (" + propertyNames (take->state) + ")");
+
+        // Whatever the landing needed belongs to the landing's own undo step: one undo takes
+        // the take away, and the redo brings back the take as it landed, not as the engine
+        // first inserted it. (The clip object is rebuilt, so look it up again.)
+        check (ok (cmd (ops, "undo")) && findTake() == nullptr, tag + "one undo removes the take");
+        check (ok (cmd (ops, "redo")), tag + "redo ok");
+        auto* again = findTake();
+        check (again != nullptr && ! again->getAutoTempo() && ! again->getAutoPitch()
+                   && std::abs (again->getPosition().getStart().inSeconds() - start) < 1.0e-6
+                   && std::abs (again->getPosition().getLength().inSeconds() - length) < 1.0e-6
+                   && std::abs (again->getPosition().getOffset().inSeconds() - offset) < 1.0e-6
+                   && propertyNames (again->state) == ordinaryTakeProperties,
+               tag + "the redo brings the take back exactly as it landed");
+    };
+
+    // The reference: nothing in "Plain_Take_1" reads as a tempo.
+    recordAndCheck ({ "Plain", "Plain_Take_1", 0.0, 4.0, 0, false });
+    check (ordinaryTakeProperties.isNotEmpty(), "an ordinary take landed, to compare the others against ("
+                                                    + ordinaryTakeProperties + ")");
+
+    // One bar at 60 is 4 s.
+    recordAndCheck ({ "Vox 60", "Vox 60_Take_1", 0.0, 4.0 * sessionBpm / 60.0, 0, true });
+
+    // One bar at 51, as take 51.
+    {
+        Array<File> placeholders;
+        for (int i = 1; i <= 50; ++i)
+            placeholders.add (takeDir.getChildFile ("Vox_Take_" + String (i) + ".wav"));
+        for (auto& f : placeholders) f.create();
+        recordAndCheck ({ "Vox", "Vox_Take_51", 0.0, 4.0 * sessionBpm / 51.0, 0, true });
+        for (auto& f : placeholders) f.deleteFile();
+    }
+
+    // The session's own tempo in the track name, behind a 1-bar count-in. The file starts at
+    // the pre-roll, 4.5 beats before the punch-in (RecordingLanding.h), so 3.5 beats of take
+    // make it 8 beats long. Punch in at bar 3.
+    const String tempoNamed = "Vox " + String ((int) sessionBpm);
+    recordAndCheck ({ tempoNamed, tempoNamed + "_Take_1", 8.0 * 60.0 / sessionBpm, 3.5, 1, true });
 }
 
 // ── V3-vocal — the Booth loop with a real device (docs/VERIFICATION.md "V3 default-shell
@@ -19748,6 +20205,9 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
         check (steps <= 2, "the keep reversed within two undo steps (a landed post-Keep pass costs one)");
         std::cerr << "  ..   undo steps to reverse the keep: " << steps << " (passes before undo: " << partsBeforeUndo << ")\n";
     }
+
+    // ── 6. and however its file is named, a take lands as it was recorded ──
+    checkTakesLandAsRecorded (eng, ops);
 
     // One machine-readable line for scripts/v3-acceptance/run.py (it copies the takes).
     {
