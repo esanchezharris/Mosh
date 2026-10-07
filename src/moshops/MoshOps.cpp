@@ -15,6 +15,7 @@
 #include "StemExport.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
+#include "engine/UndoTrace.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
 #include "state/RenderLayer.h"
@@ -662,6 +663,7 @@ juce::var MoshOps::execute (const juce::var& command)
         ~DepthGuard() { --depth; }
         int& depth;
     } depthGuard (execDepth_);
+    const undotrace::ScopedCommand traceCommand (command.getProperty ("command", var()).toString());
 
     // Step-1 slice 6 — the OUTERMOST call owns the origin for every line it logs; a
     // re-entered execute (composites, the multiplayer apply path) inherits it unchanged,
