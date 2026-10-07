@@ -8,10 +8,16 @@ removed through a reviewed manifest:
     python3 harness_session.py plan --older-than-hours 24 --out manifest.json
     python3 harness_session.py apply manifest.json
 
+`plan --include-mosh-root` also lists the `.mosh-reset-*` quarantines the engine's
+auto-session prune used to leave directly under the Mosh data directory
+(`<Mosh>/.mosh-reset-<uuid32>/session`). Only those direct children are considered, and
+only in that exact layout: nothing else under the Mosh data directory is ever planned.
+
 `plan` is read-only. `apply` deletes exactly the manifest entries that still verify.
 Deletion walks descriptors only: symlinks are unlinked, never followed; a directory is
 entered only if it is the inode an lstat saw, on the same device. Trees holding model,
-adapter, checkpoint or evaluation files are never deleted.
+adapter, checkpoint or evaluation files, and quarantines of evaluation/adapter-named
+sessions, are never deleted.
 """
 
 import argparse
@@ -33,6 +39,9 @@ MARKER_CONTENTS = "Mosh isolated harness session v1"
 # this module (`.mosh-reset-<leaf>-<pid>-<hex8>`) and scripts/lib/harness-session.sh
 # (`.mosh-reset.XXXXXX/session`).
 QUARANTINE_PREFIXES = (".mosh-reset-", ".mosh-reset.")
+# The auto-session prune (src/engine/SessionMaintenance.h) quarantined into the Mosh
+# data directory itself, always as `.mosh-reset-<uuid32>/session`.
+MOSH_ROOT_QUARANTINE_PREFIX = ".mosh-reset-"
 NESTED_SESSION = "session"
 
 # Kept in step with SessionOwnershipPosix.h isModelFileName / isEvidenceDirectoryName.
@@ -51,6 +60,7 @@ _FD_WALK = (hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
             and os.listdir in os.supports_fd)
 _PY_QUARANTINE = re.compile(r"^\.mosh-reset-(?P<leaf>.+)-\d+-[0-9a-f]{8}$")
 _UUID_SUFFIX = re.compile(r"^(?P<prefix>.+)-[0-9a-f]{10}$")
+_AUTO_TAG = re.compile(r"-auto-\d+-[0-9a-f]{8}$")
 
 
 def _mosh_base():
@@ -59,6 +69,10 @@ def _mosh_base():
     if sys.platform.startswith("win"):
         return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Mosh"
     return Path.home() / ".local" / "share" / "Mosh"
+
+
+def _mosh_root():
+    return Path(os.path.abspath(_mosh_base()))
 
 
 def _harness_root():
@@ -110,13 +124,16 @@ def _open_child_dir(parent_fd, name, device, expected=None):
     return fd
 
 
-def _open_harness_root(harness):
+def _open_root(directory, *ancestors):
     if not _FD_WALK:
         raise RuntimeError("descriptor-relative deletion is unavailable on this platform")
-    base = harness.parent
-    if base.is_symlink() or harness.is_symlink():
-        raise RuntimeError(f"refusing symlinked harness root: {harness}")
-    return os.open(str(harness), _DIR_FLAGS)
+    if any(path.is_symlink() for path in (*ancestors, directory)):
+        raise RuntimeError(f"refusing symlinked sweep root: {directory}")
+    return os.open(str(directory), _DIR_FLAGS)
+
+
+def _open_harness_root(harness):
+    return _open_root(harness, harness.parent)
 
 
 def _marker_ok_at(dir_fd):
@@ -255,6 +272,46 @@ def _remove_tree_at(parent_fd, name, identity):
     return True
 
 
+def _remove_nested_quarantine(parent_fd, name, identity):
+    """Delete a `name/session` quarantine through descriptors held on the verified
+    directories, like SessionOwnership.h's reclaim: a session that lost its marker,
+    holds evidence or was swapped stops it, and anything that appears beside `session`
+    keeps the quarantine (its final rmdir fails)."""
+    device = identity[0]
+    quarantine_fd = _open_child_dir(parent_fd, name, device, expected=identity)
+    if quarantine_fd is None:
+        return False
+    try:
+        if os.listdir(quarantine_fd) != [NESTED_SESSION]:
+            return False
+        session_fd = _open_child_dir(quarantine_fd, NESTED_SESSION, device)
+        if session_fd is None:
+            return False
+        try:
+            session = os.fstat(session_fd)
+            if not _marker_ok_at(session_fd) or _has_evidence(session_fd, device) \
+                    or not _remove_tree_contents(session_fd, device):
+                return False
+        finally:
+            os.close(session_fd)
+        current = _lstat_at(quarantine_fd, NESTED_SESSION)
+        if (current.st_dev, current.st_ino) != (session.st_dev, session.st_ino):
+            return False
+        os.rmdir(NESTED_SESSION, dir_fd=quarantine_fd)
+    except OSError:
+        return False
+    finally:
+        os.close(quarantine_fd)
+    try:
+        current = _lstat_at(parent_fd, name)
+        if (current.st_dev, current.st_ino) != tuple(identity):
+            return False
+        os.rmdir(name, dir_fd=parent_fd)
+    except OSError:
+        return False
+    return True
+
+
 # --- reset ---------------------------------------------------------------------------
 
 def reset_owned_harness_session(path):
@@ -312,18 +369,26 @@ def reset_owned_harness_session(path):
 
 # --- manifest sweep ------------------------------------------------------------------
 
-def _producer(name, session_fd):
+ROOTS = ("harness", "mosh")
+
+
+def _session_leaf(name, session_fd, base):
+    """The session a quarantine came from, when its name or last-project.json says."""
+    match = _PY_QUARANTINE.match(name)
+    if match:
+        return match.group("leaf")
+    return _last_project_leaf(session_fd, base)
+
+
+def _producer(name, session_fd, base):
     if name.startswith(QUARANTINE_PREFIXES):
-        match = _PY_QUARANTINE.match(name)
-        if match:
-            name = match.group("leaf")
-        else:
-            name = _last_project_leaf(session_fd) or "<unattributed engine/bash reset>"
+        name = _session_leaf(name, session_fd, base) or "<unattributed engine/bash reset>"
+    name = _AUTO_TAG.sub("-auto-<tag>", name)
     match = _UUID_SUFFIX.match(name)
     return match.group("prefix") + "-<uuid10>" if match else name
 
 
-def _last_project_leaf(session_fd):
+def _last_project_leaf(session_fd, base):
     try:
         fd = os.open("last-project.json", os.O_RDONLY | _NOFOLLOW, dir_fd=session_fd)
     except OSError:
@@ -334,18 +399,27 @@ def _last_project_leaf(session_fd):
         return None
     finally:
         os.close(fd)
+    if not isinstance(data, dict):
+        return None
+    prefix = str(base) + "/"
     for path in [data.get("last")] + list(data.get("recent") or []):
-        if isinstance(path, str) and "/_harness/" in path:
+        if not isinstance(path, str):
+            continue
+        if "/_harness/" in path:
             return path.split("/_harness/", 1)[1].split("/", 1)[0]
+        if path.startswith(prefix):
+            return path[len(prefix):].split("/", 1)[0]
     return None
 
 
-def _inspect(root_fd, device, name, quarantine):
+def _inspect(root_fd, device, name, quarantine, nested_only=False):
     """(layout, directory fd holding the marker, fds to close) or (reason, None, fds)."""
     fd = _open_child_dir(root_fd, name, device)
     if fd is None:
-        return "not a real directory on the harness volume", None, []
+        return "not a real directory on the sweep volume", None, []
     if _marker_ok_at(fd):
+        if nested_only:
+            return "not the auto-session prune's <quarantine>/session layout", None, [fd]
         return "flat", fd, [fd]
     if not quarantine:
         return "no ownership marker", None, [fd]
@@ -365,126 +439,203 @@ def _inspect(root_fd, device, name, quarantine):
     return "nested", session, [fd, session]
 
 
+def _last_activity(top, marked_fd, newest):
+    # ctime cannot be set from user space, so a touched or renamed entry always reads as
+    # recent. A nested quarantine also counts its session directory.
+    marked = os.fstat(marked_fd)
+    return max(top.st_mtime, top.st_ctime, marked.st_mtime, marked.st_ctime, newest)
+
+
+def _plan_entry(plan, root, root_fd, device, name, quarantine, min_age, now, base):
+    def skip(reason):
+        plan["skip"].append({"root": root, "name": name, "reason": reason})
+
+    try:
+        top = _lstat_at(root_fd, name)
+    except OSError:
+        return
+    layout, marked_fd, to_close = _inspect(root_fd, device, name, quarantine,
+                                           nested_only=root == "mosh")
+    try:
+        if marked_fd is None:
+            skip(layout)
+            return
+        entry_fd = to_close[0]
+        if _has_evidence(entry_fd, device):
+            skip("holds model/adapter/checkpoint/evaluation files")
+            return
+        if quarantine and _is_evidence_directory_name(
+                _session_leaf(name, marked_fd, base) or ""):
+            skip("quarantined session's name marks it as evaluation/adapter evidence")
+            return
+        size, newest = _tree_usage(entry_fd, device, {(top.st_dev, top.st_ino)})
+        size += top.st_blocks * 512
+        age = now - _last_activity(top, marked_fd, 0.0 if quarantine else newest)
+        if age < min_age:
+            skip(f"active within the last {min_age / 3600:g} h")
+            return
+        plan["delete"].append({
+            "root": root,
+            "name": name,
+            "kind": "quarantine" if quarantine else "session",
+            "layout": layout,
+            "producer": _producer(name, marked_fd, base),
+            "identity": [top.st_dev, top.st_ino],
+            "bytes": size,
+            "age_hours": round(age / 3600, 1),
+            "min_age_seconds": min_age,
+        })
+    finally:
+        for fd in reversed(to_close):
+            os.close(fd)
+
+
 def plan_harness_cleanup(older_than_hours=24, sessions_older_than_days=None, keep=(),
-                         now=None):
-    """Read-only. Lists quarantines (and optionally sessions) that are safe to delete."""
+                         now=None, include_mosh_root=False):
+    """Read-only. Lists quarantines (and optionally sessions) that are safe to delete.
+
+    With include_mosh_root, also lists the auto-session prune's quarantines: direct
+    `.mosh-reset-*` children of the Mosh data directory, nested layout only."""
     now = time.time() if now is None else now
     harness = _harness_root()
+    base = _mosh_root()
     keep = set(keep)
-    plan = {"harness": str(harness), "created": now, "older_than_hours": older_than_hours,
+    plan = {"harness": str(harness), "mosh_root": str(base) if include_mosh_root else None,
+            "created": now, "older_than_hours": older_than_hours,
             "sessions_older_than_days": sessions_older_than_days, "delete": [], "skip": []}
-    if not os.path.lexists(harness):
-        return plan
-    root_fd = _open_harness_root(harness)
-    try:
-        device = os.fstat(root_fd).st_dev
-        for name in sorted(os.listdir(root_fd)):
-            quarantine = name.startswith(QUARANTINE_PREFIXES)
-            if not quarantine and sessions_older_than_days is None:
-                continue
-            min_age = older_than_hours * 3600 if quarantine else sessions_older_than_days * 86400
 
-            def skip(reason):
-                plan["skip"].append({"name": name, "reason": reason})
+    if os.path.lexists(harness):
+        root_fd = _open_harness_root(harness)
+        try:
+            device = os.fstat(root_fd).st_dev
+            for name in sorted(os.listdir(root_fd)):
+                quarantine = name.startswith(QUARANTINE_PREFIXES)
+                if not quarantine and sessions_older_than_days is None:
+                    continue
+                if not quarantine and any(fnmatch.fnmatchcase(name, pattern) for pattern in keep):
+                    plan["skip"].append({"root": "harness", "name": name,
+                                         "reason": "on the keep list"})
+                    continue
+                if not quarantine and _is_evidence_directory_name(name):
+                    plan["skip"].append({"root": "harness", "name": name,
+                                         "reason": "name marks it as evaluation/adapter evidence"})
+                    continue
+                min_age = older_than_hours * 3600 if quarantine else sessions_older_than_days * 86400
+                _plan_entry(plan, "harness", root_fd, device, name, quarantine, min_age, now, base)
+        finally:
+            os.close(root_fd)
 
-            if not quarantine and any(fnmatch.fnmatchcase(name, pattern) for pattern in keep):
-                skip("on the keep list")
-                continue
-            if not quarantine and _is_evidence_directory_name(name):
-                skip("name marks it as evaluation/adapter evidence")
-                continue
-            try:
-                top = _lstat_at(root_fd, name)
-            except OSError:
-                continue
-            layout, marked_fd, to_close = _inspect(root_fd, device, name, quarantine)
-            try:
-                if marked_fd is None:
-                    skip(layout)
-                    continue
-                entry_fd = to_close[0]
-                if _has_evidence(entry_fd, device):
-                    skip("holds model/adapter/checkpoint/evaluation files")
-                    continue
-                size, newest = _tree_usage(entry_fd, device, {(top.st_dev, top.st_ino)})
-                size += top.st_blocks * 512
-                # ctime cannot be set from user space, so a touched or renamed entry
-                # always reads as recent.
-                last_activity = max(top.st_mtime, top.st_ctime,
-                                    0.0 if quarantine else newest)
-                age = now - last_activity
-                if age < min_age:
-                    skip(f"active within the last {min_age / 3600:g} h")
-                    continue
-                plan["delete"].append({
-                    "name": name,
-                    "kind": "quarantine" if quarantine else "session",
-                    "layout": layout,
-                    "producer": _producer(name, marked_fd),
-                    "identity": [top.st_dev, top.st_ino],
-                    "bytes": size,
-                    "age_hours": round(age / 3600, 1),
-                    "min_age_seconds": min_age,
-                })
-            finally:
-                for fd in reversed(to_close):
-                    os.close(fd)
-    finally:
-        os.close(root_fd)
+    if include_mosh_root and os.path.lexists(base):
+        root_fd = _open_root(base)
+        try:
+            device = os.fstat(root_fd).st_dev
+            for name in sorted(os.listdir(root_fd)):
+                if name.startswith(MOSH_ROOT_QUARANTINE_PREFIX):
+                    _plan_entry(plan, "mosh", root_fd, device, name, True,
+                                older_than_hours * 3600, now, base)
+        finally:
+            os.close(root_fd)
     return plan
+
+
+def _entry_name_problem(root, entry):
+    name = entry.get("name")
+    if not isinstance(name, str) or not name or "/" in name or name in (".", ".."):
+        return "not a direct child name"
+    identity = entry.get("identity")
+    if entry.get("layout") not in ("flat", "nested") or not isinstance(identity, list) \
+            or len(identity) != 2 or not all(isinstance(value, int) for value in identity) \
+            or not isinstance(entry.get("min_age_seconds"), (int, float)) \
+            or not isinstance(entry.get("bytes"), int):
+        return "malformed manifest entry"
+    quarantine = entry.get("kind") == "quarantine"
+    if root == "mosh":
+        if not quarantine or entry.get("layout") != "nested" \
+                or not name.startswith(MOSH_ROOT_QUARANTINE_PREFIX):
+            return "not an auto-session prune quarantine"
+    elif quarantine != name.startswith(QUARANTINE_PREFIXES):
+        return "not a harness entry name"
+    return None
 
 
 def apply_harness_cleanup(plan, now=None):
     """Deletes exactly the planned entries that still verify; refuses the rest."""
     now = time.time() if now is None else now
     harness = _harness_root()
+    base = _mosh_root()
     if plan.get("harness") != str(harness):
         raise RuntimeError(f"manifest is for {plan.get('harness')}, not {harness}")
     result = {"deleted": [], "refused": [], "freed_bytes": 0}
-    root_fd = _open_harness_root(harness)
-    try:
-        device = os.fstat(root_fd).st_dev
-        for entry in plan["delete"]:
-            name, identity = entry["name"], tuple(entry["identity"])
-            quarantine = entry["kind"] == "quarantine"
+    by_root = {root: [] for root in ROOTS}
+    for entry in plan["delete"]:
+        root = entry.get("root", "harness")
+        if root in by_root:
+            by_root[root].append(entry)
+        else:
+            result["refused"].append({"name": entry.get("name"), "reason": "unknown root"})
+    if by_root["mosh"] and plan.get("mosh_root") != str(base):
+        raise RuntimeError(f"manifest is for Mosh root {plan.get('mosh_root')}, not {base}")
 
-            def refuse(reason):
-                result["refused"].append({"name": name, "reason": reason})
-
-            if "/" in name or name in (".", "..") or \
-                    quarantine != name.startswith(QUARANTINE_PREFIXES):
-                refuse("not a harness entry name")
-                continue
-            try:
-                top = _lstat_at(root_fd, name)
-            except OSError:
-                refuse("gone")
-                continue
-            if (top.st_dev, top.st_ino) != identity or top.st_dev != device:
-                refuse("replaced since the plan")
-                continue
-            layout, marked_fd, to_close = _inspect(root_fd, device, name, quarantine)
-            try:
-                newest = 0.0
-                if marked_fd is not None and not quarantine:
-                    newest = _tree_usage(to_close[0], device, set())[1]
-            finally:
-                for fd in reversed(to_close):
-                    os.close(fd)
-            if layout != entry["layout"]:
-                refuse(f"no longer verifies ({layout})")
-                continue
-            if now - max(top.st_mtime, top.st_ctime, newest) < entry["min_age_seconds"]:
-                refuse("changed since the plan")
-                continue
-            if _remove_tree_at(root_fd, name, identity):
-                result["deleted"].append(name)
-                result["freed_bytes"] += entry["bytes"]
-            else:
-                refuse("could not be removed completely")
-    finally:
-        os.close(root_fd)
+    for root in ROOTS:
+        if not by_root[root]:
+            continue
+        root_fd = _open_harness_root(harness) if root == "harness" else _open_root(base)
+        try:
+            device = os.fstat(root_fd).st_dev
+            for entry in by_root[root]:
+                _apply_entry(result, root, root_fd, device, entry, now, base)
+        finally:
+            os.close(root_fd)
     return result
+
+
+def _apply_entry(result, root, root_fd, device, entry, now, base):
+    name = entry.get("name")
+
+    def refuse(reason):
+        result["refused"].append({"root": root, "name": name, "reason": reason})
+
+    problem = _entry_name_problem(root, entry)
+    if problem:
+        refuse(problem)
+        return
+    identity = tuple(entry["identity"])
+    quarantine = entry["kind"] == "quarantine"
+    try:
+        top = _lstat_at(root_fd, name)
+    except OSError:
+        refuse("gone")
+        return
+    if (top.st_dev, top.st_ino) != identity or top.st_dev != device:
+        refuse("replaced since the plan")
+        return
+    layout, marked_fd, to_close = _inspect(root_fd, device, name, quarantine,
+                                           nested_only=root == "mosh")
+    try:
+        last_activity = evidence_name = None
+        if marked_fd is not None:
+            newest = 0.0 if quarantine else _tree_usage(to_close[0], device, set())[1]
+            last_activity = _last_activity(top, marked_fd, newest)
+            evidence_name = quarantine and _is_evidence_directory_name(
+                _session_leaf(name, marked_fd, base) or "")
+    finally:
+        for fd in reversed(to_close):
+            os.close(fd)
+    if last_activity is None or layout != entry["layout"]:
+        refuse(f"no longer verifies ({layout})")
+        return
+    if evidence_name:
+        refuse("quarantined session's name marks it as evaluation/adapter evidence")
+        return
+    if now - last_activity < entry["min_age_seconds"]:
+        refuse("changed since the plan")
+        return
+    remove = _remove_nested_quarantine if layout == "nested" else _remove_tree_at
+    if remove(root_fd, name, identity):
+        result["deleted"].append(name)
+        result["freed_bytes"] += entry["bytes"]
+    else:
+        refuse("could not be removed completely")
 
 
 def _summarize(entries):
@@ -496,6 +647,25 @@ def _summarize(entries):
     return sorted(by.items(), key=lambda item: -item[1][1])
 
 
+def _print_plan(plan):
+    for root in ROOTS:
+        directory = plan["harness"] if root == "harness" else plan.get("mosh_root")
+        if directory is None:
+            continue
+        delete = [entry for entry in plan["delete"] if entry.get("root", "harness") == root]
+        skip = [entry for entry in plan["skip"] if entry.get("root", "harness") == root]
+        total = sum(entry["bytes"] for entry in delete)
+        print(f"{directory}: {len(delete)} entries, {total} bytes ({total / 2**30:.2f} GiB) "
+              f"would be deleted; {len(skip)} kept")
+        for (kind, producer), (count, size) in _summarize(delete):
+            print(f"  {kind:10s} {count:6d} {size / 2**20:10.1f} MiB  {producer}")
+        reasons = {}
+        for entry in skip:
+            reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
+        for reason, count in sorted(reasons.items(), key=lambda item: -item[1]):
+            print(f"  kept {count:6d}  {reason}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -504,6 +674,9 @@ def main(argv=None):
     plan_cmd.add_argument("--older-than-hours", type=float, default=24)
     plan_cmd.add_argument("--sessions-older-than-days", type=float, default=None,
                           help="also plan owned sessions idle this long (off by default)")
+    plan_cmd.add_argument("--include-mosh-root", action="store_true",
+                          help="also plan the auto-session prune's .mosh-reset-* quarantines "
+                               "directly under the Mosh data directory (off by default)")
     plan_cmd.add_argument("--keep-file", help="session names or globs never to plan, one per line")
     plan_cmd.add_argument("--out", help="write the manifest here")
     apply_cmd = commands.add_parser("apply", help="delete exactly a reviewed manifest")
@@ -515,17 +688,9 @@ def main(argv=None):
         if args.keep_file:
             keep = {line.strip() for line in Path(args.keep_file).read_text().splitlines()
                     if line.strip() and not line.startswith("#")}
-        plan = plan_harness_cleanup(args.older_than_hours, args.sessions_older_than_days, keep)
-        total = sum(entry["bytes"] for entry in plan["delete"])
-        print(f"{plan['harness']}: {len(plan['delete'])} entries, "
-              f"{total / 2**30:.2f} GiB would be deleted; {len(plan['skip'])} kept")
-        for (kind, producer), (count, size) in _summarize(plan["delete"]):
-            print(f"  {kind:10s} {count:6d} {size / 2**20:10.1f} MiB  {producer}")
-        reasons = {}
-        for entry in plan["skip"]:
-            reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
-        for reason, count in sorted(reasons.items(), key=lambda item: -item[1]):
-            print(f"  kept {count:6d}  {reason}")
+        plan = plan_harness_cleanup(args.older_than_hours, args.sessions_older_than_days, keep,
+                                    include_mosh_root=args.include_mosh_root)
+        _print_plan(plan)
         if args.out:
             Path(args.out).write_text(json.dumps(plan, indent=1) + "\n")
             print(f"manifest: {args.out}")
