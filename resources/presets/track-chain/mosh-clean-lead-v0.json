@@ -1,0 +1,43 @@
+{
+  "kind": "mosh.track-chain",
+  "schema": 1,
+  "id": "mosh.clean-lead",
+  "revision": 0,
+  "name": "Mosh Clean Lead v0",
+  "provenance": {
+    "origin": "original",
+    "author": "Mosh",
+    "created": "2026-10-01",
+    "note": "An original Mosh recipe built only from Tracktion Engine built-ins already shipped in Mosh. Not derived from, a reconstruction of, or endorsed by any commercial preset.",
+    "rationale": "Dry and conservative: clear rumble below the voice, then even out level gently. No EQ, de-essing, saturation, ambience or makeup gain — none is justified without a listening pass. Values are documented in docs/vocal-presets/VALIDATION-2026-10-01.md."
+  },
+  "validation": {
+    "engineering": "see docs/vocal-presets/VALIDATION-2026-10-01.md",
+    "listening": "not-run",
+    "release": "internal-candidate"
+  },
+  "target": { "trackType": "audio" },
+  "stages": [
+    {
+      "processor": "lowpass",
+      "state": { "mode": "highpass" },
+      "bypassed": false,
+      "params": {
+        "frequency": { "value": 80, "unit": "Hz" }
+      }
+    },
+    {
+      "processor": "compressor",
+      "state": { "sidechainTrigger": false },
+      "bypassed": false,
+      "params": {
+        "threshold": { "value": -24, "unit": "dB" },
+        "ratio": { "value": 2.5, "unit": ":1" },
+        "attack": { "value": 20, "unit": "ms" },
+        "release": { "value": 150, "unit": "ms" },
+        "output gain": { "value": 0, "unit": "dB" },
+        "input gain": { "value": 0, "unit": "dB" }
+      }
+    }
+  ]
+}

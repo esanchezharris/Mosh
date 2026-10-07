@@ -64,12 +64,16 @@ namespace mosh::sessionpaths
             if (child == actualSessionDir || child.isSymbolicLink())
                 continue;
             // Names and age are attacker/owner-controlled metadata. Only the exact
-            // marker permits relocation into a recoverable reset quarantine.
+            // marker permits relocation into a reset quarantine.
             if (! isOwnedAutoSession (moshDir, child))
                 continue;
             if ((now - child.getLastModificationTime()).inHours() < (double) kPruneAfterHours)
                 continue;
-            resetOwnedIsolationDirectory (moshDir, child);
+            // Delete the quarantine this prune creates (descriptor-relative, never
+            // following symlinks); trees holding model/adapter/checkpoint/evaluation
+            // evidence stay quarantined. Older `.mosh-reset-*` entries are left for
+            // scripts/verify-hardware/harness_session.py's manifest sweep.
+            resetAndReclaimOwnedIsolationDirectory (moshDir, child);
         }
     }
 }

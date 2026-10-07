@@ -27,6 +27,7 @@
 #include "multiplayer/LogicalId.h"
 #include "multiplayer/TrackCommit.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
+#include "PluginState.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
 #endif
@@ -54,8 +55,36 @@ namespace
                 || compressor->sidechainDb.parameter.get() == &parameter)
                 return parameter.getValueRange();
 
+        // Every parameter of these built-ins is a plain linear range (te::AutomatableParameter
+        // keeps a NormalisableRange made from a juce::Range: no skew), so its live range IS
+        // the physical endpoints: phys = min + value * (max - min). EQ Hz/dB/Q, delay feedback
+        // dB and mix, pitch semitones, and every Mosh FX control (AutoTune's key and scale are
+        // stepped 0..11 / 0..2 indexes into their `choices`). The compressor's threshold
+        // (linear gain) and ratio (inverse slope) above stay without endpoints on purpose.
+        // The 4OSC below is NOT linear.
+        if (dynamic_cast<te::EqualiserPlugin*> (&plugin) != nullptr
+            || dynamic_cast<te::DelayPlugin*> (&plugin) != nullptr
+            || dynamic_cast<te::PitchShiftPlugin*> (&plugin) != nullptr
+            || dynamic_cast<MoshOTTPlugin*> (&plugin) != nullptr
+            || dynamic_cast<MoshSoftClipPlugin*> (&plugin) != nullptr
+            || dynamic_cast<MoshXFeedbackPlugin*> (&plugin) != nullptr
+            || dynamic_cast<MoshAutoTunePlugin*> (&plugin) != nullptr)
+            return parameter.getValueRange();
+
+        // 4OSC: every parameter's endpoints, but NOT a linear mapping. Its times, levels and
+        // LFO rates are skewed JUCE NormalisableRanges (phys = min + (max - min) *
+        // v^(1/skew): an amp time at 0.5 is 1.876 s of 0.001..60) and its tunes step by
+        // a semitone, so pluginToVar publishes `skew` and `step` beside min/max for it.
+        if (dynamic_cast<te::FourOscPlugin*> (&plugin) != nullptr)
+            return parameter.getValueRange();
+
         return std::nullopt;
     }
+
+    // The 4OSC's mod matrix covers the parameters Tracktion added before building it (the
+    // oscillators, LFOs, mod envelopes, amp and filter: indices 0..53); FourOscPlugin's
+    // isModulated/getModulationSources assert for the effect, legato and master ones.
+    constexpr int kFourOscModulatableParams = 54;
 
     juce::String pluginRackTopology (te::Edit& edit)
     {
@@ -313,7 +342,8 @@ namespace
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
-    : eng (engineToUse), pluginHost (engineToUse.engine()),
+    : eng (engineToUse),
+      pluginHost (engineToUse.engine(), engineToUse.pluginStateDir(), engineToUse.pluginSeedDir()),
       trainerRegistry (engineToUse.sessionDir())
 {
     eng.beforePersist = [this] { restoreDirectAuditions(); };
@@ -389,6 +419,7 @@ MoshOps::~MoshOps()
     // flush a late editor callback into the event sink. Ordinary editor close still does.
     pluginHost.closeAllEditors();
     stopTimer();
+    endGestureWindow();   // before the Edit goes (Tracktion asserts no inhibitor outlives it)
     // Balances track, send, and playback-context master clients while their measurers
     // are still alive. Main.cpp destroys MoshOps before the engine for this reason.
     unregisterAllMeterClients();
@@ -405,6 +436,7 @@ MoshOps::~MoshOps()
 void MoshOps::timerCallback()
 {
     pollDirectRenders();
+    expireGestureWindow();   // an idle drag ends its undo step after kGestureIdleMs
     // Push a decimated transport delta while playing (and once on the
     // play-to-stop edge) so the UI playhead animates without polling (02 §4.2).
     auto& transport = eng.edit().getTransport();
@@ -522,6 +554,31 @@ void MoshOps::timerCallback()
         hadMuteAutomation = any;
     }
 
+    // The tuner's live note display: what each Mosh AutoTune is hearing and the note it
+    // is pulling to. A rail of its own for the same reason as the two above (a pitch
+    // moving 30 times a second must not re-create the snapshot), and silent unless
+    // someone is singing through a tuner: emitted while any has a pitch, plus once, empty,
+    // when the last one stops.
+    {
+        auto payload = tunerReadings();
+        const bool any = payload.getProperty ("tuners", var()).size() > 0;
+        if (any || hadTunerReadings)
+            emit ("tuner", payload);
+        hadTunerReadings = any;
+    }
+
+    // Native plugin panels' live meters (compressor/soft clip gain reduction, OTT bands,
+    // X-FDBK cuts): the "plugin_meters" rail, same discipline as "tuner" — off the
+    // snapshot, emitted while any plugin processed audio since the last tick, plus one
+    // empty payload on the falling edge so a panel's meter drops instead of freezing.
+    {
+        auto payload = pluginMeters();
+        const bool any = payload.getProperty ("plugins", var()).size() > 0;
+        if (any || hadPluginMeters)
+            emit ("plugin_meters", payload);
+        hadPluginMeters = any;
+    }
+
     // Master spectral feed (Moshi reactivity). Only live with a real playback context
     // (an audio device) — headless / --selftest has none, so the tap is NEVER inserted
     // and the edit state is untouched. One zero on the play→stop edge so Moshi settles.
@@ -621,6 +678,17 @@ juce::var MoshOps::execute (const juce::var& command)
             return early;   // refused or replayed: no dispatch, no mutation, no journal
     }
 
+    // A panel drag's undo window (set_plugin_param / set_plugin_state with a `gesture`)
+    // ends at the next command that is not a read, and its step is closed then: some
+    // commands open no transaction of their own (stop_recording lands its take through
+    // the Edit's UndoManager), and their writes must not join the drag's step.
+    if (outermost)
+    {
+        const auto name = command.getProperty ("command", var()).toString();
+        if (name != "set_plugin_param" && name != "set_plugin_state" && ! txnsafe::isReadOnlyDuringTransaction (name))
+            endGestureWindow (true);
+    }
+
     prepareDirectCommand (command);
     auto result = executeImpl (command);
     pollDirectRenders();
@@ -695,7 +763,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
             "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
             "normalize_clip", "set_clip_warp", "stretch_clip",
             "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
-            "set_plugin_param", "bypass_plugin", "open_plugin_editor", "load_preset",
+            "set_plugin_param", "set_plugin_state", "bypass_plugin", "open_plugin_editor", "load_preset",
+            "apply_track_preset",
             "set_track_automation_mode", "write_automation_curve",
             "add_automation_point", "set_automation_point", "remove_automation_point",
             "clear_automation", "replace_instrument", "hot_swap_instrument",
@@ -900,6 +969,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
     if (name == "list_presets")      return cmdListPresets (args);
     if (name == "load_preset")       return cmdLoadPreset (args);
+    if (name == "apply_track_preset") return cmdApplyTrackPreset (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
     if (name == "set_drum_pad")      return cmdSetDrumPad (args);
@@ -910,6 +980,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
+    if (name == "set_plugin_state")  return cmdSetPluginState (args);
     if (name == "bypass_plugin")     return cmdBypassPlugin (args);
     if (name == "rescan_plugins")        return cmdRescanPlugins (args);
     if (name == "get_plugin_blocklist")  return cmdGetPluginBlocklist (args);
@@ -1117,6 +1188,7 @@ std::vector<juce::String> MoshOps::lockKeysFor (LockManager::Scope scope,
 
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
+    endGestureWindow();
     const auto rackBefore = pluginRackTopology (eng.edit());
     const bool did = undoManager().undo();
     // CAP-PRJ-005 — walk the mirror's cursor with the UndoManager's. Doing it HERE
@@ -1133,6 +1205,7 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
+    endGestureWindow();
     const auto rackBefore = pluginRackTopology (eng.edit());
     const bool did = undoManager().redo();
     if (did && txnCursor_ < (int) txnIds_.size()) ++txnCursor_;   // CAP-PRJ-005 (see cmdUndo)
@@ -1167,6 +1240,7 @@ juce::var MoshOps::cmdJumpToHistory (const juce::var& args)
     if (inBatch)
         return errResult ("jump_to_history", "a batch is open; end or roll it back before jumping");
 
+    endGestureWindow();
     syncUndoMirror();
 
     if (! target.startsWith (historyToken_ + ":"))
@@ -3126,10 +3200,102 @@ te::VolumeAndPanPlugin* MoshOps::ensureVolumePlugin (te::AudioTrack& track)
     return nullptr;
 }
 
+juce::var MoshOps::tunerReadings()
+{
+    juce::Array<var> tuners;
+    for (auto* track : te::getAudioTracks (eng.edit()))
+    {
+        if (track == nullptr) continue;
+        const auto plugins = track->pluginList.getPlugins();
+        for (int i = 0; i < plugins.size(); ++i)
+        {
+            auto* tuner = dynamic_cast<MoshAutoTunePlugin*> (plugins[i].get());
+            if (tuner == nullptr) continue;
+            // Taken even when it will not be reported, so a reading left over from
+            // before a bypass cannot surface as current when the plugin comes back.
+            const auto reading = tuner->takeLivePitch();
+            if (! tuner->isEnabled() || ! reading.live || ! reading.voiced) continue;
+
+            auto* o = new DynamicObject();
+            o->setProperty ("trackId", track->itemID.toString());
+            o->setProperty ("index", i);
+            o->setProperty ("inputHz", reading.inputHz);
+            o->setProperty ("targetHz", reading.targetHz);
+            o->setProperty ("confidence", reading.confidence);
+            tuners.add (var (o));
+        }
+    }
+
+    auto* payload = new DynamicObject();
+    payload->setProperty ("tuners", tuners);
+    return var (payload);
+}
+
+juce::var MoshOps::pluginMeters()
+{
+    juce::Array<var> readings;
+    std::set<juce::uint64> seen;
+    for (auto* track : te::getAudioTracks (eng.edit()))
+    {
+        if (track == nullptr) continue;
+        const auto plugins = track->pluginList.getPlugins();
+        for (int i = 0; i < plugins.size(); ++i)
+        {
+            auto* metered = dynamic_cast<MoshLiveMetered*> (plugins[i].get());
+            if (metered == nullptr) continue;
+            const auto rawId = plugins[i]->itemID.getRawID();
+            seen.insert (rawId);
+            // Taken even when it will not be reported, so a reading left over from
+            // before a bypass cannot surface as current when the plugin comes back.
+            auto fields = metered->takeLiveMeters();
+            auto* entry = fields.getDynamicObject();
+            if (! plugins[i]->isEnabled() || entry == nullptr) continue;
+            // Not in the chain at the previous call: newly loaded, or back from an undone
+            // removal. Tracktion's PluginCache can hand an undone removal the SAME plugin
+            // object, latch included, so this reading may hold blocks the old graph ran
+            // before the removal. Consume it, report nothing; the next call is clean.
+            if (pluginMetersSeen_.count (rawId) == 0) continue;
+
+            auto* o = new DynamicObject();
+            o->setProperty ("trackId", track->itemID.toString());
+            o->setProperty ("index", i);
+            o->setProperty ("itemId", plugins[i]->itemID.toString());
+            o->setProperty ("type", effectiveBuiltinType (*plugins[i]));
+            // Per plugin, +1 for every entry reported, so the UI can tell a new frame from
+            // the same one held on screen (event fields such as the 4OSC's `struck` must
+            // fire once). Keyed by EditItemID and never reset: it keeps rising across an
+            // undone removal (the same object) and a reload (the same id).
+            o->setProperty ("seq", ++pluginMeterSeq_[rawId]);
+            for (auto& field : entry->getProperties())
+                o->setProperty (field.name, field.value);
+            readings.add (var (o));
+        }
+    }
+    pluginMetersSeen_ = std::move (seen);
+
+    auto* payload = new DynamicObject();
+    payload->setProperty ("plugins", readings);
+    return var (payload);
+}
+
+juce::var MoshOps::pluginVarForSelfTest (const juce::String& trackId, int index)
+{
+    auto* plugin = findPlugin (trackId, index);
+    return plugin != nullptr ? pluginToVar (*plugin, index, findTrack (trackId)) : var();
+}
+
+juce::var MoshOps::pluginVarForSelfTest (te::Plugin& plugin)
+{
+    return pluginToVar (plugin, 0, nullptr);
+}
+
 juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
 {
     auto* o = new DynamicObject();
     o->setProperty ("index", index);
+    // The plugin's EditItemID: a stable key that follows the plugin through a reorder
+    // (index does not) and survives save/reload and remove+undo. Additive.
+    o->setProperty ("itemId", p.itemID.toString());
     // R3.3 — a high-pass-mode LowPassPlugin reports the "highpass" built-in id/name
     // here, not Tracktion's genuine "lowpass" xmlTypeName/"LPF/HPF" name, so this
     // matches what load_builtin returned and stays consistent across save/reload.
@@ -3146,6 +3312,19 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         o->setProperty ("category", bspec->category);
     if (ext != nullptr)
         addExternalPluginMetadata (*o, *ext);
+    // A stage a track-chain preset inserted (apply_track_preset). Additive: absent on
+    // every plugin a user loaded, so their payload is byte-identical. Read from the
+    // node's own tags — never from the preset file — and it says where the plugin CAME
+    // FROM, not that its values still equal the preset's.
+    if (p.state.hasProperty (ids::moshPresetId))
+    {
+        auto* preset = new DynamicObject();
+        preset->setProperty ("id", p.state.getProperty (ids::moshPresetId).toString());
+        preset->setProperty ("name", p.state.getProperty (ids::moshPresetName).toString());
+        preset->setProperty ("revision", (int) p.state.getProperty (ids::moshPresetRevision, 0));
+        preset->setProperty ("stage", (int) p.state.getProperty (ids::moshPresetStage, 0));
+        o->setProperty ("preset", var (preset));
+    }
    #if MOSH_HAVE_ANIRA
     if (auto* r = asRave (&p))
         o->setProperty ("rave", r->describe());
@@ -3163,7 +3342,12 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
     }
 
     juce::Array<var> params;
-    const int n = juce::jmin (16, p.getNumAutomatableParameters());
+    // The snapshot carries at most 16 parameters per plugin, except the 4OSC: all 68 (its
+    // panel draws the amp/filter envelopes, the filter and the effects, which sit past
+    // index 15). Every other plugin keeps the cap, so its payload is unchanged.
+    auto* fourOsc = dynamic_cast<te::FourOscPlugin*> (&p);
+    const int n = fourOsc != nullptr ? p.getNumAutomatableParameters()
+                                     : juce::jmin (16, p.getNumAutomatableParameters());
     for (int i = 0; i < n; ++i)
     {
         auto param = p.getAutomatableParameter (i);
@@ -3172,6 +3356,22 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         po->setProperty ("name", param->getParameterName());
         po->setProperty ("value", param->getCurrentNormalisedValue());
         addPluginParameterReadback (*po, *param, pluginParameterPhysicalRange (p, *param));
+        // 4OSC only (every other payload stays byte-identical): the paramID, because names
+        // collide ("Mix" x3, "Width" x2, "Level" beside "Level N"), and the rest of the
+        // JUCE NormalisableRange: phys = min + (max - min) * v^(1/skew), v = ((phys - min) /
+        // (max - min))^skew, snapped to `step` when there is one. Only emitted when not the
+        // default (skew 1, no symmetric skew, interval 0), so absent means linear.
+        if (fourOsc != nullptr)
+        {
+            const auto& range = param->valueRange;
+            po->setProperty ("id", param->paramID);
+            if (! juce::exactlyEqual (range.skew, 1.0f))
+                po->setProperty ("skew", (double) range.skew);
+            if (range.symmetricSkew)
+                po->setProperty ("symmetricSkew", true);
+            if (range.interval > 0.0f)
+                po->setProperty ("step", (double) range.interval);
+        }
         // CAP-AUT-006 — a stepped parameter (the mute gate is the first) is applied
         // through snapToState, so the editor must snap its points to the same states
         // instead of drawing a value the engine will never use. Only emitted when true,
@@ -3180,6 +3380,15 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         {
             po->setProperty ("discrete", true);
             po->setProperty ("states", juce::jmax (2, param->getNumberOfStates()));
+            // The states' own names, when the parameter has them (AutoTune's key and
+            // scale), so a surface can offer a menu instead of a slider. Additive.
+            if (param->hasLabels())
+            {
+                juce::Array<var> choices;
+                for (const auto& label : param->getAllLabels())
+                    choices.add (label);
+                po->setProperty ("choices", choices);
+            }
         }
         const bool automated = param->hasAutomationPoints();
         po->setProperty ("automated", automated);
@@ -3199,6 +3408,44 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         params.add (var (po));
     }
     o->setProperty ("params", params);
+    // 4OSC modulation routes, read-only and only when there are any (Mosh never creates
+    // one; an imported session can carry a MODMATRIX). Read straight from the public map,
+    // which only the message thread writes, by lookup rather than through the accessors
+    // that assert for the parameters the matrix does not cover.
+    if (fourOsc != nullptr)
+    {
+        juce::Array<var> routes;
+        for (int i = 0; i < juce::jmin (n, kFourOscModulatableParams); ++i)
+        {
+            auto param = p.getAutomatableParameter (i);
+            const auto assign = fourOsc->modMatrix.find (param.get());
+            if (assign == fourOsc->modMatrix.end())
+                continue;
+            for (int s = te::FourOscPlugin::lfo1; s < te::FourOscPlugin::numModSources; ++s)
+            {
+                const float depth = assign->second.depths[s];
+                if (! (depth >= -1.0f))   // -1000: no route from this source
+                    continue;
+                auto* route = new DynamicObject();
+                route->setProperty ("paramIndex", i);
+                route->setProperty ("id", param->paramID);
+                route->setProperty ("source", fourOsc->modulationSourceToID ((te::FourOscPlugin::ModSource) s));
+                route->setProperty ("depth", (double) depth);
+                routes.add (var (route));
+            }
+        }
+        if (! routes.isEmpty())
+            o->setProperty ("modRoutes", routes);
+    }
+    // CachedValue-only settings (delay length, chorus, phaser, the low/high-pass mode):
+    // the same whitelist set_plugin_state accepts (src/moshops/PluginState.h). Additive:
+    // absent on every other plugin type.
+    if (auto state = pluginstate::describe (p, effectiveBuiltinType (p)); ! state.isVoid())
+        o->setProperty ("state", state);
+    // A sampler's sounds, limits and whether the pad commands address it (samplerToVar).
+    // Additive: absent on every other plugin type.
+    if (auto* sampler = dynamic_cast<te::SamplerPlugin*> (&p))
+        o->setProperty ("sampler", samplerToVar (*sampler, owner));
     return var (o);
 }
 
@@ -4554,6 +4801,7 @@ juce::var MoshOps::cmdOpenWithoutPlugins (const juce::var& args)
                               std::vector<juce::String> (suspects.begin(), suspects.end()));
 
     unregisterAllMeterClients();        // old measurers are still valid here; the Edit is about to swap
+    endGestureWindow();                 // the inhibitor must not outlive the Edit it holds
     int skipped = 0;
     if (auto refusal = eng.reloadInSafeMode (&skipped); refusal.isNotEmpty())
     {
