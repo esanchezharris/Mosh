@@ -78,6 +78,86 @@ describe("matchFastPath — beat-shaped asks route to generate_beat_recipe (FIND
   it("never fires mid-take", () => {
     expect(matchFastPath("make me a beat", ctx("recording"))).toBeNull();
   });
+
+  // Review of PR #740: the first cut captured ANY text between the verb and the noun, so
+  // these asks about the EXISTING beat (or the transport) laid a whole new beat instead
+  // of reaching the model. Each one is pinned null here.
+  it.each([
+    "write drums for the beat",
+    "make a bassline for this beat",
+    "write a melody over this beat",
+    "produce vocals for my beat",
+    "write lyrics for this beat",
+    "make it sound like a lofi beat",
+    "start the beat",
+    "start beat",
+    "make the beat",
+    "make my beat",
+    "make this a lofi beat",
+    "make a drum fill for the groove",
+    "write a hook to the beat",
+    "make me a piano sketch",
+    "make me a vocal sketch",
+    "write me a love song sketch",
+    "make me a beat for this song",
+  ])("does not treat %j as a request for a NEW beat", (ask) => {
+    expect(matchFastPath(ask, ctx())).toBeNull();
+  });
+
+  it.each([
+    ["build me a lofi sketch", "lofi"],
+    ["make a trap beat", "trap"],
+    ["make me a chill groove", "chill"],
+    ["make me a lo-fi beat", "lo fi"],
+    ["produce a dark boom bap beat", "dark boom bap"],
+    ["lay down a dusty jazzy groove", "dusty jazzy"],
+    ["start a new r&b beat", "r b"],
+  ])("routes %j to generate_beat_recipe with mood %j", (ask, mood) => {
+    const a = matchFastPath(ask, ctx());
+    expect(a).toMatchObject({ kind: "commands" });
+    expect(cmds(a)[0]).toEqual({ command: "generate_beat_recipe", args: { mood } });
+  });
+
+  it("drops neutral words from the mood and still routes ('make me a new beat')", () => {
+    expect(cmds(matchFastPath("make me a new beat", ctx()))[0]).toEqual({ command: "generate_beat_recipe", args: {} });
+    expect(cmds(matchFastPath("make another beat", ctx()))[0]).toEqual({ command: "generate_beat_recipe", args: {} });
+  });
+});
+
+describe("matchFastPath — a beat ask never retempos or rekeys a song that has material (PR #740 review)", () => {
+  // The native program generate_beat_recipe compiles sets tempo, key AND time signature
+  // (service/teardown/render/compile.py emits set_tempo/set_key/set_time_signature from
+  // the recipe meta, and recipes/generate.py takes the requested tempo/key as that meta).
+  const key = { tonic: "D", mode: "minor" };
+  const withClips = (clipCount: number, timeSigNum = 4) => ({
+    mode: "idle" as const, tempo: 87, timeSigNum, key,
+    tracks: [{ id: "1", name: "Drums", clipCount }, { id: "2", name: "Keys", clipCount: 0 }],
+  });
+
+  it("an empty session lets the recipe choose its own tempo and key", () => {
+    const a = matchFastPath("build me a lofi sketch", withClips(0));
+    expect(cmds(a)[0]).toEqual({ command: "generate_beat_recipe", args: { mood: "lofi" } });
+  });
+
+  it("a session with any clip pins the recipe to the session's tempo and key", () => {
+    const a = matchFastPath("build me a lofi sketch", withClips(1));
+    expect(cmds(a)[0]).toEqual({
+      command: "generate_beat_recipe", args: { mood: "lofi", tempo: 87, key: "D minor" },
+    });
+  });
+
+  it("a caller that does not report clip counts is treated as having material", () => {
+    const a = matchFastPath("make me a beat", {
+      mode: "idle", tempo: 101, timeSigNum: 4, key, tracks: [{ id: "1", name: "Drums" }],
+    });
+    expect(cmds(a)[0]).toEqual({ command: "generate_beat_recipe", args: { tempo: 101, key: "D minor" } });
+  });
+
+  it("a non-4/4 song with material falls through to the model (the recipe always writes 4/4)", () => {
+    expect(matchFastPath("build me a lofi sketch", withClips(2, 3))).toBeNull();
+    // ...but an EMPTY 3/4 session is a fresh start, and the recipe may set its meter
+    expect(matchFastPath("build me a lofi sketch", withClips(0, 3))).not.toBeNull();
+  });
 });
 
 describe("matchFastPath — state-aware track ops (mute/solo by name)", () => {

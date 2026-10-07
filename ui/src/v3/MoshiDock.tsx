@@ -214,7 +214,10 @@ export function MoshiDock() {
         mode: st.currentMode(),
         tempo: st.snapshot?.session?.tempo ?? 120,
         timeSigNum: st.snapshot?.session?.timeSigNumerator ?? 4,
-        tracks: (st.snapshot?.tracks ?? []).map((t) => ({ id: t.id, name: t.name, mute: t.mute, solo: t.solo })),
+        key: st.snapshot?.session?.key,
+        tracks: (st.snapshot?.tracks ?? []).map((t) => ({
+          id: t.id, name: t.name, mute: t.mute, solo: t.solo, clipCount: t.clips?.length ?? 0,
+        })),
       });
       if (fast) {
         await handleFast(fast, {
