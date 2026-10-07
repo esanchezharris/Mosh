@@ -1,0 +1,454 @@
+/* Home page. Features are laid out the way the app lays out a song: a track header
+   beside its lane, with real crops of the session as the clips. */
+
+.section {
+  padding-top: var(--s9);
+}
+.section__head {
+  display: grid;
+  gap: var(--s5);
+  margin-bottom: var(--s7);
+}
+.section__head h2 {
+  max-width: 18ch;
+}
+@media (min-width: 900px) {
+  .section__head {
+    grid-template-columns: 1.15fr 1fr;
+    align-items: end;
+    gap: var(--s7);
+  }
+}
+
+/* ---------- hero ---------- */
+.hero {
+  padding-top: clamp(2.5rem, 1.5rem + 4vw, 5rem);
+}
+.hero__grid {
+  display: grid;
+  gap: var(--s6);
+}
+.hero__title {
+  font-size: var(--fs-hero);
+  line-height: 0.94;
+  letter-spacing: -0.035em;
+}
+.hero__line {
+  display: block;
+}
+/* "Mosh it." is a selected clip: accent fill, ink text, the way the shell paints one */
+.clip-word {
+  display: inline-block;
+  margin-top: 0.06em;
+  margin-left: -0.1em;
+  padding: 0.02em 0.14em 0.07em;
+  border-radius: 0.14em;
+  background: var(--accent);
+  color: var(--accent-ink);
+  transition: background-color var(--dur) var(--ease-out);
+}
+.hero__lede {
+  margin-top: var(--s6);
+}
+.hero__cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin-top: var(--s6);
+}
+.hero__fine {
+  margin-top: var(--s4);
+}
+.hero__tile {
+  order: -1;
+  width: 6.5rem;
+  transform: rotate(-6deg);
+  transition: transform var(--dur) var(--ease-out);
+}
+.hero__tile:hover {
+  transform: rotate(-2deg) scale(1.03);
+}
+.hero__tile:active {
+  transform: rotate(-2deg) scale(0.97);
+}
+@media (min-width: 860px) {
+  .hero__grid {
+    grid-template-columns: minmax(0, 1fr) clamp(13rem, 22vw, 19rem);
+    align-items: center;
+    gap: var(--s7);
+  }
+  .hero__tile {
+    order: 0;
+    width: 100%;
+  }
+}
+
+.hero__stage {
+  margin-top: var(--s8);
+}
+.hero__under {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3) var(--s6);
+  margin-top: var(--s4);
+}
+
+/* ---------- lanes: features as tracks ---------- */
+.lanes {
+  display: grid;
+  gap: var(--s3);
+}
+.lane {
+  display: grid;
+  gap: var(--s3);
+}
+.lane__head {
+  display: grid;
+  gap: var(--s3);
+  align-content: start;
+  padding: var(--s5);
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.lane__head p {
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+/* the lane: the app's own dark surface, holding crops of the session */
+.lane__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: var(--s3);
+  min-width: 0;
+  padding: var(--s3);
+  border: 1px solid var(--shot-line);
+  border-radius: var(--r-md);
+  background: var(--shot-bg);
+}
+.lane__stack {
+  display: grid;
+  gap: var(--s3);
+  max-width: 100%;
+}
+@media (min-width: 900px) {
+  .lane {
+    grid-template-columns: 22rem minmax(0, 1fr);
+  }
+  .lane__body {
+    padding: var(--s4);
+  }
+}
+
+/* ---------- Moshi ---------- */
+.moshi {
+  display: grid;
+  gap: var(--s6);
+}
+.moshi__copy {
+  display: grid;
+  gap: var(--s5);
+  align-content: start;
+}
+@media (min-width: 960px) {
+  .moshi {
+    grid-template-columns: 1fr 1.15fr;
+    align-items: center;
+    gap: var(--s8);
+  }
+}
+
+/* the dock, drawn as the shell draws it (always dark: it is the app's surface) */
+.dock {
+  padding: var(--s4);
+  border: 1px solid var(--shot-line);
+  border-radius: var(--r-lg);
+  background: var(--shot-chrome);
+  color: var(--shot-text);
+}
+.dock__say {
+  min-height: 3.4rem;
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--shot-line);
+  border-radius: 10px;
+  background: #161a1a;
+  font-size: clamp(1rem, 0.9rem + 0.5vw, 1.25rem);
+  line-height: 1.3;
+  transition: opacity var(--dur) var(--ease-out);
+}
+.dock__say[data-pending='true'] {
+  opacity: 0.35;
+}
+.dock__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+.dock__face {
+  flex: none;
+  width: 4rem;
+  height: 4rem;
+  border: 1px solid var(--shot-line);
+  border-radius: var(--r-md);
+  background: #1e2424;
+}
+.dock__field {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 1.1rem;
+  border: 1px solid #3a4040;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.dock__field:empty::before {
+  content: attr(data-placeholder);
+  color: var(--shot-muted);
+}
+.dock__send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.2rem;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 55%, #0b0c0c);
+  color: #0b0c0c;
+  transition: background-color var(--dur) var(--ease-out);
+}
+:root[data-theme='light'][data-colorway='bone'] .dock__send {
+  background: #e8e2d6;
+}
+.dock__send svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.dock__asks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--shot-line);
+}
+.dock__try {
+  margin-right: var(--s1);
+  color: var(--shot-muted);
+  font-size: var(--fs-small);
+}
+.ask {
+  min-height: 2.5rem;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #3a4040;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--shot-text);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.ask:hover {
+  border-color: var(--shot-text);
+}
+.ask:focus-visible {
+  outline-color: var(--shot-text);
+}
+.ask[aria-pressed='true'] {
+  border-color: transparent;
+  background: rgba(242, 238, 230, 0.1);
+}
+.ask:disabled {
+  cursor: default;
+}
+.dock__note {
+  margin-top: var(--s3);
+  color: var(--shot-muted);
+  font-size: 0.8125rem;
+}
+
+/* one creature, four moods: each phrase in the sentence is a control for it */
+.moods {
+  display: grid;
+  gap: var(--s5);
+  align-items: center;
+  margin-top: var(--s8);
+}
+.moods__tile {
+  width: clamp(7rem, 16vw, 11rem);
+}
+.moods__text {
+  max-width: 30ch;
+  font-stretch: 112%;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 1.05rem + 1.7vw, 2.4rem);
+  letter-spacing: -0.02em;
+  line-height: 1.22;
+  text-wrap: balance;
+}
+.mood {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    text-decoration-color var(--dur-fast) var(--ease-out);
+}
+.mood:hover,
+.mood[aria-pressed='true'] {
+  color: var(--text);
+  text-decoration-color: var(--accent-text);
+}
+@media (min-width: 760px) {
+  .moods {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--s7);
+  }
+}
+
+/* ---------- two-player ---------- */
+.duo {
+  display: grid;
+  gap: var(--s7);
+}
+@media (min-width: 900px) {
+  .duo {
+    grid-template-columns: 1.1fr 1fr;
+    align-items: center;
+    gap: var(--s8);
+  }
+}
+.players {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.player {
+  display: grid;
+  justify-items: center;
+  gap: var(--s3);
+}
+.player__tile {
+  width: clamp(5.5rem, 15vw, 10rem);
+}
+.player__tile--alt {
+  background: #f3ede4;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.player__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+.online-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #58d68d;
+}
+.players__code {
+  flex: 1;
+  align-self: flex-start;
+  margin-top: clamp(2.2rem, 6.5vw, 4.4rem);
+  padding-bottom: 0.4rem;
+  border-bottom: 2px dashed var(--line);
+  color: var(--faint);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+.duo__text {
+  display: grid;
+  gap: var(--s6);
+}
+.duo__text h3 {
+  margin-bottom: var(--s3);
+}
+.duo__text p {
+  max-width: 46ch;
+  color: var(--muted);
+}
+.duo__text > div + div {
+  padding-top: var(--s6);
+  border-top: 1px solid var(--fog-line);
+}
+
+/* ---------- outro ---------- */
+.section--outro {
+  padding-bottom: var(--s9);
+}
+.outro {
+  display: grid;
+  gap: var(--s5);
+  padding: clamp(1.75rem, 1rem + 4vw, 4.5rem);
+  border-radius: var(--r-xl);
+  background: var(--accent);
+  color: var(--accent-ink);
+  overflow: hidden;
+  transition: background-color var(--dur) var(--ease-out);
+}
+.outro__copy {
+  display: grid;
+  gap: var(--s5);
+  justify-items: start;
+}
+.outro h2 {
+  font-size: clamp(2.6rem, 1.4rem + 6vw, 5.5rem);
+}
+.outro p {
+  max-width: 34rem;
+  font-size: var(--fs-lede);
+  line-height: 1.4;
+}
+.outro__mascot {
+  width: clamp(9rem, 30vw, 20rem);
+  aspect-ratio: 1;
+  justify-self: end;
+  margin: -1rem -0.5rem -1rem 0;
+}
+@media (min-width: 820px) {
+  .outro {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+  .outro__mascot {
+    margin: -2rem 0;
+  }
+}
+
+.waitlist {
+  display: grid;
+  gap: var(--s5);
+  margin-top: var(--s6);
+  padding: var(--s6);
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.waitlist__copy p {
+  margin-top: var(--s2);
+  color: var(--muted);
+}
+@media (min-width: 900px) {
+  .waitlist {
+    grid-template-columns: 1fr 1.2fr;
+    align-items: center;
+  }
+}
