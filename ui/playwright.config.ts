@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { shouldReuseExistingServer } from "./e2e/serverIdentity";
 
 const preview = process.env.MOSH_E2E_PREVIEW === "1";
 const port = process.env.MOSH_E2E_PORT ?? "5173";
@@ -39,8 +40,16 @@ export default defineConfig({
     video: "off",
   },
   projects: [
+    // Before any spec: the server on the e2e port must be Mosh's UI (e2e/serverIdentity.ts).
+    // A foreign page there (another project's dev server on :5173) fails this one test and
+    // skips the suite, instead of failing hundreds of specs against the wrong app.
+    {
+      name: "mosh-server-identity",
+      testMatch: "server-identity.setup.ts",
+    },
     {
       name: "chromium",
+      dependencies: ["mosh-server-identity"],
       use: {
         ...devices["Desktop Chrome"],
         // Collaborator-video tests: a fake camera so getUserMedia resolves with a real
@@ -84,7 +93,10 @@ export default defineConfig({
       ? `MOSH_E2E_HERMETIC_BRAIN=1 npm run build:e2e && MOSH_E2E_HERMETIC_BRAIN=1 npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port ${port}`
       : `${devServerEnv} npm run dev -- --host 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI && !preview,
+    // Not on CI, not for the preview lane, and not when the gate owns the port
+    // (MOSH_E2E_OWN_SERVER=1): then Playwright starts THIS tree's server or refuses a busy
+    // port. Anywhere else a reused server must pass the mosh-server-identity check.
+    reuseExistingServer: shouldReuseExistingServer(process.env),
     timeout: 120_000,
     stdout: "ignore",
     stderr: "pipe",
