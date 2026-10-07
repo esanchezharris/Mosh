@@ -114,6 +114,50 @@ void pruneOtherTakes (te::WaveAudioClip& clip, int keepIndex, juce::UndoManager&
         if (i != keepIndex)
             takes.removeChild (sourced.getReference (i), &undo);
 }
+
+// What the engine's take landing (WaveInputDeviceInstance::applyLastRecording) worked from.
+struct TakeLandingContext
+{
+    bool looping = false, punching = false;
+    tracktion::TimePosition loopEnd;
+};
+
+// Undoes the engine's loop adoption on a take it has just landed.
+//
+// The engine lands a take with te::insertWaveClip, which reads a tempo out of a file's NAME
+// (insertPlainWaveClip in MoshOpsInternal.h has the rule), and it names a take file
+// "<track>_Take_<n>". So a take on a track called "Vox 120" can land auto-tempo'd, and so can
+// takes 51 to 249 on ANY track, the take number being the name's last token: roughly one such
+// take in twenty is a whole number of bars long at "its" tempo. That take came back stretched
+// to that many beats of the session tempo and following every tempo change after it; with a
+// note name in the track name as well, transposed to the session key.
+//
+// insertPlainWaveClip avoids the adoption by seeding the clip state, and Mosh does not build
+// this one. So put back what an ordinary take has: none of the adopted properties, the
+// stretcher off, and the recording's own length — held inside the loop when punching or
+// looping, as applyLastRecording holds it. Start and offset are already right: adoption only
+// rewrites the length, and the punch adjustments that run after it move start and offset by
+// the same amount either way. The LOOPINFO child stays, as insertPlainWaveClip leaves it: it
+// is the file's own.
+//
+// Every write goes through the clip's UndoManager, so it rides the undo step the landing is in.
+void landTakeAsRecorded (te::WaveAudioClip& take, const TakeLandingContext& landing)
+{
+    if (! take.getAutoTempo() && ! take.getAutoPitch())
+        return;
+
+    // Removed rather than set false: an ordinary take's state carries none of the three.
+    for (const auto& adopted : { te::IDs::autoTempo, te::IDs::autoPitch, te::IDs::stretchMode })
+        take.state.removeProperty (adopted, &take.edit.getUndoManager());
+    take.setTimeStretchMode (te::TimeStretcher::disabled);
+
+    const auto pos = take.getPosition();
+    const auto fileStart = pos.getStart() - pos.getOffset();   // where the file's first sample sits
+    auto end = fileStart + take.getSourceLength();
+    if (landing.punching || landing.looping)
+        end = juce::jlimit (fileStart + tracktion::TimeDuration::fromSeconds (0.5), landing.loopEnd, end);
+    take.setEnd (end, /*preserveSync=*/ true);
+}
 }
 
 juce::var MoshOps::cmdCreateTrack (const juce::var& args)
@@ -367,7 +411,8 @@ juce::var MoshOps::cmdBounceTrack (const juce::var& args)
         .getChildFile (track->getName() + "-" + track->itemID.toString()
                        + "-" + juce::String (++bounceSeq) + ".wav");
     if (! bounceTrackToWav (*track, 0.0, lastEnd, destWav))
-        return errResult ("bounce_track", "offline render failed (stalled or not possible here)");
+        return errResult ("bounce_track", "offline render failed ("
+            + (lastBounceError_.isNotEmpty() ? lastBounceError_ : juce::String ("stalled or not possible here")) + ")");
 
     te::AudioFile af (eng.edit().engine, destWav);
     const double len = af.isValid() ? af.getLength() : lastEnd;
@@ -393,8 +438,10 @@ juce::var MoshOps::cmdBounceTrack (const juce::var& args)
                         hidden->removeFromParent();
             c->removeFromParent();
         }
-        auto nc = track->insertWaveClip (track->getName(), destWav,
-            { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+        // Plain: the render is named after the track, and a name can read as a tempo
+        // (insertPlainWaveClip, MoshOpsInternal.h).
+        auto nc = insertPlainWaveClip (*track, track->getName(), destWav,
+            { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} });
         if (nc == nullptr) return errResult ("bounce_track", "insertWaveClip failed");
         data->setProperty ("trackId", track->itemID.toString());
         data->setProperty ("clipId", nc->itemID.toString());
@@ -405,8 +452,8 @@ juce::var MoshOps::cmdBounceTrack (const juce::var& args)
         if (nt == nullptr) return errResult ("bounce_track", "could not create the bounce track");
         // Land DIRECTLY below the source (visible ordering, same idiom as move_track).
         eng.edit().moveTrack (nt, te::TrackInsertPoint (*track, /*insertBefore=*/ false));
-        auto nc = nt->insertWaveClip (track->getName(), destWav,
-            { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+        auto nc = insertPlainWaveClip (*nt, track->getName(), destWav,
+            { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} });
         if (nc == nullptr) return errResult ("bounce_track", "insertWaveClip failed");
         data->setProperty ("trackId", nt->itemID.toString());
         data->setProperty ("clipId", nc->itemID.toString());
@@ -453,7 +500,8 @@ juce::var MoshOps::cmdFreezeTrack (const juce::var& args)
         .getChildFile (track->getName() + "-" + track->itemID.toString()
                        + "-" + juce::String (++freezeSeq) + ".wav");
     if (! bounceTrackToWav (*track, 0.0, lastEnd, destWav))
-        return errResult ("freeze_track", "offline render failed (stalled or not possible here)");
+        return errResult ("freeze_track", "offline render failed ("
+            + (lastBounceError_.isNotEmpty() ? lastBounceError_ : juce::String ("stalled or not possible here")) + ")");
     te::AudioFile af (eng.edit().engine, destWav);
     const double len = af.isValid() ? af.getLength() : lastEnd;
 
@@ -469,8 +517,9 @@ juce::var MoshOps::cmdFreezeTrack (const juce::var& args)
                     hidden->removeFromParent();
         c->removeFromParent();
     }
-    auto nc = track->insertWaveClip (track->getName(), destWav,
-        { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+    // Plain, as in bounce_track: the render is named after the track.
+    auto nc = insertPlainWaveClip (*track, track->getName(), destWav,
+        { { tracktion::TimePosition::fromSeconds (0.0), tracktion::TimeDuration::fromSeconds (len) }, {} });
     if (nc == nullptr) return errResult ("freeze_track", "insertWaveClip failed");
     for (auto* p : track->pluginList.getPlugins())
         if (p != nullptr)
@@ -1215,6 +1264,12 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     const auto punchIn = transport.getTimeWhenStarted();
     const bool countInActive = eng.edit().getNumCountInBeats() > 0;
 
+    // What the landing will work from, for landTakeAsRecorded below. Read BEFORE stop too.
+    TakeLandingContext takeLanding;
+    takeLanding.looping  = transport.looping;
+    takeLanding.punching = eng.edit().recordingPunchInOut;
+    takeLanding.loopEnd  = transport.getLoopRange().getEnd();
+
     // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
     // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
     // playbackContext->stopRecording() -> applyRecording()), so the take clips exist in
@@ -1244,6 +1299,11 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                                                 beforeCaptureStates[id],
                                                 captureStateForClip (*c)))
                     {
+                        // A new take is the recording, whatever its file is called. First, so
+                        // the punch-in trim below works on a plain clip.
+                        if (auto* take = dynamic_cast<te::WaveAudioClip*> (c);
+                            take != nullptr && ! beforeIds.contains (id))
+                            landTakeAsRecorded (*take, takeLanding);
                         // CAP-001 — measure the landed take ONCE (peak of its source file) so
                         // the UI can flag a take that captured nothing (a muted interface, the
                         // wrong input) before the producer sings four more over it. Message
