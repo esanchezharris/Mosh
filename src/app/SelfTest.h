@@ -73,7 +73,12 @@ int runLatencyCalibrationSmoke (MoshEngine&, MoshOps&);
     entry point and its first onset is the tone played after it, not the one during the
     pre-roll), both passes are non-silent WAVs on disk landing within the calibrated
     tolerance, Again mutes and rejects, Keep moves the pass to LEAD audible, and undo reverses
-    the keep. Prints one "V3-VOCAL-SMOKE: {json}" line for scripts/v3-acceptance/run.py.
+    the keep. Then that a take lands AS RECORDED even when its file name reads as a tempo,
+    which the engine's own take landing acts on ("<track>_Take_<n>": a number in the track
+    name, or a take number from 51 up): an ordinary take for reference, then one take per way
+    in, one of them behind a count-in, each warp-free, starting at the punch-in, playing to
+    the end of its file, its state an ordinary take's, and gone in one undo.
+    Prints one "V3-VOCAL-SMOKE: {json}" line for scripts/v3-acceptance/run.py.
     Proves nothing about AUDIBILITY or feel — those stay with the owner. */
 int runV3VocalSmoke (MoshEngine&, MoshOps&);
 

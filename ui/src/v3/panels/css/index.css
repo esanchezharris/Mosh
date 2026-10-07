@@ -1,0 +1,15 @@
+/* Native plugin panels: one stylesheet per panel, each scoped to its own .pp-<name>
+   classes. Imported by ../../shell.css. */
+@import "./eq.css";
+@import "./filter.css";
+@import "./compressor.css";
+@import "./softclip.css";
+@import "./reverb.css";
+@import "./delay.css";
+@import "./chorus.css";
+@import "./phaser.css";
+@import "./pitch.css";
+@import "./ott.css";
+@import "./xfeedback.css";
+@import "./fourosc.css";
+@import "./sampler.css";

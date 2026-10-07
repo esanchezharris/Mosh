@@ -1581,11 +1581,9 @@ def check_clip_reverse(ctx):
         {"command": "import_clip", "args": {"trackId": "${T}", "file": src}, "capture": {"C": "clipId"}},
         {"command": "export_audio", "args": {"file": str(fwd)}},
         {"command": "set_clip_reverse", "args": {"clipId": "${C}", "reversed": True}},
-        # A reversed clip renders via a background-generated reversed proxy; without a
-        # message-loop pump the export detects the missing source and errors ("render
-        # stalled") — found by this check's first run. The __wait mirrors what the GUI's
-        # live message loop does implicitly.
-        {"command": "__wait", "args": {"ms": 4000}},
+        # No pump before this export, deliberately: a reversed clip renders from a
+        # background-generated reversed copy, and the export must wait for it itself
+        # (MoshOps::prepareRenderSources). It used to stall at 20 s without a __wait.
         {"command": "export_audio", "args": {"file": str(rev)}},
         {"command": "normalize_clip", "args": {"clipId": "${C}", "targetDb": 0.0}},
         {"command": "export_audio", "args": {"file": str(norm)}},
@@ -1674,9 +1672,8 @@ def check_warp_stretch(ctx):
          "capture": {"C": "clipId"}},
         {"command": "export_audio", "args": {"file": str(dry)}},
         {"command": "stretch_clip", "args": {"clipId": "${C}", "bars": 2}},
-        # Warped (auto-tempo) clips render via a background-generated proxy too — same
-        # pump requirement as reverse (found by this check's first run).
-        {"command": "__wait", "args": {"ms": 4000}},
+        # No pump here either: the warped clip's time-stretched proxy is generated in the
+        # background, and the export waits for it itself (as for reverse above).
         {"command": "export_audio", "args": {"file": str(wet)}},
     ]
     results, proc = run_script(ctx.bin, cmds, "verify-warp-stretch")

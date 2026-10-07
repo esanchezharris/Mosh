@@ -7,6 +7,7 @@
 namespace mosh
 {
 namespace te = tracktion::engine;
+namespace undotrace { class Tracer; }
 
 /** Owns the single te::Engine and the current te::Edit for the app lifetime
     (01 §1). Provides lifecycle + access only — it does NOT expose mutation to
@@ -101,6 +102,12 @@ public:
 
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
+
+    /** Where PluginHost persists the plugin catalog, block reasons and scan pedal, and
+        the read-only dir a not-yet-written catalog is seeded from (empty when this
+        engine owns the machine-wide copy). See sessionpaths::resolvePluginStateDirs. */
+    juce::File pluginStateDir() const { return pluginStateDirectory; }
+    juce::File pluginSeedDir()  const { return pluginSeedDirectory; }
 
     /** Attach the Edit to the audio device so the transport can play (01 §5). */
     void ensurePlaybackContext();
@@ -251,15 +258,20 @@ public:
 private:
     std::unique_ptr<te::Engine> enginePtr;
     std::unique_ptr<te::Edit>   editPtr;
+    // MOSH_UNDO_TRACE only (engine/UndoTrace.h): follows the live Edit via wireEditResolvers.
+    std::unique_ptr<undotrace::Tracer> undoTracer;
     // Borrowed (non-owning) pointer to the MoshEngineBehaviour the Engine owns —
     // typed as the base here because the concrete type is anonymous-namespace-local
     // to MoshEngine.cpp. Lets the PRF-001 accessors mutate its audioThreads atomic.
     te::EngineBehaviour*        behaviourPtr = nullptr;
     juce::File session;
     juce::File editPath;
+    juce::File pluginStateDirectory;
+    juce::File pluginSeedDirectory;
     juce::String openAudioDeviceBounded();                     // AUD-017 — the one, bounded, device open
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
-    void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
+    void consolidateAudioInto (const juce::File& projectDir,   // gap 3 — copy referenced audio project-local
+                               const juce::File& leavingEdit);
     void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
 
     /** FS-T2 — the ONE load-from-file path, bracketed by the plugin crash breadcrumb.

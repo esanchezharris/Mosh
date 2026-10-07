@@ -5,18 +5,8 @@
     "expires": "2026-12-01"
   },
   {
-    "command": "cancel_training_job",
-    "reason": "Re-reviewed 2026-10-02: still unquoted on every ledger surface, and a cover was attempted and blocked. The LoRA Lab is the caller (stopLabRun in ui/src/store/loraLab.ts, the lab-stop button in ui/src/ui/LoraLab.tsx). An e2e Train -> Stop spec cannot run today because the dev mock never sets `eligible` on a training source (native TrainerRegistry does), so the Lab's Train button stays disabled and no run can be started from the UI; the mock job is also 'ready' the instant it is submitted, so the spec needs Playwright's paused clock to keep Stop on screen. Cheapest cover: derive `eligible`/`blocked_reason` in the mock's training registry, then add that Train -> Stop spec to ui/e2e/lora-lab.spec.ts asserting cancel_training_job {jobId} in the command trace; this retires training_job_status in the same PR. scripts/verify-hardware/lab_train_check.py still never issues the command, and extending it needs a live SA3 + pmetal run to verify.",
-    "expires": "2026-11-02"
-  },
-  {
     "command": "import_lora_adapter",
     "reason": "Re-reviewed 2026-10-02: still unquoted on every ledger surface and absent from vitest (bridge.mock.ts, ui/src/ui/TopbarTools.tsx and commandClassification.ts only). The UI path exists (the training popover's 'Import adapter' / per-job 'Import' buttons), but an e2e spec can only reach the REFUSAL: mock training jobs carry a stub adapter.lora.json artifact, which the mock rejects exactly as native does ('unsupported source extension'). The success path - validate, stage, install into $MOSH_LORA_DIR/sa3 through jobManager.installLora - needs a real .safetensors from a real run; the install itself is proven service-side by service/loras/install_test.py, the native command is not. Cheapest real cover: have scripts/verify-hardware/lab_train_check.py import the finished run's artifact by jobId and assert the adapter appears in the registry. That needs a live SA3 service and a pmetal fine-tune to verify, so it was not done in this pass.",
     "expires": "2026-11-16"
-  },
-  {
-    "command": "training_job_status",
-    "reason": "Re-reviewed 2026-10-02: still unquoted on every ledger surface. The LoRA Lab polls it once a second while a run is live (pollLabRun in ui/src/store/loraLab.ts), but no e2e spec can start a run: the dev mock never sets `eligible` on a training source, so the Lab's Train button stays disabled (see cancel_training_job). It is also in the mock's READONLY set, so it never appears in the e2e command trace; the observable is the Lab run header moving to 'stopped'/'done', which only this read can cause. scripts/verify-hardware/lab_train_check.py still polls the service's /training/status over HTTP and never issues the command. Cheapest cover: the Train -> Stop e2e spec described under cancel_training_job, which retires both waivers together.",
-    "expires": "2026-11-02"
   }
 ]

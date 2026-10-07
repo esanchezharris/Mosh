@@ -3,6 +3,7 @@
 
 #include "plugins/moshfx/MoshFxDsp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <vector>
@@ -58,158 +59,7 @@ namespace
     }
 }
 
-// These drive mosh::moshfx::AutoTuneCore — the SAME stateful sine-resynthesis
-// core the live plugin runs (MoshAutoTunePlugin::applyToBuffer), so the green
-// tests actually cover production. (The old [autotune] tests exercised a
-// divergent linear-resampler free function the plugin never called.)
-
-TEST_CASE ("Mosh AutoTune core pulls a near-note sine toward the scale target", "[moshfx][autotune]")
-{
-    auto input = sine (448.985916, 8192);
-    std::vector<float> output (input);
-
-    mosh::moshfx::AutoTuneSettings settings;
-    settings.rootSemitone = 0;
-    settings.scale = mosh::moshfx::ScaleKind::chromatic;
-    settings.retuneMs = 5.0f;
-    settings.amount = 1.0f;
-    settings.maxCorrectionCents = 100.0f;
-    settings.mix = 1.0f;
-
-    const auto before = mosh::moshfx::estimateMonophonicPitch (input.data(), (int) input.size(), kSampleRate);
-
-    mosh::moshfx::AutoTuneCore core;
-    core.prepare (kSampleRate);
-    const auto result = core.processBlock (output.data(), (int) output.size(), settings);
-
-    const auto after = mosh::moshfx::estimateMonophonicPitch (output.data(), (int) output.size(), kSampleRate);
-
-    REQUIRE (before.voiced);
-    REQUIRE (result.corrected);
-    REQUIRE (after.voiced);
-    CHECK (std::abs (after.frequencyHz - 440.0) < std::abs (before.frequencyHz - 440.0));
-    CHECK (after.frequencyHz == Catch::Approx (440.0).margin (4.0));
-}
-
-TEST_CASE ("Mosh AutoTune leaves low-confidence noise stable", "[moshfx][autotune]")
-{
-    auto input = noise (8192);
-    std::vector<float> output (input);
-
-    mosh::moshfx::AutoTuneSettings settings;
-    settings.amount = 1.0f;
-    settings.mix = 1.0f;
-
-    mosh::moshfx::AutoTuneCore core;
-    core.prepare (kSampleRate);
-    const auto result = core.processBlock (output.data(), (int) output.size(), settings);
-
-    CHECK_FALSE (result.corrected);
-    REQUIRE (output.size() == input.size());
-    CHECK (rmsDiff (input, output) < 1.0e-6);
-}
-
-TEST_CASE ("Mosh AutoTune retune time changes correction speed", "[moshfx][autotune]")
-{
-    auto input = sine (448.985916, 4096);
-
-    mosh::moshfx::AutoTuneSettings settings;
-    settings.amount = 1.0f;
-    settings.maxCorrectionCents = 100.0f;
-    settings.mix = 1.0f;
-
-    std::vector<float> fast (input);
-    settings.retuneMs = 5.0f;
-    mosh::moshfx::AutoTuneCore fastCore;
-    fastCore.prepare (kSampleRate);
-    const auto fastResult = fastCore.processBlock (fast.data(), (int) fast.size(), settings);
-
-    std::vector<float> slow (input);
-    settings.retuneMs = 250.0f;
-    mosh::moshfx::AutoTuneCore slowCore;
-    slowCore.prepare (kSampleRate);
-    const auto slowResult = slowCore.processBlock (slow.data(), (int) slow.size(), settings);
-
-    REQUIRE (fastResult.corrected);
-    REQUIRE (slowResult.corrected);
-    CHECK (std::abs (fastResult.correctionCents) > std::abs (slowResult.correctionCents) * 3.0);
-
-    // A faster retune pulls the synthesized pitch closer to the 440 Hz target
-    // within the same single block.
-    const auto fastPitch = mosh::moshfx::estimateMonophonicPitch (fast.data(), (int) fast.size(), kSampleRate);
-    const auto slowPitch = mosh::moshfx::estimateMonophonicPitch (slow.data(), (int) slow.size(), kSampleRate);
-    CHECK (std::abs (fastPitch.frequencyHz - 440.0) < std::abs (slowPitch.frequencyHz - 440.0));
-}
-
-TEST_CASE ("Mosh AutoTune corrects the whole block past 8192 samples", "[moshfx][autotune]")
-{
-    // An offline render can hand the plugin a single block longer than 8192
-    // samples. The entire block must be corrected — not just the first 8192,
-    // with the tail left as the unprocessed (un-gained, un-tuned) dry signal.
-    const int n = 12000;
-    auto input = sine (448.985916, n);
-    std::vector<float> output (input);
-
-    mosh::moshfx::AutoTuneSettings settings;
-    settings.scale = mosh::moshfx::ScaleKind::chromatic;
-    settings.retuneMs = 5.0f;
-    settings.amount = 1.0f;
-    settings.maxCorrectionCents = 100.0f;
-    settings.mix = 1.0f;
-
-    mosh::moshfx::AutoTuneCore core;
-    core.prepare (kSampleRate);
-    core.processBlock (output.data(), n, settings);
-
-    // The tail [8192, n) must be pulled toward 440 too. Under the old cap it
-    // passed through as the original ~449 Hz.
-    const int tailStart = 8192;
-    const auto tail = mosh::moshfx::estimateMonophonicPitch (output.data() + tailStart,
-                                                             n - tailStart, kSampleRate);
-    REQUIRE (tail.voiced);
-    CHECK (tail.frequencyHz == Catch::Approx (440.0).margin (4.0));
-}
-
-TEST_CASE ("Mosh AutoTune fades the synth out across a voiced boundary (no pop)", "[moshfx][autotune]")
-{
-    // When a voiced phrase ends, the resynthesized tone must fade out instead of
-    // snapping to silence — a hard cut on the voiced->unvoiced transition is an
-    // audible click. After several voiced blocks (synth fully engaged), the first
-    // slice of the following unvoiced (silent) block must still carry the decaying
-    // tone; a hard cut leaves it at ~0.
-    mosh::moshfx::AutoTuneSettings settings;
-    settings.scale = mosh::moshfx::ScaleKind::chromatic;
-    settings.retuneMs = 5.0f;
-    settings.amount = 1.0f;
-    settings.maxCorrectionCents = 100.0f;
-    settings.mix = 1.0f;
-
-    mosh::moshfx::AutoTuneCore core;
-    core.prepare (kSampleRate);
-
-    const int block = 2048;
-    for (int b = 0; b < 4; ++b)
-    {
-        auto voiced = sine (448.985916, block);
-        core.processBlock (voiced.data(), block, settings);
-    }
-
-    std::vector<float> silent (block, 0.0f);   // unvoiced -> synth should fade, not cut
-    core.processBlock (silent.data(), block, settings);
-
-    auto sliceRms = [] (const float* d, int count)
-    {
-        double s = 0.0;
-        for (int i = 0; i < count; ++i)
-            s += (double) d[i] * (double) d[i];
-        return std::sqrt (s / (double) count);
-    };
-
-    const auto head = sliceRms (silent.data(), 64);     // ~1.3 ms after the boundary
-    const auto bodyEnd = sliceRms (silent.data() + block - 64, 64);
-    CHECK (head > 0.05);            // tone still present right after the boundary
-    CHECK (bodyEnd < head * 0.5);   // and it has decayed away by the end of the block
-}
+// Mosh AutoTune's engine is covered by test_retune_core.cpp and test_retune_shifter.cpp.
 
 TEST_CASE ("Mosh OTT is conservative by default and stronger at high amount", "[moshfx][ott]")
 {
@@ -236,6 +86,75 @@ TEST_CASE ("Mosh OTT is conservative by default and stronger at high amount", "[
     CHECK (peak (pushed) <= 1.0);
     CHECK (rmsDiff (input, defaults) < 0.08);
     CHECK (rmsDiff (input, pushed) > rmsDiff (input, defaults) * 1.5);
+}
+
+namespace
+{
+    // The OTT band gain law (MoshOTTDsp.cpp ottGainDb) with the static trim removed,
+    // restated here so the meter's gainDb is checked against the documented curve.
+    double ottDynamicGainDb (double levelDb, double amount, double upward, double downward)
+    {
+        double g = 0.0;
+        if (levelDb > -20.0)
+            g += ((-20.0 + (levelDb + 20.0) / 4.0) - levelDb) * downward * amount;
+        if (levelDb > -76.0 && levelDb < -38.0)
+            g += std::min (18.0, (-38.0 - levelDb) * 0.45) * upward * amount;
+        return g;
+    }
+}
+
+TEST_CASE ("Mosh OTT block meter: a loud band is cut, a quiet band is lifted", "[moshfx][ott][live-meter]")
+{
+    mosh::moshfx::OTTSettings settings;
+    settings.amount = 1.0f;
+
+    // Loud low band: 110 Hz at 0.8 sits well above -20 dB in the low band.
+    auto loud = sine (110.0, 48000, 0.8f);
+    mosh::moshfx::OTTCore loudCore;
+    loudCore.prepare (kSampleRate);
+    loudCore.processBlock (loud.data(), (int) loud.size(), settings);
+    const auto& lm = loudCore.lastBlockMeter();
+    CHECK (lm.dynamicsRan);
+    const double loudLevel = 20.0 * std::log10 ((double) lm.peakEnvelope[0]);
+    CHECK (loudLevel > -20.0);
+    CHECK (lm.gainDb[0] < -1.0);   // downward: a cut
+    // The gain at the end of the block follows the band law at the envelope's level
+    // (a steady tone: the final envelope sits within its ripple of the block peak).
+    CHECK (std::abs (lm.gainDb[0] - ottDynamicGainDb (loudLevel, 1.0, settings.upward, settings.downward)) < 0.6);
+
+    // Quiet low band: 110 Hz at 0.003 (about -50 dB) is inside the upward window.
+    auto quiet = sine (110.0, 48000, 0.003f);
+    mosh::moshfx::OTTCore quietCore;
+    quietCore.prepare (kSampleRate);
+    quietCore.processBlock (quiet.data(), (int) quiet.size(), settings);
+    const auto& qm = quietCore.lastBlockMeter();
+    const double quietLevel = 20.0 * std::log10 ((double) qm.peakEnvelope[0]);
+    CHECK (quietLevel < -38.0);
+    CHECK (quietLevel > -76.0);
+    CHECK (qm.gainDb[0] > 0.5);    // upward: a lift
+    CHECK (std::abs (qm.gainDb[0] - ottDynamicGainDb (quietLevel, 1.0, settings.upward, settings.downward)) < 0.6);
+    CHECK_FALSE (qm.clipped);
+}
+
+TEST_CASE ("Mosh OTT block meter: clamp and amount-zero reporting", "[moshfx][ott][live-meter]")
+{
+    mosh::moshfx::OTTSettings settings;
+    settings.amount = 0.0f;   // trim and limit only
+    settings.outputDb = 0.0f;
+
+    auto hot = sine (440.0, 4800, 1.5f);
+    mosh::moshfx::OTTCore core;
+    core.prepare (kSampleRate);
+    core.processBlock (hot.data(), (int) hot.size(), settings);
+    CHECK (core.lastBlockMeter().clipped);
+    CHECK_FALSE (core.lastBlockMeter().dynamicsRan);
+    CHECK (core.lastBlockMeter().gainDb[0] == 0.0f);
+    CHECK (core.lastBlockMeter().peakEnvelope[1] == 0.0f);
+
+    // The next block is metered from scratch: a quiet block does not inherit the clamp.
+    auto soft = sine (440.0, 4800, 0.2f);
+    core.processBlock (soft.data(), (int) soft.size(), settings);
+    CHECK_FALSE (core.lastBlockMeter().clipped);
 }
 
 TEST_CASE ("Mosh X-FDBK detects and optionally suppresses a narrowband squeal", "[moshfx][xfeedback]")
@@ -313,4 +232,39 @@ TEST_CASE ("Mosh X-FDBK notch state persists across blocks (no per-block reset t
     // Per-block reset leaks the tone across the head of the block while the notch
     // re-converges; the middle is already suppressed. Persistent state keeps them level.
     CHECK (headMag <= midMag * 2.5);
+}
+
+TEST_CASE ("Mosh OTT block meter: gainDb excludes the static band trim", "[moshfx][ott][live-meter]")
+{
+    // The panel scales its gain bars for the band law's DYNAMIC movement only; the
+    // contract (docs/02_MOSHOPS_CONTRACT.md, plugin_meters moshOTT) pins gainDb as the
+    // gain change EXCLUDING the Low/Mid/High Gain trim. The trims act after detection,
+    // so the envelopes are the same with or without them and gainDb must be too.
+    mosh::moshfx::OTTSettings plain;
+    plain.amount = 1.0f;
+    auto trimmed = plain;
+    trimmed.lowGainDb = 6.0f;
+    trimmed.midGainDb = -4.0f;
+    trimmed.highGainDb = 3.0f;
+
+    // Something in every band: 110 Hz (low), 1 kHz (mid), 8 kHz (high).
+    auto make = [] {
+        auto a = sine (110.0, 24000, 0.5f), b = sine (1000.0, 24000, 0.1f), c = sine (8000.0, 24000, 0.02f);
+        for (size_t i = 0; i < a.size(); ++i) a[i] += b[i] + c[i];
+        return a;
+    };
+    auto x = make(), y = make();
+    mosh::moshfx::OTTCore p, t;
+    p.prepare (kSampleRate);
+    t.prepare (kSampleRate);
+    p.processBlock (x.data(), (int) x.size(), plain);
+    t.processBlock (y.data(), (int) y.size(), trimmed);
+
+    // The trims really were applied to the audio (else this test proves nothing).
+    CHECK (rmsDiff (x, y) > 1.0e-3);
+    for (size_t b = 0; b < 3; ++b)
+    {
+        CHECK (t.lastBlockMeter().peakEnvelope[b] == p.lastBlockMeter().peakEnvelope[b]);
+        CHECK (t.lastBlockMeter().gainDb[b] == p.lastBlockMeter().gainDb[b]);
+    }
 }
