@@ -17,10 +17,11 @@ What it proves, row by row (each check would read differently if the feature wer
             Then `Mosh --v3-booth-smoke`: the Booth's own button path (Add a Vocal track, Put
             Me In from bar 1) with takes ended by the Stop pad, the TopBar stop, Shift+Space and
             Space, each registering as a Part in snapshot.loop (what the Booth renders); since
-            2026-09-24 export_audio, export_stems, the bounce, and a loop toggle each finalize
-            an in-flight pass as a Part too (they used to bypass the finalize and leave it
-            unstamped), a Hear-myself toggle mid-take defers instead of ending the take, and
-            the Stop pad ends a take the TopBar started.
+            2026-09-24 export_audio, export_stems, the bounce, and a loop toggle (and since
+            2026-09-26 export_clip_consolidated) each finalize an in-flight pass as a Part
+            too (they used to bypass the finalize and leave it unstamped), a Hear-myself
+            toggle mid-take defers instead of ending the take, and the Stop pad ends a take
+            the TopBar started.
             Then `Mosh --disarm-after-export-smoke`: a disarm right after export_audio applies
             and survives the next transport start.
   V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
@@ -519,9 +520,9 @@ def row_vocal(ctx) -> Row:
     row.chk(booth.returncode == 0 and booth_summary and int(booth_summary.get("failures", 1)) == 0,
             f"Mosh --v3-booth-smoke passed every check ({booth_summary.get('checks', '?')} checks): each take ended by "
             f"the Stop pad, the TopBar stop, Shift+Space or Space registers as a Part the Booth lists, Keep can act "
-            f"on it, export_audio/export_stems/the bounce/a loop toggle mid-take each finalize the pass as a Part, "
-            f"a Hear-myself toggle mid-take defers instead of ending the take, and the Stop pad ends a take "
-            f"the TopBar started",
+            f"on it, export_audio/export_stems/the bounce/export_clip_consolidated/a loop toggle mid-take each "
+            f"finalize the pass as a Part, a Hear-myself toggle mid-take defers instead of ending the take, and "
+            f"the Stop pad ends a take the TopBar started",
             {"rc": booth.returncode, "summary": booth_summary, "failed": booth_failed})
 
     # export_audio frees the playback context; a disarm right after it used to find no input

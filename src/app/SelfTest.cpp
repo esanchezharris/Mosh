@@ -21121,6 +21121,47 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         check (after.getProperty ("currentId", var()).toString().isEmpty(), "bounce mid-take: nothing left in flight");
     }
 
+    // -- export_clip_consolidated mid-take, on a Guide clip (a DIFFERENT track than the one
+    //    recording): the fourth offline render that detaches the whole Edit from the device.
+    //    It called Tracktion's raw transport.stop() too, so the pass landed unstamped. --
+    {
+        juce::String guideClipId;
+        {
+            auto snap = ops.snapshot();
+            auto tv = snap.getProperty ("tracks", var());
+            if (auto* tracks = tv.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("name", var()).toString() == "Guide")
+                    {
+                        auto cv = t.getProperty ("clips", var());
+                        if (auto* clips = cv.getArray())
+                            if (! clips->isEmpty())
+                                guideClipId = clips->getReference (0).getProperty ("id", var()).toString();
+                    }
+        }
+        check (guideClipId.isNotEmpty(), "export_clip_consolidated mid-take: found a Guide clip");
+
+        const int partsBefore = partsOf (boothLoop()).size();
+        auto rec = cmd (ops, "loop_record");
+        check (ok (rec) && (bool) rec["data"].getProperty ("applied", false), "export_clip_consolidated mid-take: Put Me In applied");
+        const auto passId = rec["data"].getProperty ("currentId", var()).toString();
+        check (passId.isNotEmpty(), "export_clip_consolidated mid-take: a pass is in flight");
+        pump (1500);
+        const auto clipFile = eng.sessionDir().getChildFile ("v3-booth-export-clip.wav");
+        auto exported = cmd (ops, "export_clip_consolidated", objN ({{ "clipId", guideClipId }, { "file", clipFile.getFullPathName() }}));
+        check (ok (exported), "export_clip_consolidated (Guide clip) mid-take is accepted");
+        pump (300);
+        check (! eng.edit().getTransport().isRecording(), "export_clip_consolidated mid-take: the export ended the recording");
+        const auto after = boothLoop();
+        check (partsOf (after).size() == partsBefore + 1,
+               "export_clip_consolidated mid-take finalizes the in-flight pass as a new Part (" + String (partsBefore)
+                   + " before, " + String (partsOf (after).size()) + " after)");
+        check (after.getProperty ("lastId", var()).toString() == passId,
+               "export_clip_consolidated mid-take: lastId names the pass the export just finalized");
+        check (after.getProperty ("currentId", var()).toString().isEmpty(),
+               "export_clip_consolidated mid-take: nothing left in flight");
+    }
+
     // -- A loop toggle mid-take (set_transport {loop} while recording) is a stop too:
     //    Tracktion's own valueTreePropertyChanged listener calls stopIfRecording() the
     //    instant `.looping` changes. cmdSetTransport now finalizes the in-flight pass FIRST.
