@@ -16,6 +16,18 @@ from typing import Any
 from .rights import write_json
 
 
+class TrainingCancelled(RuntimeError):
+    """The run ended because the producer pressed Stop — an outcome, not a failure.
+
+    A distinct type so the service can record "cancelled" for exactly this case
+    and keep "error" for everything else. As a plain RuntimeError it was recorded
+    as "error", and the LoRA Lab header said "failed" after every Stop.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("training cancelled")
+
+
 def _digest_json(payload: dict[str, Any]) -> str:
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
@@ -430,8 +442,13 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
     # On the MLX-owning thread when the caller provides one (the service always
     # does). Running it on this thread instead poisons every subsequent render —
     # see train()'s docstring.
-    _pre = lambda: PC.precompute(clips, str(pre_dir), on_progress=None)  # noqa: E731
+    _pre = lambda: PC.precompute(clips, str(pre_dir), on_progress=None,  # noqa: E731
+                                 should_cancel=should_cancel)
     pre = run_on_mlx(_pre) if run_on_mlx else _pre()
+    # A Stop during precompute ends the run here. Without this the trainer
+    # subprocess was launched anyway, only to be killed at its first poll.
+    if should_cancel and should_cancel():
+        raise TrainingCancelled()
     if pre["count"] == 0:
         raise RuntimeError(f"precompute produced no samples (skipped: {pre['skipped']})")
 
@@ -499,8 +516,10 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
 
     code = LP.run_training(argv, run_dir, cfg["steps"],
                            should_cancel=should_cancel, on_progress=_progress)
-    if code == 130:
-        raise RuntimeError("training cancelled")
+    # run_training returns 130 when it killed the group on Stop. A trainer that
+    # exits 130 on its own was not stopped by anyone and falls through as a failure.
+    if code == 130 and should_cancel and should_cancel():
+        raise TrainingCancelled()
     if code != 0:
         raise RuntimeError(f"trainer exited {code} — see {run_dir / 'progress.json'} and ~/.cache/pmetal/logs/pmetal.log")
 

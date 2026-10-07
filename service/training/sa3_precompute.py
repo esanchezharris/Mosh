@@ -65,8 +65,9 @@ def precompute(
     out_dir: str,
     engine: Any | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Encode `clips` into `out_dir`. Returns `{manifest_path, count, skipped}`.
+    """Encode `clips` into `out_dir`. Returns `{manifest_path, count, skipped, cancelled}`.
 
     `clips` is an iterable of `{"id": str, "wav": path, "caption": str}`.
     The caption is the prompt the adapter learns to answer; an empty one is
@@ -75,6 +76,11 @@ def precompute(
 
     `engine` defaults to the live singleton. Injectable so the parity test can
     drive it directly.
+
+    `should_cancel` is checked between clips. Precompute is in-process work ahead
+    of the trainer subprocess, so a Stop has nothing to kill here; without this
+    check it waited for the whole corpus to encode. A cancelled run still writes
+    the manifest of what it finished and returns `cancelled: True`.
     """
     if engine is None:
         from sa3 import engine as E  # local import: service may run without SA3
@@ -89,8 +95,12 @@ def precompute(
     total = len(clips)
     manifest: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
+    cancelled = False
 
     for i, clip in enumerate(clips):
+        if should_cancel and should_cancel():
+            cancelled = True
+            break
         sample_id = str(clip.get("id") or f"clip_{i:04d}")
         wav = os.path.expanduser(str(clip.get("wav", "")))
         caption = str(clip.get("caption") or "").strip()
@@ -133,4 +143,5 @@ def precompute(
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
-    return {"manifest_path": manifest_path, "count": len(manifest), "skipped": skipped}
+    return {"manifest_path": manifest_path, "count": len(manifest), "skipped": skipped,
+            "cancelled": cancelled}
