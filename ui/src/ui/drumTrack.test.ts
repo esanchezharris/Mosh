@@ -60,7 +60,8 @@ describe("DRM-001 drum tracks + default instruments", () => {
     expect((await exec("load_drum_kit", { trackId: id.trackId })).ok).toBe(true);
     const as = await exec("assign_sample", { trackId: id.trackId, note: 60, file: "/tmp/x.wav", name: "X" });
     expect(as.ok).toBe(true);
-    expect((as.data as { file: string }).file).toBe("/tmp/x.wav");
+    // the engine copies the file into the session's imports and reports the copy it plays
+    expect((as.data as { file: string }).file).toMatch(/^\/.*\/imports\/x\.wav$/);
     // assign_sample requires a file (mirrors the native "file not found" guard).
     expect((await exec("assign_sample", { trackId: id.trackId, note: 60, file: "" })).ok).toBe(false);
   });

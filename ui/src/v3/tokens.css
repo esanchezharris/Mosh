@@ -1,4 +1,13 @@
 .v3-shell {
+  /* Plugin panels (panels/): one monospace stack that is not Courier outside WebKit, and
+     one type scale for axis labels, captions, values and the one hero number per panel. */
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --pp-fs-axis: 9px;
+  --pp-fs-cap: 10px;
+  --pp-fs-val: 11px;
+  --pp-fs-hero: 13px;
+  /* The outline of an interactive control (about 3:1 against the card). */
+  --pp-edge: color-mix(in srgb, var(--text) 22%, transparent);
   --bg: #0B0C0C;
   --surface: #161A1A;
   --surface2: #1E2424;

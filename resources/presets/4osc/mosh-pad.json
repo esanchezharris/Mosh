@@ -1,23 +1,64 @@
 {
- "waveShapes": [
-  2,
-  3,
-  0,
-  0
- ],
- "params": {
-  "Level 1": 0.75,
-  "Level 2": 0.65,
-  "Detune 2": 0.4,
-  "Spread": 0.7,
-  "Amp Attack": 0.5,
-  "Amp Decay": 0.5,
-  "Amp Sustain": 0.9,
-  "Amp Release": 0.8,
-  "Filter Freq": 0.55,
-  "Filter Resonance": 0.15,
-  "Level 3": 0.0,
-  "Level 4": 0.0
+ "state": {
+  "waveShape1": "triangle",
+  "waveShape2": "saw",
+  "voices2": 4,
+  "filterType": "lowpass",
+  "filterSlope": 12
  },
- "_note": "Bundled starter patch, authored 2026-09-01 for the P1 preset seam. Params are NORMALIZED 0..1 against 4OSC's ranges. UN-AUDITIONED: owner by-ear pass pending; edit freely."
+ "params": {
+  "Level 1": 0.7513,
+  "Level 2": 0.6503,
+  "Detune 2": 0.4,
+  "Spread 2": 0.7,
+  "Amp Attack": 0.5013,
+  "Amp Decay": 0.5013,
+  "Amp Sustain": 0.9,
+  "Amp Release": 0.5296,
+  "Filter Freq": 0.5484,
+  "Filter Resonance": 0.15
+ },
+ "_physical": {
+  "Level 1": {
+   "value": -6.9,
+   "unit": "dB"
+  },
+  "Level 2": {
+   "value": -10.2,
+   "unit": "dB"
+  },
+  "Detune 2": {
+   "value": 0.2,
+   "unit": "st"
+  },
+  "Spread 2": {
+   "value": 40,
+   "unit": "%"
+  },
+  "Amp Attack": {
+   "value": 1.9,
+   "unit": "s"
+  },
+  "Amp Decay": {
+   "value": 1.9,
+   "unit": "s"
+  },
+  "Amp Sustain": {
+   "value": 90,
+   "unit": "%"
+  },
+  "Amp Release": {
+   "value": 2.5,
+   "unit": "s"
+  },
+  "Filter Freq": {
+   "value": 590,
+   "unit": "Hz"
+  },
+  "Filter Resonance": {
+   "value": 15,
+   "unit": "%"
+  }
+ },
+ "_note": "Bundled starter patch (first drafted 2026-09-01; waves, filter and unison restored 2026-10-06 from that draft, whose wave numbers were Tracktion's LFO enum). \"state\" holds the 4OSC settings by their set_plugin_state names; \"params\" are NORMALIZED 0..1 against 4OSC's own ranges (skewed: times v^5, levels v^0.25), keyed by display name or paramID, and \"_physical\" says what each one is. Loading sets the whole patch: anything not named returns to its default. UN-AUDITIONED: owner by-ear pass pending; edit freely."
 }

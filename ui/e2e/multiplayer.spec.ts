@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { expectDispatched } from "./helpers";
 
 // The #1 playtest blocker (2026-07-16): in the default v2 shell, the prominent
 // "Invite" pill (TopBar) and the "Invite collaborator" button (RightRail) both just
@@ -111,6 +112,26 @@ test.describe("v2 multiplayer — discoverable Create/Join", () => {
     await expect(modal).toBeVisible();
     await expect(modal.getByRole("button", { name: "Create session" })).toBeVisible();
     await expect(modal.getByLabel("Room code to join")).toBeVisible();
+  });
+
+  test("sharing your camera in a session sends the peer a video offer", async ({ page }) => {
+    await bootV2(page);
+    await page.getByTestId("v2-share").click();
+    const modal = page.getByTestId("mp-launcher-modal");
+    await modal.getByRole("button", { name: "Create session" }).click();
+    await expect(modal.getByLabel("Room code (share to invite)")).toBeVisible();
+    await modal.getByRole("button", { name: "Close" }).click();
+
+    // The mock session seats one other peer ("bo"). Turning the camera on opens a link
+    // to them, and the media never crosses the command seam — only the SDP/ICE
+    // handshake does, addressed to that peer through mp_send_signal.
+    const camera = page.getByTestId("v2-camera-toggle");
+    await camera.click();
+    await expect(camera).toHaveAttribute("aria-pressed", "true");
+    await expectDispatched(page, "mp_send_signal", {
+      to: "bo",
+      payload: expect.objectContaining({ kind: "offer", sdp: expect.stringMatching(/^v=0/) }),
+    });
   });
 
   test("Escape dismisses the modal", async ({ page }) => {
