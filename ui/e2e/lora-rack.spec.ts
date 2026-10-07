@@ -26,6 +26,20 @@ test("lora rack: add → strength → unbounded stack → Σ readout → remove"
   const add = gen.getByTestId("lora-add");
   await expect(add).toBeVisible();
   await expect(add.locator("option[value=broken]")).toHaveCount(0);
+
+  // The menu is a FILTER over what list_loras returned, which the store holds whole as
+  // `availableLoras` (the command is in the mock's READONLY set, so it never reaches the
+  // command trace — the slice only it fills is the observable). Every kept, usable
+  // adapter is offered; the unreadable one and a run's lab checkpoints are not.
+  type Listed = { name: string; valid?: boolean; family?: string };
+  const listed = await page.evaluate(() =>
+    (window as unknown as { __moshStore: { getState: () => { availableLoras: Listed[] } } })
+      .__moshStore.getState().availableLoras);
+  const offered = await add.locator("option").evaluateAll((els) =>
+    els.map((el) => (el as HTMLOptionElement).value).filter(Boolean));
+  expect(listed.some((l) => l.family === "lab")).toBe(true);
+  expect([...offered].sort(), 'the "+ LoRA…" menu is the kept, usable part of the "list_loras" result').toEqual(
+    listed.filter((l) => (l.valid ?? true) && l.family !== "lab").map((l) => l.name).sort());
   await add.selectOption("ken-sa3");
   const row = gen.getByTestId("lora-row-ken-sa3");
   await expect(row).toBeVisible();

@@ -21,13 +21,7 @@ import { effectiveInteractionSetting } from "../interaction/config";
 import { activeShell, isV2Active } from "../v2/shellFlag";
 import { settingHiddenForShell } from "./shellVisibility";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
-import {
-  outputDeviceOptions,
-  inputDeviceOptions,
-  waveInputOptions,
-  currentTrackInput,
-  audioDevicePatch,
-} from "./routing";
+import { outputDeviceOptions, inputDeviceOptions, waveInputOptions, currentTrackInput, audioDevicePatch, bufferSizeOptions } from "./routing";
 
 // ── one renderer per setting type ───────────────────────────────────────────
 function SettingControl({ def }: { def: SettingDef }) {
@@ -197,7 +191,7 @@ export function EngineSettings({ snapshot }: { snapshot: Snapshot }) {
       <div className="pop-row"><span>Sample rate</span><span className="tc">{s.sampleRate} Hz</span></div>
       <label className="pop-row"><span>Buffer</span>
         <select value={String(s.bufferSize ?? 512)} onChange={(e) => void exec("set_buffer_size", { bufferSize: Number(e.target.value) }).then(() => refresh())}>
-          {[128, 256, 512, 1024].map((b) => <option key={b} value={b}>{b}</option>)}
+          {bufferSizeOptions(audioDevices, s.bufferSize).map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
       </label>
       <label className="pop-row"><span>Threads</span>

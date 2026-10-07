@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "audio/CombinedAudioDevice.h"
 #include "SessionMaintenance.h"
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
@@ -7,6 +8,11 @@
 #include "state/ProjectName.h"
 #include "state/TakeIdentity.h"
 #include "plugins/mixer/TrackMutePlugin.h"
+#include "plugins/moshfx/MoshCompressorPlugin.h"
+#include "plugins/moshfx/MoshDelayLinePlugins.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "state/SafeMode.h"
 #include "app/MacMicrophonePermission.h"
 
@@ -37,11 +43,68 @@ namespace
     {
         bool audio;
         explicit MoshEngineBehaviour (bool a) : audio (a) {}
-        bool autoInitialiseDeviceManager() override { return false; }
+
+        // Two jobs. (1) AUD-017 above: never let the engine open the device itself.
+        // (2) The ONE hook between Tracktion constructing its PluginManager and
+        // registering its own built-in types. Engine::initialise() (tracktion_Engine.cpp,
+        // initialise()) does: pluginManager = make_unique<PluginManager>; then
+        // `if (engineBehaviour->autoInitialiseDeviceManager()) ...`; then
+        // pluginManager->initialise(), which calls createBuiltInType<CompressorPlugin>()
+        // among the rest. PluginManager::registerBuiltInType keeps the FIRST
+        // registration of a type string and ignores later ones, so registering
+        // MoshCompressorPlugin (same xmlTypeName, "compressor") here makes every
+        // compressor Mosh creates or loads a metered one (the live gain-reduction rail)
+        // while its audio stays Tracktion's. This depends on that Tracktion init order;
+        // --selftest ("plugin_meters: compressor") fails if a loaded "compressor" is not
+        // a MoshCompressorPlugin, so an engine update that moves the call cannot slip by.
+        // The delay, chorus, low/high-pass, 4OSC and sampler shadows below ride the same hook
+        // and have the same guard.
+        bool autoInitialiseDeviceManager() override
+        {
+            registerShadowingBuiltIns();
+            return false;
+        }
+
+        void registerShadowingBuiltIns()
+        {
+            if (shadowingBuiltInsRegistered)
+                return;
+            // The Engine ctor adds itself to Engine::getEngines() before initialise(),
+            // so the newest engine is the one being constructed. Confirm it is OURS
+            // (it owns this behaviour) rather than trusting the list's order.
+            const auto engines = te::Engine::getEngines();
+            auto* engine = engines.isEmpty() ? nullptr : engines.getLast();
+            if (engine == nullptr || &engine->getEngineBehaviour() != this)
+                return;
+            engine->getPluginManager().createBuiltInType<MoshCompressorPlugin>();
+            // Delay and chorus: delay lines sized for set_plugin_state's ceiling on the
+            // message thread, so a length/depth change never allocates on the audio
+            // thread (src/plugins/moshfx/MoshDelayLinePlugins.h).
+            engine->getPluginManager().createBuiltInType<MoshDelayPlugin>();
+            engine->getPluginManager().createBuiltInType<MoshChorusPlugin>();
+            // Low/high-pass with a selectable slope (6-48 dB/oct); at 12 dB/oct its audio
+            // is Tracktion's bit for bit (src/plugins/moshfx/MoshLowPassPlugin.h).
+            engine->getPluginManager().createBuiltInType<MoshLowPassPlugin>();
+            // The 4OSC synth with a live keys/output entry on the plugin_meters rail; its
+            // audio is Tracktion's (src/plugins/moshfx/MoshFourOscPlugin.h).
+            engine->getPluginManager().createBuiltInType<MoshFourOscPlugin>();
+            // The sampler with a live hits/keys/output entry on the plugin_meters rail; its
+            // audio is Tracktion's (src/plugins/moshfx/MoshSamplerPlugin.h).
+            engine->getPluginManager().createBuiltInType<MoshSamplerPlugin>();
+            shadowingBuiltInsRegistered = true;
+        }
+        bool shadowingBuiltInsRegistered = false;
         bool shouldOpenAudioInputByDefault() override { return false; }
         // No audio → don't enumerate audio I/O device types (avoids the macOS
         // mic-permission prompt on headless/no-audio launches).
+        // On macOS the engine registers its own CoreAudio type instead of JUCE's (see
+        // the MoshEngine ctor and audio/CombinedAudioDevice.h), so JUCE's must not be
+        // added as well.
+       #if JUCE_MAC
+        bool addSystemAudioIODeviceTypes() override { return false; }
+       #else
         bool addSystemAudioIODeviceTypes() override { return audio; }
+       #endif
 
         // PRF-001 — the ONE knob Tracktion's parallel audio graph reads. The engine
         // applies setNumThreads(getNumberOfCPUsToUseForAudio() - 1) in EditPlaybackContext
@@ -151,6 +214,13 @@ namespace
                 juce::Thread::sleep (stallMs);
 
             juce::AudioDeviceManager manager;
+           #if JUCE_MAC
+            // The device type the engine itself registers (see the MoshEngine ctor), so a
+            // microphone-plus-headphones setup is probed the way it will really be opened:
+            // as one private aggregate, not through JUCE's two-device path.
+            if (auto type = audio::createCoreAudioTypeWithPrivateAggregates())
+                manager.addAudioDeviceType (std::move (type));
+           #endif
             error = setupXml != nullptr
                         ? manager.initialise (numInputChannels, numOutputChannels,
                                               setupXml.get(), true)
@@ -273,6 +343,18 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
             moshDir, propertyStorageSession, propertyStorageDir, uniqueTag, useOwnerSession),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
+
+    // macOS: Mosh's CoreAudio type opens "input on one device, output on another" (a
+    // laptop's built-in microphone and headphones) as ONE private aggregate device.
+    // JUCE's own two-device path adds a FIFO that pays both device latencies a second
+    // time, about 38 ms of monitoring delay with a MacBook microphone
+    // (audio/CombinedAudioDevice.h). It must be registered before anything asks the
+    // device manager for its types, or JUCE would create its default set first.
+   #if JUCE_MAC
+    if (audioOpen)
+        if (auto type = audio::createCoreAudioTypeWithPrivateAggregates())
+            enginePtr->getDeviceManager().deviceManager.addAudioDeviceType (std::move (type));
+   #endif
 
     // CAP-AUT-006 — register the mute gate's type HERE, not with the rest of the Mosh
     // built-ins in PluginHost::initialise(). PluginHost runs from the MoshOps ctor,
@@ -729,6 +811,8 @@ juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputN
         return error;
 
     preferredInputDeviceName = inputName;
+    std::cerr << "[audio] input on: "
+              << audio::describeOpenDevice (manager.getCurrentAudioDevice(), inputName, setup.outputDeviceName) << std::endl;
     enginePtr->getDeviceManager().rescanWaveDeviceList();
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (50);

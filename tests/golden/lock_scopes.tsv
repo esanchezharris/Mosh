@@ -18,6 +18,7 @@ analyze_lyrics	Track
 apply_agent_patch	Unguarded
 apply_choke	Clip
 apply_remote_track	Unguarded
+apply_track_preset	Track
 approve_training_source	Unguarded
 arm_track	Track
 assert_lyric_line	Track
@@ -233,6 +234,7 @@ set_master_volume	SessionGlobal
 set_metronome	SessionGlobal
 set_note	Clip
 set_plugin_param	Track
+set_plugin_state	Track
 set_project_settings	Unguarded
 set_rave_param	Track
 set_record_options	SessionGlobal
