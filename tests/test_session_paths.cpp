@@ -147,6 +147,50 @@ TEST_CASE ("only the interactive GUI uses the owner property-storage directory",
              == sessionDir.getChildFile ("_settings/run-pid2-bbbb"));
 }
 
+TEST_CASE ("only the GUI and the deep scan write the owner's plugin catalog", "[sessionpaths]")
+{
+    // REGRESSION: PluginHost kept plugin-catalog.xml, plugin-block-reasons.txt and the
+    // scan pedal at fixed ~/Library/Mosh paths for EVERY launch. A --selftest's
+    // clear_plugin_blocklist therefore rewrote the owner's real quarantines away, and
+    // concurrent runs consumed each other's simulated-crash pedal mid-check.
+    const auto ownerDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                              .getChildFile ("mosh-plugin-owner");
+    const auto privateDir = ownerDir.getChildFile ("_harness/audit-run/_settings/run-pid1-aaaa");
+
+    const auto gui = resolvePluginStateDirs (ownerDir, privateDir, true, {});
+    REQUIRE (gui.directory == ownerDir);
+    REQUIRE (gui.seed == juce::File());
+
+    HarnessModes scan {};  scan.scanDeep = true;
+    const auto deepScan = resolvePluginStateDirs (ownerDir, privateDir, false, harnessSessionBase (scan));
+    REQUIRE (deepScan.directory == ownerDir);   // its whole job is the GUI's catalog
+    REQUIRE (deepScan.seed == juce::File());
+
+    HarnessModes selftest {};  selftest.selfTest = true;
+    HarnessModes undo {};      undo.undoSelfTest = true;
+    HarnessModes golden {};    golden.goldenSelfTest = true;
+    HarnessModes live {};      live.liveAudioSmoke = true;
+    HarnessModes midi {};      midi.midiRecordSmoke = true;
+    HarnessModes script {};    script.runScript = true;
+    HarnessModes demo {};      demo.demoGui = true;
+    HarnessModes noAudio {};   noAudio.envNoAudio = true;
+    for (const auto& modes : { selftest, undo, golden, live, midi, script, demo, noAudio })
+    {
+        const auto base = harnessSessionBase (modes);
+        INFO ("session base " << base);
+        const auto harness = resolvePluginStateDirs (ownerDir, privateDir, false, base);
+        REQUIRE (harness.directory == privateDir);
+        REQUIRE (harness.seed == ownerDir);   // still sees the owner's plugins, read-only
+    }
+
+    // A GUI launched under MOSH_SELFTEST_SESSION is not the owner session either.
+    const auto auditGui = resolvePluginStateDirs (ownerDir, privateDir, false, {});
+    REQUIRE (auditGui.directory == privateDir);
+    // ...and neither is a nested selftest engine, whatever purpose name it carries.
+    const auto nested = resolvePluginStateDirs (ownerDir, privateDir, false, "session-mp-selfheal-host");
+    REQUIRE (nested.directory == privateDir);
+}
+
 TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[sessionpaths]")
 {
     const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)

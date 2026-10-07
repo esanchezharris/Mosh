@@ -1,0 +1,50 @@
+/* Mosh X-FDBK panel (panels/XFeedbackPanel.tsx): mode + cuts row, the ring strip (its status
+   and chips in a lane of their own along its top), then the dials. Tokens only; the switch, buttons,
+   plot frame and dials are the shared ones in shell.css. */
+.v3-shell .insp .pr .pp-xf { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.v3-shell .insp .pr .pp-xf.off .pp-xf-strip { opacity: .5; }
+
+/* Controls row: Detect | Suppress (the shared .pp-seg), then the cuts stepper. */
+.v3-shell .insp .pr .pp-xf-ctl { display: flex; align-items: center; gap: 8px; min-width: 0; height: 18px; }
+.v3-shell .insp .pr .pp-xf-mode { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-xf-step { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-xf-step .pp-btn { width: 18px; padding: 0; color: var(--text); font-size: var(--pp-fs-val); }
+.v3-shell .insp .pr .pp-xf-step .pp-btn[aria-disabled="true"] { opacity: .35; cursor: default; }
+.v3-shell .insp .pr .pp-xf-step .v { min-width: 46px; text-align: center; font-family: var(--mono); font-size: var(--pp-fs-val);
+  color: var(--text); outline: none; border-radius: 3px; }
+.v3-shell .insp .pr .pp-xf-step .v:focus-visible { outline: 1px solid var(--accent); }
+
+/* The ring strip (the shared plot frame), with what it hears overlaid top-left. */
+.v3-shell .insp .pr .pp-xf-stripw { position: relative; min-width: 0; }
+.v3-shell .insp .pr .pp-xf-thr { stroke: color-mix(in srgb, var(--accent) 70%, transparent); stroke-width: 1; stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-xf-cand line { stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-xf-cand circle { fill: var(--accent); }
+.v3-shell .insp .pr .pp-xf-cand.would line { stroke: color-mix(in srgb, var(--accent) 60%, transparent); stroke-dasharray: 2 1.5; }
+.v3-shell .insp .pr .pp-xf-cand.would circle { fill: var(--surface2); stroke: var(--accent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-xf-cutline { fill: none; stroke: var(--warn); stroke-width: 1.4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-xf-cutarea { fill: color-mix(in srgb, var(--warn) 22%, transparent); stroke: none; }
+.v3-shell .insp .pr .pp-xf-strip.idle .grid, .v3-shell .insp .pr .pp-xf-strip.idle .pp-xf-thr { opacity: .55; }
+
+/* Status: what it hears now, in the strip's top lane (XF_STRIP.lane = 13 px, above the 0 dB
+   line). Candidates, the threshold and the notches are drawn below the lane, so nothing
+   crosses the text; the shared .pp-halo only lifts it off the faint grid. */
+.v3-shell .insp .pr .pp-xf-status { position: absolute; top: 1px; left: 3px; right: 3px; height: 11px; display: flex;
+  align-items: center; gap: 5px; min-width: 0; overflow: hidden; pointer-events: none; font-size: var(--pp-fs-cap);
+  line-height: 11px; color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-xf-status.cutting .t { color: var(--warn); }
+.v3-shell .insp .pr .pp-xf-status.ringing .t { color: var(--accent); }
+.v3-shell .insp .pr .pp-xf-chip { flex: 0 0 auto; font-family: var(--mono); font-size: var(--pp-fs-axis); color: var(--text); }
+.v3-shell .insp .pr .pp-xf-chip + .pp-xf-chip::before { content: "·"; margin-right: 4px; color: var(--muted); }
+.v3-shell .insp .pr .pp-xf-chip.more { color: var(--muted); cursor: default; pointer-events: auto; }
+.v3-shell .insp .pr .pp-xf-note { font-size: var(--pp-fs-cap); color: var(--warn); }
+
+/* Dials: the suppression settings are .inert (shared) while only detecting. */
+.v3-shell .insp .pr .pp-xf-dials { display: flex; align-items: flex-end; justify-content: space-between; gap: 2px; min-width: 0; }
+
+/* Minimized micro strip (44×14). */
+.v3-shell .insp .pr .pp-xf-mini { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-xf-mini .base { stroke: color-mix(in srgb, var(--text) 25%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-xf-mini .cand { stroke: var(--accent); stroke-width: 1.5; }
+.v3-shell .insp .pr .pp-xf-mini .cut { stroke: var(--warn); stroke-width: 1.5; }
+.v3-shell .insp .pr .pp-xf-mini.idle .base { stroke: color-mix(in srgb, var(--text) 18%, transparent); }

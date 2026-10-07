@@ -65,7 +65,9 @@ const WEIGHTS: DimScores = {
 // known stock set — never an allowlist of "good" sounds.
 const STOCK_KIT_DIRMARK = "drumkits/mosh-kit";
 const STOCK_KIT_FILES = new Set(["kick.wav", "snare.wav", "clap.wav", "hat_closed.wav", "hat_open.wav", "tom_low.wav", "tom_mid.wav", "crash.wav"]);
-const DEFAULT_INSTRUMENTS = new Set(["4osc", "4OSC Synth", "sampler", "Sampler"]); // bare auto-loaded built-ins
+// Bare auto-loaded built-ins. "4OSC" is the name the engine's snapshot gives the synth
+// (FourOscPlugin::getName); "4OSC Synth" is its list_builtins name.
+const DEFAULT_INSTRUMENTS = new Set(["4osc", "4OSC", "4OSC Synth", "sampler", "Sampler"]);
 const KIT_PAD_PITCHES = [36, 38, 39, 42, 46, 45, 47, 49]; // bundled kDefaultKit GM pitches
 
 export function classifySample(path: string): "real" | "stock" {

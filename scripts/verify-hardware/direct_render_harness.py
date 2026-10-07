@@ -163,7 +163,12 @@ class Harness:
                 (directory / "app.pid").write_text(str(process.pid))
                 if self.observer is not None:
                     self.observer(directory)
-                code = process.wait(timeout=180)
+                try:
+                    code = process.wait(timeout=180)
+                except subprocess.TimeoutExpired:
+                    # Popen.__exit__ waits without a timeout, so a hung app would hang the caller (the gate) forever.
+                    process.kill()
+                    raise
         (directory / "process-result.json").write_text(json.dumps({"pid": process.pid, "exit_code": code, "port": port,
                                                                   "binary": str(self.binary), "binary_sha256": binary_hash}))
         exited = subprocess.run(["ps", "-p", str(process.pid), "-o", "pid=,command="], capture_output=True, text=True)
