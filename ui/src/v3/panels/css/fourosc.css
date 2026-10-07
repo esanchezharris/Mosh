@@ -1,0 +1,187 @@
+/* 4OSC panel (panels/FourOscPanel.tsx). Rules scoped .v3-shell .insp .pr .pp-fourosc (and
+   .pp-fo-mini for the minimized row's thumbnail). One top row (section switch, presets,
+   master level with the live output under it), ONE section at a time in a fixed-height
+   body (so switching does not move the chain below), and the live key strip. */
+.v3-shell .insp .pr .pp-fourosc { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* ── the top row ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-top { display: flex; align-items: center; gap: 6px; height: 18px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-sections { flex: 0 0 auto; }
+/* The label sits a little high, leaving room for the LED under it (as the EQ's band picker). */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-sections > button { position: relative; padding: 0 5px 3px; }
+/* A section with something switched on (a filter type, an effect) carries a small lit LED. */
+.v3-shell .insp .pr .pp-fourosc :is(.pp-fo-sections, .pp-fo-fxpick) > button.live::after {
+  content: ""; position: absolute; bottom: 1.5px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent);
+}
+/* The preset menu, sized to the row (the shared one is a full-width line of its own). */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-top .preset-pick {
+  flex: 1 1 auto; width: auto; min-width: 40px; height: 18px; margin: 0; padding: 0 4px;
+  border: 1px solid var(--pp-edge); border-radius: 4px; background: transparent; color: var(--muted);
+  font-size: var(--pp-fs-cap); cursor: pointer;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-top .preset-pick:hover { color: var(--text); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-top .preset-pick:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* Master level: the read-out, with the live output bar as its underline. */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub.pp-fo-master { flex: 0 0 auto; display: inline-flex; flex-direction: column; align-items: stretch; gap: 1px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub.pp-fo-master .v { border-bottom: 0; text-align: right; min-width: 7ch; line-height: 13px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-master .pp-bar { height: 2px; min-width: 0; border-radius: 1px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-master .pp-bar .tick { width: 1px; }
+
+/* ── the scrubbable read-out (drag up/down, keys, wheel) ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub { display: inline-flex; align-items: baseline; gap: 3px; min-width: 0; white-space: nowrap; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub .cap { flex: 0 0 auto; font-size: var(--pp-fs-cap); color: var(--muted); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub .v {
+  min-width: 0; color: var(--text); font-family: var(--mono); font-size: var(--pp-fs-val); font-variant-numeric: tabular-nums;
+  cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none; outline: none;
+  border-bottom: 1px dotted var(--pp-edge);
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub .v:hover { border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub .v:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub .v[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-scrub.inert .v { color: var(--muted); }
+
+/* ── the fixed-height section body ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-body { height: 78px; min-width: 0; display: flex; flex-direction: column; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-row { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; height: 18px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-note { color: var(--muted); font-size: var(--pp-fs-cap); line-height: 12px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-select {
+  height: 18px; min-width: 0; padding: 0 3px; border: 1px solid var(--pp-edge); border-radius: 4px;
+  background: transparent; color: var(--text); font-size: var(--pp-fs-cap); cursor: pointer;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-select:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-select:disabled { opacity: .5; cursor: default; }
+/* The detail row under a picker: dials narrower than the family's 46 px so five fit. */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-detail { display: flex; align-items: flex-start; gap: 3px; height: 57px; margin-top: 3px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-detail .pp-dial { flex: 0 1 40px; min-width: 34px; width: 40px; }
+
+/* ── OSC: one chip per sounding oscillator (number, wave, level), "+" for the rest ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chips { display: flex; align-items: stretch; gap: 4px; height: 18px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip {
+  position: relative; flex: 0 1 auto; min-width: 0; max-width: 72px; display: inline-flex; align-items: center; overflow: hidden;
+  border: 1px solid var(--pp-edge); border-radius: 4px;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* When the row is tight the wave glyph gives way first (it clips); the number and the level
+   never do (a clipped "-4.0" would read "4.0"). */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .pick {
+  flex: 0 1 auto; min-width: 14px; overflow: hidden; display: inline-flex; align-items: center; gap: 3px; height: 100%; padding: 0 3px 0 5px;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .pick:hover, .v3-shell .insp .pr .pp-fourosc .pp-fo-chip.on .pick { color: var(--accent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .pick:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .n { font-size: var(--pp-fs-cap); font-weight: 600; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-glyph { display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-glyph path { fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round; }
+/* The level: a read-out, with a thin line along the chip's foot at the fader position. */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .lv { flex: 0 0 auto; padding: 0 5px 0 1px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .n { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .pp-fo-glyph { flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .pp-fo-scrub.lv .v { border-bottom: 0; min-width: 4ch; text-align: right; font-size: var(--pp-fs-cap); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip .lv .fill {
+  position: absolute; left: 0; bottom: 0; height: 2px; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip:not(.on) .lv .fill { background: color-mix(in srgb, var(--text) 30%, transparent); }
+/* On but at the -100 dB floor (silent): the number, wave and level go quiet, even when the
+   chip is the focused one (its border still says so). */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip.silent .pick,
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip.silent .pp-fo-scrub.lv .v { color: var(--muted); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip.silent .pp-fo-glyph { opacity: .45; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip.silent .pick:hover { color: var(--text); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-chip.silent .pp-fo-scrub.lv .v:focus-visible { color: var(--accent); }
+/* "+": a menu of waves for the next oscillator that is off (the menu itself is invisible
+   over the glyph, so it opens where it is clicked). */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-add {
+  position: relative; flex: 0 0 auto; display: inline-grid; place-items: center; width: 22px; height: 18px;
+  border: 1px dashed var(--pp-edge); border-radius: 4px; color: var(--muted); font-size: var(--pp-fs-val); cursor: pointer;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-add.alone { width: auto; padding: 0 8px; font-size: var(--pp-fs-cap); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-add:hover { color: var(--text); border-color: var(--accent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-add:focus-within { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-add select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-pickers { flex: 0 0 56px; display: flex; flex-direction: column; gap: 4px; padding-top: 2px; margin-right: 3px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-empty { margin-top: 10px; color: var(--muted); font-size: var(--pp-fs-cap); }
+/* A noise oscillator: no Tune or Fine, and a word on why in their place. */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-nopitch { margin: 10px 0 0 4px; white-space: nowrap; }
+
+/* ── AMP: the exact envelope with three handles, the values under it ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-amp { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-env .pp-node { cursor: grab; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keyup {
+  stroke: color-mix(in srgb, var(--text) 24%, transparent); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-env .axis { pointer-events: none; user-select: none; }
+
+/* ── FILTER: type and slope, the response at the base cutoff, its values ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-filter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-frow { display: flex; align-items: center; gap: 6px; height: 18px; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-ftype > button { padding: 0 6px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-slope > button { padding: 0 5px; font-family: var(--mono); }
+.v3-shell .insp .pr .pp-fourosc :is(.pp-fo-ftype, .pp-fo-slope) > button[aria-checked="true"] { cursor: default; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fplot { cursor: ew-resize; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-filter.off .pp-fo-fplot { cursor: default; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fplot .axis { pointer-events: none; user-select: none; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fplot .pp-node { cursor: ew-resize; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fc {
+  stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1; stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke; pointer-events: none;
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fplot.bypassed .pp-fo-fc { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
+/* Where the filter envelope takes the cutoff at full velocity: a quiet line from the base. */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-envrange line { stroke: color-mix(in srgb, var(--accent) 70%, transparent); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-envrange circle { fill: color-mix(in srgb, var(--accent) 80%, transparent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fplot.bypassed .pp-fo-envrange line { stroke: color-mix(in srgb, var(--text) 30%, transparent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fplot.bypassed .pp-fo-envrange circle { fill: var(--muted); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-off { fill: var(--muted); font-size: var(--pp-fs-cap); pointer-events: none; user-select: none;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round; }
+
+/* ── FX: which effect (lit = on), its switch, its controls only while it is on ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fx { display: flex; flex-direction: column; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fxpick { align-self: flex-start; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fxpick > button { position: relative; padding: 0 7px 3px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-powercol { flex: 0 0 34px; display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 7px 4px 0 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-power { flex: 0 0 auto; width: 34px; padding: 0; margin: 0; }
+/* The reverb's dry lift (Tracktion's reverb doubles the dry): "+6 dB" over "dry". */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-dry { display: flex; flex-direction: column; align-items: center; line-height: 11px; white-space: nowrap; cursor: default; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-dry .v { font-family: var(--mono); font-size: var(--pp-fs-cap); font-variant-numeric: tabular-nums; color: var(--text); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-dry .nm { font-size: var(--pp-fs-cap); color: var(--muted); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-power[aria-checked="true"] {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fx .pp-fo-note { margin-top: 10px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-time { flex: 0 0 50px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding-top: 2px; margin-right: 2px; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-time .pp-fo-select { width: 100%; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-time .v { margin-top: 6px; font-family: var(--mono); font-size: var(--pp-fs-val); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-time .nm { font-size: var(--pp-fs-cap); color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-time.warn .v { color: var(--warn); }
+/* An effect has at most four dials beside its switch: they get the family's full 46 px
+   (the delay's "-100 dB" and the chorus's "10.0 Hz" need it). */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-fx .pp-fo-detail .pp-dial { flex: 0 1 47px; width: 47px; min-width: 40px; }
+
+/* ── MOD: the session's routes, read-only ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-mod { display: flex; flex-direction: column; gap: 4px; min-width: 0; height: 100%; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-routes { list-style: none; margin: 0; padding: 0; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-routes li { display: flex; align-items: baseline; gap: 5px; height: 14px; font-size: var(--pp-fs-cap); white-space: nowrap; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-routes .src { color: var(--text); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-routes .arrow { color: var(--muted); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-routes .dst { color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-routes .depth { margin-left: auto; font-family: var(--mono); color: var(--muted); }
+
+/* ── the live key strip: keys held at the synth, a flash on each key struck ── */
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keys { display: block; width: 100%; height: 8px; border-radius: 2px; overflow: hidden; }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keys .w { fill: color-mix(in srgb, var(--text) 18%, var(--surface2)); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keys .b { fill: var(--bg); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keys :is(.w, .b).held { fill: var(--accent); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keys :is(.w, .b).struck { fill: var(--text); }
+.v3-shell .insp .pr .pp-fourosc .pp-fo-keys.idle { opacity: .55; }
+
+/* An older engine: the plain rows and one muted line. */
+.v3-shell .insp .pr .pp-fourosc.legacy { gap: 5px; }
+
+/* ── the minimized row's thumbnail: the amp envelope, the live output under it ── */
+.v3-shell .insp .pr .pp-fo-mini { display: block; flex: 0 0 auto; overflow: visible; }
+.v3-shell .insp .pr .pp-fo-mini .env { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: var(--accent); stroke-width: 1; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-fo-mini .trk { stroke: color-mix(in srgb, var(--text) 10%, transparent); stroke-width: 2; }
+.v3-shell .insp .pr .pp-fo-mini .out { stroke: var(--accent); stroke-width: 2; }
+.v3-shell .insp .pr .pp-fo-mini.bypassed .env { stroke: var(--muted); fill: color-mix(in srgb, var(--text) 6%, transparent); }

@@ -4,7 +4,7 @@ import { pickFiles, pickSaveFile, onEvent, nativeMenuPresent, brainChat } from "
 import { runAction, type ActionCtx, type ActionId } from "../menuActions";
 import { EditorAction as EA } from "../interaction/actions";
 import { liveKeymap } from "../interaction/config";
-import { isEditableTarget, resolveKey } from "../interaction/keymap";
+import { isAriaValueControl, isEditableTarget, resolveKey } from "../interaction/keymap";
 import { unshiftForQwerty } from "../interaction/qwertyMidi";
 import { qwertyState } from "./useQwertyMidi";
 import { useLive } from "../live/liveState";
@@ -33,7 +33,8 @@ const emptyAgentPromptSpace = (target: EventTarget | null, action: string): bool
 // own, so play/pause passes through — Space after touching a fader plays. Range ONLY:
 // checkbox and radio toggle natively on Space, and this hook is shared by every shell.
 const rangeSliderSpace = (target: EventTarget | null, action: string): boolean =>
-  action === EA.PLAY_PAUSE && target instanceof HTMLInputElement && target.type === "range";
+  action === EA.PLAY_PAUSE
+  && ((target instanceof HTMLInputElement && target.type === "range") || isAriaValueControl(target));
 
 // Native-menu Edit actions (⌘Z/⇧⌘Z/⌘X/⌘C/⌘V in the packaged app arrive as mosh_menu events,
 // not keydowns, so the editable-target guard in onKey never sees them). While a text field
