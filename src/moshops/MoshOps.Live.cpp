@@ -32,6 +32,7 @@
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
 #include "state/Ids.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include <algorithm>
 
 namespace mosh
@@ -106,6 +107,11 @@ te::MidiInputDevice* MoshOps::armedMidiInputFor (te::AudioTrack& track)
 // ── the command ──────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdAuditionNote (const juce::var& args)
 {
+    return auditionNote (args, false);
+}
+
+juce::var MoshOps::auditionNote (const juce::var& args, bool samplerRoadOnly)
+{
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("audition_note", "no track");
 
@@ -150,52 +156,62 @@ juce::var MoshOps::cmdAuditionNote (const juce::var& args)
     {
         return v.track == track->itemID && v.pitch == pitch && v.channel == channel;
     };
+    // What this pitch's voice was before this event, for the sampler road's re-tap rule.
+    const auto previous = std::find_if (heldVoices_.begin(), heldVoices_.end(), sameVoice);
+    const bool hadVoice = previous != heldVoices_.end();
+    const bool hadBlip  = hadVoice && previous->blip;
     heldVoices_.erase (std::remove_if (heldVoices_.begin(), heldVoices_.end(), sameVoice),
                        heldVoices_.end());
     if (noteOn)
         heldVoices_.push_back ({ track->itemID, pitch, channel,
                                  juce::Time::getMillisecondCounterHiRes(),
-                                 action == "blip" ? (double) blipMs : heldTtlMs() });
+                                 action == "blip" ? (double) blipMs : heldTtlMs(),
+                                 action == "blip" });
 
-    // Headless / no device: nothing below can sound, and saying so is the honest answer.
-    // NOT an error — a keypress has done nothing wrong — and --selftest pins this exact
-    // graceful shape, since it can never prove audibility itself.
-    if (! eng.hasAudio())
-        return reply (false, "none", "no audio device");
-
-    eng.ensurePlaybackContext();   // no-op once allocated; never starts the transport
-
-    const auto msg = noteOn ? juce::MidiMessage::noteOn  (channel, pitch, (juce::uint8) velocity)
-                            : juce::MidiMessage::noteOff (channel, pitch);
-
-    // REC-002 — an ARMED track takes the input path instead, so what you play on the
-    // computer keyboard is recordable and reaches the buffer Capture reads. The engine
-    // owns everything from here: timing, record latency, overdub merge, record-quantise.
-    //
-    // Deliberately gated on ARMED rather than taken always. Two reasons, and the second
-    // is the load-bearing one:
-    //   • Doubling. With the track armed, monitoring makes the input path audible; adding
-    //     an inject on top would sound every note twice.
-    //   • Blast radius. The unarmed path is the spine of three shipped surfaces — the
-    //     piano roll's drag-audition, the drum pads, and the QWERTY keyboard on an idle
-    //     track. None of them can regress from a change that cannot reach them, and none
-    //     of their audibility is provable in a headless run.
-    // It also matches Ableton, where the computer MIDI keyboard plays the armed track.
-    ensureKeyboardInputDevice();
-    if (auto* armedInput = armedMidiInputFor (*track))
+    // --selftest's auditionNoteOnSamplerRoadForSelfTest goes straight to the sampler road
+    // below (headless there is no device, and the inject road needs a track with clips).
+    if (! samplerRoadOnly)
     {
-        armedInput->handleIncomingMidiMessage (msg, armedInput->getMPESourceID());
-        return reply (true, "input");
+        // Headless / no device: nothing below can sound, and saying so is the honest answer.
+        // NOT an error — a keypress has done nothing wrong — and --selftest pins this exact
+        // graceful shape, since it can never prove audibility itself.
+        if (! eng.hasAudio())
+            return reply (false, "none", "no audio device");
+
+        eng.ensurePlaybackContext();   // no-op once allocated; never starts the transport
+
+        const auto msg = noteOn ? juce::MidiMessage::noteOn  (channel, pitch, (juce::uint8) velocity)
+                                : juce::MidiMessage::noteOff (channel, pitch);
+
+        // REC-002 — an ARMED track takes the input path instead, so what you play on the
+        // computer keyboard is recordable and reaches the buffer Capture reads. The engine
+        // owns everything from here: timing, record latency, overdub merge, record-quantise.
+        //
+        // Deliberately gated on ARMED rather than taken always. Two reasons, and the second
+        // is the load-bearing one:
+        //   • Doubling. With the track armed, monitoring makes the input path audible; adding
+        //     an inject on top would sound every note twice.
+        //   • Blast radius. The unarmed path is the spine of three shipped surfaces — the
+        //     piano roll's drag-audition, the drum pads, and the QWERTY keyboard on an idle
+        //     track. None of them can regress from a change that cannot reach them, and none
+        //     of their audibility is provable in a headless run.
+        // It also matches Ableton, where the computer MIDI keyboard plays the armed track.
+        ensureKeyboardInputDevice();
+        if (auto* armedInput = armedMidiInputFor (*track))
+        {
+            armedInput->handleIncomingMidiMessage (msg, armedInput->getMPESourceID());
+            return reply (true, "input");
+        }
+
+        // Cleared immediately before and read immediately after: the engine calls
+        // warnOfWastedMidiMessages synchronously from inside this very call.
+        wastedMidiFired_ = false;
+        track->injectLiveMidiMessage (msg, kLiveSourceID);
+        const bool reachedGraph = ! wastedMidiFired_;
+
+        if (reachedGraph)
+            return reply (true, "inject");
     }
-
-    // Cleared immediately before and read immediately after: the engine calls
-    // warnOfWastedMidiMessages synchronously from inside this very call.
-    wastedMidiFired_ = false;
-    track->injectLiveMidiMessage (msg, kLiveSourceID);
-    const bool reachedGraph = ! wastedMidiFired_;
-
-    if (reachedGraph)
-        return reply (true, "inject");
 
     // The clipless-track hole. A sampler can still be driven directly, which is what makes
     // drum pads previewable on a bare drum track. Velocity is NOT honoured on this path
@@ -207,7 +223,32 @@ juce::var MoshOps::cmdAuditionNote (const juce::var& args)
         for (auto& v : heldVoices_)
             if (v.track == track->itemID)
                 keys.setBit (v.pitch);
-        sampler->playNotes (keys);
+        auto* metered = dynamic_cast<MoshSamplerPlugin*> (sampler);
+        // A RE-TAP. The sampler is handed the whole set of keys down on this road, and
+        // te::SamplerPlugin::playNotes starts a voice only for a key that JOINED the set, so
+        // tapping a pad again while its blip still held the key (250 ms by default; each tap
+        // restarts that) started nothing and reported no hit: a double-tap or a roll on one
+        // pad sounded once. A blip, or any note-on whose earlier voice was a blip, therefore
+        // releases the key first and presses it again: the new voice starts (a one-shot
+        // layers over the ringing one, a gated one is shortened, exactly as a repeated MIDI
+        // note-on does) and is reported as a hit. An "on" repeating an "on" stays ONE press
+        // (a held QWERTY key repeats at about 30 Hz and must not re-fire the sample).
+        const bool held = metered != nullptr ? metered->getAuditionKeys()[pitch] : hadVoice;
+        if (noteOn && held && (action == "blip" || hadBlip))
+        {
+            auto released = keys;
+            released.clearBit (pitch);
+            if (metered != nullptr)
+                metered->auditionKeys (released);
+            else
+                sampler->playNotes (released);
+        }
+        // Through the metered subclass, so the pad lights on the plugin_meters rail:
+        // playNotes is not virtual, and these notes never reach its MIDI scan.
+        if (metered != nullptr)
+            metered->auditionKeys (keys);
+        else
+            sampler->playNotes (keys);
         return reply (true, "sampler");
     }
 
@@ -295,7 +336,12 @@ int MoshOps::releaseAllVoices (te::AudioTrack* onlyThisTrack)
             for (int ch = 1; ch <= 16; ++ch)
                 t->injectLiveMidiMessage (juce::MidiMessage::allNotesOff (ch), kLiveSourceID);
         if (auto* sampler = findSampler (*t))
-            sampler->allNotesOff();
+        {
+            if (auto* metered = dynamic_cast<MoshSamplerPlugin*> (sampler))
+                metered->auditionAllNotesOff();   // the same, and it forgets the audition keys
+            else
+                sampler->allNotesOff();
+        }
     }
 
     return released;
@@ -322,6 +368,26 @@ void MoshOps::sweepStuckVoices()
 
     heldVoices_.erase (std::remove_if (heldVoices_.begin(), heldVoices_.end(), expired),
                        heldVoices_.end());
+
+    // The sampler road (a clipless track, see cmdAuditionNote) has no note-off: the one
+    // releaseOneVoice injected above is swallowed, and te::SamplerPlugin::playNotes starts a
+    // voice only for a key it does not already hold. A blip that sounded there used to leave
+    // its pitch held at the sampler when it expired, so the SAME pad's next tap started
+    // nothing (silent until another pad was tapped or the sampler rebuilt). Hand the sampler
+    // the keys still held on the track, as the explicit "off" action does; only where that
+    // road was taken (the sampler still holds audition keys), so a clip-playing sampler's
+    // own MIDI keys are never touched.
+    for (auto& v : done)
+        if (auto* t = findTrack (v.track.toString()))
+            if (auto* metered = dynamic_cast<MoshSamplerPlugin*> (findSampler (*t)))
+                if (! metered->getAuditionKeys().isZero())
+                {
+                    juce::BigInteger keys;
+                    for (auto& h : heldVoices_)
+                        if (h.track == t->itemID)
+                            keys.setBit (h.pitch);
+                    metered->auditionKeys (keys);
+                }
 }
 
 } // namespace mosh
