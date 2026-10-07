@@ -6138,6 +6138,207 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         stemDir.deleteRecursively();
     }
 
+    // --- Offline renders prepare background-generated clip audio themselves ---
+    // A warped clip plays from a time-stretched proxy and a reversed clip from a reversed
+    // render. Tracktion starts the proxy from a clip timer and completes both through the
+    // message thread, which a synchronous render blocks, so a render issued right after
+    // the edit (one agent batch: "warp this, then export") used to wait out the 20 s
+    // watchdog and fail "render stalled". Every render below follows its edit with NO
+    // message-loop pump; each edit changes the proxy, so each render needs a new one.
+    section ("Offline renders prepare warped/reversed clip audio (no pump)");
+    {
+        check (ok (cmd (ops, "new_project", args1 ("name", "render-source-prep-selftest"))),
+               "render-source prep: fresh project ok");
+        const auto prepTrack = cmd (ops, "create_track", args1 ("name", "Prep"))["data"]
+                                   .getProperty ("trackId", var()).toString();
+        const auto prepClip = cmd (ops, "add_test_tone_clip",
+                                   objN ({{ "trackId", prepTrack }, { "seconds", 1.0 }, { "freq", 271.0 }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        check (prepTrack.isNotEmpty() && prepClip.isNotEmpty(), "render-source prep: tone clip created");
+
+        auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("render-source-prep-selftest");
+        outDir.deleteRecursively();
+        outDir.createDirectory();
+
+        auto wavPeak = [] (const juce::File& f) {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            float peak = 0.0f;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                              (int) juce::jmin ((juce::int64) 1 << 20, reader->lengthInSamples));
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    peak = juce::jmax (peak, buf.getMagnitude (ch, 0, buf.getNumSamples()));
+            }
+            return peak;
+        };
+        auto warpTo = [&] (double bpm) {
+            return ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", prepClip }, { "autoTempo", true },
+                                                         { "sourceBpm", bpm }})));
+        };
+
+        // A peer's multiplayer commit that restores this track's name, "Peer Commit".
+        auto trackNamed = [&ops] (const String& name)
+        {
+            const auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tr : *arr)
+                    if (tr.getProperty ("name", var()).toString() == name)
+                        return true;
+            return false;
+        };
+        const auto peerTrack = cmd (ops, "create_track", args1 ("name", "Peer Commit"))["data"]
+                                   .getProperty ("trackId", var()).toString();
+        const auto peerSerialized = cmd (ops, "mp_serialize_track", args1 ("trackId", peerTrack));
+        const auto peerBlob = peerSerialized["data"].getProperty ("blob", var()).toString();
+        const auto peerLogicalId = peerSerialized["data"].getProperty ("logicalId", var()).toString();
+        check (peerBlob.isNotEmpty() && peerLogicalId.isNotEmpty()
+                   && ok (cmd (ops, "rename_track", objN ({{ "trackId", peerTrack }, { "name", "Local Rename" }}))),
+               "render-source prep: peer commit fixture serialized, then renamed locally");
+
+        // export_audio. A command queued on the message loop before the export is delivered
+        // while the export waits for the new proxy; it must be refused, not run inside the
+        // export (it would mutate the edit the render is about to read). A multiplayer commit
+        // delivered then must not run inside the export either, and must not be lost: it is
+        // held and lands right after.
+        check (warpTo (97.0), "render-source prep: warp on (97 BPM source)");
+        {
+            struct Probe { bool exporting = true, ran = false, ranDuringExport = false, commitRanMidExport = true; var result; };
+            auto probe = std::make_shared<Probe>();
+            juce::MessageManager::callAsync ([probe, &ops, prepTrack, peerBlob, peerLogicalId, trackNamed] {
+                probe->ran = true;
+                probe->ranDuringExport = probe->exporting;
+                probe->result = cmd (ops, "rename_track", objN ({{ "trackId", prepTrack }, { "name", "Renamed Mid-Export" }}));
+                ops.applyMultiplayerCommitForSelfTest (objN ({{ "type", "commit" }, { "logicalId", peerLogicalId },
+                                                              { "blob", peerBlob }}));
+                probe->commitRanMidExport = trackNamed ("Peer Commit");
+            });
+            const auto warpedFile = outDir.getChildFile ("warped.wav");
+            auto exported = cmd (ops, "export_audio", args1 ("file", warpedFile.getFullPathName()));
+            probe->exporting = false;
+            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+                for (int i = 0; i < 300 && ! (probe->ran && trackNamed ("Peer Commit")); ++i)
+                    mm->runDispatchLoopUntil (10);
+
+            check (ok (exported), "render-source prep: export_audio right after set_clip_warp succeeds ("
+                                  + exported.getProperty ("error", var()).toString() + ")");
+            check (wavPeak (warpedFile) > 0.1f, "render-source prep: the warped export carries the tone");
+            check (probe->ranDuringExport,
+                   "render-source prep: the export serviced the message loop while its proxy generated");
+            check (! ok (probe->result) && probe->result.getProperty ("error", var()).toString().startsWith ("busy:"),
+                   "render-source prep: a command arriving mid-export is refused as busy");
+            check (trackById (prepTrack).getProperty ("name", var()).toString() == "Prep",
+                   "render-source prep: the refused command changed nothing");
+            check (probe->ran && ! probe->commitRanMidExport,
+                   "render-source prep: a multiplayer commit arriving mid-export is held, not applied inside it");
+            check (trackNamed ("Peer Commit") && ! trackNamed ("Local Rename"),
+                   "render-source prep: the held multiplayer commit lands after the export");
+        }
+
+        // export_stems, export_clip_consolidated and bounce_track take the same path.
+        check (warpTo (83.0), "render-source prep: re-warp (83 BPM source)");
+        const auto stemDir = outDir.getChildFile ("stems");
+        auto stems = cmd (ops, "export_stems", args1 ("dir", stemDir.getFullPathName()));
+        check (ok (stems), "render-source prep: export_stems right after set_clip_warp succeeds ("
+                           + stems.getProperty ("error", var()).toString() + ")");
+        const auto stemFiles = stemDir.findChildFiles (File::findFiles, false, "*.wav");
+        check (stemFiles.size() == 1 && wavPeak (stemFiles.getFirst()) > 0.1f,
+               "render-source prep: the warped stem carries the tone");
+
+        check (warpTo (131.0), "render-source prep: re-warp (131 BPM source)");
+        const auto consolidatedFile = outDir.getChildFile ("consolidated.wav");
+        auto consolidated = cmd (ops, "export_clip_consolidated",
+                                 objN ({{ "clipId", prepClip }, { "file", consolidatedFile.getFullPathName() }}));
+        check (ok (consolidated), "render-source prep: export_clip_consolidated right after set_clip_warp succeeds ("
+                                  + consolidated.getProperty ("error", var()).toString() + ")");
+        check (wavPeak (consolidatedFile) > 0.1f, "render-source prep: the consolidated warped clip carries the tone");
+
+        check (warpTo (111.0), "render-source prep: re-warp (111 BPM source)");
+        auto bounced = cmd (ops, "bounce_track", objN ({{ "trackId", prepTrack }, { "mode", "newTrack" }}));
+        check (ok (bounced), "render-source prep: bounce_track right after set_clip_warp succeeds ("
+                             + bounced.getProperty ("error", var()).toString() + ")");
+        check (wavPeak (juce::File (bounced["data"].getProperty ("file", var()).toString())) > 0.1f,
+               "render-source prep: the bounced warped track carries the tone");
+        if (ok (bounced))
+            cmd (ops, "remove_track", args1 ("trackId", bounced["data"].getProperty ("trackId", var()).toString()));
+
+        // A reversed clip renders from a reversed copy (a RenderManager job that finishes
+        // through the message thread) and, warped, from a proxy OF that copy.
+        check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", prepClip }, { "reversed", true }}))),
+               "render-source prep: reverse on");
+        const auto reversedFile = outDir.getChildFile ("reversed-warped.wav");
+        auto reversed = cmd (ops, "export_audio", args1 ("file", reversedFile.getFullPathName()));
+        check (ok (reversed), "render-source prep: export_audio right after set_clip_reverse succeeds ("
+                              + reversed.getProperty ("error", var()).toString() + ")");
+        check (wavPeak (reversedFile) > 0.1f, "render-source prep: the reversed warped export carries the tone");
+
+        // Inside an agent batch, the wait must not let Tracktion's undo-transaction timer
+        // (350 ms after an edit, whenever the message loop runs) open a new transaction, or
+        // "warp, export, rename" undoes in two steps. A long clip keeps the proxy wait past
+        // that timer; the export renders only its first second.
+        {
+            const auto batchTrack = cmd (ops, "create_track", args1 ("name", "Batch Long"))["data"]
+                                        .getProperty ("trackId", var()).toString();
+            const auto batchClip = cmd (ops, "add_test_tone_clip",
+                                        objN ({{ "trackId", batchTrack }, { "seconds", 180.0 }, { "freq", 233.0 },
+                                               { "name", "render-prep-batch-long" }}))["data"]
+                                       .getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "batch_begin", args1 ("name", "render-source prep batch"))),
+                   "render-source prep: batch opened");
+            check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", batchClip }, { "autoTempo", true },
+                                                            { "sourceBpm", 101.0 }}))),
+                   "render-source prep: batch warps a 180 s clip");
+            auto batchExport = cmd (ops, "export_audio",
+                                    objN ({{ "file", outDir.getChildFile ("batch.wav").getFullPathName() },
+                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }}));
+            check (ok (batchExport), "render-source prep: export inside the batch succeeds ("
+                                     + batchExport.getProperty ("error", var()).toString() + ")");
+            check (ok (cmd (ops, "rename_track", objN ({{ "trackId", batchTrack }, { "name", "Batch Renamed" }})))
+                       && ok (cmd (ops, "batch_end")),
+                   "render-source prep: batch renames the track and closes");
+            check (ok (cmd (ops, "undo")), "render-source prep: one undo after the batch");
+            const auto batchState = trackById (batchTrack);
+            const auto batchClips = batchState.getProperty ("clips", var());
+            const bool stillWarped = batchClips.getArray() != nullptr && ! batchClips.getArray()->isEmpty()
+                                     && (bool) batchClips.getArray()->getFirst().getProperty ("autoTempo", false);
+            check (batchState.getProperty ("name", var()).toString() == "Batch Long" && ! stillWarped,
+                   "render-source prep: one undo reverts the whole batch around a waiting export");
+            cmd (ops, "remove_track", args1 ("trackId", batchTrack));
+        }
+
+        // A warped clip whose source file is gone can never get a proxy: say so at once,
+        // naming the clip, instead of waiting out a watchdog.
+        const auto lostTrack = cmd (ops, "create_track", args1 ("name", "Lost Source"))["data"]
+                                   .getProperty ("trackId", var()).toString();
+        const auto lostClip = cmd (ops, "add_test_tone_clip",
+                                   objN ({{ "trackId", lostTrack }, { "seconds", 1.0 }, { "freq", 409.0 },
+                                          { "name", "render-prep-lost-source" }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        juce::File lostSource;
+        const auto lostTrackState = trackById (lostTrack);                 // keep the array alive
+        const auto lostTrackClips = lostTrackState.getProperty ("clips", var());
+        if (auto* clipsArr = lostTrackClips.getArray())
+            for (auto& c : *clipsArr)
+                if (c.getProperty ("id", var()).toString() == lostClip)
+                    lostSource = juce::File (c.getProperty ("sourceFile", var()).toString());
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", lostClip }, { "autoTempo", true },
+                                                        { "sourceBpm", 89.0 }}))),
+               "render-source prep: second clip warped");
+        check (lostSource.existsAsFile() && lostSource.deleteFile(), "render-source prep: its source file deleted");
+        const double lostStartMs = Time::getMillisecondCounterHiRes();
+        auto lost = cmd (ops, "export_audio", args1 ("file", outDir.getChildFile ("lost.wav").getFullPathName()));
+        const double lostElapsedMs = Time::getMillisecondCounterHiRes() - lostStartMs;
+        const auto lostError = lost.getProperty ("error", var()).toString();
+        check (! ok (lost) && lostError.contains (lostClip) && lostError.contains ("is missing"),
+               "render-source prep: a warped clip with a missing source fails naming the clip (" + lostError + ")");
+        check (lostElapsedMs < 10000.0, "render-source prep: the missing-source failure does not wait for a watchdog");
+
+        outDir.deleteRecursively();
+    }
+
     // --- EXP-EOF-001 / #538: fail known-empty audio source windows before render ---
     section ("Export rejects empty audio source windows atomically (#538)");
     {
