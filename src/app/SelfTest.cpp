@@ -6428,6 +6428,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "export of the programmed beat ok");
         check (wavMagnitude (beatFile) > 0.02f, "programmed drum beat renders NON-SILENT (sampler+kit actually sounds)");
 
+        // te::SamplerPlugin plays from a LOADED copy of its SOUND children that Tracktion
+        // rebuilds only in handleAsyncUpdate, on a later message-loop pass. These read the
+        // engine directly, beside the snapshot, to show when that copy is behind.
+        auto samplerOf = [&] (const String& tid) -> te::SamplerPlugin* {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == tid)
+                    for (auto* p : t->pluginList.getPlugins())
+                        if (auto* s = dynamic_cast<te::SamplerPlugin*> (p)) return s;
+            return nullptr;
+        };
+        auto storedSources = [] (te::SamplerPlugin& s) {   // what the sampler HOLDS, SOUND children only
+            StringArray out;
+            for (auto v : s.state)
+                if (v.hasType (te::IDs::SOUND)) out.add (v[te::IDs::source].toString());
+            return out;
+        };
+        auto snapshotPadFiles = [&] (const String& tid) {
+            StringArray out;
+            auto trk = trackById (tid);                  // hold the var (no dangling temporary)
+            auto padsVar = trk.getProperty ("drumPads", var());
+            if (auto* a = padsVar.getArray())
+                for (auto& p : *a) out.add (p.getProperty ("file", var()).toString());
+            return out;
+        };
+
         // Persistence: the trackType flag + the sampler's kit sounds serialize into the
         // .tracktionedit and survive save/reload — the beat still renders afterwards (the
         // sampler reconstructs its sounds from the persisted state on load). Done here
@@ -6435,11 +6460,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             check (ok (cmd (ops, "save")), "save before reload ok");
             check (ok (cmd (ops, "reload")), "reload ok");
-            // The reloaded edit's new sampler rebuilds its loaded sound list on an AsyncUpdate
-            // (headless, reload has no drain of its own). Pump until every pad is loaded; a fixed
-            // 50 ms pump lost this race on a loaded machine.
-            check (pumpUntil (drumKitLoaded, 120000),
-                   "the reloaded sampler has loaded every kit sound before re-export");
+            // No wait here. The reloaded sampler's sounds load on an AsyncUpdate that neither
+            // reload nor export_audio dispatches (the render runs synchronously on the message
+            // thread), and the fixed 50 ms pump that used to sit here lost that race under load:
+            // the re-export below came out silent (2026-09-30, 1 of 3 selftest runs). Keep the
+            // window open instead, prove it is open, and let export_audio close it.
+            auto* reloaded = samplerOf (dt);
+            check (reloaded != nullptr && reloaded->getNumSounds() > 0 && reloaded->getSoundMedia (0).isEmpty(),
+                   "sampler-race (reload): precondition: the reloaded kit is still unloaded at export time");
+            if (reloaded != nullptr)
+                check (snapshotPadFiles (dt) == storedSources (*reloaded) && ! storedSources (*reloaded).contains (String()),
+                       "sampler-race (reload): the snapshot names every pad's sample before the kit loads");
             auto rtrk = trackById (dt);   // item ids are persisted, so dt still resolves
             check (rtrk.getProperty ("type", var()).toString() == "drum", "drum track type survives save/reload");
             bool hasSampler = false;
@@ -6451,7 +6482,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "export_audio", objN ({{ "file", reloadFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
                    "re-export after reload ok");
             check (wavMagnitude (reloadFile) > 0.02f, "drum beat still NON-SILENT after save/reload (sampler sounds restored)");
+            check (reloaded != nullptr && reloaded->getSoundMedia (0) == storedSources (*reloaded)[0],
+                   "sampler-race (reload): export_audio loaded the kit before rendering it");
             reloadFile.deleteFile();
+        }
+
+        // A lane mute is a pad-gain write, and the sampler plays each pad at the gain its
+        // loaded copy took when it was last rebuilt. Nothing between set_drum_lane and
+        // export_audio rebuilds it, so mute the only two lanes the beat plays and export at
+        // once: the render must hear the -48 dB mute, not the 0 dB the copy still holds.
+        {
+            // The kit must be LOADED (at 0 dB) before the mutes, or an export that never loaded
+            // it would be silent too and pass for the wrong reason.
+            auto* kitSampler = samplerOf (dt);
+            for (int spin = 0; spin < 400 && kitSampler != nullptr
+                               && kitSampler->getSoundMedia (0) != storedSources (*kitSampler)[0]; ++spin)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);   // a condition, not a fixed wait
+            check (kitSampler != nullptr && kitSampler->getSoundMedia (0).isNotEmpty()
+                       && kitSampler->getSoundMedia (0) == storedSources (*kitSampler)[0],
+                   "sampler-race (mute): precondition: the kit is loaded before the mutes");
+            check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }})))
+                       && ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "mute", true }}))),
+                   "sampler-race (mute): kick and snare lanes muted");
+            auto mutedFile = eng.sessionDir().getChildFile ("exports").getChildFile ("drum-muted.wav");
+            check (ok (cmd (ops, "export_audio", objN ({{ "file", mutedFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
+                   "sampler-race (mute): export straight after the mutes ok");
+            const float mutedPeak = wavMagnitude (mutedFile);
+            check (mutedPeak >= 0.0f && mutedPeak < 0.01f,
+                   "sampler-race (mute): an export straight after set_drum_lane renders the muted lanes at -48 dB");
+            cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", false }}));
+            cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "mute", false }}));
+            mutedFile.deleteFile();
         }
 
         // assign_sample: map a kit sample onto a fresh pad/note and confirm it lands.
@@ -6824,6 +6885,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             cmd (ops, "add_midi_clip", objN ({{ "trackId", wav }, { "length", 1.0 }}));
             check (! (bool) trackById (wav).getProperty ("isInstrument", false),
                    "MIDI clip on a wave track does NOT auto-load an instrument (wave audio preserved)");
+        }
+
+        // snapshot drumPads[].file while the sampler's loaded copy is behind its state. MoshOps
+        // pumps 5 ms after a kit or sample load, and only headless, so with an audio device open
+        // (or a pump that runs out under load) a snapshot can land first. Hold that window open
+        // deterministically: engine-level sampler edits AFTER the last command that pumps,
+        // then snapshot with nothing in between.
+        {
+            const auto kit = drumKitDir();
+            const auto kickWav = kit.getChildFile ("kick.wav"), snareWav = kit.getChildFile ("snare.wav"),
+                       crashWav = kit.getChildFile ("crash.wav");
+            // (b) replaced: assign_sample loads the kick, then the state alone swaps it for the
+            // snare — assign_sample's own replace path (removeSound + addSound), unpumped.
+            const auto swapTid = cmd (ops, "create_track", args1 ("name", "PadSwap"))["data"].getProperty ("trackId", var()).toString();
+            const auto kickLoaded = cmd (ops, "assign_sample", objN ({{ "trackId", swapTid }, { "note", 36 },
+                                                                      { "file", kickWav.getFullPathName() } }))["data"]
+                                        .getProperty ("file", var()).toString();
+            const auto freshTid = cmd (ops, "create_track", args1 ("name", "PadFresh"))["data"].getProperty ("trackId", var()).toString();
+            // Every command comes first; a later one could deliver the pending updates.
+            auto* swapped = samplerOf (swapTid);
+            for (int spin = 0; spin < 400 && swapped != nullptr && swapped->getSoundMedia (0) != kickLoaded; ++spin)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);   // the FIRST load must land (a condition, not a fixed wait)
+            if (swapped != nullptr)
+            {
+                swapped->removeSound (0);
+                swapped->addSound (snareWav.getFullPathName(), "snare", 0.0, 0.0, 0.0f);
+            }
+            // (a) never loaded: a fresh sampler whose sound is in the state but whose first load is pending.
+            te::SamplerPlugin* fresh = nullptr;
+            if (auto* t = [&] () -> te::AudioTrack* {
+                    for (auto* candidate : te::getAudioTracks (eng.edit()))
+                        if (candidate != nullptr && candidate->itemID.toString() == freshTid) return candidate;
+                    return nullptr; } ())
+                if (auto p = eng.edit().getPluginCache().createNewPlugin (te::SamplerPlugin::xmlTypeName, {}))
+                {
+                    t->pluginList.insertPlugin (p, 0, nullptr);
+                    fresh = dynamic_cast<te::SamplerPlugin*> (p.get());
+                }
+            check (fresh != nullptr && fresh->addSound (crashWav.getFullPathName(), "crash", 0.0, 0.0, 0.0f).isEmpty(),
+                   "sampler-race (a): sound added to a fresh sampler");
+            check (fresh != nullptr && fresh->getSoundMedia (0).isEmpty(),
+                   "sampler-race (a): precondition: its first load is still pending at snapshot time");
+            check (swapped != nullptr && kickLoaded.isNotEmpty() && swapped->getSoundMedia (0) == kickLoaded,
+                   "sampler-race (b): precondition: the loaded copy still holds the replaced kick at snapshot time");
+            check (snapshotPadFiles (freshTid) == StringArray (crashWav.getFullPathName()),
+                   "sampler-race (a): the snapshot names a pad's sample before its first load");
+            check (snapshotPadFiles (swapTid) == StringArray (snareWav.getFullPathName()),
+                   "sampler-race (b): the snapshot names the sample the pad HOLDS, not the replaced one");
+            cmd (ops, "remove_track", args1 ("trackId", freshTid));
+            cmd (ops, "remove_track", args1 ("trackId", swapTid));
         }
 
         // QA: keep the real engine-rendered beat for an audible listen when asked
@@ -8733,9 +8844,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         return true;
             return false;
         };
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        // Wait for the NEXT levels frame, by condition. Frames come from MoshOps' 30 Hz timer,
+        // and each one reconciles the meter taps before it is emitted, so the first frame after
+        // an edit already reflects it. A fixed 80 ms pump could end before that tick was even
+        // dispatched: on macOS the dispatch loop delivers a few queued messages per pass, and a
+        // reload queues an async update for nearly every object in the new Edit. That is a
+        // queue-depth race, so it lost on an idle machine as readily as on a loaded one.
+        auto nextLevelsFrame = [&] {
+            lastLevelsEvent = var();
+            const auto start = Time::getMillisecondCounterHiRes();
+            while (lastLevelsEvent.isVoid() && Time::getMillisecondCounterHiRes() - start < 5000.0)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);
+            return Time::getMillisecondCounterHiRes() - start;
+        };
+        nextLevelsFrame();
         check (latestLevelsHasSend (automationTrack, bus1),
                "levels telemetry carries the live send keyed by track and bus");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
@@ -8793,9 +8915,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && (bool) params[restoredMuteParamIndex].getProperty ("automated", false),
                    "send automation addresses and curves persist across save/reload");
         }
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        {
+            const double frameMs = nextLevelsFrame();
+            std::cerr << "  ..   first levels frame after the reload arrived in " << String (frameMs, 1).toStdString() << " ms" << std::endl;
+        }
         check (latestLevelsHasSend (automationTrack, bus1),
                "send meter registration reconciles after project reload");
         cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", false }}));
@@ -8804,18 +8927,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
         check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");
         check (sendsOf (gt).size() == 0, "remove_send drops the send");
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
-        check (! latestLevelsHasSend (gt, bus0),
+        nextLevelsFrame();
+        check (! lastLevelsEvent.isVoid() && ! latestLevelsHasSend (gt, bus0),   // a frame, without the send
                "removed send disappears from levels telemetry without a stale read");
         check (! ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send on a missing send errors");
         check (ok (cmd (ops, "undo")), "undo remove_send ok");
         check (sendsOf (gt).size() == 1 && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-6.0)) < 0.6,
                "undo restores the send at its prior level");
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        nextLevelsFrame();
         check (latestLevelsHasSend (gt, bus0),
                "undo restores the send meter registration");
 

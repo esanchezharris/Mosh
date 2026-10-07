@@ -2579,6 +2579,23 @@ te::SamplerPlugin* MoshOps::findSampler (te::AudioTrack& track) const
     return nullptr;
 }
 
+void MoshOps::settleSamplers()
+{
+    // The rebuild is SamplerPlugin::handleAsyncUpdate, and juce::AsyncUpdater already has the
+    // exact flush for it: handleUpdateNowIfNeeded runs it now if (and only if) it is pending.
+    // SamplerPlugin inherits AsyncUpdater privately, though, and a C-style cast is the one
+    // conversion the language lets reach an inaccessible base. The static_assert keeps that
+    // cast honest: should the base ever go, it fails the build instead of silently becoming
+    // a reinterpret_cast. A bounded poll on the public getters would not do: they expose only
+    // each sound's source, so a pad gain, pan or key edit (a lane mute) never shows as stale.
+    static_assert (std::is_base_of_v<juce::AsyncUpdater, te::SamplerPlugin>,
+                   "te::SamplerPlugin no longer derives from juce::AsyncUpdater; revisit settleSamplers()");
+    JUCE_ASSERT_MESSAGE_THREAD
+    for (auto* p : te::getAllPlugins (eng.edit(), false))
+        if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
+            ((juce::AsyncUpdater*) s)->handleUpdateNowIfNeeded();
+}
+
 // Parse / pack a comma-separated pitch set (the drumMute/drumSolo track props).
 static juce::SortedSet<int> parseLanePitches (const juce::String& s)
 {
