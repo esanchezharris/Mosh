@@ -41,12 +41,36 @@ export type LabRender = {
   peaks?: [number, number][];
 };
 
-export type LabRunStatus = "idle" | "precompute" | "training" | "ready" | "error" | "cancelled";
+/** Every status the training service reports for a run that is still going.
+ *  service/server.py holds a job "queued" until the training worker takes it,
+ *  then "running" through precompute, training and export, and the native relay
+ *  (MoshOps cmdTrainingJobStatus) passes that through untouched. WHICH of those
+ *  a running job is in is `detail.phase` (LabRun.phase), never the status.
+ *  Anything else — "ready", "error", "cancelled", or a name nobody expected —
+ *  is a run that has ended.
+ *
+ *  The one list the poll, Stop and the take sheet all ask. They used to each
+ *  test for "training" / "precompute" — phase names no status ever carries — so
+ *  on the native app the first poll ended the poll and took Stop away from a
+ *  run that had 20-60 minutes left. */
+export const LAB_RUN_LIVE_STATUSES = ["queued", "running"] as const;
+export type LabRunLiveStatus = (typeof LAB_RUN_LIVE_STATUSES)[number];
+export type LabRunStatus = "idle" | LabRunLiveStatus | "ready" | "error" | "cancelled";
+
+export const isLabRunLive = (status: string | null | undefined): status is LabRunLiveStatus =>
+  (LAB_RUN_LIVE_STATUSES as readonly string[]).includes(status ?? "");
 
 export type LabRun = {
   jobId: string;
   label: string;
   status: LabRunStatus;
+  /** The trainer's own phase while the job runs (`detail.phase`): "training",
+   *  then the state it exited in while the service collects the last takes.
+   *  null during the local trainer's precompute, which reports no progress, for
+   *  the whole run on a backend that reports none (remote_http), and on a
+   *  service that predates it. Presentation only — whether the run is live is
+   *  `status`. */
+  phase: string | null;
   step: number;
   totalSteps: number;
   loss: number | null;
@@ -118,6 +142,23 @@ export type LoraLabSlice = {
 
 const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : d);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+type LabSet = Parameters<StateCreator<State, [], [], LoraLabSlice>>[0];
+type LabGet = Parameters<StateCreator<State, [], [], LoraLabSlice>>[1];
+
+/** The service keeps training jobs in memory only, so after it restarts every
+ *  read of a run it had answers "unknown jobId" (native relays that text as is).
+ *  Unlike a failed read, that is final: the run is gone. */
+const isLostRunError = (error: string | undefined) => /unknown jobId/i.test(error ?? "");
+
+/** Ends the current run here, as failed with `reason`, when nothing is left to
+ *  report its end. The poll and Stop then let go of it and Train comes back. A
+ *  run that is no longer live is left as it is. */
+function endLabRun(set: LabSet, get: LabGet, reason: string) {
+  const run = get().labRun;
+  if (!run || !isLabRunLive(run.status)) return;
+  set({ labRun: { ...run, status: "error", error: reason } } as Partial<State>);
+}
 
 /** The key a render is filed under. A null take = the stock model baseline —
  *  the denominator every comparison needs, and the one the owner explicitly
@@ -246,7 +287,9 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
 
     set({
       labRun: {
-        jobId, label: runLabel, status: "precompute",
+        // What submit records, natively and in the service, until the first
+        // poll says otherwise.
+        jobId, label: runLabel, status: "queued", phase: null,
         step: 0, totalSteps: 0, loss: null, sPerStep: null, etaSeconds: null,
         leg: null, legs: null,
         // Unknown until the run reports them — deliberately NOT seeded from the
@@ -262,7 +305,15 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
   stopLabRun: async () => {
     const run = get().labRun;
     if (!run?.jobId) return;
-    await executeCommand({ command: "cancel_training_job", args: { jobId: run.jobId } });
+    const res = await executeCommand<CommandResult>({ command: "cancel_training_job", args: { jobId: run.jobId } });
+    // A cancel nothing could deliver (no service, or one that has lost the job)
+    // must still end the run here, or Stop does nothing and Train never comes
+    // back until the app restarts. It is recorded as failed with the reason,
+    // never as "stopped": nothing confirmed that the trainer stopped.
+    if (!res.ok) {
+      endLabRun(set, get, `could not stop this run: ${res.error || "the training service did not answer"}. The Lab has stopped watching it`);
+      return;
+    }
     // Don't fake the status — the next poll reports what actually happened.
     // Cancellation has to reach a process group, and claiming "stopped" before
     // it has would be a lie the UI tells for as long as the trainer takes to die.
@@ -422,6 +473,13 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       command: "training_job_status",
       args: { jobId: run.jobId },
     });
+    if (!res.ok && isLostRunError(res.error)) {
+      endLabRun(set, get, `the training service no longer has this run (${res.error}); it restarted or stopped while training`);
+      return;
+    }
+    // Any other failed read may be a hiccup, and the run may well still be going:
+    // keep the status and ask again on the next poll. Stop is the way out if the
+    // service never answers again.
     if (!res.ok || !res.data) return;
     const d = res.data;
     // `progress` is a coarse 0..1 FLOAT for a generic bar; the per-step numbers
@@ -436,6 +494,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       labRun: {
         ...run,
         status: (status as LabRunStatus) || run.status,
+        phase: str(progress.phase) || null,
         step: num(progress.step, run.step),
         totalSteps: num(progress.totalSteps, run.totalSteps),
         loss: typeof progress.loss === "number" ? progress.loss : run.loss,

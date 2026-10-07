@@ -25,6 +25,7 @@ import { RunHeader } from "./loraLab/RunHeader";
 import { TakeSheet } from "./loraLab/TakeSheet";
 import { KeptRack } from "./loraLab/KeptRack";
 import { trainingBlockers, trainingPreviewLabel } from "../capabilities";
+import { isLabRunLive } from "../store/loraLab";
 
 export function LoraLab() {
   const open = useLoraLab((s) => s.open);
@@ -65,7 +66,7 @@ export function LoraLab() {
 
   // A 1s poll for a 20-60 minute job. Honest and disposable — a dedicated native
   // event rail would be prettier and, at this duration, indistinguishable.
-  const active = run?.status === "training" || run?.status === "precompute";
+  const active = isLabRunLive(run?.status);
   useEffect(() => {
     if (!open || !active) return;
     const t = setInterval(() => void pollRun(), 1000);
@@ -113,7 +114,7 @@ export function LoraLab() {
             never rendered, and the Lab was a viewer for a run nothing here could
             begin. This is the missing link. */}
         <div className="lab-go">
-          {run && (run.status === "training" || run.status === "precompute") ? (
+          {active ? (
             <button className="btn ghost lab-stop" data-testid="lab-stop"
               title="Stop this run. Checkpoints already published stay auditionable."
               onClick={() => void stopRun()}>Stop training</button>

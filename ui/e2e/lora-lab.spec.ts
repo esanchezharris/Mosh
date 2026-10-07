@@ -119,15 +119,15 @@ test("Train starts a run on the approved sources, and Stop cancels that run", as
   await expect(train).toBeEnabled();
   await expect(train).toContainText("2 clips");
 
-  // The mock's job is already "ready" when it is submitted, and the Lab polls once a
-  // second — so on a running clock the first poll ends the run and Stop is gone before
-  // a click can land. Freeze time: the run stays "preparing" until Stop is pressed.
+  // The mock's job finishes on its second status read, and the Lab polls once a
+  // second — so on a running clock the run can end before a click lands. Freeze
+  // time: the run stays "queued" (what submit records) until Stop is pressed.
   await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 60_000));
 
   await train.click();
   const status = lab.getByTestId("lab-run-status");
-  await expect(status).toHaveText("preparing");
+  await expect(status).toHaveText("queued");
   const jobId = await page.evaluate(
     () => (window as unknown as { __moshStore: LabStore }).__moshStore.getState().labRun?.jobId,
   );

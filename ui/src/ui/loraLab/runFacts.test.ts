@@ -19,7 +19,7 @@ import { epochsFor } from "./recipe";
 import type { LabRun } from "../../store/loraLab";
 
 const RUN: LabRun = {
-  jobId: "j1", label: "ken-01", status: "training",
+  jobId: "j1", label: "ken-01", status: "running", phase: "training",
   step: 940, totalSteps: 2079, loss: 0.31, sPerStep: 2.15, etaSeconds: 2450,
   leg: 2, legs: 4, clipCount: 189, batchSize: 2, gradAccum: 2,
 };
@@ -34,7 +34,7 @@ describe("LoRA Lab — the run reports its own facts", () => {
     useStore.setState({ labRun: { ...RUN, clipCount: null, batchSize: null, gradAccum: null } } as never);
     vi.spyOn(await import("../../bridge"), "executeCommand").mockImplementation(
       (async () => ({ ok: true, data: {
-        status: "training",
+        status: "running",
         detail: { step: 940, totalSteps: 2079, clipCount: 189, batchSize: 2, gradAccum: 2 },
       } })) as never,
     );
@@ -48,7 +48,7 @@ describe("LoRA Lab — the run reports its own facts", () => {
   it("keeps them when a later poll omits them", async () => {
     useStore.setState({ labRun: RUN } as never);
     vi.spyOn(await import("../../bridge"), "executeCommand").mockImplementation(
-      (async () => ({ ok: true, data: { status: "training", detail: { step: 1000 } } })) as never,
+      (async () => ({ ok: true, data: { status: "running", detail: { phase: "training", step: 1000 } } })) as never,
     );
     await useStore.getState().pollLabRun();
     const r = useStore.getState().labRun!;
