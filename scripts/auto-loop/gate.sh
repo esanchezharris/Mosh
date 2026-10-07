@@ -267,7 +267,19 @@ gate_cheap() {
   run_harness_selftests
   run_step "typecheck" bash -c 'cd ui && npm run typecheck'
   run_step "vitest"    bash -c 'cd ui && npm test'
-  run_step "e2e"       bash -c 'cd ui && npm run test:e2e'
+  # The e2e suite gets a port block of its own and starts THIS tree's dev server there
+  # (MOSH_E2E_OWN_SERVER=1: Playwright refuses a busy port rather than reusing it). On
+  # 2026-10-06 another project's Vite server sat on the default :5173 and every spec ran
+  # against it. e2e-server-guard-selftest.sh pins both halves.
+  run_step "e2e_server_guard" bash scripts/auto-loop/e2e-server-guard-selftest.sh
+  local e2e_port
+  e2e_port="$(unique_port "${AL_E2E_PORT_LO:-5400}" "${AL_E2E_PORT_HI:-5499}")"
+  if [ -z "$e2e_port" ]; then
+    emit_step "e2e" false '{"error":"no free e2e port block in the e2e band (AL_E2E_PORT_LO..AL_E2E_PORT_HI)"}'
+  else
+    run_step "e2e" env MOSH_E2E_PORT="$e2e_port" MOSH_E2E_OWN_SERVER=1 bash -c 'cd ui && npm run test:e2e'
+    al_release_port "$e2e_port"
+  fi
   run_py_tests
   # Swappability is guaranteed BY CLASSIFICATION for a cheap PR: classify.sh only
   # returns "cheap" when ZERO compiled/CMake paths are touched, so the C++ binary
