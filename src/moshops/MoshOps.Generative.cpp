@@ -14,6 +14,7 @@
 // namespace, verbatim.
 
 #include "MoshOps.h"
+#include "BoundedRender.h"
 #include "MoshOpsInternal.h"
 #include "PluginState.h"
 #include "state/Ids.h"
@@ -594,29 +595,12 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
 
         if (params.tracksToDo.countNumberOfSetBits() > 0 && ! params.destFile.isDirectory())
         {
-            te::Renderer::RenderTask task ("Mosh bounce", params, nullptr, nullptr);
-
-            // Same no-progress watchdog + absolute deadline cmdExportAudio uses, so a
-            // stuck bounce (e.g. an unreadable source) errors cleanly instead of hanging.
-            const double secs = juce::jmax (0.1, endSec - startSec);
-            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, secs * 8000.0 + 60000.0);
-            const juce::uint32 stallMs    = 20000;
-            float  lastProgress   = -1.0f;
-            juce::uint32 lastProgressMs = startMs;
-            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-            {
-                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                const float p = task.getCurrentTaskProgress();
-                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                {
-                    if (task.errorMessage.isEmpty()) task.errorMessage = "bounce render stalled";
-                    break;
-                }
-            }
+            // Same bounded loop cmdExportAudio uses, so a stuck bounce (e.g. an unreadable
+            // source) errors cleanly instead of hanging.
+            renderError = mosh::runBoundedRender (params, "Mosh bounce", juce::jmax (0.1, endSec - startSec),
+                                                  "bounce render stalled");
             te::Renderer::turnOffAllPlugins (edit);
-            if (task.errorMessage.isNotEmpty()) { renderError = task.errorMessage; destWav.deleteFile(); }
+            if (renderError.isNotEmpty()) destWav.deleteFile();
         }
         else renderError = "no renderable track for bounce";
     }
