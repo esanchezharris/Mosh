@@ -34,8 +34,11 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
   let host: HTMLDivElement;
   let root: Root;
   let calls: Req[];
-  /** What successive training_job_status reads return; the last one repeats. */
+  /** What successive training_job_status reads return; the last one repeats.
+   *  `{ fail }` answers the read with that error instead, as native does. */
   let replies: Record<string, unknown>[];
+  /** What cancel_training_job answers; `{ fail }` as above. */
+  let cancelReply: Record<string, unknown>;
 
   const polls = () => calls.filter((c) => c.command === "training_job_status").length;
   const byId = (id: string) => host.querySelector(`[data-testid="${id}"]`);
@@ -46,6 +49,11 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
     vi.useFakeTimers();
     calls = [];
     replies = [];
+    cancelReply = { status: "running", cancelRequested: true };
+    const answer = (command: string, reply: Record<string, unknown>) =>
+      typeof reply.fail === "string"
+        ? { ok: false, command, error: reply.fail }
+        : { ok: true, command, data: { jobId: "job-1", ...reply } };
     vi.mocked(executeCommand).mockImplementation((async (req: Req) => {
       calls.push(req);
       switch (req.command) {
@@ -54,7 +62,9 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
         case "submit_training_job":
           return { ok: true, data: { jobId: "job-1" } };
         case "training_job_status":
-          return { ok: true, data: { jobId: "job-1", ...(replies.length > 1 ? replies.shift() : replies[0]) } };
+          return answer(req.command, (replies.length > 1 ? replies.shift() : replies[0])!);
+        case "cancel_training_job":
+          return answer(req.command, cancelReply);
         default:
           return { ok: true, data: {} };
       }
@@ -124,17 +134,94 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
     const pill = () => byId("lab-run-status")?.textContent;
     replies = [
       { status: "queued", detail: {} },
+      // No phase: the local trainer's precompute, or a remote trainer, which
+      // reports no phase for its whole run. Either way all that is known is
+      // that it is running.
       { status: "running", detail: {} },
       { status: "running", detail: { phase: "training", step: 40, totalSteps: 600, etaSeconds: 1200 } },
+      // The trainer has exited ("ready" is ITS state, flushed with its last
+      // ETA); the job is still running while the service collects the last
+      // takes. The ETA from the training poll is kept in the store, so only the
+      // phase can hide it.
+      { status: "running", detail: { phase: "ready", step: 600, totalSteps: 600, etaSeconds: 1200 } },
+      { status: "ready", detail: { phase: "ready", step: 600, totalSteps: 600 } },
     ];
 
     await tick();
     expect(pill(), "a queued job is waiting for the trainer").toBe("queued");
     await tick();
-    expect(pill(), "running with no trainer report yet is precompute").toBe("preparing");
+    expect(pill(), "a running job with no phase is just running").toBe("running");
     expect(byId("lab-eta")).toBeNull();
     await tick();
     expect(pill()).toBe("training");
     expect(byId("lab-eta"), "a training run reporting an ETA shows it").toBeTruthy();
+    await tick();
+    expect(pill(), "the trainer is done but the job is not").toBe("finishing");
+    expect(byId("lab-eta"), "no time left is shown once training is over").toBeNull();
+    await tick();
+    expect(pill()).toBe("done");
+  });
+
+  // The service keeps jobs in memory only. If it dies or restarts mid-run, every
+  // later read of the run answers "unknown jobId", and the run must end here, or
+  // the Lab polls forever and the producer can never train again without
+  // restarting the app.
+  it("ends a run the service no longer knows as failed, and stops polling", async () => {
+    replies = [{ status: "running", detail: { phase: "training" } }, { fail: "unknown jobId" }];
+
+    await tick();
+    expect(byId("lab-stop")).toBeTruthy();
+    await tick();
+    expect(polls()).toBe(2);
+    expect(byId("lab-stop"), "Stop stayed up on a run the service no longer has").toBeNull();
+    expect(byId("lab-train"), "Train did not come back").toBeTruthy();
+    expect(byId("lab-run-status")?.textContent).toBe("failed");
+    expect(useStore.getState().labRun?.error).toMatch(/no longer has this run/);
+
+    await tick(5000);
+    expect(polls(), "still polling a run the service no longer has").toBe(2);
+  });
+
+  it("keeps a run live through a status read that fails for another reason", async () => {
+    replies = [{ status: "running", detail: { phase: "training" } }, { fail: "job lookup failed" }];
+
+    await tick();
+    await tick(3000);
+    expect(polls(), "a failed read stopped the poll").toBe(4);
+    expect(byId("lab-stop"), "a failed read took Stop away from a run that may still be going").toBeTruthy();
+    expect(useStore.getState().labRun?.status).toBe("running");
+  });
+
+  it("Stop ends the run here when the cancel cannot reach it", async () => {
+    replies = [{ status: "running", detail: { phase: "training" } }, { fail: "training service unavailable" }];
+    cancelReply = { fail: "training service unavailable" };
+    await tick(3000);
+    expect(byId("lab-stop")).toBeTruthy();
+
+    await act(async () => { (byId("lab-stop") as HTMLButtonElement).click(); });
+    expect(calls.some((c) => c.command === "cancel_training_job")).toBe(true);
+    expect(byId("lab-stop"), "Stop did nothing").toBeNull();
+    expect(byId("lab-train"), "Train did not come back after Stop").toBeTruthy();
+    // Failed, with the reason, never "stopped": nothing confirmed the trainer stopped.
+    expect(byId("lab-run-status")?.textContent).toBe("failed");
+    expect(useStore.getState().labRun?.error).toMatch(/could not stop this run: training service unavailable/);
+
+    const after = polls();
+    await tick(5000);
+    expect(polls(), "still polling after Stop gave up on the run").toBe(after);
+  });
+
+  it("Stop that reaches the run leaves the end to the service", async () => {
+    replies = [{ status: "running", detail: { phase: "training" } }];
+    await tick();
+
+    await act(async () => { (byId("lab-stop") as HTMLButtonElement).click(); });
+    expect(byId("lab-stop"), "a delivered stop ended the run before the service said so").toBeTruthy();
+    expect(useStore.getState().labRun?.status).toBe("running");
+
+    replies = [{ status: "cancelled", detail: { phase: "cancelled" } }];
+    await tick();
+    expect(byId("lab-run-status")?.textContent).toBe("stopped");
+    expect(byId("lab-train")).toBeTruthy();
   });
 });

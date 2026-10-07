@@ -37,14 +37,16 @@ export function RunHeader({ clipCount }: { clipCount: number }) {
   const frac = run.totalSteps > 0 ? Math.min(1, run.step / run.totalSteps) : 0;
 
   // The status says whether the run is going; the phase says what it is doing.
-  // A running job reports no phase during precompute, then the trainer's
-  // "training", then the state the trainer exited in while the service collects
-  // the last takes and reports the run's own end.
+  // The local trainer reports no phase during precompute, then "training", then
+  // the state it exited in while the service collects the last takes and
+  // reports the run's own end. A remote trainer reports no phase at all, so no
+  // phase says only that the run is going: "running", never "preparing".
   const pill =
     run.status === "queued" ? "queued"
     : run.status === "running"
-      ? (run.phase === "training" ? "training"
-        : run.phase == null || run.phase === "precompute" ? "preparing"
+      ? (run.phase == null ? "running"
+        : run.phase === "training" ? "training"
+        : run.phase === "precompute" ? "preparing"
         : "finishing")
     : run.status === "ready" ? "done"
     : run.status === "cancelled" ? "stopped"
