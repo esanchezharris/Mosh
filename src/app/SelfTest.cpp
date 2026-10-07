@@ -15196,6 +15196,195 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "save")), "re-persist the edit after the mp-commit-export probe");
     }
 
+    // Regression: a dropped-in audio file plays AS IS, and a compressed one renders with no
+    // message-loop pump.
+    //
+    // te::insertWaveClip acts on a file's loop metadata (insertPlainWaveClip in
+    // MoshOps.Clips.cpp has the mechanism). Three shapes, each from real material:
+    //   • an ACID chunk with a root note and zero beats (what Sony ACID writes on a one-shot
+    //     a cappella) → the clip came in auto-PITCHED: transposed to the session key;
+    //   • an ACID chunk with a beat count → auto-TEMPO: stretched to the session tempo;
+    //   • a tempo token in the file NAME (Song A's "…_145BPM_….wav") → auto-tempo as well.
+    // Each of those also plays from a time-stretched proxy that only the message loop can
+    // start, so "import, then export" in one headless batch sat out the render watchdog's
+    // 20 s and failed. A FLAC failed the same way for its own reason: anything that is not
+    // WAV/AIFF plays from a decoded proxy copy.
+    //
+    // Every export here runs straight after its import, with no pump, and is judged by what
+    // it rendered — the tone's pitch and the timeline length — not by "ok" alone: once a
+    // render waits for its proxies, an adopted clip exports fine and is simply wrong.
+    {
+        section ("Import: a dropped-in file plays as is (loop metadata, tempo-named, FLAC), no pump");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "import-as-is-selftest"))),
+               "import-as-is: fresh project ok (120 bpm, key of C)");
+
+        auto fixtureDir = selftestTempPath (eng, "import-as-is");
+        fixtureDir.deleteRecursively();
+        fixtureDir.createDirectory();
+        auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("import-as-is-selftest");
+        outDir.deleteRecursively();
+        outDir.createDirectory();
+
+        constexpr double fixtureRate = 44100.0;
+        constexpr double toneHz = 220.0;   // A3; auto-pitch from root A into the key of C would move it to ~261.6
+
+        // A mono 16-bit sine. The WAV writer turns the acid keys of `metadata` into an `acid` chunk.
+        auto writeTone = [&] (const String& name, double seconds, AudioFormat* format,
+                              const StringPairArray& metadata) -> File
+        {
+            const int n = roundToInt (seconds * fixtureRate);
+            AudioBuffer<float> buf (1, n);
+            for (int i = 0; i < n; ++i)
+                buf.setSample (0, i, 0.5f * (float) std::sin (MathConstants<double>::twoPi * toneHz * i / fixtureRate));
+
+            auto f = fixtureDir.getChildFile (name);
+            if (format != nullptr)
+                if (auto os = std::unique_ptr<FileOutputStream> (f.createOutputStream()))
+                {
+                    std::unique_ptr<AudioFormatWriter> w (
+                        format->createWriterFor (os.get(), fixtureRate, 1u, 16, metadata, 0));
+                    if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, n); }
+                }
+            return f;
+        };
+
+        auto acidChunk = [] (int beats, double tempo, int rootNote) -> StringPairArray
+        {
+            StringPairArray m;
+            m.set (WavAudioFormat::acidOneShot, "0");
+            m.set (WavAudioFormat::acidStretch, "1");
+            m.set (WavAudioFormat::acidDiskBased, "1");
+            m.set (WavAudioFormat::acidizerFlag, "1");
+            m.set (WavAudioFormat::acidRootSet, rootNote >= 0 ? "1" : "0");
+            if (rootNote >= 0)
+                m.set (WavAudioFormat::acidRootNote, String (rootNote));
+            m.set (WavAudioFormat::acidBeats, String (beats));
+            m.set (WavAudioFormat::acidDenominator, "4");
+            m.set (WavAudioFormat::acidNumerator, "4");
+            m.set (WavAudioFormat::acidTempo, String (tempo));
+            return m;
+        };
+
+        // The rate of upward zero crossings of channel 0 over [fromSec, toSec): the tone's
+        // frequency, 0 for silence, -1 for an unreadable file.
+        auto renderedToneHz = [] (const File& f, double fromSec, double toSec) -> double
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) };
+            if (reader == nullptr) return -1.0;
+
+            const auto first = (int64) (fromSec * reader->sampleRate);
+            const int n = (int) jmin ((int64) ((toSec - fromSec) * reader->sampleRate), reader->lengthInSamples - first);
+            if (n < 2) return -1.0;
+
+            AudioBuffer<float> buf ((int) reader->numChannels, n);
+            reader->read (&buf, 0, n, first, true, true);
+            const float* s = buf.getReadPointer (0);
+            int crossings = 0;
+            for (int i = 1; i < n; ++i)
+                if (s[i - 1] <= 0.0f && s[i] > 0.0f)
+                    ++crossings;
+            return crossings * reader->sampleRate / (double) n;
+        };
+
+        auto engineClip = [&] (const String& id) -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+
+        // "As is": neither follow switch on, nothing left for a stretcher to do, and exactly
+        // `seconds` of timeline.
+        auto playsAsIs = [&] (const String& id, double seconds)
+        {
+            auto* w = engineClip (id);
+            return w != nullptr && ! w->getAutoTempo() && ! w->getAutoPitch() && ! w->usesTimeStretchedProxy()
+                   && std::abs (w->getPosition().getLength().inSeconds() - seconds) < 1.0e-6;
+        };
+
+        struct Fixture { const char* what; File file; double seconds; bool hasLoopMetadata; };
+        auto& formats = eng.engine().getAudioFileFormatManager();
+        const Fixture acidRoot { "ACID root-note a cappella",
+                                 writeTone ("acapella_acid_root.wav", 2.0, formats.getWavFormat(), acidChunk (0, 82.0, 57)),
+                                 2.0, true };
+        const Fixture acidLoop { "ACID loop, 8 beats in 3 s",
+                                 writeTone ("acapella_acid_loop.wav", 3.0, formats.getWavFormat(), acidChunk (8, 160.0, -1)),
+                                 3.0, true };
+        const Fixture namedBpm { "tempo-named WAV",
+                                 writeTone ("beat_150bpm.wav", 3.2, formats.getWavFormat(), {}), 3.2, true };
+        const Fixture flac     { "FLAC",
+                                 writeTone ("vocal_take.flac", 2.0, formats.getFlacFormat(), {}), 2.0, false };
+
+        // The fixtures must carry what they claim, or every check below is vacuous.
+        {
+            const auto rootInfo = te::AudioFile (eng.engine(), acidRoot.file).getInfo();
+            check (rootInfo.loopInfo.getRootNote() == 57 && ! rootInfo.loopInfo.isLoopable(),
+                   "import-as-is: the ACID root-note fixture reads back as root A, not a loop");
+            check (te::AudioFile (eng.engine(), acidLoop.file).getInfo().loopInfo.isLoopable(),
+                   "import-as-is: the ACID loop fixture reads back as a loop");
+            check (te::AudioFile (eng.engine(), namedBpm.file).getInfo().loopInfo.isLoopable(),
+                   "import-as-is: the tempo-named fixture reads back as a loop (tempo deduced from its name)");
+            const auto flacInfo = te::AudioFile (eng.engine(), flac.file).getInfo();
+            check (flacInfo.wasParsedOk && flacInfo.needsCachedProxy && ! flacInfo.loopInfo.isLoopable(),
+                   "import-as-is: the FLAC fixture is valid, plays from a decoded proxy, and is not a loop");
+        }
+
+        for (const auto& fx : { acidRoot, acidLoop, namedBpm, flac })
+        {
+            const String tag = "import-as-is [" + String (fx.what) + "]: ";
+
+            const auto trackId = cmd (ops, "create_track", args1 ("name", "Drop"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            auto imp = cmd (ops, "import_clip", objN ({{ "trackId", trackId }, { "file", fx.file.getFullPathName() }}));
+            check (ok (imp), tag + "import_clip ok");
+            const auto dropped = imp["data"].getProperty ("clipId", var()).toString();
+            check (playsAsIs (dropped, fx.seconds),
+                   tag + "the clip is the file's own length with warp and key-follow off");
+
+            // Straight to the render: no pump between the import and the export.
+            auto out = outDir.getChildFile (fx.file.getFileNameWithoutExtension() + ".wav");
+            auto exp = cmd (ops, "export_audio", objN ({{ "file", out.getFullPathName() }, { "format", "wav" },
+                                                        { "bitDepth", 24 }, { "tail", "cut" }}));
+            check (ok (exp), tag + "export straight after import completes"
+                                 + (ok (exp) ? String() : " (" + exp.getProperty ("error", var()).toString() + ")"));
+            check (std::abs ((double) exp["data"].getProperty ("seconds", 0.0) - fx.seconds) < 1.0e-3,
+                   tag + "the export is the file's own length");
+            const double hz = renderedToneHz (out, 0.25, fx.seconds - 0.25);
+            check (std::abs (hz - toneHz) < 3.0,
+                   tag + "the export carries the tone at its own pitch (" + String (hz, 1) + " Hz, want "
+                       + String (toneHz, 0) + ")");
+
+            // A copy re-inserts the same file, so it has to stay as is too.
+            if (fx.hasLoopMetadata)
+            {
+                auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", dropped));
+                check (ok (dup) && playsAsIs (dup["data"].getProperty ("newClipId", var()).toString(), fx.seconds),
+                       tag + "duplicate_clip's copy plays as is");
+
+                var clipDesc;
+                const auto snap = ops.snapshot();
+                if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                    for (auto& t : *tracks)
+                        if (auto* clips = t.getProperty ("clips", var()).getArray())
+                            for (auto& c : *clips)
+                                if (c.getProperty ("id", var()).toString() == dropped)
+                                    clipDesc = c;
+                auto pasted = cmd (ops, "paste_clip", objN ({{ "trackId", trackId }, { "start", 20.0 }, { "clip", clipDesc }}));
+                check (ok (pasted) && playsAsIs (pasted["data"].getProperty ("clipId", var()).toString(), fx.seconds),
+                       tag + "paste_clip's copy plays as is");
+            }
+
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", trackId))), tag + "track removed");
+        }
+
+        outDir.deleteRecursively();
+        fixtureDir.deleteRecursively();
+    }
+
     // Regression: export after relink_clip to a project-LOCAL copy. relink_clip rewrites a
     // wave clip's source via setToDirectFileReference(newFile, /*useRelativePath*/ local).
     // When the new file lives under the project dir (local==true), that computes the path

@@ -185,6 +185,53 @@ namespace
         if (lo >= at - eps)              return { lo + delta, hi + delta, true };   // entirely after
         return { lo, hi + delta, true };                                      // straddles → grows
     }
+
+    // Inserts a wave clip that plays its file AS IS. te::insertWaveClip does not: when the
+    // clip state it builds has no LOOPINFO child, te::insertClipWithState reads the FILE's
+    // loop metadata and acts on it —
+    //   • a loop (ACID / Apple-loop beats, or a tempo token in the file NAME — see
+    //     te::LoopInfo::deduceTempo) → autoTempo on, and the clip's length rewritten to that
+    //     many beats at the session tempo: the audio is time-stretched;
+    //   • a root note alone (an ACID chunk with "root set" and zero beats — what Sony ACID
+    //     writes on a one-shot a cappella) → autoPitch on: the audio is transposed to the
+    //     session key.
+    // Either also makes the clip play from a time-stretched proxy the engine has to render
+    // first. For a dropped-in vocal that is a stretch or a transposition nobody asked for;
+    // warping is an explicit command here (set_clip_warp / stretch_clip).
+    //
+    // So hand the engine the file's own loop info up front: the same LOOPINFO child it would
+    // have added, minus the adoption.
+    //
+    // The rest is the file-path branch of te::insertWaveClip, step for step (Mosh edits never
+    // belong to a te::Project, so that is the only branch it takes), so a file with no loop
+    // metadata saves to the identical clip state. That includes its item-id allocation: the
+    // engine writes one id into the new state and insertClipWithState then replaces it with a
+    // second, and ids recorded in existing command logs and recovery journals only name the
+    // same items on replay if both are still drawn.
+    te::WaveAudioClip::Ptr insertPlainWaveClip (te::ClipTrack& track, const juce::String& name,
+                                                const juce::File& file, te::ClipPosition position)
+    {
+        auto& edit = track.edit;
+
+        juce::ValueTree state (te::TrackItem::clipTypeToXMLType (te::TrackItem::Type::wave));
+        te::addValueTreeProperties (state,
+                                    te::IDs::name, name,
+                                    te::IDs::start, position.getStart().inSeconds(),
+                                    te::IDs::length, position.getLength().inSeconds(),
+                                    te::IDs::offset, position.getOffset().inSeconds());
+        edit.createNewItemID().writeID (state, nullptr);
+
+        const bool useRelativePath = edit.filePathResolver && edit.editFileRetriever
+                                     && edit.editFileRetriever().existsAsFile();
+        state.setProperty (te::IDs::source,
+                           te::SourceFileReference::findPathFromFile (edit, file, useRelativePath), nullptr);
+
+        state.addChild (te::AudioFile (edit.engine, file).getInfo().loopInfo.state.createCopy(), -1, nullptr);
+
+        return dynamic_cast<te::WaveAudioClip*> (
+            te::insertClipWithState (track, state, name, te::TrackItem::Type::wave, position,
+                                     te::DeleteExistingClips::no, false));
+    }
 }
 
 // Shared wave-file insertion path used by both import_clip (path-based) and
@@ -227,8 +274,8 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
     auto name = clipName;
     if (name.isEmpty()) name = file.getFileNameWithoutExtension();
 
-    auto clip = track->insertWaveClip (name, file,
-        { { tracktion::TimePosition::fromSeconds (startSeconds), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
+    auto clip = insertPlainWaveClip (*track, name, file,
+        { { tracktion::TimePosition::fromSeconds (startSeconds), tracktion::TimeDuration::fromSeconds (len) }, {} });
     if (clip == nullptr)
     {
         logLine (command, logArgs, false, "insert failed", true);
@@ -1369,8 +1416,8 @@ juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
     te::Clip* dup = nullptr;
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
     {
-        auto nc = track->insertWaveClip (clip->getName(), w->getCurrentSourceFile(),
-            { { tracktion::TimePosition::fromSeconds (newStart), pos.getLength() }, pos.getOffset() }, false);
+        auto nc = insertPlainWaveClip (*track, clip->getName(), w->getCurrentSourceFile(),
+            { { tracktion::TimePosition::fromSeconds (newStart), pos.getLength() }, pos.getOffset() });
         if (nc != nullptr)
         {
             nc->setGainDB (w->getGainDB());
@@ -1842,9 +1889,9 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
     te::Clip* pasted = nullptr;
     if (type == "wave")
     {
-        auto nc = track->insertWaveClip (name, waveSource,
+        auto nc = insertPlainWaveClip (*track, name, waveSource,
             { { tracktion::TimePosition::fromSeconds (start), tracktion::TimeDuration::fromSeconds (length) },
-              tracktion::TimeDuration::fromSeconds (offset) }, false);
+              tracktion::TimeDuration::fromSeconds (offset) });
         if (nc == nullptr) return errResult ("paste_clip", "insertWaveClip failed");
         nc->setGainDB ((float) (double) clipVar.getProperty ("gainDb", 0.0));
         if (hasPastedGainCurve)
