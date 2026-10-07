@@ -47,6 +47,41 @@ inline bool shouldFinalizeBeforeTransportAction (bool isRecording,
             || action == "record" || action == "to_start");
 }
 
+/** A loop toggle mid-take (`set_transport {loop}` while recording) is a stop too, one the
+    action-based check above cannot see (there is no "action" in a bare loop-flag command).
+    Tracktion's own valueTreePropertyChanged listener calls transport.stopIfRecording() the
+    instant `.looping` actually changes (tracktion_TransportControl.cpp) -- landing whatever
+    is recording through ITS raw transport.stop(), bypassing cmdStopRecording entirely, so
+    before 2026-09-24 the take landed unstamped, never a Part, same class of bug as the
+    action-based stops above. It can also hand an EMPTY loop range into the isLooping-driven
+    endPos clamp inside WaveInputDevice::applyLastRecording and raise UIBehaviour's MODAL
+    "Recording" alert -- tried and dropped in the PR #730 review because it hung the smoke.
+    Finalizing FIRST (cmdSetTransport, before `transport.looping = ...`) means `.looping`
+    only ever changes once nothing is recording, so Tracktion's listener no-ops and neither
+    hazard is reachable, whatever range the caller supplies. Gated on an ACTUAL change (JUCE
+    fires the listener only when the value differs), so a redundant `{loop:true}` sent while
+    already looping never touches a live take. Every EXISTING internal Booth flow that
+    touches `.looping` mid-capture (loopStartCapture / loopStartPlayback, called from
+    loop_keep/loop_again/loop_hear/loop_play_all) already finalizes first for exactly this
+    reason; this brings set_transport's own direct `loop` field in line with that precedent. */
+inline bool shouldFinalizeBeforeLoopToggle (bool isRecording, bool currentLooping, bool requestedLooping)
+{
+    return isRecording && currentLooping != requestedLooping;
+}
+
+/** Changing a track's input monitoring mid-take is a DIFFERENT class of hazard from the two
+    above: InputDevice::setMonitorMode also calls Tracktion's restartAllTransports() the
+    instant the mode actually changes, and that ALSO calls stopIfRecording() -- so BoothView's
+    "Hear myself" toggle could cut a pass short the same way (2026-09-24 finding c). But unlike
+    a loop toggle or an offline-render detach, monitoring is not itself an action a producer
+    means to end their take with, so it must not be finalized: the fix is to DEFER the mode
+    change (apply it once the take actually lands, from stopRecordingAndLand) so recording
+    survives the toggle and the change still happens, just a beat later than the click. */
+inline bool shouldDeferMonitorChange (bool isRecording, bool currentModeDiffersFromRequested)
+{
+    return isRecording && currentModeDiffersFromRequested;
+}
+
 /** loop_stop is the Booth's and the phone's panic button: it ends WHATEVER is recording. A
     pass the loop started is finalized as a pass (its own transaction, the pass id stamped, a
     Part). Any other recording -- the TopBar Record, an agent's set_transport record -- is
