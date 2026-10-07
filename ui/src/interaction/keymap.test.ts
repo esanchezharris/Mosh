@@ -1,14 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { EditorAction as A, type EditorAction as Action } from "./actions";
-import {
-  eventToCombo,
-  canonicalCombo,
-  resolveKey,
-  getKeymap,
-  KEYMAPS,
-  type KeyCombo,
-  type KeyEventLike,
-} from "./keymap";
+import { eventToCombo, canonicalCombo, resolveKey, getKeymap, KEYMAPS, type KeyCombo, type KeyEventLike, isEditableTarget, isAriaValueControl } from "./keymap";
 
 const ev = (over: Partial<KeyEventLike>): KeyEventLike => ({ key: "a", ...over });
 
@@ -338,5 +330,30 @@ describe("Alt-combo sweep — every Alt+letter binding in every preset", () => {
       }
     }
     expect(swept).toBeGreaterThanOrEqual(3);   // CREATE_FADE, FREEZE_TRACK, EXPAND_CLIP today
+  });
+});
+
+describe("isEditableTarget: custom value controls own their keys", () => {
+  it("treats an ARIA slider or spin button like a native range input, and nothing else new", () => {
+    const svgNS = "http://www.w3.org/2000/svg";
+    const dial = document.createElementNS(svgNS, "svg");
+    dial.setAttribute("role", "slider");
+    const node = document.createElementNS(svgNS, "g");
+    node.setAttribute("role", "slider");
+    const spin = document.createElement("div");
+    spin.setAttribute("role", "spinbutton");
+    expect(isEditableTarget(dial)).toBe(true);
+    expect(isEditableTarget(node)).toBe(true);
+    expect(isEditableTarget(spin)).toBe(true);
+    expect(isAriaValueControl(spin)).toBe(true);
+
+    const button = document.createElement("button");
+    const radio = document.createElement("div");
+    radio.setAttribute("role", "radio");
+    expect(isEditableTarget(button)).toBe(false);
+    expect(isEditableTarget(radio)).toBe(false);
+    expect(isEditableTarget(document.body)).toBe(false);
+    expect(isEditableTarget(null)).toBe(false);
+    expect(isAriaValueControl(window)).toBe(false);
   });
 });

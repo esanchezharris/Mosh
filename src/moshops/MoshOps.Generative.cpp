@@ -14,7 +14,9 @@
 // namespace, verbatim.
 
 #include "MoshOps.h"
+#include "BoundedRender.h"
 #include "MoshOpsInternal.h"
+#include "PluginState.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "generative/AudioStaging.h"
@@ -429,13 +431,55 @@ juce::var MoshOps::cmdCompileRender (const juce::var& args)
     return okResult ("compile_render", var (d));
 }
 
+// A sampler's sounds as the signature sees them: what each SOUND child makes the bounce sound
+// like, in child order, read exactly as te::SamplerPlugin reads it when it builds its sound
+// list (handleAsyncUpdate and SamplerSound: root and range clamped to 0..127, the live gain
+// to -48..+48 dB, pan to -1..1, the gate, the excerpt's start and length), plus the file the
+// source resolves to, identified by its name and size. Deliberately NOT the raw `source`
+// string (Save-As consolidation copies a sample into the project's audio/ folder and rewrites
+// the source from an absolute to a relative path, the same audio), the sound's name, its
+// choke group (only apply_choke enforces one, by baking note lengths, which the notes hash
+// already sees) or the level a silenced pad has parked (moshPadGainDb: the pad plays at the
+// live -48 dB floor). Hashing those re-rendered an applied drum layer for a pad rename, a
+// choke renumber, a parked-level edit or a Save-As (2026-10-06). Pad edits that change the
+// sound (set_drum_pad gain/pan/choke-on-or-off, clear_drum_pad, assign_sample, load_drum_kit,
+// set_drum_lane) change these.
+static void writeSamplerSounds (juce::MemoryOutputStream& mos, te::SamplerPlugin& sampler)
+{
+    const auto& samplerState = sampler.state;
+    for (int i = 0; i < samplerState.getNumChildren(); ++i)
+    {
+        const auto sound = samplerState.getChild (i);
+        if (! sound.hasType (te::IDs::SOUND))
+            continue;
+        mos.writeInt (i);
+        mos.writeInt (juce::jlimit (0, 127, (int) sound[te::IDs::keyNote]));
+        mos.writeInt (juce::jlimit (0, 127, (int) sound[te::IDs::minNote]));
+        mos.writeInt (juce::jlimit (0, 127, (int) sound[te::IDs::maxNote]));
+        mos.writeFloat (juce::jlimit (-48.0f, 48.0f, (float) sound[te::IDs::gainDb]));
+        mos.writeFloat (juce::jlimit (-1.0f, 1.0f, (float) sound[te::IDs::pan]));
+        mos.writeBool ((bool) sound[te::IDs::openEnded]);
+        mos.writeDouble ((double) sound[te::IDs::startTime]);
+        mos.writeDouble ((double) sound[te::IDs::length]);
+        const auto file = te::SourceFileReference::findFileFromString (sampler.edit, sound[te::IDs::source].toString());
+        mos.writeString (file.getFileName());
+        mos.writeInt64 (file.existsAsFile() ? file.getSize() : (juce::int64) -1);
+    }
+}
+
 // A stable, deterministic signature of a clip's GENERATIVE SOURCE — its MIDI note content
-// plus the owning track's instrument + insert-FX names and param VALUES. Used as the
-// render-cache upstream hash for non-wave clips, whose bounced audio isn't bit-stable.
-// Editing a note OR an instrument/FX param changes this → cache MISS; an unchanged source
-// → identical signature → cache HIT. Deliberately hashes note fields + param values, NOT
-// the clip/plugin `state` ValueTrees — a synth scribbles its free-running phase into its
-// opaque state chunk during render, which would make the signature differ every render.
+// plus the owning track's instrument + insert-FX names, bypass, param VALUES (and curves),
+// CachedValue-only settings and sampler sounds. Used as the render-cache upstream hash for
+// non-wave clips, whose bounced audio isn't bit-stable. Editing a note, an instrument/FX
+// param, a set_plugin_state setting (delay length, chorus, phaser, the filter's mode and
+// slope, the 4OSC's waves, voices, filter type/slope and switches) or a sampler pad changes this → cache MISS; an unchanged source → identical
+// signature → cache HIT. Deliberately hashes note fields, param values, the plugin-state
+// WHITELIST (pluginstate::describe, the snapshot's `plugin.state`) and the sampler's SOUND
+// children, NOT whole clip/plugin `state` ValueTrees — a synth scribbles its free-running
+// phase into its opaque state chunk during render, which would make the signature differ
+// every render. A plugin with no state keys and no sounds contributes exactly what it did
+// before those two were folded in (2026-10-05), so such chains keep their cached renders;
+// a chain with a delay/chorus/phaser/filter, a 4OSC or a sampler re-renders once.
 static juce::String stableSourceSig (te::Clip& clip)
 {
     juce::MemoryOutputStream mos;
@@ -472,8 +516,24 @@ static juce::String stableSourceSig (te::Clip& clip)
                             }
                         }
                     }
+                // CachedValue-only settings: the same whitelist, read the same way, as the
+                // snapshot's plugin.state and set_plugin_state (PluginState.h). Not
+                // parameters, so the loop above never saw them; LowPassPlugin's name is
+                // "LPF/HPF" in both modes, so not even the mode reached the signature.
+                const auto settings = pluginstate::describe (*p, effectiveBuiltinType (*p));
+                if (! settings.isVoid())
+                    mos.writeString (juce::JSON::toString (settings, true));
+                // A sampler has no parameters at all: its sound is its SOUND children.
+                if (auto* sampler = dynamic_cast<te::SamplerPlugin*> (p))
+                    writeSamplerSounds (mos, *sampler);
             }
     return juce::MD5 (mos.getMemoryBlock()).toHexString();
+}
+
+juce::String MoshOps::renderSourceSignatureForSelfTest (const juce::String& clipId)
+{
+    auto* clip = findClip (clipId);
+    return clip != nullptr ? stableSourceSig (*clip) : juce::String();
 }
 
 bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav)
@@ -536,29 +596,12 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
 
         if (params.tracksToDo.countNumberOfSetBits() > 0 && ! params.destFile.isDirectory())
         {
-            te::Renderer::RenderTask task ("Mosh bounce", params, nullptr, nullptr);
-
-            // Same no-progress watchdog + absolute deadline cmdExportAudio uses, so a
-            // stuck bounce (e.g. an unreadable source) errors cleanly instead of hanging.
-            const double secs = juce::jmax (0.1, endSec - startSec);
-            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, secs * 8000.0 + 60000.0);
-            const juce::uint32 stallMs    = 20000;
-            float  lastProgress   = -1.0f;
-            juce::uint32 lastProgressMs = startMs;
-            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-            {
-                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                const float p = task.getCurrentTaskProgress();
-                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                {
-                    if (task.errorMessage.isEmpty()) task.errorMessage = "bounce render stalled";
-                    break;
-                }
-            }
+            // Same bounded loop cmdExportAudio uses, so a stuck bounce (e.g. an unreadable
+            // source) errors cleanly instead of hanging.
+            renderError = mosh::runBoundedRender (params, "Mosh bounce", juce::jmax (0.1, endSec - startSec),
+                                                  "bounce render stalled");
             te::Renderer::turnOffAllPlugins (edit);
-            if (task.errorMessage.isNotEmpty()) { renderError = task.errorMessage; destWav.deleteFile(); }
+            if (renderError.isNotEmpty()) destWav.deleteFile();
         }
         else renderError = "no renderable track for bounce";
     }
@@ -1396,6 +1439,8 @@ void MoshOps::reactiveTouchTrack (const juce::String& trackId)
     // An instrument/FX edit changes a MIDI clip's bounce (the stableSourceSig folds the track's
     // plugins in) → re-touch every applied NON-wave clip on the track. Wave in-place renders stage
     // the clip's own audio (independent of track FX), so they're not affected.
+    ++reactiveTrackTouches_;
+    lastReactiveTouchTrack_ = trackId;
     auto* track = findTrack (trackId);
     if (track == nullptr) return;
     for (auto* c : track->getClips())

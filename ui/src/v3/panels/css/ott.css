@@ -1,0 +1,61 @@
+/* Mosh OTT panel (panels/OttPanel.tsx): three band columns (crossover range, live level +
+   bipolar gain with its read-out over the band name, trim) over the dial row. Tokens only;
+   the dials, captions and pressed looks are the shared ones in shell.css. */
+.v3-shell .insp .pr .pp-ott { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.v3-shell .insp .pr .pp-ott-bands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.v3-shell .insp .pr .pp-ott-band { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 2px 3px;
+  border-radius: 4px; background: color-mix(in srgb, var(--bg) 45%, transparent); }
+.v3-shell .insp .pr .pp-ott-bh { font-family: var(--mono); font-size: var(--pp-fs-axis); line-height: 11px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Live bars: level (left) and bipolar gain (right), then the gain over the band's name. */
+.v3-shell .insp .pr .pp-ott-live { display: flex; align-items: flex-end; gap: 5px; height: 20px; min-width: 0; }
+.v3-shell .insp .pr .pp-ott-live svg { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-ott-trk { fill: color-mix(in srgb, var(--text) 10%, transparent); }
+.v3-shell .insp .pr .pp-ott-window { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+.v3-shell .insp .pr .pp-ott-level { fill: color-mix(in srgb, var(--text) 62%, transparent); }
+.v3-shell .insp .pr .pp-ott-thr { stroke: var(--warn); stroke-width: 1; }
+.v3-shell .insp .pr .pp-ott-mid { stroke: color-mix(in srgb, var(--text) 40%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-ott-lift { fill: var(--accent); }
+.v3-shell .insp .pr .pp-ott-cut { fill: var(--warn); }
+.v3-shell .insp .pr .pp-ott-read { display: flex; flex-direction: column; min-width: 0; line-height: 10px; }
+.v3-shell .insp .pr .pp-ott-read .g { font-family: var(--mono); font-size: var(--pp-fs-cap); font-variant-numeric: tabular-nums;
+  color: var(--text); white-space: nowrap; }
+.v3-shell .insp .pr .pp-ott-read .g.up { color: var(--accent); }
+.v3-shell .insp .pr .pp-ott-read .g.dn { color: var(--warn); }
+.v3-shell .insp .pr .pp-ott-read .g.none { color: var(--muted); }
+.v3-shell .insp .pr .pp-ott-read .nm { font-size: var(--pp-fs-cap); color: var(--muted); white-space: nowrap; }
+.v3-shell .insp .pr .pp-ott-live.idle svg, .v3-shell .insp .pr .pp-ott.off .pp-ott-live svg { opacity: .55; }
+
+/* Band trim: a thin bipolar bar with its read-out. At Amount 0 it is skipped: the bar's fill
+   is muted, the read-out stays legible. */
+.v3-shell .insp .pr .pp-ott-trim { display: flex; align-items: center; gap: 4px; height: 12px; min-width: 0;
+  cursor: ew-resize; touch-action: none; outline: none; border-radius: 3px; }
+.v3-shell .insp .pr .pp-ott-trim:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.v3-shell .insp .pr .pp-ott-trimbar { position: relative; flex: 1 1 auto; min-width: 14px; height: 3px; border-radius: 2px;
+  background: color-mix(in srgb, var(--text) 12%, transparent); }
+.v3-shell .insp .pr .pp-ott-trimbar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; }
+.v3-shell .insp .pr .pp-ott-trim.inert .pp-ott-trimbar .fill { background: color-mix(in srgb, var(--accent) 35%, var(--muted)); }
+.v3-shell .insp .pr .pp-ott-trimbar .ctr { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px;
+  background: color-mix(in srgb, var(--text) 45%, transparent); }
+.v3-shell .insp .pr .pp-ott-trim .v { flex: 0 0 auto; font-family: var(--mono); font-size: var(--pp-fs-cap);
+  font-variant-numeric: tabular-nums; color: var(--muted); }
+.v3-shell .insp .pr .pp-ott-trim .v.set { color: var(--text); }
+
+/* Dials, then the status column in the same footer (value line over a caption). */
+.v3-shell .insp .pr .pp-ott-dials { display: flex; align-items: flex-end; justify-content: space-between; gap: 2px; min-width: 0; }
+.v3-shell .insp .pr .pp-ott-stat { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 1px;
+  min-width: 46px; }
+.v3-shell .insp .pr .pp-ott-stat .v { font-family: var(--mono); font-size: var(--pp-fs-val); color: var(--muted); }
+/* Idle: the words sit in the value slot (caption-sized, on the dials' value line). */
+.v3-shell .insp .pr .pp-ott-stat .v.none { font-family: inherit; font-size: var(--pp-fs-cap); line-height: 14px; white-space: nowrap; }
+.v3-shell .insp .pr .pp-ott-stat .nm { font-size: var(--pp-fs-cap); color: var(--muted); white-space: nowrap; }
+/* The clip light: an LED, not a button. It sits on the value line, so it shares the dials' baselines. */
+.v3-shell .insp .pr .pp-ott-clip { display: block; width: 7px; height: 7px; margin: 4px 0 3px; border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 22%, transparent); }
+.v3-shell .insp .pr .pp-ott-clip.on { background: var(--record); box-shadow: 0 0 4px var(--record); }
+.v3-shell .insp .pr .pp-ott-note { font-size: var(--pp-fs-cap); color: var(--muted); }
+
+/* Minimized: one baseline with three bipolar bars. */
+.v3-shell .insp .pr .pp-ott-mini { flex: 0 0 auto; display: block; overflow: visible; }
+.v3-shell .insp .pr .pp-ott-mini.idle .pp-ott-mid { stroke: color-mix(in srgb, var(--text) 22%, transparent); }

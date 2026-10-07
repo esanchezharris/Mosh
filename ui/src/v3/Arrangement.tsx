@@ -10,7 +10,7 @@ import { liveFeel, liveGestureTable } from "../interaction/config";
 import { passedDragThreshold } from "../interaction/feel";
 import { EditorAction as EA, type Mods } from "../interaction/actions";
 import { pushEscapeHandler } from "../hooks/escapeStack";
-import { beatPx, clipBeats, clipBox, gridBeatCount, gridDensity, gridMarks, laneContentPx, secondsAtLaneX, type GridMark } from "./timeline";
+import { beatPx, clipBeats, clipBox, gridBeatCount, gridDensity, gridMarks, laneContentPx, secondsAtLaneX, visibleBeatWindow, type GridMark } from "./timeline";
 import { Playhead, RulerMarker } from "./Playhead";
 import { SectionStrip } from "./SectionStrip";
 import { lockOwnerOfTrack } from "../multiplayer/sync";
@@ -29,6 +29,19 @@ const capturePointer = (el: Element, id: number) => { try { (el as HTMLElement).
 const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).releasePointerCapture(id); } catch { /* no-op */ } };
 const MIN_LEN = 0.05;
 type DragKind = "move" | "trim-l" | "trim-r";
+
+/** requestAnimationFrame, falling back to a macrotask where it doesn't exist (matches
+ *  protools/proToolsZoom.ts's deferScroll) — returns a canceller. Used to throttle the
+ *  scroll-driven grid/ruler window to at most one state update per frame, so a fast trackpad
+ *  fling firing many native "scroll" events doesn't storm React with a setState per event. */
+function scheduleFrame(cb: () => void): () => void {
+  if (typeof requestAnimationFrame === "function") {
+    const id = requestAnimationFrame(cb);
+    return () => cancelAnimationFrame(id);
+  }
+  const id = window.setTimeout(cb, 0);
+  return () => window.clearTimeout(id);
+}
 
 function Ruler({ marks, widthPx, pxPerSec, beatLabels }: { marks: GridMark[]; widthPx: number; pxPerSec: number; beatLabels: boolean }) {
   const exec = useStore((s) => s.exec);
@@ -292,13 +305,30 @@ export function Arrangement({ snapshot }: { snapshot: Snapshot }) {
     const ro = new ResizeObserver(measure); ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // The scrolled-into-view range, in lane px. Kept in state (not read imperatively) so the
+  // windowed grid/ruler marks below track it, but the state write is throttled to once per
+  // animation frame (scheduleFrame) — a raw per-"scroll"-event setState would storm React on a
+  // trackpad fling. Before this, a long session (500+ bars) put every bar/beat mark for the
+  // WHOLE content width in the DOM regardless of scroll position: thousands of nodes that a
+  // macOS accessibility walk timed out on, even with CPU idle (FINDINGS.md "New (minor)").
+  const [scrollLeftPx, setScrollLeftPx] = useState(0);
+  const scrollFrame = useRef<(() => void) | null>(null);
+  useEffect(() => () => scrollFrame.current?.(), []);
   const lanePx = laneContentPx(snapshot.session, pxPerSec, viewportPx);
   const beats = gridBeatCount(snapshot.session, pxPerSec, lanePx);   // beats across the lane
-  // One set of grid marks for every lane and the ruler, snapped to this display's pixels.
-  const marks = gridMarks(beats, beatWidth, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
+  // One set of grid marks for every lane and the ruler, snapped to this display's pixels, and
+  // windowed to what's scrolled into view (+ overscan) instead of the whole session — a mark's
+  // position never changes, this only bounds how many are ever mounted.
+  const visibleWindow = visibleBeatWindow(scrollLeftPx, viewportPx, beatWidth, beats);
+  const marks = gridMarks(beats, beatWidth, typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, visibleWindow);
   const beatLabels = gridDensity(beatWidth).beats;
   const onScroll = () => {
     if (rulerRef.current && scrollerRef.current) rulerRef.current.style.transform = `translateX(${-scrollerRef.current.scrollLeft}px)`;
+    if (scrollFrame.current) return;   // an update is already scheduled for this frame
+    scrollFrame.current = scheduleFrame(() => {
+      scrollFrame.current = null;
+      setScrollLeftPx(scrollerRef.current?.scrollLeft ?? 0);
+    });
   };
   return (
     <div className="main" data-testid="v3-arrangement" data-px-per-sec={pxPerSec}>

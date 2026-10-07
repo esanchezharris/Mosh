@@ -16,11 +16,38 @@
 #include "AutomationMode.h"
 #include "AutomationCurveWrite.h"
 #include "PluginScanPlan.h"
+#include "TrackPresetEngine.h"
+#include "PluginState.h"
+#include "plugins/moshfx/MoshDelayLinePlugins.h"
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include "files/ImportCopy.h"
 #include <cmath>
 #include <limits>
+
+// The delay/chorus lines are sized for set_plugin_state's ceilings (see
+// MoshDelayLinePlugins.h); raising a ceiling in PluginState.h without them would put the
+// reallocation back on the audio thread.
+static_assert ((int) mosh::pluginstate::maxOf ("delay", "lengthMs") == mosh::MoshDelayPlugin::kMaxLengthMs,
+               "MoshDelayPlugin pre-sizes for the lengthMs ceiling");
+static_assert ((int) (mosh::pluginstate::maxOf ("chorus", "depthMs") * 1000.0)
+                   == (int) (mosh::MoshChorusPlugin::kMaxDepthMs * 1000.0f),
+               "MoshChorusPlugin pre-sizes for the depthMs ceiling");
+// The low/high-pass slope grid IS the filter's: MoshLowPassPlugin's cascade has
+// kMaxSections sections, enough for the steepest slope the command can set, and its
+// order is slope / 6, so the grid must start at 6 and step by 6.
+static_assert ((int) mosh::pluginstate::maxOf ("lowpass", "slope") == mosh::MoshLowPassPlugin::kMaxSlopeDbPerOct
+                   && (int) mosh::pluginstate::maxOf ("highpass", "slope") == mosh::MoshLowPassPlugin::kMaxSlopeDbPerOct,
+               "set_plugin_state's slope ceiling is the cascade's");
+static_assert (mosh::moshfx::filterdesign::numSections ((int) mosh::pluginstate::maxOf ("lowpass", "slope")
+                                                         / mosh::moshfx::filterdesign::kSlopeStep)
+                   <= mosh::moshfx::filterdesign::kMaxSections,
+               "the steepest slope fits MoshLowPassPlugin's sections");
+static_assert ((int) mosh::pluginstate::minOf ("lowpass", "slope") == mosh::moshfx::filterdesign::kMinSlope
+                   && mosh::pluginstate::stepOf ("lowpass", "slope") == mosh::moshfx::filterdesign::kSlopeStep
+                   && (int) mosh::pluginstate::minOf ("highpass", "slope") == mosh::moshfx::filterdesign::kMinSlope
+                   && mosh::pluginstate::stepOf ("highpass", "slope") == mosh::moshfx::filterdesign::kSlopeStep,
+               "set_plugin_state snaps the slope onto the filter's own 6 dB/oct grid");
 
 namespace mosh
 {
@@ -117,6 +144,34 @@ namespace
         const float valueBefore;
     };
 
+    // Tracktion's FourOscPlugin reallocates its voices in its (private) ValueTree listener
+    // when voiceMode changes, reading voiceModeValue — a CachedValue that refreshes in its
+    // OWN listener. JUCE calls a tree's listeners ordered by object address and the plugin's
+    // comes first, so a voiceMode change that is not CachedValue::setValue (a property
+    // removal, and every undo or redo of the change) reallocates for the OLD mode: mono
+    // stays one voice while the snapshot says poly. This action re-sends the property's
+    // change message, so the listener runs again once every CachedValue is fresh. A change
+    // is wrapped as [resync, change, resync]: perform and redo end with the second, undo
+    // with the first. Resolved by item id on every call, like SetPluginParamValueAction.
+    struct ResyncFourOscVoicesAction final : public juce::UndoableAction
+    {
+        explicit ResyncFourOscVoicesAction (te::FourOscPlugin& fo) : edit (fo.edit), pluginItemId (fo.itemID) {}
+
+        bool perform() override        { resync(); return true; }
+        bool undo() override           { resync(); return true; }
+        int  getSizeInUnits() override { return (int) sizeof (*this); }
+
+        void resync()
+        {
+            if (auto plugin = edit.getPluginCache().getPluginFor (pluginItemId))
+                if (auto* fo = dynamic_cast<te::FourOscPlugin*> (plugin.get()))
+                    fo->state.sendPropertyChangeMessage (te::IDs::voiceMode);
+        }
+
+        te::Edit& edit;
+        const te::EditItemID pluginItemId;
+    };
+
     int indexOfParameter (te::Plugin& plugin, te::AutomatableParameter& parameter)
     {
         for (int i = 0; i < plugin.getNumAutomatableParameters(); ++i)
@@ -145,6 +200,35 @@ namespace
         { "tom_mid.wav",    "Mid Tom",    47 },
         { "crash.wav",      "Crash",      49 },
     };
+
+    // A sampler loads its sound files on an AsyncUpdate that rebuilds the list
+    // getSoundMedia() reads from the SOUND children of its state. True once that loaded
+    // list matches the saved one pad for pad, with no stale extra entries.
+    bool samplerSoundsLoaded (te::SamplerPlugin& sampler)
+    {
+        int i = 0;
+        for (auto v : sampler.state)
+            if (v.hasType (te::IDs::SOUND))
+                if (sampler.getSoundMedia (i++) != v[te::IDs::source].toString())
+                    return false;
+        return sampler.getSoundMedia (i).isEmpty();
+    }
+
+    // Headless there is no GUI dispatch between commands, so a sampler's AsyncUpdate must be
+    // drained before a later command renders it. Pump once, as before, then until the load
+    // has landed: a fixed 5 ms pump is outlasted on a loaded machine and DRM-001's beat then
+    // exports silent. Bounded so a sampler that never loads cannot hang the command.
+    void drainSamplerLoad (te::SamplerPlugin& sampler)
+    {
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        if (mm == nullptr)
+            return;
+
+        const auto startMs = juce::Time::getMillisecondCounter();
+        do
+            mm->runDispatchLoopUntil (5);
+        while (! samplerSoundsLoaded (sampler) && juce::Time::getMillisecondCounter() - startMs < 30000);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +361,9 @@ juce::var MoshOps::cmdSetTrackType (const juce::var& args)
     data->setProperty ("isInstrument", trackHasInstrument (*track));
     logLine ("set_track_type", args, true, {}, true);
     emitSnapshotInvalidated();
+    // A drum track's sampler and kit are the instrument a MIDI layer's render bounces through.
+    if (type == "drum")
+        reactiveTouchTrack (track->itemID.toString());
     return okResult ("set_track_type", var (data));
 }
 
@@ -312,6 +399,8 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     data->setProperty ("kit", kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId));
     logLine ("load_drum_kit", args, true, {}, true);
     emitSnapshotInvalidated();
+    // Every pad changed: an applied drum layer re-renders, as after set_drum_pad.
+    reactiveTouchTrack (track->itemID.toString());
     return okResult ("load_drum_kit", var (data));
 }
 
@@ -325,17 +414,29 @@ static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index);
 // command aimed at the snare would silently retune the 808 instead. A melodic sound is a
 // pitched instrument played across the keys, not a pad, so it only ever wins when nothing
 // more specific covers the note.
-static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+//
+// The rule itself, over each sound's [minNote, maxNote] in sound-index order (the first of
+// equally narrow sounds wins). Shared with samplerToVar's addressNote, so the note the
+// snapshot says reaches a sound is the note these commands resolve to it.
+static int narrowestSoundCovering (const std::vector<std::pair<int, int>>& ranges, int note)
 {
     int best = -1, bestSpan = std::numeric_limits<int>::max();
-    for (int i = 0; i < sampler.getNumSounds(); ++i)
+    for (int i = 0; i < (int) ranges.size(); ++i)
     {
-        const int lo = sampler.getMinKey (i), hi = sampler.getMaxKey (i);
+        const int lo = ranges[(size_t) i].first, hi = ranges[(size_t) i].second;
         if (lo > note || hi < note) continue;
         const int span = hi - lo;
         if (span < bestSpan) { bestSpan = span; best = i; }
     }
     return best;
+}
+
+static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+{
+    std::vector<std::pair<int, int>> ranges;
+    for (int i = 0; i < sampler.getNumSounds(); ++i)
+        ranges.emplace_back (sampler.getMinKey (i), sampler.getMaxKey (i));
+    return narrowestSoundCovering (ranges, note);
 }
 
 // ── Drum pads ────────────────────────────────────────────────────────────────────────
@@ -358,14 +459,22 @@ juce::var MoshOps::cmdSetDrumPad (const juce::var& args)
 
     if (args.hasProperty ("gainDb") || args.hasProperty ("pan"))
     {
-        const float gain = (float) (double) args.getProperty ("gainDb", sampler->getSoundGainDb (idx));
+        // While a pad is SILENCED (its lane muted, or another lane soloed) its live gain is
+        // the mute floor and the producer's real gain is parked (see applyDrumLaneGains).
+        // Writing the live gain here would be overwritten by the next unmute, so the parked
+        // copy is the one to update, and the one an edit that sends no gainDb (a pan-only
+        // edit) keeps: defaulting to the LIVE gain there wrote the -48 dB floor over the
+        // parked level, and unmuting then restored -48 (the pad stayed silent).
+        const bool parked = sound.isValid() && sound.hasProperty (ids::moshPadGainDb);
+        const float userGain = parked ? (float) (double) sound.getProperty (ids::moshPadGainDb)
+                                      : sampler->getSoundGainDb (idx);
+        const float gain = (float) (double) args.getProperty ("gainDb", userGain);
         const float pan  = (float) (double) args.getProperty ("pan",    sampler->getSoundPan (idx));
-        // While a pad is MUTED its live gain is the mute floor and the producer's real
-        // gain is parked (see applyDrumLaneGains). Writing the live gain here would be
-        // overwritten by the next unmute, so the parked copy is the one to update.
-        if (sound.isValid() && sound.hasProperty (ids::moshPadGainDb))
+        if (parked)
         {
-            sound.setProperty (ids::moshPadGainDb, gain, &undoManager());
+            // The engine's own gain clamp (setSoundGains), so the parked level is one the
+            // pad can be restored to. An unchanged value writes nothing (no undo action).
+            sound.setProperty (ids::moshPadGainDb, juce::jlimit (-48.0f, 48.0f, gain), &undoManager());
             sampler->setSoundGains (idx, sampler->getSoundGainDb (idx), pan);
         }
         else
@@ -527,11 +636,12 @@ juce::var MoshOps::cmdListPalette (const juce::var& args)
 
 // Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
 //
-// This exists because live choke cannot reach clip playback. During playback the MIDI
-// comes from the engine's own MidiNode; MoshOps is not in that path and cannot inject a
-// note-off between two clip notes at render time. Subclassing SamplerPlugin to do it
-// properly was rejected for v1: the plugin type name is persisted in every existing edit,
-// so it would change the on-disk format for every drum track already out there.
+// This exists because nothing chokes LIVE. During playback the MIDI comes from the
+// engine's own MidiNode; MoshOps is not in that path and cannot inject a note-off between
+// two clip notes at render time, and audition_note does not choke either. A sampler
+// subclass could (it sees the block's MIDI before the voices do), and one now exists
+// without changing the on-disk format (MoshSamplerPlugin shadows the same "sampler" type),
+// but it only meters: live choke is NOT implemented.
 //
 // Baking is the honest alternative rather than a hack: the notes really do get shorter,
 // which means you can SEE it in the piano roll, it survives export because the render path
@@ -636,9 +746,10 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     const auto name  = args.getProperty ("name", f.getFileNameWithoutExtension()).toString();
     const float gain = (float) (double) args.getProperty ("gainDb", 0.0);
 
-    // NB: the sampler insert is undoable, but the pad SOUND edits below go straight to
-    // the plugin (no UndoManager) — sampler sound content is non-undoable here, the same
-    // as plugin add/remove. (Undo restores a freshly-inserted sampler's removal, not pads.)
+    // One undo step: the sampler insert and every SOUND edit below go through the Edit's
+    // UndoManager inside this transaction (Tracktion's addSound, removeSound,
+    // setSoundParams and setSoundOpenEnded all write with getUndoManager()); --selftest
+    // ("Plugin panels: the Sampler") proves the one step on an existing sampler.
     beginTxn ("assign_sample");
     auto* sampler = ensureSampler (*track);
     if (sampler == nullptr) return errResult ("assign_sample", "could not create sampler");
@@ -679,8 +790,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     // there is no GUI dispatch between commands, so drain it now — the sound's audio
     // data must be resident before an export/render reads it (mirrors createAudioTrack).
     if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (5);
+        drainSamplerLoad (*sampler);
 
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
@@ -692,6 +802,8 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     data->setProperty ("sounds", sampler->getNumSounds());
     logLine ("assign_sample", args, true, {}, true);
     emitSnapshotInvalidated();
+    // The pad's sound changed: an applied drum layer re-renders, as after set_drum_pad.
+    reactiveTouchTrack (track->itemID.toString());
     return okResult ("assign_sample", var (data));
 }
 
@@ -832,8 +944,113 @@ juce::var MoshOps::cmdReorderPlugin (const juce::var& args)
     return okResult ("reorder_plugin");
 }
 
+// ── Gesture coalescing ────────────────────────────────────────────────────────
+// See MoshOps.h (joinGestureTxn). A join performs WITHOUT beginNewTransaction, and JUCE
+// adds such a perform to whatever action set is current, so the join must be sure that
+// set is still the gesture's own. The hazard is a set some OTHER command opened and
+// performed into after the gesture's last call (set_track_volume mid-drag, say):
+// joining would append the drag to that command's step. The serial (no other
+// beginUndoTransaction) and the depth/name checks rule that out. Undo and redo are a
+// lesser hazard (JUCE's undo()/redo() already end with beginNewTransaction(), so a
+// perform after them starts a fresh set either way), but they still end the window
+// here, through editRevision_, so the step a gesture opens after an undo is a normal
+// named "set_plugin_param" step and not JUCE's unnamed one.
+juce::String MoshOps::gestureArgError (const juce::var& args)
+{
+    if (! args.hasProperty ("gesture"))
+        return {};
+    const auto g = args.getProperty ("gesture", var());
+    const auto text = g.toString();
+    bool okChars = g.isString() && text.length() >= 1 && text.length() <= 64;
+    for (int i = 0; okChars && i < text.length(); ++i)
+    {
+        const auto c = text[i];
+        okChars = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                  || c == '_' || c == '.' || c == ':' || c == '-';
+    }
+    return okChars ? juce::String()
+                   : juce::String ("bad gesture: must be a string of 1-64 characters from [A-Za-z0-9_.:-]");
+}
+
+bool MoshOps::joinGestureTxn (const juce::String& gesture)
+{
+    auto& um = undoManager();
+    const bool join = gesture.isNotEmpty() && ! inBatch
+                      && gesture == gestureId_
+                      && gestureTxnSerial_ == undoTxnSerial_          // no other transaction opened
+                      && gestureRevision_ == editRevision_            // no other mutation, undo, redo or jump
+                      && gestureUndoDepth_ == um.getUndoDescriptions().size()
+                      && ! um.canRedo()
+                      && um.getNumActionsInCurrentTransaction() > 0   // the set exists and is current
+                      && um.getCurrentTransactionName() == gestureTxnName_;
+    if (! join)
+    {
+        // Not this gesture's window any more (or never was): close it, so a stale
+        // inhibitor never outlives the gesture that took it.
+        if (gesture != gestureId_ || inBatch)
+            endGestureWindow();
+        return false;
+    }
+    // Joining: the same bookkeeping beginTxn does, minus opening a transaction.
+    eng.markDirty();
+    ++editRevision_;
+    return true;
+}
+
+void MoshOps::noteGestureTxn (const juce::String& gesture)
+{
+    if (gesture.isEmpty() || inBatch)
+    {
+        endGestureWindow();
+        return;
+    }
+    auto& um = undoManager();
+    gestureId_ = gesture;
+    gestureTxnSerial_ = undoTxnSerial_;
+    gestureRevision_ = editRevision_;
+    gestureUndoDepth_ = um.getUndoDescriptions().size();
+    gestureTxnName_ = um.getCurrentTransactionName();
+    gestureLastCallMs_ = juce::Time::getMillisecondCounter();
+    auto& edit = eng.edit();
+    if (gestureInhibitor_ == nullptr || gestureInhibitedEdit_ != &edit)
+    {
+        gestureInhibitor_.reset();
+        gestureInhibitor_ = std::make_unique<te::Edit::UndoTransactionInhibitor> (edit);
+        gestureInhibitedEdit_ = &edit;
+    }
+}
+
+void MoshOps::endGestureWindow (bool closeStep)
+{
+    const bool held = gestureInhibitor_ != nullptr && gestureInhibitedEdit_ == &eng.edit();
+    gestureId_.clear();
+    gestureInhibitor_.reset();
+    gestureInhibitedEdit_ = nullptr;
+    if (closeStep && held)
+    {
+        // An unnamed new set, as Edit::UndoTransactionTimer would start. JUCE creates the
+        // set lazily, so this leaves no empty step behind if nothing follows.
+        undoManager().beginNewTransaction();
+        ++undoTxnSerial_;
+    }
+}
+
+void MoshOps::expireGestureWindow()
+{
+    if (gestureInhibitor_ == nullptr)
+        return;
+    const bool idle = juce::Time::getMillisecondCounter() - gestureLastCallMs_ > kGestureIdleMs;
+    const bool invalidated = gestureRevision_ != editRevision_ || gestureTxnSerial_ != undoTxnSerial_
+                             || gestureInhibitedEdit_ != &eng.edit();
+    if (idle || invalidated)
+        endGestureWindow (idle);
+}
+
 juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
 {
+    if (const auto gestureError = gestureArgError (args); gestureError.isNotEmpty())
+        return errResult ("set_plugin_param", gestureError);
+    const auto gesture = args.getProperty ("gesture", var()).toString();
     const auto trackId = args.getProperty ("trackId", var()).toString();
     auto* plugin = findPlugin (trackId, (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("set_plugin_param", "no plugin");
@@ -846,7 +1063,10 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     const float raw  = param->valueRange.convertFrom0to1 (norm);
     auto* track = findTrack (trackId);   // resolved once — also gates G10 write-mode capture below
 
-    beginTxn ("set_plugin_param");
+    // A drag that carries one `gesture` id joins the transaction its first call opened
+    // (one undo step for the whole drag); without a gesture this is beginTxn.
+    if (! joinGestureTxn (gesture))
+        beginTxn ("set_plugin_param");
     // G14-class fix — see SetPluginParamValueAction's comment. param->setParameter() directly
     // left AutomatableParameter::currentValue (and thus the snapshot's params[].value) stale
     // after undo; replaying through a custom UndoableAction keeps it correct both ways.
@@ -865,6 +1085,7 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
         const auto posSec = eng.edit().getTransport().getPosition().inSeconds();
         param->getCurve().addPoint (tracktion::TimePosition::fromSeconds (posSec), raw, 0.0f, &undoManager());
     }
+    noteGestureTxn (gesture);
     logLine ("set_plugin_param", args, true, {}, true);
     // Scoped — param tweaks are the other rapid-fire case. A param that changes plugin
     // LATENCY leaves the session PDC readout briefly stale (self-corrects on the next
@@ -873,6 +1094,75 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     else emitSnapshotInvalidated();
     reactiveTouchTrack (trackId);   // Phase 3 — param change → re-bounce
     return okResult ("set_plugin_param");
+}
+
+juce::var MoshOps::cmdSetPluginState (const juce::var& args)
+{
+    static const juce::String name ("set_plugin_state");
+    if (const auto gestureError = gestureArgError (args); gestureError.isNotEmpty())
+        return errResult (name, gestureError);
+    const auto gesture = args.getProperty ("gesture", var()).toString();
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* plugin = findPlugin (trackId, (int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult (name, "no plugin");
+
+    const auto type = effectiveBuiltinType (*plugin);
+    const auto key = args.getProperty ("key", var()).toString();
+    const auto* spec = pluginstate::find (type, key);
+    if (spec == nullptr)
+    {
+        const auto keys = pluginstate::keysFor (type);
+        return errResult (name, "key '" + key + "' is not a state key of " + type
+                                    + (keys.isEmpty() ? juce::String (" (it has none)")
+                                                      : " (allowed: " + keys.joinIntoString (", ") + ")"));
+    }
+    // A key of the type that THIS plugin object cannot hold: the low/high-pass slope on a
+    // plain te::LowPassPlugin (Mosh's subclass was not registered first). The snapshot
+    // omits it there too (describe skips a void read).
+    if (pluginstate::read (*plugin, *spec).isVoid())
+        return errResult (name, "this " + type + " cannot set '" + key + "'");
+    if (! args.hasProperty ("value"))
+        return errResult (name, "missing value");
+    var applied;
+    juce::String error;
+    if (! pluginstate::coerce (*spec, args.getProperty ("value", var()), applied, error))
+        return errResult (name, error);
+
+    // Same value as now: nothing to change, so this is not an edit. No transaction is
+    // opened, so an open gesture window (another call's drag) is NOT ended by it; the
+    // JSONL line says undoable:false; nothing is re-bounced. (An empty transaction would
+    // be harmless to undo itself: JUCE's beginNewTransaction is lazy and CachedValue
+    // performs nothing for an equal value.)
+    const bool same = pluginstate::isNoChange (*plugin, *spec, applied);
+    auto* track = findTrack (trackId);
+    // A no-change call of the open drag (the UI keeps sending a value clamped at the end of
+    // the range) still counts as activity: it keeps the window from going idle.
+    if (same && gesture.isNotEmpty() && gesture == gestureId_ && gestureInhibitor_ != nullptr)
+        gestureLastCallMs_ = juce::Time::getMillisecondCounter();
+    if (! same)
+    {
+        if (! joinGestureTxn (gesture))
+            beginTxn ("set_plugin_state");
+        // Through the Edit's UndoManager: a ValueTree property action, which undo/redo
+        // replays and the CachedValue follows (these keys drive no parameter). A 4OSC voice
+        // mode is wrapped in resyncs so its undo/redo reallocate for the right mode
+        // (ResyncFourOscVoicesAction).
+        auto* fourOsc = juce::String (spec->key) == "voiceMode" ? dynamic_cast<te::FourOscPlugin*> (plugin) : nullptr;
+        if (fourOsc != nullptr) undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
+        pluginstate::write (*plugin, *spec, applied, &undoManager());
+        if (fourOsc != nullptr) undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
+        noteGestureTxn (gesture);
+    }
+    logLine (name, args, true, {}, ! same);
+    if (track != nullptr) emitTrackPatch (*track);
+    else emitSnapshotInvalidated();
+    if (! same)
+        reactiveTouchTrack (trackId);   // a state change alters the bounce like a param does
+
+    auto* data = new DynamicObject();
+    data->setProperty ("key", key);
+    data->setProperty ("value", pluginstate::read (*plugin, *spec));
+    return okResult (name, var (data));
 }
 
 juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
@@ -1664,8 +1954,9 @@ juce::File MoshOps::drumKitDir() const { return drumKitDir (kDefaultKitId); }
 // Library layout: <root>/<pluginKey>/<preset file>, pluginKey ∈ {"vital","4osc",…}.
 // Two roots: the bundled bank (resolution mirrors drumKitsRoot) and the user's
 // ~/Library/Mosh/presets. `.vital` files target a hosted Vital VST3; `.json`
-// files are 4OSC patches ({"params": {"<display name>": normalized 0..1},
-// "waveShapes": [perOscInt…]}).
+// files are 4OSC patches: {"state": {<set_plugin_state key>: value}, "params":
+// {"<display name>": normalized 0..1}}. A patch is whole: what it does not name returns to
+// Tracktion's default.
 // ─────────────────────────────────────────────────────────────────────────────
 
 juce::File MoshOps::presetsBundledRoot() const
@@ -1849,6 +2140,17 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
     // ── .json → the built-in 4OSC on this track ──────────────────────────────
     if (ext == ".json")
     {
+        // A track-chain preset is a different thing from an instrument patch, and this
+        // command is agent-reachable while apply_track_preset deliberately is not. Refuse
+        // it by NAME. Checked twice: by its library folder FIRST, before the 4OSC lookup,
+        // so a file picked from list_presets gets "wrong command" on any track rather
+        // than "no 4OSC instrument" on the vocal track it was meant for; and by the
+        // file's own `kind` once it is parsed, for one that was copied somewhere else.
+        static const juce::String wrongSeam ("this is a track preset, not an instrument patch — "
+                                             "apply it from the track's Vocal preset menu");
+        if (file.getParentDirectory().getFileName() == trackpreset::kLibraryKey)
+            return errResult ("load_preset", wrongSeam);
+
         te::Plugin* target = index >= 0 ? findPlugin (trackId, index) : nullptr;
         if (target == nullptr)
             for (auto p : track->pluginList)
@@ -1858,63 +2160,390 @@ juce::var MoshOps::cmdLoadPreset (const juce::var& args)
             return errResult ("load_preset", "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
 
         const auto parsed = juce::JSON::parse (file.loadFileAsString());
+        if (parsed.getProperty ("kind", var()).toString() == trackpreset::kKind)
+            return errResult ("load_preset", wrongSeam);
+        // The first bank (2026-09-01) numbered its waves in Tracktion's LFO enum
+        // (SimpleLFO::WaveShape), not the oscillator's (te::Oscillator::Waves), and wrote them
+        // where the synth never reads them, so they never sounded. Settings are now named, in
+        // "state"; a numbered list is refused rather than guessed at.
+        if (parsed.getDynamicObject() != nullptr && parsed.getDynamicObject()->hasProperty ("waveShapes"))
+            return errResult ("load_preset", "this preset uses the old numbered \"waveShapes\"; name the waves in "
+                                             "\"state\" instead (waveShape1..4: off|sine|square|saw|triangle|noise)");
         const auto params = parsed.getProperty ("params", var());
         auto* paramsObj = params.getDynamicObject();
-        const auto waveShapes = parsed.getProperty ("waveShapes", var());
+        const auto stateArg = parsed.getProperty ("state", var());
+        auto* stateObj = stateArg.getDynamicObject();
+        if (! stateArg.isVoid() && stateObj == nullptr)
+            return errResult ("load_preset", "\"state\" must be an object of 4OSC settings");
+        if (! params.isVoid() && paramsObj == nullptr)
+            return errResult ("load_preset", "\"params\" must be an object of 4OSC parameter ids or names");
 
-        // Resolve every named param BEFORE the txn (G14 again): apply-all-or-error.
+        // PREFLIGHT, touching nothing (G14 again): resolve every named param, and validate
+        // every setting exactly as set_plugin_state would. A bad setting refuses the whole
+        // preset; an unknown param name is reported and skipped, as before.
+        const int numParams = fourOsc->getNumAutomatableParameters();
         struct Pending { te::AutomatableParameter* p; int index; float raw; };
         juce::Array<Pending> pending;
+        std::vector<bool> named ((size_t) juce::jmax (0, numParams), false);
         juce::StringArray unknown;
         if (paramsObj != nullptr)
             for (const auto& prop : paramsObj->getProperties())
             {
+                // The paramID first (exact: "chorusMix"), then the first display name that
+                // matches case-insensitively. Names collide ("Mix" x3, "Width" x2: a name
+                // reaches the reverb's), so only an id reaches the delay's or chorus's.
                 te::AutomatableParameter* found = nullptr; int fi = -1;
-                for (int i = 0; i < fourOsc->getNumAutomatableParameters(); ++i)
-                {
-                    auto ap = fourOsc->getAutomatableParameter (i);
-                    if (ap != nullptr && ap->paramName.equalsIgnoreCase (prop.name.toString())) { found = ap.get(); fi = i; break; }
-                }
+                for (int pass = 0; pass < 2 && found == nullptr; ++pass)
+                    for (int i = 0; i < numParams; ++i)
+                    {
+                        auto ap = fourOsc->getAutomatableParameter (i);
+                        if (ap != nullptr && (pass == 0 ? ap->paramID == prop.name.toString()
+                                                        : ap->paramName.equalsIgnoreCase (prop.name.toString())))
+                            { found = ap.get(); fi = i; break; }
+                    }
                 if (found == nullptr) { unknown.add (prop.name.toString()); continue; }
                 const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) prop.value);
                 pending.add ({ found, fi, found->valueRange.convertFrom0to1 (norm) });
+                named[(size_t) fi] = true;
             }
-        const bool hasShapes = waveShapes.isArray() && waveShapes.size() > 0;
-        if (pending.isEmpty() && ! hasShapes)
-            return errResult ("load_preset", "preset matched no 4OSC parameters"
+
+        struct PendingSetting { const pluginstate::Spec* spec; juce::var applied; };
+        juce::Array<PendingSetting> settings;
+        juce::StringArray namedSettings;
+        if (stateObj != nullptr)
+            for (const auto& prop : stateObj->getProperties())
+            {
+                const auto key = prop.name.toString();
+                const auto* spec = pluginstate::find ("4osc", key);
+                if (spec == nullptr)
+                    return errResult ("load_preset", "unknown 4OSC setting in \"state\": " + key
+                                                     + " (settings: " + pluginstate::keysFor ("4osc").joinIntoString (", ") + ")");
+                juce::var applied; juce::String why;
+                if (! pluginstate::coerce (*spec, prop.value, applied, why) || pluginstate::fourosc::toStored (*spec, applied).isVoid())
+                    return errResult ("load_preset", "4OSC setting " + key + ": " + (why.isNotEmpty() ? why : juce::String ("not a value it can hold")));
+                settings.add ({ spec, applied });
+                namedSettings.add (key);
+            }
+        if (pending.isEmpty() && settings.isEmpty())
+            return errResult ("load_preset", "preset matched no 4OSC parameters or settings"
                               + juce::String (unknown.isEmpty() ? "" : " (unknown: " + unknown.joinIntoString (", ") + ")"));
 
-        beginTxn ("load_preset");
+        // A preset is a whole patch: every param and setting it does not name goes back to
+        // Tracktion's default, so the sound never depends on what was loaded before.
+        juce::Array<Pending> resets;
+        for (int i = 0; i < numParams; ++i)
+            if (! named[(size_t) i])
+                if (auto ap = fourOsc->getAutomatableParameter (i))
+                    if (const auto def = ap->getDefaultValue(); def.has_value() && ! juce::exactlyEqual (*def, ap->getCurrentValue()))
+                        resets.add ({ ap.get(), i, *def });
+        juce::Array<const pluginstate::Spec*> settingResets;
+        for (const auto& key : pluginstate::keysFor ("4osc"))
+            if (! namedSettings.contains (key))
+                // On value, as for params: a property set back to its default by hand stays
+                // (harmless), so reloading the loaded patch really opens no step.
+                if (const auto* spec = pluginstate::find ("4osc", key); spec != nullptr && pluginstate::fourosc::differsFromDefault (*fourOsc, *spec))
+                    settingResets.add (spec);
+
+        juce::Array<Pending> paramWrites;
         for (const auto& pe : pending)
-            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
-        if (hasShapes)
-        {
-            // Wave shape is a per-oscillator ValueTree property (not automatable).
-            // Find the oscillator child trees in order and set their waveShape with
-            // the undo manager, so the whole preset stays one undo step.
-            int osc = 0;
-            for (int i = 0; i < fourOsc->state.getNumChildren() && osc < waveShapes.size(); ++i)
-            {
-                auto child = fourOsc->state.getChild (i);
-                if (child.hasProperty (te::IDs::waveShape) || child.getType().toString().containsIgnoreCase ("osc"))
-                {
-                    child.setProperty (te::IDs::waveShape, (int) waveShapes[osc], &undoManager());
-                    ++osc;
-                }
-            }
-        }
-        logLine ("load_preset", args, true, {}, true);
-        emitTrackPatch (*track);
-        reactiveTouchTrack (trackId);
+            if (! juce::exactlyEqual (pe.raw, pe.p->getCurrentValue()))
+                paramWrites.add (pe);
+        juce::Array<PendingSetting> settingWrites;
+        for (const auto& st : settings)
+            if (! pluginstate::isNoChange (*fourOsc, *st.spec, st.applied))
+                settingWrites.add (st);
+
         auto* data = new DynamicObject();
         data->setProperty ("plugin", "4osc");
         data->setProperty ("preset", presetName);
         data->setProperty ("paramsApplied", pending.size());
+        data->setProperty ("settingsApplied", settings.size());
         if (! unknown.isEmpty()) data->setProperty ("unknownParams", unknown.joinIntoString (", "));
+
+        // The patch is already loaded: no edit, and no empty transaction for undo to trip on.
+        if (paramWrites.isEmpty() && settingWrites.isEmpty() && resets.isEmpty() && settingResets.isEmpty())
+        {
+            logLine ("load_preset", args, true, {}, false);
+            data->setProperty ("changed", false);
+            data->setProperty ("reset", 0);
+            return okResult ("load_preset", var (data));
+        }
+
+        bool touchesVoiceMode = false;
+        for (const auto& st : settingWrites)   touchesVoiceMode = touchesVoiceMode || juce::String (st.spec->key) == "voiceMode";
+        for (const auto* spec : settingResets) touchesVoiceMode = touchesVoiceMode || juce::String (spec->key) == "voiceMode";
+
+        beginTxn ("load_preset");
+        for (const auto& pe : paramWrites)
+            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
+        for (const auto& pe : resets)
+            undoManager().perform (new SetPluginParamValueAction (*pe.p, pe.index, pe.raw));
+        if (touchesVoiceMode)
+            undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
+        for (const auto& st : settingWrites)
+            pluginstate::write (*fourOsc, *st.spec, st.applied, &undoManager());
+        for (const auto* spec : settingResets)
+            pluginstate::fourosc::resetToDefault (*fourOsc, *spec, &undoManager());
+        if (touchesVoiceMode)
+            undoManager().perform (new ResyncFourOscVoicesAction (*fourOsc));
+        logLine ("load_preset", args, true, {}, true);
+        emitTrackPatch (*track);
+        reactiveTouchTrack (trackId);
+        data->setProperty ("changed", true);
+        data->setProperty ("reset", resets.size() + settingResets.size());
         return okResult ("load_preset", var (data));
     }
 
     return errResult ("load_preset", "unsupported preset type: " + ext);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Track-chain presets — apply_track_preset {trackId, file}.
+//
+// Applies an ordered group of BUILT-IN effects ("Mosh Clean Lead v0": high-pass →
+// compressor) to ONE explicitly named audio track as ONE undo step. Discovery reuses the
+// preset library seam above: list_presets {plugin:"track-chain"}.
+//
+// A separate command from load_preset on purpose. load_preset swaps the state of an
+// instrument the track already has and is in the agent's catalog; this INSERTS plugins,
+// owns them as a group, and is UI-only — a producer applies a vocal chain, Moshi does not
+// (agentic mixing is postponed, docs/vocal-presets/AUDIT-2026-10-01.md).
+//
+// The shape is preflight → one transaction → readback:
+//
+//   PREFLIGHT touches nothing: no engine object is created, the UndoManager is not
+//   contacted, nothing is saved. Every reason the apply could fail is checked here —
+//   the target, the file, each processor, each value against the pinned parameter table
+//   (TrackPreset.h), the track's plugin capacity — so a refusal leaves no trace and no
+//   empty transaction for the next undo to trip over (the G14 class).
+//
+//   APPLY is state-first (TrackPresetEngine.h::makeStageState): each stage is built as a
+//   finished PLUGIN tree and the only undoable action is adding it to the track. No
+//   parameter is written through the undo manager, so one undo removes the chain and one
+//   redo restores it with its values, including after the plugin objects were purged.
+//
+//   READBACK reports what the live plugins hold, converted to the preset's units. A
+//   value that did not land is a failure, never a success carrying the requested number.
+//
+// OWNERSHIP. Each inserted plugin is tagged (ids::moshPresetId …). Re-applying the same
+// preset finds that group: untouched → a no-op that opens no transaction; edited, partial
+// or reordered → only that group is replaced. A user's own plugin is never matched, even
+// one of the same type. Replacing the group takes any automation the user drew on it
+// along (one undo brings it back); nothing outside the group is touched.
+//
+// POSITION. The chain goes after the user's existing inserts and ahead of the first send
+// and the fader, so the fader sets level rather than how hard the compressor is driven,
+// and a send carries the processed voice. On a fresh track (mute gate + meter only) that
+// is the end of the list, and the lazily created fader lands after it.
+//
+// NOT DONE HERE, deliberately: the transport is not stopped, nothing is rendered into
+// the source audio, and no track gain, send, or other track is changed. Applying while
+// RECORDING is refused — replacing the graph under a rolling record is not something this
+// repo has proven safe, and a refusal the producer can read beats a take that glitched.
+juce::var MoshOps::cmdApplyTrackPreset (const juce::var& args)
+{
+    using namespace trackpreset;
+    static const juce::String cmd ("apply_track_preset");
+
+    // ── preflight: the target ────────────────────────────────────────────────────────
+    // The track is named by the caller, every time. There is no "selected track" here to
+    // fall back to; an id that no longer resolves is an error, not a retarget.
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    if (trackId.isEmpty())
+        return errResult (cmd, "trackId is required — a preset is applied to one named track");
+    auto* track = findTrack (trackId);
+    if (track == nullptr)
+        return errResult (cmd, "no track: " + trackId);
+
+    const auto trackType = track->state.getProperty (ids::trackType, "audio").toString();
+    if (trackType != "audio")
+        return errResult (cmd, "a vocal preset applies to an audio track; this is a " + trackType + " track");
+    if (trackHasInstrument (*track))
+        return errResult (cmd, "this track hosts an instrument; a vocal preset applies to an audio track");
+    if (firstAuxReturnOn (*track) != nullptr)
+        return errResult (cmd, "this is a return track; apply the preset to the vocal track that feeds it");
+    if (eng.edit().getTransport().isRecording() || trackPresetPretendRecording_)
+        return errResult (cmd, "cannot apply a preset while recording — stop recording first");
+
+    // ── preflight: the preset ────────────────────────────────────────────────────────
+    const auto fileArg = args.getProperty ("file", var()).toString();
+    const juce::File file = juce::File::isAbsolutePath (fileArg) ? juce::File (fileArg) : juce::File();
+    if (! file.existsAsFile())
+        return errResult (cmd, "preset file not found: " + fileArg);
+    if (file.getSize() > 1024 * 1024)
+        return errResult (cmd, "preset file too large");
+    const auto parsed = parseTrackPresetText (file.loadFileAsString());
+    if (! parsed.ok)
+        return errResult (cmd, "invalid track preset: " + parsed.error);
+    const auto& preset = parsed.preset;
+    const int numStages = (int) preset.stages.size();
+
+    // The table only admits processors it pins; this confirms each is also in the
+    // palette this build exposes (so the rack can name and show the row).
+    for (const auto& stage : preset.stages)
+        if (findBuiltin (stage.processor->type) == nullptr)
+            return errResult (cmd, "this build has no '" + juce::String (stage.processor->type) + "' effect");
+
+    // ── preflight: what is already there ─────────────────────────────────────────────
+    auto& list = track->pluginList;
+    juce::Array<te::Plugin*> owned;
+    for (auto* p : list.getPlugins())
+        if (p != nullptr && isOwnedBy (*p, preset.id))
+            owned.add (p);
+
+    auto ownedGroupIsThePreset = [&]
+    {
+        if (owned.size() != numStages) return false;
+        for (int i = 0; i < numStages; ++i)
+        {
+            auto& p = *owned[i];
+            if ((int) p.state.getProperty (ids::moshPresetStage, -1) != i
+                || (int) p.state.getProperty (ids::moshPresetRevision, -1) != preset.revision
+                || (i > 0 && list.indexOf (&p) != list.indexOf (owned[i - 1]) + 1)
+                || stageMismatch (p, preset.stages[(size_t) i]).isNotEmpty())
+                return false;
+        }
+        return true;
+    };
+
+    auto resultFor = [&] (bool changed, bool replaced)
+    {
+        juce::Array<var> stages;
+        int i = 0;
+        for (auto* p : list.getPlugins())
+            if (p != nullptr && isOwnedBy (*p, preset.id) && i < numStages)
+            {
+                stages.add (stageReadback (*p, preset.stages[(size_t) i], list.indexOf (p)));
+                ++i;
+            }
+        auto* data = new DynamicObject();
+        data->setProperty ("trackId", track->itemID.toString());
+        data->setProperty ("presetId", preset.id);
+        data->setProperty ("revision", preset.revision);
+        data->setProperty ("name", preset.name);
+        data->setProperty ("changed", changed);
+        data->setProperty ("replaced", replaced);
+        data->setProperty ("stages", stages);
+        return var (data);
+    };
+
+    // Already applied and untouched: nothing to do, so do nothing — in particular do NOT
+    // open a transaction. An empty one would be logged as an undo step that undoes the
+    // producer's PREVIOUS edit instead.
+    if (ownedGroupIsThePreset())
+        return okResult (cmd, resultFor (false, false));
+
+    // Capacity, counted as it will be once the old group (if any) is gone. The engine's
+    // insertPlugin drops a plugin silently at the limit, hidden mixer elements included.
+    const int limit = eng.engine().getEngineBehaviour().getEditLimits().maxPluginsOnTrack;
+    if (list.size() - owned.size() + numStages > limit)
+        return errResult (cmd, "no room on this track for the preset's " + juce::String (numStages)
+                               + " effects (a track holds at most " + juce::String (limit) + ")");
+
+    // Where the chain goes: in place of the group being replaced, else ahead of the
+    // first send and the fader, else at the end.
+    auto insertIndexNow = [&]
+    {
+        auto plugins = list.getPlugins();
+        for (int i = 0; i < plugins.size(); ++i)
+            if (dynamic_cast<te::VolumeAndPanPlugin*> (plugins[i].get()) != nullptr
+                || dynamic_cast<te::AuxSendPlugin*> (plugins[i].get()) != nullptr)
+                return i;
+        return plugins.size();
+    };
+    const bool replacing = ! owned.isEmpty();
+    const int replaceAt = replacing ? list.indexOf (owned.getFirst()) : -1;
+
+    // Finished PLUGIN trees, built with a null undo manager — still no engine contact.
+    const bool remap = eng.engine().getEngineBehaviour().arePluginsRemappedWhenTempoChanges();
+    juce::Array<juce::ValueTree> stageStates;
+    for (int i = 0; i < numStages; ++i)
+        stageStates.add (makeStageState (preset, i, remap));
+
+    // ── apply: one transaction ───────────────────────────────────────────────────────
+    beginTxn (cmd);
+    auto& um = undoManager();
+
+    // Rollback. Unreachable in real use — everything that can fail was checked above —
+    // and exercised only through the selftest fault points. Outside a batch this
+    // transaction is ours alone, so undoing it is exact and JUCE discards the undone set
+    // (nothing is left redoable). Inside a batch "the current transaction" is the WHOLE
+    // batch, so undoing it would take the batch's earlier commands too; there the pieces
+    // are put back by hand.
+    struct Removed { juce::ValueTree state; int index; };
+    juce::Array<Removed> removed;
+    juce::Array<te::Plugin::Ptr> inserted;
+    auto rollback = [&]
+    {
+        if (! inBatch)
+        {
+            if (um.getNumActionsInCurrentTransaction() > 0)
+                um.undoCurrentTransactionOnly();
+        }
+        else
+        {
+            for (int i = inserted.size(); --i >= 0;)
+                inserted[i]->deleteFromParent();
+            for (const auto& r : removed)             // ascending, so each index is valid as it lands
+                list.insertPlugin (r.state, r.index);
+        }
+        synchronisePlaybackGraph();
+    };
+    auto fail = [&] (const juce::String& why)
+    {
+        rollback();
+        return errResult (cmd, why);
+    };
+
+    // Create every stage and prove it holds the preset BEFORE the track is touched.
+    juce::Array<te::Plugin::Ptr> created;
+    for (int i = 0; i < numStages; ++i)
+    {
+        auto plugin = eng.edit().getPluginCache().createNewPlugin (stageStates[i]);
+        if (plugin == nullptr)
+            return fail ("could not create the preset's " + juce::String (preset.stages[(size_t) i].processor->type));
+        if (auto why = stageMismatch (*plugin, preset.stages[(size_t) i]); why.isNotEmpty())
+            return fail ("the preset did not load as written: " + why);
+        created.add (plugin);
+    }
+    if (trackPresetFaultPoint_ == 1)
+        return fail ("injected fault after creating the preset stages (selftest)");
+
+    if (replacing)
+    {
+        for (auto* p : owned)
+        {
+            removed.add ({ p->state, list.indexOf (p) });
+            pluginHost.closeEditor (*p);
+        }
+        for (int i = owned.size(); --i >= 0;)
+            owned[i]->deleteFromParent();
+    }
+
+    // Removing the old group cannot move anything ahead of its first member, so that
+    // position is still where the new group belongs.
+    const int at = replacing ? replaceAt : insertIndexNow();
+    for (int i = 0; i < numStages; ++i)
+    {
+        list.insertPlugin (created[i], at + i, nullptr);
+        inserted.add (created[i]);   // before the check: a misplaced insert must still be rolled back
+        if (list.indexOf (created[i].get()) != at + i)
+            return fail ("could not insert the preset's " + juce::String (preset.stages[(size_t) i].processor->type));
+        if (trackPresetFaultPoint_ == 2 && i == 0)
+            return fail ("injected fault after inserting the first preset stage (selftest)");
+    }
+    synchronisePlaybackGraph();
+
+    // Readback from the live, inserted plugins. Reported as actual values; if they are
+    // not the preset's, that is a failure.
+    for (int i = 0; i < numStages; ++i)
+        if (auto why = stageMismatch (*created[i], preset.stages[(size_t) i]); why.isNotEmpty())
+            return fail ("the preset did not read back as written: " + why);
+
+    logLine (cmd, args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouchTrack (trackId);   // the track's sound changed → re-bounce anything layered on it
+    return okResult (cmd, resultFor (true, replacing));
 }
 
 bool MoshOps::drumKitAvailable (const juce::String& kitId) const
@@ -2040,6 +2669,102 @@ void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
     }
 }
 
+// plugin.sampler (docs/02_MOSHOPS_CONTRACT.md, Snapshot): every sound of one sampler, read
+// from the SOUND children of its persisted state in one walk (the numbering every pad index
+// uses, see soundTreeAt). Never from getSoundMedia / getSoundFile / getSoundLength, which
+// read the list the sampler loads asynchronously, under the lock its audio thread takes, and
+// which is empty or stale until that load has run. track.drumPads is a separate, older
+// reading of the primary sampler and is left as it is.
+//
+// Per sound: `file` is the persisted source string; `path` is where the sampler finds it
+// (resolved through the edit's filePathResolver, as the sampler resolves it, so an
+// edit-relative source after Save-As is still absolute here; "" if it cannot be resolved);
+// `missing` is true when nothing is at `path`. `silenced` is the parked-gain flag
+// applyDrumLaneGains sets for a muted lane AND for a pad silenced by another lane's solo;
+// `userGainDb` is the producer's level (the parked copy while silenced, else the live gain).
+// `addressNote` is the lowest note the pad commands' narrowest-range rule resolves to THIS
+// sound, absent when every note it covers reaches a narrower one. The file's length, rate
+// and channels come from te::AudioFile's info (cached by the AudioFileManager; it takes
+// only that cache's lock, never the sampler's).
+juce::var MoshOps::samplerToVar (te::SamplerPlugin& sampler, te::AudioTrack* owner)
+{
+    std::vector<juce::ValueTree> sounds;
+    for (auto v : sampler.state)
+        if (v.hasType (te::IDs::SOUND))
+            sounds.push_back (v);
+    std::vector<std::pair<int, int>> ranges;
+    for (const auto& sound : sounds)
+        ranges.emplace_back ((int) sound[te::IDs::minNote], (int) sound[te::IDs::maxNote]);
+
+    auto& edit = eng.edit();
+    Array<var> list;
+    for (int i = 0; i < (int) sounds.size(); ++i)
+    {
+        const auto& sound = sounds[(size_t) i];
+        const auto source = sound[te::IDs::source].toString();
+        const auto file = te::SourceFileReference::findFileFromString (edit, source);
+        const bool resolved = file != juce::File();
+        const bool exists = resolved && file.existsAsFile();
+        const float gainDb = (float) sound[te::IDs::gainDb];
+        const bool silenced = sound.hasProperty (ids::moshPadGainDb);
+        const int lo = ranges[(size_t) i].first, hi = ranges[(size_t) i].second;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("index", i);
+        o->setProperty ("name", sound[te::IDs::name].toString());
+        o->setProperty ("file", source);
+        o->setProperty ("path", resolved ? file.getFullPathName() : juce::String());
+        o->setProperty ("missing", ! exists);
+        o->setProperty ("pitch", (int) sound[te::IDs::keyNote]);
+        o->setProperty ("minNote", lo);
+        o->setProperty ("maxNote", hi);
+        o->setProperty ("gainDb", gainDb);
+        o->setProperty ("userGainDb", silenced ? (float) sound[ids::moshPadGainDb] : gainDb);
+        o->setProperty ("silenced", silenced);
+        o->setProperty ("pan", (float) sound[te::IDs::pan]);
+        o->setProperty ("openEnded", (bool) sound[te::IDs::openEnded]);
+        if (const int group = (int) sound.getProperty (ids::moshChokeGroup, 0); group > 0)
+            o->setProperty ("chokeGroup", group);
+        o->setProperty ("mode", lo == hi ? "drum" : (lo == 0 && hi == 127 ? "melodic" : "range"));
+        for (int note = juce::jmax (0, lo); note <= juce::jmin (127, hi); ++note)
+            if (narrowestSoundCovering (ranges, note) == i)
+            {
+                o->setProperty ("addressNote", note);
+                break;
+            }
+        if (exists)
+        {
+            const auto info = te::AudioFile (eng.engine(), file).getInfo();
+            if (info.sampleRate > 0)
+            {
+                o->setProperty ("durationSec", (double) info.lengthInSamples / info.sampleRate);
+                o->setProperty ("sampleRate", info.sampleRate);
+                o->setProperty ("channels", info.numChannels);
+            }
+        }
+        list.add (var (o));
+    }
+
+    auto* o = new DynamicObject();
+    // The sampler the pad commands (set_drum_pad, clear_drum_pad, assign_sample,
+    // load_drum_kit, set_drum_lane's gains) address: the first one on the track.
+    const bool primary = owner != nullptr && findSampler (*owner) == &sampler;
+    o->setProperty ("primary", primary);
+    if (primary)
+        if (const auto kit = owner->state.getProperty (ids::drumKitId, "").toString(); kit.isNotEmpty())
+            o->setProperty ("kit", kit);
+    o->setProperty ("sounds", list);
+    // The engine's own limits (tracktion_SamplerPlugin.cpp): 32 simultaneous voices, 64
+    // sounds per sampler, every gain clamped to [-48, +48] dB.
+    auto* limits = new DynamicObject();
+    limits->setProperty ("maxVoices", 32);
+    limits->setProperty ("maxSounds", 64);
+    limits->setProperty ("minGainDb", -48);
+    limits->setProperty ("maxGainDb", 48);
+    o->setProperty ("limits", var (limits));
+    return var (o);
+}
+
 // FL drum-lane mute/solo. Stores the muted/soloed GM pitches on the track and applies
 // them as sampler pad gains (a muted lane's pad is silenced; soloing lanes silences
 // the rest). State persists with the Edit and rides the snapshot for the UI.
@@ -2108,10 +2833,18 @@ int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& ki
         ++loaded;
     }
 
-    // Resolve sample files now (see the pump note in cmdAssignSample).
+    // Resolve sample files now (see the pump note in cmdAssignSample). This pump runs in
+    // the MIDDLE of the caller's transaction (load_drum_kit then records the kit and the
+    // lane gains; create_track / set_track_type then add the track's meter), and Tracktion's
+    // Edit::UndoTransactionTimer, if it is due (350 ms after a change it was told of in an
+    // earlier pump), would call beginNewTransaction inside it and split the command into
+    // two undo steps. Inhibited for the pump; it fires again on its next tick, after the
+    // command.
     if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (5);
+    {
+        const te::Edit::UndoTransactionInhibitor oneUndoStep (eng.edit());
+        drainSamplerLoad (sampler);
+    }
 
     return loaded;
 }
