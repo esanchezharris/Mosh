@@ -430,6 +430,12 @@ juce::var MoshOps::cmdSave (const juce::var& args)
 
 juce::var MoshOps::cmdReload (const juce::var& args)
 {
+    // FU1 — reload REPLACES the Edit (eng.reloadFromFile), exactly like new_project, so a
+    // legacy batch left open across it is force-closed FIRST: its inhibitor is released
+    // while its Edit still exists, and `inBatch` does not stay true on the fresh Edit.
+    // (As in openProjectFile, a REFUSED reload keeps the current Edit but the batch stays
+    // closed: the engine decides refusal inside the same call that would swap the Edit.)
+    closeBatchForEditSwap();
     releaseAllVoices();                 // silence held notes while their Edit still exists
     unregisterAllMeterClients();        // old measurers are still valid here
     endGestureWindow();                 // the inhibitor must not outlive the Edit it holds
@@ -1812,6 +1818,14 @@ juce::var MoshOps::cmdSetAudioThreads (const juce::var& args)
 
 juce::var MoshOps::cmdNewProject (const juce::var& args)
 {
+    // FU1 — new_project REPLACES the Edit outright, so a batch/agent transaction left open
+    // across the swap has nothing left to commit onto. Clear it FIRST: setInBatch(false)
+    // releases the real UndoTransactionInhibitor (see MoshOps.h) and, just as importantly,
+    // stops `inBatch` from wedging true forever on the fresh Edit (beginTxn would then
+    // never open a transaction for the new session's own commands). batchTurnId_ goes with
+    // it, exactly like every other batch-closing path, so the swap's own log line — and
+    // every command after it — is not mis-stamped with the abandoned batch's turn id.
+    closeBatchForEditSwap();
     releaseAllVoices();                    // silence held notes while their Edit still exists
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
     const auto projectsDir = eng.sessionDir().getChildFile ("projects");
@@ -1918,6 +1932,9 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 // distinguishable in the JSONL + the structured envelope.
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
+    // FU1 — same reasoning as cmdNewProject: open_project/open_recent also replace the
+    // Edit, so an open batch is force-closed before the swap rather than left stuck.
+    closeBatchForEditSwap();
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
     endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.

@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
@@ -1485,6 +1486,58 @@ private:
     // Each metered plugin's rail frame counter (the entry's `seq`), by raw EditItemID.
     std::map<juce::uint64, juce::int64> pluginMeterSeq_;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
+
+    // FU1 (2026-09-24 investor-demo walkthrough, finding 4) — a real Tracktion Edit runs
+    // te::Edit::UndoTransactionTimer (tracktion_Edit.cpp), which fires 350 ms after ANY
+    // change and calls beginNewTransaction() unless edit.numUndoTransactionInhibitors > 0.
+    // A multi-step Moshi agent task's LLM round-trip between steps routinely exceeds that
+    // window, so an unguarded batch_begin..batch_end could still split into two or more
+    // real undo transactions even though `inBatch` stayed true the whole time — the mock
+    // e2e's "one task = one undo" is vacuous because the mock has no Tracktion timer.
+    //
+    // batchInhibitor_ holds the real te::Edit::UndoTransactionInhibitor (tracktion_Edit.h)
+    // for exactly as long as `inBatch` is true. setInBatch() below is the ONLY place that
+    // may change `inBatch`, so every existing writer (batch_begin/batch_end/batch_rollback
+    // in both legacy and transactional mode, their error/needs-recovery branches, and the
+    // two ownBatch composites cmdSketchBeatbox/cmdGenerateBeatRecipe) toggles the inhibitor
+    // the same way and none of them can leak or double-release it.
+    //
+    // UndoTransactionInhibitor stores a SafeSelectable<Edit>, so its destructor is a no-op
+    // once the Edit is gone — it can never dereference a dangling Edit even if held across
+    // an Edit teardown. That is only a safety net, though: ~Edit asserts
+    // numUndoTransactionInhibitors == 0 (tracktion_Edit.cpp), so an inhibitor must never
+    // outlive the Edit it holds. Main.cpp destroys MoshOps (and so batchInhibitor_) BEFORE
+    // the engine/Edit on ordinary shutdown, and EVERY command that replaces the Edit —
+    // new_project, open_project/open_recent, reload and open_without_plugins — calls
+    // closeBatchForEditSwap() before the swap, so a batch left open across it neither leaks
+    // its inhibitor onto the dying Edit nor wedges `inBatch` true on the fresh one.
+    std::optional<te::Edit::UndoTransactionInhibitor> batchInhibitor_;
+
+    /** The only place `inBatch` is assigned. Toggling it also holds/releases the real
+        undo-transaction inhibitor so a whole agent batch coalesces into ONE undo step. */
+    void setInBatch (bool shouldBeInBatch)
+    {
+        if (shouldBeInBatch == inBatch) return;
+        inBatch = shouldBeInBatch;
+        if (shouldBeInBatch) batchInhibitor_.emplace (eng.edit());
+        else                 batchInhibitor_.reset();
+    }
+
+    /** Force-close an open LEGACY batch because the Edit is about to be REPLACED
+        (new_project, open_project/open_recent, reload, open_without_plugins). Call it
+        BEFORE the engine swaps the Edit: the abandoned batch has nothing left to commit
+        onto, its inhibitor must be released while its Edit still exists, and `inBatch`
+        must not stay true on the fresh Edit (batch_begin would refuse forever and the
+        rest of the batch would run with no inhibitor). batchTurnId_ goes with it, like
+        every other batch-closing path, so the swap's own log line is not stamped with
+        the abandoned batch's turn id. (In transactional mode txnPreDispatch already
+        refuses a foreign project swap while txn_ is open, so this is the legacy path.) */
+    void closeBatchForEditSwap()
+    {
+        if (! inBatch) return;
+        setInBatch (false);
+        batchTurnId_.clear();
+    }
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
     // `inBatch` above keeps its EXACT prior meaning (undo coalescing) and is still set
