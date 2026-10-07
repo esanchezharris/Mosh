@@ -36,9 +36,16 @@ export function RunHeader({ clipCount }: { clipCount: number }) {
   const epochsTotal = clips > 0 ? epochsFor(clips, run.totalSteps, batch, accum) : 0;
   const frac = run.totalSteps > 0 ? Math.min(1, run.step / run.totalSteps) : 0;
 
+  // The status says whether the run is going; the phase says what it is doing.
+  // A running job reports no phase during precompute, then the trainer's
+  // "training", then the state the trainer exited in while the service collects
+  // the last takes and reports the run's own end.
   const pill =
-    run.status === "training" ? "training"
-    : run.status === "precompute" ? "preparing"
+    run.status === "queued" ? "queued"
+    : run.status === "running"
+      ? (run.phase === "training" ? "training"
+        : run.phase == null || run.phase === "precompute" ? "preparing"
+        : "finishing")
     : run.status === "ready" ? "done"
     : run.status === "cancelled" ? "stopped"
     : run.status === "error" ? "failed" : run.status;
@@ -56,7 +63,7 @@ export function RunHeader({ clipCount }: { clipCount: number }) {
         </div>
         <span className={`gen-badge st-${run.status === "error" ? "error" : run.status === "ready" ? "ready" : "working"}`}
           data-testid="lab-run-status">{pill}</span>
-        {run.etaSeconds != null && run.status === "training" && (
+        {run.etaSeconds != null && run.status === "running" && run.phase === "training" && (
           <span className="lab-eta" data-testid="lab-eta">{formatDuration(run.etaSeconds)} left</span>
         )}
       </div>

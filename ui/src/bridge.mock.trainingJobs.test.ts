@@ -6,13 +6,17 @@ import type { Snapshot, CommandResult, TrainingJob } from "./types";
 // cmdSubmitTrainingJob / cmdTrainingJobStatus / cmdCancelTrainingJob):
 //
 //   submit   records the job as "queued"; nothing else moves it until it is read
-//   status   reports what the trainer says, and that is what gets recorded
+//   status   reports what the trainer says, and that is what gets recorded. Like
+//            the service, a run passes through "running" before it ends: a mock
+//            that went straight from queued to ready never showed the UI a live
+//            status, which is how the LoRA Lab shipped treating "queued" and
+//            "running" as finished
 //   cancel   refuses an id nobody knows, stops a run that is still going, and
 //            leaves a finished run exactly as it was — its answer is the state the
 //            run was in, never an assumed "cancelled"
 //
-// The mock has no trainer, so a run finishes the first time its status is read
-// and a stop lands at once.
+// The mock has no trainer, so a run is "running" the first time its status is
+// read, finishes on the next read, and a stop lands at once.
 
 const exec = <T = unknown>(command: string, args: Record<string, unknown> = {}) =>
   mockExecute<CommandResult<T>>({ command, args });
@@ -32,9 +36,12 @@ describe("mock training job lifecycle", () => {
     expect(await jobs()).toEqual([]);
   });
 
-  it("a submitted run is recorded as queued, and finishes when its status is read", async () => {
+  it("a submitted run is recorded as queued, reads as running, then finishes", async () => {
     const jobId = await submit();
     expect(await jobs()).toMatchObject([{ jobId, status: "queued", progress: 0 }]);
+
+    expect((await status(jobId)).data).toMatchObject({ jobId, status: "running" });
+    expect(await jobs()).toMatchObject([{ jobId, status: "running" }]);
 
     expect((await status(jobId)).data).toMatchObject({ jobId, status: "ready", progress: 1 });
     expect(await jobs()).toMatchObject([{ jobId, status: "ready", progress: 1 }]);
@@ -53,8 +60,18 @@ describe("mock training job lifecycle", () => {
     expect(await jobs()).toMatchObject([{ jobId, status: "cancelled" }]);
   });
 
+  it("cancel stops a running run the same way", async () => {
+    const jobId = await submit();
+    await status(jobId);
+
+    const res = await exec<CancelAnswer>("cancel_training_job", { jobId });
+    expect(res.data).toMatchObject({ jobId, status: "running", cancelRequested: true });
+    expect((await status(jobId)).data).toMatchObject({ jobId, status: "cancelled" });
+  });
+
   it("cancel leaves a finished run alone and says there was nothing to stop", async () => {
     const jobId = await submit();
+    await status(jobId);
     await status(jobId);
     const finished = (await jobs())[0];
     expect(finished.status).toBe("ready");

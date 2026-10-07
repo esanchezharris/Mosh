@@ -6126,9 +6126,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!bundlePath) return err(command, "missing corpusBundle");
       const jobId = `job-${Math.random().toString(36).slice(2, 8)}`;
       const outputDir = str(args.outputDir, `${bundlePath}/training-output/${jobId}`);
-      // Recorded as "queued", as native records a submit. The run finishes when its
-      // status is first read (training_job_status below) — until then it is still
-      // going, which is what leaves cancel_training_job something to stop.
+      // Recorded as "queued", as native records a submit. Reads of its status
+      // (training_job_status below) move it to running, then ready — until then it
+      // is still going, which is what leaves cancel_training_job something to stop.
       const job = {
         jobId,
         status: "queued",
@@ -6166,9 +6166,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
-      // No trainer here: a run that is still going finishes on this read. Like
+      // No trainer here, so each read advances the run one step the service
+      // would: queued -> running -> ready. It used to go straight to ready, so no
+      // UI built on the mock ever saw a live status (the LoRA Lab treated
+      // "queued"/"running" as finished, and nothing here could show it). The
+      // first "running" carries no detail, as precompute reports none. Like
       // native, the read is what updates the recorded job.
-      if (job.status === "queued" || job.status === "running") {
+      if (job.status === "queued") {
+        job.status = "running";
+      } else if (job.status === "running") {
         job.status = "ready";
         job.progress = 1;
       }

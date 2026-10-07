@@ -12,6 +12,7 @@
 // model was on these prompts, which made every "is this better?" unanswerable.
 
 import { useStore } from "../../store";
+import { isLabRunLive } from "../../store/loraLab";
 import { TakeRow, type TakeRowModel } from "./TakeRow";
 
 const BASE_ROW: TakeRowModel = { name: null, step: -1, isFinal: false, landedAt: 0 };
@@ -21,7 +22,7 @@ export function TakeSheet() {
   const dismissed = useStore((s) => s.labDismissed);
   const restore = useStore((s) => s.restoreLabTakes);
   const promptSet = useStore((s) => s.labPrompt.trim().length > 0);
-  const running = useStore((s) => s.labRun?.status === "training" || s.labRun?.status === "precompute");
+  const running = useStore((s) => isLabRunLive(s.labRun?.status));
 
   const hidden = new Set(dismissed);
   const shown = takes

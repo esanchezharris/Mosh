@@ -41,12 +41,34 @@ export type LabRender = {
   peaks?: [number, number][];
 };
 
-export type LabRunStatus = "idle" | "precompute" | "training" | "ready" | "error" | "cancelled";
+/** Every status the training service reports for a run that is still going.
+ *  service/server.py holds a job "queued" until the training worker takes it,
+ *  then "running" through precompute, training and export, and the native relay
+ *  (MoshOps cmdTrainingJobStatus) passes that through untouched. WHICH of those
+ *  a running job is in is `detail.phase` (LabRun.phase), never the status.
+ *  Anything else — "ready", "error", "cancelled", or a name nobody expected —
+ *  is a run that has ended.
+ *
+ *  The one list the poll, Stop and the take sheet all ask. They used to each
+ *  test for "training" / "precompute" — phase names no status ever carries — so
+ *  on the native app the first poll ended the poll and took Stop away from a
+ *  run that had 20-60 minutes left. */
+export const LAB_RUN_LIVE_STATUSES = ["queued", "running"] as const;
+export type LabRunLiveStatus = (typeof LAB_RUN_LIVE_STATUSES)[number];
+export type LabRunStatus = "idle" | LabRunLiveStatus | "ready" | "error" | "cancelled";
+
+export const isLabRunLive = (status: string | null | undefined): status is LabRunLiveStatus =>
+  (LAB_RUN_LIVE_STATUSES as readonly string[]).includes(status ?? "");
 
 export type LabRun = {
   jobId: string;
   label: string;
   status: LabRunStatus;
+  /** The trainer's own phase while the job runs (`detail.phase`): "training",
+   *  then the state it exited in while the service collects the last takes.
+   *  null during precompute, which reports no progress, and on a service that
+   *  predates it. Presentation only — whether the run is live is `status`. */
+  phase: string | null;
   step: number;
   totalSteps: number;
   loss: number | null;
@@ -246,7 +268,9 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
 
     set({
       labRun: {
-        jobId, label: runLabel, status: "precompute",
+        // What submit records, natively and in the service, until the first
+        // poll says otherwise.
+        jobId, label: runLabel, status: "queued", phase: null,
         step: 0, totalSteps: 0, loss: null, sPerStep: null, etaSeconds: null,
         leg: null, legs: null,
         // Unknown until the run reports them — deliberately NOT seeded from the
@@ -436,6 +460,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       labRun: {
         ...run,
         status: (status as LabRunStatus) || run.status,
+        phase: str(progress.phase) || null,
         step: num(progress.step, run.step),
         totalSteps: num(progress.totalSteps, run.totalSteps),
         loss: typeof progress.loss === "number" ? progress.loss : run.loss,
