@@ -14,6 +14,7 @@
 // namespace, verbatim.
 
 #include "MoshOps.h"
+#include "BoundedRender.h"
 #include "MoshOpsInternal.h"
 #include "PluginState.h"
 #include "state/Ids.h"
@@ -537,6 +538,7 @@ juce::String MoshOps::renderSourceSignatureForSelfTest (const juce::String& clip
 
 bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, const juce::File& destWav)
 {
+    lastBounceError_.clear();
     auto* track = clip.getTrack();
     if (track == nullptr || endSec <= startSec + 1.0e-4) return false;
     juce::Array<te::Clip*> only; only.add (&clip);
@@ -545,6 +547,7 @@ bool MoshOps::bounceClipToWav (te::Clip& clip, double startSec, double endSec, c
 
 bool MoshOps::bounceTrackToWav (te::Track& track, double startSec, double endSec, const juce::File& destWav)
 {
+    lastBounceError_.clear();
     if (endSec <= startSec + 1.0e-4) return false;
     return bounceRenderToWavImpl (track, startSec, endSec, destWav, nullptr);
 }
@@ -556,6 +559,10 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
                                      const juce::Array<te::Clip*>* onlyTheseClips)
 {
     auto& edit = eng.edit();
+
+    lastBounceError_ = prepareRenderSources ({ &track }, onlyTheseClips);
+    if (lastBounceError_.isNotEmpty())
+        return false;
 
     // Render exclusivity (01 §5): detach the Edit from the device before an offline
     // render (Tracktion asserts otherwise). Mirror cmdExportAudio's teardown; the master
@@ -583,6 +590,7 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
         }
         transport.freePlaybackContext();
     }
+    settleSamplers();                      // as cmdExportAudio: no stale sampler sound lists
 
     destWav.getParentDirectory().createDirectory();
     destWav.deleteFile();
@@ -613,29 +621,12 @@ bool MoshOps::bounceRenderToWavImpl (te::Track& track, double startSec, double e
 
         if (params.tracksToDo.countNumberOfSetBits() > 0 && ! params.destFile.isDirectory())
         {
-            te::Renderer::RenderTask task ("Mosh bounce", params, nullptr, nullptr);
-
-            // Same no-progress watchdog + absolute deadline cmdExportAudio uses, so a
-            // stuck bounce (e.g. an unreadable source) errors cleanly instead of hanging.
-            const double secs = juce::jmax (0.1, endSec - startSec);
-            const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, secs * 8000.0 + 60000.0);
-            const juce::uint32 stallMs    = 20000;
-            float  lastProgress   = -1.0f;
-            juce::uint32 lastProgressMs = startMs;
-            while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
-            {
-                const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
-                const float p = task.getCurrentTaskProgress();
-                if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
-                if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
-                {
-                    if (task.errorMessage.isEmpty()) task.errorMessage = "bounce render stalled";
-                    break;
-                }
-            }
+            // Same bounded loop cmdExportAudio uses, so a stuck bounce (e.g. an unreadable
+            // source) errors cleanly instead of hanging.
+            renderError = mosh::runBoundedRender (params, "Mosh bounce", juce::jmax (0.1, endSec - startSec),
+                                                  "bounce render stalled");
             te::Renderer::turnOffAllPlugins (edit);
-            if (task.errorMessage.isNotEmpty()) { renderError = task.errorMessage; destWav.deleteFile(); }
+            if (renderError.isNotEmpty()) destWav.deleteFile();
         }
         else renderError = "no renderable track for bounce";
     }
@@ -1316,8 +1307,10 @@ bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTre
     beginTxn ("apply_render_beneath");
     auto* hiddenTrack = findOrCreateHiddenRenderTrack();
     if (hiddenTrack == nullptr) return false;
-    auto landed = hiddenTrack->insertWaveClip ("mosh-render-" + midi->getName(), dest,
-        { { pos.getStart(), pos.getLength() }, {} }, false);
+    // Plain: the render stands in for the MIDI clip at the MIDI clip's own span, whatever loop
+    // metadata the artifact carries (insertPlainWaveClip, MoshOpsInternal.h).
+    auto landed = insertPlainWaveClip (*hiddenTrack, "mosh-render-" + midi->getName(), dest,
+        { { pos.getStart(), pos.getLength() }, {} });
     if (landed == nullptr) return false;
     landed->state.setProperty (ids::moshHidden, true, &undoManager());
     midi->setMuted (true);
@@ -2412,8 +2405,9 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
             landLen   = tracktion::TimeDuration::fromSeconds (re - rs);
         }
     }
-    auto landed = lane->insertWaveClip ("neural-" + clip->getName(), dest,
-        { { landStart, landLen }, {} }, false);
+    // Plain, so the render covers exactly the span it was made for.
+    auto landed = insertPlainWaveClip (*lane, "neural-" + clip->getName(), dest,
+        { { landStart, landLen }, {} });
 
     node.setProperty (ids::userKept, true, &undoManager());
     node.setProperty (ids::status, "ready", &undoManager());

@@ -504,6 +504,30 @@ describe("v3 Moshi dock", () => {
     expect(receipt()?.textContent).toContain("Set tempo to 90 BPM");
   });
 
+  it("PR #740: a beat ask on a session with material pins the recipe to the session's tempo and key", async () => {
+    // generate_beat_recipe's generated program sets tempo and key; the dock must hand the
+    // fast path the clip counts and the session key so an existing song keeps both.
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    expect((await originalExec("set_tempo", { bpm: 93 })).ok).toBe(true);
+    expect((await originalExec("set_key", { tonic: "D", mode: "minor" })).ok).toBe(true);
+    await useStore.getState().refresh();
+    const s0 = useStore.getState().snapshot!;
+    expect(s0.tracks.some((t) => t.clips.length > 0), "the seed has material (anti-vacuity)").toBe(true);
+    const sent: Array<[string, Record<string, unknown> | undefined]> = [];
+    useStore.setState({
+      exec: async (command, args, transaction, origin) => {
+        sent.push([command, args]);
+        return originalExec(command, args, transaction, origin);
+      },
+    });
+    await mount();
+    await ask(host, "build me a lofi sketch");
+    const recipe = sent.find(([c]) => c === "generate_beat_recipe");
+    expect(recipe?.[1]).toEqual({ mood: "lofi", tempo: 93, key: "D minor" });
+    expect(useStore.getState().snapshot?.session.tempo).toBe(93);
+  });
+
   it("U3: setAgentChangeSet refuses a change set stamped before the latest undo-head move; unstamped ones pass", () => {
     useStore.setState({ setAgentChangeSet: realSetAgentChangeSet });
     const set = useStore.getState().setAgentChangeSet;

@@ -326,7 +326,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
     // A clean edit: no leftover tracks or master-bus plugins from earlier sections, so an
     // export here is the preset track and nothing else (the precedent is the G1 and
     // stem-export sections, which isolate themselves the same way).
-    section ("VOCAL-PRESET: fixture — a clean project and the bundled preset");
+    section ("VOCAL-PRESET: fixture -- a clean project and the bundled preset");
     check (ok (command (ops, "new_project", object ({ { "name", "vocal-preset-selftest" } }))),
            "new_project (vocal preset isolation) ok");
 
@@ -342,7 +342,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         check (presetFile.isNotEmpty(), "the bundled track-chain library lists mosh-clean-lead-v0");
     }
     const auto parsed = parseTrackPresetText (juce::File (presetFile).loadFileAsString());
-    check (parsed.ok, "the bundled preset passes schema validation" + (parsed.ok ? String() : " — " + parsed.error));
+    check (parsed.ok, "the bundled preset passes schema validation" + (parsed.ok ? String() : " -- " + parsed.error));
     if (! parsed.ok)
         return;   // nothing below can mean anything
     const auto& preset = parsed.preset;
@@ -391,7 +391,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
                 // parameter and every piece of typed state came up at the probe's value.
                 const auto why = stageMismatch (*plugin, stage);
                 check (why.isEmpty(), type + " created from preset state reads back every probe value"
-                                          + (why.isEmpty() ? String() : " — " + why));
+                                          + (why.isEmpty() ? String() : " -- " + why));
                 check (plugin->getLatencySeconds() == 0.0, type + " declares zero latency");
             }
 
@@ -543,7 +543,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
                                + String (toDb (gain[2]), 2) + " / " + String (toDb (gain[3]), 2) + " dB)");
                     // THE anti-vacuity check for the 2026-09-06 "does not compress" finding.
                     check (toDb (gain[3]) - outGainDb <= -1.5,
-                           cfg + ": the compressor measurably compresses — " + String (toDb (gain[3]) - outGainDb, 2)
+                           cfg + ": the compressor measurably compresses -- " + String (toDb (gain[3]) - outGainDb, 2)
                                + " dB of gain reduction at " + String (toDb (levels[3]), 1) + " dBFS peak");
 
                     // The pinned formula is  gain = (th + (L - th) * slope) / L  with L the
@@ -637,14 +637,14 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         const auto r = command (ops, "export_audio", object ({ { "file", file.getFullPathName() }, { "format", "wav" },
                                                                 { "bitDepth", 32 }, { "sampleRate", sampleRate },
                                                                 { "range", "full" } }));
-        check (ok (r), String ("export_audio ") + leaf + " ok" + (ok (r) ? String() : " — " + errorOf (r)));
+        check (ok (r), String ("export_audio ") + leaf + " ok" + (ok (r) ? String() : " -- " + errorOf (r)));
         return file;
     };
     const auto dryExport = exportTo ("vp-dry.wav", 48000.0);
 
     const auto beforeApply = canon (ops);
     const auto applied = apply (vox, presetFile);
-    check (ok (applied), "apply_track_preset ok" + (ok (applied) ? String() : " — " + errorOf (applied)));
+    check (ok (applied), "apply_track_preset ok" + (ok (applied) ? String() : " -- " + errorOf (applied)));
     {
         const auto d = dataOf (applied);
         check (d.getProperty ("presetId", var()).toString() == preset.id
@@ -688,7 +688,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
     }
     check (liveGroupMismatch (eng, vox, preset).isEmpty(),
            "the LIVE plugins hold the preset (parameters the DSP reads, typed state, bypass, order)"
-               + (liveGroupMismatch (eng, vox, preset).isEmpty() ? String() : " — " + liveGroupMismatch (eng, vox, preset)));
+               + (liveGroupMismatch (eng, vox, preset).isEmpty() ? String() : " -- " + liveGroupMismatch (eng, vox, preset)));
     {
         const auto rows = presetRows (ops, vox, preset.id);
         check (rows.size() == 2, "the snapshot shows two rack rows tagged with the preset");
@@ -728,7 +728,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
     check (ok (command (ops, "redo")), "redo after the cache purge ok");
     check (liveGroupMismatch (eng, vox, preset).isEmpty(),
            "plugins RE-CREATED from the undone state still hold the preset values"
-               + (liveGroupMismatch (eng, vox, preset).isEmpty() ? String() : " — " + liveGroupMismatch (eng, vox, preset)));
+               + (liveGroupMismatch (eng, vox, preset).isEmpty() ? String() : " -- " + liveGroupMismatch (eng, vox, preset)));
 
     section ("VOCAL-PRESET RENDER: the track render matches the measured curve, pre-fader");
     std::vector<double> renderGainDb;
@@ -820,9 +820,9 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         const auto again = apply (vox, presetFile);
         check (ok (again) && ! (bool) dataOf (again).getProperty ("changed", true),
                "re-applying an intact, unmodified preset reports changed:false");
-        check (dataOf (again).getProperty ("stages", var()).size() == 2, "…and still reports the live readback");
+        check (dataOf (again).getProperty ("stages", var()).size() == 2, "...and still reports the live readback");
         check (canon (ops) == beforeNoop && presetRows (ops, vox, preset.id).size() == 2 && rackSize (ops, vox) == 3,
-               "…and changes nothing: still exactly two preset rows");
+               "...and changes nothing: still exactly two preset rows");
         check (ok (command (ops, "undo")), "undo after the no-op");
         check (trackVar (ops, vox).getProperty ("name", var()).toString() == "VP Vox",
                "that undo reverted the EARLIER real edit (the no-op left no transaction behind)");
@@ -840,8 +840,8 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
                "re-applying over a tweaked group reports changed:true, replaced:true");
         check (liveGroupMismatch (eng, vox, preset).isEmpty() && presetRows (ops, vox, preset.id).size() == 2
                    && rackSize (ops, vox) == 3,
-               "…the group is back at the preset values and there are still exactly two preset rows");
-        check (userEqRow() == eqBefore, "…and the user's EQ was not touched by the replace");
+               "...the group is back at the preset values and there are still exactly two preset rows");
+        check (userEqRow() == eqBefore, "...and the user's EQ was not touched by the replace");
         check (ok (command (ops, "undo")), "undo the re-apply");
         check (canon (ops) == tweaked, "ONE undo of a re-apply restores the user's tweaked chain exactly");
         check (ok (command (ops, "redo")), "redo the re-apply");
@@ -907,7 +907,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         const auto point = command (ops, "add_automation_point", object ({ { "trackId", other }, { "pluginIndex", userFxIndex },
                                                                            { "paramIndex", 0 }, { "time", 1.0 }, { "value", 0.5 } }));
         check (ok (userFx) && ok (point), "automation point written on the second track's user plugin"
-                                              + (ok (point) ? String() : " — " + errorOf (userFx) + " / " + errorOf (point)));
+                                              + (ok (point) ? String() : " -- " + errorOf (userFx) + " / " + errorOf (point)));
 
         auto strip = [&] (const String& trackId)
         {
@@ -1047,7 +1047,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         ops.setTrackPresetHooksForSelfTest (0, true);
         refused (apply (bare, presetFile), "recording", before, "applying while recording");
         ops.setTrackPresetHooksForSelfTest (0, false);
-        check (ok (apply (bare, presetFile)) && ok (command (ops, "undo")), "…and the same call succeeds once recording has stopped");
+        check (ok (apply (bare, presetFile)) && ok (command (ops, "undo")), "...and the same call succeeds once recording has stopped");
 
         // Capacity: 16 plugins per track, hidden mixer elements included.
         const auto full = newTrack ("VP Full");
@@ -1089,7 +1089,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
             ops.setTrackPresetHooksForSelfTest (0, false);
             check (! ok (failed) && errorOf (failed).contains ("injected"), at + ": the apply fails");
             check (canon (ops) == before && ownedPlugins (eng, bare, preset.id).empty(),
-                   at + ": no partial chain — the canonical snapshot is unchanged");
+                   at + ": no partial chain -- the canonical snapshot is unchanged");
             check (ok (command (ops, "undo")) && trackVar (ops, bare).getProperty ("name", var()).toString() == "VP Bare",
                    at + ": the next undo reverts the earlier real edit, not a phantom step");
             check (ok (command (ops, "redo")) && trackVar (ops, bare).getProperty ("name", var()).toString() == "VP Bare F",
@@ -1127,11 +1127,11 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
             check (ok (command (ops, "undo")), "one undo for the whole batch");
             check (trackVar (ops, bare).getProperty ("name", var()).toString() == "VP Bare"
                        && ownedPlugins (eng, bare, preset.id).empty(),
-                   "…removes the rename AND the chain together (the apply coalesced into the batch's one step)");
+                   "...removes the rename AND the chain together (the apply coalesced into the batch's one step)");
         }
     }
 
-    section ("VOCAL-PRESET PERSIST: save, reload — serialized, effective and rendered state");
+    section ("VOCAL-PRESET PERSIST: save, reload -- serialized, effective and rendered state");
     {
         const auto preSaveExport = exportTo ("vp-presave.wav", 48000.0);
         const auto preSaveVox = juce::JSON::toString (trackVar (ops, vox));
@@ -1159,7 +1159,7 @@ void runVocalPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPresetSel
         // Effective: brand-new plugin objects built from the file hold the preset.
         check (liveGroupMismatch (eng, vox, preset).isEmpty(),
                "plugins rebuilt from the saved file hold the preset's effective values"
-                   + (liveGroupMismatch (eng, vox, preset).isEmpty() ? String() : " — " + liveGroupMismatch (eng, vox, preset)));
+                   + (liveGroupMismatch (eng, vox, preset).isEmpty() ? String() : " -- " + liveGroupMismatch (eng, vox, preset)));
         check (! (bool) dataOf (apply (vox, presetFile)).getProperty ("changed", true),
                "re-applying after reload is still a no-op (ownership survived, nothing duplicates)");
 

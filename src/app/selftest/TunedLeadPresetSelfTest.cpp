@@ -98,7 +98,7 @@ void runTunedLeadPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPrese
     section ("TUNED-PRESET TABLE: the pinned AutoTune row matches the linked plugin");
     {
         const auto probe = parseTrackPresetText (kAutoTuneProbeJson);
-        check (probe.ok, "the all-non-default AutoTune probe parses" + (probe.ok ? String() : " — " + probe.error));
+        check (probe.ok, "the all-non-default AutoTune probe parses" + (probe.ok ? String() : " -- " + probe.error));
         if (probe.ok)
         {
             const auto& stage = probe.preset.stages[0];
@@ -130,7 +130,7 @@ void runTunedLeadPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPrese
                 }
                 const auto why = stageMismatch (*plugin, stage);
                 check (why.isEmpty(), "moshAutoTune created from preset state reads back every probe value"
-                                          + (why.isEmpty() ? String() : " — " + why));
+                                          + (why.isEmpty() ? String() : " -- " + why));
             }
         }
     }
@@ -150,7 +150,7 @@ void runTunedLeadPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPrese
         }
         check (presetFile.isNotEmpty(), "the bundled track-chain library lists mosh-tuned-lead-v0");
         const auto parsed = parseTrackPresetText (juce::File (presetFile).loadFileAsString());
-        check (parsed.ok, "the bundled tuned preset passes schema validation" + (parsed.ok ? String() : " — " + parsed.error));
+        check (parsed.ok, "the bundled tuned preset passes schema validation" + (parsed.ok ? String() : " -- " + parsed.error));
         if (presetFile.isEmpty() || ! parsed.ok)
             return;
         const auto& preset = parsed.preset;
@@ -161,7 +161,7 @@ void runTunedLeadPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPrese
 
         auto apply = [&] { return command (ops, "apply_track_preset", object ({ { "trackId", vox }, { "file", presetFile } })); };
         const auto applied = apply();
-        check (ok (applied), "apply_track_preset (tuned lead) ok" + (ok (applied) ? String() : " — " + errorOf (applied)));
+        check (ok (applied), "apply_track_preset (tuned lead) ok" + (ok (applied) ? String() : " -- " + errorOf (applied)));
         check ((bool) dataOf (applied).getProperty ("changed", false), "first application reports changed:true");
 
         // Order, straight from the live plugin list.
@@ -174,7 +174,7 @@ void runTunedLeadPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPrese
             check (owned[2]->getPluginType() == "compressor", "stage 3 is the compressor");
         }
         const auto mismatch = liveGroupMismatch (eng, vox, preset);
-        check (mismatch.isEmpty(), "every live parameter holds the preset's value" + (mismatch.isEmpty() ? String() : " — " + mismatch));
+        check (mismatch.isEmpty(), "every live parameter holds the preset's value" + (mismatch.isEmpty() ? String() : " -- " + mismatch));
 
         // Readback in the file's own units: a percentage comes back as a percentage.
         {
@@ -210,7 +210,7 @@ void runTunedLeadPresetSelfTest (MoshEngine& eng, MoshOps& ops, const VocalPrese
         check (ownedPlugins (eng, vox, preset.id).empty(), "ONE undo removes all three stages");
         check (ok (command (ops, "redo")), "redo ok");
         const auto afterRedo = liveGroupMismatch (eng, vox, preset);
-        check (afterRedo.isEmpty(), "redo restores the chain with its values" + (afterRedo.isEmpty() ? String() : " — " + afterRedo));
+        check (afterRedo.isEmpty(), "redo restores the chain with its values" + (afterRedo.isEmpty() ? String() : " -- " + afterRedo));
     }
 }
 } // namespace mosh

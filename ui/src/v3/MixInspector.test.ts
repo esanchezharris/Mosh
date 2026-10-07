@@ -357,7 +357,7 @@ describe("v3 Mix inspector — vocal preset", () => {
   });
 
   it("shows the engine's refusal when an apply fails", async () => {
-    applyResult = { ok: false, command: "apply_track_preset", error: "cannot apply a preset while recording \u2014 stop recording first" };
+    applyResult = { ok: false, command: "apply_track_preset", error: "cannot apply a preset while recording -- stop recording first" };
     await mount(vocalSnapshot());
     const select = picker()!;
     select.value = FILE;
