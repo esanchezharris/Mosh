@@ -3,19 +3,20 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Mosh marketing site + email waitlist. Standalone static site (Vite + vanilla TS) — its own dependency tree, does not import from ui/ or anywhere else in the monorepo.",
+  "description": "Mosh site + playtest guide. Standalone static site (Vite + vanilla TS) \u2014 its own dependency tree, does not import from ui/ or anywhere else in the monorepo.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   },
   "dependencies": {
-    "@fontsource-variable/bricolage-grotesque": "^5.2.10",
+    "@fontsource-variable/archivo": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.2.7"
   }
 }

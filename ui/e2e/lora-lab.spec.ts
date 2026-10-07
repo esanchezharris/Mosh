@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV2 } from "./helpers";
+import { bootV2, expectDispatched } from "./helpers";
 
 // The LoRA Lab, reached and driven by a MOUSE ONLY, from the shipped v2 shell.
 //
@@ -88,4 +88,58 @@ test("a take can be hidden and brought back — dismissal is never a delete", as
   await expect(restore).toBeVisible();
   await restore.click();
   await expect(lab.getByTestId("lab-take-e2e-run@600")).toBeVisible();
+});
+
+test("Train starts a run on the approved sources, and Stop cancels that run", async ({ page }) => {
+  type LabStore = {
+    getState: () => {
+      exec: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+      labRun: { jobId: string } | null;
+    };
+  };
+
+  // Two rights-cleared sources, registered and approved. Approval alone is not enough:
+  // the registry counts a source only when it also has a title, a creator, a license
+  // claim, proof of rights and a local file — and Train is disabled until one counts.
+  await page.evaluate(async () => {
+    const { exec } = (window as unknown as { __moshStore: LabStore }).__moshStore.getState();
+    for (const sourceId of ["e2e-beat-a", "e2e-beat-b"]) {
+      await exec("import_training_source", {
+        sourceId, title: sourceId, creator: "e2e", localPath: `/Users/you/${sourceId}.wav`,
+        userClaimedLicense: "my own work", proofOfRights: "session files",
+      });
+      await exec("approve_training_source", { sourceId, approved: true });
+    }
+  });
+
+  await openLab(page);
+
+  const lab = page.getByTestId("lora-lab");
+  const train = lab.getByTestId("lab-train");
+  await expect(train).toBeEnabled();
+  await expect(train).toContainText("2 clips");
+
+  // The mock's job is already "ready" when it is submitted, and the Lab polls once a
+  // second — so on a running clock the first poll ends the run and Stop is gone before
+  // a click can land. Freeze time: the run stays "preparing" until Stop is pressed.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 60_000));
+
+  await train.click();
+  const status = lab.getByTestId("lab-run-status");
+  await expect(status).toHaveText("preparing");
+  const jobId = await page.evaluate(
+    () => (window as unknown as { __moshStore: LabStore }).__moshStore.getState().labRun?.jobId,
+  );
+  expect(jobId, "Train recorded the job it started").toBeTruthy();
+
+  await lab.getByTestId("lab-stop").click();
+  await expectDispatched(page, "cancel_training_job", { jobId });
+
+  // Stop never writes a status itself: it cancels, then re-reads the run. With the
+  // clock frozen the 1 s poll cannot fire, so that one re-read is the only thing that
+  // can move the header. The read is absent from the command trace (the mock keeps
+  // read-only commands out of it), which is why it is pinned by its effect.
+  await expect(status, 'the header shows what "training_job_status" reported after the cancel')
+    .toHaveText("stopped");
 });

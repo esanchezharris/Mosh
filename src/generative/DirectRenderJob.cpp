@@ -7,6 +7,10 @@
 
 namespace mosh
 {
+namespace { std::atomic<int> activeRunCount { 0 }; }
+
+int DirectRenderJob::activeRuns() noexcept { return activeRunCount.load(); }
+
 void DirectRenderJob::publish (const juce::String& state, const juce::String& reason)
 {
     const juce::ScopedLock guard (lock);
@@ -32,6 +36,8 @@ juce::Result createDirectSourceSnapshot (const juce::File& source, const juce::F
 
 void DirectRenderJob::run (const std::shared_ptr<GenerativeJobManager>& manager)
 {
+    // Declared before Finish, so the count drops only after `finished` is set.
+    const struct Active { Active() { ++activeRunCount; } ~Active() { --activeRunCount; } } active;
     struct Finish { std::atomic<bool>& flag; ~Finish() { flag.store (true); } } finish { finished };
     const auto fail = [this] (const juce::String& reason) { publish ("error", reason); };
     if (cancelled) { publish ("cancelled"); return; }

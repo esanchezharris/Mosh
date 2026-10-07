@@ -13,6 +13,15 @@ interface ImportMetaEnv {
   /** Short label stored in the waitlist row's `source` column. Optional,
    *  defaults to "landing". */
   readonly PUBLIC_WAITLIST_SOURCE?: string
+  /** Where the playtest page's Download button points (https only): the notarized
+   *  DMG or zip, hosted wherever you like. Unset: the page tells the tester to ask
+   *  their host for the build. */
+  readonly PUBLIC_DOWNLOAD_URL?: string
+  /** Short label shown beside the Download button, e.g. "Build 2026-10-02". Optional. */
+  readonly PUBLIC_BUILD_LABEL?: string
+  /** Where playtest feedback goes: an https link (Discord, a form) or a mailto:
+   *  address. Unset: the page tells the tester to message their host. */
+  readonly PUBLIC_FEEDBACK_URL?: string
 }
 
 interface ImportMeta {
