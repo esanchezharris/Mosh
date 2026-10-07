@@ -24,8 +24,20 @@ describe("portfolio seed — the Song A session", () => {
     expect(lead.plugins![1].params.slice(0, 4).map((p) => p.name)).toEqual(["Threshold", "Ratio", "Attack", "Release"]);   // the engine's names, not Drive/Tone
     const eight = rows(s)[2];
     expect(eight.isInstrument).toBe(true);
-    expect(eight.plugins![0]).toMatchObject({ name: "4OSC", builtin: true, isInstrument: true });
-    expect(eight.plugins![0].params).toHaveLength(8);
+    expect(eight.plugins![0]).toMatchObject({ name: "4OSC", builtin: true, isInstrument: true, category: "Instrument" });
+    // the engine's whole 4OSC surface, with the bundled mosh-bass preset loaded on it
+    expect(eight.plugins![0].params).toHaveLength(68);
+    expect(eight.plugins![0].params[2]).toMatchObject({ id: "level1", name: "Level 1", value: expect.closeTo(0.7807, 6) });
+    // ...its settings too: saw + square through a 24 dB/oct low-pass
+    expect(eight.plugins![0].state?.waveShape1?.value).toBe("saw");
+    expect(eight.plugins![0].state?.filterType?.value).toBe("lowpass");
+    expect(eight.plugins![0].state?.filterSlope?.value).toBe(24);
+    // the drum track's sampler holds the bundled kit, named on the track
+    const drums = rows(s)[1];
+    expect(drums.drumKit).toBe("mosh-kit");
+    expect(drums.plugins![0].sampler).toMatchObject({ primary: true, kit: "mosh-kit" });
+    expect(drums.plugins![0].sampler!.sounds.map((x) => x.pitch)).toEqual([36, 38, 39, 42, 46, 45, 47, 49]);
+    expect(drums.drumPads?.map((x) => x.name)).toEqual(["Kick", "Snare", "Clap", "Closed Hat", "Open Hat", "Low Tom", "Mid Tom", "Crash"]);
     expect(rows(s)[6].mute).toBe(true);
     expect(s.session.tempo).toBe(145);
     expect(s.session.editFile).toBe("/mock/greg.mosh");

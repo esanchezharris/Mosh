@@ -1,6 +1,7 @@
 #include "MoshFxDsp.h"
 #include "MoshFxMath.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace mosh::moshfx
@@ -51,6 +52,7 @@ void OTTCore::reset()
 
 void OTTCore::processBlock (float* samples, int numSamples, const OTTSettings& settings)
 {
+    meter = {};
     if (samples == nullptr || numSamples <= 0)
         return;
 
@@ -59,9 +61,14 @@ void OTTCore::processBlock (float* samples, int numSamples, const OTTSettings& s
     {
         const auto gain = dbToGain (settings.outputDb);
         for (int i = 0; i < numSamples; ++i)
-            samples[i] = softLimit (samples[i] * gain);
+        {
+            const auto out = samples[i] * gain;
+            meter.clipped = meter.clipped || std::abs (out) > 0.999f;
+            samples[i] = softLimit (out);
+        }
         return;
     }
+    meter.dynamicsRan = true;
 
     const auto lowCoeff = onePoleCoeff (120.0, sampleRate);
     const auto highCoeff = onePoleCoeff (3500.0, sampleRate);
@@ -91,7 +98,17 @@ void OTTCore::processBlock (float* samples, int numSamples, const OTTSettings& s
         const auto highGain = dbToGain (ottGainDb (highEnv, amount, settings.upward, settings.downward, settings.highGainDb));
         const auto wet = low * lowGain + mid * midGain + high * highGain;
 
-        samples[i] = softLimit ((dry + (wet - dry) * mix) * outputGain);
+        meter.peakEnvelope[0] = std::max (meter.peakEnvelope[0], lowEnv);
+        meter.peakEnvelope[1] = std::max (meter.peakEnvelope[1], midEnv);
+        meter.peakEnvelope[2] = std::max (meter.peakEnvelope[2], highEnv);
+        const auto out = (dry + (wet - dry) * mix) * outputGain;
+        meter.clipped = meter.clipped || std::abs (out) > 0.999f;
+        samples[i] = softLimit (out);
     }
+
+    // The dynamic part of each band's gain where the block ended (trim excluded).
+    meter.gainDb[0] = ottGainDb (lowEnv, amount, settings.upward, settings.downward, 0.0f);
+    meter.gainDb[1] = ottGainDb (midEnv, amount, settings.upward, settings.downward, 0.0f);
+    meter.gainDb[2] = ottGainDb (highEnv, amount, settings.upward, settings.downward, 0.0f);
 }
 }

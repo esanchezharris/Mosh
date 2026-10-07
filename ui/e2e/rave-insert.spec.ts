@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { boot, newProject, addAudioTrack, selectTrack } from "./helpers";
+import { boot, newProject, addAudioTrack, selectTrack, expectDispatched } from "./helpers";
 
 // Route C.2 — the real-time RAVE insert's rack UI (against the dev mock, which reports
 // session.raveAvailable=true). The "+ RAVE" affordance is gated on that flag, so it only
@@ -27,11 +27,14 @@ test("RAVE insert: + RAVE → card → load model", async ({ page }) => {
   // Lane B — pick a model from the BROWSER dropdown (list_rave_models); the card reflects it.
   await card.getByTestId("rave-model-select").selectOption("guitar");
   await expect(card.getByTestId("rave-model-name")).toHaveText("guitar");
+  await expectDispatched(page, "load_rave_model", { target: "guitar" });
 
   // The "path…" escape hatch still loads a custom .ts via the prompt dialog.
   page.once("dialog", (d) => d.accept("flute"));
   await card.getByTestId("rave-load-custom").click();
   await expect(card.getByTestId("rave-model-name")).toHaveText("flute");
+  // A bare name (no .ts) goes out as a library `target`, not a file `path`.
+  await expectDispatched(page, "load_rave_model", { target: "flute" });
 
   await expect(page.getByTestId("error")).toHaveCount(0);
 });

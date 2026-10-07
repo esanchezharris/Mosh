@@ -1152,13 +1152,10 @@ def fam_workflow_remix(ctx):
         {"command": "import_clip", "args": {"trackId": "${T}", "file": src}, "capture": {"C": "clipId"}},
         {"command": "set_tempo", "args": {"bpm": 140.0}},
         {"command": "stretch_clip", "args": {"clipId": "${C}", "bars": 1}},
-        {"command": "__wait", "args": {"ms": 4000}},
         {"command": "split_clip", "args": {"clipId": "${C}", "time": 0.85}, "capture": {"N": "newClipId"}},
         {"command": "move_clip", "args": {"clipId": "${N}", "start": 4.0}},
-        # The split minted a NEW warped clip whose render proxy generates in the
-        # background — pump again or the export sees an unreadable source (the same
-        # proxy class the P4 checks found).
-        {"command": "__wait", "args": {"ms": 4000}},
+        # No pump before the export: both halves are warped clips whose render proxies
+        # generate in the background, and export_audio waits for them itself.
         {"command": "__snapshot", "args": {"label": "arranged"}},
         {"command": "export_audio", "args": {"file": str(out)}},
     ]

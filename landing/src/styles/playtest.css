@@ -1,0 +1,339 @@
+/* Playtest guide. A reading page: one column of steps, a sticky list of them on
+   wide screens, and the download card at the top. */
+
+.clip-word {
+  display: inline-block;
+  padding: 0.02em 0.14em 0.07em;
+  border-radius: 0.14em;
+  background: var(--accent);
+  color: var(--accent-ink);
+  transition: background-color var(--dur) var(--ease-out);
+}
+
+/* ---------- top: title + download ---------- */
+.guide-top {
+  padding-block: clamp(2.5rem, 1.5rem + 4vw, 5rem) var(--s7);
+  border-bottom: 1px solid var(--fog-line);
+}
+.guide-top__grid {
+  display: grid;
+  gap: var(--s6);
+}
+.guide-hero {
+  display: grid;
+  gap: var(--s5);
+  justify-items: start;
+  align-content: start;
+}
+.guide-hero__title {
+  font-size: var(--fs-hero);
+  line-height: 0.94;
+  letter-spacing: -0.035em;
+}
+@media (min-width: 900px) {
+  .guide-top__grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 1fr);
+    align-items: end;
+    gap: var(--s8);
+  }
+}
+
+.download {
+  display: grid;
+  gap: var(--s5);
+  padding: var(--s5);
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.download__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+}
+.download__icon {
+  width: 4.5rem;
+  height: 4.5rem;
+}
+.download__title {
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+.download__build {
+  margin-top: 0.3rem;
+  color: var(--faint);
+  font-size: var(--fs-small);
+}
+.download__btn {
+  width: 100%;
+}
+.download__fallback {
+  padding: var(--s4);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+.download__fallback strong {
+  color: var(--text);
+}
+
+/* ---------- body: toc + steps ---------- */
+.guide {
+  padding-block: var(--s7) var(--s9);
+}
+.guide__grid {
+  display: grid;
+  gap: var(--s6);
+}
+.toc {
+  display: none;
+}
+@media (min-width: 1000px) {
+  .guide__grid {
+    grid-template-columns: 15rem minmax(0, 44rem);
+    gap: var(--s8);
+  }
+  .toc {
+    display: block;
+    position: sticky;
+    top: 5.5rem;
+    align-self: start;
+  }
+}
+.toc__label {
+  color: var(--faint);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+.toc__list {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--s3);
+}
+.toc__list a {
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  margin-left: -0.6rem;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--fs-small);
+  text-decoration: none;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.toc__list a span {
+  color: var(--faint);
+  font-size: var(--fs-label);
+}
+.toc__list a:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.toc__list a[aria-current='true'] {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.toc__list a[aria-current='true'] span {
+  color: var(--accent-text);
+}
+
+.steps {
+  display: grid;
+}
+.step {
+  display: grid;
+  gap: var(--s3);
+  padding-block: var(--s7) var(--s6);
+  border-top: 1px solid var(--fog-line);
+}
+.step:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.step__num {
+  color: var(--accent-text);
+  font-size: var(--fs-small);
+}
+.step__body {
+  display: grid;
+  gap: var(--s4);
+  min-width: 0;
+  /* a reading measure: about 68 characters of body text */
+  max-width: 36rem;
+}
+.step h2 {
+  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.5rem);
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+}
+.aside {
+  margin-left: 0.3rem;
+  color: var(--faint);
+  font-size: var(--fs-body);
+  font-stretch: 100%;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.step__intro {
+  color: var(--muted);
+}
+@media (min-width: 640px) {
+  .step {
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+  .step__num {
+    padding-top: 0.55rem;
+  }
+}
+
+.ticks,
+.numbered {
+  display: grid;
+  gap: var(--s3);
+}
+.ticks li,
+.numbered li {
+  position: relative;
+  padding-left: 1.75rem;
+}
+.ticks li::before {
+  content: '';
+  position: absolute;
+  left: 0.15rem;
+  top: 0.62em;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--fog-line);
+}
+.numbered {
+  counter-reset: n;
+}
+.numbered li {
+  counter-increment: n;
+}
+.numbered li::before {
+  content: counter(n);
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  color: var(--accent-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+/* a control's name, drawn the way the shell draws a toolbar button */
+.ui {
+  display: inline-block;
+  padding: 0.05em 0.5em;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.9em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.note {
+  padding: var(--s4);
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+.note strong {
+  color: var(--text);
+}
+/* the one warning on the page: joining replaces your project */
+.note--warn {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  color: var(--text);
+}
+
+/* ---------- checklist ---------- */
+.checklist {
+  display: grid;
+  gap: var(--s2);
+}
+.checklist label {
+  display: flex;
+  gap: var(--s3);
+  align-items: flex-start;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--fog-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur) var(--ease-out);
+}
+.checklist label:hover {
+  border-color: var(--line);
+}
+.checklist input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin: 0.15rem 0 0;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.checklist input::after {
+  content: '';
+  width: 0.7rem;
+  height: 0.4rem;
+  margin-top: -0.15rem;
+  border: solid var(--accent-ink);
+  border-width: 0 0 2.5px 2.5px;
+  transform: rotate(-45deg) scale(0);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.checklist input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.checklist input:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+.checklist label:has(input:checked) {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.checklist label:has(input:checked) > span {
+  color: var(--muted);
+}
+.checklist__count {
+  color: var(--faint);
+  font-size: var(--fs-small);
+}
+
+.feedback {
+  display: grid;
+  gap: var(--s3);
+  justify-items: start;
+  margin-top: var(--s2);
+}
+.feedback p {
+  color: var(--muted);
+}
+.feedback strong {
+  color: var(--text);
+}

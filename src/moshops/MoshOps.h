@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
@@ -65,6 +66,62 @@ public:
         why the button tracks the playhead while the transport is STOPPED. */
     juce::var muteAutomationAtPlayhead();
 
+    /** What every Mosh AutoTune is hearing right now, for the live note display:
+        `{tuners:[{trackId, index, inputHz, targetHz, confidence}]}`. Only tuners that are
+        enabled, were run by the audio thread since the previous call, and are hearing a
+        pitch appear; `index` is the plugin's position in the track's chain, as in the
+        snapshot. Feeds the 30 Hz "tuner" rail, outside the snapshot like the meters.
+
+        Public for the same reason as muteAutomationAtPlayhead: the rail is emitted from
+        timerCallback, which a headless run never pumps. One caller at a time: each call
+        consumes the readings (that is how a stale one is told from a current one). */
+    juce::var tunerReadings();
+
+    /** Live meters of the native plugins that publish them, for the 30 Hz
+        "plugin_meters" rail: `{plugins:[{trackId, index, itemId, type, seq, ...fields}]}`.
+        compressor/softclip: {grDb, inDb, outDb}; moshOTT: {bands:[{levelDb, gainDb}] x3,
+        clipped}; moshXFeedback: {candidates:[{hz, score}], cuts:[{hz, score, depthDb}]};
+        4osc: {outDb, held:[notes], struck:[notes]}, only while not rendering offline and
+        not idle (docs/02_MOSHOPS_CONTRACT.md). `seq` counts each plugin's reported frames. Only track plugins that are enabled AND were run by
+        the audio thread since the previous call appear; peaks and gain reduction are the
+        largest since that call. `index` is the plugin's position in the track's chain, as
+        in the snapshot. Mosh AutoTune is never here (its reading belongs to "tuner").
+
+        Public for the same reason as tunerReadings: the rail is emitted from
+        timerCallback, which a headless run never pumps. One caller at a time: each call
+        consumes the readings, including those of plugins it does not report. */
+    juce::var pluginMeters();
+
+    /** The render-layer cache's source signature for a non-wave clip, exactly as
+        render_layer folds it into the fingerprint: the clip's notes plus its track's
+        plugins (name, bypass, parameter values and curves, CachedValue-only settings,
+        sampler sounds). "" for an unknown clip. Public for --selftest, which asserts what
+        does and does not change it without paying for a render each time. */
+    juce::String renderSourceSignatureForSelfTest (const juce::String& clipId);
+
+    /** One track plugin's snapshot entry, exactly as snapshot() builds it (pluginToVar),
+        or void for no such plugin. Public for --selftest, which times it for a 4OSC (68
+        parameters) without paying for a whole snapshot. */
+    juce::var pluginVarForSelfTest (const juce::String& trackId, int index);
+
+    /** pluginToVar for any plugin object, one not on a track included (index 0, no owner).
+        Public for --selftest, which proves the 16-parameter cap with a plugin that has more
+        parameters than any built-in but the 4OSC. */
+    juce::var pluginVarForSelfTest (te::Plugin& plugin);
+
+    /** audition_note as a headless run cannot reach it: the clipless-track sampler road
+        (no audio device skips it, and the inject road would take a track with clips), with
+        the command's own voice bookkeeping, re-tap rule and reply. Not on the command
+        surface. --selftest drives the sampler's hits and keys through it. */
+    juce::var auditionNoteOnSamplerRoadForSelfTest (const juce::var& args) { return auditionNote (args, true); }
+
+    /** How many times an edit asked for the reactive re-render of a track's applied layers
+        (reactiveTouchTrack), and the track it named last. Public for --selftest: the
+        re-render itself spawns the generative service and is off headless, so the test
+        proves that each pad command asks for it. */
+    int reactiveTrackTouchesForSelfTest() const noexcept { return reactiveTrackTouches_; }
+    juce::String lastReactiveTouchTrackForSelfTest() const { return lastReactiveTouchTrack_; }
+
     /** The single command spine for native, remote, and internal callers. Thin wrapper
         around executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
@@ -85,7 +142,30 @@ public:
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
+    /** True while any Direct Re-Imagine work could still land: MoshOps holds a request
+        (generation or decision validation) or a worker is still running, including one whose
+        request was already cancelled. Read-only; the headless `--run-script`
+        `__wait_until direct_render_idle` condition polls it instead of sleeping a fixed time. */
+    bool hasDirectRenderWork() const;
+
     void applyMultiplayerCommitForSelfTest (const juce::var& msg);
+
+    /** apply_track_preset's two selftest inputs. `faultPoint` makes the next apply fail
+        at that point (1 = stages created, nothing inserted yet; 2 = first stage
+        inserted) so the rollback can be proven — the preflight makes both unreachable in
+        real use. `pretendRecording` stands in for a rolling record, which a headless
+        --selftest has no device to start; the guard that reads it is the real one.
+        Neither is reachable from the command surface. */
+    void setTrackPresetHooksForSelfTest (int faultPoint, bool pretendRecording)
+    {
+        trackPresetFaultPoint_ = faultPoint;
+        trackPresetPretendRecording_ = pretendRecording;
+    }
+
+    /** The playback timer's spectrum step (timerCallback → emitSpectrum), which headless
+        runs never reach because it is gated on a live playback context. Lets --selftest
+        drive the production tap insertion without an audio device. */
+    void emitSpectrumForSelfTest (bool playing) { emitSpectrum (playing); }
 
     /** Direct plugin-host access for the headless deep-scan CLI (--scan-plugins-deep),
         which runs a synchronous OOP + hang-watchdog rescan off the message thread.
@@ -391,6 +471,9 @@ private:
     juce::var cmdLoadDrumKit    (const juce::var& args);
     juce::var cmdListPresets    (const juce::var& args);   // read-only preset library scan
     juce::var cmdLoadPreset     (const juce::var& args);   // apply a preset to a track's instrument
+    // A track-chain preset ("Mosh Clean Lead v0"): an ordered group of built-in effects
+    // applied to ONE explicitly named audio track as ONE undo step. UI-only by design.
+    juce::var cmdApplyTrackPreset (const juce::var& args);
     juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdSetDrumLane    (const juce::var& args);
     // Drum-rack pads: per-pad mixer/identity/choke, and the inverse of assign_sample.
@@ -407,6 +490,9 @@ private:
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
+    // A native plugin's CachedValue-only settings (delay length, chorus/phaser, the
+    // low/high-pass mode): whitelisted per type, validated, clamped, undoable.
+    juce::var cmdSetPluginState (const juce::var& args);
     juce::var cmdBypassPlugin   (const juce::var& args);
     // INS-005 — plugin scan / blocklist / management (NON-undoable: catalog ops,
     // not Edit mutations). rescan persists the catalog; the rest are read-only or
@@ -459,6 +545,14 @@ private:
     // The shared offline-render body behind both bounce wrappers (nullptr = all clips).
     bool bounceRenderToWavImpl (te::Track& track, double startSec, double endSec, const juce::File& destWav,
                                 const juce::Array<te::Clip*>* onlyTheseClips);
+    // Before an offline render: waits (bounded, servicing the message loop) until every
+    // background-generated file the render will read for these tracks' audio clips exists
+    // (warp proxies, reversed sources, decoded copies), starting any that never started.
+    // "" when ready, else a per-clip error. nullptr/empty onlyTheseClips = every clip.
+    juce::String prepareRenderSources (const juce::Array<te::Track*>& tracks,
+                                       const juce::Array<te::Clip*>* onlyTheseClips);
+    // Why the last bounceRenderToWavImpl failed, for the bounce/freeze command's error.
+    juce::String lastBounceError_;
     juce::var cmdCancelRender     (const juce::var& args);
     juce::var cmdAcceptRender     (const juce::var& args);
     juce::var cmdRejectRender     (const juce::var& args);
@@ -794,6 +888,8 @@ private:
     // (an instrument/FX edit changes a MIDI bounce). Message-thread only.
     void            reactiveTouch (const juce::String& clipId);
     void            reactiveTouchTrack (const juce::String& trackId);
+    int             reactiveTrackTouches_ = 0;          // --selftest's view of reactiveTouchTrack
+    juce::String    lastReactiveTouchTrack_;
     void            reactiveFire (const juce::String& clipId);
     // Per-clip debounce timers (juce::Timer holds a LambdaTimer defined in the .cpp).
     std::map<juce::String, std::unique_ptr<juce::Timer>> reactiveTimers;
@@ -895,6 +991,8 @@ private:
     // user is ~/Library/Mosh/presets/<pluginKey>/ and wins on name collisions.
     juce::File           presetsBundledRoot() const;
     juce::File           presetsUserRoot() const;
+    int                  trackPresetFaultPoint_ = 0;          // selftest only; see setTrackPresetHooksForSelfTest
+    bool                 trackPresetPretendRecording_ = false;
     // True when at least one bundled pad is resolvable — guard mutations that load
     // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
     bool                 drumKitAvailable (const juce::String& kitId = {}) const;
@@ -903,6 +1001,12 @@ private:
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
     // findSampler(): the track's te::SamplerPlugin if present (never creates one).
     te::SamplerPlugin*   findSampler (te::AudioTrack&) const;
+    // samplerToVar(): a sampler plugin entry's `sampler` object {primary, kit?, sounds,
+    // limits} (docs/02_MOSHOPS_CONTRACT.md), read from the SOUND children of its persisted
+    // state on the message thread; never from the asynchronously loaded sound list, which
+    // the audio thread's lock guards. `owner` is the track the plugin is on (nullptr on the
+    // master bus); `primary` is whether it is the sampler the pad commands address.
+    juce::var            samplerToVar (te::SamplerPlugin&, te::AudioTrack* owner);
     // applyDrumLaneGains(): silence the sampler pads whose GM pitch is muted (or, when
     // any lane is soloed, every pad EXCEPT the soloed ones), and restore a formerly-muted
     // pad to the gain it had before. Only touches pads crossing the mute threshold, so a
@@ -915,6 +1019,12 @@ private:
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
     // sampler's async file load headless. Returns the number of pads loaded.
     int                  loadDrumKitInto (te::SamplerPlugin&, const juce::String& kitId = {});
+    // settleSamplers(): bring every sampler's LOADED sound list up to its state now. A
+    // te::SamplerPlugin plays from that list, which Tracktion rebuilds only on an
+    // AsyncUpdate after any sound edit (load, replace, pad gain/pan/key, reload/open), and
+    // an offline render runs on the message thread without dispatching one. Every render
+    // entry calls this first; otherwise it plays what the list held before the edit.
+    void                 settleSamplers();
     // ensureDefaultInstrument(): if the track has no instrument, auto-load the sane
     // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
     // audible immediately. No-op when an instrument is already present.
@@ -1078,9 +1188,63 @@ private:
         see txnOpenedSinceSync_ for why that matters at saturation. */
     void beginUndoTransaction (const juce::String& name)
     {
+        endGestureWindow();   // a new step: whatever gesture owned the old one is over
         undoManager().beginNewTransaction (name);
         txnOpenedSinceSync_ = true;
+        ++undoTxnSerial_;
     }
+
+    // ── Gesture coalescing (set_plugin_param / set_plugin_state) ─────────────────
+    // A drag sends many commands carrying one `gesture` id. The first opens a normal
+    // transaction; each later call with the SAME id joins it instead of opening a new
+    // one, as long as that transaction is still the current one and nothing else has
+    // touched the undo stack since: no other beginUndoTransaction (any other command),
+    // no undo/redo/jump (editRevision_ and the stack depth), no foreign transaction.
+    // So a whole drag undoes as ONE step. Without a gesture, and inside an agent batch
+    // (which already coalesces), this is exactly beginTxn.
+    //
+    // While the window is open MoshOps holds a te::Edit::UndoTransactionInhibitor:
+    // Tracktion's Edit::UndoTransactionTimer otherwise calls beginNewTransaction() 350 ms
+    // after any change unless a JUCE mouse button is down, and the panels' dials live in
+    // the WebView, whose pointer never reaches JUCE, so a drag held still to listen
+    // would split into several steps. The window (and the inhibitor) ends at any
+    // beginUndoTransaction, undo/redo/jump_to_history, a call without or with another
+    // gesture, an agent batch, before the Edit is replaced, after kGestureIdleMs without
+    // a call of the gesture (checked from timerCallback), and before ANY other command
+    // that is not a read (execute()): a command that opens no transaction (stop_recording,
+    // whose take Tracktion lands through the Edit's UndoManager) must not let Tracktion's
+    // writes join a drag's step.
+    /** Empty when `gesture` is absent or valid; otherwise the error message. A valid
+        gesture is 1..64 characters from [A-Za-z0-9_.:-]. */
+    static juce::String gestureArgError (const juce::var& args);
+    /** True when this call joined the open gesture transaction (it did the bookkeeping
+        beginTxn does, minus opening a transaction). False: the caller calls beginTxn. */
+    bool joinGestureTxn (const juce::String& gesture);
+    /** After performing: remember the transaction this gesture now owns. */
+    void noteGestureTxn (const juce::String& gesture);
+    /** Close the gesture window: forget the gesture and release the inhibitor. With
+        `closeStep`, also close the gesture's undo step (what Tracktion's own timer would
+        have done had the inhibitor not held it), so a later write that opens no
+        transaction of its own (a take landing at stop, a by-hash repoint) cannot join the
+        drag's step. */
+    void endGestureWindow (bool closeStep = false);
+    /** timerCallback: end a window that went idle or that something else invalidated. */
+    void expireGestureWindow();
+    static constexpr juce::uint32 kGestureIdleMs = 3000;
+    juce::uint64 undoTxnSerial_ = 0;          // bumped by every beginUndoTransaction
+    juce::String gestureId_;                  // the gesture that owns the current transaction
+    juce::uint64 gestureTxnSerial_ = 0;       // undoTxnSerial_ when it was noted
+    juce::int64  gestureRevision_ = -1;       // editRevision_ when it was noted
+    int          gestureUndoDepth_ = -1;      // undo depth when it was noted
+    juce::String gestureTxnName_;             // the transaction's name when it was noted
+    juce::uint32 gestureLastCallMs_ = 0;      // Time::getMillisecondCounter() at the last call
+    std::unique_ptr<te::Edit::UndoTransactionInhibitor> gestureInhibitor_;
+    const te::Edit* gestureInhibitedEdit_ = nullptr;   // the Edit the inhibitor holds
+public:
+    /** Selftest probe: a gesture window is open and holds Tracktion's transaction timer. */
+    bool gestureWindowOpenForTest() const noexcept { return gestureInhibitor_ != nullptr; }
+    static constexpr juce::uint32 kGestureIdleMsForTest = kGestureIdleMs;
+private:
 
     /** The JUCE device manager under Tracktion's wrapper that the device picker drives. */
     juce::AudioDeviceManager& adm() { return eng.engine().getDeviceManager().deviceManager; }
@@ -1120,6 +1284,10 @@ private:
         // path for both kinds, instead of a per-note timer whose destruction mid-flight
         // would be one more way to leak a stuck note.
         double ttlMs = 0.0;
+        // A blip (fire-and-forget), not a held "on". On the clipless sampler road a note-on
+        // for a pitch whose voice is a blip, or a blip for a held pitch, re-presses the key
+        // (a re-tap must sound); an "on" repeating an "on" stays one press.
+        bool   blip = false;
     };
     std::vector<HeldVoice> heldVoices_;          // message thread only
     // Every injected message is stamped notMPE ({} == 0), which is what the engine's own
@@ -1158,6 +1326,11 @@ private:
     void releaseOneVoice (te::AudioTrack&, int channel, int pitch);
 
     juce::var cmdAuditionNote (const juce::var& args);
+    // cmdAuditionNote's body. `samplerRoadOnly` (--selftest only, through
+    // auditionNoteOnSamplerRoadForSelfTest) skips the no-audio bail and the armed-input and
+    // inject roads and goes straight to the clipless sampler road, so a headless run drives
+    // that road through the command's own bookkeeping, retrigger rule and reply.
+    juce::var auditionNote (const juce::var& args, bool samplerRoadOnly);
     juce::var cmdAllNotesOff  (const juce::var& args);
     // Releases every held voice on every track (explicit note-offs, then an all-notes-off
     // per channel, then any sampler's allNotesOff — the only thing that stops an
@@ -1190,6 +1363,15 @@ private:
     juce::var decideDirectRender (const juce::String&, const juce::var&);
     void pollDirectRenders();
     void cancelDirectRenders (const juce::String& reason);
+    // Undo/redo/history-jump and project-replacing commands must never race a Keep
+    // (accept_render) decision that is still validating: cancelling it (as every other
+    // in-flight direct-render job is) could silently drop the user's Keep. Decision
+    // validation is bounded and fully local (a clonefile snapshot + two SHA256 reads,
+    // no network, no model) -- measured ~2.7s for a 200s clip -- so it is safe to block
+    // the message thread on briefly here instead. Only "accept" decisions are waited
+    // for; "result" (audition) validations and generation jobs still cancel as before.
+    // See FINDINGS.md #7 (2026-09-23 demo walkthrough).
+    void completePendingAcceptDecisions();
     void restoreDirectAuditions();
     void prepareDirectCommand (const juce::var&);
     void appendDirectRenderSnapshot (juce::DynamicObject&, te::Clip&, const juce::ValueTree&);
@@ -1292,7 +1474,70 @@ private:
     // CAP-AUT-006 — did last tick's "mute_automation" rail carry anything? Drives the
     // one falling-edge emit that clears the UI when the last mute curve is deleted.
     bool        hadMuteAutomation = false;
+    // Did last tick's "tuner" rail carry a reading? Same falling-edge rule: one empty
+    // payload when the singing stops, so the display clears instead of freezing.
+    bool        hadTunerReadings = false;
+    // Did last tick's "plugin_meters" rail carry a reading? Same falling-edge rule.
+    bool        hadPluginMeters = false;
+    // EditItemIDs (raw) of the metered plugins pluginMeters() saw on its previous call. A
+    // plugin not in it (new, or back from an undone removal) has its reading consumed
+    // and not reported, so data from before it left the chain can never surface.
+    std::set<juce::uint64> pluginMetersSeen_;
+    // Each metered plugin's rail frame counter (the entry's `seq`), by raw EditItemID.
+    std::map<juce::uint64, juce::int64> pluginMeterSeq_;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
+
+    // FU1 (2026-09-24 investor-demo walkthrough, finding 4) — a real Tracktion Edit runs
+    // te::Edit::UndoTransactionTimer (tracktion_Edit.cpp), which fires 350 ms after ANY
+    // change and calls beginNewTransaction() unless edit.numUndoTransactionInhibitors > 0.
+    // A multi-step Moshi agent task's LLM round-trip between steps routinely exceeds that
+    // window, so an unguarded batch_begin..batch_end could still split into two or more
+    // real undo transactions even though `inBatch` stayed true the whole time — the mock
+    // e2e's "one task = one undo" is vacuous because the mock has no Tracktion timer.
+    //
+    // batchInhibitor_ holds the real te::Edit::UndoTransactionInhibitor (tracktion_Edit.h)
+    // for exactly as long as `inBatch` is true. setInBatch() below is the ONLY place that
+    // may change `inBatch`, so every existing writer (batch_begin/batch_end/batch_rollback
+    // in both legacy and transactional mode, their error/needs-recovery branches, and the
+    // two ownBatch composites cmdSketchBeatbox/cmdGenerateBeatRecipe) toggles the inhibitor
+    // the same way and none of them can leak or double-release it.
+    //
+    // UndoTransactionInhibitor stores a SafeSelectable<Edit>, so its destructor is a no-op
+    // once the Edit is gone — it can never dereference a dangling Edit even if held across
+    // an Edit teardown. That is only a safety net, though: ~Edit asserts
+    // numUndoTransactionInhibitors == 0 (tracktion_Edit.cpp), so an inhibitor must never
+    // outlive the Edit it holds. Main.cpp destroys MoshOps (and so batchInhibitor_) BEFORE
+    // the engine/Edit on ordinary shutdown, and EVERY command that replaces the Edit —
+    // new_project, open_project/open_recent, reload and open_without_plugins — calls
+    // closeBatchForEditSwap() before the swap, so a batch left open across it neither leaks
+    // its inhibitor onto the dying Edit nor wedges `inBatch` true on the fresh one.
+    std::optional<te::Edit::UndoTransactionInhibitor> batchInhibitor_;
+
+    /** The only place `inBatch` is assigned. Toggling it also holds/releases the real
+        undo-transaction inhibitor so a whole agent batch coalesces into ONE undo step. */
+    void setInBatch (bool shouldBeInBatch)
+    {
+        if (shouldBeInBatch == inBatch) return;
+        inBatch = shouldBeInBatch;
+        if (shouldBeInBatch) batchInhibitor_.emplace (eng.edit());
+        else                 batchInhibitor_.reset();
+    }
+
+    /** Force-close an open LEGACY batch because the Edit is about to be REPLACED
+        (new_project, open_project/open_recent, reload, open_without_plugins). Call it
+        BEFORE the engine swaps the Edit: the abandoned batch has nothing left to commit
+        onto, its inhibitor must be released while its Edit still exists, and `inBatch`
+        must not stay true on the fresh Edit (batch_begin would refuse forever and the
+        rest of the batch would run with no inhibitor). batchTurnId_ goes with it, like
+        every other batch-closing path, so the swap's own log line is not stamped with
+        the abandoned batch's turn id. (In transactional mode txnPreDispatch already
+        refuses a foreign project swap while txn_ is open, so this is the legacy path.) */
+    void closeBatchForEditSwap()
+    {
+        if (! inBatch) return;
+        setInBatch (false);
+        batchTurnId_.clear();
+    }
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
     // `inBatch` above keeps its EXACT prior meaning (undo coalescing) and is still set
@@ -1311,6 +1556,16 @@ private:
     juce::File        txnLedgerFile;
     juce::int64       editRevision_ = 0;   // bumped by beginTxn / cmdUndo / cmdRedo
     int               execDepth_    = 0;   // the guard governs the OUTERMOST execute only
+    // True while prepareRenderSources services the message loop inside a render command;
+    // execute() refuses any command that arrives then (a UI click, a queued async call).
+    bool              preparingRenderSources_ = false;
+    // Multiplayer applies (a peer commit, structural op or bootstrap adoption) arrive by
+    // callAsync; one delivered while a render waits would be refused and lost, so it is
+    // held here instead, in arrival order, and the next timer tick after the render runs it.
+    std::vector<std::function<void()>> heldMpApplies_;
+    bool mpAppliesHeld() const noexcept { return preparingRenderSources_ || ! heldMpApplies_.empty(); }
+    void runOrHoldMpApply (std::function<void()> apply);
+    void runHeldMpApplies();
     // Step-1 slice 6 — provenance stamped on every JSONL line (ADDITIVE fields; a reader
     // treats absence as unknown). currentOrigin_ is owned by the OUTERMOST execute(): the
     // envelope's non-empty "origin" sibling, else "ui" when the call came through
