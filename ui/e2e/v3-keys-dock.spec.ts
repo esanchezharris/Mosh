@@ -69,7 +69,8 @@ test("A7: a live task shows step and elapsed with Stop; after it ends the next e
   const before = await tracks.count();
   expect(await tempo(page)).toBe(120);
 
-  await page.getByTestId("v3-moshi-field").fill("build me a lofi sketch");
+  // Not the bare "build me a lofi sketch": that takes the fast path to generate_beat_recipe.
+  await page.getByTestId("v3-moshi-field").fill("build me a lofi sketch, keep it dusty");
   await page.getByTestId("v3-moshi-send").click();
 
   const status = page.getByTestId("v3-moshi-task");
