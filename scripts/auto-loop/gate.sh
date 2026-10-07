@@ -13,6 +13,7 @@
 set -uo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib.sh"
+. "$SELF_DIR/../lib/harness-session.sh"
 # lib.sh enables `set -e`; the gate INTENTIONALLY runs steps that may fail and records
 # them, so turn errexit back OFF (keep nounset + pipefail).
 set +e -uo pipefail
@@ -80,6 +81,9 @@ run_memory_preflight() {
 
 # ── selftest ×3 (native only) ────────────────────────────────────────────────────
 SELFTEST_NS="[]"; SELFTEST_FMAX=0; SELFTEST_AMAX=0
+# The session each launched round was given, and whether selftest_x3 passed; read by
+# reclaim_selftest_sessions once every later step has run.
+SELFTEST_SESSIONS=""; SELFTEST_OK=false
 run_selftest_x3() {
   local bin="$1" i rc n f a det=true
   local ns="" deterministic=true baseline_ok=true rc_nonzero=""
@@ -101,6 +105,7 @@ run_selftest_x3() {
       rm -f "$log"; return 1
     fi
     [ -n "$PORT" ] || PORT="$sport"
+    SELFTEST_SESSIONS="$SELFTEST_SESSIONS $sess"
     # -ApplePersistenceIgnoreState YES: a headless selftest must NEVER inherit AppKit's
     # window-restoration / "reopen after crash" modal. After repeated crashes macOS shows
     # NSPersistentUIRestorer's runModal during launch, which blocks a headless run forever
@@ -143,6 +148,7 @@ run_selftest_x3() {
   [ "$det" = true ] || ok=false
   [ "$deterministic" = true ] || ok=false
   [ "$baseline_ok" = true ] || ok=false
+  SELFTEST_OK="$ok"
   emit_step "selftest_x3" "$ok" "$(jq -nc \
       --argjson ns "$SELFTEST_NS" --argjson fmax "$SELFTEST_FMAX" --argjson amax "$SELFTEST_AMAX" \
       --argjson deterministic "$deterministic" --argjson baseline_ok "$baseline_ok" \
@@ -156,15 +162,14 @@ run_selftest_x3() {
 # only on failure. On pass it is removed along with this run's own session dirs: the harness
 # names each sub-run session _harness/<name>-<uuid>, so without this every gate run would leave
 # ~29 dirs (~100 MB) behind for good. Only dirs this run's evidence names AND that carry the
-# harness ownership marker are removed. $2 = "advisory": report a failure but return 0.
+# harness ownership marker are removed.
 run_direct_reimagine() {
-  local bin="$1" mode="${2:-}" ev rc script session
+  local bin="$1" ev rc script session
   ev="$AL_HOME/direct-reimagine/${HEAD_SHA:0:12}-$(date +%Y%m%dT%H%M%S)-$$"
   mkdir -p "$ev" || return 1
   python3 scripts/verify-hardware/verify-direct-reimagine.py "$bin" "$ev"; rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "direct_reimagine FAILED (rc=$rc); evidence kept: $ev"
-    [ "$mode" = advisory ] && { echo "ADVISORY step: this failure does not fail the gate"; return 0; }
     return "$rc"
   fi
   for script in "$ev"/*/commands.jsonl; do
@@ -248,6 +253,11 @@ run_harness_selftests() {
   run_step "harness_selftest_log_keep" bash scripts/auto-loop/selftest-log-keep-selftest.sh
   run_step "cmake_preset_bundle_metadata" bash tests/cmake-preset-bundle-metadata-test.sh
   run_step "tracktion_patch_stack" bash tests/apply-tracktion-patch-test.sh
+  # v3-acceptance's row_chords verdict logic (BLOCKED vs FAIL precedence) -- like run_py_tests
+  # above, path-scoped-only discovery let a scripts/v3-acceptance/ regression hide (it isn't
+  # under relay/ or service/), so this one runs unconditionally here too. Pure unittest, no
+  # binary/device required (subprocess + _is_asan_build mocked); <1s including python3 startup.
+  run_step "v3_acceptance_chords_verdict_selftest" python3 scripts/v3-acceptance/chords_verdict_test.py
 }
 
 # ── cheap lane ───────────────────────────────────────────────────────────────────
@@ -354,16 +364,15 @@ gate_native() {
   # lifecycle (render → audition → Keep/Reject/remove → undo/redo → save/reopen), and nothing ran
   # it, which is how the Keep→undo race (2026-09-23 walkthrough, FINDINGS #7) shipped. Hermetic:
   # a deterministic fixture service (no SA3, model or GPU), an isolated _harness/ session and an
-  # OS-assigned loopback port per sub-run (49152+, clear of this gate's 8800-8899 band). ~2.5 min,
-  # nearly all fixed waits. Needs pydantic>=2.
+  # OS-assigned loopback port per sub-run (49152+, clear of this gate's 8800-8899 band). Needs
+  # pydantic>=2.
   #
-  # ADVISORY (a failure is logged, never fails the gate) until those fixed waits become
-  # condition polls: several checks assert a result landed within a fixed __wait with only
-  # 1-2 s of margin over a cold fixture-service start. Measured 2026-09-26: 3/3 clean full runs
-  # on a quiet Mac, but under a sibling build `overlap` (4.5 s wait vs the fixture's 3 s delay)
-  # still read `rendering` in 2/12 runs at load 8-12 and red-flaked 1 of 2 full runs. Promote to
-  # blocking by dropping the `advisory` argument.
-  run_step "direct_reimagine" run_direct_reimagine "$bin" advisory
+  # BLOCKING. Every async result is awaited with `__wait_until` (SelfTest.cpp), never a fixed
+  # `__wait`. It returns when the work has landed and fails only past a generous deadline. The
+  # fixed waits it replaced had 1-2 s of margin over a cold fixture-service start. Under sibling
+  # builds `overlap` read `rendering` in 2/12 runs at load 8-12 and in 12/12 at load ~200, and one
+  # full run failed on it; that was why this step used to be advisory.
+  run_step "direct_reimagine" run_direct_reimagine "$bin"
 
   # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
   # through the real command surface. Fails on an in-scope regression (known gaps are
@@ -406,6 +415,22 @@ gate_native() {
   run_step "replay_e2e" bash -c "python3 scripts/daw-conformance/replay_e2e_log.py '$bin' || true"
 }
 
+# ── reclaim this run's selftest sessions ─────────────────────────────────────────
+# Each --selftest round leaves a ~90 MB session under ~/Library/Mosh/_harness, and none
+# was ever deleted (210 of them, 15.4 GiB, on 2026-09-26). Nothing after run_selftest_x3
+# reads them: verify.py, conformance and replay run their own sessions, and
+# keep_failed_selftest_log copies a round's log, not its session. So after the last step,
+# a passing selftest_x3 removes exactly the sessions it generated, through the ownership
+# checks in scripts/lib/harness-session.sh; a failing one keeps them as its diagnostics.
+# Advisory: reclaiming disk never decides the verdict.
+reclaim_selftest_sessions() {
+  [ -n "$SELFTEST_SESSIONS" ] || return 0
+  local lines
+  lines="$(mosh_reclaim_harness_sessions "$SELFTEST_OK" $SELFTEST_SESSIONS)"
+  emit_step "harness_session_reclaim" true "$(printf '%s\n' "$lines" \
+    | jq -Rsc '{sessions:(split("\n") | map(select(length > 0)))}')"
+}
+
 finish() {
   local steps; steps="$(jq -sc . "$STEPS_FILE")"
   jq -nc \
@@ -429,5 +454,6 @@ if run_memory_preflight; then
   esac
 fi
 
+reclaim_selftest_sessions
 finish
 [ "$OVERALL" = true ]

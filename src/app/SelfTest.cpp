@@ -1,5 +1,8 @@
 #include "SelfTest.h"
 #include "selftest/MultiplayerAudioRefSelfTest.h"
+#include "selftest/TunedLeadPresetSelfTest.h"
+#include "selftest/VocalPresetSelfTest.h"
+#include "selftest/PluginPanelsSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -7,6 +10,9 @@
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -22,6 +28,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <thread>
@@ -87,6 +94,29 @@ namespace
     void check (bool cond, const char* what)
     {
         check (cond, juce::String (juce::CharPointer_UTF8 (what)));
+    }
+
+    // Pumps the message loop until `ready()` holds, for at most `timeoutMs`; returns
+    // whether it held. For async engine work (a warp proxy render, a plugin's AsyncUpdate)
+    // whose duration depends on machine load: a fixed pump that is ample on an idle
+    // machine loses the race while other worktrees are building.
+    bool pumpUntil (const std::function<bool()>& ready, int timeoutMs)
+    {
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        const auto startMs = juce::Time::getMillisecondCounter();
+
+        while (! ready())
+        {
+            if (juce::Time::getMillisecondCounter() - startMs > (juce::uint32) timeoutMs)
+                return ready();
+
+            if (mm != nullptr)
+                mm->runDispatchLoopUntil (20);
+            else
+                juce::Thread::sleep (20);
+        }
+
+        return true;
     }
 
     juce::var cmd (MoshOps& ops, const juce::String& name, juce::var args = juce::var())
@@ -176,6 +206,81 @@ namespace
         if (! ledger.existsAsFile()) return {};
         return mosh::agenttxn::unresolvedIdsIn (
             juce::StringArray::fromLines (ledger.loadFileAsString()));
+    }
+
+    /** True when `text` holds `token` as a WHOLE token: bounded on each side by the text's
+        edge or a character that is not a letter or digit. "1085", "id=1085", "[1085]" and
+        "track_1085" match; "9ab1085cd" does not, because a run of hex is one token. */
+    bool containsWholeToken (const juce::String& text, const juce::String& token)
+    {
+        if (token.isEmpty()) return false;
+        const auto isWord = [] (juce::juce_wchar c) { return juce::CharacterFunctions::isLetterOrDigit (c); };
+        for (int at = text.indexOf (token); at >= 0; at = text.indexOf (at + 1, token))
+        {
+            const int end = at + token.length();
+            if ((at == 0 || ! isWord (text[at - 1])) && (end >= text.length() || ! isWord (text[end])))
+                return true;
+        }
+        return false;
+    }
+
+    /** The path under `path` at which `v` carries `id` as data, or "" if it does not. */
+    juce::String varPlaceCarrying (const juce::var& v, const juce::String& path, const juce::String& id)
+    {
+        if (auto* o = v.getDynamicObject())
+        {
+            for (auto& p : o->getProperties())
+            {
+                const auto at = path + "/" + p.name.toString();
+                if (containsWholeToken (p.name.toString(), id)) return at + " (key)";
+                if (auto hit = varPlaceCarrying (p.value, at, id); hit.isNotEmpty()) return hit;
+            }
+            return {};
+        }
+        if (auto* a = v.getArray())
+        {
+            for (int i = 0; i < a->size(); ++i)
+                if (auto hit = varPlaceCarrying (a->getReference (i), path + "[" + juce::String (i) + "]", id);
+                    hit.isNotEmpty())
+                    return hit;
+            return {};
+        }
+        if (v.isString())
+            return containsWholeToken (v.toString(), id) ? path : juce::String();
+        // `revision` is the edit-revision counter, not a track id, but it shares their number
+        // space: bootstrap-refusal-txn's revision drifts run to run (1057..1093 in the ledgers
+        // on disk, 2026-09-30) around the fixture's id (1085), and five 2026-08-07 ledgers
+        // carry revision 1073 beside trackId 1073. Equality there is a coincidence.
+        if ((v.isInt() || v.isInt64() || v.isDouble()) && path != "/revision")
+            return id.containsOnly ("0123456789") && (double) v == id.getDoubleValue() ? path : juce::String();
+        return {};
+    }
+
+    /** Where the durable txn ledger carries `id` as DATA ("line N /key"), or "" if nowhere.
+        A substring test over the whole file is not exact for a short numeric id (the
+        2026-09-30 selftest flake): a revision can equal it (above), and the ledger is mostly
+        32-char MD5 hex (two fingerprints per txn record, up to six digests per request
+        record) that holds a given 4 digits in about 1 run in 130. So each line is parsed,
+        and every key and string value, at any depth, is checked for the id as a whole
+        token, and every number except `revision` for equality with it. A line that does not
+        parse — a torn crash tail — is scanned raw, token-wise, so malformed text cannot
+        hide a leak. */
+    juce::String whereLedgerCarries (const juce::String& ledgerText, const juce::String& id)
+    {
+        const auto lines = juce::StringArray::fromLines (ledgerText);
+        for (int n = 0; n < lines.size(); ++n)
+        {
+            const auto line = lines[n].trim();
+            if (line.isEmpty()) continue;
+            const auto record = juce::JSON::parse (line);
+            const auto where = record.getDynamicObject() != nullptr
+                                   ? varPlaceCarrying (record, {}, id)
+                                   : (containsWholeToken (line, id) ? juce::String ("(unparsed line)")
+                                                                    : juce::String());
+            if (where.isNotEmpty())
+                return "line " + juce::String (n + 1) + " " + where;
+        }
+        return {};
     }
 
     // A fixed filename in the shared, machine-wide system temp dir collides when two
@@ -624,6 +729,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     std::vector<String> eventTypes;
     var lastEvent;
     var lastLevelsEvent;
+    double peakMasterSinceReset = -1000.0;   // max master l/r over every "levels" event since reset
     var lastMpCommitDone;
     bool sawProjectReplacementEvent = false;
     String lastProjectReplacementReason;
@@ -633,7 +739,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         eventTypes.push_back (e.getProperty ("type", var()).toString());
         lastEvent = e;
         if (e.getProperty ("type", var()).toString() == "levels")
+        {
             lastLevelsEvent = e;
+            const auto master = e.getProperty ("payload", var()).getProperty ("master", var());
+            peakMasterSinceReset = jmax (peakMasterSinceReset,
+                                         (double) master.getProperty ("l", -1000.0),
+                                         (double) master.getProperty ("r", -1000.0));
+        }
         if (e.getProperty ("type", var()).toString() == "mp_commit_done")
             lastMpCommitDone = e;
         if (e.getProperty ("type", var()).toString() == "snapshot_invalidated"
@@ -1918,6 +2030,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // gate stays green on a box with zero .component files.
     section ("INS-002/INS-005: AU hosting + scan / blocklist");
     {
+        // Everything below blocks, unblocks and clears quarantines and arms a simulated
+        // crash pedal. A harness run must do that in its OWN plugin state dir: on the
+        // machine-wide ~/Library/Mosh copy, concurrent runs consumed each other's pedal
+        // (failing the FIT-003 checks below) and clear_plugin_blocklist wiped the owner's
+        // real quarantines out of the catalog the GUI loads at launch.
+        check (ops.pluginHostForScan().stateDirectory().isAChildOf (eng.sessionDir()),
+               "plugin catalog, block reasons and scan pedal are private to this run's session");
+
         // The AudioUnit format is registered (proves the JUCE_PLUGINHOST_AU flag is
         // live) -- machine-independent; the format object exists even with no AUs.
         bool auFormatRegistered = false;
@@ -2123,7 +2243,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (reason == "crash_or_hang",
                    "dead-mans-pedal recovery is tagged reason:\"crash_or_hang\" (not \"manual\")");
 
-            // Clean up: never leave a synthetic id in the shared, machine-wide catalog.
+            // Clean up: leave no synthetic id in this run's catalog.
             check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok (crash-recovery cleanup)");
             auto bl2 = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
             check (bl2.isArray() && bl2.size() == 0, "blocklist empty after crash-recovery cleanup");
@@ -3296,6 +3416,299 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // checks live in the separate runUndoSelfTest with its own fresh engine.
     }
 
+    // ─── Mosh AutoTune: real pitch correction, latency compensated ───
+    // docs/AUTOTUNE-SCOPE-2026-10-01.md. Renders a detuned, harmonic-rich tone with a
+    // click ahead of it through the real plugin and reads the stem back. The click is
+    // unvoiced, so it passes at exactly the plugin's latency: it lands on time only if
+    // the reported latency is right and the render compensates for it. This proves the
+    // wiring, not how a voice sounds.
+    section ("Mosh AutoTune: pitch correction through the plugin");
+    {
+        const double fixtureRate = 48000.0;
+        const double detunedHz = 220.0 * std::pow (2.0, 35.0 / 1200.0); // A3 + 35 cents
+        auto makeFixture = [&] () -> File
+        {
+            const int n = (int) (2.0 * fixtureRate);
+            juce::AudioBuffer<float> buf (1, n);
+            buf.clear();
+            const int clickAt = (int) (0.25 * fixtureRate);
+            for (int i = 0; i < 48; ++i)
+                buf.setSample (0, clickAt + i, 0.8f * (1.0f - (float) i / 48.0f) * (i % 2 == 0 ? 1.0f : -1.0f));
+            const int toneStart = (int) (0.5 * fixtureRate), toneEnd = (int) (1.9 * fixtureRate);
+            const int fade = (int) (0.02 * fixtureRate);
+            for (int i = toneStart; i < toneEnd; ++i)
+            {
+                const double phase = juce::MathConstants<double>::twoPi * detunedHz * (double) (i - toneStart) / fixtureRate;
+                double v = 0.0;
+                for (int h = 1; h <= 10; ++h)
+                    v += std::sin (h * phase) / h;
+                const double env = juce::jmin (1.0, (double) (i - toneStart) / fade, (double) (toneEnd - 1 - i) / fade);
+                buf.setSample (0, i, (float) (0.2 * v * env));
+            }
+            auto dir = eng.sessionDir().getChildFile ("autotune-test");
+            dir.createDirectory();
+            auto f = dir.getChildFile ("detuned-vowel.wav");
+            f.deleteFile();
+            juce::WavAudioFormat fmt;
+            if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (os.get(), fixtureRate, 1u, 24, {}, 0));
+                if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, n); }
+            }
+            return f;
+        };
+
+        struct Stem { std::vector<float> samples; double rate = 0.0; };
+        auto renderStem = [&] (const String& trackId, const String& leaf) -> Stem
+        {
+            Stem stem;
+            auto dir = selftestTempPath (eng, leaf);
+            dir.deleteRecursively();
+            auto exp = cmd (ops, "export_stems", objN ({{ "dir", dir.getFullPathName() }}));
+            if (auto* arr = exp["data"].getProperty ("stems", var()).getArray())
+                for (auto& st : *arr)
+                    if (st.getProperty ("trackId", var()).toString() == trackId)
+                    {
+                        AudioFormatManager fm; fm.registerBasicFormats();
+                        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (File (st.getProperty ("file", var()).toString())));
+                        if (reader != nullptr && reader->lengthInSamples > 0)
+                        {
+                            const int count = (int) reader->lengthInSamples;
+                            AudioBuffer<float> buf ((int) reader->numChannels, count);
+                            reader->read (&buf, 0, count, 0, true, true);
+                            stem.rate = reader->sampleRate;
+                            stem.samples.resize ((size_t) count);
+                            for (int i = 0; i < count; ++i)
+                            {
+                                float sum = 0.0f;
+                                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                                    sum += buf.getSample (ch, i);
+                                stem.samples[(size_t) i] = sum / (float) buf.getNumChannels();
+                            }
+                        }
+                    }
+            dir.deleteRecursively();
+            return stem;
+        };
+        // Time of the largest sample in [0.15 s, 0.40 s): the click.
+        auto clickSeconds = [] (const Stem& stem) -> double
+        {
+            if (stem.rate <= 0.0) return -1.0;
+            const size_t from = (size_t) (0.15 * stem.rate), to = juce::jmin (stem.samples.size(), (size_t) (0.40 * stem.rate));
+            size_t best = from;
+            for (size_t i = from; i < to; ++i)
+                if (std::abs (stem.samples[i]) > std::abs (stem.samples[best])) best = i;
+            return (double) best / stem.rate;
+        };
+        // Autocorrelation pitch over [1.0 s, 1.6 s), searched only around A3.
+        auto toneHz = [] (const Stem& stem) -> double
+        {
+            if (stem.rate <= 0.0 || stem.samples.size() < (size_t) (1.7 * stem.rate)) return 0.0;
+            const float* x = stem.samples.data() + (size_t) (1.0 * stem.rate);
+            const int n = (int) (0.6 * stem.rate);
+            const int minLag = (int) (stem.rate / 260.0), maxLag = (int) (stem.rate / 180.0);
+            auto corr = [&] (int lag) { double sum = 0.0; for (int i = 0; i + lag < n; ++i) sum += (double) x[i] * x[i + lag]; return sum / (double) (n - lag); };
+            int best = minLag; double bestValue = -1.0e30;
+            for (int lag = minLag; lag <= maxLag; ++lag) { const double c = corr (lag); if (c > bestValue) { bestValue = c; best = lag; } }
+            const double a = corr (best - 1), b = corr (best), c = corr (best + 1);
+            const double denom = a - 2.0 * b + c;
+            return stem.rate / ((double) best + (std::abs (denom) > 1.0e-12 ? 0.5 * (a - c) / denom : 0.0));
+        };
+        // Level of one frequency over the same span (Hann-weighted).
+        auto levelAt = [] (const Stem& stem, double hz) -> double
+        {
+            if (stem.rate <= 0.0 || stem.samples.size() < (size_t) (1.7 * stem.rate)) return 0.0;
+            const float* x = stem.samples.data() + (size_t) (1.0 * stem.rate);
+            const int n = (int) (0.6 * stem.rate);
+            double re = 0.0, im = 0.0, weight = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                const double w = 0.5 * (1.0 - std::cos (juce::MathConstants<double>::twoPi * i / (n - 1)));
+                const double angle = juce::MathConstants<double>::twoPi * hz * i / stem.rate;
+                re += w * x[i] * std::cos (angle); im -= w * x[i] * std::sin (angle); weight += w;
+            }
+            return 2.0 * std::sqrt (re * re + im * im) / juce::jmax (weight, 1.0e-12);
+        };
+        auto cents = [] (double hz, double ref) { return hz > 0.0 ? 1200.0 * std::log2 (hz / ref) : 1.0e9; };
+
+        auto fixture = makeFixture();
+        check (fixture.existsAsFile(), "AutoTune fixture synthesized (click + detuned harmonic tone)");
+        auto at = cmd (ops, "create_track", args1 ("name", "AutoTune Render"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "import_clip", objN ({{ "trackId", at }, { "file", fixture.getFullPathName() }}))), "AutoTune fixture imported");
+
+        auto atLoad = cmd (ops, "load_builtin", objN ({{ "trackId", at }, { "type", "moshAutoTune" }}));
+        const int atIdx = (int) atLoad["data"].getProperty ("index", -1);
+        check (ok (atLoad) && atIdx >= 0, "AutoTune loaded on the fixture track");
+
+        bool hasGlide = false, hasLookahead = false; int paramCount = 0;
+        { auto trk = trackById (at);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == atIdx)
+                if (auto* params = p.getProperty ("params", var()).getArray())
+                {
+                    paramCount = params->size();
+                    if (paramCount > 7) hasGlide = params->getReference (7).getProperty ("name", var()).toString() == "Glide";
+                    if (paramCount > 8) hasLookahead = params->getReference (8).getProperty ("name", var()).toString() == "Look-ahead";
+                } }
+        check (paramCount == 9, "AutoTune exposes nine params (seven original + Glide + Look-ahead)");
+        check (hasGlide && hasLookahead, "AutoTune's new params are appended as Glide then Look-ahead");
+
+        // Key and scale are menus, not sliders: stepped, with every choice named, and the
+        // other controls read back in their own units instead of a bare 0-1 number.
+        {
+            auto atParam = [&] (int paramIndex) -> var
+            {
+                auto trk = trackById (at);
+                if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                    for (auto& p : *arr)
+                        if ((int) p.getProperty ("index", -1) == atIdx)
+                            if (auto* params = p.getProperty ("params", var()).getArray())
+                                if (paramIndex < params->size())
+                                    return params->getReference (paramIndex);
+                return {};
+            };
+            auto shown = [&] (int paramIndex) { return atParam (paramIndex).getProperty ("display", var()).toString(); };
+            auto choice = [&] (int paramIndex, int i) { return atParam (paramIndex).getProperty ("choices", var())[i].toString(); };
+
+            const auto key = atParam (0), scale = atParam (1);
+            check (key.getProperty ("name", var()).toString() == "Key", "AutoTune's first control is named Key");
+            check ((bool) key.getProperty ("discrete", false) && (int) key.getProperty ("states", 0) == 12
+                   && key.getProperty ("choices", var()).size() == 12,
+                   "Key is a stepped control with twelve named choices");
+            check (choice (0, 0) == "C" && choice (0, 7) == "G" && choice (0, 10) == "A#/Bb" && choice (0, 11) == "B",
+                   "Key's choices are the twelve notes in order from C");
+            check (shown (0) == "C", "a new AutoTune is in C");
+            check ((bool) scale.getProperty ("discrete", false) && (int) scale.getProperty ("states", 0) == 3
+                   && choice (1, 0) == "Chromatic" && choice (1, 1) == "Major" && choice (1, 2) == "Minor",
+                   "Scale is a stepped control: Chromatic, Major, Minor");
+            check (shown (1) == "Chromatic", "a new AutoTune is chromatic");
+            check (shown (2) == "80 ms" && shown (3) == "100 %" && shown (4) == "100 cents" && shown (5) == "100 %"
+                   && shown (6) == "0.0 dB" && shown (7) == "100 %" && shown (8) == "0.0 ms",
+                   "the other controls read back in units (retune \"" + shown (2) + "\", output \"" + shown (6) + "\")");
+
+            // A menu sends the exact position of a choice.
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 0 }, { "value", 7.0 / 11.0 }}))),
+                   "set Key to its eighth choice");
+            check (shown (0) == "G", "Key reads G");
+            // Anything else (an old slider position, an automation point) lands on the nearest note.
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 0 }, { "value", 0.80 }}))),
+                   "set Key between two notes");
+            check (shown (0) == "A" && std::abs ((double) atParam (0).getProperty ("value", -1.0) - 9.0 / 11.0) < 1.0e-4,
+                   "a value between two notes snaps to the nearest (0.80 -> A, stored exactly on it)");
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 1 }, { "value", 0.5 }}))),
+                   "set Scale to its middle choice");
+            check (shown (1) == "Major", "Scale reads Major");
+            check (ok (cmd (ops, "undo")) && shown (1) == "Chromatic", "undo puts the scale back to Chromatic");
+            check (ok (cmd (ops, "undo")) && shown (0) == "G", "undo puts the key back to G");
+            check (ok (cmd (ops, "undo")) && shown (0) == "C", "undo puts the key back to C");
+        }
+
+        // The live note display's feed (the 30 Hz "tuner" rail reads this). A headless run
+        // has no audio thread, so the plugin on the track is driven by hand, block by block,
+        // the way the playback graph's PluginNode drives it.
+        auto tunerOnTrack = [&] () -> MoshAutoTunePlugin*
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == at)
+                {
+                    const auto chain = t->pluginList.getPlugins();
+                    if (atIdx >= 0 && atIdx < chain.size())
+                        return dynamic_cast<MoshAutoTunePlugin*> (chain[atIdx].get());
+                }
+            return nullptr;
+        };
+        // `hz` <= 0 is silence. A harmonic tone, because that is what a voice is.
+        auto singThroughTuner = [&] (double hz, double seconds)
+        {
+            auto* tuner = tunerOnTrack();
+            if (tuner == nullptr) return false;
+            const double rate = 48000.0;
+            const int block = 256;
+            juce::AudioBuffer<float> io (1, (int) (seconds * rate));
+            for (int i = 0; i < io.getNumSamples(); ++i)
+            {
+                double v = 0.0;
+                if (hz > 0.0)
+                    for (int h = 1; h <= 6; ++h)
+                        v += std::sin (juce::MathConstants<double>::twoPi * hz * h * i / rate) / h;
+                io.setSample (0, i, (float) (0.2 * v));
+            }
+            tuner->baseClassInitialise ({ tracktion::TimePosition(), rate, block });
+            const auto layout = juce::AudioChannelSet::mono();
+            for (int start = 0; start < io.getNumSamples(); start += block)
+            {
+                const int n = juce::jmin (block, io.getNumSamples() - start);
+                const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
+                                                 tracktion::TimePosition::fromSeconds ((start + n) / rate));
+                te::PluginRenderContext context (&io, layout, start, n, nullptr, 0.0, time,
+                                                 /*playing*/ true, /*scrubbing*/ false, /*rendering*/ true,
+                                                 /*allowBypassedProcessing*/ false);
+                tuner->applyToBufferWithAutomation (context);
+            }
+            tuner->baseClassDeinitialise();
+            return true;
+        };
+        auto liveTuners = [&] { return ops.tunerReadings().getProperty ("tuners", var()); };
+
+        check (liveTuners().size() == 0, "an AutoTune that has processed no audio reports no live pitch");
+        check (singThroughTuner (detunedHz, 0.5), "a held A3 + 35 cents was put through the tuner");
+        {
+            const auto live = liveTuners();
+            check (live.size() == 1, "one tuner reports a live pitch while it is being sung through");
+            const auto reading = live.size() > 0 ? live[0] : var();
+            check (reading.getProperty ("trackId", var()).toString() == at
+                   && (int) reading.getProperty ("index", -1) == atIdx,
+                   "the reading names its track and its place in the chain, as the snapshot does");
+            const double heardHz = (double) reading.getProperty ("inputHz", 0.0);
+            const double pulledToHz = (double) reading.getProperty ("targetHz", 0.0);
+            check (std::abs (cents (heardHz, detunedHz)) < 8.0,
+                   "it hears the sung pitch (" + String (heardHz, 2) + " Hz for " + String (detunedHz, 2) + " Hz)");
+            check (std::abs (cents (pulledToHz, 220.0)) < 0.5,
+                   "and it is pulling to A3 (" + String (pulledToHz, 2) + " Hz)");
+            check ((double) reading.getProperty ("confidence", 0.0) > 0.5, "with a confident detection");
+        }
+        check (liveTuners().size() == 0,
+               "asked again with no new audio, the reading is gone (a stale pitch is never shown as current)");
+        check (singThroughTuner (0.0, 0.3) && liveTuners().size() == 0, "silence through the tuner is no pitch");
+        check (singThroughTuner (detunedHz, 0.5) && liveTuners().size() == 1, "and the pitch comes back with the voice");
+
+        // Hard tune, and the longest look-ahead so the reported latency is large
+        // enough (about 14 ms) that a missing compensation cannot hide.
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 2 }, { "value", 0.0 }}))), "AutoTune retune set to hard");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 8 }, { "value", 1.0 }}))), "AutoTune look-ahead set to maximum");
+
+        const auto wet = renderStem (at, "autotune-wet");
+        check (! wet.samples.empty(), "AutoTune wet stem rendered");
+
+        // The bypassed render is the reference: same track, same clip, no plugin and
+        // no latency claimed. (Each stem export renders every track, so two are enough.)
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", at }, { "index", atIdx }, { "bypassed", true }}))), "AutoTune bypassed");
+        const auto dry = renderStem (at, "autotune-bypassed");
+        check (! dry.samples.empty(), "AutoTune bypassed stem rendered");
+        check (singThroughTuner (detunedHz, 0.5) && liveTuners().size() == 0,
+               "a bypassed AutoTune reports no live pitch, whatever is sung at it");
+        const double dryHz = toneHz (dry);
+        const double dryClick = clickSeconds (dry);
+        check (std::abs (cents (dryHz, detunedHz)) < 3.0, "bypassed AutoTune leaves the pitch alone (A3 + 35 cents)");
+        check (std::abs (dryClick - 0.25) < 0.002, "bypassed AutoTune adds no delay: the click is where the fixture put it");
+
+        const double wetHz = toneHz (wet);
+        check (std::abs (cents (wetHz, 220.0)) < 6.0,
+               "AutoTune pulls the +35 cent tone onto A3 (output " + String (wetHz, 2) + " Hz)");
+        check (std::abs (clickSeconds (wet) - dryClick) < 0.0005,
+               "AutoTune's latency is reported and compensated: the click lands within 0.5 ms of the bypassed render");
+        bool keepsHarmonics = dryHz > 0.0 && wetHz > 0.0;
+        for (int h = 2; h <= 5 && keepsHarmonics; ++h)
+        {
+            const double before = levelAt (dry, h * dryHz), after = levelAt (wet, h * wetHz);
+            keepsHarmonics = before > 0.0 && after > 0.0 && std::abs (20.0 * std::log10 (after / before)) < 3.0;
+        }
+        check (keepsHarmonics, "AutoTune output keeps harmonics 2-5 within 3 dB (it shifts the voice, it does not replace it)");
+
+        // Leave no latency behind for the sections that follow.
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", at))), "AutoTune fixture track removed");
+    }
+
     // ─── R3.3: highpass + softclip built-ins ───
     // "highpass" is not its own Tracktion xmlTypeName — it's te::LowPassPlugin
     // (xmlTypeName "lowpass") flipped into high-pass mode by load_builtin/
@@ -3410,6 +3823,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
             check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
             check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
+            // Shadow guard (MoshEngine.cpp, autoInitialiseDeviceManager): a master
+            // high-pass is Mosh's slope-capable filter too, and shows its slope read-only
+            // (set_plugin_state is track-only).
+            check (dynamic_cast<MoshLowPassPlugin*> (lp) != nullptr, "a load_master_builtin highpass is a MoshLowPassPlugin");
+            check ((int) hpMasterEntry["state"]["slope"]["value"] == 12, "the master highpass snapshot shows state.slope 12 dB/oct");
         }
         else
             check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
@@ -3466,16 +3884,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
+        // The slope persists: 24 dB/oct on the track high-pass survives save/reload, as
+        // the plugin property moshFilterSlope, on a reloaded MoshLowPassPlugin.
+        check (ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "key", "slope" }, { "value", 24 }})))
+                   && (int) trackBuiltin ("highpass")["state"]["slope"]["value"] == 24,
+               "set_plugin_state slope 24 dB/oct on the track highpass before save");
         const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
         const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
+        // A 4OSC rides the same save/reload: it must come back as Mosh's metered subclass,
+        // with its state keys and all 68 parameters (ids, ranges) exactly as saved.
+        const auto oscTrack = cmd (ops, "create_track", args1 ("name", "R3.3 4OSC"))["data"].getProperty ("trackId", var()).toString();
+        const int oscIdx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", oscTrack }, { "type", "4osc" }}))["data"].getProperty ("index", -1);
+        auto oscEntry = [&] () -> var {
+            auto plugins = trackById (oscTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if ((int) plugins[i].getProperty ("index", -1) == oscIdx) return plugins[i];
+            return var();
+        };
+        check (oscIdx >= 0
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "filterType" }, { "value", "lowpass" }})))
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "waveShape2" }, { "value", "saw" }})))
+                   && ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "paramIndex", 40 }, { "value", 0.5 }}))),
+               "a 4OSC with filterType lowpass, osc 2 saw and Amp Attack 0.5 before save");
+        const auto oscParamsBeforeReload = JSON::toString (oscEntry()["params"]);
+        const auto oscStateBeforeReload = JSON::toString (oscEntry()["state"]);
+        // A drum track's sampler rides it too: back as Mosh's metered subclass, with
+        // plugin.sampler (its sounds, a muted pad's parked level) exactly as saved.
+        const auto drumTrack = cmd (ops, "create_track", objN ({{ "name", "R3.3 Drums" }, { "type", "drum" }}))["data"].getProperty ("trackId", var()).toString();
+        auto samplerEntry = [&] () -> var {
+            auto plugins = trackById (drumTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "sampler") return plugins[i];
+            return var();
+        };
+        check (drumTrack.isNotEmpty()
+                   && ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "gainDb", -6.0 }})))
+                   && ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "mute", true }})))
+                   && samplerEntry()["sampler"]["sounds"].size() == 8,
+               "a drum track (8 pads) with the snare at -6 dB and its lane muted before save");
+        const auto samplerBeforeReload = JSON::toString (samplerEntry()["sampler"]);
         check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
         check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
+        {
+            te::Plugin* reloadedOsc = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == oscTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (oscIdx >= 0 && oscIdx < plugins.size())
+                        reloadedOsc = plugins[oscIdx].get();
+                }
+            check (dynamic_cast<MoshFourOscPlugin*> (reloadedOsc) != nullptr,
+                   "the reloaded 4OSC is a MoshFourOscPlugin (shadow registered before the session loaded)");
+            const auto reloaded = oscEntry();
+            check (reloaded["params"].size() == 68 && JSON::toString (reloaded["params"]) == oscParamsBeforeReload
+                       && JSON::toString (reloaded["state"]) == oscStateBeforeReload
+                       && reloaded["state"]["filterType"]["value"].toString() == "lowpass"
+                       && reloaded["state"]["waveShape2"]["value"].toString() == "saw",
+                   "the reloaded 4OSC keeps its 68 parameters and its state (filterType lowpass, osc 2 saw) exactly");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", oscTrack))), "R3.3 4OSC track removed");
+
+            const auto drums = samplerEntry();
+            te::Plugin* reloadedSampler = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == drumTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    const int index = (int) drums.getProperty ("index", -1);
+                    if (index >= 0 && index < plugins.size())
+                        reloadedSampler = plugins[index].get();
+                }
+            check (dynamic_cast<MoshSamplerPlugin*> (reloadedSampler) != nullptr,
+                   "the reloaded sampler is a MoshSamplerPlugin (shadow registered before the session loaded)");
+            const auto snare = drums["sampler"]["sounds"][1];
+            check (JSON::toString (drums["sampler"]) == samplerBeforeReload && (int) snare["pitch"] == 38 && (bool) snare["silenced"]
+                       && std::abs ((double) snare["userGainDb"] + 6.0) < 1.0e-6 && std::abs ((double) snare["gainDb"] + 48.0) < 1.0e-6,
+                   "the reloaded sampler keeps plugin.sampler exactly (the muted snare: silenced, live -48 dB, userGainDb -6)");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", drumTrack))), "R3.3 drum track removed");
+        }
         check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
                    && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,
                "reloaded track highpass retains normalized value, display and physical limits");
         check (masterBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz"
                    && JSON::toString (masterBuiltin ("highpass")["params"]) == masterReadbackBeforeReload,
                "reloaded master highpass retains normalized value, display and physical limits");
+        {
+            const auto reloaded = trackBuiltin ("highpass");
+            check ((int) reloaded["state"]["slope"]["value"] == 24 && (int) reloaded["state"]["slope"]["step"] == 6,
+                   "reloaded track highpass keeps state.slope 24 dB/oct (step 6)");
+            auto* m = dynamic_cast<MoshLowPassPlugin*> (liveTrackLowPass ((int) reloaded.getProperty ("index", -1)));
+            check (m != nullptr, "the reloaded track highpass is a MoshLowPassPlugin (shadow registered before the session loaded)");
+            if (m != nullptr)
+                check (m->getSlope() == 24 && (int) m->state.getProperty (MoshLowPassPlugin::slopePropertyId(), 0) == 24,
+                       "...running at 24 dB/oct, saved as moshFilterSlope = 24");
+            auto* master = dynamic_cast<MoshLowPassPlugin*> (liveMasterLowPass ((int) masterBuiltin ("highpass").getProperty ("index", -1)));
+            check (master != nullptr && master->getSlope() == 12 && ! master->state.hasProperty (MoshLowPassPlugin::slopePropertyId()),
+                   "the reloaded master highpass is a MoshLowPassPlugin at 12 dB/oct with no slope property written");
+        }
 
         // Leave the master bus as we found it: the next section ("Master bus plugins")
         // asserts it starts empty, and this section's redo'd highpass + softclip were
@@ -3489,6 +3994,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! masterBuiltin ("softclip").isObject() && ! masterBuiltin ("highpass").isObject(),
                "R3.3 cleanup: master bus carries no R3.3 builtins afterwards");
     }
+
+    // ─── Native plugin panels: the engine seam the V3 inspector panels draw from ───
+    // itemId, physical ranges, `state` + set_plugin_state, gesture coalescing, and the
+    // "plugin_meters" rail (incl. the guard that a loaded "compressor" is Mosh's metered
+    // subclass, i.e. Tracktion's init order still lets Mosh register first). Own track,
+    // removed at the end. See src/app/selftest/PluginPanelsSelfTest.cpp.
+    runPluginPanelsSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); } });
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
     section ("PLG reorder: plugin chain ordering (reorder_plugin)");
@@ -3675,10 +4189,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // emitSpectrum() during REAL playback (a live PlaybackContext), which headless
     // --selftest never reaches, so the mapping logic that is supposed to protect the
     // tap from user-facing commands has never actually run against a real internal
-    // plugin. This section constructs one directly — the SAME insertion call
-    // cmdLoadMasterBuiltin/ensureMasterSpectralTap use (PluginCache::createNewPlugin +
-    // PluginList::insertPlugin at the list's current end) — and proves the mapping
-    // holds around it, then tears it down by hand (there is deliberately no user-facing
+    // plugin. This section inserts one through the production path (the playback
+    // timer's spectrum step, ensureMasterSpectralTap) and proves the mapping holds
+    // around it, then tears it down by hand (there is deliberately no user-facing
     // command that can reach an internal plugin) so later sections see a clean bus. ───
     section ("Master bus: internal plugin (spectral tap) visible-index boundary");
     {
@@ -3717,12 +4230,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "3 visible plugins load in order before the tap exists");
         check (physicalCount() == 3, "physical master list has exactly 3 plugins pre-tap");
 
-        {
-            auto tap = eng.edit().getPluginCache().createNewPlugin (MasterSpectralTapPlugin::xmlTypeName, {});
-            check (tap != nullptr, "synthetic internal plugin (spectral tap) created");
-            auto& list = eng.edit().getMasterPluginList();
-            list.insertPlugin (tap, list.getPlugins().size(), nullptr);   // append — same call cmdLoadMasterBuiltin/ensureMasterSpectralTap use
-        }
+        ops.emitSpectrumForSelfTest (true);   // the first playing spectrum tick appends the tap
         check (physicalCount() == 4, "physical master list now has 4 plugins (3 visible + the internal tap)");
         check (physicalTypeAt (3) == tapType, "the tap physically sits at index 3 (last)");
 
@@ -3821,9 +4329,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // ── cleanup: remove every visible plugin via the command surface (proves
         // remove_master_plugin keeps working with the tap present through to the end),
-        // then remove the synthetic internal plugin directly — mirrors its direct
-        // construction above; there is deliberately no user-facing command that can
-        // reach it — so later sections/demos see a fully clean master bus. ──
+        // then remove the internal plugin directly, without an undo step, the same way
+        // it arrived; there is deliberately no user-facing command that can reach it —
+        // so later sections/demos see a fully clean master bus. ──
         for (int guard = 0; guard < 8 && ! masterOrder().isEmpty(); ++guard)
         {
             const int idx = (int) masterPlugins()[0].getProperty ("index", -1);
@@ -3834,9 +4342,74 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             auto plugins = eng.edit().getMasterPluginList().getPlugins();
             if (! plugins.isEmpty())
-                plugins.getLast()->deleteFromParent();
+                plugins.getLast()->state.getParent().removeChild (plugins.getLast()->state, nullptr);
         }
         check (eng.edit().getMasterPluginList().getPlugins().isEmpty(), "synthetic internal plugin cleaned up — master bus fully empty for later sections");
+    }
+
+    // ─── The spectral tap is telemetry, not an undo step. In the 2026-09-23 real-app
+    // walkthrough, ⌘Z after Direct Re-Imagine Keep did not revert Keep: the first Play in
+    // the project made the playback timer insert the master spectral tap THROUGH the
+    // Edit's UndoManager, an unnamed transaction above Keep, and undo reverted that
+    // instead. Headless runs never have a playback context, so nothing else here reaches
+    // the insertion; drive the timer's own spectrum step directly. ───
+    section ("Master spectral tap insertion is not an undo step");
+    {
+        auto& um = eng.edit().getUndoManager();
+        auto pump = []
+        {
+            // Past Tracktion's 350 ms transaction-close timer, as in the GUI where Play
+            // comes seconds after the last edit.
+            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+                mm->runDispatchLoopUntil (500);
+            else
+                juce::Thread::sleep (500);
+        };
+        auto tapPresent = [&]
+        {
+            for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+                if (dynamic_cast<MasterSpectralTapPlugin*> (p) != nullptr)
+                    return true;
+            return false;
+        };
+        auto witnessPresent = [&]
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->getName() == "Tap undo witness")
+                    return true;
+            return false;
+        };
+
+        check (! tapPresent(), "no spectral tap before the first spectrum tick");
+        check (ok (cmd (ops, "create_track", args1 ("name", "Tap undo witness"))), "witness edit (create_track) ok");
+        pump();
+        const int undoBefore = um.getUndoDescriptions().size();
+        const int redoBefore = um.getRedoDescriptions().size();
+        const int actionsBefore = um.getNumActionsInCurrentTransaction();
+
+        ops.emitSpectrumForSelfTest (true);   // the first playing tick inserts the tap
+        pump();
+
+        check (tapPresent(), "the first playing spectrum tick inserted the master spectral tap");
+        check (um.getUndoDescriptions().size() == undoBefore,
+               "inserting the spectral tap adds no undo transaction");
+        check (um.getRedoDescriptions().size() == redoBefore, "inserting the spectral tap leaves redo untouched");
+        check (um.getNumActionsInCurrentTransaction() == actionsBefore,
+               "inserting the spectral tap folds nothing into the last user transaction");
+
+        check (ok (cmd (ops, "undo")), "undo after the spectrum tick ok");
+        check (! witnessPresent(), "undo reverts the user's last edit, not the tap insertion");
+        check (tapPresent(), "the spectral tap survives undo (it was never an undo step)");
+
+        // Leave the master bus as later sections expect it — without an undo step, the
+        // same way the tap arrived.
+        for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+            if (dynamic_cast<MasterSpectralTapPlugin*> (p) != nullptr)
+            {
+                p->state.getParent().removeChild (p->state, nullptr);
+                break;
+            }
+        check (! tapPresent(), "spectral tap removed — master bus clean for later sections");
     }
 
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
@@ -4581,6 +5154,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "promote_lora_checkpoint is transaction-safe (it writes to the library, not the edit)");
     }
 
+    // ── LoRA Lab: cancel_training_job ("Stop") refuses what it cannot confirm ──
+    // Hermetic — every check here is a REFUSAL, and it holds whichever service
+    // answers: one that is up says it does not know a made-up id, and one that is
+    // not running has no jobs at all. Stopping a real run needs a trainer and
+    // lives in scripts/verify-hardware.
+    //
+    // The command used to report success for any id and write a "cancelled" job
+    // into the registry without reading the service's answer, so a mistyped id
+    // became a recorded job that never existed.
+    section ("LoRA Lab: cancel_training_job refuses a job the service does not know");
+    {
+        // Read the registry's own state file, located through the command surface.
+        // The native snapshot carries no `training` key, so a check against
+        // snapshot().training.jobs passes whatever the command wrote.
+        const File stateFile = File (cmd (ops, "list_training_sources")["data"]
+                                         .getProperty ("registryPath", var()).toString())
+                                   .getSiblingFile ("training_state.json");
+        check (stateFile.existsAsFile(), "the training registry's state file is readable from this run");
+        auto recordedJob = [&stateFile] (const String& jobId)
+        {
+            auto jobs = JSON::parse (stateFile.loadFileAsString()).getProperty ("jobs", var());
+            for (int i = 0; i < jobs.size(); ++i)
+                if (jobs[i].getProperty ("jobId", var()).toString() == jobId)
+                    return true;
+            return false;
+        };
+
+        auto noId = cmd (ops, "cancel_training_job", objN ({}));
+        check (! ok (noId), "cancel_training_job without a jobId fails");
+
+        const String ghost = "selftest-job-that-never-existed";
+        check (! recordedJob (ghost), "the made-up job is not in the registry to begin with");
+        auto unknown = cmd (ops, "cancel_training_job", args1 ("jobId", ghost));
+        check (! ok (unknown), "cancel_training_job refuses a jobId no service knows (it does not report success)");
+        check (unknown.getProperty ("error", var()).toString().isNotEmpty(),
+               "…and says why");
+        check (! recordedJob (ghost),
+               "…and records no job for it (no phantom \"cancelled\" job in the registry)");
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The
@@ -4680,6 +5293,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto rbi = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (! ok (rbi), "bypassing the INSTRUMENT -> render refuses (silent bounce guard; no stale render served)");
         cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", false } }));
+
+        // A CachedValue-only setting (set_plugin_state; here the low-pass slope) is in the
+        // source signature too: an edit is a cache MISS. (Until 2026-10-05 the signature
+        // hashed only names, bypass and parameters, so a slope, filter mode, delay length
+        // or chorus edit served the stale render.) A layer caches ONE render, its latest
+        // (node cacheKey == fingerprint), so going back to 12 re-renders once and only the
+        // identical re-render after it HITs; that the key itself returns exactly to its
+        // earlier value is PluginPanelsSelfTest's signature section.
+        {
+            auto lpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", mt }, { "type", "lowpass" }}));
+            check (ok (lpLoad), "load_builtin (lowpass FX) on the MIDI track ok");
+            const int lpIdx = (int) lpLoad["data"].getProperty ("index", -1);
+            auto renderCache = [&]
+            {
+                auto r = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+                return r["data"].getProperty ("cache", var()).toString();
+            };
+            auto slopeTo = [&] (int dbPerOct)
+            {
+                return ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", mt }, { "index", lpIdx }, { "key", "slope" }, { "value", dbPerOct }})));
+            };
+            check (renderCache() == "miss", "adding the low-pass -> source signature changed -> cache MISS");
+            check (renderCache() == "hit", "an identical re-render with the low-pass is a cache HIT");
+            check (slopeTo (24), "set_plugin_state slope 24 dB/oct on the MIDI track's low-pass ok");
+            check (renderCache() == "miss", "a slope edit (state only, no parameter) -> cache MISS (no stale render served)");
+            check (renderCache() == "hit", "an identical re-render at 24 dB/oct is a cache HIT");
+            check (slopeTo (12), "slope back to 12 dB/oct");
+            check (renderCache() == "miss", "slope back to 12 -> MISS (the layer cached only its latest, 24 dB/oct, render)");
+            check (renderCache() == "hit", "...and the identical re-render at 12 dB/oct HITs");
+            check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", mt }, { "index", lpIdx }}))), "remove the low-pass again");
+        }
 
         // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
         // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
@@ -5534,6 +6178,207 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         stemDir.deleteRecursively();
     }
 
+    // --- Offline renders prepare background-generated clip audio themselves ---
+    // A warped clip plays from a time-stretched proxy and a reversed clip from a reversed
+    // render. Tracktion starts the proxy from a clip timer and completes both through the
+    // message thread, which a synchronous render blocks, so a render issued right after
+    // the edit (one agent batch: "warp this, then export") used to wait out the 20 s
+    // watchdog and fail "render stalled". Every render below follows its edit with NO
+    // message-loop pump; each edit changes the proxy, so each render needs a new one.
+    section ("Offline renders prepare warped/reversed clip audio (no pump)");
+    {
+        check (ok (cmd (ops, "new_project", args1 ("name", "render-source-prep-selftest"))),
+               "render-source prep: fresh project ok");
+        const auto prepTrack = cmd (ops, "create_track", args1 ("name", "Prep"))["data"]
+                                   .getProperty ("trackId", var()).toString();
+        const auto prepClip = cmd (ops, "add_test_tone_clip",
+                                   objN ({{ "trackId", prepTrack }, { "seconds", 1.0 }, { "freq", 271.0 }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        check (prepTrack.isNotEmpty() && prepClip.isNotEmpty(), "render-source prep: tone clip created");
+
+        auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("render-source-prep-selftest");
+        outDir.deleteRecursively();
+        outDir.createDirectory();
+
+        auto wavPeak = [] (const juce::File& f) {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            float peak = 0.0f;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                              (int) juce::jmin ((juce::int64) 1 << 20, reader->lengthInSamples));
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    peak = juce::jmax (peak, buf.getMagnitude (ch, 0, buf.getNumSamples()));
+            }
+            return peak;
+        };
+        auto warpTo = [&] (double bpm) {
+            return ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", prepClip }, { "autoTempo", true },
+                                                         { "sourceBpm", bpm }})));
+        };
+
+        // A peer's multiplayer commit that restores this track's name, "Peer Commit".
+        auto trackNamed = [&ops] (const String& name)
+        {
+            const auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& tr : *arr)
+                    if (tr.getProperty ("name", var()).toString() == name)
+                        return true;
+            return false;
+        };
+        const auto peerTrack = cmd (ops, "create_track", args1 ("name", "Peer Commit"))["data"]
+                                   .getProperty ("trackId", var()).toString();
+        const auto peerSerialized = cmd (ops, "mp_serialize_track", args1 ("trackId", peerTrack));
+        const auto peerBlob = peerSerialized["data"].getProperty ("blob", var()).toString();
+        const auto peerLogicalId = peerSerialized["data"].getProperty ("logicalId", var()).toString();
+        check (peerBlob.isNotEmpty() && peerLogicalId.isNotEmpty()
+                   && ok (cmd (ops, "rename_track", objN ({{ "trackId", peerTrack }, { "name", "Local Rename" }}))),
+               "render-source prep: peer commit fixture serialized, then renamed locally");
+
+        // export_audio. A command queued on the message loop before the export is delivered
+        // while the export waits for the new proxy; it must be refused, not run inside the
+        // export (it would mutate the edit the render is about to read). A multiplayer commit
+        // delivered then must not run inside the export either, and must not be lost: it is
+        // held and lands right after.
+        check (warpTo (97.0), "render-source prep: warp on (97 BPM source)");
+        {
+            struct Probe { bool exporting = true, ran = false, ranDuringExport = false, commitRanMidExport = true; var result; };
+            auto probe = std::make_shared<Probe>();
+            juce::MessageManager::callAsync ([probe, &ops, prepTrack, peerBlob, peerLogicalId, trackNamed] {
+                probe->ran = true;
+                probe->ranDuringExport = probe->exporting;
+                probe->result = cmd (ops, "rename_track", objN ({{ "trackId", prepTrack }, { "name", "Renamed Mid-Export" }}));
+                ops.applyMultiplayerCommitForSelfTest (objN ({{ "type", "commit" }, { "logicalId", peerLogicalId },
+                                                              { "blob", peerBlob }}));
+                probe->commitRanMidExport = trackNamed ("Peer Commit");
+            });
+            const auto warpedFile = outDir.getChildFile ("warped.wav");
+            auto exported = cmd (ops, "export_audio", args1 ("file", warpedFile.getFullPathName()));
+            probe->exporting = false;
+            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+                for (int i = 0; i < 300 && ! (probe->ran && trackNamed ("Peer Commit")); ++i)
+                    mm->runDispatchLoopUntil (10);
+
+            check (ok (exported), "render-source prep: export_audio right after set_clip_warp succeeds ("
+                                  + exported.getProperty ("error", var()).toString() + ")");
+            check (wavPeak (warpedFile) > 0.1f, "render-source prep: the warped export carries the tone");
+            check (probe->ranDuringExport,
+                   "render-source prep: the export serviced the message loop while its proxy generated");
+            check (! ok (probe->result) && probe->result.getProperty ("error", var()).toString().startsWith ("busy:"),
+                   "render-source prep: a command arriving mid-export is refused as busy");
+            check (trackById (prepTrack).getProperty ("name", var()).toString() == "Prep",
+                   "render-source prep: the refused command changed nothing");
+            check (probe->ran && ! probe->commitRanMidExport,
+                   "render-source prep: a multiplayer commit arriving mid-export is held, not applied inside it");
+            check (trackNamed ("Peer Commit") && ! trackNamed ("Local Rename"),
+                   "render-source prep: the held multiplayer commit lands after the export");
+        }
+
+        // export_stems, export_clip_consolidated and bounce_track take the same path.
+        check (warpTo (83.0), "render-source prep: re-warp (83 BPM source)");
+        const auto stemDir = outDir.getChildFile ("stems");
+        auto stems = cmd (ops, "export_stems", args1 ("dir", stemDir.getFullPathName()));
+        check (ok (stems), "render-source prep: export_stems right after set_clip_warp succeeds ("
+                           + stems.getProperty ("error", var()).toString() + ")");
+        const auto stemFiles = stemDir.findChildFiles (File::findFiles, false, "*.wav");
+        check (stemFiles.size() == 1 && wavPeak (stemFiles.getFirst()) > 0.1f,
+               "render-source prep: the warped stem carries the tone");
+
+        check (warpTo (131.0), "render-source prep: re-warp (131 BPM source)");
+        const auto consolidatedFile = outDir.getChildFile ("consolidated.wav");
+        auto consolidated = cmd (ops, "export_clip_consolidated",
+                                 objN ({{ "clipId", prepClip }, { "file", consolidatedFile.getFullPathName() }}));
+        check (ok (consolidated), "render-source prep: export_clip_consolidated right after set_clip_warp succeeds ("
+                                  + consolidated.getProperty ("error", var()).toString() + ")");
+        check (wavPeak (consolidatedFile) > 0.1f, "render-source prep: the consolidated warped clip carries the tone");
+
+        check (warpTo (111.0), "render-source prep: re-warp (111 BPM source)");
+        auto bounced = cmd (ops, "bounce_track", objN ({{ "trackId", prepTrack }, { "mode", "newTrack" }}));
+        check (ok (bounced), "render-source prep: bounce_track right after set_clip_warp succeeds ("
+                             + bounced.getProperty ("error", var()).toString() + ")");
+        check (wavPeak (juce::File (bounced["data"].getProperty ("file", var()).toString())) > 0.1f,
+               "render-source prep: the bounced warped track carries the tone");
+        if (ok (bounced))
+            cmd (ops, "remove_track", args1 ("trackId", bounced["data"].getProperty ("trackId", var()).toString()));
+
+        // A reversed clip renders from a reversed copy (a RenderManager job that finishes
+        // through the message thread) and, warped, from a proxy OF that copy.
+        check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", prepClip }, { "reversed", true }}))),
+               "render-source prep: reverse on");
+        const auto reversedFile = outDir.getChildFile ("reversed-warped.wav");
+        auto reversed = cmd (ops, "export_audio", args1 ("file", reversedFile.getFullPathName()));
+        check (ok (reversed), "render-source prep: export_audio right after set_clip_reverse succeeds ("
+                              + reversed.getProperty ("error", var()).toString() + ")");
+        check (wavPeak (reversedFile) > 0.1f, "render-source prep: the reversed warped export carries the tone");
+
+        // Inside an agent batch, the wait must not let Tracktion's undo-transaction timer
+        // (350 ms after an edit, whenever the message loop runs) open a new transaction, or
+        // "warp, export, rename" undoes in two steps. A long clip keeps the proxy wait past
+        // that timer; the export renders only its first second.
+        {
+            const auto batchTrack = cmd (ops, "create_track", args1 ("name", "Batch Long"))["data"]
+                                        .getProperty ("trackId", var()).toString();
+            const auto batchClip = cmd (ops, "add_test_tone_clip",
+                                        objN ({{ "trackId", batchTrack }, { "seconds", 180.0 }, { "freq", 233.0 },
+                                               { "name", "render-prep-batch-long" }}))["data"]
+                                       .getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "batch_begin", args1 ("name", "render-source prep batch"))),
+                   "render-source prep: batch opened");
+            check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", batchClip }, { "autoTempo", true },
+                                                            { "sourceBpm", 101.0 }}))),
+                   "render-source prep: batch warps a 180 s clip");
+            auto batchExport = cmd (ops, "export_audio",
+                                    objN ({{ "file", outDir.getChildFile ("batch.wav").getFullPathName() },
+                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }}));
+            check (ok (batchExport), "render-source prep: export inside the batch succeeds ("
+                                     + batchExport.getProperty ("error", var()).toString() + ")");
+            check (ok (cmd (ops, "rename_track", objN ({{ "trackId", batchTrack }, { "name", "Batch Renamed" }})))
+                       && ok (cmd (ops, "batch_end")),
+                   "render-source prep: batch renames the track and closes");
+            check (ok (cmd (ops, "undo")), "render-source prep: one undo after the batch");
+            const auto batchState = trackById (batchTrack);
+            const auto batchClips = batchState.getProperty ("clips", var());
+            const bool stillWarped = batchClips.getArray() != nullptr && ! batchClips.getArray()->isEmpty()
+                                     && (bool) batchClips.getArray()->getFirst().getProperty ("autoTempo", false);
+            check (batchState.getProperty ("name", var()).toString() == "Batch Long" && ! stillWarped,
+                   "render-source prep: one undo reverts the whole batch around a waiting export");
+            cmd (ops, "remove_track", args1 ("trackId", batchTrack));
+        }
+
+        // A warped clip whose source file is gone can never get a proxy: say so at once,
+        // naming the clip, instead of waiting out a watchdog.
+        const auto lostTrack = cmd (ops, "create_track", args1 ("name", "Lost Source"))["data"]
+                                   .getProperty ("trackId", var()).toString();
+        const auto lostClip = cmd (ops, "add_test_tone_clip",
+                                   objN ({{ "trackId", lostTrack }, { "seconds", 1.0 }, { "freq", 409.0 },
+                                          { "name", "render-prep-lost-source" }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        juce::File lostSource;
+        const auto lostTrackState = trackById (lostTrack);                 // keep the array alive
+        const auto lostTrackClips = lostTrackState.getProperty ("clips", var());
+        if (auto* clipsArr = lostTrackClips.getArray())
+            for (auto& c : *clipsArr)
+                if (c.getProperty ("id", var()).toString() == lostClip)
+                    lostSource = juce::File (c.getProperty ("sourceFile", var()).toString());
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", lostClip }, { "autoTempo", true },
+                                                        { "sourceBpm", 89.0 }}))),
+               "render-source prep: second clip warped");
+        check (lostSource.existsAsFile() && lostSource.deleteFile(), "render-source prep: its source file deleted");
+        const double lostStartMs = Time::getMillisecondCounterHiRes();
+        auto lost = cmd (ops, "export_audio", args1 ("file", outDir.getChildFile ("lost.wav").getFullPathName()));
+        const double lostElapsedMs = Time::getMillisecondCounterHiRes() - lostStartMs;
+        const auto lostError = lost.getProperty ("error", var()).toString();
+        check (! ok (lost) && lostError.contains (lostClip) && lostError.contains ("is missing"),
+               "render-source prep: a warped clip with a missing source fails naming the clip (" + lostError + ")");
+        check (lostElapsedMs < 10000.0, "render-source prep: the missing-source failure does not wait for a watchdog");
+
+        outDir.deleteRecursively();
+    }
+
     // --- EXP-EOF-001 / #538: fail known-empty audio source windows before render ---
     section ("Export rejects empty audio source windows atomically (#538)");
     {
@@ -5677,19 +6522,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", true },
                                                         { "sourceBpm", 120.0 }}))),
                "source-window: valid remainder Warp on ok");
-        // Warp proxy creation is asynchronous in the real UI.  Match the frozen
-        // reproduction's two-second wait while continuing to pump the JUCE message
-        // loop so this control proves a ready proxy rather than racing its creation.
+        // Warp proxy creation is asynchronous in the real UI: a clip timer on the message
+        // thread starts a background proxy render, and export_audio then blocks the message
+        // thread, so a render begun before that job starts can never see a proxy. Pump until
+        // the proxy the warped render will read is complete, so this control proves a ready
+        // proxy rather than racing its creation. The old fixed 3 s pump lost that race on a
+        // loaded machine; the bound here is only a backstop.
         {
-            auto* mm = MessageManager::getInstanceWithoutCreating();
-            const auto deadline = Time::getMillisecondCounter() + 3000;
-            while (Time::getMillisecondCounter() < deadline)
-            {
-                if (mm != nullptr)
-                    mm->runDispatchLoopUntil (50);
-                else
-                    Thread::sleep (50);
-            }
+            auto* warpClip = dynamic_cast<te::AudioClipBase*> (
+                te::findClipForID (eng.edit(), te::EditItemID::fromString (validClip)));
+            auto& proxies = eng.edit().engine.getAudioFileManager().proxyGenerator;
+            check (warpClip != nullptr
+                   && pumpUntil ([&]
+                      {
+                          const auto playFile = warpClip->getPlaybackFile();
+                          return ! playFile.isNull()
+                                 && ! proxies.isProxyBeingGenerated (playFile)
+                                 && playFile.getFile().existsAsFile()
+                                 && playFile.isValid();
+                      }, 120000),
+                   "source-window: warp proxy is ready before the warped export");
         }
         auto validWarpFile = outDir.getChildFile ("valid-warp.wav");
         check (ok (cmd (ops, "export_audio", args1 ("file", validWarpFile.getFullPathName()))),
@@ -5775,6 +6627,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (hasSampler, "drum track hosts the built-in sampler");
         }
 
+        // The sampler loads its sounds on an AsyncUpdate that rebuilds the loaded list
+        // getSoundFile() reads; getNumSounds() reads the saved state. A render before that
+        // lands plays nothing, so the kit is "loaded" once every saved pad has a valid file.
+        auto drumKitLoaded = [&]
+        {
+            auto* drumTrack = dynamic_cast<te::AudioTrack*> (
+                te::findTrackForID (eng.edit(), te::EditItemID::fromString (dt)));
+            auto* sampler = drumTrack != nullptr
+                                ? drumTrack->pluginList.getPluginsOfType<te::SamplerPlugin>().getFirst()
+                                : nullptr;
+            if (sampler == nullptr || sampler->getNumSounds() == 0)
+                return false;
+            for (int i = 0; i < sampler->getNumSounds(); ++i)
+                if (! sampler->getSoundFile (i).isValid())
+                    return false;
+            return true;
+        };
+        // No pump here: headless, create_track itself must leave the kit loaded before the
+        // next command renders it (MoshOps drains the sampler's AsyncUpdate).
+        check (drumKitLoaded(), "create_track leaves the drum kit's sounds loaded for the next render");
+
         // Empty drum clip → export is SILENT (the "silence stays silent" control).
         auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", dt }, { "length", 2.0 }, { "notes", var (Array<var>()) }}));
         check (ok (mc), "empty drum MIDI clip added");
@@ -5796,6 +6669,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "export of the programmed beat ok");
         check (wavMagnitude (beatFile) > 0.02f, "programmed drum beat renders NON-SILENT (sampler+kit actually sounds)");
 
+        // te::SamplerPlugin plays from a LOADED copy of its SOUND children that Tracktion
+        // rebuilds only in handleAsyncUpdate, on a later message-loop pass. These read the
+        // engine directly, beside the snapshot, to show when that copy is behind.
+        auto samplerOf = [&] (const String& tid) -> te::SamplerPlugin* {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == tid)
+                    for (auto* p : t->pluginList.getPlugins())
+                        if (auto* s = dynamic_cast<te::SamplerPlugin*> (p)) return s;
+            return nullptr;
+        };
+        auto storedSources = [] (te::SamplerPlugin& s) {   // what the sampler HOLDS, SOUND children only
+            StringArray out;
+            for (auto v : s.state)
+                if (v.hasType (te::IDs::SOUND)) out.add (v[te::IDs::source].toString());
+            return out;
+        };
+        auto snapshotPadFiles = [&] (const String& tid) {
+            StringArray out;
+            auto trk = trackById (tid);                  // hold the var (no dangling temporary)
+            auto padsVar = trk.getProperty ("drumPads", var());
+            if (auto* a = padsVar.getArray())
+                for (auto& p : *a) out.add (p.getProperty ("file", var()).toString());
+            return out;
+        };
+
         // Persistence: the trackType flag + the sampler's kit sounds serialize into the
         // .tracktionedit and survive save/reload — the beat still renders afterwards (the
         // sampler reconstructs its sounds from the persisted state on load). Done here
@@ -5803,9 +6701,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             check (ok (cmd (ops, "save")), "save before reload ok");
             check (ok (cmd (ops, "reload")), "reload ok");
-            // The sampler reloads its sample files on an AsyncUpdate; drain it before render.
-            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-                mm->runDispatchLoopUntil (50);
+            // No wait here. The reloaded sampler's sounds load on an AsyncUpdate that neither
+            // reload nor export_audio dispatches (the render runs synchronously on the message
+            // thread), and the fixed 50 ms pump that used to sit here lost that race under load:
+            // the re-export below came out silent (2026-09-30, 1 of 3 selftest runs). Keep the
+            // window open instead, prove it is open, and let export_audio close it.
+            auto* reloaded = samplerOf (dt);
+            check (reloaded != nullptr && reloaded->getNumSounds() > 0 && reloaded->getSoundMedia (0).isEmpty(),
+                   "sampler-race (reload): precondition: the reloaded kit is still unloaded at export time");
+            if (reloaded != nullptr)
+                check (snapshotPadFiles (dt) == storedSources (*reloaded) && ! storedSources (*reloaded).contains (String()),
+                       "sampler-race (reload): the snapshot names every pad's sample before the kit loads");
             auto rtrk = trackById (dt);   // item ids are persisted, so dt still resolves
             check (rtrk.getProperty ("type", var()).toString() == "drum", "drum track type survives save/reload");
             bool hasSampler = false;
@@ -5817,7 +6723,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (ops, "export_audio", objN ({{ "file", reloadFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
                    "re-export after reload ok");
             check (wavMagnitude (reloadFile) > 0.02f, "drum beat still NON-SILENT after save/reload (sampler sounds restored)");
+            check (reloaded != nullptr && reloaded->getSoundMedia (0) == storedSources (*reloaded)[0],
+                   "sampler-race (reload): export_audio loaded the kit before rendering it");
             reloadFile.deleteFile();
+        }
+
+        // A lane mute is a pad-gain write, and the sampler plays each pad at the gain its
+        // loaded copy took when it was last rebuilt. Nothing between set_drum_lane and
+        // export_audio rebuilds it, so mute the only two lanes the beat plays and export at
+        // once: the render must hear the -48 dB mute, not the 0 dB the copy still holds.
+        {
+            // The kit must be LOADED (at 0 dB) before the mutes, or an export that never loaded
+            // it would be silent too and pass for the wrong reason.
+            auto* kitSampler = samplerOf (dt);
+            for (int spin = 0; spin < 400 && kitSampler != nullptr
+                               && kitSampler->getSoundMedia (0) != storedSources (*kitSampler)[0]; ++spin)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);   // a condition, not a fixed wait
+            check (kitSampler != nullptr && kitSampler->getSoundMedia (0).isNotEmpty()
+                       && kitSampler->getSoundMedia (0) == storedSources (*kitSampler)[0],
+                   "sampler-race (mute): precondition: the kit is loaded before the mutes");
+            check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }})))
+                       && ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "mute", true }}))),
+                   "sampler-race (mute): kick and snare lanes muted");
+            auto mutedFile = eng.sessionDir().getChildFile ("exports").getChildFile ("drum-muted.wav");
+            check (ok (cmd (ops, "export_audio", objN ({{ "file", mutedFile.getFullPathName() }, { "format", "wav" }, { "bitDepth", 16 }}))),
+                   "sampler-race (mute): export straight after the mutes ok");
+            const float mutedPeak = wavMagnitude (mutedFile);
+            check (mutedPeak >= 0.0f && mutedPeak < 0.01f,
+                   "sampler-race (mute): an export straight after set_drum_lane renders the muted lanes at -48 dB");
+            cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", false }}));
+            cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "mute", false }}));
+            mutedFile.deleteFile();
         }
 
         // assign_sample: map a kit sample onto a fresh pad/note and confirm it lands.
@@ -6040,8 +6976,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 // ── USER kit library (~/Library/Mosh/kits; env-pointed here so the
                 // harness never reads or depends on the real user library) ──
                 {
-                    auto userRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                        .getChildFile ("selftest-user-kits");
+                    auto userRoot = selftestTempPath (eng, "selftest-user-kits");
                     auto kitDir = userRoot.getChildFile ("selftest-user-kit");
                     kitDir.createDirectory();
                     // Two REAL pads copied from the bundled kit found above — a partial
@@ -6128,8 +7063,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             }
 
             // Wrong-family refusal: a .vital preset must never touch a 4OSC-only track.
-            auto tmpVital = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                .getChildFile ("selftest-refusal.vital");
+            auto tmpVital = selftestTempPath (eng, "selftest-refusal.vital");
             tmpVital.replaceWithText ("{}");
             check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", tmpVital.getFullPathName() }}))),
                    "a .vital preset is refused on a track without Vital");
@@ -6194,6 +7128,56 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "MIDI clip on a wave track does NOT auto-load an instrument (wave audio preserved)");
         }
 
+        // snapshot drumPads[].file while the sampler's loaded copy is behind its state. MoshOps
+        // pumps 5 ms after a kit or sample load, and only headless, so with an audio device open
+        // (or a pump that runs out under load) a snapshot can land first. Hold that window open
+        // deterministically: engine-level sampler edits AFTER the last command that pumps,
+        // then snapshot with nothing in between.
+        {
+            const auto kit = drumKitDir();
+            const auto kickWav = kit.getChildFile ("kick.wav"), snareWav = kit.getChildFile ("snare.wav"),
+                       crashWav = kit.getChildFile ("crash.wav");
+            // (b) replaced: assign_sample loads the kick, then the state alone swaps it for the
+            // snare — assign_sample's own replace path (removeSound + addSound), unpumped.
+            const auto swapTid = cmd (ops, "create_track", args1 ("name", "PadSwap"))["data"].getProperty ("trackId", var()).toString();
+            const auto kickLoaded = cmd (ops, "assign_sample", objN ({{ "trackId", swapTid }, { "note", 36 },
+                                                                      { "file", kickWav.getFullPathName() } }))["data"]
+                                        .getProperty ("file", var()).toString();
+            const auto freshTid = cmd (ops, "create_track", args1 ("name", "PadFresh"))["data"].getProperty ("trackId", var()).toString();
+            // Every command comes first; a later one could deliver the pending updates.
+            auto* swapped = samplerOf (swapTid);
+            for (int spin = 0; spin < 400 && swapped != nullptr && swapped->getSoundMedia (0) != kickLoaded; ++spin)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);   // the FIRST load must land (a condition, not a fixed wait)
+            if (swapped != nullptr)
+            {
+                swapped->removeSound (0);
+                swapped->addSound (snareWav.getFullPathName(), "snare", 0.0, 0.0, 0.0f);
+            }
+            // (a) never loaded: a fresh sampler whose sound is in the state but whose first load is pending.
+            te::SamplerPlugin* fresh = nullptr;
+            if (auto* t = [&] () -> te::AudioTrack* {
+                    for (auto* candidate : te::getAudioTracks (eng.edit()))
+                        if (candidate != nullptr && candidate->itemID.toString() == freshTid) return candidate;
+                    return nullptr; } ())
+                if (auto p = eng.edit().getPluginCache().createNewPlugin (te::SamplerPlugin::xmlTypeName, {}))
+                {
+                    t->pluginList.insertPlugin (p, 0, nullptr);
+                    fresh = dynamic_cast<te::SamplerPlugin*> (p.get());
+                }
+            check (fresh != nullptr && fresh->addSound (crashWav.getFullPathName(), "crash", 0.0, 0.0, 0.0f).isEmpty(),
+                   "sampler-race (a): sound added to a fresh sampler");
+            check (fresh != nullptr && fresh->getSoundMedia (0).isEmpty(),
+                   "sampler-race (a): precondition: its first load is still pending at snapshot time");
+            check (swapped != nullptr && kickLoaded.isNotEmpty() && swapped->getSoundMedia (0) == kickLoaded,
+                   "sampler-race (b): precondition: the loaded copy still holds the replaced kick at snapshot time");
+            check (snapshotPadFiles (freshTid) == StringArray (crashWav.getFullPathName()),
+                   "sampler-race (a): the snapshot names a pad's sample before its first load");
+            check (snapshotPadFiles (swapTid) == StringArray (snareWav.getFullPathName()),
+                   "sampler-race (b): the snapshot names the sample the pad HOLDS, not the replaced one");
+            cmd (ops, "remove_track", args1 ("trackId", freshTid));
+            cmd (ops, "remove_track", args1 ("trackId", swapTid));
+        }
+
         // QA: keep the real engine-rendered beat for an audible listen when asked
         // (MOSH_DRUM_DEMO_DIR=<dir> Mosh --selftest → <dir>/mosh-drum-beat.wav).
         if (const auto demoDir = SystemStats::getEnvironmentVariable ("MOSH_DRUM_DEMO_DIR", {}); demoDir.isNotEmpty())
@@ -6211,12 +7195,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // palette-v2 manifest. UI-only by design (the loop model never sees command result
     // data — StepCommandResult carries {command, ok, error} only, ui/src/agent/loopSeam.ts):
     // this proves the CONTRACT the produce-lane preflight/picker (drumPalette.ts) depends
-    // on, not agent reachability. Hermetic: builds its own manifest under tempDirectory so
-    // it never reads or depends on the real ~/Library/Mosh/palette-v2.
+    // on, not agent reachability. Hermetic: builds its own manifest under a per-process temp
+    // dir so it never reads or depends on the real ~/Library/Mosh/palette-v2 — nor races a
+    // concurrent selftest's deleteRecursively() of the same fixture.
     section ("list_palette (W2.2 produce-lane data seam)");
     {
-        auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                          .getChildFile ("selftest-palette");
+        auto tmpDir = selftestTempPath (eng, "selftest-palette");
         tmpDir.deleteRecursively();
         tmpDir.createDirectory();
 
@@ -8101,9 +9085,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                         return true;
             return false;
         };
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        // Wait for the NEXT levels frame, by condition. Frames come from MoshOps' 30 Hz timer,
+        // and each one reconciles the meter taps before it is emitted, so the first frame after
+        // an edit already reflects it. A fixed 80 ms pump could end before that tick was even
+        // dispatched: on macOS the dispatch loop delivers a few queued messages per pass, and a
+        // reload queues an async update for nearly every object in the new Edit. That is a
+        // queue-depth race, so it lost on an idle machine as readily as on a loaded one.
+        auto nextLevelsFrame = [&] {
+            lastLevelsEvent = var();
+            const auto start = Time::getMillisecondCounterHiRes();
+            while (lastLevelsEvent.isVoid() && Time::getMillisecondCounterHiRes() - start < 5000.0)
+                MessageManager::getInstance()->runDispatchLoopUntil (5);
+            return Time::getMillisecondCounterHiRes() - start;
+        };
+        nextLevelsFrame();
         check (latestLevelsHasSend (automationTrack, bus1),
                "levels telemetry carries the live send keyed by track and bus");
         check (! ok (cmd (ops, "add_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "duplicate send to a bus rejected");
@@ -8161,9 +9156,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && (bool) params[restoredMuteParamIndex].getProperty ("automated", false),
                    "send automation addresses and curves persist across save/reload");
         }
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        {
+            const double frameMs = nextLevelsFrame();
+            std::cerr << "  ..   first levels frame after the reload arrived in " << String (frameMs, 1).toStdString() << " ms" << std::endl;
+        }
         check (latestLevelsHasSend (automationTrack, bus1),
                "send meter registration reconciles after project reload");
         cmd (ops, "set_send_mute", objN ({{ "trackId", gt }, { "bus", bus0 }, { "mute", false }}));
@@ -8172,18 +9168,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // remove_send (was uncovered): drop the gt->bus0 send, undo restores it at its level.
         check (ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send ok");
         check (sendsOf (gt).size() == 0, "remove_send drops the send");
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
-        check (! latestLevelsHasSend (gt, bus0),
+        nextLevelsFrame();
+        check (! lastLevelsEvent.isVoid() && ! latestLevelsHasSend (gt, bus0),   // a frame, without the send
                "removed send disappears from levels telemetry without a stale read");
         check (! ok (cmd (ops, "remove_send", objN ({{ "trackId", gt }, { "bus", bus0 }}))), "remove_send on a missing send errors");
         check (ok (cmd (ops, "undo")), "undo remove_send ok");
         check (sendsOf (gt).size() == 1 && std::abs ((double) sendsOf (gt)[0].getProperty ("db", 0.0) - (-6.0)) < 0.6,
                "undo restores the send at its prior level");
-        lastLevelsEvent = var();
-        if (auto* manager = MessageManager::getInstanceWithoutCreating())
-            manager->runDispatchLoopUntil (80);
+        nextLevelsFrame();
         check (latestLevelsHasSend (gt, bus0),
                "undo restores the send meter registration");
 
@@ -8359,6 +9351,197 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        "METER-UAF-send: the removed send's still-alive measurer holds NO client after telemetry drops its tap");
             }
             held = nullptr;
+        }
+
+        // METER-UAF-master (regression, PR #732 follow-up): masterTap must RE-ATTACH to
+        // the LIVE playback context's masterLevels after each of open_project,
+        // export_audio, and new_project. Two of them (open_project, new_project) swap
+        // eng.editPtr entirely (MoshEngine::openProject/newProject); export_audio keeps
+        // the same Edit but frees the context for render exclusivity
+        // (MoshOps::cmdExportAudio: "Tear down our level-meter taps first"). All three
+        // free the OLD te::EditPlaybackContext masterTap pointed at; before PR #731/#732
+        // the master client was a raw EditPlaybackContext* that could dangle (see the
+        // freePlaybackContextIfNotRecording comment on MoshOps::masterTap).
+        //
+        // Headless has no audio device, so MoshOps' OWN set_transport command skips
+        // transport.play() entirely (cmdSetTransport's `eng.audioReady()` gate in
+        // MoshOps.TempoProject.cpp) and getCurrentPlaybackContext() never allocates on
+        // its own. So — like METER-UAF above reaching for a raw te::LevelMeterPlugin* —
+        // this reaches straight for the engine: TransportControl::ensureContextAllocated()
+        // only checks Edit::shouldPlay() (editRole, which Mosh never touches), not
+        // hardware, exactly how tracktion_TransportControl.test.cpp exercises it in CI
+        // with no device either.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            // Pumps until `done()` holds or `ms` elapse: a deadline, not a fixed-length
+            // pump, because a loaded CI runner can take longer than one telemetry tick.
+            auto pumpUntil = [mm] (auto&& done, uint32 ms) -> bool
+            {
+                const auto end = Time::getMillisecondCounter() + ms;
+                while (Time::getMillisecondCounter() < end)
+                {
+                    if (mm != nullptr) mm->runDispatchLoopUntil (10); else Thread::sleep (10);
+                    if (done()) return true;
+                }
+                return done();
+            };
+            auto hasClient = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> none (0, 0);
+                m.processBuffer (none, 0, 0);
+                return m.getNumActiveChannels() == 0;
+            };
+            // Injects a real, non-silent buffer straight into a measurer -- the same
+            // thing the audio thread does via the playback graph -- so the "levels"
+            // telemetry the UI actually reads can be proven LIVE, not just "a client is
+            // registered". peak(0.5) is ~-6 dBFS, far clear of the -100 floor.
+            auto injectSignal = [] (te::LevelMeasurer& m)
+            {
+                AudioBuffer<float> loud (2, 64);
+                for (int ch = 0; ch < loud.getNumChannels(); ++ch)
+                    for (int i = 0; i < loud.getNumSamples(); ++i)
+                        loud.setSample (ch, i, 0.5f);
+                m.processBuffer (loud, 0, loud.getNumSamples());
+            };
+            // Reads the PEAK master level over every "levels" event since the reset, not
+            // just the latest one: getAndClearAudioLevel resets to -100 dB on read, so on a
+            // loaded runner a later tick in the same dispatch slice would otherwise clobber
+            // the one live reading before the poll looks at it.
+            auto pollForLiveMaster = [&] () -> bool
+            {
+                return pumpUntil ([&] { return peakMasterSinceReset > -50.0; }, 3000);
+            };
+
+            const auto sessionEdit = eng.editFile();   // restore this harness session at the end
+
+            // A minimal real project: one metered track (METER-001 auto-meters it on
+            // create_track) with a tone clip, so every telemetry tick actually emits
+            // "levels" (MoshOps.cpp gates the whole payload, master included, on
+            // meterClients/sendMeterClients being non-empty) and export_audio has a
+            // non-empty render window.
+            auto mtFile = eng.sessionDir().getChildFile ("projects").getChildFile ("meter-uaf-master.mosh");
+            mtFile.deleteFile();
+            check (ok (cmd (ops, "new_project", args1 ("name", "meter-uaf-master"))),
+                   "METER-UAF-master: isolate on a fresh project");
+            const auto mtTrackId = cmd (ops, "create_track", args1 ("name", "Master Probe"))
+                                       ["data"].getProperty ("trackId", var()).toString();
+            check (mtTrackId.isNotEmpty(), "METER-UAF-master: create_track ok");
+            check (ok (cmd (ops, "add_test_tone_clip",
+                            objN ({{ "trackId", mtTrackId }, { "seconds", 1.0 }, { "freq", 220.0 }}))),
+                   "METER-UAF-master: add_test_tone_clip ok");
+            check (ok (cmd (ops, "save")), "METER-UAF-master: save ok");
+
+            // Allocates a context directly on the engine (see block comment above),
+            // pumps telemetry until masterTap attaches to it, and proves the reading the
+            // UI gets through it is genuinely live. Doubles as the "back to normal" check
+            // closing out the PREVIOUS case.
+            auto ensureLiveMaster = [&] (const char* label) -> te::EditPlaybackContext*
+            {
+                eng.edit().getTransport().ensureContextAllocated();
+                auto* ctx = eng.edit().getTransport().getCurrentPlaybackContext();
+                check (ctx != nullptr,
+                       String ("METER-UAF-master: playback context allocated (") + label + ")");
+                if (ctx != nullptr)
+                {
+                    ctx->masterLevels.clear();   // reset the client-probe to a known false
+                    check (pumpUntil ([&] { return hasClient (ctx->masterLevels); }, 3000),
+                           String ("METER-UAF-master: master tap attached to the live context's masterLevels (") + label + ")");
+                    lastLevelsEvent = var();
+                    peakMasterSinceReset = -1000.0;
+                    injectSignal (ctx->masterLevels);
+                    check (pollForLiveMaster(),
+                           String ("METER-UAF-master: telemetry's master level is LIVE, not stale/floor (") + label + ")");
+                }
+                return ctx;
+            };
+
+            // ── open_project ─────────────────────────────────────────────────
+            {
+                auto* ctxBefore = ensureLiveMaster ("pre-open_project");
+                juce::WeakReference<te::LevelMeasurer> weakOld =
+                    ctxBefore != nullptr ? &ctxBefore->masterLevels : nullptr;
+                auto* editBefore = &eng.edit();
+                check (ok (cmd (ops, "open_project", args1 ("file", eng.editFile().getFullPathName()))),
+                       "METER-UAF-master: open_project (reopen self) ok");
+                check (&eng.edit() != editBefore,
+                       "METER-UAF-master: open_project replaced the Edit (mechanism witness)");
+                check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+                       "METER-UAF-master: context is null immediately after open_project");
+                check (weakOld.get() == nullptr,
+                       "METER-UAF-master: open_project's old context+measurer is FREED, not just detached");
+                auto* ctxAfter = ensureLiveMaster ("post-open_project");
+                check (ctxAfter != nullptr, "METER-UAF-master: a context exists again after open_project");
+                // Diagnostic only, NOT a check: the allocator can legitimately hand back
+                // the just-freed context's address for the next allocation (the same ABA
+                // hazard MoshOps.h documents for masterTap) -- re-attach correctness is
+                // proven above via the weak reference and the live-telemetry probe, not
+                // by whether this address happens to differ.
+                std::cerr << "  ..   METER-UAF-master: post-open_project context "
+                          << (ctxAfter == ctxBefore ? "REUSED the freed address (ABA)" : "is at a new address")
+                          << "\n";
+            }
+
+            // ── export_audio ────────────────────────────────────────────
+            {
+                auto* ctxBefore = ensureLiveMaster ("pre-export_audio");
+                juce::WeakReference<te::LevelMeasurer> weakOld =
+                    ctxBefore != nullptr ? &ctxBefore->masterLevels : nullptr;
+                auto outFile = eng.sessionDir().getChildFile ("projects").getChildFile ("meter-uaf-master-export.wav");
+                outFile.deleteFile();
+                check (ok (cmd (ops, "export_audio", objN ({{ "file", outFile.getFullPathName() }, { "format", "wav" }}))),
+                       "METER-UAF-master: export_audio ok");
+                check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+                       "METER-UAF-master: context is null immediately after export_audio (freed for render exclusivity)");
+                check (weakOld.get() == nullptr,
+                       "METER-UAF-master: export_audio's old context+measurer is FREED, not just detached");
+                auto* ctxAfter = ensureLiveMaster ("post-export_audio");
+                check (ctxAfter != nullptr, "METER-UAF-master: a context exists again after export_audio");
+                // Diagnostic only -- see the open_project block above for why address
+                // identity is not asserted (observed in practice: export_audio's freed
+                // context/new context DO share an address on this allocator, which is
+                // exactly the ABA case the weak-reference design has to tolerate).
+                std::cerr << "  ..   METER-UAF-master: post-export_audio context "
+                          << (ctxAfter == ctxBefore ? "REUSED the freed address (ABA)" : "is at a new address")
+                          << "\n";
+                outFile.deleteFile();
+            }
+
+            // ── new_project ─────────────────────────────────────────────
+            {
+                auto* ctxBefore = ensureLiveMaster ("pre-new_project");
+                juce::WeakReference<te::LevelMeasurer> weakOld =
+                    ctxBefore != nullptr ? &ctxBefore->masterLevels : nullptr;
+                const auto editFileBefore = eng.editFile().getFullPathName();
+                check (ok (cmd (ops, "new_project", args1 ("name", "meter-uaf-master-2"))),
+                       "METER-UAF-master: new_project ok");
+                // Edit-pointer identity is NOT a safe witness here: unlike open_project
+                // (which allocates the incoming Edit before freeing the outgoing one),
+                // MoshEngine::newProject frees editPtr FIRST (editPtr.reset()) and only
+                // then allocates the replacement -- a genuine free-then-allocate window,
+                // and the address came back reused when this was tried with a raw
+                // pointer check. The backing file path is a real, deterministic proxy
+                // for "a different Edit is now loaded".
+                check (eng.editFile().getFullPathName() != editFileBefore,
+                       "METER-UAF-master: new_project replaced the Edit (different backing file, mechanism witness)");
+                check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+                       "METER-UAF-master: context is null immediately after new_project");
+                check (weakOld.get() == nullptr,
+                       "METER-UAF-master: new_project's old context+measurer is FREED, not just detached");
+                // new_project starts EMPTY -- add a track so METER-001's auto-meter makes
+                // the "levels" event (and its master field) fire again below.
+                check (ok (cmd (ops, "create_track", args1 ("name", "Post New"))),
+                       "METER-UAF-master: create_track on the new project ok");
+                auto* ctxAfter = ensureLiveMaster ("post-new_project");
+                check (ctxAfter != nullptr, "METER-UAF-master: a context exists again after new_project");
+                // Diagnostic only -- see the open_project block above.
+                std::cerr << "  ..   METER-UAF-master: post-new_project context "
+                          << (ctxAfter == ctxBefore ? "REUSED the freed address (ABA)" : "is at a new address")
+                          << "\n";
+            }
+
+            check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))),
+                   "METER-UAF-master: restored the harness session edit (clean teardown)");
+            mtFile.deleteFile();
         }
     }
 
@@ -9812,6 +10995,58 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // breaks when moved to another machine/install.
         check (ok (cmd (ops, "create_track", objN ({ { "name", "Kit" }, { "type", "drum" } }))), "drum track for portability ok");
 
+        // That kit reaches save_as only after MoshOps' 5 ms post-load pump, which runs only
+        // headless (! hasAudio()). te::SamplerPlugin rebuilds its LOADED sound list solely in
+        // handleAsyncUpdate, so with an audio device open, or a pump that runs out on a loaded
+        // machine, save_as can land while that update is still pending: the SOUND children are
+        // in the state, the loaded list is empty or stale (1 of 4 concurrent selftests lost the
+        // kit on 2026-09-30). Hold that window open deterministically: engine-level sampler
+        // edits AFTER the last command that pumps, then save_as with nothing in between.
+        auto rawTrack = [&] (const String& tid) -> te::AudioTrack* {
+            for (auto* candidate : te::getAudioTracks (eng.edit()))
+                if (candidate != nullptr && candidate->itemID.toString() == tid) return candidate;
+            return nullptr;
+        };
+        auto raceSrc = selftestTempPath (eng, "sampler-race-src");
+        raceSrc.deleteRecursively(); raceSrc.createDirectory();
+        const auto unloadedWav = raceSrc.getChildFile ("race-unloaded.wav");
+        const auto staleOldWav = raceSrc.getChildFile ("race-stale-old.wav");
+        const auto staleNewWav = raceSrc.getChildFile ("race-stale-new.wav");
+        check (poolSrc.copyFileTo (unloadedWav) && poolSrc.copyFileTo (staleOldWav) && poolSrc.copyFileTo (staleNewWav),
+               "sampler-race: probe samples staged outside the project");
+        // Every command and pump comes first; a later one would deliver the pending updates.
+        auto* unloadedTrack = rawTrack (cmd (ops, "create_track", args1 ("name", "RaceUnloaded"))["data"].getProperty ("trackId", var()).toString());
+        // (b) stale: assign_sample loads race-stale-old, then the state alone swaps it for
+        // race-stale-new — assign_sample's own replace path (removeSound + addSound), unpumped.
+        const auto staleTid = cmd (ops, "create_track", args1 ("name", "RaceStale"))["data"].getProperty ("trackId", var()).toString();
+        const File staleOldLoaded (cmd (ops, "assign_sample", objN ({ { "trackId", staleTid }, { "file", staleOldWav.getFullPathName() },
+                                                                      { "note", 36 }, { "name", "stale" } }))["data"].getProperty ("file", var()).toString());
+        te::SamplerPlugin* stale = nullptr;
+        if (auto* t = rawTrack (staleTid))
+            for (auto* p : t->pluginList.getPlugins())
+                if (auto* s = dynamic_cast<te::SamplerPlugin*> (p)) { stale = s; break; }
+        for (int spin = 0; spin < 400 && stale != nullptr && stale->getSoundFile (0).getFile() != staleOldLoaded; ++spin)
+            MessageManager::getInstance()->runDispatchLoopUntil (5);   // the FIRST load must land (a condition, not a fixed wait)
+        if (stale != nullptr)
+        {
+            stale->removeSound (0);
+            stale->addSound (staleNewWav.getFullPathName(), "stale", 0.0, 0.0, 0.0f);
+        }
+        // (a) never loaded: a fresh sampler whose sound is in the state but whose first load is pending.
+        te::SamplerPlugin* unloaded = nullptr;
+        if (unloadedTrack != nullptr)
+            if (auto p = eng.edit().getPluginCache().createNewPlugin (te::SamplerPlugin::xmlTypeName, {}))
+            {
+                unloadedTrack->pluginList.insertPlugin (p, 0, nullptr);
+                unloaded = dynamic_cast<te::SamplerPlugin*> (p.get());
+            }
+        check (unloaded != nullptr && unloaded->addSound (unloadedWav.getFullPathName(), "unloaded", 0.0, 0.0, 0.0f).isEmpty(),
+               "sampler-race (a): sound added to a fresh sampler");
+        check (unloaded != nullptr && unloaded->getSoundFile (0).getFile() == File(),
+               "sampler-race (a): precondition: its first load is still pending at save_as");
+        check (stale != nullptr && staleOldLoaded.existsAsFile() && stale->getSoundFile (0).getFile() == staleOldLoaded,
+               "sampler-race (b): precondition: the loaded list still holds the replaced sound at save_as");
+
         // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
         auto destDir  = selftestTempPath (eng, "portable-src");
         destDir.deleteRecursively(); destDir.createDirectory();
@@ -9829,6 +11064,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! xml.contains ("Resources/drumkits"),
                "saved edit references the kit by a relative path, not the absolute app-bundle path");
         check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
+        check (destDir.getChildFile ("audio").getChildFile ("race-unloaded.wav").existsAsFile() && xml.contains ("audio/race-unloaded.wav"),
+               "sampler-race (a): save_as consolidated a sampler sound whose load was still pending");
+        check (destDir.getChildFile ("audio").getChildFile ("race-stale-new.wav").existsAsFile() && xml.contains ("audio/race-stale-new.wav")
+                   && ! xml.contains ("race-stale-old"),
+               "sampler-race (b): save_as consolidated the sound the sampler HOLDS, not the stale loaded one");
 
         // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source
         // so resolution can ONLY succeed via the co-located copy, then open the copy.
@@ -9841,6 +11081,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto movedClip = firstTrack (ops)["clips"][0];
         check (! (bool) movedClip.getProperty ("sourceMissing", true), "moved project's clip resolves to co-located audio (portable)");
         check (File (movedClip.getProperty ("sourceFile", var()).toString()).isAChildOf (moved), "resolved source is inside the moved project dir");
+        // Save As of an ALREADY-portable project: its kit refs are relative now ("audio/kick.wav")
+        // and must resolve against the project being LEFT. By the time consolidation runs the
+        // resolver points at the new dir, which has no audio/ yet.
+        auto resaved = selftestTempPath (eng, "portable-resaved");
+        resaved.deleteRecursively();
+        check (ok (cmd (ops, "save_as", args1 ("file", resaved.getChildFile ("portable.tracktionedit").getFullPathName()))),
+               "save_as of the moved (already-portable) project ok");
+        check (resaved.getChildFile ("audio").getChildFile ("kick.wav").existsAsFile(),
+               "re-Save-As carries the project's relative kit sounds into the new project");
         poolBak.moveFileTo (poolSrc);                            // restore the pool original
 
         // relink: a clip whose source goes missing reports sourceMissing; relink_clip fixes it.
@@ -9861,7 +11110,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // teardown
         check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (gap3 teardown)");
-        destDir.deleteRecursively(); moved.deleteRecursively();
+        destDir.deleteRecursively(); moved.deleteRecursively(); resaved.deleteRecursively(); raceSrc.deleteRecursively();
     }
 
     // ─── AL-009 — Save-As render-artifact consolidation + portability ───
@@ -13987,6 +15236,479 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "save")), "re-persist the edit after the mp-commit-export probe");
     }
 
+    // Regression: a dropped-in audio file plays AS IS, and a compressed one renders with no
+    // message-loop pump.
+    //
+    // te::insertWaveClip acts on a file's loop metadata (insertPlainWaveClip in
+    // MoshOpsInternal.h has the mechanism). Three shapes, each from real material:
+    //   • an ACID chunk with a root note and zero beats (what Sony ACID writes on a one-shot
+    //     a cappella) → the clip came in auto-PITCHED: transposed to the session key;
+    //   • an ACID chunk with a beat count → auto-TEMPO: stretched to the session tempo;
+    //   • a tempo token in the file NAME (Song A's "…_145BPM_….wav") → auto-tempo as well.
+    // Each of those also plays from a time-stretched proxy that only the message loop can
+    // start, so "import, then export" in one headless batch sat out the render watchdog's
+    // 20 s and failed. A FLAC failed the same way for its own reason: anything that is not
+    // WAV/AIFF plays from a decoded proxy copy.
+    //
+    // Every export here runs straight after its import, with no pump, and is judged by what
+    // it rendered — the tone's pitch and the timeline length — not by "ok" alone: once a
+    // render waits for its proxies, an adopted clip exports fine and is simply wrong.
+    {
+        section ("Import: a dropped-in file plays as is (loop metadata, tempo-named, FLAC), no pump");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "import-as-is-selftest"))),
+               "import-as-is: fresh project ok (120 bpm, key of C)");
+
+        auto fixtureDir = selftestTempPath (eng, "import-as-is");
+        fixtureDir.deleteRecursively();
+        fixtureDir.createDirectory();
+        auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("import-as-is-selftest");
+        outDir.deleteRecursively();
+        outDir.createDirectory();
+
+        constexpr double fixtureRate = 44100.0;
+        constexpr double toneHz = 220.0;   // A3; auto-pitch from root A into the key of C would move it to ~261.6
+
+        // A mono 16-bit sine. The WAV writer turns the acid keys of `metadata` into an `acid` chunk.
+        auto writeTone = [&] (const String& name, double seconds, AudioFormat* format,
+                              const StringPairArray& metadata) -> File
+        {
+            const int n = roundToInt (seconds * fixtureRate);
+            AudioBuffer<float> buf (1, n);
+            for (int i = 0; i < n; ++i)
+                buf.setSample (0, i, 0.5f * (float) std::sin (MathConstants<double>::twoPi * toneHz * i / fixtureRate));
+
+            auto f = fixtureDir.getChildFile (name);
+            if (format != nullptr)
+                if (auto os = std::unique_ptr<FileOutputStream> (f.createOutputStream()))
+                {
+                    std::unique_ptr<AudioFormatWriter> w (
+                        format->createWriterFor (os.get(), fixtureRate, 1u, 16, metadata, 0));
+                    if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, n); }
+                }
+            return f;
+        };
+
+        auto acidChunk = [] (int beats, double tempo, int rootNote) -> StringPairArray
+        {
+            StringPairArray m;
+            m.set (WavAudioFormat::acidOneShot, "0");
+            m.set (WavAudioFormat::acidStretch, "1");
+            m.set (WavAudioFormat::acidDiskBased, "1");
+            m.set (WavAudioFormat::acidizerFlag, "1");
+            m.set (WavAudioFormat::acidRootSet, rootNote >= 0 ? "1" : "0");
+            if (rootNote >= 0)
+                m.set (WavAudioFormat::acidRootNote, String (rootNote));
+            m.set (WavAudioFormat::acidBeats, String (beats));
+            m.set (WavAudioFormat::acidDenominator, "4");
+            m.set (WavAudioFormat::acidNumerator, "4");
+            m.set (WavAudioFormat::acidTempo, String (tempo));
+            return m;
+        };
+
+        // The rate of upward zero crossings of channel 0 over [fromSec, toSec): the tone's
+        // frequency, 0 for silence, -1 for an unreadable file.
+        auto renderedToneHz = [] (const File& f, double fromSec, double toSec) -> double
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) };
+            if (reader == nullptr) return -1.0;
+
+            const auto first = (int64) (fromSec * reader->sampleRate);
+            const int n = (int) jmin ((int64) ((toSec - fromSec) * reader->sampleRate), reader->lengthInSamples - first);
+            if (n < 2) return -1.0;
+
+            AudioBuffer<float> buf ((int) reader->numChannels, n);
+            reader->read (&buf, 0, n, first, true, true);
+            const float* s = buf.getReadPointer (0);
+            int crossings = 0;
+            for (int i = 1; i < n; ++i)
+                if (s[i - 1] <= 0.0f && s[i] > 0.0f)
+                    ++crossings;
+            return crossings * reader->sampleRate / (double) n;
+        };
+
+        auto engineClip = [&] (const String& id) -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+
+        // "As is": neither follow switch on, nothing left for a stretcher to do, and exactly
+        // `seconds` of timeline.
+        auto playsAsIs = [&] (const String& id, double seconds)
+        {
+            auto* w = engineClip (id);
+            return w != nullptr && ! w->getAutoTempo() && ! w->getAutoPitch() && ! w->usesTimeStretchedProxy()
+                   && std::abs (w->getPosition().getLength().inSeconds() - seconds) < 1.0e-6;
+        };
+
+        struct Fixture { const char* what; File file; double seconds; bool hasLoopMetadata; };
+        auto& formats = eng.engine().getAudioFileFormatManager();
+        const Fixture acidRoot { "ACID root-note a cappella",
+                                 writeTone ("acapella_acid_root.wav", 2.0, formats.getWavFormat(), acidChunk (0, 82.0, 57)),
+                                 2.0, true };
+        const Fixture acidLoop { "ACID loop, 8 beats in 3 s",
+                                 writeTone ("acapella_acid_loop.wav", 3.0, formats.getWavFormat(), acidChunk (8, 160.0, -1)),
+                                 3.0, true };
+        const Fixture namedBpm { "tempo-named WAV",
+                                 writeTone ("beat_150bpm.wav", 3.2, formats.getWavFormat(), {}), 3.2, true };
+        const Fixture flac     { "FLAC",
+                                 writeTone ("vocal_take.flac", 2.0, formats.getFlacFormat(), {}), 2.0, false };
+
+        // The fixtures must carry what they claim, or every check below is vacuous.
+        {
+            const auto rootInfo = te::AudioFile (eng.engine(), acidRoot.file).getInfo();
+            check (rootInfo.loopInfo.getRootNote() == 57 && ! rootInfo.loopInfo.isLoopable(),
+                   "import-as-is: the ACID root-note fixture reads back as root A, not a loop");
+            check (te::AudioFile (eng.engine(), acidLoop.file).getInfo().loopInfo.isLoopable(),
+                   "import-as-is: the ACID loop fixture reads back as a loop");
+            check (te::AudioFile (eng.engine(), namedBpm.file).getInfo().loopInfo.isLoopable(),
+                   "import-as-is: the tempo-named fixture reads back as a loop (tempo deduced from its name)");
+            const auto flacInfo = te::AudioFile (eng.engine(), flac.file).getInfo();
+            check (flacInfo.wasParsedOk && flacInfo.needsCachedProxy && ! flacInfo.loopInfo.isLoopable(),
+                   "import-as-is: the FLAC fixture is valid, plays from a decoded proxy, and is not a loop");
+        }
+
+        for (const auto& fx : { acidRoot, acidLoop, namedBpm, flac })
+        {
+            const String tag = "import-as-is [" + String (fx.what) + "]: ";
+
+            const auto trackId = cmd (ops, "create_track", args1 ("name", "Drop"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            auto imp = cmd (ops, "import_clip", objN ({{ "trackId", trackId }, { "file", fx.file.getFullPathName() }}));
+            check (ok (imp), tag + "import_clip ok");
+            const auto dropped = imp["data"].getProperty ("clipId", var()).toString();
+            check (playsAsIs (dropped, fx.seconds),
+                   tag + "the clip is the file's own length with warp and key-follow off");
+
+            // Straight to the render: no pump between the import and the export.
+            auto out = outDir.getChildFile (fx.file.getFileNameWithoutExtension() + ".wav");
+            auto exp = cmd (ops, "export_audio", objN ({{ "file", out.getFullPathName() }, { "format", "wav" },
+                                                        { "bitDepth", 24 }, { "tail", "cut" }}));
+            check (ok (exp), tag + "export straight after import completes"
+                                 + (ok (exp) ? String() : " (" + exp.getProperty ("error", var()).toString() + ")"));
+            check (std::abs ((double) exp["data"].getProperty ("seconds", 0.0) - fx.seconds) < 1.0e-3,
+                   tag + "the export is the file's own length");
+            const double hz = renderedToneHz (out, 0.25, fx.seconds - 0.25);
+            check (std::abs (hz - toneHz) < 3.0,
+                   tag + "the export carries the tone at its own pitch (" + String (hz, 1) + " Hz, want "
+                       + String (toneHz, 0) + ")");
+
+            // A copy re-inserts the same file, so it has to stay as is too.
+            if (fx.hasLoopMetadata)
+            {
+                auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", dropped));
+                check (ok (dup) && playsAsIs (dup["data"].getProperty ("newClipId", var()).toString(), fx.seconds),
+                       tag + "duplicate_clip's copy plays as is");
+
+                var clipDesc;
+                const auto snap = ops.snapshot();
+                if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                    for (auto& t : *tracks)
+                        if (auto* clips = t.getProperty ("clips", var()).getArray())
+                            for (auto& c : *clips)
+                                if (c.getProperty ("id", var()).toString() == dropped)
+                                    clipDesc = c;
+                auto pasted = cmd (ops, "paste_clip", objN ({{ "trackId", trackId }, { "start", 20.0 }, { "clip", clipDesc }}));
+                check (ok (pasted) && playsAsIs (pasted["data"].getProperty ("clipId", var()).toString(), fx.seconds),
+                       tag + "paste_clip's copy plays as is");
+            }
+
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", trackId))), tag + "track removed");
+        }
+
+        outDir.deleteRecursively();
+        fixtureDir.deleteRecursively();
+    }
+
+    // Regression: audio Mosh writes ITSELF lands as is, whatever its file is called or carries.
+    //
+    // The section above covers files a producer drops in. The same adoption
+    // (insertPlainWaveClip in MoshOpsInternal.h has the mechanism) reached Mosh's own renders:
+    //   • bounce_track, freeze_track and consolidate_clips name the render
+    //     "<track>-<trackId>-<n>.wav", and the engine reads a tempo out of a file's NAME: a
+    //     bare number 51–249 between separators, when the file is a whole number of bars long
+    //     at it. Four seconds bounced off a track called "Beat 120" is "8 beats at 120", so in
+    //     a 100 bpm session it landed auto-tempo'd and 4.8 s long.
+    //   • a generative render lands the service's artifact under a layer-id name, which cannot
+    //     read as a tempo. Loop metadata INSIDE the artifact is acted on all the same, and
+    //     lands the render at some other length than the span it was made for.
+    // A recorded take is exposed too ("<track>_Take_<n>"), but the engine lands it and nothing
+    // records without a device: that half is the last part of `Mosh --v3-vocal-smoke`.
+    {
+        section ("Render landings: a tempo-named track's bounce / freeze / consolidate, and a loop-tagged render, land as is");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "render-as-is-selftest"))),
+               "render-as-is: fresh project ok");
+        check (ok (cmd (ops, "set_tempo", args1 ("bpm", 100.0))), "render-as-is: session at 100 bpm");
+
+        auto engineClip = [&] (const String& id) -> te::Clip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))   // the hidden render track included
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return c;
+            return nullptr;
+        };
+
+        // "As is": neither follow switch on, nothing left for a stretcher to do, and exactly
+        // `seconds` of timeline.
+        auto landsAsIs = [&] (const String& id, double seconds)
+        {
+            auto* w = dynamic_cast<te::WaveAudioClip*> (engineClip (id));
+            return w != nullptr && ! w->getAutoTempo() && ! w->getAutoPitch() && ! w->usesTimeStretchedProxy()
+                   && std::abs (w->getPosition().getLength().inSeconds() - seconds) < 1.0e-3;
+        };
+
+        auto readsAsLoop = [&] (const File& f)
+        {
+            return te::AudioFile (eng.engine(), f).getInfo().loopInfo.isLoopable();
+        };
+
+        // ── renders named after a track ──
+        constexpr double toneSeconds = 4.0;   // 8 beats at the "120" in the track's name
+        auto tonedTrack = [&] (String& trackId, String& clipId)
+        {
+            trackId = cmd (ops, "create_track", args1 ("name", "Beat 120"))["data"]
+                          .getProperty ("trackId", var()).toString();
+            clipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", toneSeconds },
+                                                            { "freq", 220.0 }}))["data"]
+                         .getProperty ("clipId", var()).toString();
+        };
+
+        // The render must read as a loop, or the landing check proves nothing.
+        auto checkLanding = [&] (const String& what, const var& result, const char* clipKey)
+        {
+            const String tag = "render-as-is [" + what + "]: ";
+            check (ok (result), tag + "ok" + (ok (result) ? String() : " (" + result.getProperty ("error", var()).toString() + ")"));
+            const auto data = result.getProperty ("data", var());
+            const File rendered (data.getProperty ("file", var()).toString());
+            check (rendered.existsAsFile() && readsAsLoop (rendered),
+                   tag + "the render reads as a loop, its tempo taken from the track's name (" + rendered.getFileName() + ")");
+            check (landsAsIs (data.getProperty (clipKey, var()).toString(), toneSeconds),
+                   tag + "the landed clip is the render's own length with warp and key-follow off");
+        };
+
+        {
+            String trackId, clipId;
+            tonedTrack (trackId, clipId);
+            checkLanding ("bounce to a new track",
+                          cmd (ops, "bounce_track", objN ({{ "trackId", trackId }, { "mode", "newTrack" }})), "clipId");
+            checkLanding ("bounce in place",
+                          cmd (ops, "bounce_track", objN ({{ "trackId", trackId }, { "mode", "inPlace" }})), "clipId");
+        }
+        {
+            String trackId, clipId;
+            tonedTrack (trackId, clipId);
+            checkLanding ("freeze", cmd (ops, "freeze_track", args1 ("trackId", trackId)), "clipId");
+        }
+        {
+            String trackId, clipId;
+            tonedTrack (trackId, clipId);
+            const auto secondHalf = cmd (ops, "split_clip", objN ({{ "clipId", clipId }, { "time", 2.0 }}))["data"]
+                                        .getProperty ("newClipId", var()).toString();
+            checkLanding ("consolidate",
+                          cmd (ops, "consolidate_clips", objN ({{ "clipIds", Array<var> { clipId, secondHalf } }})),
+                          "newClipId");
+        }
+
+        // ── renders that carry loop metadata ──
+        // The service's WAVs carry none today, so tag one on disk between the render and its
+        // landing: an ACID chunk saying "8 beats", on 3 s of tone. Adopted, that lands as 8
+        // beats of the session tempo — 4.8 s — instead of the span the render was made for.
+        auto tagAsLoop = [&] (const File& f) -> bool
+        {
+            constexpr double rate = 44100.0;
+            const int n = roundToInt (3.0 * rate);
+            AudioBuffer<float> buf (1, n);
+            for (int i = 0; i < n; ++i)
+                buf.setSample (0, i, 0.5f * (float) std::sin (MathConstants<double>::twoPi * 220.0 * i / rate));
+
+            StringPairArray acid;
+            acid.set (WavAudioFormat::acidOneShot, "0");
+            acid.set (WavAudioFormat::acidStretch, "1");
+            acid.set (WavAudioFormat::acidDiskBased, "1");
+            acid.set (WavAudioFormat::acidizerFlag, "1");
+            acid.set (WavAudioFormat::acidRootSet, "0");
+            acid.set (WavAudioFormat::acidBeats, "8");
+            acid.set (WavAudioFormat::acidDenominator, "4");
+            acid.set (WavAudioFormat::acidNumerator, "4");
+            acid.set (WavAudioFormat::acidTempo, "160");
+
+            bool written = false;
+            f.deleteFile();
+            if (auto os = std::unique_ptr<FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<AudioFormatWriter> w (eng.engine().getAudioFileFormatManager().getWavFormat()
+                                                          ->createWriterFor (os.get(), rate, 1u, 16, acid, 0));
+                if (w != nullptr) { os.release(); written = w->writeFromAudioSampleBuffer (buf, 0, n); }
+            }
+            // The engine may have read this path before; make it read the new contents.
+            eng.engine().getAudioFileManager().forceFileUpdate (te::AudioFile (eng.engine(), f));
+            return written && readsAsLoop (f);
+        };
+
+        auto renderLayerNode = [&] (const String& clipId) -> ValueTree
+        {
+            if (auto* c = engineClip (clipId))
+                return c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+            return {};
+        };
+        const Identifier landedClipId ("landedClipId");   // kLandedClipId, MoshOpsInternal.h
+
+        // accept_render: a sub-region render lands on the "Neural Renders" lane, over its region.
+        {
+            const String tag = "render-as-is [accepted render]: ";
+            const auto trackId = cmd (ops, "create_track", args1 ("name", "Scoped"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            const auto clipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 2.0 },
+                                                                        { "freq", 220.0 }}))["data"]
+                                    .getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", clipId }, { "adapter", "fake" },
+                                                               { "regionStart", 0.5 }, { "regionEnd", 1.0 }}))),
+                   tag + "create_render_layer over [0.5, 1.0] ok");
+            check (ok (cmd (ops, "render_layer", objN ({{ "clipId", clipId }, { "wait", true }}))), tag + "render_layer ok");
+
+            const File artifact (renderLayerNode (clipId).getProperty (ids::cacheArtifact).toString());
+            check (artifact.existsAsFile() && tagAsLoop (artifact), tag + "the render artifact now reads as an 8-beat loop");
+            check (ok (cmd (ops, "accept_render", args1 ("clipId", clipId))), tag + "accept_render ok");
+            check (landsAsIs (renderLayerNode (clipId).getProperty (landedClipId).toString(), 0.5),
+                   tag + "the landed clip covers the 0.5 s region with warp and key-follow off");
+        }
+
+        // The render beneath a MIDI clip: reset it, tag the landed file, and let the identical
+        // re-render (a cache hit) land that file again.
+        {
+            const String tag = "render-as-is [render beneath MIDI]: ";
+            const auto trackId = cmd (ops, "create_track", args1 ("name", "Keys"))["data"]
+                                     .getProperty ("trackId", var()).toString();
+            Array<var> notes;
+            for (int i = 0; i < 4; ++i)
+                notes.add (objN ({{ "pitch", 60 + i * 2 }, { "start", (double) i * 0.5 }, { "length", 0.5 }, { "velocity", 100 }}));
+            const auto midiId = cmd (ops, "add_midi_clip", objN ({{ "trackId", trackId }, { "length", 2.0 }, { "notes", notes }}))["data"]
+                                    .getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", midiId }, { "adapter", "fake" }}))),
+                   tag + "create_render_layer on a MIDI clip ok");
+            check (ok (cmd (ops, "render_layer", objN ({{ "clipId", midiId }, { "wait", true }}))), tag + "render_layer ok");
+
+            const File landedFile (renderLayerNode (midiId).getProperty (ids::cacheArtifact).toString());
+            check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", midiId))), tag + "reset_render_layer ok");
+            check (landedFile.existsAsFile() && tagAsLoop (landedFile), tag + "the landed render file now reads as an 8-beat loop");
+
+            auto again = cmd (ops, "render_layer", objN ({{ "clipId", midiId }, { "wait", true }}));
+            check (ok (again) && again["data"].getProperty ("cache", var()).toString() == "hit",
+                   tag + "the identical re-render is a cache hit, so it lands the file on disk");
+            auto* midi = engineClip (midiId);
+            check (midi != nullptr
+                       && landsAsIs (renderLayerNode (midiId).getProperty (landedClipId).toString(),
+                                     midi->getPosition().getLength().inSeconds()),
+                   tag + "the hidden clip covers the MIDI clip's span with warp and key-follow off");
+        }
+    }
+
+    // Regression: a copy of a warped clip is warped the same way.
+    //
+    // duplicate_clip and paste_clip insert the source file plain and then carry the clip's gain
+    // across. They did not carry its warp: the copy of a clip stretched from 4 s to 5 s kept the
+    // 5 s of timeline, played the file unstretched for 4 of them, and then nothing. So the
+    // copies are judged by what they render as well as by their state: the tone has to run to
+    // the end of each.
+    {
+        section ("Copies: duplicate_clip and paste_clip keep a clip's warp");
+
+        check (ok (cmd (ops, "new_project", args1 ("name", "warp-copy-selftest"))), "warp-copy: fresh project ok");
+
+        auto engineClip = [&] (const String& id) -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == id)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+
+        const auto trackId = cmd (ops, "create_track", args1 ("name", "Loop"))["data"]
+                                 .getProperty ("trackId", var()).toString();
+        const auto sourceId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 4.0 },
+                                                                      { "freq", 220.0 }}))["data"]
+                                  .getProperty ("clipId", var()).toString();
+        constexpr double warpedSeconds = 5.0;
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", sourceId }, { "length", warpedSeconds }}))),
+               "warp-copy: stretch_clip, 4 s of file across 5 s, ok");
+
+        auto* source = engineClip (sourceId);
+        check (source != nullptr && source->getAutoTempo(), "warp-copy: the source clip is warped");
+        const auto sourceMode = source != nullptr ? source->getTimeStretchMode() : te::TimeStretcher::disabled;
+        const double sourceBpm = source != nullptr ? source->getLoopInfo().getBpm (source->getAudioFile().getInfo()) : 0.0;
+
+        auto warpedLikeSource = [&] (const String& id, double start)
+        {
+            auto* w = engineClip (id);
+            return w != nullptr && w->getAutoTempo() && w->getTimeStretchMode() == sourceMode
+                   && std::abs (w->getLoopInfo().getBpm (w->getAudioFile().getInfo()) - sourceBpm) < 1.0e-6
+                   && std::abs (w->getPosition().getStart().inSeconds() - start) < 1.0e-6
+                   && std::abs (w->getPosition().getLength().inSeconds() - warpedSeconds) < 1.0e-6;
+        };
+
+        auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", sourceId));
+        const auto dupId = dup["data"].getProperty ("newClipId", var()).toString();
+        check (ok (dup) && warpedLikeSource (dupId, warpedSeconds),
+               "warp-copy: duplicate_clip's copy has the source's warp (stretch mode, source tempo, length)");
+
+        var clipDesc;
+        {
+            const auto snap = ops.snapshot();
+            if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                for (auto& t : *tracks)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == sourceId)
+                                clipDesc = c;
+        }
+        constexpr double pasteStart = 20.0;
+        auto pasted = cmd (ops, "paste_clip", objN ({{ "trackId", trackId }, { "start", pasteStart }, { "clip", clipDesc }}));
+        const auto pastedId = pasted["data"].getProperty ("clipId", var()).toString();
+        check (ok (pasted) && warpedLikeSource (pastedId, pasteStart),
+               "warp-copy: paste_clip's copy has the source's warp (stretch mode, source tempo, length)");
+
+        // The peak of channel 0 over [fromSec, toSec) of a rendered file; -1 if unreadable.
+        auto levelIn = [] (const File& f, double fromSec, double toSec) -> float
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) };
+            if (reader == nullptr) return -1.0f;
+            const auto first = (int64) (fromSec * reader->sampleRate);
+            const int n = (int) jmin ((int64) ((toSec - fromSec) * reader->sampleRate), reader->lengthInSamples - first);
+            if (n < 1) return -1.0f;
+            AudioBuffer<float> buf ((int) reader->numChannels, n);
+            reader->read (&buf, 0, n, first, true, true);
+            return buf.getMagnitude (0, 0, n);
+        };
+
+        // Unstretched, the 4 s file is over well before the last half second of a 5 s clip.
+        auto out = eng.sessionDir().getChildFile ("exports").getChildFile ("warp-copy-selftest.wav");
+        out.getParentDirectory().createDirectory();
+        out.deleteFile();
+        auto exp = cmd (ops, "export_audio", objN ({{ "file", out.getFullPathName() }, { "format", "wav" },
+                                                    { "bitDepth", 24 }, { "tail", "cut" }}));
+        check (ok (exp), "warp-copy: export ok" + (ok (exp) ? String() : " (" + exp.getProperty ("error", var()).toString() + ")"));
+        check (levelIn (out, warpedSeconds + 4.4, warpedSeconds + 4.9) > 0.05f,
+               "warp-copy: the duplicate's tone runs to the end of the clip");
+        check (levelIn (out, pasteStart + 4.4, pasteStart + 4.9) > 0.05f,
+               "warp-copy: the pasted copy's tone runs to the end of the clip");
+        out.deleteFile();
+
+        // The warp is part of the copy's own undo step.
+        check (ok (cmd (ops, "undo")) && engineClip (pastedId) == nullptr, "warp-copy: one undo removes the pasted copy");
+        check (ok (cmd (ops, "undo")) && engineClip (dupId) == nullptr
+                   && engineClip (sourceId) != nullptr && engineClip (sourceId)->getAutoTempo(),
+               "warp-copy: one more removes the duplicate, and the source is still warped");
+    }
+
     // Regression: export after relink_clip to a project-LOCAL copy. relink_clip rewrites a
     // wave clip's source via setToDirectFileReference(newFile, /*useRelativePath*/ local).
     // When the new file lives under the project dir (local==true), that computes the path
@@ -16168,6 +17890,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                     objN ({ { "trackId", mt }, { "seconds", 2.0 }, { "freq", 220.0 } })), "clipId");
         const auto eqR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "4bandEq" } }));
         const int  eqIx = (int) eqR.getProperty ("data", var()).getProperty ("index", -1);
+        // A chorus for the set_plugin_state row (its settings are CachedValue-only state).
+        const auto chR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "chorus" } }));
+        const int  chIx = (int) chR.getProperty ("data", var()).getProperty ("index", -1);
+        check (chIx >= 0, "matrix fixture: chorus loaded for the set_plugin_state row");
         const auto mmt  = rid (cmd (ops, "create_track", args1 ("name", "MxMidi")), "trackId");
         const auto mmc  = rid (cmd (ops, "add_midi_clip",
                                     objN ({ { "trackId", mmt }, { "start", 0.0 }, { "length", 4.0 } })), "clipId");
@@ -16245,6 +17971,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "load_builtin",         objN ({ { "trackId", mt }, { "type", "compressor" } }) },
             { "bypass_plugin",        objN ({ { "trackId", mt }, { "index", eqIx }, { "bypassed", true } }) },
             { "set_plugin_param",     objN ({ { "trackId", mt }, { "index", eqIx }, { "paramIndex", 0 }, { "value", 0.7 } }) },
+            { "set_plugin_state",     objN ({ { "trackId", mt }, { "index", chIx }, { "key", "depthMs" }, { "value", 7.5 } }) },
             { "add_automation_point", objN ({ { "trackId", mt }, { "pluginIndex", eqIx }, { "paramIndex", 0 },
                                               { "time", 1.0 }, { "value", 0.5 } }) },
             { "set_master_volume",    objN ({ { "db", -5.0 } }) },
@@ -16981,7 +18708,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ledgerText.contains ("\"args\"") == false, "no args key");
         check (ledgerText.contains ("trackId") == false, "no trackId");
         check (ledgerText.contains ("/Users/") == false, "no owner-home path");
-        check (ledgerText.contains (tid) == false, "not even the fixture's own track id");
+        const auto tidPlace = whereLedgerCarries (ledgerText, tid);
+        check (tidPlace.isEmpty(), "not even the fixture's own track id"
+                                       + (tidPlace.isEmpty() ? juce::String() : " (found at " + tidPlace + ")"));
+
+        // EXACTNESS, proven both ways with the fixture's REAL id. A digest that happens to
+        // contain the id's digits and a revision equal to it are coincidences: the old
+        // `ledgerText.contains (tid)` trips on this line, the field check must not.
+        const auto coincidence = "{\"v\": 1, \"transactionId\": \"txn-x\", \"revision\": " + tid
+                               + ", \"fingerprint\": \"9f" + tid + "e0c4d1b27a6f38e5c0d9a4b1f7\""
+                               + ", \"transactionKey\": \"request-" + tid + "ab12cd34\"}";
+        check (coincidence.contains (tid), "…the old substring check DOES trip on a digest/revision collision");
+        check (whereLedgerCarries (coincidence, tid).isEmpty(),
+               "…the field check does not (digits inside a digest, a revision equal to the id)");
+        // …and it still catches the id wherever it really is data.
+        for (const auto& leak : { "{\"v\": 1, \"target\": \"" + tid + "\"}",
+                                  "{\"v\": 1, \"note\": \"moved track " + tid + " to -3 dB\"}",
+                                  "{\"v\": 1, \"applied\": " + tid + "}",
+                                  "{\"v\": 1, \"steps\": [{\"t\": \"" + tid + "\"}]}",
+                                  "{\"v\": 1, \"" + tid + "\": true}",
+                                  "{\"v\": 1, \"target\": \"" + tid })   // torn: does not parse
+            check (whereLedgerCarries (leak, tid).isNotEmpty(), "yet the id IS caught as data: " + leak);
 
         // The RESTART-BLOCK fixture. An unresolved transaction is exactly what a crash
         // leaves behind: a `begin` record with no terminal record after it. Read the ledger
@@ -17071,6 +18818,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               "…and the create_track step it DID apply was undone along with the rest of the batch");
     }
 
+    // Track-chain presets ("Mosh Clean Lead v0"). LAST in the core run on purpose: it
+    // opens a clean project so its renders contain the preset track and nothing else,
+    // and nothing it creates can shift the ids or revision counters earlier sections
+    // assert on. Its own sections cover what a matrix row would (one undo restores the
+    // canonical snapshot; the state survives save/reload) — see VocalPresetSelfTest.cpp.
+    runVocalPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
+    // "Mosh Tuned Lead v0": Mosh AutoTune as a preset stage. Straight after, in the same
+    // clean project, so it is equally unable to shift ids earlier sections assert on.
+    runTunedLeadPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
@@ -17115,6 +18879,45 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
     check (trackClips (firstTrack (ops)) == 1, "redo restored clip");
     check (ok (cmd (ops, "redo")), "redo render layer command ok");
     check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "redo restored render layer");
+
+    // ── Native plugin panels: set_plugin_state and gesture coalescing undo/redo ──
+    {
+        const auto probe = firstTrack (ops).getProperty ("id", var()).toString();
+        const int delayIx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", probe }, { "type", "delay" }}))["data"]
+                                      .getProperty ("index", -1);
+        check (delayIx >= 0, "delay loaded for the plugin-state undo checks");
+        auto lengthMs = [&ops, &probe, delayIx]() -> int {
+            auto snap = ops.snapshot();
+            auto ts = snap.getProperty ("tracks", var());
+            for (int i = 0; i < ts.size(); ++i)
+                if (ts[i].getProperty ("id", var()).toString() == probe)
+                {
+                    auto ps = ts[i].getProperty ("plugins", var());
+                    for (int j = 0; j < ps.size(); ++j)
+                        if ((int) ps[j].getProperty ("index", -1) == delayIx)
+                            return (int) ps[j].getProperty ("state", var()).getProperty ("lengthMs", var()).getProperty ("value", -1);
+                }
+            return -1;
+        };
+        auto setLength = [&ops, &probe, delayIx] (int ms, const char* gesture) {
+            auto* a = new DynamicObject();
+            a->setProperty ("trackId", probe); a->setProperty ("index", delayIx);
+            a->setProperty ("key", "lengthMs"); a->setProperty ("value", ms);
+            if (gesture != nullptr) a->setProperty ("gesture", gesture);
+            return ok (cmd (ops, "set_plugin_state", var (a)));
+        };
+        check (lengthMs() == 150, "delay lengthMs starts at 150");
+        check (setLength (420, nullptr) && lengthMs() == 420, "set_plugin_state lengthMs 420");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "undo set_plugin_state restores 150");
+        check (ok (cmd (ops, "redo")) && lengthMs() == 420, "redo set_plugin_state reapplies 420");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "undo again");
+        check (setLength (200, "undo-drag") && setLength (300, "undo-drag") && setLength (500, "undo-drag") && lengthMs() == 500,
+               "a three-call gesture on lengthMs");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "ONE undo takes back the whole gesture");
+        check (ok (cmd (ops, "redo")) && lengthMs() == 500, "ONE redo puts the whole gesture back");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "and undo once more");
+        check (ok (cmd (ops, "undo")) && lengthMs() == -1, "undo the delay load (the delay is gone)");
+    }
 
     // ── MOSHI-LOOP: Keep is one undoable transaction over a clip that moved tracks ──
     // The loop's one genuinely undoable command. Everything else it does — the listening
@@ -17611,6 +19414,101 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
             continue;
         }
 
+        // __wait_until pseudo-command: pump like __wait, but stop as soon as args.condition
+        // holds, or fail once args.maxMs (default 30000) has passed. A fixed __wait bets a
+        // number against machine load; this waits for the async work itself. Read-only: the
+        // conditions read the same snapshot() the WebView sees (plus whether MoshOps still
+        // has Direct Re-Imagine work in flight). Emits one result line with ok = the
+        // condition held and data.waitedMs; a miss counts as a failure, never a silent pass.
+        //   direct_render_idle   no Direct Re-Imagine request or worker is in flight and no
+        //                        render layer reads queued/rendering: nothing more can land.
+        //   render_job_submitted args.clipId's render layer carries a service jobId. Stops
+        //                        early (a miss) if the layer settles or disappears without one.
+        //   file_exists          args.file exists. A relative path resolves against this
+        //                        script's directory, for a handshake with an observer process.
+        if (name == "__wait_until")
+        {
+            const auto args = subst (command.getProperty ("args", var()));
+            const auto condition = args.getProperty ("condition", var()).toString();
+            const int maxMs = jmax (0, (int) args.getProperty ("maxMs", 30000));
+            const auto clipId = args.getProperty ("clipId", var()).toString();
+            const auto fileArg = args.getProperty ("file", var()).toString();
+            const auto marker = fileArg.isEmpty() ? File() : scriptFile.getParentDirectory().getChildFile (fileArg);
+            const auto busy = [] (const var& layer)
+            {
+                const auto status = layer.getProperty ("status", var()).toString();
+                return status == "queued" || status == "rendering";
+            };
+            const auto layers = [&ops]
+            {
+                std::map<String, var> byClip;
+                const auto snap = ops.snapshot();
+                if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+                    for (const auto& track : *tracks)
+                        if (auto* clips = track.getProperty ("clips", var()).getArray())
+                            for (const auto& clip : *clips)
+                                byClip[clip.getProperty ("id", var()).toString()] = clip.getProperty ("renderLayer", var());
+                return byClip;
+            };
+            enum class Poll { waiting, met, missed };
+            const auto check = [&]() -> Poll
+            {
+                if (condition == "file_exists")
+                    return marker == File() ? Poll::missed : marker.existsAsFile() ? Poll::met : Poll::waiting;
+                if (condition == "direct_render_idle")
+                {
+                    if (ops.hasDirectRenderWork()) return Poll::waiting;
+                    for (const auto& entry : layers())
+                        if (busy (entry.second)) return Poll::waiting;
+                    return Poll::met;
+                }
+                if (condition == "render_job_submitted" && clipId.isNotEmpty())
+                {
+                    const auto all = layers();
+                    const auto it = all.find (clipId);
+                    const auto layer = it == all.end() ? var() : it->second;
+                    if (layer.getProperty ("jobId", var()).toString().isNotEmpty()) return Poll::met;
+                    return busy (layer) ? Poll::waiting : Poll::missed;
+                }
+                return Poll::missed;
+            };
+
+            const auto start = Time::getMillisecondCounter();
+            auto state = check();
+            while (state == Poll::waiting && (int) (Time::getMillisecondCounter() - start) < maxMs)
+            {
+                if (mm != nullptr) mm->runDispatchLoopUntil (20);
+                else Thread::sleep (20);
+                state = check();
+            }
+            const auto waitedMs = (int) (Time::getMillisecondCounter() - start);
+
+            auto* d = new DynamicObject();
+            d->setProperty ("condition", condition);
+            d->setProperty ("met", state == Poll::met);
+            d->setProperty ("waitedMs", waitedMs);
+            d->setProperty ("maxMs", maxMs);
+            if (clipId.isNotEmpty()) d->setProperty ("clipId", clipId);
+            if (marker != File()) d->setProperty ("file", marker.getFullPathName());
+            auto* wo = new DynamicObject();
+            wo->setProperty ("command", "__wait_until");
+            wo->setProperty ("ok", state == Poll::met);
+            if (auto lbl = args.getProperty ("label", var()); ! lbl.isVoid())
+                wo->setProperty ("label", lbl);
+            wo->setProperty ("data", var (d));
+            if (state != Poll::met)
+            {
+                ++failures;
+                wo->setProperty ("error", state == Poll::waiting
+                    ? "condition not met within " + String (maxMs) + " ms"
+                    : "condition cannot be met (unknown condition, missing argument, or the layer settled first)");
+            }
+            const auto waitLine = JSON::toString (var (wo), true);
+            outLines.add (waitLine);
+            std::cout << waitLine.toStdString() << std::endl;
+            continue;
+        }
+
         // __snapshot pseudo-command: emit the current session snapshot as a result line
         // (read-only — no mutation, no transaction, no JSONL log; mirrors get_command_log's
         // read-only posture). Lets the DAW-conformance harness assert expected_state / undo
@@ -17782,12 +19680,20 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (device != nullptr, "JUCE audio device is open");
     if (device == nullptr)
         return failures;
-    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
-              << " block=" << device->getCurrentBufferSizeSamples()
-              << " reportedIn=" << device->getInputLatencyInSamples()
-              << " reportedOut=" << device->getOutputLatencyInSamples() << "\n";
-    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
-    const double rate = device->getCurrentSampleRate();
+    auto describeDevice = [&] (const char* when)
+    {
+        std::cerr << "  ..   " << when << ": device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+                  << " block=" << device->getCurrentBufferSizeSamples()
+                  << " reportedIn=" << device->getInputLatencyInSamples()
+                  << " reportedOut=" << device->getOutputLatencyInSamples()
+                  << " activeIn=" << device->getActiveInputChannels().countNumberOfSetBits() << "\n";
+    };
+    describeDevice ("at launch");
+    // NB: MoshEngine opens the device output-only at launch and activates the input side
+    // lazily, on the first arm (activateAudioInput), and calibrate_latency refuses until
+    // an input channel is active. So the take track is armed FIRST: "active input
+    // channel" is asserted after that, and the calibration runs after it too — the same
+    // order the V3-vocal smoke below uses.
 
     auto* mm = MessageManager::getInstanceWithoutCreating();
     auto pump = [mm] (int ms)
@@ -17801,10 +19707,31 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     };
     auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
 
-    // ── 1. calibrate ──
+    // ── 1. open the input the way the product does: arm the track the take will land on ──
+    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
+    check (ok (takeTrack), "create_track Take ok");
+    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
+           "input monitoring OFF on the take (so the loopback carries only the click)");
+    // Arming activated the input side, which RE-OPENS the device: the pointer read at the
+    // top is stale from here on. Re-fetch it before it is used again.
+    device = deviceManager.getCurrentAudioDevice();
+    check (device != nullptr, "the device is still open after arming (input side activated)");
+    if (device == nullptr)
+        return failures;
+    describeDevice ("after arming");
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0,
+           "arming opened an active input channel on the device (set MOSH_AUDIO_INPUT_DEVICE)");
+    const double rate = device->getCurrentSampleRate();
+
+    // ── 2. calibrate ──
     check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
     auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
     check (ok (start), "calibrate_latency start ok with a live device");
+    if (! ok (start))   // a refusal is not recorded in the status block, so name it here
+        std::cerr << "  ..   calibrate_latency start refused: " << start["error"].toString() << "\n";
     check (calState().getProperty ("state", var()).toString() == "running", "calibration reports running");
     const auto deadline = Time::getMillisecondCounter() + 12000;
     while (Time::getMillisecondCounter() < deadline
@@ -17827,7 +19754,7 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (measuredMs >= 0.0 && measuredMs < 200.0, "loopback round trip is a sane number (< 200 ms)");
     check (std::abs ((double) cal.getProperty ("sampleRate", 0.0) - rate) < 0.5, "record carries the device rate");
 
-    // ── 2. the click: play at 1.0 s on one track, record the loopback on another ──
+    // ── 3. the click: play at 1.0 s on one track, record the loopback on the armed one ──
     auto clickTrack = cmd (ops, "create_track", args1 ("name", "Click"));
     check (ok (clickTrack), "create_track Click ok");
     const auto clickTrackId = clickTrack["data"].getProperty ("trackId", var()).toString();
@@ -17836,43 +19763,32 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     const auto clickId = tone["data"].getProperty ("clipId", var()).toString();
     check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
 
-    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
-    check (ok (takeTrack), "create_track Take ok");
-    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
-    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
-    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
-    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
-           "input monitoring OFF on the take (so the loopback carries only the click)");
-
-    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
-    auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
-    check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
-    pump (2500);
-    auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
-    check (ok (stop), "recording stopped");
-
-    // ── 3. where did it land? ──
-    var landed;
+    // Where the click landed on `trackId`: the first clip's WAV, first sample over the floor,
+    // as an error against 1.0 s. Returns the landed clip's id.
+    auto checkLanding = [&] (const String& trackId, const String& suffix) -> String
     {
-        auto snap = ops.snapshot();
-        auto tracksVar = snap.getProperty ("tracks", var());
-        if (auto* tracks = tracksVar.getArray())
-            for (auto& t : *tracks)
-                if (t.getProperty ("id", var()).toString() == takeTrackId)
-                    landed = t.getProperty ("clips", var());
-    }
-    const int nLanded = landed.isArray() ? landed.size() : 0;
-    check (nLanded > 0, "a take landed on the armed track");
-    if (nLanded > 0)
-    {
+        var landed;
+        {
+            auto snap = ops.snapshot();
+            auto tracksVar = snap.getProperty ("tracks", var());
+            if (auto* tracks = tracksVar.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("id", var()).toString() == trackId)
+                        landed = t.getProperty ("clips", var());
+        }
+        const int nLanded = landed.isArray() ? landed.size() : 0;
+        check (nLanded > 0, "a take landed on the armed track" + suffix);
+        if (nLanded == 0)
+            return {};
+
         const auto clip = landed[0];
         const double clipStart  = (double) clip.getProperty ("start", 0.0);
         const double clipOffset = (double) clip.getProperty ("offset", 0.0);
         const File src (clip.getProperty ("sourceFile", var()).toString());
-        check (src.existsAsFile(), "landed take has a source WAV on disk");
+        check (src.existsAsFile(), "landed take has a source WAV on disk" + suffix);
         AudioFormatManager fm; fm.registerBasicFormats();
         std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (src));
-        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable");
+        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable" + suffix);
         if (reader != nullptr && reader->lengthInSamples > 0)
         {
             AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
@@ -17884,7 +19800,7 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
             for (int i = 0; i < buf.getNumSamples() && onset < 0; ++i)
                 for (int ch = 0; ch < buf.getNumChannels(); ++ch)
                     if (std::abs (buf.getSample (ch, i)) > 0.003f) { onset = i; break; }
-            check (onset >= 0, "the click is present in the recorded take");
+            check (onset >= 0, "the click is present in the recorded take" + suffix);
             if (onset >= 0)
             {
                 const double onsetEditSeconds = clipStart + ((double) onset / reader->sampleRate - clipOffset);
@@ -17892,12 +19808,262 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
                 std::cerr << "  ..   landed: clipStart=" << clipStart << " offset=" << clipOffset
                           << " onsetSample=" << onset << " onset=" << onsetEditSeconds
                           << " s error=" << errorMs << " ms\n";
-                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)");
+                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)" + suffix);
             }
         }
+        return clip.getProperty ("id", var()).toString();
+    };
+    // Xruns across a take (device overloads plus callbacks that overran their block). A HAL
+    // cycle skipped between the click going out and coming back moves the landing by exactly
+    // one device block, so a block-sized error can only be read with this beside it.
+    auto reportXruns = [&] (int beforeRecord)
+    {
+        const int afterStop = deviceManager.getXRunCount();
+        std::cerr << "  ..   xruns: beforeRecord=" << beforeRecord << " afterStop=" << afterStop
+                  << " duringTake=" << (afterStop - beforeRecord) << "\n";
+    };
+    // What a snapshot or a UI burst right after Record does: the message thread is held (no
+    // message-loop turn) for the start of the take, then the loop runs for the rest of it.
+    const int takeMs = 2500;
+    auto runTake = [&] (int busyMs)
+    {
+        if (busyMs > 0)
+            Thread::sleep (busyMs);
+        pump (takeMs - busyMs);
+    };
+    // One take through the transport: seek to 0, record, stop, then where did it land?
+    auto recordTakeAndCheckLanding = [&] (int busyMs, const String& suffix) -> String
+    {
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0" + suffix);
+        const int xrunsBeforeRecord = deviceManager.getXRunCount();
+        auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started" + suffix);
+        runTake (busyMs);
+        auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (ok (stop), "recording stopped" + suffix);
+        if (! ok (stop))   // a take that was cut short is refused here: name the refusal
+            std::cerr << "  ..   set_transport stop refused: " << stop["error"].toString() << "\n";
+        const auto landedClipId = checkLanding (takeTrackId, suffix);
+        reportXruns (xrunsBeforeRecord);
+        return landedClipId;
+    };
+
+    // ── 4. the calibrated take: record, then where did it land? ──
+    const auto firstTakeClipId = recordTakeAndCheckLanding (0, {});
+
+    // ── 5. arm, then record, with no message-loop turn in between ──
+    // Any caller that arms and records back to back does this. Tracktion applies an arm on
+    // the NEXT message-loop turn (te::InputDeviceInstance's deferred record-status update).
+    // If the record has already started by then, that update stops the fresh take: a take
+    // that already holds audio simply ends there, and an empty one is punched in again and
+    // lands a block or two early. Holding the message thread for the take's first 150 ms
+    // puts the update well inside the take on every run; left to itself it is a race with
+    // the audio callback that only goes wrong some of the time.
+    const int busyMs = 150;
+    check (ok (cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", false }}))), "take track disarmed");
+    check (ok (cmd (ops, "remove_clip", args1 ("clipId", firstTakeClipId))), "first take removed (it must not play into the second)");
+    pump (500);   // everything above settles: only the arm below is still pending at Record
+    auto rearm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (rearm) && (bool) rearm["data"].getProperty ("applied", false), "take track re-armed");
+    const auto secondTakeClipId = recordTakeAndCheckLanding (busyMs, " (armed and recorded in the same turn)");
+
+    // ── 6. the Booth's version: loop_record on a project that was never set up ──
+    // "Put Me In" pairs a Takes track with the one armed track, arms it and starts the pass
+    // inside ONE command, so its arm is always still pending when the record starts.
+    {
+        const String suffix (" (loop_record on a project that was never set up)");
+        if (secondTakeClipId.isNotEmpty())
+            check (ok (cmd (ops, "remove_clip", args1 ("clipId", secondTakeClipId))), "second take removed (it must not play into the loop pass)");
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "no count-in: the pass starts at 0 s");
+        pump (500);
+        const int xrunsBeforeRecord = deviceManager.getXRunCount();
+        auto loopRecord = cmd (ops, "loop_record");
+        check (ok (loopRecord) && (bool) loopRecord["data"].getProperty ("applied", false),
+               "loop_record set the loop up and started the pass in one command");
+        runTake (busyMs);
+        auto loopStop = cmd (ops, "loop_stop");
+        check (ok (loopStop) && (bool) loopStop["data"].getProperty ("stoppedRecording", false), "loop_stop stopped the recording");
+        pump (300);
+        const auto takesTrackId = cmd (ops, "loop_state")["data"].getProperty ("takesTrackId", var()).toString();
+        check (takesTrackId.isNotEmpty() && takesTrackId != takeTrackId, "loop_record paired a distinct Takes track");
+        checkLanding (takesTrackId, suffix);
+        reportXruns (xrunsBeforeRecord);
     }
+
     std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
     return failures;
+}
+
+// ── Take landing — a recorded take is the recording: its own length, not warped, not
+// transposed. The live half of --selftest's "Render landings" section, run as the last part of
+// --v3-vocal-smoke: nothing records without a device. The engine lands a take itself, through
+// te::insertWaveClip, which reads a tempo out of a file's NAME (any bare number 51–249 between
+// separators, when the file is a whole number of bars long at it), and it names take files
+// "<track>_Take_<n>". After an ordinary take for reference, three ways in:
+//   • the TRACK name: one bar at 60 on a track called "Vox 60". Adopted, it lands as 4 beats
+//     of the session tempo: at 120 bpm, 2 s of a 4 s recording;
+//   • the TAKE NUMBER, on a plainly named track: it is the name's last token, so take 51 is
+//     "at 51 bpm". Takes 1–50 are occupied with placeholder files first;
+//   • a track named with the SESSION's tempo ("Vox 120"), recorded behind a 1-bar count-in.
+//     Adopted, its length is unchanged and it is simply left warped; and the count-in trim
+//     (RecordingLanding.h) runs on whatever the landing left. ──
+static void checkTakesLandAsRecorded (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    section ("Take landing live: a take whose file name reads as a tempo still lands as recorded");
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (5);
+            else Thread::sleep (5);
+        }
+    };
+
+    const double sessionBpm = eng.edit().tempoSequence.getBpmAt (tracktion::TimePosition());
+    check (sessionBpm > 50.0 && sessionBpm < 250.0 && sessionBpm == std::floor (sessionBpm) && sessionBpm != 60.0,
+           "the session tempo is a whole number a track can be named after, and not 60 (" + String (sessionBpm) + " bpm)");
+
+    // Only the track under test may record: the Booth's Takes track is still armed.
+    {
+        const auto snap = ops.snapshot();
+        if (auto* tracks = snap.getProperty ("tracks", var()).getArray())
+            for (auto& t : *tracks)
+                if ((bool) t.getProperty ("armed", false))
+                    cmd (ops, "arm_track", objN ({{ "trackId", t.getProperty ("id", var()) }, { "armed", false }}));
+    }
+
+    auto propertyNames = [] (const ValueTree& v)
+    {
+        StringArray names;
+        for (int i = 0; i < v.getNumProperties(); ++i)
+            names.add (v.getPropertyName (i).toString());
+        names.sort (false);
+        return names.joinIntoString (" ");
+    };
+    String ordinaryTakeProperties;   // the clip state of a take whose file name reads as nothing
+    File takeDir;                    // where the engine writes this project's takes
+
+    // Records `takeBeats` session beats from `punchIn` on a new track called `trackName`, then
+    // checks the take. A file expected to read as a loop must do so, or the run proves nothing.
+    struct TakeCase { String trackName, stem; double punchIn, takeBeats; int countInBars; bool readsAsLoop; };
+    auto recordAndCheck = [&] (const TakeCase& tc)
+    {
+        const String tag = "[" + tc.stem + "] ";
+        const double takeSeconds = tc.takeBeats * 60.0 / sessionBpm;
+
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", tc.countInBars))),
+               tag + "count-in of " + String (tc.countInBars) + " bar(s)");
+        const auto trackId = cmd (ops, "create_track", args1 ("name", tc.trackName))["data"]
+                                 .getProperty ("trackId", var()).toString();
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+        check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), tag + "track armed on the live input");
+        check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", trackId }, { "mode", "off" }}))),
+               tag + "input monitoring off");
+        check (ok (cmd (ops, "set_transport", args1 ("position", tc.punchIn))), tag + "seek to the punch-in");
+        auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), tag + "recording started");
+
+        // Roll until the transport has covered the take, then stop: the name's tolerance is a
+        // tenth of a beat either side, a good deal wider than a pump tick. A count-in rolls
+        // up to the punch-in first.
+        const auto deadline = Time::getMillisecondCounter() + (uint32) ((takeSeconds + 15.0) * 1000.0);
+        while (eng.edit().getTransport().getPosition().inSeconds() < tc.punchIn + takeSeconds - 0.01
+               && Time::getMillisecondCounter() < deadline)
+            pump (5);
+        auto stop = cmd (ops, "stop_recording");
+        const auto clips = stop["data"].getProperty ("clips", var());
+        check (ok (stop) && clips.size() == 1, tag + "one take landed");
+        cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+        if (clips.size() != 1)
+            return;
+
+        const auto clipId = clips[0].getProperty ("id", var()).toString();
+        const File source (clips[0].getProperty ("sourceFile", var()).toString());
+        check (source.getFileNameWithoutExtension() == tc.stem,
+               tag + "the engine named the take file as expected (" + source.getFileName() + ")");
+        const te::AudioFile takeFile (eng.engine(), source);
+        const double fileSeconds = takeFile.getLength();
+        check (takeFile.getInfo().loopInfo.isLoopable() == tc.readsAsLoop,
+               tag + (tc.readsAsLoop ? "the take file reads as a loop, its tempo taken from its name ("
+                                     : "the take file does not read as a loop (")
+                   + String (fileSeconds, 3) + " s)");
+
+        auto findTake = [&] () -> te::WaveAudioClip*
+        {
+            for (auto* track : te::getAudioTracks (eng.edit()))
+                for (auto* c : track->getClips())
+                    if (c->itemID.toString() == clipId)
+                        return dynamic_cast<te::WaveAudioClip*> (c);
+            return nullptr;
+        };
+        auto* take = findTake();
+        check (take != nullptr, tag + "the take is a wave clip in the edit");
+        if (take == nullptr)
+            return;
+
+        const auto pos = take->getPosition();
+        const double start = pos.getStart().inSeconds(), length = pos.getLength().inSeconds(),
+                     offset = pos.getOffset().inSeconds();
+        std::cerr << "  ..   " << source.getFileName() << ": file=" << fileSeconds << " s clip start=" << start
+                  << " length=" << length << " offset=" << offset
+                  << " autoTempo=" << (int) take->getAutoTempo() << " autoPitch=" << (int) take->getAutoPitch() << "\n";
+        check (! take->getAutoTempo() && ! take->getAutoPitch() && ! take->usesTimeStretchedProxy(),
+               tag + "the take is not warped and does not follow the key");
+        check (std::abs (start - tc.punchIn) < 0.05, tag + "the take starts at the punch-in (" + String (start, 3) + " s)");
+        check (std::abs (offset + length - fileSeconds) < 0.05,
+               tag + "the take plays through to the end of its recording (offset " + String (offset, 3)
+                   + " + length " + String (length, 3) + " of " + String (fileSeconds, 3) + " s)");
+
+        if (! tc.readsAsLoop)
+        {
+            ordinaryTakeProperties = propertyNames (take->state);
+            takeDir = source.getParentDirectory();
+            return;
+        }
+        check (propertyNames (take->state) == ordinaryTakeProperties,
+               tag + "the take's clip state has exactly an ordinary take's properties (" + propertyNames (take->state) + ")");
+
+        // Whatever the landing needed belongs to the landing's own undo step: one undo takes
+        // the take away, and the redo brings back the take as it landed, not as the engine
+        // first inserted it. (The clip object is rebuilt, so look it up again.)
+        check (ok (cmd (ops, "undo")) && findTake() == nullptr, tag + "one undo removes the take");
+        check (ok (cmd (ops, "redo")), tag + "redo ok");
+        auto* again = findTake();
+        check (again != nullptr && ! again->getAutoTempo() && ! again->getAutoPitch()
+                   && std::abs (again->getPosition().getStart().inSeconds() - start) < 1.0e-6
+                   && std::abs (again->getPosition().getLength().inSeconds() - length) < 1.0e-6
+                   && std::abs (again->getPosition().getOffset().inSeconds() - offset) < 1.0e-6
+                   && propertyNames (again->state) == ordinaryTakeProperties,
+               tag + "the redo brings the take back exactly as it landed");
+    };
+
+    // The reference: nothing in "Plain_Take_1" reads as a tempo.
+    recordAndCheck ({ "Plain", "Plain_Take_1", 0.0, 4.0, 0, false });
+    check (ordinaryTakeProperties.isNotEmpty(), "an ordinary take landed, to compare the others against ("
+                                                    + ordinaryTakeProperties + ")");
+
+    // One bar at 60 is 4 s.
+    recordAndCheck ({ "Vox 60", "Vox 60_Take_1", 0.0, 4.0 * sessionBpm / 60.0, 0, true });
+
+    // One bar at 51, as take 51.
+    {
+        Array<File> placeholders;
+        for (int i = 1; i <= 50; ++i)
+            placeholders.add (takeDir.getChildFile ("Vox_Take_" + String (i) + ".wav"));
+        for (auto& f : placeholders) f.create();
+        recordAndCheck ({ "Vox", "Vox_Take_51", 0.0, 4.0 * sessionBpm / 51.0, 0, true });
+        for (auto& f : placeholders) f.deleteFile();
+    }
+
+    // The session's own tempo in the track name, behind a 1-bar count-in. The file starts at
+    // the pre-roll, 4.5 beats before the punch-in (RecordingLanding.h), so 3.5 beats of take
+    // make it 8 beats long. Punch in at bar 3.
+    const String tempoNamed = "Vox " + String ((int) sessionBpm);
+    recordAndCheck ({ tempoNamed, tempoNamed + "_Take_1", 8.0 * 60.0 / sessionBpm, 3.5, 1, true });
 }
 
 // ── V3-vocal — the Booth loop with a real device (docs/VERIFICATION.md "V3 default-shell
@@ -18174,6 +20340,9 @@ int runV3VocalSmoke (MoshEngine& eng, MoshOps& ops)
         check (steps <= 2, "the keep reversed within two undo steps (a landed post-Keep pass costs one)");
         std::cerr << "  ..   undo steps to reverse the keep: " << steps << " (passes before undo: " << partsBeforeUndo << ")\n";
     }
+
+    // ── 6. and however its file is named, a take lands as it was recorded ──
+    checkTakesLandAsRecorded (eng, ops);
 
     // One machine-readable line for scripts/v3-acceptance/run.py (it copies the takes).
     {
@@ -18761,5 +20930,340 @@ int runChordsStress (MoshEngine& eng, MoshOps& ops)
     std::cerr << "===== " << (checks - failures) << "/" << checks << " chords-stress checks passed, " << failures << " failed =====\n";
     return failures;
 }
+
+// -- Disarm-after-export smoke (PR #730 round-3 review, "Found in passing") --------------
+// cmdExportAudio (MoshOps.ProjectIo.cpp) calls edit.getTransport().freePlaybackContext()
+// after rendering and never reallocates one. arm_track's `armed` flag is a ValueTree
+// property on a per-device INPUTDEVICEDESTINATION node owned by the Edit's
+// EditInputDevices (tracktion_InputDevice.h: recordEnabled.referTo(state, IDs::armed,
+// nullptr, false)) -- Edit-level state that survives a freed context untouched. Before the
+// fix, `arm_track {armed:false}` right after an export found `getAllInputDevices()` empty
+// (no context -> no live InputDeviceInstance), reported ok/applied:false, and never
+// touched the persisted armed:true destination; the NEXT context rebuild (a transport
+// start) read it straight back, so the disarm was silently lost. This needs a REAL
+// device: headless never allocates a playback context in the first place (arm_track is
+// always applied:false there), so the defect is invisible to --selftest. Pair with
+// MOSH_AUDIO_{OUTPUT,INPUT}_DEVICE="BlackHole 2ch". Prints one
+// "DISARM-AFTER-EXPORT-SMOKE: {json}" line.
+int runDisarmAfterExportSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh disarm-after-export smoke (arm / export / disarm on a live device) =====\n";
+    section ("Disarm survives a freed-then-reallocated playback context (PR #730)");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        do
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (10);
+            else Thread::sleep (10);
+        }
+        while (Time::getMillisecondCounter() < end);
+    };
+
+    auto trackById = [&] (const String& id) -> var
+    {
+        auto snap = ops.snapshot();                 // keep the temporary alive (no dangling array)
+        if (auto* arr = snap["tracks"].getArray())
+            for (auto& tr : *arr)
+                if (tr.getProperty ("id", var()).toString() == id) return tr;
+        return {};
+    };
+
+    auto tr = cmd (ops, "create_track", args1 ("name", "DisarmExport"));
+    check (ok (tr), "create_track ok");
+    const auto trackId = tr["data"].getProperty ("trackId", var()).toString();
+    // export_audio's renderer refuses an edit with literally no audio anywhere
+    // ("Didn't find any audio to render", tracktion_NodeRenderContext.cpp) -- a short
+    // test tone gives it real content so the export this smoke depends on can succeed;
+    // it is unrelated to (and does not gate) the arm/disarm behaviour under test.
+    check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", trackId }, { "seconds", 0.25 }, { "freq", 440.0 }}))),
+           "add_test_tone_clip ok (gives export_audio real content to render)");
+    pump (100);   // let device activation settle before the first arm
+
+    // -- 1. arm. This direction already ensured a context before the fix; asserting it
+    //       here pins the baseline and gives step 5 below cheap reverse coverage. --
+    auto armOn = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+    check (ok (armOn), "arm_track armed:true ok");
+    check ((bool) armOn["data"].getProperty ("applied", false),
+           "arm_track armed:true applied (a live input instance was armed)");
+    check ((bool) trackById (trackId).getProperty ("armed", false),
+           "snapshot shows the track armed before export");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr,
+           "playback context is allocated while armed");
+
+    // -- 2. export_audio -- the trigger. Mechanism witness: assert the context was
+    //       ACTUALLY freed, not merely assumed from reading the source. --
+    const File exportFile = eng.sessionDir().getChildFile ("disarm-export-smoke.wav");
+    exportFile.deleteFile();
+    auto exp = cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}));
+    check (ok (exp), "export_audio ok");
+    check (exportFile.existsAsFile() && exportFile.getSize() > 0, "export_audio produced a non-empty file");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+           "export_audio freed the playback context (mechanism witness)");
+
+    // -- 3. disarm right after export -- the reported defect. Pre-fix: no live instance
+    //       to find (context freed), so the persisted armed:true destination is never
+    //       touched; the command still reports ok with applied:false. --
+    auto armOff = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+    check (ok (armOff), "arm_track armed:false ok");
+    check ((bool) armOff["data"].getProperty ("applied", false),
+           "arm_track armed:false applied right after export (fix: context is reallocated before the lookup)");
+    check (! (bool) trackById (trackId).getProperty ("armed", true),
+           "snapshot shows the track disarmed immediately after the export+disarm sequence");
+
+    // -- 4. the ORIGINAL symptom: the next context rebuild (a transport start) must not
+    //       resurrect a stale armed:true destination. --
+    check (ok (cmd (ops, "set_transport", args1 ("action", "play"))), "set_transport play ok (rebuilds the context)");
+    pump (150);
+    check (! (bool) trackById (trackId).getProperty ("armed", true),
+           "track is STILL disarmed after the transport rebuilt the playback context");
+    check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))), "set_transport stop ok");
+
+    // -- 5. cheap reverse-direction coverage: re-arm after an export, so a regression on
+    //       the (already-working) armed:true path would also be caught here. --
+    exportFile.deleteFile();
+    auto exp2 = cmd (ops, "export_audio", objN ({{ "file", exportFile.getFullPathName() }, { "format", "wav" }}));
+    check (ok (exp2), "second export_audio ok");
+    check (eng.edit().getTransport().getCurrentPlaybackContext() == nullptr,
+           "second export freed the context again");
+    auto armOn2 = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+    check (ok (armOn2), "arm_track armed:true (after export) ok");
+    check ((bool) armOn2["data"].getProperty ("applied", false),
+           "arm_track armed:true (after export) applied");
+    check ((bool) trackById (trackId).getProperty ("armed", false),
+           "track shows armed again after re-arming post-export");
+
+    // Leave nothing armed and no stray export file behind.
+    cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+    exportFile.deleteFile();
+
+    auto* summary = new DynamicObject();
+    summary->setProperty ("trackId", trackId);
+    summary->setProperty ("checks", checks);
+    summary->setProperty ("failures", failures);
+    std::cout << "DISARM-AFTER-EXPORT-SMOKE: " << JSON::toString (var (summary), true) << std::endl;
+    std::cerr << "===== " << (checks - failures) << "/" << checks
+              << " disarm-after-export-smoke checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
+// FINDINGS.md #7 follow-up (2026-09-24, coordinator review of commit 9b205295): the real
+// walkthrough's mosh-log.jsonl (~Library/Mosh/session/mosh-log.jsonl, seq 60-65) showed the
+// undo after Keep + Source/Result audition reverting a transaction OLDER than Keep's own --
+// the txn stamp on the first `bypass_layer` call was already one past Keep's, with no
+// intervening command logged as undoable. --run-script (verify-direct-reimagine.py's own
+// harness) cannot reproduce a live-playback condition at all: it forces noAudio
+// unconditionally (see Main.cpp's `noAudio` computation), so transport.play() never actually
+// engages there (confirmed empirically: "playing" stays false even after
+// set_transport{action:"toggle"} under --run-script). This smoke uses a REAL device, like
+// --chords-stress, to run the exact sequence (Keep, roll playback, Source/Result audition,
+// stop, undo, redo) under a live graph and prove undo reverts exactly Keep with the fix in
+// MoshOps::completePendingAcceptDecisions / decideDirectRender.
+//
+// NOTE ON THE HIDDEN-TRANSACTION HYPOTHESIS: extensive attempts (this exact sequence with a
+// plain clip, a frozen-drum-track clip matching the real session's actual target, an idle
+// 14s real-playback window probing the raw UndoManager depth with no commands running, and
+// headless variants) did not reproduce an extra undo-tracked transaction appearing outside
+// bypass_layer's own dispatch. The undoDepth check below is kept as a permanent regression
+// guard (idle playback must never grow the undo stack) even though it did not, by itself,
+// explain the walkthrough's txn stamp. What IS fixed and verified here: with the
+// completePendingAcceptDecisions fix, this whole sequence -- including a prior unrelated
+// edit surviving one undo of Keep -- is correct under a real, live playback graph.
+int runDirectReimagineAudioSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+    std::cerr << "\n===== Mosh Direct Re-Imagine audio smoke (Keep + audition + undo on a live device) =====\n";
+    section ("Direct Re-Imagine audio smoke: Keep survives a live playback graph, undo reverts exactly Keep");
+
+    auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto* device = deviceManager.getCurrentAudioDevice();
+    check (eng.hasAudio(), "audio mode is enabled");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    check (device != nullptr, "JUCE audio device is open");
+    if (device == nullptr)
+        return failures;
+    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+              << " block=" << device->getCurrentBufferSizeSamples() << "\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [mm] (int ms)
+    {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (0, ms);
+        do
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (5);
+            else Thread::sleep (5);
+        }
+        while (Time::getMillisecondCounter() < end);
+    };
+    int failedCommands = 0;
+    auto ui = [&] (const String& name, var a = var()) -> var
+    {
+        auto* c = new DynamicObject();
+        c->setProperty ("command", name);
+        if (! a.isVoid()) c->setProperty ("args", a);
+        auto r = ops.executeFromUi (var (c));
+        if (! ok (r))
+        {
+            ++failedCommands;
+            std::cerr << "  ..   command failed: " << name << " -> "
+                      << r.getProperty ("error", var()).toString() << "\n";
+        }
+        pump (8);
+        return r;
+    };
+
+    auto findClipVar = [&] (const String& trackId, const String& clipId) -> var {
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == trackId)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == clipId)
+                                return c;
+        return {};
+    };
+    auto layerVar  = [&] (const String& trackId, const String& clipId) -> var {
+        return findClipVar (trackId, clipId).getProperty ("renderLayer", var()); };
+    auto sourceOf  = [&] (const String& trackId, const String& clipId) -> String {
+        return findClipVar (trackId, clipId).getProperty ("sourceFile", var()).toString(); };
+    auto trackNamed = [&] (const String& name) -> bool {
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("name", var()).toString() == name) return true;
+        return false;
+    };
+
+    // A prior, unrelated user edit -- the G14 class check: one undo of Keep must leave this
+    // alone, not eat it because Keep's own transaction (or a hidden one opened elsewhere)
+    // ended up empty.
+    const auto trackId = ui ("create_track", args1 ("name", "Target Track"))["data"].getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "target track created");
+    check (ok (ui ("rename_track", objN ({ { "trackId", trackId }, { "name", "Renamed before Keep" } }))),
+           "prior, unrelated edit (rename) applied");
+
+    // Match the real walkthrough: the Keep target was a FROZEN drum track (MIDI -> audio),
+    // not a plain imported/test-tone clip.
+    check (ok (ui ("add_drum_pattern", objN ({ { "trackId", trackId }, { "pattern", "kick: x...x...x...x...; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x." },
+                                              { "name", "Drums" }, { "start", 0 }, { "bars", 4 } }))),
+           "drum pattern added (to be frozen)");
+    check (ok (ui ("freeze_track", args1 ("trackId", trackId))), "freeze_track ok");
+    const auto clipId = [&] () -> String {
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& t : *tracks)
+                if (t.getProperty ("id", var()).toString() == trackId)
+                    if (auto* clips = t.getProperty ("clips", var()).getArray())
+                        if (clips->size() > 0)
+                            return (*clips)[0].getProperty ("id", var()).toString();
+        return {};
+    }();
+    check (clipId.isNotEmpty(), "target (frozen) clip found");
+
+    check (ok (ui ("create_render_layer", objN ({ { "clipId", clipId }, { "decisionPolicy", "explicit" },
+                                                  { "adapter", "stable_audio3" } }))),
+           "create_render_layer (explicit) ok");
+    check (ok (ui ("set_render_param", objN ({ { "clipId", clipId }, { "prompt", "A sustained synthesizer tone." },
+                                               { "nl", 0.4 }, { "seed", 0 } }))),
+           "set_render_param ok");
+    check (ok (ui ("render_layer", args1 ("clipId", clipId))), "render_layer submitted");
+
+    // render_layer is asynchronous whenever hasAudio() is true (MoshOps::submitDirectRender
+    // refuses wait:true then), so poll for the fixture's fake result like the real UI would.
+    bool pending = false;
+    for (int i = 0; i < 200 && ! pending; ++i)
+    {
+        pump (50);
+        pending = (bool) layerVar (trackId, clipId).getProperty ("hasPending", false);
+    }
+    check (pending, "render_layer produced a pending fixture result");
+    if (! pending) return failures;
+
+    check (ok (ui ("accept_render", args1 ("clipId", clipId))), "accept_render (Keep) ok");
+    pump (200);
+    const auto keptLayer = layerVar (trackId, clipId);
+    check ((bool) keptLayer.getProperty ("userKept", false) && ! (bool) keptLayer.getProperty ("hasPending", true),
+           "Keep applied immediately (userKept true, hasPending false) -- no queued phase visible to the caller");
+    const auto keptSource = sourceOf (trackId, clipId);
+
+    // The real walkthrough's exact sequence: Keep, THEN roll playback (a real graph, real
+    // device), THEN the Source/Result A/B audition, THEN stop, THEN undo.
+    check (ok (ui ("set_transport", args1 ("action", "play"))), "transport rolling (real device)");
+    pump (400);
+    check (eng.edit().getTransport().getCurrentPlaybackContext() != nullptr, "a playback context (a live graph) exists");
+    // A pure read of the REAL UndoManager's depth (never mutates anything): if this number
+    // moves while playback idles with no command of ours running, something reached the
+    // Edit's undo history outside the one-mutation-path directive.
+    auto& rawUndoManager = eng.edit().getUndoManager();
+    auto undoDepth = [&] { return rawUndoManager.getUndoDescriptions().size(); };
+    const int depthBeforeIdle = undoDepth();
+    pump (2000);
+    check (undoDepth() == depthBeforeIdle,
+           "no hidden undo-tracked transaction appears from letting playback idle for 2s");
+
+    check (ok (ui ("bypass_layer", objN ({ { "clipId", clipId }, { "audition", "source" } }))), "audition source ok");
+    pump (300);
+    check (ok (ui ("bypass_layer", objN ({ { "clipId", clipId }, { "audition", "result" } }))), "audition result ok");
+    pump (300);
+    check (ok (ui ("set_transport", args1 ("action", "stop"))), "transport stopped");
+    pump (200);
+
+    check (ok (ui ("undo")), "undo ok");
+    const auto afterUndo = layerVar (trackId, clipId);
+    const auto afterUndoSource = sourceOf (trackId, clipId);
+
+    // Then: undo must revert EXACTLY Keep -- source back to pre-Keep, hasPending true,
+    // userKept false, status never "cancelled" -- and the PRIOR unrelated edit (the rename)
+    // must survive: a hidden transaction opened by the live playback graph between Keep and
+    // the audition must not be what undo reverts instead of Keep.
+    check (afterUndoSource != keptSource, "undo changed the clip's source (something was reverted)");
+    check ((bool) afterUndo.getProperty ("hasPending", false), "undo restored hasPending (back to ready-to-accept)");
+    check (! (bool) afterUndo.getProperty ("userKept", true), "undo cleared userKept");
+    check (afterUndo.getProperty ("status", var()).toString() == "ready",
+           "undo left status \"ready\", not \"cancelled\" or stuck mid-decision");
+    check (trackNamed ("Renamed before Keep"),
+           "the PRIOR unrelated edit (rename_track) survives one undo of Keep (G14 class)");
+
+    check (ok (ui ("redo")), "redo ok");
+    const auto afterRedo = layerVar (trackId, clipId);
+    check ((bool) afterRedo.getProperty ("userKept", false), "redo re-applied Keep (userKept true again)");
+    check (sourceOf (trackId, clipId) == keptSource, "redo restored the exact kept source file");
+
+    ui ("set_transport", args1 ("action", "stop"));
+    pump (200);
+
+    check (failedCommands == 0, "every command the smoke sent succeeded");
+
+    auto* summary = new DynamicObject();
+    summary->setProperty ("keptSource", keptSource);
+    summary->setProperty ("afterUndoSource", afterUndoSource);
+    summary->setProperty ("failedCommands", failedCommands);
+    summary->setProperty ("failures", failures);
+    std::cout << "DIRECT-REIMAGINE-AUDIO-SMOKE: " << JSON::toString (var (summary), true) << std::endl;
+    std::cerr << "===== " << (checks - failures) << "/" << checks << " direct-reimagine-audio-smoke checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 
 } // namespace mosh

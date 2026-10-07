@@ -18,11 +18,12 @@ import time
 import wave
 from pathlib import Path
 
-from direct_render_harness import Command, Harness, Layer, Run, command, digest, setup, snap, target, tone
+from direct_render_harness import Command, Harness, Layer, Run, command, digest, settle, setup, snap, submitted, target, tone
 from direct_render_source_safety import source_safety
 from direct_render_split_safety import split_persistence
 from direct_render_decision_safety import cancel_pending_audition
 from direct_render_reopen import reopen_controls
+from direct_render_undo_race import undo_race
 
 
 def layer(run: Run, label: str) -> Layer:
@@ -107,7 +108,7 @@ def invalidations(harness: Harness, source: Path) -> None:
                            ("cancel_before", target("cancel_render"))):
         # Given a captured request. When its target lifetime changes before delivery.
         run = harness.run(name, setup(source) + [target("render_layer"), mutation,
-                          command("__wait", {"ms": 4000}), snap("after")], "delayed")
+                          settle(), snap("after")], "delayed")
         run.passed()
         # Then no stale artifact becomes playable or pending on any surviving clip.
         for track in run.snapshot("after").tracks:
@@ -116,8 +117,8 @@ def invalidations(harness: Harness, source: Path) -> None:
                 if clip.renderLayer is not None:
                     assert not clip.renderLayer.hasPending
     # Given inference is demonstrably running. When its actual request is cancelled.
-    run = harness.run("cancel_running", setup(source) + [target("render_layer"), command("__wait", {"ms": 1000}),
-        snap("running"), target("cancel_render"), command("__wait", {"ms": 3500}), snap("after")], "delayed")
+    run = harness.run("cancel_running", setup(source) + [target("render_layer"), submitted(),
+        snap("running"), target("cancel_render"), settle(), snap("after")], "delayed")
     run.passed()
     assert layer(run, "running").jobId and layer(run, "running").status in ("queued", "rendering")
     assert layer(run, "after").status == "cancelled" and not layer(run, "after").hasPending
@@ -132,8 +133,14 @@ def failures(harness: Harness, source: Path) -> None:
         run.passed()
         assert layer(run, "after").status == "error" and not layer(run, "after").hasPending
         assert digest(Path(run.snapshot("after").clip().sourceFile)) == digest(source)
+    overlap(harness, source)
+
+
+def overlap(harness: Harness, source: Path) -> None:
+    # Given a delayed generation in flight. When a second one is requested for the same clip.
     run = harness.run("overlap", setup(source) + [target("render_layer"), target("render_layer"),
-        command("__wait", {"ms": 4500}), snap("after")], "delayed")
+        settle(), snap("after")], "delayed")
+    # Then only the second is refused, and the first still delivers its pending result.
     failed = [result for result in run.results if not result.ok]
     assert run.exit_code != 0 and len(failed) == 1 and failed[0].command == "render_layer"
     assert layer(run, "after").hasPending
@@ -158,6 +165,7 @@ def main() -> None:
     split_persistence(harness, source)
     source_safety(harness, source)
     cancel_pending_audition(harness, source)
+    undo_race(harness, source)
     owned_pids = [path.read_text().strip() for pattern in ("*/app.pid", "*/service-started.pid") for path in evidence.glob(pattern)]
     deadline = time.monotonic() + 5
     while True:
