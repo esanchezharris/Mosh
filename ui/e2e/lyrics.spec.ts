@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { commandTrace, expectDispatched } from "./helpers";
 
 // E2E for the Finish-My-Song Lyrics tab (v2 shell) — driven against the in-memory mock
 // backend (the same command/snapshot contract the native engine exposes). Covers L0:
@@ -56,6 +57,7 @@ test("the rhyme tool returns ranked candidates (phonology, no LLM)", async ({ pa
   await tool.getByTestId("rhyme-go").click();
   await expect(page.getByTestId("rhyme-results")).toBeVisible();
   await expect(page.getByTestId("rhyme-results")).toContainText("name");
+  await expectDispatched(page, "get_rhymes", { word: "flame", strictness: "slant" });
 });
 
 test("a lyric line can be removed", async ({ page }) => {
@@ -87,10 +89,12 @@ test("Finish gaps generates ranked proposals; accept commits one", async ({ page
   const props = page.getByTestId("lyric-proposals-0");
   await expect(props).toBeVisible();
   await expect(props.getByTestId(/lyric-prop-0-/)).not.toHaveCount(0);
+  await expectDispatched(page, "complete_lyrics");
   // accept the top proposal → it commits into the line and the proposals clear
   await page.getByTestId("lyric-accept-0-0").click();
   await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "asserted");
   await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+  await expectDispatched(page, "accept_lyric_proposal", { lineIndex: 0, proposalIndex: 0 });
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 
@@ -104,6 +108,38 @@ test("the fill-line ✨ button carries a screen-reader label", async ({ page }) 
   await expect(fill).toHaveAttribute("aria-label", /Fill line/);
 });
 
+test("the per-line ✨ fills just that line", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  // A second gapped line, so "just that line" is something this test can tell apart
+  // from Finish gaps (which proposes for every fillable line).
+  await page.getByTestId("lyric-add-line").click();
+  await page.getByTestId("lyric-line-1").getByLabel("line 2", { exact: true }).fill("now they all know ___");
+  await page.getByTestId("lyric-panel").getByText("Lyrics", { exact: true }).click(); // blur
+  await page.getByTestId("lyric-fill-1").click();
+  await expect(page.getByTestId("lyric-proposals-1")).toBeVisible();
+  await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+  await expectDispatched(page, "fill_lyric_gap", { lineIndex: 1 });
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
+test("⟳ regenerate draws a fresh set of proposals for the line", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  await page.getByTestId("lyric-finish").click();
+  const top = page.getByTestId("lyric-prop-0-0").locator(".v2-lyric-prop-text");
+  await expect(top).toBeVisible();
+  const before = (await top.textContent()) ?? "";
+  await page.getByTestId("lyric-regen-0").click();
+  // The line's regen counter is what makes the next draw differ, so an unchanged top
+  // proposal means the click re-sent the same request.
+  await expect(top).not.toHaveText(before);
+  await expectDispatched(page, "regenerate_lyric", { lineIndex: 0 });
+  await expect(page.getByTestId("v2-error")).toHaveCount(0);
+});
+
 test("reject clears the proposals", async ({ page }) => {
   await bootV2(page);
   await openLyrics(page);
@@ -112,6 +148,7 @@ test("reject clears the proposals", async ({ page }) => {
   await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
   await page.getByTestId("lyric-reject-0").click();
   await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+  await expectDispatched(page, "reject_lyric_proposal", { lineIndex: 0 });
 });
 
 test("suggest line shows an inline ghost; Tab accepts it", async ({ page }) => {
@@ -123,6 +160,8 @@ test("suggest line shows an inline ghost; Tab accepts it", async ({ page }) => {
   const ghost = page.getByTestId("ghost-line-0");
   await expect(ghost).toBeVisible();
   await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
+  // The sheet was empty, so the suggestion is for the line after "nothing" (index -1).
+  await expectDispatched(page, "suggest_next_line", { afterIndex: -1 });
   // Tab accepts the ghost → it commits into the line and the ghost is gone.
   await page.getByTestId("ghost-text-0").press("Tab");
   await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "asserted");
@@ -162,6 +201,7 @@ test("Analyze flow draws precise per-line phonology (syllables + rhyme grade)", 
   await expect(viz).toBeVisible();
   await expect(page.getByTestId("flow-syl-0")).toContainText("/16");
   await expect(viz).toHaveAttribute("data-analyzed", "seed");
+  await expectDispatched(page, "analyze_lyrics");
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 
@@ -183,10 +223,13 @@ test("the style-RAG 'Sound like me' opt-in toggles on", async ({ page }) => {
 test("right-click a wave take → Build lyrics from this take → a sheet appears", async ({ page }) => {
   await bootV2(page);
   // The seed's only wave clip is "chords" (on track index 2); the menu item is wave-only.
-  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  const take = page.locator('[data-testid="v2-clip"][title="chords"]');
+  const clipId = await take.getAttribute("data-clip-id");
+  await take.click({ button: "right" });
   await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
   await expect(page.getByTestId("clip-build-lyrics")).toBeVisible();
   await page.getByTestId("clip-build-lyrics").click();
+  await expectDispatched(page, "build_lyrics_from_clip", { clipId });
   // The mock transcribes+analyzes, then lands a sheet on the clip's OWN track. Open it.
   await page.getByTestId("v2-track-header").nth(2).click();
   await page.getByTestId("v2-insp-tab-lyrics").click();
@@ -209,9 +252,16 @@ test("accepting a proposal grows the 'in your voice' corpus count", async ({ pag
   // No corpus chip before any accept.
   await expect(page.getByTestId("lyric-corpus-count")).toHaveCount(0);
   await page.getByTestId("lyric-finish").click();
+  await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
+  const statReads = async () =>
+    (await commandTrace(page)).filter((e) => e.command === "get_lyric_corpus_stats" && e.ok).length;
+  const readsBeforeAccept = await statReads();
   await page.getByTestId("lyric-accept-0-0").click();
   // The accept auto-accumulates → the readout appears.
   await expect(page.getByTestId("lyric-corpus-count")).toContainText("in your voice");
+  // …and it is a fresh read of the corpus size, not a local tally of accepts: opening
+  // the sheet already read it once, so the accept has to cause another.
+  await expect.poll(statReads).toBeGreaterThan(readsBeforeAccept);
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 
@@ -219,10 +269,13 @@ test("accepting a proposal grows the 'in your voice' corpus count", async ({ pag
 
 test("right-click a wave take → Build flow from this take → an editable grid → confirm", async ({ page }) => {
   await bootV2(page);
-  await page.locator('[data-testid="v2-clip"][title="chords"]').click({ button: "right" });
+  const take = page.locator('[data-testid="v2-clip"][title="chords"]');
+  const clipId = await take.getAttribute("data-clip-id");
+  await take.click({ button: "right" });
   await expect(page.getByTestId("v2-clip-menu")).toBeVisible();
   await expect(page.getByTestId("clip-build-flow")).toBeVisible();
   await page.getByTestId("clip-build-flow").click();
+  await expectDispatched(page, "build_skeleton_from_clip", { clipId });
   // The mock lands a WORDLESS `proposed` skeleton on the clip's OWN track. Open it.
   await page.getByTestId("v2-track-header").nth(2).click();
   await page.getByTestId("v2-insp-tab-lyrics").click();

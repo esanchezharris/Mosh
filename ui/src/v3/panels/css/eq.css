@@ -1,0 +1,57 @@
+/* 4-band EQ panel (EqPanel.tsx): the exact response with four band nodes, then one row with
+   the band picker and the selected band's Freq / Gain / Q. Shared plot, node and grid looks
+   come from shell.css (.pp-plot, .pp-node); only what is the EQ's own lives here. */
+.v3-shell .insp .pr .pp-eq { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* The band letters inside the nodes at the family's axis size (the shared 8 px is below the
+   9 px floor); the EQ's nodes are r 6.5 so the glyph fits. */
+.v3-shell .insp .pr .pp-eq .pp-node .lbl { font-size: var(--pp-fs-axis); }
+/* The selected band's own curve, faint and dashed, under the composite. */
+.v3-shell .insp .pr .pp-eq .pp-eq-solo {
+  fill: none; stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1;
+  stroke-dasharray: 2 2; vector-effect: non-scaling-stroke;
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-plot.bypassed .pp-eq-solo { stroke: color-mix(in srgb, var(--text) 25%, transparent); }
+
+/* The read-out row: the band picker (the shared .pp-seg), then three scrubbable values.
+   Captions are sans like a dial's name; only the numbers are monospace. */
+.v3-shell .insp .pr .pp-eq .pp-eq-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; height: 18px;
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-bands { flex: 0 0 auto; }
+/* Narrower than the shared segment so the row fits 273 px with the widest read-outs. The
+   letter sits a little high, leaving room for the LED under it. */
+.v3-shell .insp .pr .pp-eq .pp-eq-bands > .pp-eq-b { position: relative; min-width: 17px; padding: 0 3px 3px; font-weight: 600; }
+/* A band that is processing (gain not 0 dB) carries a small lit LED, centred under its letter. */
+.v3-shell .insp .pr .pp-eq .pp-eq-bands > .pp-eq-b.live::after {
+  content: ""; position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%);
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent);
+}
+.v3-shell .insp .pr .pp-eq .pp-eq-f { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 2px; white-space: nowrap; }
+.v3-shell .insp .pr .pp-eq .pp-eq-f.q { flex-shrink: 0; }
+.v3-shell .insp .pr .pp-eq .pp-eq-cap { flex: 0 0 auto; font-size: var(--pp-fs-cap); color: var(--muted); }
+.v3-shell .insp .pr .pp-eq .pp-eq-v {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text);
+  font-family: var(--mono); font-size: var(--pp-fs-val); font-variant-numeric: tabular-nums;
+  cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
+  border-bottom: 1px dotted var(--pp-edge); outline: none;
+}
+/* Room for the widest value ("12.0 kHz", "-20.0 dB", "4.00"), so the row does not shift while dragging. */
+.v3-shell .insp .pr .pp-eq .pp-eq-f:is(.freq, .gain) .pp-eq-v { min-width: 8ch; }
+.v3-shell .insp .pr .pp-eq .pp-eq-v:hover { border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-eq .pp-eq-v:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+/* Frequency and Q of a band at 0 dB do nothing: they stay readable and adjustable; the hollow
+   node, the unlit band dot and the tooltip say why. */
+.v3-shell .insp .pr .pp-eq .pp-eq-f.inert .pp-eq-v:not(:hover, :focus-visible) { border-bottom-color: color-mix(in srgb, var(--text) 12%, transparent); }
+.v3-shell .insp .pr .pp-eq .pp-eq-in {
+  width: 9ch; min-width: 0; height: 16px; padding: 0 3px; border: 1px solid var(--accent); border-radius: 3px;
+  background: var(--bg); color: var(--text); font-family: var(--mono); font-size: var(--pp-fs-val);
+}
+
+/* The minimized row's thumbnail (the same exact curve). */
+.v3-shell .insp .pr .pp-eq.pp-eq-mini { display: block; flex: 0 0 auto; }
+.v3-shell .insp .pr .pp-eq.pp-eq-mini .z { stroke: color-mix(in srgb, var(--text) 18%, transparent); stroke-width: 1; }
+.v3-shell .insp .pr .pp-eq.pp-eq-mini .c { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-eq.pp-eq-mini.bypassed .c { stroke: var(--muted); }
+
+/* Shown only when the composite response runs past the plot's largest range (±40 dB). */
+.v3-shell .insp .pr .pp-eq .pp-eq-plot .pp-eq-clip { fill: var(--warn); }

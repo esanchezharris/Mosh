@@ -19,7 +19,7 @@ import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypedDict
+from typing import Callable, Final, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -106,6 +106,28 @@ def target(name: str, args: dict[str, JsonValue] | None = None) -> Command:
     return command(name, {"clipId": "${C}", **(args or {})})
 
 
+# Async results are awaited with the native `__wait_until` pseudo-command (SelfTest.cpp), never a
+# fixed `__wait`: under sibling-build load a fixed sleep read `rendering` instead of a result. Each
+# returns as soon as its condition holds, and a miss is a failed result line, so these deadlines
+# only bound a genuine failure. They must stay well inside Harness.run's 180 s.
+SETTLE_MS: Final = 60_000
+
+
+def settle(max_ms: int = SETTLE_MS) -> Command:
+    """Wait until no Direct Re-Imagine request or worker is in flight, so nothing more can land."""
+    return command("__wait_until", {"condition": "direct_render_idle", "maxMs": max_ms})
+
+
+def submitted(max_ms: int = SETTLE_MS) -> Command:
+    """Wait until the target's render layer shows the service jobId of its running request."""
+    return command("__wait_until", {"condition": "render_job_submitted", "clipId": "${C}", "maxMs": max_ms})
+
+
+def observed(marker: str, max_ms: int = SETTLE_MS) -> Command:
+    """Wait for a file an observer process writes; relative to the run directory."""
+    return command("__wait_until", {"condition": "file_exists", "file": marker, "maxMs": max_ms})
+
+
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -143,7 +165,7 @@ class Harness:
         directory.mkdir(parents=True)
         binary_hash = digest(self.binary)
         script, output = directory / "commands.jsonl", directory / "results.jsonl"
-        commands = [step for item in commands for step in ([item, command("__wait", {"ms": 2000})]
+        commands = [step for item in commands for step in ([item, settle()]
                     if self.settle_decisions and item["command"] in ("accept_render", "bypass_layer") else [item])]
         script.write_text("\n".join(json.dumps(item) for item in commands) + "\n")
         with socket.socket() as port_socket:
@@ -163,7 +185,12 @@ class Harness:
                 (directory / "app.pid").write_text(str(process.pid))
                 if self.observer is not None:
                     self.observer(directory)
-                code = process.wait(timeout=180)
+                try:
+                    code = process.wait(timeout=180)
+                except subprocess.TimeoutExpired:
+                    # Popen.__exit__ waits without a timeout, so a hung app would hang the caller (the gate) forever.
+                    process.kill()
+                    raise
         (directory / "process-result.json").write_text(json.dumps({"pid": process.pid, "exit_code": code, "port": port,
                                                                   "binary": str(self.binary), "binary_sha256": binary_hash}))
         exited = subprocess.run(["ps", "-p", str(process.pid), "-o", "pid=,command="], capture_output=True, text=True)

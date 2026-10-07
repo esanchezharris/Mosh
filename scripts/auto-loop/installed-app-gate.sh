@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/lib/harness-session.sh"
 APP="${MOSH_INSTALLED_APP:-/Applications/Mosh.app}"
 BIN="$APP/Contents/MacOS/Mosh"
 OWNER_TEAM_ID="ZYT77F9B27"
@@ -36,7 +37,8 @@ steps_json() {
     {name:"installed_selftest_x3", command:"MOSH_NO_AUDIO=1 \($app)/Contents/MacOS/Mosh --selftest (3 isolated runs)"},
     {name:"installed_selftest_undo", command:"MOSH_NO_AUDIO=1 \($app)/Contents/MacOS/Mosh --selftest-undo"},
     {name:"macos_ui_automation", command:"MOSH_APP_BUNDLE=\($app) python3 scripts/macos-ui-automation-gate.py"},
-    {name:"hardware_verify", command:"python3 scripts/verify-hardware/verify.py --bin \($app)/Contents/MacOS/Mosh"}
+    {name:"hardware_verify", command:"python3 scripts/verify-hardware/verify.py --bin \($app)/Contents/MacOS/Mosh"},
+    {name:"harness_session_reclaim", command:"remove this run'"'"'s _harness/installed-app-gate-<i>-<pid> sessions when installed_selftest_x3 passed"}
   ]'
 }
 
@@ -75,11 +77,15 @@ verify_team_id() {
   printf 'TeamIdentifier=%s\n' "$actual"
 }
 
+selftest_session() {
+  printf '_harness/installed-app-gate-%s-%s\n' "$1" "$$"
+}
+
 run_selftest_x3() {
   local all_ok=true rows=() i log ok n failed asserts session port
   for i in 1 2 3; do
     log="$(mktemp)"
-    session="_harness/installed-app-gate-$i-$$"
+    session="$(selftest_session "$i")"
     port="$((8900 + i + ($$ % 50)))"
     ok=true
     MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$session" MOSH_SERVICE_PORT="$port" "$BIN" --selftest >"$log" 2>&1 || ok=false
@@ -100,6 +106,20 @@ run_selftest_x3() {
   detail="$(printf '%s\n' "${rows[@]}" | jq -sc '{runs:.}')"
   jq -nc --argjson ok "$all_ok" --argjson detail "$detail" '{name:"installed_selftest_x3", ok:$ok, detail:$detail}'
   [[ "$all_ok" == true ]]
+}
+
+# Each --selftest round leaves a ~90 MB session under ~/Library/Mosh/_harness that was
+# never deleted. No later step reads them (--selftest-undo, the UI automation and
+# verify.py each run their own session), so after the last step a passing
+# installed_selftest_x3 removes exactly its three sessions, through the ownership checks
+# in scripts/lib/harness-session.sh; a failing one keeps them as its diagnostics.
+# Advisory: reclaiming disk never decides the verdict.
+reclaim_selftest_sessions() {
+  local lines
+  lines="$(mosh_reclaim_harness_sessions "$1" \
+    "$(selftest_session 1)" "$(selftest_session 2)" "$(selftest_session 3)")"
+  jq -nc --arg lines "$lines" \
+    '{name:"harness_session_reclaim", ok:true, detail:{sessions:($lines | split("\n") | map(select(length > 0)))}}'
 }
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -129,8 +149,10 @@ fi
 capture_step run_logged codesign codesign --verify --deep --strict "$APP"
 capture_step run_logged team_id verify_team_id "$APP"
 
+selftest_passed=false
 if [[ -x "$BIN" ]]; then
   capture_step run_selftest_x3
+  selftest_passed="$(jq -r '.ok' <<< "${results[${#results[@]}-1]}" 2>/dev/null || true)"
   capture_step run_logged installed_selftest_undo env MOSH_NO_AUDIO=1 "$BIN" --selftest-undo
   capture_step run_logged macos_ui_automation env MOSH_APP_BUNDLE="$APP" python3 scripts/macos-ui-automation-gate.py
   if [[ "$CLASS" == "audio" || "$CLASS" == "full" ]]; then
@@ -142,6 +164,8 @@ else
   overall=false
   results+=("$(jq -nc --arg bin "$BIN" '{name:"installed_binary", ok:false, detail:{error:"missing executable", bin:$bin}}')")
 fi
+
+[[ ! -x "$BIN" ]] || results+=("$(reclaim_selftest_sessions "$selftest_passed")")
 
 jq -nc --arg app "$APP" --argjson pass "$overall" --argjson skipDeploy "$SKIP_DEPLOY" --argjson steps "$(printf '%s\n' "${results[@]}" | jq -sc '.')" \
   '{pass:$pass, dryRun:false, app:$app, skipDeploy:$skipDeploy, steps:$steps}'
