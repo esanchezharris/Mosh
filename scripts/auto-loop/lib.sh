@@ -214,7 +214,8 @@ kill_stray_services() {
 #
 # The engine accepts explicit sessions only below `_harness`. It can create and mark
 # an absent leaf; an existing leaf is accepted only when it already has the exact
-# marker. Reset atomically relocates marker-owned data into a recoverable quarantine.
+# marker. Reset atomically relocates marker-owned data into a quarantine, then deletes
+# that quarantine unless it holds evidence or no longer verifies.
 # Reserved, traversal, symlinked, empty-unowned, and populated-unowned requests fail
 # over to a unique safety session without touching owner data.
 unique_session() {

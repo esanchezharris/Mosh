@@ -240,12 +240,11 @@ TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[ses
              == owned);
     REQUIRE (resetOwnedHarnessSession (moshDir, owned));
     REQUIRE_FALSE (owned.exists());
-    const auto recoveries = moshDir.getChildFile ("_harness")
-                                .findChildFiles (juce::File::findDirectories, false,
-                                                 ".mosh-reset-*");
-    REQUIRE (recoveries.size() == 1);
-    REQUIRE (recoveries[0].getChildFile ("session/stale.txt").loadFileAsString()
-             == "stale harness data");
+    // The harness reset reclaims its own quarantine (see the [reclaim] cases below).
+    REQUIRE (moshDir.getChildFile ("_harness")
+                 .findChildFiles (juce::File::findDirectories, false, ".mosh-reset-*")
+                 .isEmpty());
+    REQUIRE (precious.loadFileAsString() == "owner data");
 
     REQUIRE (sandbox.deleteRecursively());
 }
@@ -633,4 +632,125 @@ TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved"
     REQUIRE (oldArtifact.loadFileAsString() == "{\"seq\":1}");
 
     moshDir.deleteRecursively();
+}
+
+// Harness resets used to leave every reset session under `_harness/.mosh-reset-*`
+// forever (7,819 of them, 11.3 GB, on the owner Mac by 2026-09-26). A harness reset
+// now deletes the quarantine it just created, through descriptors held on that exact
+// directory, and leaves everything else where it is.
+namespace
+{
+    struct HarnessSandbox
+    {
+        juce::File sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                 .getChildFile ("mosh-harness-reclaim-" + juce::Uuid().toString());
+        juce::File moshDir = sandbox.getChildFile ("Mosh");
+        juce::File harness = moshDir.getChildFile (kHarnessRootName);
+        juce::File target = harness.getChildFile ("verify-recovery");
+
+        ~HarnessSandbox() { sandbox.deleteRecursively(); }
+
+        juce::Array<juce::File> harnessEntries() const
+        {
+            return harness.findChildFiles (juce::File::findFilesAndDirectories, false,
+                                           "*", juce::File::FollowSymlinks::no);
+        }
+    };
+}
+
+TEST_CASE ("a harness reset reclaims the quarantine it created", "[sessionpaths][reclaim]")
+{
+    HarnessSandbox box;
+    REQUIRE (createOwnedHarnessSession (box.moshDir, box.target));
+    REQUIRE (box.target.getChildFile ("render.wav").replaceWithText ("stale render"));
+    REQUIRE (box.target.getChildFile ("exports/deep/take.wav").create());
+    REQUIRE (box.target.getChildFile ("exports/deep/take.wav").replaceWithText ("stale take"));
+
+    REQUIRE (resetOwnedHarnessSession (box.moshDir, box.target));
+
+    REQUIRE_FALSE (box.target.exists());
+    REQUIRE (box.harnessEntries().isEmpty());
+}
+
+TEST_CASE ("a harness reset reclaim never follows a symlink out of its quarantine",
+           "[sessionpaths][reclaim][security]")
+{
+    HarnessSandbox box;
+    const auto outside = box.sandbox.getChildFile ("outside");
+    REQUIRE (outside.getChildFile ("keep.txt").create());
+    REQUIRE (outside.getChildFile ("keep.txt").replaceWithText ("owner data"));
+    REQUIRE (createOwnedHarnessSession (box.moshDir, box.target));
+    REQUIRE (juce::File::createSymbolicLink (box.target.getChildFile ("linked-dir"),
+                                             outside.getFullPathName(), true));
+    REQUIRE (juce::File::createSymbolicLink (box.target.getChildFile ("linked-file"),
+                                             outside.getChildFile ("keep.txt").getFullPathName(),
+                                             true));
+
+    REQUIRE (resetOwnedHarnessSession (box.moshDir, box.target));
+
+    REQUIRE (outside.getChildFile ("keep.txt").loadFileAsString() == "owner data");
+    REQUIRE (box.harnessEntries().isEmpty());
+}
+
+TEST_CASE ("a harness reset leaves quarantines it did not create alone",
+           "[sessionpaths][reclaim]")
+{
+    HarnessSandbox box;
+    REQUIRE (createOwnedHarnessSession (box.moshDir, box.target));
+    const auto earlier = box.harness.getChildFile (".mosh-reset-earlier/session/old.txt");
+    REQUIRE (earlier.create());
+    REQUIRE (earlier.replaceWithText ("earlier quarantine"));
+
+    REQUIRE (resetOwnedHarnessSession (box.moshDir, box.target));
+
+    REQUIRE (earlier.loadFileAsString() == "earlier quarantine");
+    REQUIRE (box.harnessEntries().size() == 1);
+}
+
+TEST_CASE ("a harness reset keeps a quarantine that holds model or adapter files",
+           "[sessionpaths][reclaim]")
+{
+    HarnessSandbox box;
+    REQUIRE (createOwnedHarnessSession (box.moshDir, box.target));
+    const auto adapter = box.target.getChildFile ("training/adapters/style.safetensors");
+    REQUIRE (adapter.create());
+    REQUIRE (adapter.replaceWithText ("adapter weights"));
+
+    REQUIRE (resetOwnedHarnessSession (box.moshDir, box.target));
+
+    REQUIRE_FALSE (box.target.exists());
+    const auto entries = box.harnessEntries();
+    REQUIRE (entries.size() == 1);
+    REQUIRE (entries[0].getFileName().startsWith (".mosh-reset-"));
+    REQUIRE (entries[0].getChildFile ("session/training/adapters/style.safetensors")
+                 .loadFileAsString() == "adapter weights");
+}
+
+TEST_CASE ("a harness reset reclaim deletes only the directory it verified",
+           "[sessionpaths][reclaim][race]")
+{
+    HarnessSandbox box;
+    REQUIRE (createOwnedHarnessSession (box.moshDir, box.target));
+    REQUIRE (box.target.getChildFile ("old.txt").replaceWithText ("owned stale data"));
+
+    juce::File replacement, displaced;
+    IsolationOwnershipTestHooks hooks;
+    hooks.beforeQuarantineReclaimed = [&] (const juce::File& quarantined)
+    {
+        displaced = quarantined.getSiblingFile ("displaced-owned-directory");
+        std::filesystem::rename (quarantined.getFullPathName().toStdString(),
+                                 displaced.getFullPathName().toStdString());
+        REQUIRE (quarantined.createDirectory());
+        REQUIRE (quarantined.getChildFile (kHarnessOwnershipFile)
+                     .replaceWithText (kHarnessOwnershipContents));
+        REQUIRE (quarantined.getChildFile ("keep.txt").replaceWithText ("replacement data"));
+        replacement = quarantined;
+    };
+
+    // The requested path was freed, so the reset itself succeeded; only the reclaim
+    // declines, because the name no longer points at the directory it verified.
+    REQUIRE (resetOwnedHarnessSession (box.moshDir, box.target, &hooks));
+    REQUIRE_FALSE (box.target.exists());
+    REQUIRE (replacement.getChildFile ("keep.txt").loadFileAsString() == "replacement data");
+    REQUIRE (displaced.getChildFile ("old.txt").loadFileAsString() == "owned stale data");
 }
