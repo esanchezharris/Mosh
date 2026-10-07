@@ -10576,6 +10576,58 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // breaks when moved to another machine/install.
         check (ok (cmd (ops, "create_track", objN ({ { "name", "Kit" }, { "type", "drum" } }))), "drum track for portability ok");
 
+        // That kit reaches save_as only after MoshOps' 5 ms post-load pump, which runs only
+        // headless (! hasAudio()). te::SamplerPlugin rebuilds its LOADED sound list solely in
+        // handleAsyncUpdate, so with an audio device open, or a pump that runs out on a loaded
+        // machine, save_as can land while that update is still pending: the SOUND children are
+        // in the state, the loaded list is empty or stale (1 of 4 concurrent selftests lost the
+        // kit on 2026-09-30). Hold that window open deterministically: engine-level sampler
+        // edits AFTER the last command that pumps, then save_as with nothing in between.
+        auto rawTrack = [&] (const String& tid) -> te::AudioTrack* {
+            for (auto* candidate : te::getAudioTracks (eng.edit()))
+                if (candidate != nullptr && candidate->itemID.toString() == tid) return candidate;
+            return nullptr;
+        };
+        auto raceSrc = selftestTempPath (eng, "sampler-race-src");
+        raceSrc.deleteRecursively(); raceSrc.createDirectory();
+        const auto unloadedWav = raceSrc.getChildFile ("race-unloaded.wav");
+        const auto staleOldWav = raceSrc.getChildFile ("race-stale-old.wav");
+        const auto staleNewWav = raceSrc.getChildFile ("race-stale-new.wav");
+        check (poolSrc.copyFileTo (unloadedWav) && poolSrc.copyFileTo (staleOldWav) && poolSrc.copyFileTo (staleNewWav),
+               "sampler-race: probe samples staged outside the project");
+        // Every command and pump comes first; a later one would deliver the pending updates.
+        auto* unloadedTrack = rawTrack (cmd (ops, "create_track", args1 ("name", "RaceUnloaded"))["data"].getProperty ("trackId", var()).toString());
+        // (b) stale: assign_sample loads race-stale-old, then the state alone swaps it for
+        // race-stale-new — assign_sample's own replace path (removeSound + addSound), unpumped.
+        const auto staleTid = cmd (ops, "create_track", args1 ("name", "RaceStale"))["data"].getProperty ("trackId", var()).toString();
+        const File staleOldLoaded (cmd (ops, "assign_sample", objN ({ { "trackId", staleTid }, { "file", staleOldWav.getFullPathName() },
+                                                                      { "note", 36 }, { "name", "stale" } }))["data"].getProperty ("file", var()).toString());
+        te::SamplerPlugin* stale = nullptr;
+        if (auto* t = rawTrack (staleTid))
+            for (auto* p : t->pluginList.getPlugins())
+                if (auto* s = dynamic_cast<te::SamplerPlugin*> (p)) { stale = s; break; }
+        for (int spin = 0; spin < 400 && stale != nullptr && stale->getSoundFile (0).getFile() != staleOldLoaded; ++spin)
+            MessageManager::getInstance()->runDispatchLoopUntil (5);   // the FIRST load must land (a condition, not a fixed wait)
+        if (stale != nullptr)
+        {
+            stale->removeSound (0);
+            stale->addSound (staleNewWav.getFullPathName(), "stale", 0.0, 0.0, 0.0f);
+        }
+        // (a) never loaded: a fresh sampler whose sound is in the state but whose first load is pending.
+        te::SamplerPlugin* unloaded = nullptr;
+        if (unloadedTrack != nullptr)
+            if (auto p = eng.edit().getPluginCache().createNewPlugin (te::SamplerPlugin::xmlTypeName, {}))
+            {
+                unloadedTrack->pluginList.insertPlugin (p, 0, nullptr);
+                unloaded = dynamic_cast<te::SamplerPlugin*> (p.get());
+            }
+        check (unloaded != nullptr && unloaded->addSound (unloadedWav.getFullPathName(), "unloaded", 0.0, 0.0, 0.0f).isEmpty(),
+               "sampler-race (a): sound added to a fresh sampler");
+        check (unloaded != nullptr && unloaded->getSoundFile (0).getFile() == File(),
+               "sampler-race (a): precondition: its first load is still pending at save_as");
+        check (stale != nullptr && staleOldLoaded.existsAsFile() && stale->getSoundFile (0).getFile() == staleOldLoaded,
+               "sampler-race (b): precondition: the loaded list still holds the replaced sound at save_as");
+
         // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
         auto destDir  = selftestTempPath (eng, "portable-src");
         destDir.deleteRecursively(); destDir.createDirectory();
@@ -10593,6 +10645,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! xml.contains ("Resources/drumkits"),
                "saved edit references the kit by a relative path, not the absolute app-bundle path");
         check (xml.contains ("audio/") && ! xml.contains ("../audio"), "saved edit references audio by a co-located relative path (no ../)");
+        check (destDir.getChildFile ("audio").getChildFile ("race-unloaded.wav").existsAsFile() && xml.contains ("audio/race-unloaded.wav"),
+               "sampler-race (a): save_as consolidated a sampler sound whose load was still pending");
+        check (destDir.getChildFile ("audio").getChildFile ("race-stale-new.wav").existsAsFile() && xml.contains ("audio/race-stale-new.wav")
+                   && ! xml.contains ("race-stale-old"),
+               "sampler-race (b): save_as consolidated the sound the sampler HOLDS, not the stale loaded one");
 
         // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source
         // so resolution can ONLY succeed via the co-located copy, then open the copy.
@@ -10605,6 +10662,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto movedClip = firstTrack (ops)["clips"][0];
         check (! (bool) movedClip.getProperty ("sourceMissing", true), "moved project's clip resolves to co-located audio (portable)");
         check (File (movedClip.getProperty ("sourceFile", var()).toString()).isAChildOf (moved), "resolved source is inside the moved project dir");
+        // Save As of an ALREADY-portable project: its kit refs are relative now ("audio/kick.wav")
+        // and must resolve against the project being LEFT. By the time consolidation runs the
+        // resolver points at the new dir, which has no audio/ yet.
+        auto resaved = selftestTempPath (eng, "portable-resaved");
+        resaved.deleteRecursively();
+        check (ok (cmd (ops, "save_as", args1 ("file", resaved.getChildFile ("portable.tracktionedit").getFullPathName()))),
+               "save_as of the moved (already-portable) project ok");
+        check (resaved.getChildFile ("audio").getChildFile ("kick.wav").existsAsFile(),
+               "re-Save-As carries the project's relative kit sounds into the new project");
         poolBak.moveFileTo (poolSrc);                            // restore the pool original
 
         // relink: a clip whose source goes missing reports sourceMissing; relink_clip fixes it.
@@ -10625,7 +10691,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // teardown
         check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (gap3 teardown)");
-        destDir.deleteRecursively(); moved.deleteRecursively();
+        destDir.deleteRecursively(); moved.deleteRecursively(); resaved.deleteRecursively(); raceSrc.deleteRecursively();
     }
 
     // ─── AL-009 — Save-As render-artifact consolidation + portability ───

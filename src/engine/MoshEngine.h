@@ -257,7 +257,8 @@ private:
     juce::File pluginSeedDirectory;
     juce::String openAudioDeviceBounded();                     // AUD-017 — the one, bounded, device open
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
-    void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
+    void consolidateAudioInto (const juce::File& projectDir,   // gap 3 — copy referenced audio project-local
+                               const juce::File& leavingEdit);
     void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
 
     /** FS-T2 — the ONE load-from-file path, bracketed by the plugin crash breadcrumb.
