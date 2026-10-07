@@ -32,11 +32,48 @@ TEST_CASE ("recording landing reports complete and partial multi-track capture",
 
 TEST_CASE ("recording-ending transport actions finalize the take first", "[recording]")
 {
-    for (const auto* action : { "stop", "toggle", "record", "to_start" })
+    // "continue" is Shift+Space (Live's Continue Playback). While recording the transport is
+    // playing, so cmdSetTransport's wantsStop takes it as a stop -- and a stop that skips the
+    // finalize lands a Booth pass unstamped (review of PR #730, 2026-09-23).
+    for (const auto* action : { "stop", "toggle", "record", "to_start", "continue" })
         REQUIRE (mosh::recording::shouldFinalizeBeforeTransportAction (true, action));
 
     for (const auto* action : { "play", "to_end", "" })
         REQUIRE_FALSE (mosh::recording::shouldFinalizeBeforeTransportAction (true, action));
 
     REQUIRE_FALSE (mosh::recording::shouldFinalizeBeforeTransportAction (false, "stop"));
+    REQUIRE_FALSE (mosh::recording::shouldFinalizeBeforeTransportAction (false, "continue"));   // a continue-START
+}
+
+TEST_CASE ("loop_stop ends whatever is recording", "[recording]")
+{
+    using mosh::recording::LoopStopRoute;
+    using mosh::recording::loopStopRoute;
+
+    // A pass the loop started is finalized as a pass: stamped, a Part, lastId moved.
+    REQUIRE (loopStopRoute (true, true, true) == LoopStopRoute::finalizePass);
+
+    // A recording the loop did NOT start (TopBar Record, then the Booth's or the phone's Stop
+    // pad) is landed as an ordinary take. It used to go to the pass finalize, which returns at
+    // once with no pass in flight, so the transport kept recording under a "Stopped before
+    // recording began" receipt (review of PR #730, round 3, 2026-09-23).
+    REQUIRE (loopStopRoute (true, false, true) == LoopStopRoute::landTake);
+
+    REQUIRE (loopStopRoute (false, false, true) == LoopStopRoute::stopPlayback);
+    REQUIRE (loopStopRoute (false, false, false) == LoopStopRoute::nothing);
+}
+
+TEST_CASE ("loop_stop's receipt says what the stop did", "[recording]")
+{
+    using mosh::recording::loopStopDetail;
+
+    REQUIRE (loopStopDetail (/*wasRecording*/ true, /*stillRecording*/ false, /*landed*/ true) == "Stopped");
+    REQUIRE (loopStopDetail (true, false, false) == "Stopped before recording began");   // the count-in
+    REQUIRE (loopStopDetail (false, false, false) == "Stopped");                         // playback, or idle
+
+    // Never "Stopped" while the transport is still recording: that is the receipt the old
+    // route gave a take it left rolling.
+    const auto stuck = loopStopDetail (true, true, false);
+    REQUIRE (stuck.startsWith ("Still recording"));
+    REQUIRE_FALSE (stuck.startsWith ("Stopped"));
 }

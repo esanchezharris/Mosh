@@ -70,6 +70,7 @@
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
+#include "RecordingLanding.h"
 #include "state/Ids.h"
 #include "remote/PhoneLoopProtocol.h"
 
@@ -301,7 +302,10 @@ juce::var MoshOps::loopStateVar()
       : playing                                                               ? "playing"
                                                                               : "idle");
     state->setProperty ("listening", var (listening));
-    state->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    // Only while it is actually recording: a stop that bypassed the finalize (export, a loop
+    // toggle) leaves loopCurrent_ set until the next command forgets it, and the Booth must not
+    // claim a pass is in flight in between. A pure read -- loopForgetStaleCapture clears it.
+    state->setProperty ("currentId", loopCurrentIdVar());
     state->setProperty ("lastId", optionalId (node.getProperty (ids::loopLastId, var()).toString()));
     state->setProperty ("reviewId", optionalId (node.getProperty (ids::loopReviewId, var()).toString()));
     state->setProperty ("auditionedId", optionalId (loopAuditionedId_));
@@ -317,7 +321,7 @@ juce::var MoshOps::loopStateVar()
     // all right now. It renders this verbatim above the buttons.
     state->setProperty ("blockReason", eng.audioReady()
                                            ? String()
-                                           : String ("No audio device — recording is unavailable on this Mac"));
+                                           : String (juce::CharPointer_UTF8 ("No audio device \xe2\x80\x94 recording is unavailable on this Mac")));
     return var (state);
 }
 
@@ -408,7 +412,7 @@ bool MoshOps::loopStartCapture (double startQn, bool bypassCountIn, juce::String
     if (! anyRecordActive)
     {
         applyCountInToEdit();
-        reason = "no armed track with a usable input — arm a track and pick an input in Settings > Audio";
+        reason = juce::String (juce::CharPointer_UTF8 ("no armed track with a usable input \xe2\x80\x94 arm a track and pick an input in Settings > Audio"));
         return false;
     }
 
@@ -443,7 +447,25 @@ bool MoshOps::loopStartPlayback (double startQn, juce::String& reason)
     return true;
 }
 
-MoshOps::LoopFinalized MoshOps::loopFinalizeCapture()
+juce::var MoshOps::loopCurrentIdVar()
+{
+    // The one gate for every place that names the capture in flight: snapshot.loop,
+    // loop_state and the loop_record / loop_keep / loop_again results. A start that did not
+    // roll (no input, no device) leaves a pass that some bypassed stop ended still sitting
+    // in loopCurrent_; a result that named it would mark "Not recording: ..." as rolling
+    // while the snapshot shows no pass (review of PR #730, round 3).
+    return loopCurrent_.active && eng.edit().getTransport().isRecording() ? var (loopCurrent_.passId) : var();
+}
+
+bool MoshOps::loopForgetStaleCapture()
+{
+    if (! loopCurrent_.active || eng.edit().getTransport().isRecording())
+        return false;
+    loopCurrent_ = {};
+    return true;
+}
+
+MoshOps::LoopFinalized MoshOps::loopFinalizeCapture (const juce::var& stopArgs)
 {
     LoopFinalized out;
     if (! loopCurrent_.active)
@@ -458,8 +480,14 @@ MoshOps::LoopFinalized MoshOps::loopFinalizeCapture()
     // previous command left at the head of the stack and one Undo would take both. When
     // nothing lands the transaction stays empty, which JUCE never pushes — so a stop
     // during the count-in leaves the undo history exactly as it found it.
+    //
+    // stopRecordingAndLand, NOT cmdStopRecording: the latter is what routes a TopBar stop
+    // HERE while a pass is in flight, so calling it would come straight back.
     beginTxn ("loop_capture");
-    const auto stopped = cmdStopRecording (var (new DynamicObject()));
+    const auto stopArgsObject = stopArgs.isObject() ? stopArgs : var (new DynamicObject());
+    const auto stopped = stopRecordingAndLand (stopArgsObject,
+                                               (bool) stopArgsObject.getProperty ("discardRecordings", false));
+    out.stopResult = stopped;
     loopCurrent_ = {};
 
     auto* takes = loopTakesTrack();
@@ -658,7 +686,7 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
     // The takes track is the loop's own scratch lane. Promoting it to LEAD would make the
     // keepers and the rejects the same track and there would be no way back.
     if (lead->itemID.toString() == storedTakes)
-        return errResult (kName, "That is the takes track — pick the track you are singing onto");
+        return errResult (kName, juce::String (juce::CharPointer_UTF8 ("That is the takes track \xe2\x80\x94 pick the track you are singing onto")));
 
     auto* takes = findTrack (storedTakes);
     const bool alreadyPaired = takes != nullptr && storedLead == lead->itemID.toString();
@@ -667,7 +695,7 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
     if (! alreadyPaired)
     {
         beginTxn (kName);
-        takes = createAudioTrack (lead->getName() + " · Takes");
+        takes = createAudioTrack (lead->getName() + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 Takes")));
         if (takes == nullptr)
         {
             logLine (kName, args, false, "insert failed", true);
@@ -720,7 +748,7 @@ juce::var MoshOps::cmdLoopSetup (const juce::var& args)
     data->setProperty ("created", created);
     data->setProperty ("armed", (bool) armed.getProperty ("data", var()).getProperty ("applied", false));
     return loopOk (kName, data, actionId,
-                   created ? "Ready — takes land on \"" + takes->getName() + "\""
+                   created ? juce::String (juce::CharPointer_UTF8 ("Ready \xe2\x80\x94 takes land on \"")) + takes->getName() + "\""
                            : "Already set up on \"" + lead->getName() + "\"");
 }
 
@@ -764,7 +792,7 @@ juce::var MoshOps::cmdLoopRecord (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", reason);
-    data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    data->setProperty ("currentId", loopCurrentIdVar());
     data->setProperty ("entryQn", startQn);
     // The Booth and the phone show `detail` as-is, so it must never claim a take is
     // rolling when the transport never started (e.g. no audio device).
@@ -833,7 +861,7 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
         data->setProperty ("keptId", targetId);
         data->setProperty ("clipId", clip->itemID.toString());
         data->setProperty ("listeningQn", resumeQn);
-        data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+        data->setProperty ("currentId", loopCurrentIdVar());
         data->setProperty ("applied", applied);
         if (! applied) data->setProperty ("reason", reason);
         return loopOk (kName, data, actionId,
@@ -882,7 +910,7 @@ juce::var MoshOps::cmdLoopKeep (const juce::var& args)
     data->setProperty ("keptId", targetId);
     data->setProperty ("clipId", clip->itemID.toString());
     data->setProperty ("listeningQn", listeningQn);
-    data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    data->setProperty ("currentId", loopCurrentIdVar());
     data->setProperty ("applied", true);
     data->setProperty ("restarted", restarted);
     return loopOk (kName, data, actionId,
@@ -969,7 +997,7 @@ juce::var MoshOps::cmdLoopAgain (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("rejectedId", targetId);
     data->setProperty ("listeningQn", entryQn);
-    data->setProperty ("currentId", loopCurrent_.active ? var (loopCurrent_.passId) : var());
+    data->setProperty ("currentId", loopCurrentIdVar());
     data->setProperty ("applied", true);
     data->setProperty ("restarted", restarted);
     return loopOk (kName, data, actionId,
@@ -1025,7 +1053,7 @@ juce::var MoshOps::cmdLoopHear (const juce::var& args)
     if (! applied) data->setProperty ("reason", reason);
     return loopOk (kName, data, actionId,
                    ! applied ? "Not playing: " + reason
-                   : rejected ? "Playing " + label + " — rejected take stays muted; restore it with Undo on the Mac"
+                   : rejected ? "Playing " + label + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 rejected take stays muted; restore it with Undo on the Mac"))
                               : "Playing " + label + " from bar " + String (loopQnToBar (entryQn)));
 }
 
@@ -1076,23 +1104,46 @@ juce::var MoshOps::cmdLoopStop (const juce::var& args)
 
     const auto actionId = loopActionId (args);
     auto& transport = eng.edit().getTransport();
+    // The panic button also clears a pass some other stop (export, a loop toggle) left
+    // "in flight": with nothing recording there is no capture for it to preserve.
+    loopForgetStaleCapture();
 
-    bool stoppedRecording = false, stoppedPlayback = false, landed = false;
-    if (transport.isRecording())
+    // It ends WHATEVER is recording (recording::loopStopRoute). PRESERVE, never discard,
+    // either way: a producer pressing Stop is ending a take, not throwing it away.
+    const bool wasRecording = transport.isRecording();
+    bool stoppedPlayback = false, landed = false;
+    switch (recording::loopStopRoute (wasRecording, loopCurrent_.active, transport.isPlaying()))
     {
-        // PRESERVE, never discard. A producer pressing Stop is ending a take, not
-        // throwing it away — cmdStopRecording's discardRecordings stays false.
-        const auto finalized = loopFinalizeCapture();
-        stoppedRecording = true;
-        landed = finalized.landed;
+        case recording::LoopStopRoute::finalizePass:
+            landed = loopFinalizeCapture().landed;
+            break;
+
+        case recording::LoopStopRoute::landTake:
+        {
+            // A take the loop did not start (the TopBar Record, an agent's set_transport
+            // record). Before 2026-09-23 it went to loopFinalizeCapture, which returns at once
+            // with no pass in flight: the transport kept recording. Landed exactly as the
+            // TopBar stop lands it -- unstamped, so the Booth does not list it as a Part (a
+            // phone's loop_state read adopts it later, as it adopts any take on Takes).
+            const auto stopped = stopRecordingAndLand (var (new DynamicObject()), /*discard=*/ false);
+            const auto data    = stopped.getProperty ("data", var());
+            const auto clips   = data.getProperty ("clips", var());   // bound, never a temporary
+            landed = clips.size() > 0;
+            break;
+        }
+
+        case recording::LoopStopRoute::stopPlayback:
+            // Leave the playhead where it halted (no return to the insert marker): the
+            // producer stopped to listen to the thing that is on screen right now.
+            transport.stop (false, false);
+            stoppedPlayback = true;
+            break;
+
+        case recording::LoopStopRoute::nothing:
+            break;
     }
-    else if (transport.isPlaying())
-    {
-        // Leave the playhead where it halted (no return to the insert marker): the
-        // producer stopped to listen to the thing that is on screen right now.
-        transport.stop (false, false);
-        stoppedPlayback = true;
-    }
+    const bool stillRecording   = transport.isRecording();
+    const bool stoppedRecording = wasRecording && ! stillRecording;
     loopAuditionedId_.clear();
 
     logLine (kName, args, true, {}, false);
@@ -1106,8 +1157,9 @@ juce::var MoshOps::cmdLoopStop (const juce::var& args)
     data->setProperty ("applied", true);
     data->setProperty ("stoppedRecording", stoppedRecording);
     data->setProperty ("stoppedPlayback", stoppedPlayback);
+    data->setProperty ("landed", landed);
     return loopOk (kName, data, actionId,
-                   stoppedRecording && ! landed ? "Stopped before recording began" : "Stopped");
+                   recording::loopStopDetail (wasRecording, stillRecording, landed));
 }
 
 // ── loop_navigate / loop_home / loop_lead_in ─────────────────────────────────────────

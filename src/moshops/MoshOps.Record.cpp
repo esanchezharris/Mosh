@@ -400,7 +400,7 @@ juce::var MoshOps::cmdAdoptRecordingResidue (const juce::var& args)
     if (! entry.isObject())
         return errResult (kName, "not a recoverable take: " + file.getFileName());
     if (entry.getProperty ("decision", var()).toString() != "adopt")
-        return errResult (kName, "this take is unreadable or at the wrong rate — quarantine it instead");
+        return errResult (kName, juce::String (juce::CharPointer_UTF8 ("this take is unreadable or at the wrong rate \xe2\x80\x94 quarantine it instead")));
 
     // The track its name carries, else an explicit trackId, else the first audio track.
     juce::String trackId = args.getProperty ("trackId", var()).toString();
@@ -426,7 +426,7 @@ juce::var MoshOps::cmdAdoptRecordingResidue (const juce::var& args)
     {
         const auto repaired = file.getSiblingFile (file.getFileNameWithoutExtension() + ".recovered.wav");
         if (! mosh::residue::repairTruncatedWav (file, repaired))
-            return errResult (kName, "could not repair the take's header — quarantine it instead");
+            return errResult (kName, juce::String (juce::CharPointer_UTF8 ("could not repair the take's header \xe2\x80\x94 quarantine it instead")));
         source = repaired;
     }
     auto result = importWaveFileToTrack (kName, source, file.getFileNameWithoutExtension(),
@@ -549,7 +549,7 @@ juce::var MoshOps::cmdCalibrateLatency (const juce::var& args)
         if (device == nullptr)
             return errResult (kName, "no audio device in this session");
         if (device->getActiveInputChannels().countNumberOfSetBits() == 0)
-            return errResult (kName, "the audio device has no active input channel — pick an input in Settings first");
+            return errResult (kName, juce::String (juce::CharPointer_UTF8 ("the audio device has no active input channel \xe2\x80\x94 pick an input in Settings first")));
 
         // Detach the Edit (export's exclusivity dance, MoshOps.ProjectIo.cpp): meter taps
         // live on the context being freed; unregisterAllMeterClients() detaches the master
@@ -612,7 +612,7 @@ void MoshOps::pollLatencyCalibration()
         }
         else
         {
-            calibrationError_ = "the measured round trip is outside the 500 ms band — check routing and retry";
+            calibrationError_ = juce::String (juce::CharPointer_UTF8 ("the measured round trip is outside the 500 ms band \xe2\x80\x94 check routing and retry"));
         }
     }
     else
