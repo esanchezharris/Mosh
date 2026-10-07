@@ -173,6 +173,27 @@ export async function setTool(page: Page, tool: "Move" | "Split" | "Range"): Pro
   await page.getByRole("group", { name: "Tool" }).getByRole("button", { name: tool, exact: true }).click();
 }
 
+// ── Command trace ────────────────────────────────────────────────────────────
+export type TracedCommand = { command: string; args: Record<string, unknown>; ok: boolean };
+
+/** The commands the UI has dispatched so far, in order: the mock's dev-only
+ *  window.__moshCmdTrace (bridge.mock.ts). The mock leaves its READONLY set out of the
+ *  trace (list_loras, training_job_status, …), so those cannot be asserted this way. */
+export async function commandTrace(page: Page): Promise<TracedCommand[]> {
+  return page.evaluate(() =>
+    ((window as unknown as { __moshCmdTrace?: TracedCommand[] }).__moshCmdTrace ?? [])
+      .map(({ command, args, ok }) => ({ command, args, ok })),
+  );
+}
+
+/** A real click path proves a control is reachable; this pins WHICH command it sent.
+ *  Passes once the trace holds a successful `command` whose args include `args`. */
+export async function expectDispatched(page: Page, command: string, args: Record<string, unknown> = {}): Promise<void> {
+  await expect
+    .poll(() => commandTrace(page), { message: `the UI dispatches ${command}` })
+    .toContainEqual(expect.objectContaining({ command, ok: true, args: expect.objectContaining(args) }));
+}
+
 // ── Settings / templates ─────────────────────────────────────────────────────
 export async function openSettings(page: Page): Promise<void> {
   await page.locator('button[title="Settings"]').click();
