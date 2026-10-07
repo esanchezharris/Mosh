@@ -14,6 +14,8 @@ What it proves, row by row (each check would read differently if the feature wer
   V3-vocal  `Mosh --v3-vocal-smoke` on a BlackHole loopback: a 1-bar count-in rolls and is
             EXCLUDED from the take, two passes land as non-silent WAVs within the calibrated
             tolerance, Again rejects/mutes, Keep moves the pass to LEAD, undo reverses it.
+            Then `Mosh --disarm-after-export-smoke`: a disarm right after export_audio applies
+            and survives the next transport start.
   V3-chords `Mosh --chords-stress` on the same loopback, meters + telemetry live, transport
             rolling: '+ Chords' (the exact dropChords batch), create_track, a 4OSC insert, a
             load_preset and an add_send, each followed by undo, looped. The regression smoke
@@ -483,6 +485,29 @@ def row_vocal(ctx) -> Row:
         row.notes.append(f"calibrated loopback {ms('calibratedMs')} ms, landing tolerance {ms('toleranceMs')} ms; "
                          f"take1 (count-in) landed {ms('take1OffsetMs')} ms from the guide, take2 (Again, no count-in) "
                          f"{ms('take2OffsetMs')} ms — a count-in landing is up to one device block early (engine follow-up)")
+    # export_audio frees the playback context; a disarm right after it used to find no input
+    # instance and silently no-op, so the track came back armed on the next transport start.
+    dleaf = f"v3-accept-disarm-{ctx.pid}"
+    reset_owned_harness_session(_session_dir(dleaf))
+    env["MOSH_SELFTEST_SESSION"] = f"_harness/{dleaf}"
+    try:
+        dproc = subprocess.run([str(ctx.bin), "--disarm-after-export-smoke", "-ApplePersistenceIgnoreState", "YES"],
+                               env=env, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired as e:
+        row.chk(False, "the disarm-after-export smoke finished within 180 s", str(e)); return row
+    (out / "disarm-after-export-smoke.log").write_text((dproc.stdout or "") + "\n--- stderr ---\n" + (dproc.stderr or ""))
+    row.artifacts.append(str(out / "disarm-after-export-smoke.log"))
+    dsummary = {}
+    for line in (dproc.stdout or "").splitlines():
+        if line.startswith("DISARM-AFTER-EXPORT-SMOKE: "):
+            try:
+                dsummary = json.loads(line[len("DISARM-AFTER-EXPORT-SMOKE: "):])
+            except json.JSONDecodeError:
+                pass
+    row.chk(dproc.returncode == 0 and dsummary and int(dsummary.get("failures", 1)) == 0,
+            f"Mosh --disarm-after-export-smoke passed every check ({dsummary.get('checks', '?')} checks) on {LOOPBACK_DEVICE}",
+            {"rc": dproc.returncode, "summary": dsummary,
+             "failed": [l for l in (dproc.stderr or "").splitlines() if "FAIL" in l][:12]})
     return row
 
 
@@ -498,6 +523,28 @@ def _is_asan_build(binary: Path) -> bool:
     except Exception:
         return False
     return "libclang_rt.asan" in out
+
+
+def chords_verdict(checks_ok: bool, asan_build: bool, bin_path) -> str | None:
+    """The BLOCKED-message decision for row_chords, factored out so it is testable without a
+    binary or a live device.
+
+    A real failure — a failed check, or the stress run having crashed/timed out — must
+    NEVER be downgraded to BLOCKED: it has to read FAIL so it can't be waved off as "smoke
+    only". Only when every check passed does the missing ASan instrumentation reduce the row
+    to a smoke test with no detection power (a Release build runs the identical
+    --chords-stress sequence clean whether or not a heap use-after-free like 2026-09-23's is
+    still present).
+
+    Returns the message for row.blocked, or None to leave the row's PASS/FAIL verdict alone
+    (None with checks_ok True means PASS; None with checks_ok False means FAIL).
+    """
+    if not checks_ok or asan_build:
+        return None
+    return (f"smoke only (no detection power): {bin_path} has no ASan runtime "
+            f"(otool -L shows no libclang_rt.asan) — this run only shows the stress "
+            f"did not crash, not that the 2026-09-23 heap-use-after-free class of bug "
+            f"is absent; rebuild with the macos-arm64-asan preset and pass --bin")
 
 
 def row_chords(ctx) -> Row:
@@ -533,8 +580,8 @@ def row_chords(ctx) -> Row:
             except json.JSONDecodeError:
                 pass
     asan = [l for l in (proc.stderr or "").splitlines() if "ERROR: AddressSanitizer" in l or l.startswith("SUMMARY: AddressSanitizer")][:4]
-    row.chk(not asan and proc.returncode == 0, "no crash and no sanitizer report", {"rc": proc.returncode, "asan": asan})
-    row.chk(bool(summary) and int(summary.get("failures", 1)) == 0,
+    ok_no_crash = row.chk(not asan and proc.returncode == 0, "no crash and no sanitizer report", {"rc": proc.returncode, "asan": asan})
+    ok_summary = row.chk(bool(summary) and int(summary.get("failures", 1)) == 0,
             f"every variant ran {summary.get('iterations', '?')} iterations with every command ok and every undo exact",
             summary)
     if summary:
@@ -545,14 +592,11 @@ def row_chords(ctx) -> Row:
             row.notes.append(f"a removed send's measurer was still held by the PluginCache after the settle in "
                              f"{summary.get('sendOutlivedRemoval')}/{summary.get('sendWitnessed')} undos "
                              f"(the same hazard, on an AuxSendPlugin instead of a track meter)")
-    if not asan_build:
-        # Every check above can still be green on a Release binary — that is exactly the
-        # false signal this guards against. Report BLOCKED, never PASS, so the row can't be
-        # read as regression evidence until it is re-run with an ASan --bin.
-        row.blocked = (f"smoke only (no detection power): {ctx.bin} has no ASan runtime "
-                       f"(otool -L shows no libclang_rt.asan) — this run only shows the stress "
-                       f"did not crash, not that the 2026-09-23 heap-use-after-free class of bug "
-                       f"is absent; rebuild with the macos-arm64-asan preset and pass --bin")
+    # A real failure (either check above false) is never downgraded to BLOCKED — it must
+    # read FAIL so a crash/regression can't be waved off as "smoke only". Only when every
+    # check passed does the missing ASan instrumentation reduce this to a smoke test with no
+    # detection power. See chords_verdict's docstring for the full rationale.
+    row.blocked = chords_verdict(ok_no_crash and ok_summary, asan_build, ctx.bin)
     return row
 
 

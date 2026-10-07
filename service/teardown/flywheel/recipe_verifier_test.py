@@ -208,3 +208,13 @@ if __name__ == "__main__":
     print("PROGRAM ADAPTER OK: rollout commands → recipe roundtrip")
     print("KEY MODE OK: dorian/mixolydian/pentatonic graded against the DECLARED mode, not major/minor")
     print(f"GRADIENT OK: good {g:.3f} > degraded {d:.3f} > empty {e:.3f} (spread {g - e:.3f}) — valid reward gradient, no render")
+
+
+# The stock-instrument names, the same table as ui/src/agent/recipeVerifier.test.ts.
+CLASSIFY = {"4osc": "default", "4OSC": "default", "4OSC Synth": "default", "sampler": "default",
+            "Sampler": "default", "Serum": "real", "808": "real"}
+
+
+def test_classify_instrument_matches_the_ts_mirror():
+    for name, want in CLASSIFY.items():
+        assert _mod.classify_instrument(name) == want, (name, want)

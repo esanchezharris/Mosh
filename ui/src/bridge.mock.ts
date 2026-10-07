@@ -15,7 +15,10 @@
 // appear (the swappable seam holds on the web side too).
 
 import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "./types";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine } from "./types";
+import { scalePitchClasses } from "./ui/tuner";
+import { ottGainDb } from "./v3/panels/ott";
+import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -23,7 +26,12 @@ import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
 import { transformVelocities, splitmix64 } from "./midi/velocityTransform";
 import { transformNotes, type NoteTransformMode } from "./midi/noteTransform";
-import { BUILTINS, mkParams, mkBuiltinParams, mkMoshFx } from "./mock/builtins";
+import { BUILTINS, mkParams, builtinParamDisplay, mkBuiltinPlugin, mkBuiltinState, nextMockItemId, STATE_SPECS } from "./mock/builtins";
+import { FOUR_OSC_PARAMS, FOUR_OSC_PRESETS, applyFourOscPreset, coerceSetting, fourOscFrom0to1, fourOscSetNorm } from "./mock/fourosc";
+import {
+  DEFAULT_KIT, MOCK_KITS, applyDrumLaneGains, importedPathFor, loadKitInto, mockFilePeaks, newSound,
+  primarySampler, refreshSamplerViews, resetImportedPaths, sampleStem, soundIndexForNote, soundsOf,
+} from "./mock/sampler";
 import { fixturePeaksForClip } from "./mock/fixturePeaks";
 import { portfolioSeed } from "./mock/portfolioSeed";
 
@@ -430,6 +438,14 @@ const mockRestorableTxns = () => [
 // Agent batch grouping (mirrors the backend batch_begin/batch_end): while a batch
 // is open, per-command pushUndo() is suppressed so the whole batch is ONE undo step.
 let inBatch = false;
+// A panel drag's undo window, as MoshOps::joinGestureTxn keeps it: the gesture id that owns
+// the newest undo step, that step's txn id, and the time of the gesture's last call. See
+// gestureUndoStep().
+let mockGesture: { id: string; txn: number; at: number } | null = null;
+const GESTURE_IDLE_MS = 3000;   // MoshOps::kGestureIdleMs
+// Set by a command that ran but opened no undo step (a set_plugin_state to the value it
+// already has), so its command-log line says undoable:false, as MoshOps::logLine does.
+let mockOpenedNoTxn = false;
 
 // ── FS-B2a — the agent batch-TRANSACTION contract, mirrored ──────────────────
 // docs/archive/first-stranger-program-2026-08-23/lanes/fs-b2.md. The mock implements the SAME semantics as
@@ -557,7 +573,7 @@ const MOCK_FROZEN_LOCKED = new Set([
   "set_clip_gain", "write_clip_gain_curve", "set_clip_fade", "set_clip_reverse", "set_clip_crossfade",
   "normalize_clip", "set_clip_warp", "stretch_clip",
   "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
-  "set_plugin_param", "bypass_plugin", "open_plugin_editor",
+  "set_plugin_param", "bypass_plugin", "open_plugin_editor", "apply_track_preset",
   "set_track_automation_mode", "write_automation_curve",
   "add_automation_point", "set_automation_point", "remove_automation_point",
   "clear_automation", "replace_instrument", "hot_swap_instrument",
@@ -635,7 +651,7 @@ function applyMockLoopArgs(next: Transport, args: Record<string, unknown>): void
   }
 }
 
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "get_rhymes", "render_lora_take", "promote_lora_checkpoint",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
@@ -857,6 +873,10 @@ let lastTick = 0;
 function startPlayback() {
   if (playTimer) return;
   lastTick = Date.now();
+  // The instruments' note-ons are read between consecutive frames, from here on; the
+  // playing tick also takes over from the stopped-transport audition timer.
+  lastMeterPos = snapshot.transport?.position ?? 0;
+  if (idleMeterTimer) { clearInterval(idleMeterTimer); idleMeterTimer = null; }
   playTimer = setInterval(() => {
     const now = Date.now();
     const dt = (now - lastTick) / 1000;
@@ -909,10 +929,241 @@ function startPlayback() {
     }));
     emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) }, sends });
     emitMuteAutomation();
+    emitTuner(true);
+    emitPluginMeters(trackFrames.map(({ track, gain }) => ({ track, inDb: toDb(gain) })), pos);
   }, 1000 / 30);
+}
+
+// The live plugin meters rail ("plugin_meters"). The engine measures the audio; the mock
+// derives plausible readings from the fake track level and each plugin's own settings,
+// with the same maths the engine's DSP uses for the static part (so a compressor below
+// threshold reads 0 dB of reduction here too). One empty payload on the falling edge.
+// Every entry carries `seq`, a per-plugin frame counter (contract §1d), so a panel can tell
+// a new frame from one held on screen.
+//
+// The instruments (contract §1d): a 4OSC reports the keys held at the playhead and the
+// note-ons since the previous frame from its track's MIDI clips, and an output level from
+// the fake track level (with a release tail after the last key); a sampler reports its
+// hits (clip note-ons, plus the panel's own auditions) and the level its sounds ADD, each
+// hit ringing for its sound's length. An idle instrument (no keys, no hits, silent) is
+// omitted, so it drops off the rail.
+let hadMockMeters = false;
+const meterSeq = new Map<string, number>();
+/** The playhead at the previous playing frame: note-ons in [previous, now) are this frame's. */
+let lastMeterPos: number | null = null;
+type MeterRing = { at: number; db: number; ms: number };
+const samplerRing = new Map<string, MeterRing[]>();                 // per sampler: hits still sounding
+const pendingAuditions = new Map<string, Map<number, number>>();     // per sampler: auditions since the last frame
+const synthTail = new Map<string, MeterRing>();                     // per 4OSC: the release after its last key
+let idleMeterTimer: ReturnType<typeof setInterval> | null = null;
+const meterKeyOf = (trackId: string, pl: Plugin): string => pl.itemId ?? `${trackId}:${pl.index}`;
+function nextMeterSeq(key: string): number {
+  const n = (meterSeq.get(key) ?? 0) + 1;
+  meterSeq.set(key, n);
+  return n;
+}
+function resetMockMeters(): void {
+  meterSeq.clear(); samplerRing.clear(); pendingAuditions.clear(); synthTail.clear();
+  lastMeterPos = null; hadMockMeters = false;
+  if (idleMeterTimer) { clearInterval(idleMeterTimer); idleMeterTimer = null; }
+}
+const ringDb = (r: MeterRing, now: number): number => (now - r.at >= r.ms ? -100 : r.db - 36 * ((now - r.at) / r.ms));
+
+/** The keys a track's MIDI clips hold at `pos`, and the note-ons (largest velocity, 0-1)
+ *  in [prev, pos) — across the loop's wrap when the playhead jumped back to its start. */
+function midiActivityAt(t: Track, prev: number | null, pos: number): { held: Set<number>; onsets: Map<number, number> } {
+  const beatSec = (4 / (snapshot.session.timeSigDenominator ?? 4)) * (60 / snapshot.session.tempo);
+  const tr = snapshot.transport;
+  const windows: [number, number][] = prev === null ? []
+    : pos >= prev ? [[prev, pos]]
+    : tr.looping && tr.loopEnd > tr.loopStart ? [[prev, tr.loopEnd], [tr.loopStart, pos]] : [];
+  const held = new Set<number>();
+  const onsets = new Map<number, number>();
+  for (const c of t.clips) {
+    if (c.type !== "midi" || c.mute || !c.notes) continue;
+    const clipEnd = c.start + c.length;
+    for (const n of c.notes) {
+      if (n.mute) continue;
+      const s = c.start + n.start * beatSec;
+      if (s < c.start || s >= clipEnd) continue;
+      const e = Math.min(clipEnd, s + n.length * beatSec);
+      if (s <= pos && pos < e) held.add(n.pitch);
+      if (windows.some(([a, b]) => s >= a && s < b)) onsets.set(n.pitch, Math.max(onsets.get(n.pitch) ?? 0, Math.min(1, n.velocity / 127)));
+    }
+  }
+  return { held, onsets };
+}
+
+/** A note-on reaching a sampler: every sound covering the note sounds (layering), each
+ *  for its own length (a melodic sound repitched: shorter going up), at its live gain less
+ *  the velocity's 20·(1 − vel) dB. */
+function ringSampler(key: string, pl: Plugin, note: number, vel: number, now: number): void {
+  const ring = samplerRing.get(key) ?? [];
+  for (const s of pl.sampler?.sounds ?? []) {
+    if (s.minNote > note || s.maxNote < note) continue;
+    const dur = (s.durationSec ?? 0.4) * (s.mode === "drum" ? 1 : 2 ** ((s.pitch - note) / 12));
+    ring.push({ at: now, db: Math.min(0, -6 + s.gainDb - 20 * (1 - vel)), ms: Math.max(30, dur * 1000) });
+  }
+  samplerRing.set(key, ring);
+}
+
+function instrumentMeters(track: Track, pl: Plugin, inDb: number, activity: { held: Set<number>; onsets: Map<number, number> } | null, now: number): PluginMeterReading | null {
+  const key = meterKeyOf(track.id, pl);
+  const base = { trackId: track.id, index: pl.index, itemId: pl.itemId, type: pl.type };
+  const sorted = (xs: Iterable<number>) => [...xs].sort((a, b) => a - b);
+  if (pl.type === "4osc") {
+    const held = activity ? sorted(activity.held) : [];
+    const struck = activity ? sorted(activity.onsets.keys()) : [];
+    const masterDb = fourOscFrom0to1(FOUR_OSC_PARAMS[67]!, pl.params.find((p) => p.index === 67)?.value ?? 1);
+    let outDb = -100;
+    if (held.length > 0 || struck.length > 0) {
+      outDb = Math.max(-100, Math.min(0, inDb + masterDb));
+      const releaseSec = fourOscFrom0to1(FOUR_OSC_PARAMS[43]!, pl.params.find((p) => p.index === 43)?.value ?? 0.2777);
+      synthTail.set(key, { at: now, db: outDb, ms: Math.max(20, releaseSec * 1000) });
+    } else {
+      const tail = synthTail.get(key);
+      if (tail) { outDb = Math.max(-100, ringDb(tail, now)); if (outDb <= -100) synthTail.delete(key); }
+    }
+    if (held.length === 0 && struck.length === 0 && outDb <= -100) return null;
+    return { ...base, seq: nextMeterSeq(key), outDb, held, struck };
+  }
+  if (pl.type === "sampler") {
+    const hits = new Map<number, number>(activity?.onsets ?? []);
+    for (const [note, vel] of pendingAuditions.get(key) ?? []) hits.set(note, Math.max(hits.get(note) ?? 0, vel));
+    pendingAuditions.delete(key);
+    for (const [note, vel] of hits) ringSampler(key, pl, note, vel, now);
+    const ring = (samplerRing.get(key) ?? []).filter((r) => now - r.at < r.ms);
+    if (ring.length) samplerRing.set(key, ring); else samplerRing.delete(key);
+    const outDb = Math.max(-100, ...ring.map((r) => ringDb(r, now)));
+    const held = activity ? sorted(activity.held) : [];
+    if (hits.size === 0 && held.length === 0 && outDb <= -100) return null;
+    return { ...base, seq: nextMeterSeq(key), outDb, held, hits: sorted(hits.keys()).map((note) => ({ note, vel: hits.get(note)! })) };
+  }
+  return null;
+}
+
+function emitPluginMeters(frames: { track: Track; inDb: number }[], pos: number): void {
+  const phys = (pl: Plugin, i: number, min: number, max: number) => {
+    const p = pl.params.find((x) => x.index === i);
+    return min + Math.min(1, Math.max(0, p?.value ?? 0)) * (max - min);
+  };
+  const now = Date.now();
+  const playing = playTimer !== null;
+  const prev = lastMeterPos;
+  lastMeterPos = playing ? pos : null;
+  const inDbOf = new Map(frames.map((f) => [f.track.id, f.inDb]));
+  const effects = frames.flatMap(({ track, inDb }) => (track.plugins ?? []).filter((pl) => pl.enabled).flatMap((pl): PluginMeterReading[] => {
+    const base = { trackId: track.id, index: pl.index, itemId: pl.itemId, type: pl.type };
+    const seq = () => nextMeterSeq(meterKeyOf(track.id, pl));
+    if (pl.type === "compressor") {
+      const T = phys(pl, 0, 0.01, 1), rho = phys(pl, 1, 0, 0.95), out = phys(pl, 4, -10, 24);
+      const L = 10 ** (inDb / 20);
+      const grDb = L > T ? 20 * Math.log10(L / (T + rho * (L - T))) : 0;
+      return [{ ...base, seq: seq(), grDb, inDb, outDb: Math.max(-100, inDb - grDb + out) }];
+    }
+    if (pl.type === "softclip") {
+      const drive = phys(pl, 0, 0, 24), ceil = phys(pl, 1, -12, 0);
+      const driven = inDb + drive;
+      const outDb = ceil + 20 * Math.log10(Math.max(1e-9, Math.tanh(10 ** ((driven - ceil) / 20))));
+      return [{ ...base, seq: seq(), grDb: Math.max(0, driven - outDb), inDb, outDb }];
+    }
+    if (pl.type === "moshOTT") {
+      // The engine's exact band law (MoshOTTDsp.cpp, mirrored in panels/ott.ts); gainDb is
+      // the dynamic movement only, without the band's static trim (contract).
+      const amount = phys(pl, 0, 0, 1);
+      const bands = [-4, -2, -9].map((offset, b) => {
+        const levelDb = Math.max(-100, inDb + offset + 3 * Math.sin(pos * (2 + b)));
+        return { levelDb, gainDb: ottGainDb(levelDb, amount) };
+      });
+      return [{ ...base, seq: seq(), bands, clipped: false }];
+    }
+    if (pl.type === "moshXFeedback") {
+      // As the engine's detector reports them: only bins at or above the Sensitivity
+      // threshold are candidates, strongest first, at most Max Cuts of them; cuts exist
+      // only with Auto Suppress on.
+      const sens = phys(pl, 0, 0, 1), maxCuts = xfMaxCuts(phys(pl, 1, 1, 4)), maxDepth = phys(pl, 2, 3, 36);
+      const auto = phys(pl, 4, 0, 1) >= 0.5;
+      const threshold = xfThreshold(sens);
+      const candidates = (pl.moshFx?.candidates ?? [])
+        .map((c, i) => ({ hz: c.frequencyHz, score: Math.max(0, Math.min(0.75, (c.score ?? 0) * (0.75 + 0.25 * Math.sin(pos * (1.3 + i))))) }))
+        .filter((c) => c.score >= threshold)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxCuts);
+      const cuts = !auto ? [] : candidates.map((c) => ({ ...c, depthDb: Math.max(3, Math.min(maxDepth, maxDepth * Math.min(1, c.score))) }));
+      return [{ ...base, seq: seq(), candidates, cuts }];
+    }
+    return [];
+  }));
+  // Instruments: while playing from their clips; stopped, only a sampler's own auditions
+  // (and their ring) reach the rail.
+  const instruments = snapshot.tracks.filter((t) => !t.isGroup).flatMap((track) => {
+    const synths = (track.plugins ?? []).filter((pl) => pl.enabled && (pl.type === "4osc" || pl.type === "sampler"));
+    if (synths.length === 0) return [];
+    const activity = playing && prev !== null ? midiActivityAt(track, prev, pos) : null;
+    return synths.map((pl) => instrumentMeters(track, pl, inDbOf.get(track.id) ?? -100, activity, now))
+      .filter((m): m is PluginMeterReading => m !== null);
+  });
+  const plugins = [...effects, ...instruments];
+  if (plugins.length > 0 || hadMockMeters) emit("plugin_meters", { plugins });
+  hadMockMeters = plugins.length > 0;
+  if (!playing && !hadMockMeters && pendingAuditions.size === 0 && samplerRing.size === 0 && idleMeterTimer) {
+    clearInterval(idleMeterTimer);
+    idleMeterTimer = null;
+  }
+}
+
+/** A sampler panel's tap: the hit reaches the rail on the next frame (the playing tick's,
+ *  or, stopped, a short-lived 30 Hz timer that runs until the rail is empty again). The
+ *  inject path reaches every sampler on the track, the clipless sampler path only the first. */
+function queueSamplerAudition(t: Track, primary: Plugin, pitch: number, vel: number): void {
+  const targets = t.clips.length > 0 ? (t.plugins ?? []).filter((p) => p.type === "sampler" && p.enabled) : [primary];
+  for (const pl of targets) {
+    const key = meterKeyOf(t.id, pl);
+    const hits = pendingAuditions.get(key) ?? new Map<number, number>();
+    hits.set(pitch, Math.max(hits.get(pitch) ?? 0, vel));
+    pendingAuditions.set(key, hits);
+  }
+  if (!playTimer && !idleMeterTimer)
+    idleMeterTimer = setInterval(() => emitPluginMeters([], snapshot.transport?.position ?? 0), 1000 / 30);
+}
+// The tuner's live note display rail. The native engine reports what each enabled Mosh
+// AutoTune is hearing; the mock has no voice to hear, so while "playing" every enabled
+// tuner follows a slow wobble around A3 (30 cents either side), pulled to the nearest
+// note its Key and Scale allow, as the engine's correction would. One empty payload on
+// the falling edge, as the engine sends.
+let hadMockTuner = false;
+function mockTunerTargetMidi(plugin: Plugin, sungMidi: number): number {
+  const choice = (index: number) => {
+    const p = plugin.params.find((x) => x.index === index);
+    const n = p?.choices?.length ?? 0;
+    return n > 1 && p ? { i: Math.round(Math.min(1, Math.max(0, p.value)) * (n - 1)), name: p.choices![Math.round(Math.min(1, Math.max(0, p.value)) * (n - 1))] } : null;
+  };
+  const allowed = scalePitchClasses(choice(0)?.i ?? 0, choice(1)?.name ?? "Chromatic");
+  let best = Math.round(sungMidi);
+  for (let d = 0; d <= 6; d++) {
+    const candidates = [Math.round(sungMidi) - d, Math.round(sungMidi) + d]
+      .filter((m) => allowed.has(((m % 12) + 12) % 12))
+      .sort((a, b) => Math.abs(a - sungMidi) - Math.abs(b - sungMidi));
+    if (candidates.length) { best = candidates[0]; break; }
+  }
+  return best;
+}
+function emitTuner(playing: boolean): void {
+  const wobble = 30 * Math.sin((snapshot.transport?.position ?? 0) * 2 * Math.PI / 1.5);
+  const sungMidi = 57 + wobble / 100;   // A3
+  const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
+  const tuners = !playing ? [] : snapshot.tracks.flatMap((t) => (t.plugins ?? [])
+    .filter((p) => p.type === "moshAutoTune" && p.enabled)
+    .map((p) => ({ trackId: t.id, index: p.index, inputHz: hz(sungMidi), targetHz: hz(mockTunerTargetMidi(p, sungMidi)), confidence: 0.9 })));
+  if (tuners.length > 0 || hadMockTuner) emit("tuner", { tuners });
+  hadMockTuner = tuners.length > 0;
 }
 function stopPlayback() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  emitTuner(false);
+  // Stopping sends all-notes-off: nothing an instrument was sounding rings on.
+  samplerRing.clear(); synthTail.clear(); pendingAuditions.clear(); lastMeterPos = null;
+  emitPluginMeters([], 0);
   emit("spectrum", { bands: Array(8).fill(0), level: 0, flux: 0 }); // calm on stop
   // Drop the meters to the floor when the transport stops.
   const tracks = snapshot.tracks.filter((t) => !t.isGroup).map((t) => ({ id: t.id, l: -100, r: -100 }));
@@ -990,6 +1241,42 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 }
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
+}
+
+// The one bundled track-chain preset, as the mock knows it. The values and display
+// strings are what the pinned engine reports for resources/presets/track-chain/
+// mosh-clean-lead-v0.json (normalized = position inside the parameter's native range).
+const MOCK_TRACK_PRESET = {
+  id: "mosh.clean-lead",
+  name: "Mosh Clean Lead v0",
+  revision: 0,
+  fileName: "mosh-clean-lead-v0",
+  file: "/presets/track-chain/mosh-clean-lead-v0.json",
+} as const;
+
+function mockTrackPresetRows(): Plugin[] {
+  const tag = (stage: number) => ({
+    id: MOCK_TRACK_PRESET.id, name: MOCK_TRACK_PRESET.name, revision: MOCK_TRACK_PRESET.revision, stage,
+  });
+  return [
+    {
+      index: 0, name: "High-Pass", type: "highpass", enabled: true, external: false, builtin: true,
+      category: "Filter", isInstrument: false, preset: tag(0), itemId: nextMockItemId(), state: mkBuiltinState("highpass"),
+      params: [{ index: 0, name: "Frequency", value: (80 - 10) / (22000 - 10), display: "80 Hz", min: 10, max: 22000 }],
+    },
+    {
+      index: 1, name: "Compressor", type: "compressor", enabled: true, external: false, builtin: true,
+      category: "Dynamics", isInstrument: false, preset: tag(1), itemId: nextMockItemId(),
+      params: [
+        { index: 0, name: "Threshold", value: (0.0630957 - 0.01) / 0.99, display: "-24.00 dB" },
+        { index: 1, name: "Ratio", value: 0.4 / 0.95, display: "2.50 : 1" },
+        { index: 2, name: "Attack", value: (20 - 0.3) / 199.7, display: "20.0 ms", min: 0.3, max: 200 },
+        { index: 3, name: "Release", value: (150 - 10) / 290, display: "150.0 ms", min: 10, max: 300 },
+        { index: 4, name: "Output gain", value: 10 / 34, display: "+0.00 dB", min: -10, max: 24 },
+        { index: 5, name: "Sidechain gain", value: 0.5, display: "+0.00 dB", min: -24, max: 24 },
+      ],
+    },
+  ];
 }
 function trackGroupSupports(group: TrackGroup, axis: "edit" | "mix"): boolean {
   return group.kind === axis || group.kind === "edit_mix";
@@ -1075,11 +1362,30 @@ function landOnNeuralLane(src: Clip): Clip {
 function ensureInstrument(t: Track, drum: boolean): void {
   t.plugins = t.plugins ?? [];
   if (!t.plugins.some((p) => p.isInstrument)) {
-    const b = drum ? { type: "sampler", name: "Sampler" } : { type: "4osc", name: "4OSC Synth" };
-    t.plugins.unshift({ index: 0, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: "Instrument", isInstrument: true, params: [] });
+    // The same entry load_builtin builds (native ensureDefaultInstrument goes through the
+    // same factory): "4OSC" with its 68 parameters and state, or a sampler holding the
+    // bundled kit. The kit is loaded WITHOUT naming it on the track (native sets drumKit
+    // only from load_drum_kit).
+    const b = BUILTINS.find((x) => x.type === (drum ? "sampler" : "4osc"))!;
+    const plugin = mkBuiltinPlugin(b, 0);
+    if (drum) loadKitInto(plugin, DEFAULT_KIT);
+    t.plugins.unshift(plugin);
     t.plugins.forEach((p, i) => (p.index = i));
+    if (drum) { applyDrumLaneGains(t); refreshSamplerViews(t); }
   }
   t.isInstrument = t.plugins.some((p) => p.isInstrument);
+}
+// The track's first sampler, or a new empty one at the FRONT of the chain (native
+// ensureSampler: assign_sample and load_drum_kit create one even next to another instrument).
+function ensureSampler(t: Track): Plugin {
+  t.plugins = t.plugins ?? [];
+  const found = primarySampler(t);
+  if (found) return found;
+  const plugin = mkBuiltinPlugin(BUILTINS.find((x) => x.type === "sampler")!, 0);
+  t.plugins.unshift(plugin);
+  t.plugins.forEach((p, i) => (p.index = i));
+  t.isInstrument = true;
+  return plugin;
 }
 // Skill Foundry Slice B, Task 1 — recompute the additive stable-id projections
 // (`takeIds`/`currentTakeId`) from `takes`/`currentTakeIndex`, mirroring the native
@@ -1107,6 +1413,33 @@ function pushUndo() {
   // UndoManager::dropOldTransactionsIfTooLarge. Dropping the snapshot without dropping
   // its id would shift every id one place and restore to the wrong point.
   if (history.length > 100) { history.shift(); mockTxnIds.shift(); }
+}
+
+// ── Gesture coalescing (set_plugin_param / set_plugin_state), as MoshOps does it ──────────
+// A drag sends many calls carrying one `gesture` id. The first opens an undo step; a later
+// call with the SAME id joins it while that step is still the newest one (nothing undone,
+// nothing redoable) and the gesture has not been idle for kGestureIdleMs. The window also
+// ends at any other command that is not a read (mockExecuteSync), so undo, redo,
+// jump_to_history, reload and every other edit close it. Inside a batch the batch already
+// coalesces, and the window ends. Without a gesture every call is its own step.
+const GESTURE_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+/** MoshOps::gestureArgError: null when `gesture` is absent or valid. */
+function gestureArgError(args: Record<string, unknown>): string | null {
+  if (!("gesture" in args)) return null;
+  return typeof args.gesture === "string" && GESTURE_RE.test(args.gesture)
+    ? null
+    : "bad gesture: must be a string of 1-64 characters from [A-Za-z0-9_.:-]";
+}
+/** Open this call's undo step, or join the gesture's open one (no pushUndo). */
+function gestureUndoStep(gesture: string): void {
+  const g = mockGesture;
+  const top = history.length > 0 ? mockTxnIds[history.length - 1] : undefined;
+  const join = gesture !== "" && !inBatch && g !== null && g.id === gesture
+    && top === g.txn && future.length === 0 && Date.now() - g.at <= GESTURE_IDLE_MS;
+  if (!join) pushUndo();
+  mockGesture = gesture !== "" && !inBatch
+    ? { id: gesture, txn: join ? g!.txn : mockTxnIds[history.length - 1]!, at: Date.now() }
+    : null;
 }
 
 // RTG-002 — does `track`'s output chain (transitively) already feed into targetId?
@@ -1193,25 +1526,28 @@ function trainingState(): TrainingState {
   return snapshot.training as TrainingState;
 }
 
-// Mirrors TrainerRegistry::sourceEligible (src/training/TrainerRegistry.cpp), reason for
-// reason and in its order: native stamps `eligible` and `blocked_reason` on every source it
-// lists, and the popover's status badges, its Build button and the Lab's Train count all
-// read them. The one check a browser cannot make is native's last — that the file exists.
-function trainingBlockedReason(s: TrainingSource): string {
-  if (!s.source_id) return "missing source_id";
-  if (!s.title) return "missing title";
-  if (!s.creator) return "missing creator";
-  if (!s.user_claimed_license) return "missing user_claimed_license";
-  if (!s.proof_of_rights) return "missing proof_of_rights";
-  if (!s.approved_for_training) return "not approved_for_training";
-  if (!s.local_path) return "missing local_path";
+/** Mirror of TrainerRegistry::sourceEligible (src/training/TrainerRegistry.cpp): the
+ *  first failing rule names the reason, in the native order. Two native rules have
+ *  nothing to test here: "missing source_url or local_path" checks for absent KEYS,
+ *  and import always writes both (natively too); "missing local file: <path>" needs
+ *  a disk, so any non-empty local_path counts as a file that exists. */
+function trainingBlockedReason(src: TrainingSource): string {
+  if (!src.source_id) return "missing source_id";
+  if (!src.title) return "missing title";
+  if (!src.creator) return "missing creator";
+  if (!(src.user_claimed_license || src.license_name)) return "missing user_claimed_license";
+  if (!src.proof_of_rights) return "missing proof_of_rights";
+  if (!src.approved_for_training) return "not approved_for_training";
+  if (!src.local_path) return "missing local_path";
   return "";
 }
 
-function withTrainingEligibility(s: TrainingSource): TrainingSource {
-  s.blocked_reason = trainingBlockedReason(s);
-  s.eligible = s.blocked_reason === "";
-  return s;
+/** Native derives `eligible` + `blocked_reason` on every read (sourceSummary). Here
+ *  they depend only on the record's own fields, so stamping each write is the same. */
+function stampTrainingEligibility(src: TrainingSource): TrainingSource {
+  src.blocked_reason = trainingBlockedReason(src);
+  src.eligible = src.blocked_reason === "";
+  return src;
 }
 
 const VST3S = [
@@ -1990,26 +2326,49 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "load_drum_kit": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
+      // Mirrors cmdLoadDrumKit: the kit is validated before anything changes; the track's
+      // first sampler (or a new one at the front) loses ALL its sounds (melodic ones too)
+      // and gets the kit's eight pads; the kit id is recorded on the track; muted lanes
+      // stay silent. Result {trackId, index (the sampler's chain position), pads, kit}.
+      const kitArg = str(args.kit);
+      if (kitArg && !MOCK_KITS[kitArg]) return err(command, "no kit: " + kitArg);
+      const kit = kitArg || DEFAULT_KIT;
       pushUndo();
-      ensureInstrument(t, true);
+      const sampler = ensureSampler(t);
+      const pads = loadKitInto(sampler, kit);
+      t.drumKit = kit;
+      applyDrumLaneGains(t);
+      refreshSamplerViews(t);
       invalidate();
-      // Mirrors the native result shape (MoshOps.cpp cmdLoadDrumKit): {trackId, index,
-      // pads} — `index` (this used to be dropped) is the sampler's position in the
-      // track's plugin rack, same field the UI's plugin-rack views key off of elsewhere.
-      const index = (t.plugins ?? []).findIndex((p) => p.type === "sampler" && p.isInstrument);
-      return ok(command, { trackId: t.id, index, pads: 8 });
+      return ok(command, { trackId: t.id, index: sampler.index, pads, kit });
     }
     case "assign_sample": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
-      // Mirror the native guard: a sample is required (native also checks the file
-      // exists on disk, which the mock can't, so it only enforces a non-empty path).
+      // Mirrors cmdAssignSample. The engine requires the file to exist (the mock can only
+      // require a non-empty path), copies it into the session's imports and plays the copy;
+      // every sound covering the note is REPLACED (a melodic one spanning it too) and the
+      // new one starts at pan 0 with no choke group. "melodic" = rooted at `note` across the
+      // whole keyboard, note-gated; anything else = a one-shot pad on `note`.
       const file = str(args.file);
       if (!file) return err(command, "file not found: " + file);
+      const note = Math.min(127, Math.max(0, Math.trunc(num(args.note, 60))));
+      const mode = typeof args.mode === "string" ? args.mode : "drum";
+      const copy = importedPathFor(file);
+      const name = typeof args.name === "string" ? args.name : sampleStem(copy);
+      const gainDb = num(args.gainDb, 0);
+      const existing = primarySampler(t);
+      if (existing && soundsOf(existing).filter((x) => !(x.minNote <= note && x.maxNote >= note)).length >= 64)
+        return err(command, "Can't load any more samples");
       pushUndo();
-      ensureInstrument(t, true);
+      const sampler = ensureSampler(t);
+      const sounds = soundsOf(sampler);
+      for (let i = sounds.length - 1; i >= 0; i--) if (sounds[i]!.minNote <= note && sounds[i]!.maxNote >= note) sounds.splice(i, 1);
+      sounds.push(newSound(copy, name, gainDb, mode === "melodic" ? "melodic" : "drum", note));
+      applyDrumLaneGains(t);
+      refreshSamplerViews(t);
       invalidate();
-      return ok(command, { trackId: t.id, note: num(args.note, 60), name: str(args.name, "Sample"), file });
+      return ok(command, { trackId: t.id, index: sampler.index, note, name, mode, file: copy, sounds: sounds.length });
     }
     case "set_drum_lane": {
       const t = findTrack(str(args.trackId));
@@ -2024,6 +2383,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       if ("mute" in args) t.drumMutedPitches = toggle(t.drumMutedPitches, Boolean(args.mute));
       if ("solo" in args) t.drumSoloPitches = toggle(t.drumSoloPitches, Boolean(args.solo));
+      // …and, as applyDrumLaneGains does, park every silenced pad's level at the -48 dB
+      // floor (keeping the producer's level) or restore it.
+      applyDrumLaneGains(t);
+      refreshSamplerViews(t);
       invalidate();
       return ok(command, { trackId: t.id, note, muted: (t.drumMutedPitches ?? []).includes(note), solo: (t.drumSoloPitches ?? []).includes(note) });
     }
@@ -4043,13 +4406,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // read real files or play audio, so it returns a synthetic waveform + a no-sound
     // ack (faithful to the backend's command shape; real audio lives in the app).
     case "file_peaks": {
-      if (!str(args.path)) return err(command, "missing 'path'");
-      const buckets = Math.max(16, Math.min(4000, num(args.buckets, 200)));
-      const peaks = Array.from({ length: buckets }, (_, i) => {
-        const a = 0.15 + 0.8 * Math.abs(Math.sin(i / 5) * Math.cos(i / 17));
-        return [-a, a] as [number, number];
-      });
-      return ok(command, { path: str(args.path), buckets, peaks });
+      const path = str(args.path);
+      if (!path) return err(command, "missing 'path'");
+      // Deterministic per path (a bundled kit pad has its real length; any other absolute
+      // path a stable made-up one); a relative path is "not found", as juce::File makes it.
+      const buckets = Math.max(16, Math.min(4000, Math.trunc(num(args.buckets, 200))));
+      const peaks = mockFilePeaks(path, buckets);
+      if (!peaks) return err(command, "file not found: " + path);
+      return ok(command, { path, buckets: peaks.length, peaks });
     }
     case "audition_file":
       return str(args.path) ? ok(command, { path: str(args.path), playing: false }) : err(command, "missing 'path'");
@@ -4063,7 +4427,24 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (args.pitch == null) return err(command, "missing 'pitch'");
       const action = str(args.action) || "blip";
       if (!["on", "off", "blip"].includes(action)) return err(command, "action must be 'on', 'off' or 'blip'");
-      if (!findTrack(str(args.trackId))) return err(command, "no track");
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      // A track with an enabled sampler and an audio session answers as the engine's
+      // sampler routes do (clips → the inject path, velocity honoured; no clips → the
+      // sampler path, fixed velocity 0.75) and the hit shows on the plugin_meters rail,
+      // as the sampler panel's own auditions do in the app. The mock still makes no sound.
+      const sampler = primarySampler(t);
+      const pitch = Math.min(127, Math.max(0, Math.trunc(num(args.pitch, 60))));
+      if (sampler?.enabled && snapshot.session.audioEnabled !== false && !t.armed) {
+        const viaClips = t.clips.length > 0;
+        if (action !== "off") {
+          const vel = viaClips ? Math.min(127, Math.max(1, Math.trunc(num(args.velocity, 100)))) / 127 : 0.75;
+          queueSamplerAudition(t, sampler, pitch, vel);
+        }
+        return ok(command, {
+          trackId: t.id, pitch, action, audible: true, path: viaClips ? "inject" : "sampler", held: 0, recordable: false,
+        });
+      }
       return ok(command, {
         trackId: str(args.trackId), pitch: num(args.pitch, 60), action,
         // REC-002 — `recordable` is true only on the "input" path. The mock has no engine
@@ -4210,7 +4591,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
                    outputDevice: dead ? "" : mockAudioSel.outputDevice,
                    inputDevice: dead ? "" : mockAudioSel.inputDevice,
                    sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
-        sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512,
+        sampleRates: [44100, 48000, 96000], bufferSizes: [64, 128, 256, 512, 1024], defaultBufferSize: 512,
         audioEnabled: !dead,
         // CAP-TRN-005 — click destinations, by te::OutputDevice NAME (not the deviceID the
         // track-output pickers use). Sentinel first, then wave outs, then the MIDI sentinel
@@ -4457,7 +4838,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
       pushUndo(); t.plugins = t.plugins ?? [];
-      t.plugins.push({ index: t.plugins.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
+      t.plugins.push(mkBuiltinPlugin(b, t.plugins.length));
       invalidate(); return ok(command);
     }
     case "load_plugin": {
@@ -4496,17 +4877,62 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo(); const [p] = f.track.plugins!.splice(f.idx, 1); f.track.plugins!.splice(to, 0, p); reindex(f.track); invalidate(); return ok(command);
     }
     case "set_plugin_param": {
+      const badGesture = gestureArgError(args); if (badGesture) return err(command, badGesture);
       const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
-      const p = f.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      const pl = f.track.plugins![f.idx];
+      const p = pl.params?.find((x) => x.index === num(args.paramIndex)); if (!p) return err(command, "bad paramIndex");
+      // One undo step per call, or per drag when the calls share a `gesture` id (as MoshOps).
+      gestureUndoStep(str(args.gesture));
+      p.value = num(args.value);
+      // 4OSC as the engine stores it: the normalised value clamped, mapped through the
+      // parameter's (skewed) range in floats, read back from the raw value (no step snap:
+      // Tracktion does not snap, the Tune read-out rounds).
+      if (pl.type === "4osc") Object.assign(p, fourOscSetNorm(p.index, num(args.value)) ?? {});
+      // A stepped parameter lands on its nearest state, and the read-out follows the
+      // value, as in the engine (only where the mock knows the engine's wording).
+      if (p.choices?.length) p.value = Math.round(Math.min(1, Math.max(0, p.value)) * (p.choices.length - 1)) / (p.choices.length - 1);
+      if (pl.type !== "4osc") { const shown = builtinParamDisplay(pl.type, p.index, p.value); if (shown !== undefined) p.display = shown; }
       // G10 — mirrors the native cmdSetPluginParam: when the owning track is armed
       // "write", capture a point at the current transport position in the SAME mutation
       // (touch/latch are accepted by set_track_automation_mode but inert here too, v0).
-      if (p && f.track.automationMode === "write") {
+      if (f.track.automationMode === "write") {
         p.points = p.points ?? [];
         p.points.push({ t: Math.max(0, num(snapshot.transport.position)), v: Math.min(1, Math.max(0, num(args.value))) });
         p.automated = p.points.length > 0;
       }
       invalidate(); return ok(command);
+    }
+    case "set_plugin_state": {
+      // Mirrors the engine's set_plugin_state: a per-type whitelist of non-automatable
+      // settings (STATE_SPECS), numbers clamped to their range (the delay time to a whole
+      // millisecond, never below 1), a mode must be one of its choices. Undoable, and a drag
+      // that shares a `gesture` id is one step, as for set_plugin_param.
+      const badGesture = gestureArgError(args); if (badGesture) return err(command, badGesture);
+      const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
+      const pl = f.track.plugins![f.idx];
+      const key = str(args.key);
+      const spec = STATE_SPECS[pl.type]?.[key];
+      if (!spec || !pl.state?.[key]) return err(command, `'${key}' is not a setting of ${pl.type}`);
+      // The engine's coerce (PluginState.h), shared with load_preset's settings.
+      const coerced = coerceSetting(key, spec, args.value);
+      if ("error" in coerced) return err(command, coerced.error);
+      const value = coerced.value;
+      const gesture = str(args.gesture);
+      // The value it already has is not an edit (MoshOps: isNoChange): no undo step, the
+      // log line says undoable:false, and an open drag's window stays open. A no-change
+      // call of that drag (a value clamped at the end of the range) keeps it from idling.
+      if (pl.state[key].value === value) {
+        if (gesture !== "" && mockGesture?.id === gesture) mockGesture.at = Date.now();
+        mockOpenedNoTxn = true;
+        invalidate(); return ok(command, { key, value });
+      }
+      gestureUndoStep(gesture);
+      pl.state[key] = { ...pl.state[key], value };
+      if (key === "mode" && (pl.type === "lowpass" || pl.type === "highpass")) {
+        pl.type = value as string;
+        pl.name = value === "highpass" ? "High-Pass" : "LPF/HPF";
+      }
+      invalidate(); return ok(command, { key, value });
     }
     case "open_plugin_editor": return ok(command);
 
@@ -4516,7 +4942,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "load_master_builtin": {
       const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
       pushUndo(); const list = masterPlugins();
-      list.push({ index: list.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
+      list.push(mkBuiltinPlugin(b, list.length));
       invalidate(); return ok(command, { index: list.length - 1 });
     }
     case "load_master_plugin": {
@@ -4541,7 +4967,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "set_master_plugin_param": {
       const f = findMasterPlugin(num(args.index)); if (!f) return err(command, "plugin not found");
-      const p = masterPlugins()[f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      const p = masterPlugins()[f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (!p) return err(command, "bad paramIndex");
+      pushUndo(); p.value = num(args.value);   // one undo step per call (MoshOps: beginTxn, no gesture)
       invalidate(); return ok(command);
     }
     case "open_master_plugin_editor": return ok(command);
@@ -5241,6 +5668,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         { plugin: "4osc", name: "mosh-pad", file: "/presets/4osc/mosh-pad.json", source: "bundled" },
         { plugin: "4osc", name: "mosh-pluck", file: "/presets/4osc/mosh-pluck.json", source: "bundled" },
         { plugin: "vital", name: "user-patch", file: "/presets/vital/user-patch.vital", source: "user" },
+        // the bundled track-chain preset (resources/presets/track-chain/*.json) — applied
+        // with apply_track_preset, never load_preset
+        { plugin: "track-chain", name: MOCK_TRACK_PRESET.fileName, file: MOCK_TRACK_PRESET.file, source: "bundled" },
       ];
       const filter = str(args.plugin, "").toLowerCase();
       return ok(command, { presets: filter ? lib.filter((p) => p.plugin === filter) : lib });
@@ -5267,35 +5697,97 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       ];
       return ok(command, { items });
     }
+    // Track-chain presets. Mirrors native cmdApplyTrackPreset's CONTRACT — the same
+    // refusals in the same order, one undo step, ownership tags, no duplicate on
+    // re-apply — over the one bundled preset. The mock holds no DSP; the two rows carry
+    // the display strings the pinned engine produces for the preset's values.
+    case "apply_track_preset": {
+      const trackId = str(args.trackId);
+      if (!trackId) return err(command, "trackId is required — a preset is applied to one named track");
+      const t = findTrack(trackId);
+      if (!t) return err(command, "no track: " + trackId);
+      if (t.type === "drum") return err(command, "a vocal preset applies to an audio track; this is a drum track");
+      if (t.isInstrument || (t.plugins ?? []).some((p) => p.isInstrument))
+        return err(command, "this track hosts an instrument; a vocal preset applies to an audio track");
+      if (t.isReturn) return err(command, "this is a return track; apply the preset to the vocal track that feeds it");
+      if (snapshot.transport.recording) return err(command, "cannot apply a preset while recording — stop recording first");
+      const file = str(args.file, "");
+      if (file !== MOCK_TRACK_PRESET.file) return err(command, "preset file not found: " + file);
+
+      const rack = t.plugins ?? [];
+      const owned = rack.filter((p) => p.preset?.id === MOCK_TRACK_PRESET.id);
+      const fresh = mockTrackPresetRows();
+      const sameAsPreset = owned.length === fresh.length && owned.every((p, i) =>
+        p.preset?.stage === i && p.type === fresh[i]!.type && p.enabled
+        && p.params.length === fresh[i]!.params.length
+        && p.params.every((q, k) => Math.abs(q.value - fresh[i]!.params[k]!.value) < 1e-9)
+        // …and its settings: a high-pass flipped to low-pass, or moved off 12 dB/oct, is
+        // not the preset any more (re-applying restores the slope, contract §1a).
+        && Object.entries(fresh[i]!.state ?? {}).every(([key, v]) => (p.state?.[key]?.value ?? v.value) === v.value)
+        && (i === 0 || p.index === owned[i - 1]!.index + 1));
+      const result = (changed: boolean, replaced: boolean) => ok(command, {
+        trackId, presetId: MOCK_TRACK_PRESET.id, revision: MOCK_TRACK_PRESET.revision,
+        name: MOCK_TRACK_PRESET.name, changed, replaced,
+        stages: (t.plugins ?? []).filter((p) => p.preset?.id === MOCK_TRACK_PRESET.id)
+          .map((p) => ({ index: p.index, processor: p.type === "highpass" ? "lowpass" : p.type, enabled: p.enabled })),
+      });
+      if (sameAsPreset) return result(false, false);   // native opens no transaction here either
+
+      pushUndo();
+      const at = owned.length > 0 ? rack.indexOf(owned[0]!) : rack.length;
+      const kept = rack.filter((p) => p.preset?.id !== MOCK_TRACK_PRESET.id);
+      const insertAt = Math.min(at, kept.length);
+      t.plugins = [...kept.slice(0, insertAt), ...fresh, ...kept.slice(insertAt)];
+      t.plugins.forEach((p, i) => { p.index = i; });
+      invalidate();
+      return result(true, owned.length > 0);
+    }
     case "load_preset": {
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "no track");
       const file = str(args.file, "");
       if (!file) return err(command, "preset file not found: ");
+      // Mirrors native: a track-chain preset is refused by name on the instrument seam.
+      if (file.includes("/track-chain/"))
+        return err(command, "this is a track preset, not an instrument patch — apply it from the track's Vocal preset menu");
       const isVital = file.endsWith(".vital");
-      const inst = (t.plugins ?? []).find((p) =>
-        isVital ? p.isInstrument && /vital/i.test(p.name) : p.isInstrument && !!p.builtin);
-      if (!inst)
-        return err(command, isVital
-          ? "no Vital instrument on this track (a .vital preset only targets Vital)"
-          : "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
+      if (!isVital) {
+        // The .json branch, as cmdLoadPreset runs it on the built-in 4OSC: the file must
+        // exist (here: one of the five bundled patches, an embedded copy of
+        // resources/presets/4osc/*.json); the target is the plugin at `index` when given,
+        // else the track's first 4OSC, and it must BE a 4OSC. The patch's settings ("state":
+        // waves, filter, unison...) and params land as one undo step, and it is a whole patch:
+        // what it does not name returns to its default. Already loaded: no step, changed:false.
+        const preset = FOUR_OSC_PRESETS[(file.split("/").pop() ?? file).replace(/\.json$/i, "")];
+        if (!file.toLowerCase().endsWith(".json") || !preset) return err(command, "preset file not found: " + file);
+        const index = Math.trunc(num(args.index, -1));
+        const target = index >= 0 ? (t.plugins ?? [])[index] : (t.plugins ?? []).find((p) => p.type === "4osc");
+        if (!target || target.type !== "4osc")
+          return err(command, "no 4OSC instrument on this track (a .json preset targets the built-in 4OSC)");
+        const r = applyFourOscPreset(target.params, target.state, preset);
+        if ("error" in r) return err(command, r.error);
+        const name = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
+        const data = { plugin: "4osc", preset: name, paramsApplied: r.applied, settingsApplied: r.settingsApplied,
+          ...(r.unknown.length ? { unknownParams: r.unknown.join(", ") } : {}) };
+        if (!r.changed) { mockOpenedNoTxn = true; invalidate(); return ok(command, { ...data, changed: false, reset: 0 }); }
+        pushUndo();
+        target.params = r.next;
+        target.state = r.nextState;
+        invalidate();
+        return ok(command, { ...data, changed: true, reset: r.reset });
+      }
+      const inst = (t.plugins ?? []).find((p) => p.isInstrument && /vital/i.test(p.name));
+      if (!inst) return err(command, "no Vital instrument on this track (a .vital preset only targets Vital)");
       pushUndo();
       const preset = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
-      // Mirror native: a 4OSC preset rewrites the patch parameters. Deterministic per preset name
-      // so a readback proves the load landed and one undo proves it is one transaction.
-      if (!isVital) {
-        const seed = [...preset].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 997, 7);
-        inst.params.forEach((p, i) => { p.value = Number((((seed + i * 37) % 89) / 100).toFixed(2)); });
-      }
       invalidate();
-      return ok(command, isVital
-        ? { plugin: inst.name, preset, note: "state sent; verify audibly (Vital applies patches asynchronously)" }
-        : { plugin: "4osc", preset, paramsApplied: 8 });
+      return ok(command, { plugin: inst.name, preset, note: "state sent; verify audibly (Vital applies patches asynchronously)" });
     }
     case "apply_choke": {
       const f = findClip(str(args.clipId));
       if (!f?.clip.notes) return err(command, "not a midi clip");
       const t = findTrack(f.track.id);
+      if (t) refreshSamplerViews(t);
       const group = new Map<number, number>();
       for (const p of t?.drumPads ?? []) if (p.chokeGroup) group.set(p.pitch, p.chokeGroup);
       if (group.size === 0) return ok(command, { clipId: str(args.clipId), truncated: 0, groups: 0 });
@@ -5314,28 +5806,53 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command, { clipId: str(args.clipId), truncated, groups: new Set(group.values()).size });
     }
+    // Per-pad edits, mirroring cmdSetDrumPad / cmdClearDrumPad: a pad is addressed by a
+    // NOTE, and the note reaches the NARROWEST sound covering it (so an 808 spanning the
+    // keyboard never shadows the snare). A missing note is clamped to 0, as the engine's
+    // jlimit does. Gain is clamped to ±48 dB, pan to ±1, the choke group to 0..16 (a
+    // choked pad is note-gated, group 0 makes it open-ended again). On a silenced pad
+    // (lane mute or solo) a level edit goes to the PARKED level, and a pan-only edit
+    // keeps it (the engine fix that ships with the sampler panel).
     case "set_drum_pad": {
       const t = findTrack(str(args.trackId));
-      const pad = t?.drumPads?.find((p) => p.pitch === num(args.note, -1));
-      if (!pad) return err(command, "no pad at note");
+      if (!t) return err(command, "no track");
+      const sampler = primarySampler(t);
+      if (!sampler) return err(command, "track has no sampler");
+      const note = Math.min(127, Math.max(0, Math.trunc(num(args.note, -1))));
+      const sounds = soundsOf(sampler);
+      const idx = soundIndexForNote(sounds, note);
+      if (idx < 0) return err(command, "no pad at note " + note);
+      const pad = sounds[idx]!;
       pushUndo();
-      if ("gainDb" in args) pad.gainDb = num(args.gainDb, pad.gainDb);
-      if ("pan" in args) pad.pan = num(args.pan, pad.pan);
+      if ("gainDb" in args || "pan" in args) {
+        const gain = Math.min(48, Math.max(-48, num(args.gainDb, pad.silenced ? pad.userGainDb : pad.gainDb)));
+        pad.pan = Math.min(1, Math.max(-1, num(args.pan, pad.pan)));
+        if (pad.silenced) pad.userGainDb = gain;
+        else pad.gainDb = gain;
+      }
       if ("name" in args) pad.name = str(args.name);
       if ("chokeGroup" in args) {
-        const g = num(args.chokeGroup, 0);
-        if (g > 0) { pad.chokeGroup = g; pad.openEnded = false; }
-        else { delete pad.chokeGroup; pad.openEnded = true; }
+        const g = Math.min(16, Math.max(0, Math.trunc(num(args.chokeGroup, 0))));
+        if (g > 0) pad.chokeGroup = g;
+        else delete pad.chokeGroup;
+        pad.openEnded = g === 0;
       }
-      invalidate(); return ok(command, { trackId: str(args.trackId), note: pad.pitch });
+      refreshSamplerViews(t);
+      invalidate(); return ok(command, { trackId: t.id, note, padIndex: idx });
     }
     case "clear_drum_pad": {
       const t = findTrack(str(args.trackId));
-      const i = t?.drumPads?.findIndex((p) => p.pitch === num(args.note, -1)) ?? -1;
-      if (!t?.drumPads || i < 0) return err(command, "no pad at note");
+      if (!t) return err(command, "no track");
+      const sampler = primarySampler(t);
+      if (!sampler) return err(command, "track has no sampler");
+      const note = Math.min(127, Math.max(0, Math.trunc(num(args.note, -1))));
+      const sounds = soundsOf(sampler);
+      const idx = soundIndexForNote(sounds, note);
+      if (idx < 0) return err(command, "no pad at note " + note);
       pushUndo();
-      t.drumPads.splice(i, 1);
-      invalidate(); return ok(command, { trackId: t.id, note: num(args.note, -1), removed: 1 });
+      sounds.splice(idx, 1);
+      refreshSamplerViews(t);
+      invalidate(); return ok(command, { trackId: t.id, note, removed: 1 });
     }
     case "quantize_notes": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
@@ -5485,21 +6002,25 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── rights-cleared type-beat training ────────────────────────────────────
+    // Results mirror native (MoshOps.ProjectIo.cpp + TrainerRegistry): import and approve
+    // answer with the source summary itself as `data`, and refuse in the same words.
     case "import_training_source": {
       const state = trainingState();
+      if (!str(args.sourceUrl) && !str(args.localPath)) return err(command, "missing sourceUrl or localPath");
       const id = str(args.sourceId, `beat-${String(state.sources.length + 1).padStart(3, "0")}`);
+      // A re-import replaces the record in the slot it already occupies.
       const existing = state.sources.findIndex((s) => s.source_id === id);
-      const src = withTrainingEligibility({
+      const src = stampTrainingEligibility({
         index: existing >= 0 ? existing : state.sources.length,
         source_id: id,
-      title: str(args.title, "Untitled Type Beat"),
-      creator: str(args.creator, "Unknown"),
-      source_url: str(args.sourceUrl),
-      local_path: str(args.localPath),
-      user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
-      license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
-      proof_of_rights: str(args.proofOfRights),
-      approved_for_training: Boolean(args.approvedForTraining),
+        title: str(args.title, "Untitled Type Beat"),
+        creator: str(args.creator, "Unknown"),
+        source_url: str(args.sourceUrl),
+        local_path: str(args.localPath),
+        user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
+        license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
+        proof_of_rights: str(args.proofOfRights),
+        approved_for_training: Boolean(args.approvedForTraining),
         expiration: (typeof args.expiration === "string" && args.expiration) ? String(args.expiration) : null,
         notes: str(args.notes, ""),
       });
@@ -5513,10 +6034,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "approve_training_source": {
       const state = trainingState();
-      const src = state.sources.find((s) => s.source_id === str(args.sourceId));
-      if (!src) return err(command, `source not found: ${str(args.sourceId)}`);
+      const sourceId = str(args.sourceId);
+      if (!sourceId) return err(command, "missing sourceId");
+      const src = state.sources.find((s) => s.source_id === sourceId);
+      if (!src) return err(command, `source not found: ${sourceId}`);
       src.approved_for_training = Boolean(args.approved ?? true);
-      withTrainingEligibility(src);
+      stampTrainingEligibility(src);
       invalidate();
       return ok(command, src);
     }
@@ -5528,7 +6051,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const bundleHash = `mock-${bundleId}-${eligible.length}`;
       const bundlePath = `/mock/training/corpora/${bundleId}`;
       const sources = eligible.map((s, index) => ({ ...s, index, copied_path: `${bundlePath}/sources/${String(index).padStart(3, "0")}-${s.source_id}.wav`, sha256: `mock-${s.source_id}`, bytes: 123456 }));
-      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !s.eligible).map((s) => ({ source_id: s.source_id, reason: s.blocked_reason ?? "" })) };
+      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !eligible.includes(s)).map((s) => ({ source_id: s.source_id, reason: s.blocked_reason ?? "" })) };
       state.activeCorpusHash = bundleHash;
       invalidate();
       return ok(command, bundle);
@@ -5539,10 +6062,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!bundlePath) return err(command, "missing corpusBundle");
       const jobId = `job-${Math.random().toString(36).slice(2, 8)}`;
       const outputDir = str(args.outputDir, `${bundlePath}/training-output/${jobId}`);
+      // Recorded as "queued", as native records a submit. The run finishes when its
+      // status is first read (training_job_status below) — until then it is still
+      // going, which is what leaves cancel_training_job something to stop.
       const job = {
         jobId,
-        status: "ready",
-        progress: 1,
+        status: "queued",
+        progress: 0,
         bundlePath,
         outputDir,
         artifactPath: `${outputDir}/adapter.lora.json`,
@@ -5576,15 +6102,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
+      // No trainer here: a run that is still going finishes on this read. Like
+      // native, the read is what updates the recorded job.
+      if (job.status === "queued" || job.status === "running") {
+        job.status = "ready";
+        job.progress = 1;
+      }
       return ok(command, job);
     }
+    // Mirrors native: the answer is the state the run was IN, and only a run that
+    // is still going has anything to stop. A finished run keeps its status, and an
+    // id nobody knows is refused rather than recorded as a cancelled job.
     case "cancel_training_job": {
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
-      job.status = "cancelled";
-      invalidate();
-      return ok(command);
+      const live = job.status === "queued" || job.status === "running";
+      const answer = { jobId: job.jobId, status: job.status, progress: job.progress, cancelRequested: live };
+      if (live) {
+        // Natively the status moves once the stop reaches the trainer and the next
+        // training_job_status reports it. With no trainer to wind down, it lands now.
+        job.status = "cancelled";
+        invalidate();
+      }
+      return ok(command, answer);
     }
     // Import now ENROLLS into the library — the same place the render path reads
     // — instead of copying into a training/adapters dir nothing renders from.
@@ -5745,7 +6286,20 @@ function mockExecuteSync(command: unknown): CommandResult {
     ? mockTxn.entries.findIndex((e) => e.requestId === str(c.transaction!.requestId))
     : -1;
 
+  // A panel drag's undo window ends at the next command that is not a read (MoshOps::
+  // execute ends it, and closes its step, before any command but the two gesture
+  // commands and txnsafe's reads): the drag's next call then opens a new step.
+  if (c.command !== "set_plugin_param" && c.command !== "set_plugin_state"
+      && !MOCK_TXN_READS.has(c.command) && c.command !== "get_snapshot")
+    mockGesture = null;
+
+  // Each level of a nested call (apply_agent_patch runs its commands through here) reads
+  // its own command's flag, then hands the outer command's back.
+  const outerOpenedNoTxn = mockOpenedNoTxn;
+  mockOpenedNoTxn = false;
   const res = dispatch(c.command, c.args ?? {});
+  const openedNoTxn = mockOpenedNoTxn;
+  mockOpenedNoTxn = outerOpenedNoTxn;
 
   // Mirror of txnPostDispatch: record the outcome against its manifest entry.
   if (admittedIndex >= 0 && mockTxn) {
@@ -5765,7 +6319,7 @@ function mockExecuteSync(command: unknown): CommandResult {
     // the undo point the session is at once the command has landed. A command that
     // opened no transaction therefore shares the previous line's stamp, which is the
     // divergence between this log and the undo stack made visible rather than guessed at.
-    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now(), txn: mockHistoryTxn() });
+    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command) && !openedNoTxn, ts: Date.now(), txn: mockHistoryTxn() });
   // DAW-parity P5 replay lane: a dev-only FULL trace (args + result ids) on window, so an
   // e2e run can dump the commands its UI gestures emitted and the native lane can replay
   // them through `Mosh --run-script` (scripts/daw-conformance/replay_e2e_log.py rebinds
@@ -5795,6 +6349,9 @@ export function mockSnapshot<T = unknown>(): Promise<T> {
   // ensureTrackMeter, so every track that has a meter has a mute gate): fill the mixer
   // strip in for every track, whichever of the mock's many track factories made it.
   for (const t of snapshot.tracks) reconcileSendAutomationPlugins(t);
+  // Samplers: each sound's index/mode/address note, which sampler is primary, and
+  // track.drumPads are DERIVED on every snapshot, as MoshOps builds them (mock/sampler.ts).
+  for (const t of snapshot.tracks) refreshSamplerViews(t);
   // MOSHI-LOOP — snapshot.loop is DERIVED, never stored: rebuilt from the model on every
   // read, exactly as the native snapshot() embeds loopStateVar().
   syncLoopSnapshot();
@@ -5806,6 +6363,8 @@ export function mockSnapshot<T = unknown>(): Promise<T> {
 // This module is dev-mock only — a production `vite build` strips it entirely.
 export function __resetMockForTests(): void {
   stopPlayback();
+  resetMockMeters();
+  resetImportedPaths();
   // Reset the id counters too, so a fresh test session is fully deterministic —
   // two resets in one process now mint the same ids (mirroring the separate
   // processes the --dump / --replies offline flow runs in). Without this, the
@@ -5831,6 +6390,8 @@ export function __resetMockForTests(): void {
   mockTxnIds = [];            // CAP-PRJ-005 — the mirror follows the stacks it mirrors
   mockNextTxnId = 1;
   inBatch = false;
+  mockGesture = null;
+  mockOpenedNoTxn = false;
   mockTxn = null;          // FS-B2a — a leaked transaction would refuse the next test's mutations
   mockAgentRequests.clear();
   mockRevision = 0;

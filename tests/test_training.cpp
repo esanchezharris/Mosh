@@ -453,3 +453,77 @@ TEST_CASE ("sha256File (via buildCorpus manifest): streamed hash equals a full-r
 
     root.deleteRecursively();
 }
+
+// The registry's job record is written three times over a run's life: once by
+// submit (the full record: bundle, output dir, config), then by every status
+// poll and by cancel, which each know only a few fields. updateJob used to
+// REPLACE the stored record with whatever it was handed, so the first poll
+// erased which corpus and config the run was trained with, and a cancel erased
+// everything but a status.
+TEST_CASE ("updateJob merges into the stored job record instead of replacing it", "[training]")
+{
+    auto root = makeTempRoot();
+    auto sessionDir = root.getChildFile ("session");
+    sessionDir.createDirectory();
+    mosh::TrainerRegistry registry (sessionDir);
+
+    auto jobWithId = [&registry] (const juce::String& jobId) -> juce::var
+    {
+        auto jobs = registry.listJobs().getProperty ("jobs", juce::var());
+        for (int i = 0; i < jobs.size(); ++i)
+            if (jobs[i].getProperty ("jobId", juce::var()).toString() == jobId)
+                return jobs[i];
+        return {};
+    };
+
+    // What submit_training_job records.
+    auto* config = new juce::DynamicObject();
+    config->setProperty ("rank", 16);
+    auto* submitted = new juce::DynamicObject();
+    submitted->setProperty ("jobId", "job-a");
+    submitted->setProperty ("status", "queued");
+    submitted->setProperty ("progress", 0.0);
+    submitted->setProperty ("bundlePath", "/corpora/corpus-001");
+    submitted->setProperty ("outputDir", "/corpora/corpus-001/training-output/job-a");
+    submitted->setProperty ("config", juce::var (config));
+    registry.updateJob (juce::var (submitted));
+
+    auto* other = new juce::DynamicObject();
+    other->setProperty ("jobId", "job-b");
+    other->setProperty ("status", "ready");
+    other->setProperty ("bundlePath", "/corpora/corpus-002");
+    registry.updateJob (juce::var (other));
+
+    // What a training_job_status poll records: the few fields the service reports.
+    auto* polled = new juce::DynamicObject();
+    polled->setProperty ("jobId", "job-a");
+    polled->setProperty ("status", "running");
+    polled->setProperty ("progress", 0.5);
+    registry.updateJob (juce::var (polled));
+
+    auto a = jobWithId ("job-a");
+    REQUIRE (a.isObject());
+    CHECK (a.getProperty ("status", juce::var()).toString() == "running");
+    CHECK ((double) a.getProperty ("progress", -1.0) == 0.5);
+    CHECK (a.getProperty ("bundlePath", juce::var()).toString() == "/corpora/corpus-001");
+    CHECK (a.getProperty ("outputDir", juce::var()).toString() == "/corpora/corpus-001/training-output/job-a");
+    CHECK ((int) a.getProperty ("config", juce::var()).getProperty ("rank", 0) == 16);
+
+    // The other job is not disturbed, and no duplicate row appears.
+    auto b = jobWithId ("job-b");
+    REQUIRE (b.isObject());
+    CHECK (b.getProperty ("status", juce::var()).toString() == "ready");
+    CHECK (b.getProperty ("bundlePath", juce::var()).toString() == "/corpora/corpus-002");
+    CHECK (registry.listJobs().getProperty ("jobs", juce::var()).size() == 2);
+
+    // A job the registry has not seen yet is still added (a poll for a run that
+    // was submitted before this session's registry existed).
+    auto* fresh = new juce::DynamicObject();
+    fresh->setProperty ("jobId", "job-c");
+    fresh->setProperty ("status", "running");
+    registry.updateJob (juce::var (fresh));
+    CHECK (jobWithId ("job-c").getProperty ("status", juce::var()).toString() == "running");
+    CHECK (registry.listJobs().getProperty ("jobs", juce::var()).size() == 3);
+
+    root.deleteRecursively();
+}

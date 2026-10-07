@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { boot, newProject, addAudioTrack, selectTrack } from "./helpers";
+import { boot, newProject, addAudioTrack, selectTrack, expectDispatched } from "./helpers";
 
 // Route B — the transform render mode in the real WebView UI (against the dev mock):
 // add a wave clip → "+ Transform" → pick a target instrument + strength → Render
@@ -31,7 +31,10 @@ test("transform render mode: + Transform → pick target → render → reset", 
   await expect(targetSel).toBeVisible();
   await expect(gen.getByTestId("xform-strength")).toBeVisible();
 
-  // Pick a target instrument (index 0 is the "pick instrument…" placeholder).
+  // The instrument list is whatever list_transform_targets returned, so it is only
+  // pickable once that has landed (index 0 is the "pick instrument…" placeholder).
+  await expectDispatched(page, "list_transform_targets");
+  await expect(targetSel.locator("option")).not.toHaveCount(1);
   await targetSel.selectOption({ index: 1 });
 
   // Render → status ready, auto-applied in place → Reset enabled (no Accept for wave clips).

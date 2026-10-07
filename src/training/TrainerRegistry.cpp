@@ -609,23 +609,34 @@ var TrainerRegistry::listJobs()
     return var (out);
 }
 
+// Merges `job` into the stored record with the same jobId, or adds it. Only
+// submit knows the whole record (bundle, output dir, config); a status poll and
+// a cancel each bring a few fields, and replacing the record with those erased
+// what the run was trained on.
 void TrainerRegistry::updateJob (const var& job)
 {
     auto st = state();
     auto* stObj = st.getDynamicObject();
     auto jobs = toArray (stObj->getProperty ("jobs"));
     const auto jobId = job.getProperty ("jobId", var()).toString();
-    bool replaced = false;
+    bool merged = false;
     for (int i = 0; i < jobs.size(); ++i)
     {
-        if (jobs.getReference (i).getProperty ("jobId", var()).toString() == jobId)
+        auto& stored = jobs.getReference (i);
+        if (stored.getProperty ("jobId", var()).toString() == jobId)
         {
-            jobs.set (i, job);
-            replaced = true;
+            auto* into = stored.getDynamicObject();
+            auto* from = job.getDynamicObject();
+            if (into != nullptr && from != nullptr)
+                for (auto& field : from->getProperties())
+                    into->setProperty (field.name, field.value);
+            else
+                jobs.set (i, job);
+            merged = true;
             break;
         }
     }
-    if (! replaced)
+    if (! merged)
         jobs.add (job);
     stObj->setProperty ("jobs", jobs);
     saveState (st);
