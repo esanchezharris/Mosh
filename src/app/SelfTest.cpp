@@ -894,7 +894,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "FU1: one undo reverts BOTH steps despite the timer window (not just the last one)");
         cmd (ops, "undo");
         check (tracks (ops) == preBase - 1,
-               "FU1: a second undo hits the PRE-batch edit — the batch really was one step");
+               "FU1: a second undo hits the PRE-batch edit -- the batch really was one step");
         cmd (ops, "redo"); cmd (ops, "redo");
         check (tracks (ops) == preBase + 2,
                "FU1: redo restores the pre-batch edit AND the whole (two-step) batch together");
@@ -908,7 +908,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         (void) cmd (ops, "remove_track", args1 ("trackId", preId));
         (void) cmd (ops, "remove_track", args1 ("trackId", aId));
         (void) cmd (ops, "remove_track", args1 ("trackId", bId));
-        check (tracks (ops) == batchBase, "FU1: cleanup — back to the pre-FU1 baseline");
+        check (tracks (ops) == batchBase, "FU1: cleanup -- back to the pre-FU1 baseline");
 
         // Regression guard: two LONE (non-batch) commands separated by the same real
         // pump must still land as two separate undo steps — the inhibitor releases at
@@ -17170,7 +17170,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     return failures;
 }
 
-int runUndoSelfTest (MoshEngine&, MoshOps& ops)
+int runUndoSelfTest (MoshEngine& eng, MoshOps& ops)
 {
     using namespace juce;
     failures = 0;
@@ -17304,13 +17304,13 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
         check (ok (cmd (ops, "undo")), "FU1: first undo after the batch ok");
         check (tracks (ops) == baseTracks,
                "FU1: one undo reverts the WHOLE batch (both steps), proving the 350 ms "
-               "timer did not split it — on unfixed code only Step B is gone here");
+               "timer did not split it -- on unfixed code only Step B is gone here");
 
         // A second undo must land on the PRE-batch edit, not "the rest of the batch" —
         // this is what rules out a lucky count match hiding an actual split.
         check (ok (cmd (ops, "undo")), "FU1: second undo (the pre-batch edit) ok");
         check (tracks (ops) == baseTracks - 1,
-               "FU1: second undo removes the PRE-batch track — the batch really was ONE step");
+               "FU1: second undo removes the PRE-batch track -- the batch really was ONE step");
 
         check (ok (cmd (ops, "redo")), "FU1: redo pre-batch edit ok");
         check (ok (cmd (ops, "redo")), "FU1: redo whole batch ok");
@@ -17331,7 +17331,7 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone B"))), "FU1: lone B ok");
         check (ok (cmd (ops, "undo")), "FU1: undo lone B ok");
         check (tracks (ops) == loneBase + 1,
-               "FU1: outside a batch, one undo removes only the LAST lone command — "
+               "FU1: outside a batch, one undo removes only the LAST lone command -- "
                "transactions still split normally (the inhibitor did not leak)");
         check (ok (cmd (ops, "undo")), "FU1: undo lone A ok");
         check (tracks (ops) == loneBase, "FU1: a second undo removes the other lone command");
@@ -17352,9 +17352,54 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
                "FU1-swap: new_project ok while a batch was left open");
 
         check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 post-swap batch"))),
-               "FU1-swap: batch_begin on the fresh project succeeds — the abandoned batch "
+               "FU1-swap: batch_begin on the fresh project succeeds -- the abandoned batch "
                "did not wedge inBatch true forever");
         check (ok (cmd (ops, "batch_end")), "FU1-swap: batch_end ok");
+    }
+
+    // -- FU1 -- the same force-close on the OTHER two Edit-replacing commands --
+    // reload (eng.reloadFromFile) and open_without_plugins (eng.reloadInSafeMode) also
+    // destroy the Edit the batch's inhibitor is held on. Without the force-close the
+    // inhibitor outlives its Edit (~Edit asserts numUndoTransactionInhibitors == 0 in a
+    // Debug build) and `inBatch` stays true on the fresh Edit with NO inhibitor, so the
+    // rest of the abandoned batch can split again and the next batch_begin is refused
+    // with "a batch is already open". Each case first proves the batch really is open
+    // going into the swap (a nested batch_begin is refused), so the post-swap checks
+    // cannot pass vacuously. After the swap a bare batch_end must find NO open batch
+    // (inBatch was cleared, not merely re-openable), and a fresh batch must open/close.
+    {
+        const auto batchLeftOpenAcross = [&ops] (const juce::String& swapCommand)
+        {
+            const juce::String tag = "FU1-" + swapCommand + ": ";
+            check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 pre-" + swapCommand + " batch"))),
+                   tag + "batch_begin ok");
+            check (ok (cmd (ops, "create_track", args1 ("name", "FU1 pre-" + swapCommand + " step"))),
+                   tag + "a step inside the still-open batch ok");
+            const auto nested = cmd (ops, "batch_begin", args1 ("name", "FU1 nested probe"));
+            check (! ok (nested)
+                       && nested.getProperty ("error", juce::var()).toString().contains ("already open"),
+                   tag + "the batch really is open going into the swap (nested batch_begin refused)");
+
+            check (ok (cmd (ops, swapCommand)), tag + swapCommand + " ok while a batch was left open");
+
+            const auto strayEnd = cmd (ops, "batch_end");
+            check (! ok (strayEnd)
+                       && strayEnd.getProperty ("error", juce::var()).toString().contains ("no batch is open"),
+                   tag + "after the swap no batch is open -- the swap force-closed it "
+                         "(inBatch false, its inhibitor released before the old Edit died)");
+            check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 post-" + swapCommand + " batch"))),
+                   tag + "batch_begin on the fresh Edit succeeds -- the abandoned batch "
+                         "did not wedge inBatch true");
+            check (ok (cmd (ops, "batch_end")), tag + "batch_end ok");
+        };
+
+        batchLeftOpenAcross ("reload");
+        batchLeftOpenAcross ("open_without_plugins");
+
+        // open_without_plugins leaves the engine in read-only safe mode; a normal reload
+        // restores saving (the FS-T2 section of --selftest pins the same exit).
+        check (ok (cmd (ops, "reload")), "FU1-open_without_plugins: reload out of safe mode ok");
+        check (! eng.inSafeMode(), "FU1-open_without_plugins: safe mode cleared after the reload");
     }
 
     finishSection();

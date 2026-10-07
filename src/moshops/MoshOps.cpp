@@ -4548,6 +4548,11 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
 // existing block_plugin command rather than reaching into PluginHost directly.
 juce::var MoshOps::cmdOpenWithoutPlugins (const juce::var& args)
 {
+    // FU1 — safe mode REPLACES the Edit (eng.reloadInSafeMode), so a legacy batch left open
+    // across it is force-closed FIRST, the same as new_project/open_project/reload: the
+    // batch's inhibitor must not outlive its Edit, and `inBatch` must not wedge true.
+    closeBatchForEditSwap();
+
     // Read the suspects BEFORE the reload clears them.
     const auto suspects = eng.pluginCrashSuspects();
     const auto target   = mosh::safemode::quarantineTarget (

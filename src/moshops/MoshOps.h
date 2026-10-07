@@ -1312,11 +1312,13 @@ private:
     //
     // UndoTransactionInhibitor stores a SafeSelectable<Edit>, so its destructor is a no-op
     // once the Edit is gone — it can never dereference a dangling Edit even if held across
-    // an Edit teardown or a new_project/open_project swap. Main.cpp destroys MoshOps (and
-    // so batchInhibitor_) BEFORE the engine/Edit on ordinary shutdown, so that path never
-    // even exercises the safety net. new_project/open_project additionally call
-    // setInBatch(false) themselves (see MoshOps.ProjectIo.cpp) so a batch left open across
-    // a project swap does not wedge `inBatch` true forever on the fresh Edit.
+    // an Edit teardown. That is only a safety net, though: ~Edit asserts
+    // numUndoTransactionInhibitors == 0 (tracktion_Edit.cpp), so an inhibitor must never
+    // outlive the Edit it holds. Main.cpp destroys MoshOps (and so batchInhibitor_) BEFORE
+    // the engine/Edit on ordinary shutdown, and EVERY command that replaces the Edit —
+    // new_project, open_project/open_recent, reload and open_without_plugins — calls
+    // closeBatchForEditSwap() before the swap, so a batch left open across it neither leaks
+    // its inhibitor onto the dying Edit nor wedges `inBatch` true on the fresh one.
     std::optional<te::Edit::UndoTransactionInhibitor> batchInhibitor_;
 
     /** The only place `inBatch` is assigned. Toggling it also holds/releases the real
@@ -1327,6 +1329,22 @@ private:
         inBatch = shouldBeInBatch;
         if (shouldBeInBatch) batchInhibitor_.emplace (eng.edit());
         else                 batchInhibitor_.reset();
+    }
+
+    /** Force-close an open LEGACY batch because the Edit is about to be REPLACED
+        (new_project, open_project/open_recent, reload, open_without_plugins). Call it
+        BEFORE the engine swaps the Edit: the abandoned batch has nothing left to commit
+        onto, its inhibitor must be released while its Edit still exists, and `inBatch`
+        must not stay true on the fresh Edit (batch_begin would refuse forever and the
+        rest of the batch would run with no inhibitor). batchTurnId_ goes with it, like
+        every other batch-closing path, so the swap's own log line is not stamped with
+        the abandoned batch's turn id. (In transactional mode txnPreDispatch already
+        refuses a foreign project swap while txn_ is open, so this is the legacy path.) */
+    void closeBatchForEditSwap()
+    {
+        if (! inBatch) return;
+        setInBatch (false);
+        batchTurnId_.clear();
     }
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
