@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LANE_LEFT_PX, beatPx, clipBeatCount, clipBeats, clipBox, gridBeatCount, gridDensity, gridMarks, laneContentPx, playheadLeftPx, secondsAtLaneX, sectionBox, sectionStartSec, sessionBeatCount } from "./timeline";
+import { LANE_LEFT_PX, beatPx, clipBeatCount, clipBeats, clipBox, gridBeatCount, gridDensity, gridMarks, laneContentPx, playheadLeftPx, secondsAtLaneX, sectionBox, sectionStartSec, sessionBeatCount, visibleBeatWindow } from "./timeline";
 
 describe("V3 timeline geometry", () => {
   it("maps seconds to pixels through pxPerSec, with a grab floor", () => {
@@ -65,5 +65,54 @@ describe("V3 playhead / sections / ruler geometry", () => {
   it("maps a ruler click back to seconds and clamps at zero", () => {
     expect(secondsAtLaneX(160, 80)).toBe(2);
     expect(secondsAtLaneX(-5, 80)).toBe(0);
+  });
+});
+
+// ── visible-range windowing for long sessions (2026-09-24 follow-up) ─────────────────────
+// FINDINGS.md ("New (minor)", 2026-09-23 retest): once the playhead ran on to ~bar 550, the V3
+// timeline rendered grid/ruler marks for the WHOLE content width — thousands of DOM/AX nodes —
+// and a macOS accessibility walk of the window timed out (CPU stayed idle; it was node count).
+// gridMarks always looped 0..beats; nothing bounded it to what was actually on screen.
+describe("V3 grid virtualization: gridMarks windowed by the visible range", () => {
+  const BEATS_550_BARS = 550 * 4;   // 2200 beats
+  const BEAT_PX = 40;               // beatPx(120, 80) — the default zoom, beats labelled (>=20px)
+
+  it("bounds the mark count for a 550-bar song regardless of session length", () => {
+    const full = gridMarks(BEATS_550_BARS, BEAT_PX, 1);
+    expect(full.length).toBe(BEATS_550_BARS);          // the unfixed baseline: the whole width, every time
+    expect(full.length).toBeGreaterThan(1000);
+
+    const win = visibleBeatWindow(20000, 1100, BEAT_PX, BEATS_550_BARS);
+    const windowed = gridMarks(BEATS_550_BARS, BEAT_PX, 1, win);
+    expect(windowed.length).toBeLessThan(200);          // bounded by the viewport, not the song
+    expect(windowed.length).toBeGreaterThan(0);          // anti-vacuity: not just an empty result
+  });
+
+  it("returns exactly the full-width marks that fall inside the window (same positions, fewer of them)", () => {
+    const full = gridMarks(BEATS_550_BARS, BEAT_PX, 1);
+    const win = visibleBeatWindow(20000, 1100, BEAT_PX, BEATS_550_BARS);
+    const windowed = gridMarks(BEATS_550_BARS, BEAT_PX, 1, win);
+    const expected = full.filter((m) => m.beat >= win.startBeat && m.beat < win.endBeat);
+    expect(windowed).toEqual(expected);
+    expect(expected.length).toBe(windowed.length);       // the filter isn't vacuously matching everything
+    expect(expected.length).toBeLessThan(full.length);
+  });
+
+  it("visibleBeatWindow: never negative, clamped to the session, grows with the viewport", () => {
+    expect(visibleBeatWindow(0, 1100, BEAT_PX, BEATS_550_BARS).startBeat).toBe(0);
+    expect(visibleBeatWindow(-500, 1100, BEAT_PX, BEATS_550_BARS).startBeat).toBe(0);   // never negative
+    const nearEnd = visibleBeatWindow(1e7, 1100, BEAT_PX, BEATS_550_BARS);
+    expect(nearEnd.endBeat).toBe(BEATS_550_BARS);         // never past the session
+    expect(nearEnd.startBeat).toBeLessThanOrEqual(nearEnd.endBeat);
+    const narrow = visibleBeatWindow(20000, 200, BEAT_PX, BEATS_550_BARS);
+    const wide = visibleBeatWindow(20000, 1100, BEAT_PX, BEATS_550_BARS);
+    expect(wide.endBeat - wide.startBeat).toBeGreaterThan(narrow.endBeat - narrow.startBeat);
+    expect(visibleBeatWindow(100, 1100, 0, BEATS_550_BARS)).toEqual({ startBeat: 0, endBeat: 0 });   // no zoom, no window
+    expect(visibleBeatWindow(100, 1100, BEAT_PX, 0)).toEqual({ startBeat: 0, endBeat: 0 });          // no session
+  });
+
+  it("gridMarks(..., range) with no range still returns the whole span (backward compatible)", () => {
+    expect(gridMarks(8, 40, 1)).toEqual(gridMarks(8, 40, 1, undefined));
+    expect(gridMarks(8, 40, 1, { startBeat: 0, endBeat: 8 })).toEqual(gridMarks(8, 40, 1));
   });
 });

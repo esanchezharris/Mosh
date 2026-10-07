@@ -16,6 +16,7 @@
 #include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
+#include "audio/CombinedAudioDevice.h"
 #include "audio/DitheringAudioFormat.h"
 #include "ExportRange.h"
 #include "RenderSourceWindow.h"
@@ -221,6 +222,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
 {
     releaseAllVoices();                 // silence held notes while their Edit still exists
     unregisterAllMeterClients();        // old measurers are still valid here
+    endGestureWindow();                 // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file on disk is refused; the current Edit is kept untouched.
     if (auto refusal = eng.reloadFromFile(); refusal.isNotEmpty())   // reconcileMeterClients() re-registers next frame
     {
@@ -1157,6 +1159,26 @@ juce::var MoshOps::currentAudioSelection (const juce::String& requestedOutput)
                     dm.getCurrentAudioDevice() != nullptr
                         ? dm.getCurrentAudioDevice()->getName() : String());
     o->setProperty ("audioReady", eng.audioReady());
+
+    // Monitoring delay, as the open device reports it (additive, read-only). `combining`
+    // says how the input and output are joined: one device ("single"), two devices as one
+    // private CoreAudio aggregate ("aggregate"), or two devices through JUCE's FIFO
+    // ("fifo", the slow fallback) — see audio/CombinedAudioDevice.h. The estimate is the
+    // device path only; plugin latency on the monitored track is extra.
+    if (auto* device = dm.getCurrentAudioDevice())
+    {
+        const auto mode = audio::combineModeOf (device, setup.inputDeviceName, setup.outputDeviceName);
+        const double rate = device->getCurrentSampleRate();
+        o->setProperty ("combining", audio::combineModeName (mode));
+        if (mode != audio::CombineMode::none && rate > 0.0)
+        {
+            const auto ms = [rate] (int samples) { return std::round (samples * 10000.0 / rate) / 10.0; };
+            o->setProperty ("monitorLatencyMs",
+                            ms (audio::estimatedRoundTripSamples (mode, device->getInputLatencyInSamples(),
+                                                                  device->getOutputLatencyInSamples(),
+                                                                  device->getCurrentBufferSizeSamples())));
+        }
+    }
     return var (o);
 }
 
@@ -1555,6 +1577,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
                        String (".") + projectname::kProjectExtension, false);
     }
 
+    endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
@@ -1628,6 +1651,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
 juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, const char* commandName)
 {
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
+    endGestureWindow();                    // the inhibitor must not outlive the Edit it holds
     // PRJ-FMT — a newer-format file is refused; the current project stays loaded + saveable.
     if (auto refusal = eng.openProject (file); refusal.isNotEmpty())  // else: stops transport + frees ctx before swap
     {
