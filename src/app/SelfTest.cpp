@@ -6546,8 +6546,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 // ── USER kit library (~/Library/Mosh/kits; env-pointed here so the
                 // harness never reads or depends on the real user library) ──
                 {
-                    auto userRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                        .getChildFile ("selftest-user-kits");
+                    auto userRoot = selftestTempPath (eng, "selftest-user-kits");
                     auto kitDir = userRoot.getChildFile ("selftest-user-kit");
                     kitDir.createDirectory();
                     // Two REAL pads copied from the bundled kit found above — a partial
@@ -6634,8 +6633,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             }
 
             // Wrong-family refusal: a .vital preset must never touch a 4OSC-only track.
-            auto tmpVital = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                .getChildFile ("selftest-refusal.vital");
+            auto tmpVital = selftestTempPath (eng, "selftest-refusal.vital");
             tmpVital.replaceWithText ("{}");
             check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", tmpVital.getFullPathName() }}))),
                    "a .vital preset is refused on a track without Vital");
@@ -6717,12 +6715,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // palette-v2 manifest. UI-only by design (the loop model never sees command result
     // data — StepCommandResult carries {command, ok, error} only, ui/src/agent/loopSeam.ts):
     // this proves the CONTRACT the produce-lane preflight/picker (drumPalette.ts) depends
-    // on, not agent reachability. Hermetic: builds its own manifest under tempDirectory so
-    // it never reads or depends on the real ~/Library/Mosh/palette-v2.
+    // on, not agent reachability. Hermetic: builds its own manifest under a per-process temp
+    // dir so it never reads or depends on the real ~/Library/Mosh/palette-v2 — nor races a
+    // concurrent selftest's deleteRecursively() of the same fixture.
     section ("list_palette (W2.2 produce-lane data seam)");
     {
-        auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                          .getChildFile ("selftest-palette");
+        auto tmpDir = selftestTempPath (eng, "selftest-palette");
         tmpDir.deleteRecursively();
         tmpDir.createDirectory();
 
