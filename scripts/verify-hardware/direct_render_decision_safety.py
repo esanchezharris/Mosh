@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from direct_render_harness import Harness, command, setup, snap, target
+from direct_render_harness import Harness, command, settle, setup, snap, target
 
 
 class QueuedDecision(BaseModel):
@@ -30,7 +30,7 @@ def cancel_pending_audition(harness: Harness, source: Path) -> None:
                                "range": "custom", "start": 0, "end": 2, "tail": "cut"}))):
         run = Harness(harness.binary, harness.evidence, settle_decisions=False).run("cancel_audition_" + name,
             setup(source) + [target("render_layer", {"wait": True}), target("bypass_layer", {"audition": "result"}),
-                boundary, command("__wait", {"ms": 2000}), snap("after")])
+                boundary, settle(), snap("after")])
         run.passed()
         queued = QueuedDecision.model_validate(next(row.data for row in run.results if row.command == "bypass_layer"))
         assert queued.requestId

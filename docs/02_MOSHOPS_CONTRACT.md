@@ -56,6 +56,198 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `clear_automation` | `{trackId, pluginIndex, paramIndex}` | ✓ | — | `snapshot_invalidated` |
 | `set_track_automation_mode` | `{trackId, mode: read\|touch\|latch\|write}` | ✓ | — | `snapshot_invalidated` (scoped track patch) |
 | `write_automation_curve` | `{trackId, pluginIndex, paramIndex, points: [{t,v:0-1,curve?}] \| JSON string, apply?: replace\|merge, replaceStart?: seconds, replaceEnd?: seconds}` | ✓ | `{pointCount, numPoints}` | `snapshot_invalidated` |
+| `set_plugin_param` | `{trackId, index, paramIndex, value: 0-1, gesture?}` | ✓ (one step per gesture) | — | `snapshot_invalidated` (scoped track patch) |
+| `set_plugin_state` | `{trackId, index, key, value: number\|string, gesture?}` | ✓ (one step per gesture) | `{key, value}` (the applied value) | `snapshot_invalidated` (scoped track patch) |
+
+**Native plugin panels (2026-10-05): `set_plugin_state`, gestures, `plugin_meters`.**
+`set_plugin_state` edits a native plugin's CachedValue-only settings, the ones Tracktion keeps in
+the plugin's state but does not expose as automatable parameters (so `set_plugin_param` cannot
+reach them). The whitelist, by the plugin's reported `type` (`src/moshops/PluginState.h`, shared
+with the snapshot's `plugin.state`): `delay` `lengthMs` (integer ms, 1–2000), `chorus` `depthMs`
+(0.1–20 ms), `speedHz` (0.1–10 Hz), `width` (0–1), `mix` (0–1), `phaser` `depth` (0–8 oct), `rate`
+(0.05–10 Hz), `feedback` (−0.95–0.95), `lowpass`/`highpass` `mode` (`"lowpass"` or
+`"highpass"`) and `slope` (integer dB/oct, 6–48 in steps of 6; 2026-10-05), and the `4osc` keys
+listed under *4OSC* below (2026-10-05). Values are physical,
+never normalised. Numbers must be JSON numbers and finite (a string, boolean or NaN is refused);
+they are clamped to the range, and `lengthMs` is rounded to an integer and never goes below 1 ms
+(Tracktion's DelayPlugin divides by the length in samples on the audio thread). An integer key
+with a `step` above 1 (the slope) is snapped onto `min + step·k`, `k = round((value − min) /
+step)` with a tie rounding up as JavaScript's `Math.round` does: slope 25 → 24, 27 → 30, 0 → 6,
+100 → 48. The result's `value` is the applied (snapped) value. `mode` must be one of its choices;
+changing it flips the plugin's reported `type`/`name` between `"lowpass"` (name `"LPF/HPF"`) and
+`"highpass"` (name `"High-Pass"`), and leaves the slope as it is. Errors: `no plugin`,
+`key '<k>' is not a state key of <type> (allowed: …)` (or `(it has none)`), `this <type> cannot set
+'<k>'` (the plugin object lacks that setting: `slope` on a plain Tracktion filter, see below),
+`bad value for <k>: …`, `missing value`. A value equal to the current one is `ok` but is not an edit: it opens no
+transaction (so it does not end an open gesture window, see below), logs `undoable:false`, and
+does not touch the reactive render loop. Otherwise the write goes through the Edit's UndoManager
+inside one transaction (a ValueTree property action the CachedValue follows), logs one JSONL
+line, emits the scoped track patch, and touches the reactive render loop like
+`set_plugin_param`. Refused on a frozen track; lock scope `Track`. **UI-only**: absent from the
+agent catalog and from `TransactionSafe.h` (fails closed inside an agent transaction). Delay
+lines: Tracktion's chorus and delay size their line in `initialise` for the CURRENT
+`depthMs`/`lengthMs` and grow it inside `applyToBuffer` (`ensureMaxBufferSize`, an allocation on
+the audio thread) when it grows. Every Mosh `delay`/`chorus` is a `MoshDelayPlugin` /
+`MoshChorusPlugin` (`src/plugins/moshfx/MoshDelayLinePlugins.h`: Tracktion's plugin, same type,
+audio bit-identical) whose `initialise` sizes the line on the message thread for this command's
+ceiling (2000 ms; a 41 ms chorus line), so a `set_plugin_state` during playback never allocates
+on the audio thread. Registered with the compressor (below); `--selftest` fails if a loaded
+delay or chorus is not one.
+
+**Low/high-pass slope (2026-10-05).** Every Mosh `lowpass`/`highpass` is a `MoshLowPassPlugin`
+(`src/plugins/moshfx/MoshLowPassPlugin.h`: Tracktion's `te::LowPassPlugin`, same `"lowpass"`
+type, registered with the shadows above; `--selftest` fails if a created or reloaded one is not).
+`slope` selects a Butterworth cascade of order `slope / 6` (`MoshFilterDesign.h`: at most four
+sections, the closed form `|H|² = 1 / (1 + (tan(πf/fs) / tan(πfc/fs))^(2N))`, inverted for
+high-pass, so every slope is −3.01 dB at the cutoff). At 12 dB/oct the subclass makes exactly
+the calls Tracktion's filter makes, so its audio is bit-identical (`--selftest` compares it with a
+directly constructed `te::LowPassPlugin` through a cutoff change and a mode flip). A slope change
+during playback resets a second cascade, warms it on the input unheard for five of its slowest
+section's time constants (`Q₁ / (π·fc)`; 30–200 ms: 51 ms at 80 Hz and 48 dB/oct, 102 ms at
+40 Hz) and then crossfades over about 20 ms into it, so the new slope is heard 30–200 ms after the
+change and a change that lands while one runs waits for it (2026-10-06: without the warm-up a
+bass-range cutoff's steep cascade was still ringing up from silence when the fade ended, −7.8 dB
+re peak off a crossfade of two warm filters at LP 80 Hz; `--selftest` now holds LP 80 Hz and HP
+40 Hz under −40 dB through and after the fade); nothing allocates on the audio thread. Saved as the plugin property `moshFilterSlope` (dB/oct, through the Edit's
+UndoManager, so undoable like every `set_plugin_state`); the default 12 is never written, so a
+session or preset tree without it plays at 12, a saved value off the grid plays snapped, and an
+older Mosh opening a session saved at another slope plays it at 12 without warning. The snapshot
+shows `state.slope` on master-bus filters too, read-only (`set_plugin_state` resolves track
+plugins only). A plain `te::LowPassPlugin` (only if Tracktion ever registered its own first)
+has no slope: `state.slope` is absent and `set_plugin_state` refuses the key. A track preset's
+filter runs at 12 (see *Track-chain presets*).
+
+**4OSC (2026-10-05).** `set_plugin_state` keys of a `4osc` (Tracktion's `te::FourOscPlugin`;
+its public CachedValues on the plugin's root state, written through the Edit's UndoManager):
+`waveShape1`…`waveShape4` (`"off"`, `"sine"`, `"square"`, `"saw"`, `"triangle"`, `"noise"`; osc 1
+defaults to `"sine"`, the others `"off"`), `voices1`…`voices4` (unison voices, integer 1–8, step
+1, default 1), `filterType` (`"off"`, `"lowpass"`, `"highpass"`, `"bandpass"`, `"notch"`; default
+`"off"`, which is a fresh 4OSC's; the bundled presets turn it on), `filterSlope` (integer 12–24 dB/oct,
+step 12, default 12), `distortionOn`, `reverbOn`, `delayOn`, `chorusOn` (`"off"`/`"on"`, default
+`"off"`), `delayBeats` (0.0625–4 beats, Tracktion's `delay`; default 1), `voiceMode` (`"mono"`,
+`"legato"`, `"poly"`; default `"poly"`) and `ampAnalog` (`"off"`/`"on"`, default `"on"`). Choices are
+the lowercase ids above (the UI owns the labels); a choice's index is Tracktion's enum value, and
+nothing outside an enum is ever written (a filter type outside 0–4 zeroes the voice filter and
+silences the synth). A stored value the synth cannot play is read as what it plays instead: a
+wave or filter type outside its enum reads `"off"`, unison voices are clamped to 1–8, a filter
+slope other than 24 reads 12 (the voice adds its second stage only for exactly 24), a voice mode
+other than 1 or 2 reads `"mono"`. For the 4OSC the no-change test compares the STORED values, so
+choosing the shown value over such a store (e.g. `"off"` over a filter type 7) is a real,
+undoable edit that repairs it. Not exposed: polyphony, the LFO wave/sync/beat, MPE and the mod
+matrix (inert without a route, reallocating, or unsafe: an LFO beat ≤ 0 hangs the audio thread).
+Changing `voiceMode` makes Tracktion reallocate voices on the message thread under the lock the
+audio thread renders under; `chorusOn` runs Tracktion's chorus, which can grow its line on the
+audio thread; `ampAnalog` changes only the envelope curve constants, so it is heard from the
+next envelope edit.
+The snapshot carries ALL 68 of a 4OSC's parameters (every other plugin keeps the 16 cap), each
+with `id` (the paramID: the names collide, "Mix" ×3, "Width" ×2, "Level" beside "Level N"),
+physical `min`/`max`, `skew` (only when ≠ 1), `symmetricSkew` (only when true; none today) and
+`step` (the range's interval, only when > 0: Tune 1–4 step 1). See *Snapshot* for the mapping.
+`plugin.modRoutes`, read-only and only when non-empty, lists mod-matrix routes an imported
+session carries: `[{paramIndex, id, source, depth}]` (`source` is Tracktion's id: `lfo1`, `lfo2`,
+`env1`, `env2`, `mpePressure`, `mpeTimbre`, `midiNote`, `midiVelocity`, `cc<N>`; only params
+0–53 can be routed). Mosh never creates a route. Every Mosh 4OSC is a `MoshFourOscPlugin`
+(`src/plugins/moshfx/MoshFourOscPlugin.h`: Tracktion's plugin, same `"4osc"` type, its audio the
+base class's own call, registered with the shadows above; `--selftest` fails if a loaded, default
+or reloaded one is not), which publishes the 4OSC's `plugin_meters` entry (see *Events*).
+
+**4OSC presets (`load_preset` with a `.json`, 2026-10-06).** A patch file is
+`{"state": {<the set_plugin_state keys above>: value}, "params": {"<parameter name>": normalized
+0–1}}` (plus ignored `_`-prefixed notes; the bundled ones carry `_physical`, what each
+normalized value is). Every `state` key and value is validated and coerced exactly as
+`set_plugin_state` does (an unknown key or bad value refuses the whole file, as does a `state` or
+`params` that is not an object); a param binds by its exact paramID (`"chorusMix"`), else to the
+first parameter with that display name, case-insensitively (the names collide: `"Mix"` and
+`"Width"` reach the reverb's, so the delay's and chorus's need their ids); an unmatched one is
+reported in `unknownParams`, not fatal. The load is a WHOLE patch: every parameter and setting the file does
+not name returns to Tracktion's default, so a patch never inherits from the one before. One undo
+step; refusals and a load of the patch already loaded open none (`changed:false`). A file with the
+first bank's numbered `"waveShapes"` is refused (it numbered the waves in Tracktion's LFO enum,
+not the oscillator's, and the loader wrote them where the synth never reads them, so until 2026-10-06 every preset played osc 1's sine
+through no filter). Result `data`: `{plugin:"4osc", preset, paramsApplied, settingsApplied,
+changed, reset, unknownParams?}` (`reset` = parameters and settings returned to default; a
+setting is reset only when its value differs from the default). A load or `set_plugin_state`
+that changes `voiceMode` re-sends that property's change message after the change and before it
+(an undoable resync), because Tracktion reallocates voices from the cached value, which is stale
+for a property removal and for every undo/redo. The bundled bank (`resources/presets/4osc/`, five
+patches) is un-auditioned. It supersedes the re-voiced `Keys`/`Bass`/`Pad`/`Lead`/`Pluck` bank and
+the top-level `waveShapes`/`oscVoices` format of open PR #728, which this loader refuses.
+
+**Sampler and drum pads (2026-10-05).** Every Mosh sampler is a `MoshSamplerPlugin`
+(`src/plugins/moshfx/MoshSamplerPlugin.h`: Tracktion's `te::SamplerPlugin`, same `"sampler"` type,
+saved format unchanged, its audio the base class's own call and bit-identical to it; registered
+with the shadows above; `--selftest` fails if one made by `load_builtin`, a drum track,
+`load_drum_kit`, `assign_sample` or a reload is not), which publishes the sampler's
+`plugin_meters` entry (see *Events*) and adds no parameters or children to its state (the pad
+commands address `SOUND` children by raw index). The pad commands address the track's FIRST
+sampler (`plugin.sampler.primary`) and a pad by the NOTE that reaches it: the narrowest sound
+covering the note, the first on a tie (`plugin.sampler.sounds[].addressNote` is that note).
+`set_drum_pad {trackId, note, gainDb?, pan?, name?, chokeGroup? 0–16}`, `clear_drum_pad
+{trackId, note}`, `assign_sample {trackId, note, file, mode?, name?, gainDb?}` (REPLACES every
+sound covering the note, a melodic one included, and resets level, pan and choke) and
+`load_drum_kit {trackId, kit?}` (replaces ALL sounds) are each exactly one undo step, and so is
+`create_track {type: "drum"}` (track, sampler, kit and meter) (`--selftest` proves each against an
+anchor edit with Tracktion's 350 ms undo-transaction timer due; before 2026-10-05 a kit load with no
+audio device pumped the message loop mid-command and that timer could split `load_drum_kit` and a
+drum `create_track` into two steps, so the load now inhibits it); every `SOUND` write rebuilds
+the sampler's sound list, which cuts ringing voices, so a UI commits pad edits on release. A pad
+silenced by `set_drum_lane` (its lane muted, or another lane soloed) keeps the producer's level
+parked (`moshPadGainDb`; `sounds[].silenced` / `userGainDb`): `set_drum_pad`'s `gainDb` writes the
+parked level, clamped to the engine's −48…+48 dB, and an edit without `gainDb` (pan, name or
+choke only) keeps it (before 2026-10-05 a pan-only edit parked the −48 dB floor, so unmuting
+restored silence). A `chokeGroup` > 0 makes the pad note-gated; choke is enforced only by
+`apply_choke` (baked note lengths): nothing chokes live. `audition_note` on a track with no clips
+plays the sampler directly (path `"sampler"`, velocity fixed at 0.75). Tapping the same pad again
+sounds and is a new hit, whether its earlier blip has expired or not: a blip's expiry hands the
+sampler the keys still held on that track, and (2026-10-06) a blip, or any note-on whose earlier
+voice for that pitch was a blip, releases the key at the sampler and presses it again, so a
+double-tap or a roll on one pad plays every tap (a one-shot layers over the ringing one, a gated
+one is shortened, as a repeated MIDI note-on does). Before, the key stayed held at the sampler and
+a re-tap within the blip (250 ms by default, restarted by each tap) was silent and unreported. An
+`"on"` repeating an `"on"` stays one press. These auditions are reported as hits on the rail;
+`--selftest` drives this road through the command's own code (`MoshOps::auditionNote` with the
+road forced, as no device is present headless).
+
+**Render-layer cache key (2026-10-05).** A MIDI/drum clip's render is cached under a signature of
+its notes and its track's plugins (`stableSourceSig`, `src/moshops/MoshOps.Generative.cpp`): each
+plugin's name, bypass, parameter values and automation curves, and now also its `plugin.state`
+values (the same whitelist, read the same way) and, for a sampler, what each `SOUND` child makes
+the bounce sound like, read as the sampler reads it: root, range, live gain, pan, gate, excerpt,
+and the file its source resolves to, by name and size (2026-10-06: not the raw source string,
+which Save-As consolidation rewrites from absolute to relative for the same audio, nor a pad's
+name, choke group or the level a silenced pad has parked, none of which the bounce hears; hashing
+them re-rendered a drum layer for a rename). Before, a state-only edit (filter slope or mode,
+delay length, chorus, phaser) or a sampler pad edit left the key unchanged, so a re-render HIT
+the cache and served the stale render. The pad commands that change the sound ask for the
+reactive re-render of the track's applied layers: `set_drum_pad`, `clear_drum_pad`,
+`set_drum_lane`, and since 2026-10-06 also `assign_sample`, `load_drum_kit` and `set_track_type
+{type:"drum"}` (before, those three changed the key but asked for no re-render, so an applied
+drum layer kept the old kit's render until some other edit touched the track; `--selftest`
+proves each asks). The key is the state, not the edit history (an undo restores the
+earlier key exactly), but a layer caches one render, its latest, so returning to an earlier
+value re-renders once. Plugins with neither state keys nor sounds contribute exactly what they
+did before, so their chains keep their cached renders; chains with a delay, chorus, phaser,
+low/high-pass, 4OSC (its `state` keys, 2026-10-05) or sampler re-render once.
+
+**Gestures.** `set_plugin_param` and `set_plugin_state` take an optional `gesture` (a string of
+1–64 characters from `[A-Za-z0-9_.:-]`; anything else, including an empty string or a non-string,
+is an error, not ignored). A call whose `gesture` equals the gesture that opened the CURRENT undo
+transaction joins that transaction instead of opening a new one, so a whole drag is one undo step.
+The window ends when anything else opens a transaction (any other undoable command: joining
+would otherwise append the drag to THAT command's step), on undo, redo or `jump_to_history`
+(JUCE's undo/redo already start a fresh step; ending the window makes the next call open a normal
+named one), on a call without `gesture` or with another one, when an agent batch begins, when
+the project is reloaded/opened/replaced, and after 3 s with no call of that gesture. While the
+window is open MoshOps holds a `te::Edit::UndoTransactionInhibitor`, because Tracktion's
+`Edit::UndoTransactionTimer` otherwise closes the current step 350 ms after any change unless a
+JUCE mouse button is down, and the panels' dials live in the WebView, whose pointer never
+reaches JUCE: without it a drag held still to listen would split into several steps. Read-only
+commands and no-change `set_plugin_state` calls do not end the window. A new gesture id starts a
+new step. Every call is still logged and still emits its track patch. Inside an agent batch (`batch_begin` …
+`batch_end`) behaviour is unchanged (the batch is the one step), and a gesture call after the
+batch never joins it. Without `gesture`, both commands behave exactly as before.
+
+**`plugin_meters` rail.** See *Events*.
 
 `set_track_active` is the Pro Tools-style processing-state command, distinct from both mute and UI-local Track List visibility. `active:false` persists Tracktion's undo-managed `process` property, excludes the track from playback graph construction, and disables processing for its owned plug-ins while leaving the track, clips, routing, and Track List row in the session. The snapshot exposes additive `track.active` (`true` when the field is absent for older consumers). The command is Track-scoped for multiplayer, replayable, JSONL-recorded, save/reload-safe, and a same-state request is a successful no-op that does not create an empty undo step.
 
@@ -101,6 +293,8 @@ Hosted plugin snapshots/results include external-plugin diagnostics when Trackti
 
 **Master-bus plugins (post-Stage-6): host plugins (limiter, bus EQ, …) on the master output.** `load_master_plugin {pluginId, index?}` / `load_master_builtin {type, index?}` / `remove_master_plugin {index}` / `reorder_master_plugin {index, toIndex}` / `bypass_master_plugin {index, bypassed}` / `set_master_plugin_param {index, paramIndex, value: 0-1}` / `open_master_plugin_editor {index}` — the SAME seven-command shape as `load_plugin` / `load_builtin` / `remove_plugin` / `reorder_plugin` / `bypass_plugin` / `set_plugin_param` / `open_plugin_editor`, one level up: they address `eng.edit().getMasterPluginList()` instead of a track's `pluginList`, so there is no `trackId` arg. All undoable except `open_master_plugin_editor` (a native pop-out, same as its per-track counterpart). Snapshot gains `master.plugins` (an array of the same plugin shape as `tracks[].plugins`, via `pluginToVar`). **Internal-plugin invariant:** the master plugin list also carries Mosh's own internal utility plugins (currently only `MasterSpectralTapPlugin`, the Moshi-reactivity tap `ensureMasterSpectralTap()` appends lazily during live playback) — these are never user-visible or user-addressable. `isInternalMasterPlugin()` filters them out of `master.plugins`, and `masterVisibleBoundary()` (the physical index of the first internal plugin, or the list's true size if none exists yet) is the one invariant every master-plugin command clamps inserts/reorders inside — so a tap created later still taps the fully-processed master signal, and a user-facing index never means "some internal plugin." Classified `SessionGlobal` (fail-closed default, same posture as `set_master_volume`/`set_master_pan` — the master bus is the session's one shared resource, not a track) except `open_master_plugin_editor`, which is `Unguarded` like `open_plugin_editor` (a viewer-local pop-out, nothing to sync). MP sync for the six mutating commands rides the same LWW `broadcastStructuralIfActive` replay as `set_master_volume`/`set_master_pan` — a peer without the same VST3 installed will fail to replay `load_master_plugin` locally, the same inherent limitation any VST3-identity-dependent sync has.
 
+**Track-chain presets (2026-10-01): one preset applies an ordered group of BUILT-IN effects to one audio track.** `apply_track_preset {trackId, file}` — `file` is a schema-1 `mosh.track-chain` JSON from the preset library (`list_presets {plugin:"track-chain"}`; bundled: `resources/presets/track-chain/`). One undo step. **UI-only**: absent from the agent catalog and from `TransactionSafe.h` (fails closed inside an agent transaction); `load_preset` refuses a track-chain file by name. Preflight performs no mutation and opens no transaction — it refuses a missing/unknown `trackId` (no fallback to a selected track), a non-audio, instrument, return or frozen track, a recording transport, a missing or invalid file, any processor/parameter/state/unit/value the pinned table in `src/moshops/TrackPreset.h` does not admit (values are never clamped), and a track without room. Each stage is created from a finished `PLUGIN` state tree, so the only undoable action is adding it; stages are inserted after the user's existing inserts and ahead of the first send and the fader. Every inserted plugin carries ownership tags (`moshPresetId` / `moshPresetRevision` / `moshPresetStage` / `moshPresetName`): re-applying an untouched group returns `changed:false` without a transaction, and re-applying over an edited or partial group replaces **only** that group. A preset file cannot name a filter slope, so a preset's low/high-pass runs at 12 dB/oct; a stage the user set to another slope counts as edited (2026-10-05), and re-applying replaces it at 12. Result `data`: `{trackId, presetId, revision, name, changed, replaced, stages:[{index, processor, enabled, state, params:[{id, unit, native, value, display}]}]}` — values read back from the live plugins; a low/high-pass stage's `state` also carries `slope` (dB/oct, the slope it runs at). Snapshot: `tracks[].plugins[].preset {id, name, revision, stage}` (additive; absent on plugins a user loaded; it records origin, not that the values still equal the preset's). Lock scope `Track`; in the freeze guard. Not broadcast to multiplayer peers (no per-track plugin command is). See `docs/vocal-presets/`.
+
 *The MP-001 multiplayer commands (`mp_create_session`, `mp_commit_track`, `mp_apply_bootstrap`, etc.) are backend-only — not in this Stage-1 catalog, not in the agent catalog — see [docs/MULTIPLAYER.md](MULTIPLAYER.md) for the collaboration model. One addition of note: **`mp_fetch_missing_stems`** `{wait?}` → `✗` (non-undoable, Unguarded) → `{fetched, failed, stillMissing}` — self-heals a wave clip whose audio is `sourceMissing` by re-deriving the missing hash/ext from its own by-hash source ref (`audio/by-hash/<64-hex>.<ext>`) and retrying the download; `wait:true` runs synchronously (harness/agents), otherwise it's async (mirrors `transcribe_clip`'s dual-mode shape). Fires automatically at the end of `mp_apply_bootstrap` so a late-joiner's audio self-heals without a manual retry. Closes the "one transient upload/download failure strands a clip forever" gap (previously the only recovery was the host re-committing that track).*
 
 ## Snapshot
@@ -111,14 +305,71 @@ current-value formatter; a separately supplied label is appended once and also
 exposed as `unit`. Missing text or labels leave the respective field absent.
 A formatter may include units in `display` without supplying a separate `unit`.
 
-Physical endpoints are currently qualified only for native low/high-pass
-frequency and compressor attack, release, output gain, and sidechain gain.
-They come from the live parameter range, matched by native parameter identity.
+Physical endpoints are published for native low/high-pass frequency;
+compressor attack, release, output gain, and sidechain gain; and (2026-10-05)
+every parameter of `4bandEq` (Hz 20–20000, dB −20–20, Q 0.1–4), `delay`
+(feedback −30–0 dB, mix 0–1), `pitchShifter` (−24–24 semitones), `moshOTT`,
+`softclip`, `moshXFeedback` and `moshAutoTune` (whose key 0–11 and scale 0–2
+index its `choices`). They come from the live parameter range. For all of these
+built-ins the normalisation is linear: `phys = min + value × (max − min)`.
+The `4osc` (2026-10-05) publishes min/max on all 68 parameters, but its ranges are
+JUCE NormalisableRanges that are NOT all linear, so each parameter also carries
+`skew` when it is not 1 (times 0.2, levels 4, LFO rates 0.3) and `step` when the
+range has an interval (Tune 1–4: 1): `phys = min + (max − min) · value^(1/skew)`,
+`value = ((phys − min) / (max − min))^skew`, phys snapped to `step` when present;
+no `skew` means linear (`symmetricSkew`, only when true, would mean JUCE's
+symmetric mapping; no 4OSC parameter has it). An amp time at 0.5 is 1.876 s of
+0.001–60 s; a level at 0.5 is −15.91 dB of −100–0 dB. Every 4OSC parameter also
+carries its paramID as `id`. Its `display` strings are Tracktion's (Fine Tune is
+cents and master Level is dB without a unit in the text).
 Other ranges are omitted, including external-plugin ranges and the builtin
-compressor's gain-domain threshold and inverse ratio. Neither endpoints nor
-display strings establish a conversion function: skew/custom mappings must use
-the processor's authoritative conversion. There is no physical-unit setter.
-The existing 16-parameter snapshot limit and all previous fields remain intact.
+compressor's gain-domain threshold and inverse ratio (map those with the
+encodings in `src/moshops/TrackPreset.h`: threshold is linear gain 0.01–1, ratio
+slope ρ = 0.95·v with N = 1/ρ and v = 0 meaning ∞:1). Neither endpoints nor
+display strings establish a conversion for any other processor. `set_plugin_param`
+stays normalised; `set_plugin_state` (above) is physical, for state keys only.
+The 16-parameter snapshot limit and all previous fields remain intact for every
+plugin except the `4osc`, which publishes all 68 parameters (indices 0–67); its
+first 16 only gained `id`, `min`, `max`, `skew` and `step`.
+
+Every plugin entry (track and master) also carries `itemId`, the plugin's
+EditItemID: a stable key that follows the plugin through a reorder (`index` does
+not) and survives save/reload and remove+undo. Plugins with CachedValue-only
+settings (`delay`, `chorus`, `phaser`, `lowpass`, `highpass`, `4osc`) carry
+`state: { <key>: { value, min?, max?, step?, unit?, choices? } }` from the same
+whitelist `set_plugin_state` accepts — e.g. `"state": {"lengthMs": {"value": 150,
+"min": 1, "max": 2000, "step": 1, "unit": "ms"}}` on a delay, `"state": {"mode":
+{"value": "highpass", "choices": ["lowpass", "highpass"]}, "slope": {"value": 12,
+"min": 6, "max": 48, "step": 6, "unit": "dB/oct"}}` on a high-pass. A
+value is what the plugin holds (a saved session can hold one outside the range;
+the slope reports the snapped value the filter runs at);
+`step` appears only on integer keys (the key's own step: 6 for `slope`, 12 for the
+4OSC's `filterSlope`, 1 otherwise; `set_plugin_state` snaps onto it) and `unit` only
+when there is one.
+`slope` is absent on a filter that is not Mosh's subclass. All of these fields
+are additive.
+
+Every sampler plugin entry (2026-10-05) carries `sampler: { primary, kit?, sounds,
+limits }`, read on the message thread from the `SOUND` children of its persisted
+state (never from the list the sampler loads asynchronously). `primary` is true for
+the sampler the pad commands address (the track's first; a second sampler, or one on
+the master bus, is false and is read-only to the pad commands); `kit` is the track's
+`drumKit` id (primary only, when set: `load_drum_kit` records it, a drum track's
+default kit does not); `limits` is `{maxVoices: 32, maxSounds: 64,
+minGainDb: -48, maxGainDb: 48}` (Tracktion's). Each of `sounds` (in sound-index order)
+is `{index, name, file, path, missing, pitch, minNote, maxNote, gainDb, userGainDb,
+silenced, pan, openEnded, chokeGroup?, mode, addressNote?, durationSec?, sampleRate?,
+channels?}`: `file` is the persisted source string, `path` the absolute file the
+sampler resolves it to (through the edit's resolver, so it stays absolute after
+Save-As makes `file` edit-relative; `""` if unresolvable), `missing` whether nothing
+is at `path`; `pitch` is the root (keyNote); `gainDb` is the live gain and
+`userGainDb` the producer's level (the parked copy while `silenced`, which is true for
+a muted lane AND for a pad silenced by another lane's solo); `chokeGroup` only when it
+is above 0; `mode` is `"drum"` (minNote = maxNote), `"melodic"` (0–127) or `"range"`;
+`addressNote` is the lowest note `set_drum_pad` / `clear_drum_pad` resolve to THIS
+sound (absent when every note it covers reaches a narrower one); `durationSec`,
+`sampleRate`, `channels` come from the file's header when it is readable.
+`track.drumPads` / `drumKit` / `drumMutedPitches` / `drumSoloPitches` are unchanged.
 
 ```jsonc
 {
@@ -141,6 +392,70 @@ The existing 16-parameter snapshot limit and all previous fields remain intact.
 
 - `snapshot_invalidated` — structural change; the UI refetches the snapshot. This is the documented "resync" choice (`02 // VERIFY`: snapshot_invalidated vs precise inverse-deltas). Undo/redo and reload use it. Stage 2 may refine hot paths to precise deltas.
 - `transport` — `{playing, recording, position, looping, loopStart, loopEnd}`. Pushed on every `set_transport` AND **decimated to 30 Hz** by a backend timer while playing (telemetry never per-block). Drives the animated playhead without polling.
+- `plugin_meters` — `{plugins: [{trackId, index, itemId, type, seq, …fields}]}`, the 30 Hz live meters of
+  the native plugins that publish them (`MoshOps::pluginMeters`, public so `--selftest` asserts it).
+  Volatile telemetry: never in the snapshot. An entry appears only for a TRACK plugin that is
+  enabled AND was run by the audio thread since the previous tick; the rail is emitted while any
+  entry exists plus ONE empty payload on the falling edge. A plugin that was not in a chain at the
+  previous tick (newly loaded, or back from an undone removal, which can return the same plugin
+  object) has its reading consumed and not reported, so it appears one tick later and never with
+  data from before its removal. Peaks and gain reduction ACCUMULATE (largest) between ticks — at
+  small buffers many blocks pass per tick. Every value is finite (a non-finite input such as +inf
+  from an upstream plugin is clamped, never sent as JSON `null`): level dB values are clamped to
+  [−100, +100], `grDb` to [0, 100]. `seq` (2026-10-05, every type) is a per-plugin frame counter:
+  it rises by one on every entry reported for that plugin (keyed by its EditItemID, never reset,
+  so it keeps rising across an undone removal and a reload), so a consumer can tell a NEW frame
+  from the same frame held on screen; event fields (the 4OSC's `struck`) must fire once per `seq`.
+  Fields by type:
+  - `compressor`: `{grDb, inDb, outDb}`. `grDb ≥ 0` is the largest gain reduction actually applied
+    since the last tick, measured as |out|/|in| per sample relative to the makeup (output) gain, on
+    samples above −80 dBFS (independent of the detector's internals; a block during which the
+    makeup gain changed contributes no `grDb`); `inDb`/`outDb` are sample
+    peaks (max over channels 0–1) in dBFS. Every Mosh `compressor` is a `MoshCompressorPlugin`
+    (Tracktion's CompressorPlugin, same `"compressor"` type, audio bit-identical, measured around
+    the base class), registered from `MoshEngineBehaviour::autoInitialiseDeviceManager()` before
+    Tracktion registers its own; `--selftest` fails if a loaded compressor is not one.
+  - `softclip`: `{grDb, inDb, outDb}`; `grDb` = max of 20·log10(|drive·x| / |y|).
+  - `moshOTT`: `{bands: [{levelDb, gainDb}] ×3 (low, mid, high), clipped}`. `levelDb` = the band's
+    envelope peak since the last tick (max over channels); `gainDb` = the band's dynamic gain change
+    at the end of the last block in dB (positive = upward lift, negative = downward cut; the static
+    Low/Mid/High Gain trim is NOT included; across channels the one furthest from 0 dB); `clipped`
+    = the output clamp (±0.999) engaged since the last tick. With Amount at 0 the band dynamics do
+    not run: `levelDb` −100 and `gainDb` 0.
+  - `moshXFeedback`: `{candidates: [{hz, score}], cuts: [{hz, score, depthDb}]}`, the last block's
+    (channel 0), carried with a serial so a frame is never reported twice. A frame is always ONE
+    block's (the latch's "latest" slots are a seqlock): if the audio thread is writing the next
+    block at the tick, the previous whole frame is reported instead of a mixture.
+  - `4osc` (2026-10-05): `{outDb, held: [notes], struck: [notes]}`. `outDb` = the synth's output
+    sample peak since the last tick (dBFS, max over channels 0–1, floored at −100); `held` = the
+    MIDI keys down at the synth now, ascending, from the MIDI it received (KEYS, not voices: the
+    sustain pedal, voice stealing and release tails are not reflected); `struck` = the note-ons
+    since the last tick, ascending, each once. MIDI is read exactly as the synth reads it: only
+    messages whose `round(timestamp × rate)` falls inside the block, a velocity-0 note-on is a
+    note-off, and a note-off, all-notes-off or reset-all-controllers acts on its own channel
+    (JUCE's MPEInstrument in legacy mode, FourOsc's mode unless its `mpe` property is set, which
+    Mosh never does); a block flagged all-notes-off, `reset()` and `midiPanic()` drop every key.
+    Unlike the other types, an entry appears only while the synth is enabled and NOT rendering
+    offline (an export or bounce is not live), and only for a tick in which a key was down, a note
+    was struck or the peak exceeded 1e-5: an idle synth drops off the rail. No voice count and no
+    envelope position: Tracktion keeps the voices behind a private base class.
+  - `sampler` (2026-10-05): `{outDb, held: [notes], hits: [{note, vel}]}`. `hits` = the note-ons
+    the sampler received since the last tick, ascending by note, each once at its largest
+    velocity (`vel` 0–1 = MIDI velocity / 127), including `audition_note`'s clipless-track road
+    (Tracktion's `playNotes`, reported at 0.75, the velocity it plays at); a hit is MIDI
+    RECEIVED, not a voice started (a note no sound covers is still a hit). `held` = the keys
+    down now (MIDI, read as the sampler reads it: any channel, a velocity-0 note-on is a
+    note-off, an all-notes-off or all-sound-off releases every key; plus the audition road's
+    keys); a one-shot pad rings past its note-off. `outDb` = the peak of what the sampler ADDED
+    (max |out − in| over channels 0–1, dBFS, floored at −100): it passes its input through, so
+    a signal before it in the chain does not count. Gated like the 4OSC: only while enabled
+    and not rendering offline, and only for a tick with a hit, a key down or an added peak
+    above 1e-5. An audition made while the sampler is bypassed is dropped. No voice count:
+    Tracktion keeps the voices private.
+  Mosh AutoTune is NOT on this rail (it keeps `tuner`; its latch has a single reader). Known limit:
+  an offline render (export, bounce) runs the same plugin objects, so a meter can report during an
+  export as the `tuner` rail can (the 4OSC's and the sampler's entries are gated on not rendering;
+  the others are not).
 
 ## Undo / threading invariants
 

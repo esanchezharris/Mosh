@@ -151,7 +151,8 @@ namespace
     }
 }
 
-PluginHost::PluginHost (te::Engine& e) : engine (e) {}
+PluginHost::PluginHost (te::Engine& e, File stateDirectory, File seedDirectory)
+    : engine (e), stateDir (std::move (stateDirectory)), seedDir (std::move (seedDirectory)) {}
 PluginHost::~PluginHost()
 {
     windowByPlugin.clear();
@@ -163,33 +164,39 @@ String PluginHost::idFor (const PluginDescription& d)
     return te::createIdentifierString (d);
 }
 
-// The persisted catalog + dead-mans-pedal live BESIDE the per-session dir (under
-// .../Mosh/), so one catalog is shared across the GUI session and the isolated
-// --selftest session and survives both.
+// The persisted catalog + dead-mans-pedal live in the state dir MoshEngine picks: the
+// machine-wide ~/Library/Mosh copy for the GUI and the deep scan, a private dir for
+// every harness run (which still reads the GUI's catalog as its seed, so it sees the
+// same plugins but can never rewrite the file the GUI loads at launch). See
+// sessionpaths::resolvePluginStateDirs.
 File PluginHost::catalogFile() const
 {
-    return File::getSpecialLocation (File::userApplicationDataDirectory)
-               .getChildFile ("Mosh").getChildFile ("plugin-catalog.xml");
+    return stateDir.getChildFile ("plugin-catalog.xml");
 }
 
 File PluginHost::deadMansPedal() const
 {
-    return File::getSpecialLocation (File::userApplicationDataDirectory)
-               .getChildFile ("Mosh").getChildFile ("plugin-scan-inflight.txt");
+    return stateDir.getChildFile ("plugin-scan-inflight.txt");
 }
 
 // FIT-003 — a separate small sidecar (NOT the JUCE-owned catalog XML) recording WHY
 // each blocklist entry was added. One "reason\trawId" line per entry.
 File PluginHost::blockReasonsFile() const
 {
-    return File::getSpecialLocation (File::userApplicationDataDirectory)
-               .getChildFile ("Mosh").getChildFile ("plugin-block-reasons.txt");
+    return stateDir.getChildFile ("plugin-block-reasons.txt");
+}
+
+File PluginHost::readableStateFile (const File& own) const
+{
+    if (own.existsAsFile() || seedDir == File())
+        return own;
+    return seedDir.getChildFile (own.getFileName());
 }
 
 void PluginHost::loadBlockReasons()
 {
     blockReasons.clear();
-    auto f = blockReasonsFile();
+    auto f = readableStateFile (blockReasonsFile());
     if (! f.existsAsFile()) return;
     StringArray lines;
     f.readLines (lines);
@@ -215,7 +222,7 @@ void PluginHost::saveBlockReasons()
 
 void PluginHost::loadCatalog()
 {
-    auto f = catalogFile();
+    auto f = readableStateFile (catalogFile());
     if (! f.existsAsFile()) return;
     if (auto xml = parseXML (f))                     // restores BOTH types and the blocklist
         engine.getPluginManager().knownPluginList.recreateFromXml (*xml);
