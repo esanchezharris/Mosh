@@ -6,7 +6,7 @@
 // existing MoshOps commands (set_audio_device / set_track_input) — one mutation
 // path, no new commands, no audio concepts leaking across the seam.
 
-import type { AudioDevices, WaveInput, MidiInput, TrackOutputs, Track } from "../types";
+import type { AudioDevices, AudioSelection, WaveInput, MidiInput, TrackOutputs, Track } from "../types";
 
 export type DeviceOption = { value: string; label: string };
 
@@ -19,6 +19,24 @@ export function outputDeviceOptions(devices: AudioDevices | null): string[] {
 
 export function inputDeviceOptions(devices: AudioDevices | null): string[] {
   return currentType(devices)?.inputs ?? [];
+}
+
+// The buffer sizes the Settings picker offers. The open device knows what it can run, so
+// its own list wins: CoreAudio reports many in-between sizes (48, 96, 192…), and a picker
+// of fourteen entries helps nobody, so only powers of two from 32 up are offered. With no
+// device report (headless, or a device that lists nothing) a standard ladder stands in.
+// The size in use is always present, so the select never shows a value it cannot display.
+export const STANDARD_BUFFER_SIZES = [64, 128, 256, 512, 1024];
+const MIN_BUFFER_SIZE = 32;
+const MAX_BUFFER_SIZE = 2048;
+
+export function bufferSizeOptions(devices: AudioDevices | null, current?: number | null): number[] {
+  const isPowerOfTwo = (n: number) => Number.isInteger(n) && n > 0 && (n & (n - 1)) === 0;
+  const reported = (devices?.bufferSizes ?? [])
+    .filter((n) => isPowerOfTwo(n) && n >= MIN_BUFFER_SIZE && n <= MAX_BUFFER_SIZE);
+  const sizes = new Set<number>(reported.length > 0 ? reported : STANDARD_BUFFER_SIZES);
+  if (typeof current === "number" && current > 0) sizes.add(current);
+  return [...sizes].sort((a, b) => a - b);
 }
 
 function currentType(devices: AudioDevices | null) {
@@ -98,4 +116,15 @@ export function trackOutputPatch(value: string, trackId: string): Record<string,
   if (value.startsWith("track:")) return { trackId, destTrackId: value.slice("track:".length) };
   if (value.startsWith("dev:")) return { trackId, deviceID: value.slice("dev:".length) };
   return { trackId, output: "default" };
+}
+
+// The Settings read-out of how long a sound takes from the microphone to the headphones
+// (snapshot.audio.monitorLatencyMs, the engine's estimate from what the open device
+// reports). "fifo" means the two devices could not be opened as one, which roughly
+// doubles the delay; the read-out says so rather than showing a bare number.
+export function monitoringDelayLabel(audio: AudioSelection | null | undefined): string | null {
+  const ms = audio?.monitorLatencyMs;
+  if (typeof ms !== "number" || !(ms > 0)) return null;
+  const text = `about ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+  return audio?.combining === "fifo" ? `${text} (devices not combined)` : text;
 }

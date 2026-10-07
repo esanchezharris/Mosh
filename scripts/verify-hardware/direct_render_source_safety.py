@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, assert_never
 
-from direct_render_harness import Harness, Result, Snapshot, command, digest, setup, snap, target
+from direct_render_harness import Harness, Result, Snapshot, command, digest, observed, settle, setup, snap, target
 
 PADDING_BYTES: Final = 256 * 1024 * 1024
 
@@ -99,7 +99,7 @@ def source_safety(harness: Harness, source: Path) -> None:
     padded = padded_source(source)
     observer = Mutation(at_submit=True, material="source")
     run = Harness(harness.binary, harness.evidence, observer.observe).run("mutate_after_submit",
-        setup(padded) + [target("render_layer"), command("__wait", {"ms": 20000}), snap("after")])
+        setup(padded) + [target("render_layer"), settle(120_000), snap("after")])
     run.passed()
     # Then the request never accepts the changed source as its original input.
     result = run.snapshot("after").clip()
@@ -120,8 +120,7 @@ def source_safety(harness: Harness, source: Path) -> None:
             observer = Mutation(at_submit=False, material=material, project=project)
             run = Harness(harness.binary, harness.evidence, observer.observe).run(f"mutate_{material}_{decision}",
                 setup(source) + [target("render_layer", {"wait": True})] + persistence + [snap("mutation_window"),
-                command("__wait", {"ms": 1000}), target(decision, {"audition": "result"}),
-                command("__wait", {"ms": 2000}), snap("after")])
+                observed("mutation.json"), target(decision, {"audition": "result"}), settle(), snap("after")])
             # Then validation refuses Result and Keep while retaining committed playback.
             clip = run.snapshot("after").clip()
             ready = run.snapshot("mutation_window").clip()

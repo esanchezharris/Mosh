@@ -163,11 +163,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Toolchain (ninja, jq) + numpy
+      - name: Toolchain (ninja, jq) + numpy + pydantic
+        # pydantic: the gate's direct_reimagine step (verify-direct-reimagine.py and its
+        # direct_render_*.py harness) imports it. Without it the step dies on ImportError,
+        # which the step's old advisory mode reported as ok.
         run: |
           jq --version >/dev/null 2>&1 || brew install jq
           command -v ninja >/dev/null 2>&1 || brew install ninja
-          python3 -m pip install --upgrade pip numpy
+          python3 -m pip install --upgrade pip numpy "pydantic>=2,<3"
 
       - name: Rewrite SSH submodule URLs to HTTPS
         # tracktion_engine's JUCE submodule is pinned via a git@github.com: URL; the
@@ -277,3 +280,16 @@ jobs:
             jq -r '.steps[] | "| \(.name) | \(if .ok then "✅" else "❌" end) |"' gate-native.json
           } >> "$GITHUB_STEP_SUMMARY"
           jq -r '.steps[] | select(.ok|not) | "\n=== FAILED: \(.name) ===\n\(.detail.log // .detail)"' gate-native.json || true
+          # selftest_x3's detail has counts only. The gate keeps a failing run's log (A17), so name the checks.
+          grep -H '^  FAIL' "${{ runner.temp }}"/mosh-autoloop/selftest-logs/*.log 2>/dev/null || true
+
+      - name: Upload gate failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-gate-evidence
+          path: |
+            ${{ runner.temp }}/mosh-autoloop/selftest-logs
+            ${{ runner.temp }}/mosh-autoloop/direct-reimagine
+          if-no-files-found: ignore
+          retention-days: 7

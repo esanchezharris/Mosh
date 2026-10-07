@@ -106,6 +106,7 @@ option(MOSH_ENABLE_EXPERIMENTAL_AGENT_LOOP "Enable free-form Moshi in packaged U
 option(MOSH_ENABLE_DEMO_COMPACT_MELODY "Demo-only: bypass the agent loop for in-key melody asks" OFF)
 option(MOSH_BUILD_TESTS "Build the Catch2 + command-surface test target" ON)
 option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for plugin-host smoke tests" OFF)
+option(MOSH_BUILD_RETUNE_CLI "Build MoshRetuneCli, the offline AutoTune renderer for listening tests" OFF)
 option(MOSH_BUILD_REIMAGINE_PLUGIN "Build the owner-local Mosh Re-Imagine VST3" ${APPLE})
 # Linux audio backend: ALSA is JUCE's Linux default and is always on. JACK is opt-in
 # (needs libjack-dev); it is additive — the ALSA path is unchanged when this is OFF.
@@ -277,6 +278,9 @@ if (MOSH_BUILD_APP)
         src/app/SelfTest.cpp
         src/app/LiveInstrumentSmoke.cpp
         src/app/selftest/MultiplayerAudioRefSelfTest.cpp
+        src/app/selftest/VocalPresetSelfTest.cpp
+        src/app/selftest/TunedLeadPresetSelfTest.cpp
+        src/app/selftest/PluginPanelsSelfTest.cpp
         src/multiplayer/AudioRefValidation.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
@@ -294,6 +298,10 @@ if (MOSH_BUILD_APP)
         # CAP-EXP-001 — TPDF dither on the export's final requantisation (offline only;
         # the pure quantiser in TpdfDither.h is header-only so MoshTests can unit it).
         src/audio/DitheringAudioFormat.cpp
+        # Microphone on one device, headphones on another: opened as ONE private CoreAudio
+        # aggregate instead of through JUCE's two-device FIFO (see CombinedAudioDevice.h).
+        src/audio/CombinedAudioDevice.cpp
+        src/audio/MacCoreAudioAggregateType.cpp
         # Opt-in, privacy-respecting crash reporting + telemetry (self-contained
         # module; see docs/telemetry/PRIVACY.md). Installed from ONE line at the
         # top of Main.cpp's initialise().
@@ -343,8 +351,18 @@ if (MOSH_BUILD_APP)
         # CAP-AUT-006 — the per-track mute gate (hidden mixer element, one automatable param)
         src/plugins/mixer/TrackMutePlugin.cpp
         # Mosh-native FX suite — in-app Tracktion built-ins.
-        src/plugins/moshfx/MoshAutoTuneDsp.cpp
+        src/plugins/moshfx/retune/RetuneCore.cpp
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
+        # Tracktion's compressor plus a live gain-reduction meter (same "compressor" type).
+        src/plugins/moshfx/MoshCompressorPlugin.cpp
+        # Tracktion's delay and chorus with their delay lines pre-sized off the audio thread.
+        src/plugins/moshfx/MoshDelayLinePlugins.cpp
+        # Tracktion's low/high-pass with a selectable 6-48 dB/oct slope (same "lowpass" type).
+        src/plugins/moshfx/MoshLowPassPlugin.cpp
+        # Tracktion's 4OSC plus a live keys/output meter (same "4osc" type).
+        src/plugins/moshfx/MoshFourOscPlugin.cpp
+        # Tracktion's sampler plus a live hits/keys/added-output meter (same "sampler" type).
+        src/plugins/moshfx/MoshSamplerPlugin.cpp
         src/plugins/moshfx/MoshOTTDsp.cpp
         src/plugins/moshfx/MoshOTTPlugin.cpp
         # R3.3 — plain tanh soft clip built-in (no separate DSP TU; it's stateless math).
@@ -727,6 +745,10 @@ endif()
 if (MOSH_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if (MOSH_BUILD_RETUNE_CLI)
+    add_subdirectory(tools/retune-cli)
 endif()
 
 if (MOSH_BUILD_PLUGIN_FIXTURES)
