@@ -17,7 +17,10 @@ public:
                             const juce::var& config,
                             const juce::String& outputDir = {});
     juce::var jobStatus (const juce::String& jobId);
-    void cancelJob (const juce::String& jobId);
+    // The service's answer: {ok, jobId, status, progress, cancelRequested} for a job
+    // it knows (`status` is the state the job was in), {ok:false, error} for one it
+    // does not, and void when no service answered.
+    juce::var cancelJob (const juce::String& jobId);
 
 private:
     juce::var httpGet (const juce::String& path);

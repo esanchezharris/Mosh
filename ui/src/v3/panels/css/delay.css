@@ -1,0 +1,53 @@
+/* Delay panel (DelayPanel.tsx): the echo strip, then Time (with the note menu), Feedback and
+   Mix. The plot frame and dials are the shared .pp-plot / .pp-dial. */
+.v3-shell .insp .pr .pp-delay { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.v3-shell .insp .pr .pp-delay .pp-delay-dry { stroke: var(--muted); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-delay .pp-delay-tap { stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-delay .pp-delay-env { stroke: color-mix(in srgb, var(--accent) 50%, transparent); stroke-width: 1;
+  stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-delay .pp-delay-read { fill: var(--text); font-family: var(--mono); font-size: var(--pp-fs-axis);
+  /* A halo so the read-out stays legible where echo stems run through it (0 dB feedback). */
+  paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round; }
+.v3-shell .insp .pr .pp-delay .pp-delay-read.warn { fill: var(--warn); }
+/* Feedback at 0 dB: the echoes never decay. */
+.v3-shell .insp .pr .pp-delay .pp-delay-strip.inf .pp-delay-tap { stroke: var(--warn); }
+.v3-shell .insp .pr .pp-delay .pp-delay-strip.inf .pp-delay-env { stroke: color-mix(in srgb, var(--warn) 60%, transparent); }
+.v3-shell .insp .pr .pp-delay .pp-delay-strip.bypassed .pp-delay-tap { stroke: var(--muted); }
+.v3-shell .insp .pr .pp-delay .pp-delay-strip.bypassed .pp-delay-env { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
+.v3-shell .insp .pr .pp-delay .pp-delay-strip.bypassed .pp-delay-read { fill: var(--muted); }
+/* The first echo on an engine that cannot set the time: marked, not draggable. */
+.v3-shell .insp .pr .pp-delay .pp-delay-fixed { cursor: default; }
+.v3-shell .insp .pr .pp-delay .pp-delay-fixed .dot { fill: var(--muted); }
+/* Controls row: bottom-aligned, so Time's value and caption sit on the dials' two lines. Time
+   keeps the left edge (under the strip's start); Feedback and Mix sit centred in equal shares
+   of the rest, so the row spreads evenly instead of leaving a gap in the middle. */
+.v3-shell .insp .pr .pp-delay .pp-delay-ctl { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  justify-items: center; align-items: end; column-gap: 0; }
+.v3-shell .insp .pr .pp-delay .pp-delay-timecol { justify-self: start; min-width: 0; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 5px; }
+/* Time: a read-out you drag up or down like a dial; applied on release. */
+.v3-shell .insp .pr .pp-delay .pp-delay-time {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none; outline: none;
+}
+.v3-shell .insp .pr .pp-delay .pp-delay-time .v { font-family: var(--mono); font-size: var(--pp-fs-val); font-variant-numeric: tabular-nums;
+  color: var(--text); white-space: nowrap; border-bottom: 1px dotted color-mix(in srgb, var(--text) 25%, transparent); }
+.v3-shell .insp .pr .pp-delay .pp-delay-time .nm { font-size: var(--pp-fs-cap); color: var(--muted); }
+.v3-shell .insp .pr .pp-delay .pp-delay-time:hover .v { border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-delay .pp-delay-time:focus-visible .v { color: var(--accent); border-bottom-color: var(--accent); }
+.v3-shell .insp .pr .pp-delay .pp-delay-time.off { cursor: default; }
+.v3-shell .insp .pr .pp-delay .pp-delay-time.off .v { color: var(--muted); border-bottom-color: transparent; }
+/* The one-off "set from tempo" menu: as wide as its longest option; the placeholder is muted. */
+.v3-shell .insp .pr .pp-delay .pp-delay-note { width: auto; max-width: 100%; height: 18px; font-size: var(--pp-fs-cap);
+  padding: 0 18px 0 6px; border-radius: 4px; background-position: right 5px center; }
+.v3-shell .insp .pr .pp-delay .pp-delay-note:has(option[value=""]:checked) { color: var(--muted); }
+.v3-shell .insp .pr .pp-delay .pp-delay-legacy { font-size: var(--pp-fs-cap); color: var(--muted); line-height: 1.2; white-space: nowrap; }
+.v3-shell .insp .pr .pp-delay :is(.pp-delay-warn, .pp-delay-fbwrap) { display: contents; }
+.v3-shell .insp .pr .pp-delay .pp-delay-warn .pp-dial .v { color: var(--warn); }
+.v3-shell .insp .pr .pp-delay .pp-delay-warn .pp-dial .value { stroke: var(--warn); }
+/* Minimized: the echo pattern as tiny stems (fills the 44 × 14 slot). */
+.v3-shell .insp .pr .pp-delay.pp-delay-mini { flex: 0 0 auto; display: block; }
+.v3-shell .insp .pr .pp-delay.pp-delay-mini line { stroke: var(--accent); stroke-width: 1.2; }
+.v3-shell .insp .pr .pp-delay.pp-delay-mini line.dry { stroke: var(--muted); }
+.v3-shell .insp .pr .pp-delay.pp-delay-mini.inf line:not(.dry) { stroke: var(--warn); }
+.v3-shell .insp .pr .pp-delay.pp-delay-mini.bypassed line { stroke: var(--muted); }

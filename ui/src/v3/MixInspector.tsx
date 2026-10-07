@@ -1,11 +1,17 @@
+import { useEffect, useState, type DragEvent } from "react";
 import { useStore } from "../store";
 import { ReImagineSection } from "./ReImagineSection";
 import { midiInputOptions, trackOutputOptions, currentTrackOutput, trackOutputPatch, waveInputOptions, currentTrackInput } from "../settings/routing";
-import type { Plugin, Snapshot } from "../types";
+import type { Plugin, Snapshot, Track } from "../types";
 import { PresetPicker } from "../ui/PresetPicker";
 import { Range } from "./Range";
 import { useV3 } from "./shellState";
 import { usePresetMemory } from "./presetMemory";
+import { pluginHint, showsEveryParam } from "./pluginParams";
+import { PANELS } from "./panels/registry";
+import { GenericParams, genericSummary } from "./panels/GenericParams";
+import { panelKey, usePanelState } from "./panels/panelState";
+import { TRACK_SCOPED_COMMANDS, type PanelProps, type RunCommand } from "./panels/types";
 
 function Fader({ label, value, min, max, step, display, onChange }: {
   label: string; value: number; min: number; max: number; step: number;
@@ -21,37 +27,209 @@ function Fader({ label, value, min, max, step, display, onChange }: {
   );
 }
 
-function PluginRow({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
+// ── drag a plugin above or below another to reorder the chain ───────────────
+// Signal-chain order is audible (a tuner ahead of a compressor is a different sound from
+// one behind it), so it gets a gesture. The HEADER is the handle: making the whole card
+// draggable would let a drag start on a parameter slider. The drop lands above or below
+// the row under the pointer, whichever half it is over, and a line shows where.
+// The drag source lives here rather than in the DataTransfer payload: the drag never
+// leaves the page, and WebKit hides custom payload types while the drag is in flight.
+let draggingPlugin: { trackId: string; index: number } | null = null;
+
+export type PluginDropSide = "above" | "below";
+
+/** Where a dragged plugin lands, as reorder_plugin's `toIndex` (the index it ends up at
+ *  once it has been taken out of its old slot). Null when the drop changes nothing. */
+export function pluginDropIndex(from: number, target: number, side: PluginDropSide): number | null {
+  if (from === target) return null;
+  const to = side === "above" ? (from < target ? target - 1 : target)
+                              : (from < target ? target : target + 1);
+  return to === from ? null : to;
+}
+
+function PluginRow({ plugin, trackId, track, sampleRate, scope, prevIndex, nextIndex }: {
+  plugin: Plugin; trackId: string;
+  /** The track the plugin is on, for panels that read track state (a sampler's lanes). */
+  track?: Track;
+  /** The session's sample rate, for curves that depend on it. */
+  sampleRate: number;
+  /** The open project (its edit file), so a minimized plugin stays minimized in this
+   *  song only. */
+  scope: string;
+  /** The chain indices of the visible plugins above and below, for the keyboard move. */
+  prevIndex?: number; nextIndex?: number;
+}) {
   const exec = useStore((s) => s.exec);
   const native = !!plugin.builtin && !plugin.external;
+  const def = native ? PANELS[plugin.type] : undefined;
+  // Minimized is this viewer's view preference: never a command, never undoable.
+  const key = panelKey(trackId, plugin, scope);
+  const collapsed = usePanelState((s) => !!s.collapsed[key]);
+  const toggle = usePanelState((s) => s.toggle);
+  const [dropSide, setDropSide] = useState<PluginDropSide | null>(null);
+  const acceptsDrag = () => draggingPlugin !== null && draggingPlugin.trackId === trackId;
+  const sideUnder = (e: DragEvent<HTMLDivElement>): PluginDropSide => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return e.clientY < box.top + box.height / 2 ? "above" : "below";
+  };
+  const moveTo = (toIndex: number | undefined) => {
+    if (toIndex !== undefined) void exec("reorder_plugin", { trackId, index: plugin.index, toIndex });
+  };
+  // Every change a panel makes goes through these two. A gesture id groups one drag into
+  // one undo step (the engine coalesces calls that share it).
+  const setParam: PanelProps["setParam"] = (paramIndex, value, opts) =>
+    void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex, value, ...(opts?.gesture ? { gesture: opts.gesture } : {}) });
+  const setState: PanelProps["setState"] = (stateKey, value, opts) =>
+    void exec("set_plugin_state", { trackId, index: plugin.index, key: stateKey, value, ...(opts?.gesture ? { gesture: opts.gesture } : {}) });
+  // The sampler's own commands (pads, kits, lanes, auditions, peaks): the row adds this
+  // track's id where the command takes one, so a panel cannot aim one at another track.
+  const run = ((command, args) => Promise.resolve(exec(command,
+    TRACK_SCOPED_COMMANDS.has(command) ? { ...args, trackId } : { ...args }))) as RunCommand;
+  const panelProps: PanelProps = { plugin, trackId, track, sampleRate, setParam, setState, run };
+  const hint = native && !def ? pluginHint(plugin) : null;
+  const summary = def ? def.summary(plugin, { track }) : genericSummary(plugin);
+  const Mini = def?.Mini;
+  const title = (collapsed ? def?.shortTitle : undefined) ?? def?.title ?? plugin.name;
   return (
-    <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}>
-      <div className="hdr">
-        <span className="nm">{plugin.name}</span>
-        <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
-        <button type="button" className="btn ghost sm" aria-label={plugin.enabled ? "Bypass" : "Enable"}
+    <div className="pr" data-testid="v3-plugin" data-plugin-index={plugin.index}
+      data-plugin-type={plugin.type}
+      data-preset={plugin.preset ? plugin.preset.id : undefined}
+      data-units={native && showsEveryParam(plugin) ? "" : undefined}
+      data-drop={dropSide ?? undefined}
+      data-collapsed={collapsed ? "" : undefined}
+      onDragOver={(e) => {
+        if (!acceptsDrag()) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDropSide(draggingPlugin!.index === plugin.index ? null : sideUnder(e));
+      }}
+      onDragLeave={(e) => {
+        // Crossing onto a child fires dragleave too; only leaving the row clears the line.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropSide(null);
+      }}
+      onDrop={(e) => {
+        if (!acceptsDrag()) return;
+        e.preventDefault();
+        const from = draggingPlugin!.index;
+        const toIndex = pluginDropIndex(from, plugin.index, sideUnder(e));
+        draggingPlugin = null;
+        setDropSide(null);
+        if (toIndex !== null) void exec("reorder_plugin", { trackId, index: from, toIndex });
+      }}>
+      <div className="hdr" data-testid="v3-plugin-handle" draggable tabIndex={0}
+        title="Drag to reorder (or Alt+Up / Alt+Down)"
+        onDragStart={(e) => {
+          draggingPlugin = { trackId, index: plugin.index };
+          e.dataTransfer.setData("text/plain", plugin.name);   // a drag with no payload never starts
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => { draggingPlugin = null; setDropSide(null); }}
+        onKeyDown={(e) => {
+          // The keyboard path: a drag is not reachable without a pointer.
+          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          e.preventDefault();
+          moveTo(e.key === "ArrowUp" ? prevIndex : nextIndex);
+        }}>
+        <button type="button" className="pp-chev" data-testid="v3-plugin-minimize" draggable={false}
+          aria-expanded={!collapsed} aria-label={collapsed ? `Expand ${plugin.name}` : `Minimize ${plugin.name}`}
+          title={collapsed ? "Expand" : "Minimize"}
+          onClick={() => toggle(key)} onPointerDown={(e) => e.stopPropagation()}>
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2 L7 5 L3 8" /></svg>
+        </button>
+        <span className="nm" title={title === plugin.name ? undefined : plugin.name}>{title}</span>
+        {collapsed ? (
+          // Minimized: the whole plugin is this one row. A fixed slot for the thumbnail keeps
+          // every summary starting at the same place down the chain.
+          <span className="pp-hsum" data-testid="v3-plugin-summary" title={summary}>
+            <span className="pp-min-viz">{Mini && <Mini {...panelProps} />}</span>
+            <span className="sum">{summary}</span>
+          </span>
+        ) : (
+          <span className={`kind${native ? " nat" : " vst"}`}>{native ? "MOSH" : (plugin.type || "VST3")}</span>
+        )}
+        <button type="button" className={`btn ghost sm${plugin.enabled ? " on" : ""}`} aria-pressed={plugin.enabled}
+          aria-label={plugin.enabled ? "Bypass" : "Enable"}
           onClick={() => void exec("bypass_plugin", { trackId, index: plugin.index, bypassed: plugin.enabled })}>
           {plugin.enabled ? "on" : "off"}
         </button>
       </div>
-      {plugin.isInstrument && <PresetPicker plugin={plugin} trackId={trackId}
+      {collapsed ? null : (<>
+      {/* Its own line, not a header chip: the header is one tight row and a preset name
+          is long. It names where the plugin came from; editing a value does not remove it. */}
+      {plugin.preset && (
+        <div className="set-hint" data-testid="v3-plugin-preset"
+          title="Inserted by this preset. Undo removes the whole preset in one step.">
+          Preset: {plugin.preset.name}
+        </div>
+      )}
+      {/* A panel that owns its preset menu draws it in its own top row instead. */}
+      {plugin.isInstrument && !def?.ownsPresets && <PresetPicker plugin={plugin} trackId={trackId}
         onLoaded={(pr) => usePresetMemory.getState().remember(trackId, plugin.index, pr.name)} />}
-      {native && plugin.params.slice(0, 4).map((p) => (
-        <label className="fader" key={p.index}>
-          <span className="nm">{p.name}</span>
-          <Range min={0} max={1} step={0.01} value={p.value} aria-label={p.name}
-            onChange={(e) => void exec("set_plugin_param", { trackId, index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
-          <span className="v">{p.display ?? p.value.toFixed(2)}</span>
-        </label>
-      ))}
+      {/* A plugin with a panel of its own (panels/registry.ts) draws it; any other native
+          plugin keeps the plain list of controls. */}
+      {def ? <def.Panel {...panelProps} /> : native && <GenericParams plugin={plugin} setParam={setParam} />}
+      {hint && <div className="set-hint" data-testid="v3-plugin-hint">{hint}</div>}
       {!native && (
         <button type="button" className="btn pri" data-testid="v3-open-editor"
           onClick={() => void exec("open_plugin_editor", { trackId, index: plugin.index })}>
           Open Editor
         </button>
       )}
+      </>)}
     </div>
   );
+}
+
+/** Can a vocal-chain preset go on this track? Mirrors the engine's own preflight
+ *  (cmdApplyTrackPreset), which stays the authority — this only decides whether to offer. */
+export function acceptsTrackPreset(track: Track): boolean {
+  return (track.type ?? "audio") === "audio" && !track.isInstrument && !track.isReturn
+    && !track.isGroup && !track.frozen
+    && !(track.plugins ?? []).some((p) => p.isInstrument);
+}
+
+// The manual entry point for track-chain presets ("Mosh Clean Lead v0"): one pick applies
+// the whole chain to THIS track as one undo step (apply_track_preset). The track id is the
+// one this picker was rendered for — never a fallback — and the engine re-validates it.
+// Keyed by track at the call site, so a refusal shown for one track cannot linger under,
+// or arrive late onto, another.
+function TrackPresetPicker({ trackId, recording }: { trackId: string; recording: boolean }) {
+  const exec = useStore((s) => s.exec);
+  const [presets, setPresets] = useState<{ name: string; file: string }[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    void Promise.resolve(exec("list_presets", { plugin: "track-chain" })).then((r) => {
+      if (dead || !r?.ok) return;
+      setPresets((r.data as { presets?: { name: string; file: string }[] } | undefined)?.presets ?? []);
+    });
+    return () => { dead = true; };
+  }, [exec]);
+  if (!presets || presets.length === 0) return null;
+  return (
+    <>
+      <select className="preset-pick" data-testid="v3-track-preset" value="" disabled={recording}
+        aria-label="Apply a vocal preset to this track"
+        title={recording ? "Stop recording to apply a preset" : "Adds the preset\u2019s effects to this track as one undo step"}
+        onChange={(e) => {
+          const file = e.target.value;
+          if (!file) return;
+          setFailed(null);
+          void Promise.resolve(exec("apply_track_preset", { trackId, file })).then((r) => {
+            if (r && !r.ok) setFailed(r.error ?? "Could not apply the preset");
+          });
+        }}>
+        <option value="" disabled>{recording ? "Vocal preset (stop recording first)" : "Vocal preset\u2026"}</option>
+        {presets.map((p) => <option key={p.file} value={p.file}>{trackPresetLabel(p.name)}</option>)}
+      </select>
+      {failed && <div className="set-hint" role="alert" data-testid="v3-track-preset-error">{failed}</div>}
+    </>
+  );
+}
+
+/** "mosh-clean-lead-v0" -> "Mosh Clean Lead v0": the library lists file stems. */
+export function trackPresetLabel(fileStem: string): string {
+  return fileStem.split("-").map((w) => (/^v\d+$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
 }
 
 export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
@@ -142,9 +320,16 @@ export function MixInspector({ snapshot }: { snapshot: Snapshot }) {
         <details className="grp quiet" open>
           <summary className="grphd"><span className="sec">Plugins</span></summary>
           <div className="grp-body chain" data-testid="v3-plugins">
-            {plugins.map((p) => <PluginRow key={p.index} plugin={p} trackId={track.id} />)}
+            {plugins.map((p, i) => <PluginRow key={p.itemId ?? `slot-${p.index}`} plugin={p} trackId={track.id} track={track}
+              sampleRate={snapshot.session?.sampleRate || 48000} scope={snapshot.session?.editFile ?? ""}
+              prevIndex={plugins[i - 1]?.index} nextIndex={plugins[i + 1]?.index} />)}
             <button type="button" className="pr add" data-testid="v3-add-plugin"
               onClick={() => useV3.getState().setPane("plugins")}>+ Add plugin</button>
+            {/* Offered only for a track the producer actually SELECTED. The inspector
+                falls back to the first track when nothing is selected; a preset must
+                never ride that fallback onto a track nobody chose. */}
+            {selectedTrackId === track.id && acceptsTrackPreset(track)
+              && <TrackPresetPicker key={track.id} trackId={track.id} recording={!!snapshot.transport?.recording} />}
           </div>
         </details>
       </div>

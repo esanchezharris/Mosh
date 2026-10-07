@@ -129,11 +129,18 @@ var TrainingJobManager::jobStatus (const String& jobId)
     return httpGet ("/training/status?jobId=" + jobId);
 }
 
-void TrainingJobManager::cancelJob (const String& jobId)
+var TrainingJobManager::cancelJob (const String& jobId)
 {
     auto* body = new DynamicObject();
     body->setProperty ("jobId", jobId);
-    httpPost ("/training/cancel", var (body));
+    auto answer = httpPost ("/training/cancel", var (body));
+
+    // An already-running service from an older build is adopted as-is, and its
+    // cancel says only {"ok": true}, for any id. Ask it for the job's status
+    // instead: that route has always refused an id it does not know.
+    if ((bool) answer.getProperty ("ok", false) && ! answer.hasProperty ("status"))
+        return jobStatus (jobId);
+    return answer;
 }
 
 } // namespace mosh

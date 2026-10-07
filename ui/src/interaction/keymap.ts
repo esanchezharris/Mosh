@@ -100,8 +100,19 @@ export function isEditableTarget(el: EventTarget | null): boolean {
     (e.tagName === "INPUT" ||
       e.tagName === "TEXTAREA" ||
       e.tagName === "SELECT" ||
-      e.isContentEditable)
+      e.isContentEditable ||
+      isAriaValueControl(e))
   );
+}
+
+/** A custom control that owns its keys the way a native range input does: an ARIA slider
+ *  or spin button (the plugin panels' dials and plot handles). Its arrows, Home/End and
+ *  PageUp/Down change its value, so they must not also nudge clips or move the playhead. */
+export function isAriaValueControl(el: EventTarget | null): boolean {
+  const e = el as Element | null;
+  if (!e || typeof (e as Element).getAttribute !== "function") return false;
+  const role = e.getAttribute("role");
+  return role === "slider" || role === "spinbutton";
 }
 
 const A = EditorAction;

@@ -1,0 +1,23 @@
+/* Soft clipper panel: the tanh curve with its knee handle, then the live clipping meter
+   (dressed as a dial) and the Drive / Ceiling dials, all on one row. About 108 px tall. */
+.v3-shell .insp .pr .pp-softclip { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-plot { flex: 0 0 auto; width: 104px; height: 88px; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-zone { fill: color-mix(in srgb, var(--accent) 7%, transparent); }
+.v3-shell .insp .pr .pp-softclip .pp-plot.bypassed .pp-softclip-zone { fill: color-mix(in srgb, var(--text) 4%, transparent); }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-asym { stroke: color-mix(in srgb, var(--accent) 40%, transparent); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-dot { fill: var(--text); stroke: var(--bg); stroke-width: 1; pointer-events: none; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-over { fill: var(--warn); pointer-events: none; }
+.v3-shell .insp .pr .pp-softclip .pp-plot .pp-softclip-nosignal { font-family: inherit; font-size: var(--pp-fs-cap); }
+/* Fixed widths sized for the widest read-outs ("-12.0 dB", "+24.0 dB"), so a read-out
+   gaining a digit mid-drag does not move the dials. */
+.v3-shell .insp .pr .pp-softclip .pp-softclip-dials { flex: 1 1 auto; display: flex; justify-content: space-between; min-width: 0; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-dials .pp-dial { flex: 0 0 auto; min-width: 0; width: 54px; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-dials .pp-softclip-gr { width: 48px; }
+/* The clipping meter: a vertical bar the height of a dial, in the dial's place. */
+.v3-shell .insp .pr .pp-softclip .pp-softclip-gr .pp-bar { height: 30px; width: 5px; }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-gr[data-level="idle"] .v,
+.v3-shell .insp .pr .pp-softclip .pp-softclip-gr[data-level="low"] .v { color: var(--muted); }
+.v3-shell .insp .pr .pp-softclip .pp-softclip-gr[data-level="hot"] .v { color: var(--warn); }
+/* Minimized row: a tiny live clipping bar filling the 44 px thumbnail slot. */
+.v3-shell .insp .pr .pp-softclip.mini { display: inline-flex; align-items: center; flex: 0 0 auto; width: 44px; }
+.v3-shell .insp .pr .pp-softclip.mini .pp-bar { width: 100%; min-width: 0; }
