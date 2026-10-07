@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # True (0) when a tree may hold model, adapter, checkpoint or evaluation evidence, or
-# could not be inspected. Empty directories do not count: every selftest session
-# carries an empty training/adapters.
+# could not be inspected. Kept in step with harness_session.py / SessionOwnershipPosix.h.
+# Empty directories do not count: every selftest session carries an empty training/adapters.
 mosh_harness_tree_has_evidence() {
   local tree="$1" leaf="$2" models dirs words
   # Word lists go through here-strings, not `| grep -q`: an early grep exit would
@@ -86,7 +86,22 @@ mosh_reset_owned_harness_session() {
     printf 'harness ownership changed during reset: %s\n' "$session" >&2
     return 2
   fi
-  MOSH_HARNESS_RESET_QUARANTINE="$quarantine"
+
+  # The path is free. Delete the quarantine this call created unless it holds evidence.
+  # rm never follows symlinks and -x / --one-file-system keeps it on this volume; a
+  # failure only leaves the quarantine for harness_session.py's manifest sweep.
+  if ! mosh_harness_tree_has_evidence "$quarantine" "${relative##*/}"; then
+    if [ "$(uname -s)" = Darwin ]; then
+      /bin/rm -rfx -- "$quarantine" 2>/dev/null || true
+    else
+      /bin/rm -rf --one-file-system -- "$quarantine" 2>/dev/null || true
+    fi
+  fi
+  # Report the quarantine only while it still exists (it held evidence, or the rm failed):
+  # mosh_remove_owned_harness_session acts on it, and an already-deleted one is "removed".
+  if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
+    MOSH_HARNESS_RESET_QUARANTINE="$quarantine"
+  fi
   return 0
 }
 
