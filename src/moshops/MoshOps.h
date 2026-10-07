@@ -821,9 +821,11 @@ private:
         int) rather than applied immediately: InputDevice::setMonitorMode's own
         restartAllTransports() would call stopIfRecording() and land the take out from under
         the producer. Applied inside stopRecordingAndLand, the one place that knows a
-        recording just actually ended, so every path that ends one picks it up. Cleared (not
-        applied) on a project replacement, same as loopCurrent_ above: it was tied to a
-        recording in an Edit that is now gone. */
+        recording just actually ended, so every path that ends one picks it up. A later
+        request for that device that applies at once (its mode already matches) removes the
+        entry, so the latest request always wins. Cleared (not applied) on a project
+        replacement, same as loopCurrent_ above: it was tied to a recording in an Edit that
+        is now gone. */
     juce::HashMap<juce::String, int> pendingMonitorModes_;
     juce::String loopAuditionedId_;                              // the pass Review is soloing, if any
     /** Per-PROCESS identity: a reload or a relaunch means the phone's authority is stale

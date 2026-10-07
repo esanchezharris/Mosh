@@ -1433,6 +1433,14 @@ juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
             }
             else
             {
+                // The latest request wins: drop any change deferred earlier for this device
+                // (review of PR #739). Without this, a Booth "Hear myself" click deferred
+                // mid-take (pending On) followed by an Inspector/agent request for the mode the
+                // device already has (Off: applied at once, applied:true) still turned
+                // monitoring On when the take ended -- the stale deferred mode overrode the
+                // newer, applied one. Also covers a pending entry left behind by a stop that
+                // bypassed stopRecordingAndLand, when the next request arrives idle.
+                pendingMonitorModes_.remove (device.getDeviceID());
                 device.setMonitorMode (mode);
                 applied = true;
             }

@@ -747,6 +747,23 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     }
     else
     {
+        // Finalize an in-flight recording BEFORE the temporary un-mute below (review of PR
+        // #739). bounceRenderToWavImpl would otherwise finalize it in the middle of the
+        // un-mute/re-mute pair: finalizing a Booth pass opens its own "loop_capture"
+        // transaction, so the re-mute lands in the take's transaction instead of beside the
+        // un-mute, and undoing the take leaves an already-layered clip audibly un-muted.
+        // Done here, the bounce helper finds nothing recording and only stops/detaches. The
+        // clip is looked up again afterwards: the landing ran Tracktion's own clip-add path.
+        if (eng.edit().getTransport().isRecording())
+        {
+            juce::String reason;
+            if (! finalizeInFlightRecordingOrFail (reason))
+                return errResult ("render_layer", "could not land the recording in progress before the bounce: " + reason);
+            clip = findClip (clipId);
+            if (clip == nullptr)
+                return errResult ("render_layer", "the clip is gone after landing the recording in progress");
+        }
+
         // MIDI/drum (any non-wave) clip: fingerprint the stable source first, then bounce
         // its instrument output for [rs,re] to input.wav. params.time handles whole-clip
         // AND section renders, so no slicing. Fold the bounce window — as CLIP-RELATIVE

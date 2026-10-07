@@ -3734,6 +3734,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           reason: "recording in progress - will apply when the take ends",
         });
       }
+      // The latest request wins: an immediate apply cancels any change deferred earlier for
+      // this track (review of PR #739), same as native's pendingMonitorModes_.remove.
+      mockPendingMonitor.delete(t.id);
       t.monitor = resolved;
       invalidate();
       // Mirrors the NATIVE result shape (MoshOps.cpp cmdSetInputMonitor): {trackId, mode,

@@ -81,6 +81,42 @@ describe("bridge.mock set_input_monitor — result shape matches native (MoshOps
     expect((await snap()).tracks.find((t) => t.id === track.id)?.monitor).toBe("on");
   });
 
+  // Review of PR #739: a later request that applies at once (it asks for the mode the
+  // track already has) must cancel an earlier deferred one. Before the fix the stale
+  // deferred mode still applied when the take ended, overriding the newer, applied request
+  // (Booth click defers On; the Inspector or an agent then sets Off, applied:true; the take
+  // ends and monitoring turned On anyway). Mirrors native's pendingMonitorModes_.remove.
+  it("a later immediate request cancels an earlier deferred one (the latest request wins)", async () => {
+    __resetMockForTests();
+    const s = await snap();
+    const track = s.tracks[0];
+    await mockExecute({ command: "set_input_monitor", args: { trackId: track.id, mode: "off" } });
+
+    await mockExecute({ command: "arm_track", args: { trackId: track.id, armed: true } });
+    await mockExecute({ command: "set_transport", args: { action: "record" } });
+    expect((await snap()).transport.recording).toBe(true);
+
+    const deferred = await mockExecute<CommandResult<{ applied: boolean; deferred?: boolean }>>({
+      command: "set_input_monitor",
+      args: { trackId: track.id, mode: "on" },
+    });
+    expect(deferred.data?.deferred).toBe(true);
+
+    const immediate = await mockExecute<CommandResult<{ applied: boolean; deferred?: boolean }>>({
+      command: "set_input_monitor",
+      args: { trackId: track.id, mode: "off" },
+    });
+    expect(immediate.data?.applied, "Off is the current mode, so it applies at once").toBe(true);
+    expect(immediate.data?.deferred).toBeUndefined();
+    expect((await snap()).transport.recording, "the take must survive both requests").toBe(true);
+
+    await mockExecute({ command: "set_transport", args: { action: "stop" } });
+    expect(
+      (await snap()).tracks.find((t) => t.id === track.id)?.monitor,
+      "the stale deferred On must not override the later, applied Off",
+    ).toBe("off");
+  });
+
   it("applies immediately when NOT recording, same as before", async () => {
     __resetMockForTests();
     const s = await snap();

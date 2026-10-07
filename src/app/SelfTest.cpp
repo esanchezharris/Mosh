@@ -19239,6 +19239,29 @@ int runV3BoothSmoke (MoshEngine& eng, MoshOps& ops)
         check (after.getProperty ("lastId", var()).toString() == passId,
                "Hear-myself mid-take: the take still lands as a Part once stopped normally");
         check (monitorModeOf (takesId) == "on", "Hear-myself mid-take: the deferred change applied once the take ended");
+
+        // The latest request wins (review of PR #739): a request that applies at once because
+        // it asks for the mode the device already has must cancel an earlier deferred one.
+        // Before the fix the stale deferred mode still applied when the take ended: the Booth
+        // defers Off, the Inspector or an agent then asks for On (applied:true), and monitoring
+        // ended up Off anyway.
+        auto rec2 = cmd (ops, "loop_record");
+        check (ok (rec2) && (bool) rec2["data"].getProperty ("applied", false), "Hear-myself cancel: Put Me In applied");
+        pump (1500);
+        auto deferOff = cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "off" }}));
+        check (ok (deferOff) && (bool) deferOff["data"].getProperty ("deferred", false),
+               "Hear-myself cancel: Off mid-take is deferred");
+        auto keepOn = cmd (ops, "set_input_monitor", objN ({{ "trackId", takesId }, { "mode", "on" }}));
+        check (ok (keepOn) && (bool) keepOn["data"].getProperty ("applied", false)
+                   && ! (bool) keepOn["data"].getProperty ("deferred", false),
+               "Hear-myself cancel: On (the device's current mode) applies at once, not deferred");
+        check (eng.edit().getTransport().isRecording(), "Hear-myself cancel: still recording after both requests");
+        pump (1000);
+        check (ok (cmd (ops, "loop_stop")), "Hear-myself cancel: Stop pad ok");
+        pump (300);
+        check (monitorModeOf (takesId) == "on",
+               "Hear-myself cancel: the later, applied On survives the take end; the stale deferred Off did not apply (got '"
+                   + monitorModeOf (takesId) + "')");
     }
 
     // -- The Stop pad is the panic button: it ends ANY recording, not only a pass the loop
