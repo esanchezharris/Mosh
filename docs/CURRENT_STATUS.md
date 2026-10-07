@@ -30,6 +30,21 @@ screenshots, gate/review and limitations are recorded at
 `~/Library/Mosh/task-evidence/v3-general-ui-20260917/HANDOFF.md`.
 This pass does not run SA3 or runtime agents, install, merge or deploy.
 
+**2026-10-01 native vocal preset (first slice):** one original, manually applied
+lead-vocal chain, "Mosh Clean Lead v0" — the built-in high-pass at 80 Hz into the built-in
+compressor, dry, no makeup gain — applied from the V3 inspector's Plugins group to the
+selected audio track as one undo step (`apply_track_preset`, UI-only; agentic mixing stays
+postponed). The stages are tagged as the preset's own group, so re-applying never stacks a
+second chain and never touches a user's plugin; applying while recording is refused.
+See [the audit and plan](vocal-presets/AUDIT-2026-10-01.md) and
+[the validation report](vocal-presets/VALIDATION-2026-10-01.md). Engineering checks pass
+headless, including a measured filter response and compressor curve (which also settles the
+2026-09-06 "the builtin compressor does not compress" finding: it does; that sweep's
+normalized ratio was 1.3:1). **Listening approval, live-monitoring acceptance and
+installed-app behaviour are NOT RUN**, so the preset is an internal candidate, not a release
+claim. "Mosh Telephone" and "Mosh Slap" are planned only. No commercial preset was acquired,
+inspected or ported; the creator inquiry is an unsent draft.
+
 The pre-pivot ownership snapshot below is preserved as historical evidence.
 Older recording/mixing-agent and reconstruction priorities are deferred.
 
