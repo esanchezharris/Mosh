@@ -321,6 +321,16 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         ? moshDir
         : propertyStorageDir.getParentDirectory().getParentDirectory();
 
+    // The plugin catalog, its block reasons and the scan pedal follow the same split:
+    // the GUI (and the deep scan) own ~/Library/Mosh's copy, every other run keeps its
+    // own beside its Settings.xml and only reads the owner's. moshDataDirectory(false)
+    // is the exact path PluginHost always used, test root or not.
+    const auto pluginState = mosh::sessionpaths::resolvePluginStateDirs (
+        mosh::sessionpaths::moshDataDirectory (false), propertyStorageDir,
+        useOwnerSession, freshSessionName);
+    pluginStateDirectory = pluginState.directory;
+    pluginSeedDirectory  = pluginState.seed;
+
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
     // te::Engine takes ownership of the behaviour unique_ptr; capture the raw

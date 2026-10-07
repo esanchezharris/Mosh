@@ -1999,6 +1999,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // gate stays green on a box with zero .component files.
     section ("INS-002/INS-005: AU hosting + scan / blocklist");
     {
+        // Everything below blocks, unblocks and clears quarantines and arms a simulated
+        // crash pedal. A harness run must do that in its OWN plugin state dir: on the
+        // machine-wide ~/Library/Mosh copy, concurrent runs consumed each other's pedal
+        // (failing the FIT-003 checks below) and clear_plugin_blocklist wiped the owner's
+        // real quarantines out of the catalog the GUI loads at launch.
+        check (ops.pluginHostForScan().stateDirectory().isAChildOf (eng.sessionDir()),
+               "plugin catalog, block reasons and scan pedal are private to this run's session");
+
         // The AudioUnit format is registered (proves the JUCE_PLUGINHOST_AU flag is
         // live) -- machine-independent; the format object exists even with no AUs.
         bool auFormatRegistered = false;
@@ -2204,7 +2212,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (reason == "crash_or_hang",
                    "dead-mans-pedal recovery is tagged reason:\"crash_or_hang\" (not \"manual\")");
 
-            // Clean up: never leave a synthetic id in the shared, machine-wide catalog.
+            // Clean up: leave no synthetic id in this run's catalog.
             check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok (crash-recovery cleanup)");
             auto bl2 = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
             check (bl2.isArray() && bl2.size() == 0, "blocklist empty after crash-recovery cleanup");
