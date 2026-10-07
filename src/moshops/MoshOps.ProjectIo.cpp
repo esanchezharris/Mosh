@@ -543,15 +543,38 @@ juce::var MoshOps::cmdCancelTrainingJob (const juce::var& args)
 {
     const auto jobId = args.getProperty ("jobId", var()).toString();
     if (jobId.isEmpty()) return errResult ("cancel_training_job", "missing jobId");
-    trainingJobManager.cancelJob (jobId);
+
+    // Unlike submit, this never starts the service: jobs live in its memory, so
+    // one that is not running has no job to stop, and spawning it would block
+    // here only to hear "unknown jobId".
+    const auto answer = trainingJobManager.cancelJob (jobId);
+    if (! answer.isObject())
+        return errResult ("cancel_training_job", "training service unavailable");
+    if (! (bool) answer.getProperty ("ok", false))
+        return errResult ("cancel_training_job", answer.getProperty ("error", "cancel failed").toString());
+
+    // Record what the service confirmed — the state the job was in — and nothing
+    // else. This used to write "cancelled" without reading the answer, which made
+    // a recorded job out of a mistyped id and a cancelled run out of a finished one.
+    // A stop still has to reach the trainer; training_job_status reports the
+    // "cancelled" once it has.
     auto* job = new DynamicObject();
+    auto* data = new DynamicObject();
     job->setProperty ("jobId", jobId);
-    job->setProperty ("status", "cancelled");
-    job->setProperty ("progress", 0.0);
+    data->setProperty ("jobId", jobId);
+    for (auto* field : { "status", "progress" })
+    {
+        if (! answer.hasProperty (field)) continue;
+        job->setProperty (field, answer[field]);
+        data->setProperty (field, answer[field]);
+    }
+    if (answer.hasProperty ("cancelRequested"))
+        data->setProperty ("cancelRequested", answer["cancelRequested"]);
     trainerRegistry.updateJob (var (job));
+
     logLine ("cancel_training_job", args, true, {}, false);
     emitSnapshotInvalidated();
-    return okResult ("cancel_training_job");
+    return okResult ("cancel_training_job", var (data));
 }
 
 // Enroll a trained adapter into the producer's LoRA library, where the render
