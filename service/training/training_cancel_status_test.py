@@ -25,9 +25,11 @@ Physical confirmation on a real pmetal run is an owner check; this proves the se
 
 Run:  python3 service/training/training_cancel_status_test.py     (exit 0 = all pass)
 """
+import atexit
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -55,6 +57,8 @@ def check(name, ok, detail=""):
 
 
 TMP = tempfile.mkdtemp(prefix="mosh-train-cancel-")
+# The gate runs this on every service change: leave nothing behind.
+atexit.register(shutil.rmtree, TMP, ignore_errors=True)
 # Never touch the checked-in service/training/training_state.json.
 STATE_PATH = os.path.join(TMP, "training_state.json")
 server._training_state_path = lambda: STATE_PATH  # type: ignore[assignment]
@@ -82,16 +86,31 @@ def _counting_run_training(*a, **k):
 LP.run_training = _counting_run_training  # type: ignore[assignment]
 
 precompute_hook = {"fn": None}
+precompute_seen = {"should_cancel": None, "cancelled": None}
 
 
-def _fake_precompute(clips, out_dir, *a, **k):
+def _fake_precompute(clips, out_dir, *a, should_cancel=None, **k):
+    """Stands in for the SA3 encode but keeps the real precompute's Stop contract:
+    should_cancel is checked before each clip, and a Stop ends it with
+    `cancelled: True` and only the clips it finished, none if the Stop came
+    first. A stand-in that ignored should_cancel let this test pass with the Stop
+    never handed to precompute, and could never return the zero-sample result a
+    Stop before the first clip really produces."""
     os.makedirs(out_dir, exist_ok=True)
-    manifest_path = os.path.join(out_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
-        json.dump([], f)
+    precompute_seen["should_cancel"] = should_cancel
     if precompute_hook["fn"]:
         precompute_hook["fn"]()
-    return {"manifest_path": manifest_path, "count": len(clips), "skipped": []}
+    done, cancelled = [], False
+    for clip in clips:
+        if should_cancel and should_cancel():
+            cancelled = True
+            break
+        done.append({"id": clip.get("id")})
+    precompute_seen["cancelled"] = cancelled
+    manifest_path = os.path.join(out_dir, "manifest.json")
+    with open(manifest_path, "w") as f:
+        json.dump(done, f)
+    return {"manifest_path": manifest_path, "count": len(done), "skipped": [], "cancelled": cancelled}
 
 
 _real_precompute = PC.precompute  # test 4 drives the real one
@@ -183,12 +202,20 @@ def test_stop_while_trainer_runs_is_cancelled():
 def test_stop_during_precompute_skips_the_trainer():
     trainer["argv"] = [sys.executable, "-c", "import time; time.sleep(60)"]
     trainer["launches"] = 0
+    precompute_seen.update(should_cancel=None, cancelled=None)
     jid = _submit("bundle-precompute")
+    # Stop lands before the first clip is encoded, so precompute finishes no
+    # samples at all. The run is still a Stop ("cancelled"), never the
+    # "precompute produced no samples" error a run with nothing to train on gets.
     precompute_hook["fn"] = lambda: _stop(jid)
     t = _run(jid)
     t.join(20.0)
     precompute_hook["fn"] = None
     check("run returned after Stop in precompute", not t.is_alive())
+    check("precompute was handed the run's Stop", callable(precompute_seen["should_cancel"]),
+          repr(precompute_seen["should_cancel"]))
+    check("precompute itself stopped on the Stop", precompute_seen["cancelled"] is True,
+          repr(precompute_seen["cancelled"]))
     status, error = _status(jid)
     check("precompute Stop is cancelled", status == "cancelled", f"status={status!r} error={error!r}")
     check("trainer never launched after a precompute Stop", trainer["launches"] == 0,
