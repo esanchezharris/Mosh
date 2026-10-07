@@ -25,6 +25,9 @@ struct DirectRenderJob
 
     void run (const std::shared_ptr<GenerativeJobManager>&);
     void publish (const juce::String& state, const juce::String& reason = {});
+
+    /** Workers inside run() on any thread, counting ones whose request was already dropped. */
+    static int activeRuns() noexcept;
 };
 
 juce::Result createDirectSourceSnapshot (const juce::File& source, const juce::File& destination);
