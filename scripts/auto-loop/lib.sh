@@ -205,16 +205,19 @@ kill_stray_services() {
 # A unique, filesystem-safe session leaf for MOSH_SELFTEST_SESSION so parallel
 # worktrees never clobber ~/Library/Mosh/session-selftest (the PR #66 fix).
 #
-# NESTED under _harness/ on purpose. These leaves are never reaped: the 2026-07-26
+# NESTED under _harness/ on purpose. These leaves used to be kept forever: the 2026-07-26
 # consolidation found ~4,525 of the 4,592 top-level entries in ~/Library/Mosh were
 # harness sessions, still accumulating at ~35/day, with the real app data (session/,
 # loras/, venvs/, the git object store) buried among them. That made every cleanup a
 # hazard — `session*` also matches the owner's hand-made session-backup-* dirs, and
-# `lora*` also matches the real 10 GB adapter rack.
+# `lora*` also matches the real 10 GB adapter rack. gate.sh now removes a passing run's
+# selftest sessions after its last step (reclaim_selftest_sessions); a failing run's
+# stay as its diagnostics.
 #
 # The engine accepts explicit sessions only below `_harness`. It can create and mark
 # an absent leaf; an existing leaf is accepted only when it already has the exact
-# marker. Reset atomically relocates marker-owned data into a recoverable quarantine.
+# marker. Reset atomically relocates marker-owned data into a quarantine, then deletes
+# that quarantine unless it holds evidence or no longer verifies.
 # Reserved, traversal, symlinked, empty-unowned, and populated-unowned requests fail
 # over to a unique safety session without touching owner data.
 unique_session() {

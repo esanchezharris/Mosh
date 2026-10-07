@@ -20,6 +20,7 @@ target_sources(MoshTests PRIVATE
     test_automation_curve_write.cpp
     test_clip_loop_phase.cpp
     test_render_source_window.cpp
+    test_render_watchdog.cpp
     test_export_range.cpp
     test_export_dither.cpp
     test_plugin_editor_param_gesture.cpp
@@ -75,6 +76,9 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_outbox.cpp
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
+    # cancel_training_job — what TrainingJobManager hands back from /training/cancel.
+    # juce_core only; talks to a fake service on a private loopback port.
+    test_training_jobmanager.cpp
     test_webbridge_resource_guard.cpp
     test_webview_cursor.cpp
     test_directory_listing.cpp
@@ -119,6 +123,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/remote/PhoneLoopProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/PhoneLoopEndpoint.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/training/TrainingJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/files/DirectoryListing.cpp
     ${CMAKE_SOURCE_DIR}/src/files/ImportCopy.cpp
@@ -175,6 +180,8 @@ endif()
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
 add_test(NAME HarnessSessionShell
          COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
+add_test(NAME InstalledAppGateShell
+         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/auto-loop/installed-app-gate-selftest.sh)
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
 if (APPLE)

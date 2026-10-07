@@ -126,6 +126,13 @@ function initForm(form: HTMLFormElement, source: string): void {
   }
 }
 
+/** True when this build has somewhere to send a signup. The home page keeps the
+ *  waitlist block hidden otherwise, rather than showing a form that cannot work. */
+export function waitlistConfigured(): boolean {
+  const env = import.meta.env
+  return Boolean(env.PUBLIC_WAITLIST_URL || (env.PUBLIC_SUPABASE_URL && env.PUBLIC_SUPABASE_ANON_KEY))
+}
+
 export function initWaitlistForms(): void {
   const source = import.meta.env.PUBLIC_WAITLIST_SOURCE || 'landing'
   const forms = document.querySelectorAll<HTMLFormElement>('[data-waitlist-form]')

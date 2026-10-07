@@ -18,8 +18,14 @@ export type FastAction =
   // allowed command". scope:"project" only when the phrasing names this song/track/
   // project explicitly; otherwise scope:"global" (a producer-wide preference).
   | { kind: "remember"; text: string; scope: "global" | "project"; intent: string; say?: string };
-export type TrackLite = { id: string; name: string; mute?: boolean; solo?: boolean };
-export type FastCtx = { mode: Mode; tempo: number; timeSigNum: number; tracks?: TrackLite[] };
+// `clipCount` lets a matcher tell an empty session from one with material on it; a
+// caller that omits it is treated as "may have material" (the conservative reading).
+export type TrackLite = { id: string; name: string; mute?: boolean; solo?: boolean; clipCount?: number };
+// `key` is the session key (snapshot.session.key) — optional so older callers still type.
+export type FastCtx = {
+  mode: Mode; tempo: number; timeSigNum: number; tracks?: TrackLite[];
+  key?: { tonic: string; mode: string };
+};
 
 const THRESHOLD = 0.78;
 const FILLER = /\b(uh+|um+|like|okay|ok|please|alright|just|so|hey|moshi)\b/g;
@@ -184,6 +190,136 @@ function resolveAll(names: string[], tracks: TrackLite[]): TrackLite[] | null {
   return out.some((t) => !t) || out.length === 0 ? null : (out as TrackLite[]);
 }
 
+// ── "make/build me a beat" → generate_beat_recipe ──────────────────────────────
+// FINDINGS.md #4 (2026-09-23 walkthrough): the free-form loop asked to "build me a
+// lofi sketch" planned add_drum_pattern onto the EXISTING Drums track at bar 1
+// (overlapping the user's clip), dropped Drums -5dB unasked, and left an empty
+// audio track named "Keys" with no instrument or notes. generate_beat_recipe
+// already exists as the curated, one-undoable-batch, real-sounds answer to
+// exactly this ask (see knowledge.ts's "beat-recipe-real-sounds" card, which tells
+// the MODEL to prefer it) — the model just did not reliably reach for it live. A
+// deterministic fast-path match removes that judgment call for the clearest
+// phrasings, so the free-form multi-step planner (the thing that produced the
+// broken plan) never gets a turn for THIS ask shape. Verified against
+// bridge.mock.ts's generate_beat_recipe (the dev-mock mirror of the native
+// contract): it ALWAYS pushes a brand-new "Recipe Drums" track and never reads or
+// mutates an existing track, so this reroute cannot touch the user's existing
+// Drums the way the free-form plan did. (The native program DOES set the session
+// tempo, key and meter -- matchBeatRecipe pins those on a session with material.)
+//
+// Scope: "lofi sketch" routes here too. It is the exact ask that broke — a
+// "sketch" IS a beat-shaped ask (the router's own CREATIVE_OBJECT list already
+// treats it as one), and generate_beat_recipe's mood arg takes free text (its own
+// ArgSpec: "vibe words steering retrieval, e.g. 'dark bounce'"), so
+// "lofi"/"dark"/"boom bap" etc. steer the SAME curated retrieval a free-form plan
+// would otherwise have to invent from scratch, more safely. The end-anchor below
+// keeps this narrow: "make the beat faster/louder" (a tempo/mix ask, not a NEW
+// beat) never matches because "faster"/"louder" trails the noun. "give" is
+// deliberately NOT in the verb list (unlike router.ts's CREATIVE_VERB) — "give me
+// a hand with the beat" was a real false-positive in standalone testing.
+//
+// Mood words are a CLOSED vocabulary (review of PR #740). The first cut captured any
+// text between the verb and the noun, so asks about the EXISTING beat matched too:
+// "write drums for the beat" read as mood "drums for the", "make a bassline for this
+// beat" as "bassline for this", "make it sound like a lofi beat" as "it sound a lofi",
+// and the transport ask "start the beat" as mood "the". Each of those would have laid
+// a whole new multi-track beat (and its tempo/key) instead of reaching the model. Now
+// every word of the captured mood must be a genre/vibe word (BEAT_MOOD_WORDS) or a
+// neutral "new beat" descriptor (BEAT_NEUTRAL_WORDS); any other word — an article, a
+// pronoun, a preposition, a part like "drums"/"bassline"/"vocals" — makes the whole
+// ask fall through to the model, which can still pick generate_beat_recipe itself.
+// A false negative costs one model turn; a false positive costs a whole unrequested
+// beat, so the list errs narrow.
+const BEAT_RECIPE_VERB = "make|build|create|start|write|compose|produce|lay(?:\\s+down)?|sketch(?:\\s+out)?";
+const BEAT_RECIPE_NOUN = "beats?|grooves?|drum\\s*loops?|sketch(?:es)?";
+// Groups: 1 = "me", 2 = article, 3 = the mood words (checked against the vocabulary).
+const BEAT_RECIPE_RE = new RegExp(`^(?:${BEAT_RECIPE_VERB})\\s+(me\\s+)?(an?\\s+|another\\s+)?(.*?)\\s*(?:${BEAT_RECIPE_NOUN})$`);
+const AT_TEMPO_RE = /\s+(?:at|in)\s+(?:this|the\s+same)\s+tempo$/;
+// Multi-word genres/vibes, collapsed to one token BEFORE the per-word vocabulary check
+// (normalize() has already turned "lo-fi" into "lo fi" and "r&b" into "r b").
+const BEAT_MOOD_PHRASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\blo fi\b/g, "lofi"], [/\bhip hop\b/g, "hiphop"], [/\btrip hop\b/g, "triphop"],
+  [/\bjazz hop\b/g, "jazzhop"], [/\bboom bap\b/g, "boombap"], [/\br (?:n |and )?b\b/g, "rnb"],
+  [/\bdrum (?:and|n) bass\b/g, "dnb"], [/\buk garage\b/g, "ukg"], [/\bneo soul\b/g, "neosoul"],
+  [/\bg funk\b/g, "gfunk"], [/\bbossa nova\b/g, "bossanova"], [/\bwest coast\b/g, "westcoast"],
+  [/\beast coast\b/g, "eastcoast"], [/\bdirty south\b/g, "dirtysouth"], [/\bold school\b/g, "oldschool"],
+  [/\blaid back\b/g, "laidback"], [/\blate night\b/g, "latenight"], [/\bhalf time\b/g, "halftime"],
+  [/\bhard hitting\b/g, "hardhitting"], [/\bfour on the floor\b/g, "fourfloor"],
+];
+const BEAT_MOOD_WORDS = new Set([
+  // genres
+  "lofi", "chillhop", "hiphop", "rap", "trap", "drill", "boombap", "house", "techno", "rnb", "soul",
+  "neosoul", "jazz", "jazzhop", "funk", "gfunk", "disco", "afrobeat", "afrobeats", "afro", "amapiano",
+  "reggaeton", "dembow", "dancehall", "reggae", "dnb", "jungle", "garage", "ukg", "grime", "phonk",
+  "pop", "edm", "dubstep", "ambient", "synthwave", "vaporwave", "chillwave", "gospel", "latin",
+  "bossanova", "plugg", "pluggnb", "rage", "emo", "cloud", "jersey", "club", "footwork", "juke",
+  "breakbeat", "breaks", "downtempo", "triphop", "westcoast", "eastcoast", "dirtysouth", "memphis",
+  "detroit", "chicago", "crunk", "oldschool", "rock", "indie", "blues", "bluesy", "orchestral",
+  "70s", "80s", "90s", "2000s", "fourfloor", "halftime",
+  // moods / vibes
+  "dark", "moody", "sad", "happy", "chill", "chilled", "mellow", "dreamy", "dusty", "gritty", "grimy",
+  "hard", "hardhitting", "heavy", "aggressive", "bouncy", "bounce", "groovy", "smooth", "warm", "cozy",
+  "cosy", "laidback", "upbeat", "uptempo", "uplifting", "energetic", "hype", "hyped", "hypnotic",
+  "melancholic", "melancholy", "nostalgic", "eerie", "spooky", "creepy", "haunting", "ominous",
+  "sinister", "evil", "menacing", "cinematic", "epic", "minimal", "simple", "sparse", "stripped",
+  "slow", "fast", "jazzy", "soulful", "funky", "vibey", "atmospheric", "ethereal", "lush", "emotional",
+  "romantic", "sexy", "sultry", "latenight", "summer", "summery", "rainy", "sunny", "tropical",
+  "bright", "punchy", "crunchy", "vintage", "retro", "classic", "modern", "experimental", "weird",
+  "quirky", "playful", "sleepy", "lazy", "relaxed", "relaxing", "calm", "peaceful", "soft", "gentle",
+  "driving", "rolling", "swinging", "swingy", "bumping", "knocking", "wavy", "spacey", "spacy", "floaty",
+  "airy", "hazy", "deep", "raw", "rough", "crisp", "triumphant", "angry", "intense", "mysterious",
+  "organic", "acoustic", "electronic", "analog", "dirty", "somber",
+]);
+// Accepted (they still say "a NEW beat") but dropped from the mood arg: they steer nothing.
+const BEAT_NEUTRAL_WORDS = new Set([
+  "new", "fresh", "quick", "little", "short", "cool", "nice", "sick", "dope", "fire", "hot", "good", "great",
+]);
+const BEAT_MOOD_MAX_WORDS = 4;
+
+/** The mood words to pass on ("" = none), or null when the capture is not purely
+ *  genre/vibe vocabulary — i.e. the ask is not a request for a new beat. */
+function beatMood(raw: string): string | null {
+  let canon = raw.trim();
+  if (!canon) return "";
+  for (const [re, token] of BEAT_MOOD_PHRASES) canon = canon.replace(re, token);
+  const words = canon.split(" ").filter(Boolean);
+  if (words.length > BEAT_MOOD_MAX_WORDS) return null;
+  if (!words.every((w) => BEAT_MOOD_WORDS.has(w) || BEAT_NEUTRAL_WORDS.has(w))) return null;
+  // Pass the user's own spelling ("lo fi", "boom bap"), minus the neutral words.
+  return raw.trim().split(" ").filter((w) => w && !BEAT_NEUTRAL_WORDS.has(w)).join(" ");
+}
+
+/** True when any track holds a clip (or a caller did not say): an existing song. */
+function sessionHasMaterial(ctx: FastCtx): boolean {
+  return (ctx.tracks ?? []).some((t) => t.clipCount === undefined || t.clipCount > 0);
+}
+
+function matchBeatRecipe(norm: string, ctx: FastCtx): FastAction | null {
+  if (ctx.mode === "recording") return null; // never mid-take
+  const atTempo = AT_TEMPO_RE.test(norm);
+  const stripped = atTempo ? norm.replace(AT_TEMPO_RE, "") : norm;
+  const m = stripped.match(BEAT_RECIPE_RE);
+  if (!m) return null;
+  const mood = beatMood(m[3]);
+  if (mood === null) return null;
+  // A bare "start beat" / "make beats" with neither "me" nor an article (and no mood)
+  // is too thin to be sure it means a NEW beat rather than the transport.
+  if (!m[1] && !m[2] && !m[3].trim()) return null;
+  const args: Record<string, unknown> = {};
+  if (mood) args.mood = mood;
+  // The generated program sets tempo, key and time signature (service compile.py emits
+  // set_tempo/set_key/set_time_signature from the recipe meta). On a session that
+  // already has material, pin the recipe to the session's own tempo and key so an
+  // existing song is never retempoed or rekeyed. The recipe always writes 4/4 and has
+  // no meter arg, so a non-4/4 song with material is left to the model instead.
+  const material = sessionHasMaterial(ctx);
+  if (material && ctx.timeSigNum !== 4) return null;
+  if (atTempo || material) args.tempo = ctx.tempo;
+  if (material && ctx.key?.tonic) args.key = `${ctx.key.tonic} ${ctx.key.mode || "major"}`;
+  const say = mood ? `laying down a ${mood} beat` : "laying down a beat";
+  return cmd("generate_beat_recipe", args, "ACK_WORKING", say);
+}
+
 function matchTrackOp(norm: string, ctx: FastCtx): FastAction | null {
   const tracks = ctx.tracks;
   if (!tracks || tracks.length === 0 || ctx.mode === "recording") return null;
@@ -254,6 +390,8 @@ export function matchFastPath(text: string, ctx: FastCtx): FastAction | null {
   if (trackOp) return trackOp;
   const tempo = matchTempo(norm, ctx);
   if (tempo) return tempo;
+  const beatRecipe = matchBeatRecipe(norm, ctx);
+  if (beatRecipe) return beatRecipe;
   const uTokens = norm.split(" ");
   let best: { score: number; len: number; rule: Rule } | null = null;
   for (const rule of RULES) {

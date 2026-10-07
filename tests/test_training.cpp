@@ -219,6 +219,193 @@ TEST_CASE ("importSource: re-importing an existing source_id returns its real in
     root.deleteRecursively();
 }
 
+// ── TrainerRegistry::snapshot() — the block MoshOps::snapshot() carries as `training` ──
+// The UI's training popover and LoRA Lab read that block and nothing else, and it is
+// asked for after every command, so the registry serves it from memory. These pin the
+// two halves of that bargain: every write through the registry shows up in the very
+// next snapshot, and a snapshot with nothing new to say does not go back to the disk.
+
+namespace
+{
+    juce::var importApprovedSource (mosh::TrainerRegistry& registry, const juce::File& audio,
+                                    const juce::String& title, bool approved)
+    {
+        auto* args = new juce::DynamicObject();
+        args->setProperty ("title", title);
+        args->setProperty ("creator", "Producer");
+        args->setProperty ("localPath", audio.getFullPathName());
+        args->setProperty ("userClaimedLicense", "own work");
+        args->setProperty ("proofOfRights", "made it");
+        args->setProperty ("approvedForTraining", approved);
+        juce::String error;
+        auto source = registry.importSource (juce::var (args), error);
+        REQUIRE (error.isEmpty());
+        return source;
+    }
+
+    juce::var snapshotSource (mosh::TrainerRegistry& registry, const juce::String& sourceId)
+    {
+        const auto sources = registry.snapshot().getProperty ("sources", juce::var());
+        for (int i = 0; i < sources.size(); ++i)
+            if (sources[i].getProperty ("source_id", juce::var()).toString() == sourceId)
+                return sources[i];
+        return {};
+    }
+
+    juce::var snapshotJob (mosh::TrainerRegistry& registry, const juce::String& jobId)
+    {
+        const auto jobs = registry.snapshot().getProperty ("jobs", juce::var());
+        for (int i = 0; i < jobs.size(); ++i)
+            if (jobs[i].getProperty ("jobId", juce::var()).toString() == jobId)
+                return jobs[i];
+        return {};
+    }
+
+    juce::var jobRecord (const juce::String& jobId, const juce::String& status, double progress)
+    {
+        auto* job = new juce::DynamicObject();
+        job->setProperty ("jobId", jobId);
+        job->setProperty ("status", status);
+        job->setProperty ("progress", progress);
+        return juce::var (job);
+    }
+}
+
+TEST_CASE ("snapshot: an empty registry still has the lists the UI maps over", "[training][snapshot]")
+{
+    auto root = makeTempRoot();
+    mosh::TrainerRegistry registry (root.getChildFile ("session"));
+
+    const auto state = registry.snapshot();
+    REQUIRE (state.isObject());
+    for (auto* list : { "sources", "adapters", "jobs" })
+    {
+        INFO (list);
+        REQUIRE (state.getProperty (list, juce::var()).isArray());
+        REQUIRE (state.getProperty (list, juce::var()).size() == 0);
+    }
+    REQUIRE (state.getProperty ("registryPath", juce::var()).toString() == registry.registryFile().getFullPathName());
+    REQUIRE (state.getProperty ("statePath", juce::var()).toString() == registry.stateFile().getFullPathName());
+    REQUIRE (state.getProperty ("activeAdapterId", juce::var()).isString());
+
+    root.deleteRecursively();
+}
+
+TEST_CASE ("snapshot: every write through the registry is in the next snapshot", "[training][snapshot]")
+{
+    auto root = makeTempRoot();
+    mosh::TrainerRegistry registry (root.getChildFile ("session"));
+    juce::String error;
+
+    // Ask first, so each step below has an older answer it must not hand back.
+    REQUIRE (registry.snapshot().getProperty ("sources", juce::var()).size() == 0);
+
+    auto audio = writeDummyFile (root.getChildFile ("beat.wav"), "dummy-audio");
+    const auto sourceId = importApprovedSource (registry, audio, "First Beat", false)
+                              .getProperty ("source_id", juce::var()).toString();
+    auto listed = snapshotSource (registry, sourceId);
+    REQUIRE (listed.isObject());
+    REQUIRE (listed.getProperty ("title", juce::var()).toString() == "First Beat");
+    REQUIRE_FALSE ((bool) listed.getProperty ("eligible", true));
+    REQUIRE (listed.getProperty ("blocked_reason", juce::var()).toString() == "not approved_for_training");
+
+    registry.approveSource (sourceId, true, error);
+    REQUIRE (error.isEmpty());
+    REQUIRE ((bool) snapshotSource (registry, sourceId).getProperty ("eligible", false));
+
+    registry.approveSource (sourceId, false, error);
+    REQUIRE (error.isEmpty());
+    REQUIRE_FALSE ((bool) snapshotSource (registry, sourceId).getProperty ("eligible", true));
+
+    // Jobs live in the other file, with its own cached half.
+    REQUIRE (registry.snapshot().getProperty ("jobs", juce::var()).size() == 0);
+    registry.updateJob (jobRecord ("job-1", "queued", 0.0));
+    REQUIRE (snapshotJob (registry, "job-1").getProperty ("status", juce::var()).toString() == "queued");
+    registry.updateJob (jobRecord ("job-1", "ready", 1.0));
+    REQUIRE (snapshotJob (registry, "job-1").getProperty ("status", juce::var()).toString() == "ready");
+    REQUIRE (registry.snapshot().getProperty ("jobs", juce::var()).size() == 1);
+
+    REQUIRE (registry.snapshot().getProperty ("activeAdapterId", juce::var()).toString().isEmpty());
+    registry.activateAdapter ("adapter-1", "/somewhere/adapter-1.safetensors", "hash-1", error);
+    REQUIRE (error.isEmpty());
+    const auto activated = registry.snapshot();
+    REQUIRE (activated.getProperty ("activeAdapterId", juce::var()).toString() == "adapter-1");
+    REQUIRE (activated.getProperty ("activeAdapterPath", juce::var()).toString() == "/somewhere/adapter-1.safetensors");
+    REQUIRE (activated.getProperty ("activeCorpusHash", juce::var()).toString() == "hash-1");
+
+    // A write to one file must not lose what the other half already held.
+    REQUIRE (snapshotJob (registry, "job-1").isObject());
+    REQUIRE (snapshotSource (registry, sourceId).isObject());
+
+    root.deleteRecursively();
+}
+
+TEST_CASE ("snapshot: is served from memory until the registry looks at the disk again", "[training][snapshot]")
+{
+    auto root = makeTempRoot();
+    mosh::TrainerRegistry registry (root.getChildFile ("session"));
+    juce::String error;
+
+    auto audio = writeDummyFile (root.getChildFile ("beat.wav"), "dummy-audio");
+    const auto sourceId = importApprovedSource (registry, audio, "Only Beat", true)
+                              .getProperty ("source_id", juce::var()).toString();
+    REQUIRE ((bool) snapshotSource (registry, sourceId).getProperty ("eligible", false));
+
+    // The source's audio file is not the registry's to watch. Building the block
+    // from disk on every call would notice this at once — at the price of a stat
+    // per source after every command.
+    REQUIRE (audio.deleteFile());
+    REQUIRE ((bool) snapshotSource (registry, sourceId).getProperty ("eligible", false));
+
+    SECTION ("a direct read is a fresh look, and the snapshot follows it")
+    {
+        const auto direct = registry.listSources().getProperty ("sources", juce::var());
+        REQUIRE (direct.size() == 1);
+        REQUIRE_FALSE ((bool) direct[0].getProperty ("eligible", true));
+
+        const auto listed = snapshotSource (registry, sourceId);
+        REQUIRE_FALSE ((bool) listed.getProperty ("eligible", true));
+        REQUIRE (listed.getProperty ("blocked_reason", juce::var()).toString().startsWith ("missing local file"));
+    }
+
+    SECTION ("building a corpus looks again too, even when it finds nothing to build")
+    {
+        auto bundle = registry.buildCorpus (juce::var (new juce::DynamicObject()), error);
+        REQUIRE (error == "no approved local sources available for training");
+        REQUIRE_FALSE ((bool) snapshotSource (registry, sourceId).getProperty ("eligible", true));
+    }
+
+    root.deleteRecursively();
+}
+
+TEST_CASE ("snapshot: what the caller gets is the caller's own copy", "[training][snapshot]")
+{
+    auto root = makeTempRoot();
+    mosh::TrainerRegistry registry (root.getChildFile ("session"));
+
+    auto audio = writeDummyFile (root.getChildFile ("beat.wav"), "dummy-audio");
+    const auto sourceId = importApprovedSource (registry, audio, "Kept Title", true)
+                              .getProperty ("source_id", juce::var()).toString();
+    registry.updateJob (jobRecord ("job-1", "queued", 0.0));
+
+    // juce::var objects are shared by reference: without a copy, a consumer that
+    // edits its snapshot would be editing every later one.
+    auto mine = registry.snapshot();
+    mine.getProperty ("sources", juce::var())[0].getDynamicObject()->setProperty ("title", "scribbled");
+    mine.getProperty ("jobs", juce::var())[0].getDynamicObject()->setProperty ("status", "scribbled");
+    mine.getProperty ("sources", juce::var()).getArray()->clear();
+
+    REQUIRE (snapshotSource (registry, sourceId).getProperty ("title", juce::var()).toString() == "Kept Title");
+    REQUIRE (snapshotJob (registry, "job-1").getProperty ("status", juce::var()).toString() == "queued");
+
+    // The same goes for a direct read handed out before the snapshot was asked for.
+    auto direct = registry.listSources();
+    direct.getProperty ("sources", juce::var())[0].getDynamicObject()->setProperty ("title", "scribbled");
+    REQUIRE (snapshotSource (registry, sourceId).getProperty ("title", juce::var()).toString() == "Kept Title");
+
+    root.deleteRecursively();
+}
+
 TEST_CASE ("sha256File (via buildCorpus manifest): streamed hash equals a full-read reference hash", "[training]")
 {
     auto root = makeTempRoot();
@@ -263,6 +450,80 @@ TEST_CASE ("sha256File (via buildCorpus manifest): streamed hash equals a full-r
     auto actualHash = sources[0].getProperty ("sha256", juce::var()).toString();
     REQUIRE (actualHash.isNotEmpty());
     REQUIRE (actualHash == referenceHash);
+
+    root.deleteRecursively();
+}
+
+// The registry's job record is written three times over a run's life: once by
+// submit (the full record: bundle, output dir, config), then by every status
+// poll and by cancel, which each know only a few fields. updateJob used to
+// REPLACE the stored record with whatever it was handed, so the first poll
+// erased which corpus and config the run was trained with, and a cancel erased
+// everything but a status.
+TEST_CASE ("updateJob merges into the stored job record instead of replacing it", "[training]")
+{
+    auto root = makeTempRoot();
+    auto sessionDir = root.getChildFile ("session");
+    sessionDir.createDirectory();
+    mosh::TrainerRegistry registry (sessionDir);
+
+    auto jobWithId = [&registry] (const juce::String& jobId) -> juce::var
+    {
+        auto jobs = registry.listJobs().getProperty ("jobs", juce::var());
+        for (int i = 0; i < jobs.size(); ++i)
+            if (jobs[i].getProperty ("jobId", juce::var()).toString() == jobId)
+                return jobs[i];
+        return {};
+    };
+
+    // What submit_training_job records.
+    auto* config = new juce::DynamicObject();
+    config->setProperty ("rank", 16);
+    auto* submitted = new juce::DynamicObject();
+    submitted->setProperty ("jobId", "job-a");
+    submitted->setProperty ("status", "queued");
+    submitted->setProperty ("progress", 0.0);
+    submitted->setProperty ("bundlePath", "/corpora/corpus-001");
+    submitted->setProperty ("outputDir", "/corpora/corpus-001/training-output/job-a");
+    submitted->setProperty ("config", juce::var (config));
+    registry.updateJob (juce::var (submitted));
+
+    auto* other = new juce::DynamicObject();
+    other->setProperty ("jobId", "job-b");
+    other->setProperty ("status", "ready");
+    other->setProperty ("bundlePath", "/corpora/corpus-002");
+    registry.updateJob (juce::var (other));
+
+    // What a training_job_status poll records: the few fields the service reports.
+    auto* polled = new juce::DynamicObject();
+    polled->setProperty ("jobId", "job-a");
+    polled->setProperty ("status", "running");
+    polled->setProperty ("progress", 0.5);
+    registry.updateJob (juce::var (polled));
+
+    auto a = jobWithId ("job-a");
+    REQUIRE (a.isObject());
+    CHECK (a.getProperty ("status", juce::var()).toString() == "running");
+    CHECK ((double) a.getProperty ("progress", -1.0) == 0.5);
+    CHECK (a.getProperty ("bundlePath", juce::var()).toString() == "/corpora/corpus-001");
+    CHECK (a.getProperty ("outputDir", juce::var()).toString() == "/corpora/corpus-001/training-output/job-a");
+    CHECK ((int) a.getProperty ("config", juce::var()).getProperty ("rank", 0) == 16);
+
+    // The other job is not disturbed, and no duplicate row appears.
+    auto b = jobWithId ("job-b");
+    REQUIRE (b.isObject());
+    CHECK (b.getProperty ("status", juce::var()).toString() == "ready");
+    CHECK (b.getProperty ("bundlePath", juce::var()).toString() == "/corpora/corpus-002");
+    CHECK (registry.listJobs().getProperty ("jobs", juce::var()).size() == 2);
+
+    // A job the registry has not seen yet is still added (a poll for a run that
+    // was submitted before this session's registry existed).
+    auto* fresh = new juce::DynamicObject();
+    fresh->setProperty ("jobId", "job-c");
+    fresh->setProperty ("status", "running");
+    registry.updateJob (juce::var (fresh));
+    CHECK (jobWithId ("job-c").getProperty ("status", juce::var()).toString() == "running");
+    CHECK (registry.listJobs().getProperty ("jobs", juce::var()).size() == 3);
 
     root.deleteRecursively();
 }

@@ -4,6 +4,7 @@
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
 #include "SourceRef.h"
+#include "UndoTrace.h"
 #include "state/Migrations.h"
 #include "state/ProjectName.h"
 #include "state/TakeIdentity.h"
@@ -24,6 +25,25 @@ namespace mosh
 {
 namespace
 {
+    // te::InputDeviceInstance keeps its deferred record-status update (recordStatusUpdater)
+    // private and offers no way to run it early. An explicit template instantiation is
+    // allowed to name a private member, which is what lets startRecord() reach that one
+    // AsyncCaller without patching the engine. If Tracktion renames the member this stops
+    // compiling, which is the failure we want.
+    struct RecordStatusUpdater
+    {
+        using Member = te::AsyncCaller te::InputDeviceInstance::*;
+        friend Member memberPointer (RecordStatusUpdater);
+    };
+
+    template <typename Tag, typename Tag::Member member>
+    struct ExposeMember
+    {
+        friend typename Tag::Member memberPointer (Tag) { return member; }
+    };
+
+    template struct ExposeMember<RecordStatusUpdater, &te::InputDeviceInstance::recordStatusUpdater>;
+
     juce::File requireAllocatedDirectory (std::optional<juce::File> directory,
                                           const char* purpose)
     {
@@ -124,8 +144,10 @@ namespace
         // The internal master-bus spectral tap (xmlTypeName moshMasterSpectralTap,
         // see MoshOps::ensureMasterSpectralTap/isInternalMasterPlugin) occupies ONE
         // master-plugin slot invisibly — masterVisibleBoundary() hides it from
-        // master.plugins entirely, but Tracktion's PluginList::insertPlugin still
-        // counts it against te::EditLimits::maxNumMasterPlugins (default 4). Without
+        // master.plugins entirely, but it still counts against
+        // te::EditLimits::maxNumMasterPlugins (default 4) — Tracktion's
+        // PluginList::insertPlugin for every visible load, and ensureMasterSpectralTap
+        // enforces the same budget for the tap itself. Without
         // this override, once the tap exists (created lazily the first time
         // transport plays, via emitSpectrum), the user's effective VISIBLE budget
         // silently drops from 4 to 3: the 4th load_master_plugin/load_master_builtin
@@ -321,6 +343,16 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         ? moshDir
         : propertyStorageDir.getParentDirectory().getParentDirectory();
 
+    // The plugin catalog, its block reasons and the scan pedal follow the same split:
+    // the GUI (and the deep scan) own ~/Library/Mosh's copy, every other run keeps its
+    // own beside its Settings.xml and only reads the owner's. moshDataDirectory(false)
+    // is the exact path PluginHost always used, test root or not.
+    const auto pluginState = mosh::sessionpaths::resolvePluginStateDirs (
+        mosh::sessionpaths::moshDataDirectory (false), propertyStorageDir,
+        useOwnerSession, freshSessionName);
+    pluginStateDirectory = pluginState.directory;
+    pluginSeedDirectory  = pluginState.seed;
+
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
     // te::Engine takes ownership of the behaviour unique_ptr; capture the raw
@@ -492,6 +524,7 @@ juce::String MoshEngine::audioReadinessError() const
 
 MoshEngine::~MoshEngine()
 {
+    undoTracer.reset();
     if (editPtr != nullptr)
         editPtr->getTransport().stop (false, false);
     editPtr.reset();
@@ -719,6 +752,15 @@ void MoshEngine::adoptOpenedAudioDevice()
     audioOpen = true;
     audioError = {};                // the banner clears on the next snapshot
     ensurePlaybackContext();
+}
+
+void MoshEngine::startRecord()
+{
+    for (auto* instance : edit().getAllInputDevices())
+        if (instance != nullptr)
+            (instance->*memberPointer (RecordStatusUpdater {})).handleUpdateNowIfNeeded();
+
+    edit().getTransport().record (false);
 }
 
 juce::String MoshEngine::activateAudioInput (const juce::String& requestedInputName)
@@ -1135,22 +1177,12 @@ juce::var MoshEngine::recentProjects() const
     return out;
 }
 
-// gap 3 — portable audio references. Set on every (re)wire of the Edit so relative paths
-// resolve against the .tracktionedit's directory and absolute (legacy / external) paths
-// resolve as-is. With both this and editFileRetriever set (and the edit file on disk),
-// Tracktion stores audio refs RELATIVE to the edit — the precondition for portability.
-void MoshEngine::wireEditResolvers()
+namespace
 {
-    // Skill Foundry Slice B, Task 1 — stable take identity (state/TakeIdentity.h). This is
-    // the ONE chokepoint every edit-adoption path already calls (ctor cold start,
-    // reloadInSafeMode, reloadFromFile, adoptEditFile — itself called from newProject/
-    // openProject/saveProjectAs), so backfilling here covers every case "on every edit
-    // adoption" (Task 1) needs without a second call site per path. Idempotent and cheap
-    // (a no-op recursive walk once every take already has an id) — see TakeIdentity.h.
-    mosh::takeidentity::backfill (editPtr->state);
-
-    editPtr->editFileRetriever = [this] { return editPath; };
-    editPtr->filePathResolver = [this] (const juce::String& path) -> juce::File
+    // gap 3 — the Edit's filePathResolver, against an explicit edit file. wireEditResolvers
+    // binds it to the live editPath; consolidateAudioInto also needs it against the edit a
+    // Save As is LEAVING (the resolver has already been re-pointed at the new file by then).
+    juce::File resolveAgainstEdit (const juce::File& editFile, const juce::String& path)
     {
         if (juce::File::isAbsolutePath (path))
             return juce::File (path);
@@ -1170,20 +1202,49 @@ void MoshEngine::wireEditResolvers()
         // (Aside: the WRITE side — setToDirectFileReference on an unsaved edit — trips a
         // Debug-only jassert in Tracktion's findPathFromFile; benign, fires in Debug only,
         // and is the very condition this resolver heals at read time.)
-        if (auto byParent = editPath.getParentDirectory().getChildFile (path); byParent.existsAsFile())
+        if (auto byParent = editFile.getParentDirectory().getChildFile (path); byParent.existsAsFile())
             return byParent;
-        if (auto byEditAsDir = editPath.getChildFile (path); byEditAsDir.existsAsFile())
+        if (auto byEditAsDir = editFile.getChildFile (path); byEditAsDir.existsAsFile())
             return byEditAsDir;
-        return editPath.getParentDirectory().getChildFile (path);   // unchanged default for a genuinely-missing source
-    };
+        return editFile.getParentDirectory().getChildFile (path);   // unchanged default for a genuinely-missing source
+    }
+}
+
+// gap 3 — portable audio references. Set on every (re)wire of the Edit so relative paths
+// resolve against the .tracktionedit's directory and absolute (legacy / external) paths
+// resolve as-is. With both this and editFileRetriever set (and the edit file on disk),
+// Tracktion stores audio refs RELATIVE to the edit — the precondition for portability.
+void MoshEngine::wireEditResolvers()
+{
+    // Skill Foundry Slice B, Task 1 — stable take identity (state/TakeIdentity.h). This is
+    // the ONE chokepoint every edit-adoption path already calls (ctor cold start,
+    // reloadInSafeMode, reloadFromFile, adoptEditFile — itself called from newProject/
+    // openProject/saveProjectAs), so backfilling here covers every case "on every edit
+    // adoption" (Task 1) needs without a second call site per path. Idempotent and cheap
+    // (a no-op recursive walk once every take already has an id) — see TakeIdentity.h.
+    mosh::takeidentity::backfill (editPtr->state);
+
+    // MOSH_UNDO_TRACE — debug-only; see engine/UndoTrace.h. Every edit-adoption path lands
+    // here, so the tracer always watches the live Edit.
+    if (undotrace::enabled())
+    {
+        if (undoTracer == nullptr)
+            undoTracer = std::make_unique<undotrace::Tracer>();
+        undoTracer->attach (*editPtr);
+    }
+
+    editPtr->editFileRetriever = [this] { return editPath; };
+    editPtr->filePathResolver = [this] (const juce::String& path) { return resolveAgainstEdit (editPath, path); };
 }
 
 // gap 3 — make a project self-contained: copy every referenced wave-clip source that
 // isn't already inside projectDir into projectDir/audio, and re-point the clip to it with
 // a RELATIVE reference (so the project dir can be moved/copied wholesale). Missing sources
 // are skipped (left for relink-on-load). Called from saveProjectAs after adopt, when
-// editPath is the new on-disk file so the relative reference computes correctly.
-void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
+// editPath is the new on-disk file so the relative reference computes correctly;
+// leavingEdit is the file the Edit was backed by before, which stored relative refs
+// resolve against.
+void MoshEngine::consolidateAudioInto (const juce::File& projectDir, const juce::File& leavingEdit)
 {
     auto audioDir = projectDir.getChildFile ("audio");
     audioDir.createDirectory();
@@ -1222,12 +1283,29 @@ void MoshEngine::consolidateAudioInto (const juce::File& projectDir)
         // assign_sample'd user files), re-pointing each to a path RELATIVE to the edit
         // so a drum project is portable wholesale. The absolute bundled-kit paths would
         // otherwise break when the project is moved to another machine/install.
+        //
+        // Each sound is read from its persisted SOUND child, NOT te::SamplerPlugin::
+        // getSoundFile: that reads the plugin's LOADED sound list, which Tracktion rebuilds
+        // only in handleAsyncUpdate on the message thread. A save_as that lands first (an
+        // audio device is open, so MoshOps doesn't pump after a kit/sample load; or the
+        // headless 5 ms pump runs out on a loaded machine) saw an empty list — the kit was
+        // silently left pointing into the app bundle — or a stale one, re-pointing a pad
+        // at a sample it no longer plays. The stored ref resolves against leavingEdit: an
+        // already-relative "audio/kick.wav" is not in the new project dir yet.
         for (auto* p : t->pluginList.getPlugins())
             if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
-                for (int i = 0; i < s->getNumSounds(); ++i)
-                    if (auto dest = localiseInto (s->getSoundFile (i).getFile()); dest != juce::File())
-                        s->setSoundMedia (i, dest.getRelativePathFrom (editPath.getParentDirectory())
-                                                 .replaceCharacter ('\\', '/'));   // portable separators (cross-OS)
+                for (int child = 0, soundIndex = 0; child < s->state.getNumChildren(); ++child)
+                {
+                    const auto sound = s->state.getChild (child);
+                    if (! sound.hasType (te::IDs::SOUND))
+                        continue;
+                    const auto stored = sound[te::IDs::source].toString();
+                    if (stored.isNotEmpty())
+                        if (auto dest = localiseInto (resolveAgainstEdit (leavingEdit, stored)); dest != juce::File())
+                            s->setSoundMedia (soundIndex, dest.getRelativePathFrom (editPath.getParentDirectory())
+                                                              .replaceCharacter ('\\', '/'));   // portable separators (cross-OS)
+                    ++soundIndex;   // setSoundMedia counts SOUND children only
+                }
     }
 }
 
@@ -1330,13 +1408,14 @@ bool MoshEngine::saveProjectAs (const juce::File& file)
     if (beforePersist) beforePersist();
     editPtr->getTransport().stop (false, false);
     file.getParentDirectory().createDirectory();
+    const auto leavingEdit = editPath;                     // stored relative refs resolve against this (gap 3)
     // saveAs re-points the Edit's backing file; force-overwrite is safe because
     // the native save dialog (the only caller path) has already confirmed it.
     const bool ok = te::EditFileOperations (*editPtr).saveAs (file, true);
     if (ok)
     {
         adoptEditFile (file);                              // re-points editPath + resolvers (gap 3)
-        consolidateAudioInto (file.getParentDirectory()); // gap 3 — copy audio local + re-point relative
+        consolidateAudioInto (file.getParentDirectory(), leavingEdit); // gap 3 — copy audio local + re-point relative
         save();                                            // persist the consolidated relative refs (clears dirty)
         rememberProject (file);                            // gap 2 — record as last/recent project
     }

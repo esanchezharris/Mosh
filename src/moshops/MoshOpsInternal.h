@@ -248,6 +248,64 @@ namespace mosh
         return -1;
     }
 
+    // Promoted from MoshOps.Clips.cpp's anonymous namespace: the import / duplicate / paste
+    // landings there, the bounce and freeze landings in MoshOps.Tracks.cpp and the render
+    // landings in MoshOps.Generative.cpp all insert through it. Verbatim body, `inline` added.
+    //
+    // Inserts a wave clip that plays its file AS IS. te::insertWaveClip does not: when the
+    // clip state it builds has no LOOPINFO child, te::insertClipWithState reads the FILE's
+    // loop metadata and acts on it —
+    //   • a loop (ACID / Apple-loop beats, or a tempo token in the file NAME — see
+    //     te::LoopInfo::deduceTempo) → autoTempo on, and the clip's length rewritten to that
+    //     many beats at the session tempo: the audio is time-stretched;
+    //   • a root note alone (an ACID chunk with "root set" and zero beats — what Sony ACID
+    //     writes on a one-shot a cappella) → autoPitch on: the audio is transposed to the
+    //     session key.
+    // Either also makes the clip play from a time-stretched proxy the engine has to render
+    // first. For a dropped-in vocal that is a stretch or a transposition nobody asked for;
+    // warping is an explicit command here (set_clip_warp / stretch_clip).
+    //
+    // The NAME rule reaches files Mosh writes itself. deduceTempo splits the name on '_',
+    // ' ' and '-' and takes the LAST token that is a bare number 51–249 (or "<n>bpm") as a
+    // tempo, when the file is within a tenth of a beat of a whole number of bars at it. A
+    // bounce, freeze or consolidate is named "<track>-<trackId>-<n>.wav", so a track called
+    // "Beat 120" qualifies, and so does any track from that command's 51st render of the run
+    // on (the counter is the last token).
+    //
+    // So hand the engine the file's own loop info up front: the same LOOPINFO child it would
+    // have added, minus the adoption.
+    //
+    // The rest is the file-path branch of te::insertWaveClip, step for step (Mosh edits never
+    // belong to a te::Project, so that is the only branch it takes), so a file with no loop
+    // metadata saves to the identical clip state. That includes its item-id allocation: the
+    // engine writes one id into the new state and insertClipWithState then replaces it with a
+    // second, and ids recorded in existing command logs and recovery journals only name the
+    // same items on replay if both are still drawn.
+    inline te::WaveAudioClip::Ptr insertPlainWaveClip (te::ClipTrack& track, const juce::String& name,
+                                                       const juce::File& file, te::ClipPosition position)
+    {
+        auto& edit = track.edit;
+
+        juce::ValueTree state (te::TrackItem::clipTypeToXMLType (te::TrackItem::Type::wave));
+        te::addValueTreeProperties (state,
+                                    te::IDs::name, name,
+                                    te::IDs::start, position.getStart().inSeconds(),
+                                    te::IDs::length, position.getLength().inSeconds(),
+                                    te::IDs::offset, position.getOffset().inSeconds());
+        edit.createNewItemID().writeID (state, nullptr);
+
+        const bool useRelativePath = edit.filePathResolver && edit.editFileRetriever
+                                     && edit.editFileRetriever().existsAsFile();
+        state.setProperty (te::IDs::source,
+                           te::SourceFileReference::findPathFromFile (edit, file, useRelativePath), nullptr);
+
+        state.addChild (te::AudioFile (edit.engine, file).getInfo().loopInfo.state.createCopy(), -1, nullptr);
+
+        return dynamic_cast<te::WaveAudioClip*> (
+            te::insertClipWithState (track, state, name, te::TrackItem::Type::wave, position,
+                                     te::DeleteExistingClips::no, false));
+    }
+
    #if MOSH_HAVE_ANIRA
     inline RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
    #endif

@@ -415,7 +415,7 @@ bool MoshOps::loopStartCapture (double startQn, bool bypassCountIn, juce::String
     const double startSec = loopQnToSeconds (startQn);
     transport.setPosition (tracktion::TimePosition::fromSeconds (startSec));
     insertMarkerSec = startSec;      // a stop returns the playhead to where the pass began
-    transport.record (false);
+    eng.startRecord();
     applyCountInToEdit();            // restore the project's own pre-roll for the next start
 
     loopCurrent_ = { juce::Uuid().toDashedString(), startQn, true };

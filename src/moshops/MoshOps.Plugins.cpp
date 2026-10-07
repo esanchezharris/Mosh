@@ -200,6 +200,35 @@ namespace
         { "tom_mid.wav",    "Mid Tom",    47 },
         { "crash.wav",      "Crash",      49 },
     };
+
+    // A sampler loads its sound files on an AsyncUpdate that rebuilds the list
+    // getSoundMedia() reads from the SOUND children of its state. True once that loaded
+    // list matches the saved one pad for pad, with no stale extra entries.
+    bool samplerSoundsLoaded (te::SamplerPlugin& sampler)
+    {
+        int i = 0;
+        for (auto v : sampler.state)
+            if (v.hasType (te::IDs::SOUND))
+                if (sampler.getSoundMedia (i++) != v[te::IDs::source].toString())
+                    return false;
+        return sampler.getSoundMedia (i).isEmpty();
+    }
+
+    // Headless there is no GUI dispatch between commands, so a sampler's AsyncUpdate must be
+    // drained before a later command renders it. Pump once, as before, then until the load
+    // has landed: a fixed 5 ms pump is outlasted on a loaded machine and DRM-001's beat then
+    // exports silent. Bounded so a sampler that never loads cannot hang the command.
+    void drainSamplerLoad (te::SamplerPlugin& sampler)
+    {
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        if (mm == nullptr)
+            return;
+
+        const auto startMs = juce::Time::getMillisecondCounter();
+        do
+            mm->runDispatchLoopUntil (5);
+        while (! samplerSoundsLoaded (sampler) && juce::Time::getMillisecondCounter() - startMs < 30000);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -761,8 +790,7 @@ juce::var MoshOps::cmdAssignSample (const juce::var& args)
     // there is no GUI dispatch between commands, so drain it now — the sound's audio
     // data must be resident before an export/render reads it (mirrors createAudioTrack).
     if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (5);
+        drainSamplerLoad (*sampler);
 
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
@@ -2551,6 +2579,23 @@ te::SamplerPlugin* MoshOps::findSampler (te::AudioTrack& track) const
     return nullptr;
 }
 
+void MoshOps::settleSamplers()
+{
+    // The rebuild is SamplerPlugin::handleAsyncUpdate, and juce::AsyncUpdater already has the
+    // exact flush for it: handleUpdateNowIfNeeded runs it now if (and only if) it is pending.
+    // SamplerPlugin inherits AsyncUpdater privately, though, and a C-style cast is the one
+    // conversion the language lets reach an inaccessible base. The static_assert keeps that
+    // cast honest: should the base ever go, it fails the build instead of silently becoming
+    // a reinterpret_cast. A bounded poll on the public getters would not do: they expose only
+    // each sound's source, so a pad gain, pan or key edit (a lane mute) never shows as stale.
+    static_assert (std::is_base_of_v<juce::AsyncUpdater, te::SamplerPlugin>,
+                   "te::SamplerPlugin no longer derives from juce::AsyncUpdater; revisit settleSamplers()");
+    JUCE_ASSERT_MESSAGE_THREAD
+    for (auto* p : te::getAllPlugins (eng.edit(), false))
+        if (auto* s = dynamic_cast<te::SamplerPlugin*> (p))
+            ((juce::AsyncUpdater*) s)->handleUpdateNowIfNeeded();
+}
+
 // Parse / pack a comma-separated pitch set (the drumMute/drumSolo track props).
 static juce::SortedSet<int> parseLanePitches (const juce::String& s)
 {
@@ -2796,11 +2841,10 @@ int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& ki
     // two undo steps. Inhibited for the pump; it fires again on its next tick, after the
     // command.
     if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-        {
-            const te::Edit::UndoTransactionInhibitor oneUndoStep (eng.edit());
-            mm->runDispatchLoopUntil (5);
-        }
+    {
+        const te::Edit::UndoTransactionInhibitor oneUndoStep (eng.edit());
+        drainSamplerLoad (sampler);
+    }
 
     return loaded;
 }

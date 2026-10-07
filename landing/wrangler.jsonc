@@ -1,0 +1,18 @@
+// Cloudflare Workers static-assets deploy for the Mosh site (no Worker script: the
+// built dist/ is served as-is). `npm run deploy` builds, uploads, and attaches the
+// custom domains below; Cloudflare creates their DNS records and certificates itself,
+// which needs the moshapp.net zone to be in the account wrangler is logged in to.
+{
+  "name": "mosh-site",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    // /playtest and /playtest/ both resolve to playtest/index.html
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "moshapp.net", "custom_domain": true },
+    { "pattern": "www.moshapp.net", "custom_domain": true }
+  ]
+}

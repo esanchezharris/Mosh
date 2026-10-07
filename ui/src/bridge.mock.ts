@@ -18,7 +18,7 @@ import { DEFAULT_TRACK_GROUP_MIX_ATTRIBUTES, TRACK_GROUP_MIX_ATTRIBUTES } from "
 import { scalePitchClasses } from "./ui/tuner";
 import { ottGainDb } from "./v3/panels/ott";
 import { xfMaxCuts, xfThreshold } from "./v3/panels/xfeedback";
-import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
+import type { Annotation, Snapshot, Clip, ClipGainPoint, ClipGroup, LoopState, Track, TrackGroup, TrackGroupKind, TrackGroupMixAttribute, Transport, CommandResult, RenderLayer, TrainingSource, TrainingState, MidiNote, Plugin, LyricSheet, LyricLine, PluginMeterReading } from "./types";
 import type { RemoteResult, RemoteStatus } from "./bridge";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
@@ -1524,6 +1524,30 @@ function trainingState(): TrainingState {
     };
   }
   return snapshot.training as TrainingState;
+}
+
+/** Mirror of TrainerRegistry::sourceEligible (src/training/TrainerRegistry.cpp): the
+ *  first failing rule names the reason, in the native order. Two native rules have
+ *  nothing to test here: "missing source_url or local_path" checks for absent KEYS,
+ *  and import always writes both (natively too); "missing local file: <path>" needs
+ *  a disk, so any non-empty local_path counts as a file that exists. */
+function trainingBlockedReason(src: TrainingSource): string {
+  if (!src.source_id) return "missing source_id";
+  if (!src.title) return "missing title";
+  if (!src.creator) return "missing creator";
+  if (!(src.user_claimed_license || src.license_name)) return "missing user_claimed_license";
+  if (!src.proof_of_rights) return "missing proof_of_rights";
+  if (!src.approved_for_training) return "not approved_for_training";
+  if (!src.local_path) return "missing local_path";
+  return "";
+}
+
+/** Native derives `eligible` + `blocked_reason` on every read (sourceSummary). Here
+ *  they depend only on the record's own fields, so stamping each write is the same. */
+function stampTrainingEligibility(src: TrainingSource): TrainingSource {
+  src.blocked_reason = trainingBlockedReason(src);
+  src.eligible = src.blocked_reason === "";
+  return src;
 }
 
 const VST3S = [
@@ -5978,27 +6002,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── rights-cleared type-beat training ────────────────────────────────────
+    // Results mirror native (MoshOps.ProjectIo.cpp + TrainerRegistry): import and approve
+    // answer with the source summary itself as `data`, and refuse in the same words.
     case "import_training_source": {
       const state = trainingState();
+      if (!str(args.sourceUrl) && !str(args.localPath)) return err(command, "missing sourceUrl or localPath");
       const id = str(args.sourceId, `beat-${String(state.sources.length + 1).padStart(3, "0")}`);
-      const src = {
-        index: state.sources.length,
+      // A re-import replaces the record in the slot it already occupies.
+      const existing = state.sources.findIndex((s) => s.source_id === id);
+      const src = stampTrainingEligibility({
+        index: existing >= 0 ? existing : state.sources.length,
         source_id: id,
-      title: str(args.title, "Untitled Type Beat"),
-      creator: str(args.creator, "Unknown"),
-      source_url: str(args.sourceUrl),
-      local_path: str(args.localPath),
-      user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
-      license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
-      proof_of_rights: str(args.proofOfRights),
-      approved_for_training: Boolean(args.approvedForTraining),
+        title: str(args.title, "Untitled Type Beat"),
+        creator: str(args.creator, "Unknown"),
+        source_url: str(args.sourceUrl),
+        local_path: str(args.localPath),
+        user_claimed_license: str(args.userClaimedLicense, str(args.licenseName, "")),
+        license_name: str(args.userClaimedLicense, str(args.licenseName, "")),
+        proof_of_rights: str(args.proofOfRights),
+        approved_for_training: Boolean(args.approvedForTraining),
         expiration: (typeof args.expiration === "string" && args.expiration) ? String(args.expiration) : null,
         notes: str(args.notes, ""),
-      };
-      const existing = state.sources.findIndex((s) => s.source_id === id);
+      });
       if (existing >= 0) state.sources[existing] = src; else state.sources.push(src);
       invalidate();
-      return ok(command, { source: src });
+      return ok(command, src);
     }
     case "list_training_sources": {
       const state = trainingState();
@@ -6006,21 +6034,24 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "approve_training_source": {
       const state = trainingState();
-      const src = state.sources.find((s) => s.source_id === str(args.sourceId));
-      if (!src) return err(command, "source not found");
+      const sourceId = str(args.sourceId);
+      if (!sourceId) return err(command, "missing sourceId");
+      const src = state.sources.find((s) => s.source_id === sourceId);
+      if (!src) return err(command, `source not found: ${sourceId}`);
       src.approved_for_training = Boolean(args.approved ?? true);
+      stampTrainingEligibility(src);
       invalidate();
-      return ok(command, { source: src });
+      return ok(command, src);
     }
     case "build_training_corpus": {
       const state = trainingState();
-      const eligible = state.sources.filter((s) => s.approved_for_training && s.local_path);
+      const eligible = state.sources.filter((s) => s.eligible);
       if (eligible.length === 0) return err(command, "no approved local sources available for training");
       const bundleId = str(args.bundleName, `corpus-${String(eligible.length).padStart(3, "0")}`);
       const bundleHash = `mock-${bundleId}-${eligible.length}`;
       const bundlePath = `/mock/training/corpora/${bundleId}`;
       const sources = eligible.map((s, index) => ({ ...s, index, copied_path: `${bundlePath}/sources/${String(index).padStart(3, "0")}-${s.source_id}.wav`, sha256: `mock-${s.source_id}`, bytes: 123456 }));
-      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !eligible.includes(s)).map((s) => ({ source_id: s.source_id, reason: s.approved_for_training ? "missing local file" : "not approved_for_training" })) };
+      const bundle = { bundleId, bundleHash, bundlePath, manifestPath: `${bundlePath}/corpus.manifest.json`, indexPath: `${bundlePath}/bundle.index.json`, sourceCount: sources.length, sources, skippedSources: state.sources.filter((s) => !eligible.includes(s)).map((s) => ({ source_id: s.source_id, reason: s.blocked_reason ?? "" })) };
       state.activeCorpusHash = bundleHash;
       invalidate();
       return ok(command, bundle);
@@ -6031,10 +6062,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!bundlePath) return err(command, "missing corpusBundle");
       const jobId = `job-${Math.random().toString(36).slice(2, 8)}`;
       const outputDir = str(args.outputDir, `${bundlePath}/training-output/${jobId}`);
+      // Recorded as "queued", as native records a submit. The run finishes when its
+      // status is first read (training_job_status below) — until then it is still
+      // going, which is what leaves cancel_training_job something to stop.
       const job = {
         jobId,
-        status: "ready",
-        progress: 1,
+        status: "queued",
+        progress: 0,
         bundlePath,
         outputDir,
         artifactPath: `${outputDir}/adapter.lora.json`,
@@ -6068,15 +6102,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
+      // No trainer here: a run that is still going finishes on this read. Like
+      // native, the read is what updates the recorded job.
+      if (job.status === "queued" || job.status === "running") {
+        job.status = "ready";
+        job.progress = 1;
+      }
       return ok(command, job);
     }
+    // Mirrors native: the answer is the state the run was IN, and only a run that
+    // is still going has anything to stop. A finished run keeps its status, and an
+    // id nobody knows is refused rather than recorded as a cancelled job.
     case "cancel_training_job": {
       const state = trainingState();
       const job = state.jobs.find((j) => j.jobId === str(args.jobId));
       if (!job) return err(command, "unknown jobId");
-      job.status = "cancelled";
-      invalidate();
-      return ok(command);
+      const live = job.status === "queued" || job.status === "running";
+      const answer = { jobId: job.jobId, status: job.status, progress: job.progress, cancelRequested: live };
+      if (live) {
+        // Natively the status moves once the stop reaches the trainer and the next
+        // training_job_status reports it. With no trainer to wind down, it lands now.
+        job.status = "cancelled";
+        invalidate();
+      }
+      return ok(command, answer);
     }
     // Import now ENROLLS into the library — the same place the render path reads
     // — instead of copying into a training/adapters dir nothing renders from.
