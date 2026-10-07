@@ -19680,12 +19680,20 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (device != nullptr, "JUCE audio device is open");
     if (device == nullptr)
         return failures;
-    std::cerr << "  ..   device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
-              << " block=" << device->getCurrentBufferSizeSamples()
-              << " reportedIn=" << device->getInputLatencyInSamples()
-              << " reportedOut=" << device->getOutputLatencyInSamples() << "\n";
-    check (device->getActiveInputChannels().countNumberOfSetBits() > 0, "device has an active input channel (set MOSH_AUDIO_INPUT_DEVICE)");
-    const double rate = device->getCurrentSampleRate();
+    auto describeDevice = [&] (const char* when)
+    {
+        std::cerr << "  ..   " << when << ": device=" << device->getName() << " rate=" << device->getCurrentSampleRate()
+                  << " block=" << device->getCurrentBufferSizeSamples()
+                  << " reportedIn=" << device->getInputLatencyInSamples()
+                  << " reportedOut=" << device->getOutputLatencyInSamples()
+                  << " activeIn=" << device->getActiveInputChannels().countNumberOfSetBits() << "\n";
+    };
+    describeDevice ("at launch");
+    // NB: MoshEngine opens the device output-only at launch and activates the input side
+    // lazily, on the first arm (activateAudioInput), and calibrate_latency refuses until
+    // an input channel is active. So the take track is armed FIRST: "active input
+    // channel" is asserted after that, and the calibration runs after it too — the same
+    // order the V3-vocal smoke below uses.
 
     auto* mm = MessageManager::getInstanceWithoutCreating();
     auto pump = [mm] (int ms)
@@ -19699,10 +19707,31 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     };
     auto calState = [&] { return cmd (ops, "calibrate_latency", args1 ("action", "status"))["data"]; };
 
-    // ── 1. calibrate ──
+    // ── 1. open the input the way the product does: arm the track the take will land on ──
+    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
+    check (ok (takeTrack), "create_track Take ok");
+    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
+    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
+    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
+           "input monitoring OFF on the take (so the loopback carries only the click)");
+    // Arming activated the input side, which RE-OPENS the device: the pointer read at the
+    // top is stale from here on. Re-fetch it before it is used again.
+    device = deviceManager.getCurrentAudioDevice();
+    check (device != nullptr, "the device is still open after arming (input side activated)");
+    if (device == nullptr)
+        return failures;
+    describeDevice ("after arming");
+    check (device->getActiveInputChannels().countNumberOfSetBits() > 0,
+           "arming opened an active input channel on the device (set MOSH_AUDIO_INPUT_DEVICE)");
+    const double rate = device->getCurrentSampleRate();
+
+    // ── 2. calibrate ──
     check (ok (cmd (ops, "calibrate_latency", args1 ("action", "clear"))), "clear any stale record first");
     auto start = cmd (ops, "calibrate_latency", args1 ("action", "start"));
     check (ok (start), "calibrate_latency start ok with a live device");
+    if (! ok (start))   // a refusal is not recorded in the status block, so name it here
+        std::cerr << "  ..   calibrate_latency start refused: " << start["error"].toString() << "\n";
     check (calState().getProperty ("state", var()).toString() == "running", "calibration reports running");
     const auto deadline = Time::getMillisecondCounter() + 12000;
     while (Time::getMillisecondCounter() < deadline
@@ -19725,7 +19754,7 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     check (measuredMs >= 0.0 && measuredMs < 200.0, "loopback round trip is a sane number (< 200 ms)");
     check (std::abs ((double) cal.getProperty ("sampleRate", 0.0) - rate) < 0.5, "record carries the device rate");
 
-    // ── 2. the click: play at 1.0 s on one track, record the loopback on another ──
+    // ── 3. the click: play at 1.0 s on one track, record the loopback on the armed one ──
     auto clickTrack = cmd (ops, "create_track", args1 ("name", "Click"));
     check (ok (clickTrack), "create_track Click ok");
     const auto clickTrackId = clickTrack["data"].getProperty ("trackId", var()).toString();
@@ -19734,43 +19763,32 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
     const auto clickId = tone["data"].getProperty ("clipId", var()).toString();
     check (ok (cmd (ops, "move_clip", objN ({{ "clipId", clickId }, { "start", 1.0 }}))), "click moved to 1.0 s");
 
-    auto takeTrack = cmd (ops, "create_track", args1 ("name", "Take"));
-    check (ok (takeTrack), "create_track Take ok");
-    const auto takeTrackId = takeTrack["data"].getProperty ("trackId", var()).toString();
-    auto arm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
-    check (ok (arm) && (bool) arm["data"].getProperty ("applied", false), "Take track armed on the loopback input");
-    check (ok (cmd (ops, "set_input_monitor", objN ({{ "trackId", takeTrackId }, { "mode", "off" }}))),
-           "input monitoring OFF on the take (so the loopback carries only the click)");
-
-    check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0");
-    auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
-    check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started");
-    pump (2500);
-    auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
-    check (ok (stop), "recording stopped");
-
-    // ── 3. where did it land? ──
-    var landed;
+    // Where the click landed on `trackId`: the first clip's WAV, first sample over the floor,
+    // as an error against 1.0 s. Returns the landed clip's id.
+    auto checkLanding = [&] (const String& trackId, const String& suffix) -> String
     {
-        auto snap = ops.snapshot();
-        auto tracksVar = snap.getProperty ("tracks", var());
-        if (auto* tracks = tracksVar.getArray())
-            for (auto& t : *tracks)
-                if (t.getProperty ("id", var()).toString() == takeTrackId)
-                    landed = t.getProperty ("clips", var());
-    }
-    const int nLanded = landed.isArray() ? landed.size() : 0;
-    check (nLanded > 0, "a take landed on the armed track");
-    if (nLanded > 0)
-    {
+        var landed;
+        {
+            auto snap = ops.snapshot();
+            auto tracksVar = snap.getProperty ("tracks", var());
+            if (auto* tracks = tracksVar.getArray())
+                for (auto& t : *tracks)
+                    if (t.getProperty ("id", var()).toString() == trackId)
+                        landed = t.getProperty ("clips", var());
+        }
+        const int nLanded = landed.isArray() ? landed.size() : 0;
+        check (nLanded > 0, "a take landed on the armed track" + suffix);
+        if (nLanded == 0)
+            return {};
+
         const auto clip = landed[0];
         const double clipStart  = (double) clip.getProperty ("start", 0.0);
         const double clipOffset = (double) clip.getProperty ("offset", 0.0);
         const File src (clip.getProperty ("sourceFile", var()).toString());
-        check (src.existsAsFile(), "landed take has a source WAV on disk");
+        check (src.existsAsFile(), "landed take has a source WAV on disk" + suffix);
         AudioFormatManager fm; fm.registerBasicFormats();
         std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (src));
-        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable");
+        check (reader != nullptr && reader->lengthInSamples > 0, "landed take is readable" + suffix);
         if (reader != nullptr && reader->lengthInSamples > 0)
         {
             AudioBuffer<float> buf ((int) reader->numChannels, (int) reader->lengthInSamples);
@@ -19782,7 +19800,7 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
             for (int i = 0; i < buf.getNumSamples() && onset < 0; ++i)
                 for (int ch = 0; ch < buf.getNumChannels(); ++ch)
                     if (std::abs (buf.getSample (ch, i)) > 0.003f) { onset = i; break; }
-            check (onset >= 0, "the click is present in the recorded take");
+            check (onset >= 0, "the click is present in the recorded take" + suffix);
             if (onset >= 0)
             {
                 const double onsetEditSeconds = clipStart + ((double) onset / reader->sampleRate - clipOffset);
@@ -19790,9 +19808,86 @@ int runLatencyCalibrationSmoke (MoshEngine& eng, MoshOps& ops)
                 std::cerr << "  ..   landed: clipStart=" << clipStart << " offset=" << clipOffset
                           << " onsetSample=" << onset << " onset=" << onsetEditSeconds
                           << " s error=" << errorMs << " ms\n";
-                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)");
+                check (std::abs (errorMs) <= 1.0, "the click landed within 1 ms of where it was played (1.0 s)" + suffix);
             }
         }
+        return clip.getProperty ("id", var()).toString();
+    };
+    // Xruns across a take (device overloads plus callbacks that overran their block). A HAL
+    // cycle skipped between the click going out and coming back moves the landing by exactly
+    // one device block, so a block-sized error can only be read with this beside it.
+    auto reportXruns = [&] (int beforeRecord)
+    {
+        const int afterStop = deviceManager.getXRunCount();
+        std::cerr << "  ..   xruns: beforeRecord=" << beforeRecord << " afterStop=" << afterStop
+                  << " duringTake=" << (afterStop - beforeRecord) << "\n";
+    };
+    // What a snapshot or a UI burst right after Record does: the message thread is held (no
+    // message-loop turn) for the start of the take, then the loop runs for the rest of it.
+    const int takeMs = 2500;
+    auto runTake = [&] (int busyMs)
+    {
+        if (busyMs > 0)
+            Thread::sleep (busyMs);
+        pump (takeMs - busyMs);
+    };
+    // One take through the transport: seek to 0, record, stop, then where did it land?
+    auto recordTakeAndCheckLanding = [&] (int busyMs, const String& suffix) -> String
+    {
+        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "seek to 0" + suffix);
+        const int xrunsBeforeRecord = deviceManager.getXRunCount();
+        auto rec = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (rec) && (bool) rec["data"].getProperty ("recording", false), "recording started" + suffix);
+        runTake (busyMs);
+        auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (ok (stop), "recording stopped" + suffix);
+        if (! ok (stop))   // a take that was cut short is refused here: name the refusal
+            std::cerr << "  ..   set_transport stop refused: " << stop["error"].toString() << "\n";
+        const auto landedClipId = checkLanding (takeTrackId, suffix);
+        reportXruns (xrunsBeforeRecord);
+        return landedClipId;
+    };
+
+    // ── 4. the calibrated take: record, then where did it land? ──
+    const auto firstTakeClipId = recordTakeAndCheckLanding (0, {});
+
+    // ── 5. arm, then record, with no message-loop turn in between ──
+    // Any caller that arms and records back to back does this. Tracktion applies an arm on
+    // the NEXT message-loop turn (te::InputDeviceInstance's deferred record-status update).
+    // If the record has already started by then, that update stops the fresh take: a take
+    // that already holds audio simply ends there, and an empty one is punched in again and
+    // lands a block or two early. Holding the message thread for the take's first 150 ms
+    // puts the update well inside the take on every run; left to itself it is a race with
+    // the audio callback that only goes wrong some of the time.
+    const int busyMs = 150;
+    check (ok (cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", false }}))), "take track disarmed");
+    check (ok (cmd (ops, "remove_clip", args1 ("clipId", firstTakeClipId))), "first take removed (it must not play into the second)");
+    pump (500);   // everything above settles: only the arm below is still pending at Record
+    auto rearm = cmd (ops, "arm_track", objN ({{ "trackId", takeTrackId }, { "armed", true }}));
+    check (ok (rearm) && (bool) rearm["data"].getProperty ("applied", false), "take track re-armed");
+    const auto secondTakeClipId = recordTakeAndCheckLanding (busyMs, " (armed and recorded in the same turn)");
+
+    // ── 6. the Booth's version: loop_record on a project that was never set up ──
+    // "Put Me In" pairs a Takes track with the one armed track, arms it and starts the pass
+    // inside ONE command, so its arm is always still pending when the record starts.
+    {
+        const String suffix (" (loop_record on a project that was never set up)");
+        if (secondTakeClipId.isNotEmpty())
+            check (ok (cmd (ops, "remove_clip", args1 ("clipId", secondTakeClipId))), "second take removed (it must not play into the loop pass)");
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "no count-in: the pass starts at 0 s");
+        pump (500);
+        const int xrunsBeforeRecord = deviceManager.getXRunCount();
+        auto loopRecord = cmd (ops, "loop_record");
+        check (ok (loopRecord) && (bool) loopRecord["data"].getProperty ("applied", false),
+               "loop_record set the loop up and started the pass in one command");
+        runTake (busyMs);
+        auto loopStop = cmd (ops, "loop_stop");
+        check (ok (loopStop) && (bool) loopStop["data"].getProperty ("stoppedRecording", false), "loop_stop stopped the recording");
+        pump (300);
+        const auto takesTrackId = cmd (ops, "loop_state")["data"].getProperty ("takesTrackId", var()).toString();
+        check (takesTrackId.isNotEmpty() && takesTrackId != takeTrackId, "loop_record paired a distinct Takes track");
+        checkLanding (takesTrackId, suffix);
+        reportXruns (xrunsBeforeRecord);
     }
 
     std::cerr << "===== " << (checks - failures) << "/" << checks << " checks passed, " << failures << " failed =====\n";
