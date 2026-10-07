@@ -295,6 +295,117 @@ describe("createTaskExecutor — guards from the 2026-09-23 real-app walkthrough
   });
 });
 
+describe("createTaskExecutor — PR #740 review fixes", () => {
+  beforeEach(async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+  });
+
+  // ── (3) the empty-melodic-track repair never removes a track the request named ──
+  it.each([
+    ["add a guitar track", "Guitar"],
+    ["add a bass track", "Bass"],
+    ["set me up with a bass and some drums", "Bass"],
+    ["I want keys on this", "Keys"],
+  ])("%j keeps the empty %j track the request named", async (utterance, name) => {
+    const t = createTaskExecutor(utterance, { utterance });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(true);
+  });
+
+  it("still removes an unnamed empty Keys track even when the ask says 'key' (not 'keys')", async () => {
+    const utterance = "write a melody in the key of C";
+    const t = createTaskExecutor(utterance, { utterance });
+    const s = await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Keys", type: "audio" } }]);
+    const trackId = s.results[0]!.ids!.trackId as string;
+    await t.close();
+    expect(snap().tracks.some((x) => x.id === trackId)).toBe(false);
+  });
+
+  // ── (4) close() always sends batch_end, whatever the repair does ──
+  function spyingDeps(opts: { rejectRemoveTrack?: boolean } = {}) {
+    const sent: string[] = [];
+    let failNextRefresh = false;
+    const exec = async (command: string, args?: Record<string, unknown>, origin?: string) => {
+      sent.push(command);
+      if (opts.rejectRemoveTrack && command === "remove_track") throw new Error("bridge timeout");
+      return useStore.getState().exec(command, args, undefined, origin);
+    };
+    const refresh = async () => {
+      if (failNextRefresh) { failNextRefresh = false; throw new Error("bridge down"); }
+      await useStore.getState().refresh();
+    };
+    return { sent, exec, refresh, failNextRefresh: () => { failNextRefresh = true; } };
+  }
+
+  async function expectNoLeakedBatch() {
+    // A leaked batch would refuse a fresh batch_begin as "already open".
+    const again = await useStore.getState().exec("batch_begin", {});
+    expect(again).toMatchObject({ ok: true });
+    await useStore.getState().exec("batch_end", {});
+  }
+
+  it("close() sends batch_end when the repair's snapshot refresh rejects", async () => {
+    const d = spyingDeps();
+    const t = createTaskExecutor("lofi sketch", { utterance: "build me a lofi sketch" }, d);
+    await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Keys" } }]);
+    d.failNextRefresh();
+    await expect(t.close()).resolves.toBeUndefined();
+    expect(d.sent).toContain("batch_end");
+    expect(d.sent).not.toContain("remove_track");
+    await expectNoLeakedBatch();
+  });
+
+  it("close() sends batch_end when remove_track rejects", async () => {
+    const d = spyingDeps({ rejectRemoveTrack: true });
+    const t = createTaskExecutor("lofi sketch", { utterance: "build me a lofi sketch" }, d);
+    await t.env.runBatch("step 1", [{ command: "create_track", args: { name: "Keys" } }]);
+    await expect(t.close()).resolves.toBeUndefined();
+    expect(d.sent.slice(-2)).toEqual(["remove_track", "batch_end"]);
+    await expectNoLeakedBatch();
+  });
+
+  // ── (5) the overlap guard ──
+  async function drumTrackWithClipAt(start: number): Promise<{ trackId: string; clipId: string }> {
+    await useStore.getState().exec("set_tempo", { bpm: 120 });
+    const created = await useStore.getState().exec("create_track", { name: "Drums", type: "drum" });
+    const trackId = (created.data as { trackId: string }).trackId;
+    const clip = await useStore.getState().exec("add_drum_pattern", { trackId, start, bars: 1, pattern: "kick: x..." });
+    expect(clip.ok).toBe(true);
+    await useStore.getState().refresh();
+    return { trackId, clipId: (clip.data as { clipId: string }).clipId };
+  }
+
+  it("an add_drum_pattern with no `bars` is measured by its longest lane, like the native default", async () => {
+    // At 120 bpm one 4/4 bar is 2 s: the existing clip sits in bar 3 (4-6 s). A 48-step
+    // kick lane is 3 bars (0-6 s), so it overlaps, though a 1-bar assumption (0-2 s) would not.
+    const { trackId } = await drumTrackWithClipAt(4);
+    const t = createTaskExecutor("drums", { utterance: "lay a kick pattern" });
+    const s = await t.env.runBatch("step 1", [
+      { command: "add_drum_pattern", args: { trackId, start: 0, pattern: `kick: ${"x...".repeat(12)}` } },
+    ]);
+    await t.close();
+    expect(s.results[0]).toMatchObject({ command: "add_drum_pattern", ok: false });
+    expect(s.results[0]!.error).toMatch(/overlap/i);
+  });
+
+  it("a clip removed earlier in the SAME step does not block a new clip in its place", async () => {
+    const { trackId, clipId } = await drumTrackWithClipAt(0);
+    const t = createTaskExecutor("redo drums", { utterance: "redo the drums" });
+    const s = await t.env.runBatch("step 1", [
+      { command: "remove_clip", args: { clipId } },
+      { command: "add_drum_pattern", args: { trackId, start: 0, bars: 1, pattern: "kick: x.x." } },
+    ]);
+    await t.close();
+    expect(s.results.map((r) => r.ok)).toEqual([true, true]);
+    const clips = snap().tracks.find((x) => x.id === trackId)!.clips;
+    expect(clips).toHaveLength(1);
+    expect(clips[0]!.id).not.toBe(clipId);
+  });
+});
+
 describe("createTaskExecutor — result ids reach the step results (step-1 slice 4)", () => {
   // Before this slice the step envelope was {command, ok, error} and `data` was
   // dropped, so a trackId/clipId/busNumber a command minted never reached the model

@@ -18,6 +18,7 @@
 import { useStore } from "../../store";
 import { SCALES, TONICS, inScale, keyLabel, resolveKey, scaleMask } from "../../musicalKey";
 import { validateCommand } from "../commands";
+import { parseDrumPattern } from "../../ui/drumPatternUtil";
 import {
   destructiveWeight, isDestructiveCommand,
   MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON,
@@ -73,9 +74,35 @@ const MELODY_REQUEST = /\b(?:melody|melodic)\b/i;
 // should stay empty/for later, skip the repair entirely for this task.
 // "lead" is deliberately absent: the Booth's vocal lane is "Lead", and an empty
 // vocal/mic track is a recording destination, never a failed melodic part.
+//
+// A track the REQUEST NAMED is never removed (review of PR #740): a plain "add a
+// guitar track" / "add a bass track" makes create_track({name:"Guitar"}) with the
+// default audio type and no clip -- an empty audio track is exactly the recording
+// destination a guitar or bass DI wants, and the user asked for it by name. So a
+// candidate survives when any of its melodic name words ("guitar", "keys", ...)
+// appears in the utterance (requestNamesTrack), and the whole repair is skipped when
+// the ask is explicitly about adding a track (EXPLICIT_TRACK_REQUEST). What is left
+// is the defect itself: "build me a lofi sketch" never named "Keys".
 const MELODIC_TRACK_NAME_RE = /\b(?:keys?|piano|synth|pad|bass|chords?|melody|melodic|guitar|strings?|organ|rhodes|wurlitzer)\b/i;
+const MELODIC_TRACK_WORDS_RE = new RegExp(MELODIC_TRACK_NAME_RE.source, "gi");
 const RECORDING_TRACK_NAME_RE = /\b(?:vocals?|vox|voice|mic|takes?)\b/i;
 const EXPLICIT_EMPTY_TRACK_REQUEST = /\b(?:empty|blank|placeholder)\b|\bfor (?:me|you) to (?:record|play|fill|write)\b|\brecord into (?:it|this|that)\b|\b(?:record(?:ing)?|sing(?:ing)?|vocals?|vox|mic|live)\b/i;
+const EXPLICIT_TRACK_REQUEST = /\b(?:add|create|make|set up|give me|new)\b[^.!?]{0,40}\btracks?\b/i;
+
+/** Whether the utterance names this track's instrument ("add a guitar track" names a
+ *  "Guitar" track). Singular/plural tolerant; "keys" must be said as "keys" so a
+ *  "key of C" ask does not read as naming a Keys track. */
+function requestNamesTrack(utterance: string, trackName: string): boolean {
+  const said = utterance.toLowerCase();
+  for (const m of trackName.toLowerCase().matchAll(MELODIC_TRACK_WORDS_RE)) {
+    const word = m[0];
+    const family = word.startsWith("melod") ? "melod(?:y|ies|ic)"
+      : word === "key" || word === "keys" ? "keys"
+      : `${word.endsWith("ss") ? word : word.replace(/s$/, "")}(?:s|es)?`;
+    if (new RegExp(`\\b${family}\\b`).test(said)) return true;
+  }
+  return false;
+}
 
 // FINDINGS.md #4 -- the same task's add_drum_pattern passed the EXISTING Drums
 // track's id with no clipId, and bridge.mock.ts's add_drum_pattern (mirroring
@@ -86,8 +113,29 @@ const EXPLICIT_EMPTY_TRACK_REQUEST = /\b(?:empty|blank|placeholder)\b|\bfor (?:m
 // see its ArgSpec desc in commands.ts), so refusing the trackId-only
 // collision here closes a silent side door without removing any capability.
 const OVERLAP_GUARDED_COMMANDS = new Set(["add_drum_pattern", "add_midi_clip"]);
+// The guard checks a whole step against ONE snapshot taken before the step runs. A clip
+// an EARLIER call of the same step removes, moves or shortens is therefore stale in that
+// snapshot, and is left out of the check (so "remove_clip X, then add_midi_clip where X
+// was" is not refused). delete_time_range earlier in the step reshapes every clip, so
+// the guard stands down for the rest of that step. Both fail OPEN, never closed.
+const CLIP_VACATING_COMMANDS = new Set(["remove_clip", "move_clip", "trim_clip", "crop_clip"]);
+// cmdAddMidiClip's own default length, in seconds (MoshOps.cpp: args "length", 2.0).
+const NATIVE_MIDI_CLIP_DEFAULT_SEC = 2.0;
 
-function clipPlacementOverlapError(command: string, args: Record<string, unknown>, snap: Snapshot): string | null {
+/** Bars an add_drum_pattern will lay. With no `bars` the native handler fits the
+ *  longest lane (DrumPattern.h / drumPatternUtil.ts), so this parses the same way;
+ *  a pattern that will not parse fails natively anyway, and counts as one bar here. */
+function drumPatternBars(args: Record<string, unknown>): number {
+  const stepsPerBar = typeof args.stepsPerBar === "number" ? args.stepsPerBar : 16;
+  const bars = typeof args.bars === "number" ? args.bars : 0;
+  const parsed = parseDrumPattern(args.pattern, stepsPerBar, bars, 100);
+  if (parsed.ok) return parsed.bars;
+  return bars > 0 ? bars : 1;
+}
+
+function clipPlacementOverlapError(
+  command: string, args: Record<string, unknown>, snap: Snapshot, ignoreClipIds: ReadonlySet<string> = new Set(),
+): string | null {
   if (!OVERLAP_GUARDED_COMMANDS.has(command)) return null;
   if (typeof args.clipId === "string" && args.clipId) return null; // explicit in-place edit
   const trackId = typeof args.trackId === "string" ? args.trackId : "";
@@ -99,10 +147,10 @@ function clipPlacementOverlapError(command: string, args: Record<string, unknown
   const beatsPerBar = snap.session.timeSigNumerator ?? 4;
   const beatSec = (4 / (snap.session.timeSigDenominator ?? 4)) * (60 / (snap.session.tempo || 120));
   const end = command === "add_midi_clip"
-    ? start + (typeof args.length === "number" && args.length > 0 ? args.length : beatsPerBar * beatSec)
-    : start + (typeof args.bars === "number" && args.bars > 0 ? args.bars : 1) * beatsPerBar * beatSec;
+    ? start + (typeof args.length === "number" && args.length > 0 ? args.length : NATIVE_MIDI_CLIP_DEFAULT_SEC)
+    : start + drumPatternBars(args) * beatsPerBar * beatSec;
 
-  const hit = track.clips.find((c) => start < c.start + c.length && c.start < end);
+  const hit = track.clips.find((c) => !ignoreClipIds.has(c.id) && start < c.start + c.length && c.start < end);
   if (!hit) return null;
   return `${command} at ${start.toFixed(2)}s would overlap the existing clip "${hit.name}" `
     + `(${hit.start.toFixed(2)}s-${(hit.start + hit.length).toFixed(2)}s) on this track; `
@@ -244,6 +292,7 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
         const r = await handleRememberPreference(c.args, exec);
         entries.push({ index, command: r.command, ok: r.ok, error: r.error });
       }
+      const vacatedClipIds = new Set<string>();
       calls.forEach((c, index) => {
         if (MEMORY_COMMANDS.has(c.command)) return;   // already handled above
         const args = (c.args ?? {}) as Record<string, unknown>;
@@ -251,9 +300,13 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
         if (!err && constrainedKey && c.command === "set_key")
           constrainedKey = { tonic: String(args.tonic), mode: String(args.mode) };
         if (!err && constrainedKey) err = noteKeyError(c.command, args, constrainedKey, melodyRequest);
-        if (!err && overlapSnapshot) err = clipPlacementOverlapError(c.command, args, overlapSnapshot);
+        if (!err && overlapSnapshot)
+          err = clipPlacementOverlapError(c.command, args, overlapSnapshot, vacatedClipIds);
         if (err) entries.push({ index, command: c.command, ok: false, error: err });
         else valid.push({ index, command: c.command, args });
+        if (!err && CLIP_VACATING_COMMANDS.has(c.command) && typeof args.clipId === "string")
+          vacatedClipIds.add(args.clipId);
+        if (!err && c.command === "delete_time_range") overlapSnapshot = undefined;
       });
 
       // Task-cumulative destructive screen (same reporting shape as runAgentBatch).
@@ -305,13 +358,16 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
   };
 
   /** Removes a track THIS TASK created that ends the task empty and melodic-named -- see
-   *  MELODIC_TRACK_NAME_RE's header comment. Skipped entirely when the ask itself said the
-   *  track should stay empty/for later (EXPLICIT_EMPTY_TRACK_REQUEST). Called from close(),
-   *  before batch_end, so the removal is inside the same undo transaction as everything else
-   *  the task did. */
+   *  MELODIC_TRACK_NAME_RE's header comment -- unless the request named it. Skipped
+   *  entirely when the ask itself said the track should stay empty/for later
+   *  (EXPLICIT_EMPTY_TRACK_REQUEST) or asked for a track outright (EXPLICIT_TRACK_REQUEST).
+   *  Called from close(), before batch_end, so the removal is inside the same undo
+   *  transaction as everything else the task did. Best effort: close() never lets a
+   *  failure here skip batch_end. */
   async function repairEmptyMelodicTracks(): Promise<void> {
     if (createdTrackTypes.size === 0) return;
-    if (EXPLICIT_EMPTY_TRACK_REQUEST.test(meta.utterance ?? "")) return;
+    const utterance = meta.utterance ?? "";
+    if (EXPLICIT_EMPTY_TRACK_REQUEST.test(utterance) || EXPLICIT_TRACK_REQUEST.test(utterance)) return;
     let liveSnapshot: Snapshot | undefined;
     for (const [trackId, requestedType] of createdTrackTypes) {
       if (requestedType && requestedType !== "audio") continue; // "drum" auto-loads a kit
@@ -319,6 +375,7 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       const track = liveSnapshot.tracks.find((t) => t.id === trackId);
       if (!track || track.clips.length > 0) continue;
       if (!MELODIC_TRACK_NAME_RE.test(track.name) || RECORDING_TRACK_NAME_RE.test(track.name)) continue;
+      if (requestNamesTrack(utterance, track.name)) continue;
       await exec("remove_track", { trackId });
     }
   }
@@ -335,9 +392,17 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       if (closed) return;
       closed = true;
       if (opened) {
-        await repairEmptyMelodicTracks();
-        await exec("batch_end", {});
-        await refresh();
+        // batch_end MUST go out whatever the repair does: a refresh()/getSnapshot() throw
+        // or a rejected remove_track would otherwise leak the native batch, and every later
+        // user edit would fold into this task's undo step until the next task heals it.
+        try {
+          await repairEmptyMelodicTracks();
+        } catch {
+          // best effort -- an empty track left behind is harmless; a leaked batch is not
+        } finally {
+          await exec("batch_end", {});
+          await refresh();
+        }
       }
     },
   };
