@@ -48,7 +48,10 @@ GRID_TOL = 0.06
 # auto-provides); "real" = any other path (the owner's musica/Splice library / an import).
 STOCK_KIT_DIRMARK = "drumkits/mosh-kit"
 STOCK_KIT_FILES = {"kick.wav", "snare.wav", "clap.wav", "hat_closed.wav", "hat_open.wav", "tom_low.wav", "tom_mid.wav", "crash.wav"}
-DEFAULT_INSTRUMENTS = {"4osc", "4OSC Synth", "sampler", "Sampler"}
+# Bare auto-loaded built-ins. "4OSC" is the name the engine's snapshot gives the synth
+# (FourOscPlugin::getName); "4OSC Synth" is its list_builtins name. Mirrors
+# ui/src/agent/recipeVerifier.ts DEFAULT_INSTRUMENTS (pinned by both test files).
+DEFAULT_INSTRUMENTS = {"4osc", "4OSC", "4OSC Synth", "sampler", "Sampler"}
 KIT_PAD_PITCHES = [36, 38, 39, 42, 46, 45, 47, 49]
 
 # weights sum to 1 — the three musical anti-gaming dims (dynamics/variation/contour) plus the

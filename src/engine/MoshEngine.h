@@ -103,6 +103,12 @@ public:
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 
+    /** Where PluginHost persists the plugin catalog, block reasons and scan pedal, and
+        the read-only dir a not-yet-written catalog is seeded from (empty when this
+        engine owns the machine-wide copy). See sessionpaths::resolvePluginStateDirs. */
+    juce::File pluginStateDir() const { return pluginStateDirectory; }
+    juce::File pluginSeedDir()  const { return pluginSeedDirectory; }
+
     /** Attach the Edit to the audio device so the transport can play (01 §5). */
     void ensurePlaybackContext();
 
@@ -250,9 +256,12 @@ private:
     te::EngineBehaviour*        behaviourPtr = nullptr;
     juce::File session;
     juce::File editPath;
+    juce::File pluginStateDirectory;
+    juce::File pluginSeedDirectory;
     juce::String openAudioDeviceBounded();                     // AUD-017 — the one, bounded, device open
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
-    void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
+    void consolidateAudioInto (const juce::File& projectDir,   // gap 3 — copy referenced audio project-local
+                               const juce::File& leavingEdit);
     void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
 
     /** FS-T2 — the ONE load-from-file path, bracketed by the plugin crash breadcrumb.

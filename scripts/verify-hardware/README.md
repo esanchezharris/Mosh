@@ -43,3 +43,14 @@ multiplayer) are listed in [`docs/VERIFICATION.md`](../../docs/VERIFICATION.md).
 as `"${VAR}"` — so engine-assigned ids (trackId/clipId/index) never need
 hard-coding. `{"command":"__wait","args":{"ms":N}}` pumps the message loop for
 async work. `render_layer` with `"wait":true` blocks until the render finishes.
+
+To assert on async work, prefer
+`{"command":"__wait_until","args":{"condition":C,"maxMs":N}}` over a fixed `__wait`.
+It pumps the same loop, stops as soon as the condition holds and emits a result line
+(`ok`, `data.waitedMs`). If the condition is not met by `maxMs` (default 30000) it
+counts as a failure, never a silent pass. A fixed `__wait` bets a number against
+machine load: `verify-direct-reimagine.py`'s overlap check read `rendering` in 12 of 12
+runs while three sibling builds were running. The conditions are:
+`direct_render_idle` (no Direct Re-Imagine request or worker in flight, no layer
+queued/rendering), `render_job_submitted` (`clipId`'s layer shows a service jobId), and
+`file_exists` (`file`, relative to the script's directory).
