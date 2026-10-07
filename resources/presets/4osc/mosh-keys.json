@@ -1,22 +1,58 @@
 {
- "waveShapes": [
-  1,
-  2,
-  0,
-  0
- ],
- "params": {
-  "Level 1": 0.8,
-  "Level 2": 0.55,
-  "Tune 2": 0.75,
-  "Amp Attack": 0.04,
-  "Amp Decay": 0.45,
-  "Amp Sustain": 0.6,
-  "Amp Release": 0.4,
-  "Filter Freq": 0.7,
-  "Filter Resonance": 0.1,
-  "Level 3": 0.0,
-  "Level 4": 0.0
+ "state": {
+  "waveShape1": "sine",
+  "waveShape2": "triangle",
+  "filterType": "lowpass",
+  "filterSlope": 12
  },
- "_note": "Bundled starter patch, authored 2026-09-01 for the P1 preset seam. Params are NORMALIZED 0..1 against 4OSC's ranges. UN-AUDITIONED: owner by-ear pass pending; edit freely."
+ "params": {
+  "Level 1": 0.8009,
+  "Level 2": 0.5496,
+  "Tune 2": 0.6667,
+  "Amp Attack": 0.0,
+  "Amp Decay": 0.4493,
+  "Amp Sustain": 0.6,
+  "Amp Release": 0.398,
+  "Filter Freq": 0.6983,
+  "Filter Resonance": 0.1
+ },
+ "_physical": {
+  "Level 1": {
+   "value": -5.4,
+   "unit": "dB"
+  },
+  "Level 2": {
+   "value": -13.9,
+   "unit": "dB"
+  },
+  "Tune 2": {
+   "value": 12,
+   "unit": "st"
+  },
+  "Amp Attack": {
+   "value": 0.001,
+   "unit": "s"
+  },
+  "Amp Decay": {
+   "value": 1.1,
+   "unit": "s"
+  },
+  "Amp Sustain": {
+   "value": 60,
+   "unit": "%"
+  },
+  "Amp Release": {
+   "value": 0.6,
+   "unit": "s"
+  },
+  "Filter Freq": {
+   "value": 1900,
+   "unit": "Hz"
+  },
+  "Filter Resonance": {
+   "value": 10,
+   "unit": "%"
+  }
+ },
+ "_note": "Bundled starter patch (first drafted 2026-09-01; waves, filter and unison restored 2026-10-06 from that draft, whose wave numbers were Tracktion's LFO enum). \"state\" holds the 4OSC settings by their set_plugin_state names; \"params\" are NORMALIZED 0..1 against 4OSC's own ranges (skewed: times v^5, levels v^0.25), keyed by display name or paramID, and \"_physical\" says what each one is. Loading sets the whole patch: anything not named returns to its default. UN-AUDITIONED: owner by-ear pass pending; edit freely."
 }

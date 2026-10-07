@@ -37,6 +37,8 @@ namespace mosh::sessionpaths
     // would destroy someone's project.
     inline constexpr const char* kAutoMarker = "-auto-";
     inline constexpr const char* kSafetyPrefix = "session-safety-auto-";
+    // --scan-plugins-deep's base leaf. Named so resolvePluginStateDirs can single it out.
+    inline constexpr const char* kDeepScanSessionBase = "session-scan";
 
     inline juce::File moshDataDirectory (bool allowTestRoot)
     {
@@ -190,12 +192,23 @@ namespace mosh::sessionpaths
             moshDir.getChildFile (kHarnessRootName), directory);
     }
 
+    /** Frees an owned `_harness` session for a fresh run and deletes the reset quarantine
+        it created. Other `.mosh-reset-*` entries are left for scripts/verify-hardware/
+        harness_session.py's manifest sweep. */
     inline bool resetOwnedHarnessSession (const juce::File& moshDir,
-                                          const juce::File& directory)
+                                          const juce::File& directory
+                                         #if MOSH_TESTING
+                                          , const IsolationOwnershipTestHooks* hooks = nullptr
+                                         #endif
+    )
     {
         return isOwnedHarnessSession (moshDir, directory)
-            && resetOwnedIsolationDirectory (
-                moshDir.getChildFile (kHarnessRootName), directory);
+            && resetAndReclaimOwnedIsolationDirectory (
+                moshDir.getChildFile (kHarnessRootName), directory
+               #if MOSH_TESTING
+                , hooks
+               #endif
+                );
     }
 
     /** Resolves the project directory without allowing an environment-controlled
@@ -307,7 +320,7 @@ namespace mosh::sessionpaths
         if (m.goldenSelfTest) return "session-golden-selftest";
         if (m.liveAudioSmoke) return "session-live-audio-smoke";
         if (m.midiRecordSmoke) return "session-midi-record-smoke";
-        if (m.scanDeep)       return "session-scan";
+        if (m.scanDeep)       return kDeepScanSessionBase;
         if (m.runScript)      return "session-run-script";
         if (m.demoGui)        return "session-demo";
         if (m.selfTest)       return "session-selftest";
@@ -316,6 +329,37 @@ namespace mosh::sessionpaths
         if (m.envNoAudio)     return "session-selftest";
 
         return {};   // interactive GUI
+    }
+
+    /** Where PluginHost keeps plugin-catalog.xml, plugin-block-reasons.txt and the scan
+        dead-mans-pedal (plugin-scan-inflight.txt) for one engine.
+        `seed` is a read-only fallback for a catalog / reasons file not written yet in
+        `directory`; empty means none. The pedal is never seeded: it is crash evidence
+        for whichever process armed it. */
+    struct PluginStateDirs
+    {
+        juce::File directory;
+        juce::File seed;
+    };
+
+    /** Only the interactive GUI and --scan-plugins-deep (whose whole job is filling the
+        GUI's catalog) use the machine-wide copy in the owner's Mosh dir. Every other
+        engine -- --selftest and its nested peers, run-script, the smokes, a GUI launched
+        under MOSH_SELFTEST_SESSION -- writes to its private property-storage dir and only
+        READS the owner's catalog as a seed, so it still sees the same plugins.
+
+        Sharing the files let concurrent harness runs consume each other's pedal mid-check,
+        and let a harness clear_plugin_blocklist rewrite the owner's real quarantines away
+        (re-enabling a crasher at the GUI's next launch). Same rule as
+        resolvePropertyStorageDir, for the plugin state that lived outside Settings.xml. */
+    inline PluginStateDirs resolvePluginStateDirs (const juce::File& ownerDirectory,
+                                                   const juce::File& privateDirectory,
+                                                   bool useOwnerSession,
+                                                   const juce::String& sessionBaseName)
+    {
+        if (useOwnerSession || sessionBaseName == kDeepScanSessionBase)
+            return { ownerDirectory, {} };
+        return { privateDirectory, ownerDirectory };
     }
 
     /** A per-process tag: pid (greppable against a live process) + a Uuid fragment

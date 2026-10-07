@@ -5,6 +5,7 @@ import { useSettings } from "../settings/store";
 import { settingsByCategory, type SettingDef } from "../settings/schema";
 import { settingHiddenForShell } from "../settings/shellVisibility";
 import { EngineSettings, AudioRouting, ProjectSettings } from "../settings/SettingsPanel";
+import { bufferSizeOptions, monitoringDelayLabel } from "../settings/routing";
 import { activeShell } from "../v2/shellFlag";
 import type { Snapshot } from "../types";
 import { useV3 } from "./shellState";
@@ -58,6 +59,10 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), [setOpen]);
   useEscapeToClose(open, close);
+  // The Buffer row offers what the open device reports it can run (list_audio_devices).
+  const audioDevices = useStore((s) => s.audioDevices);
+  const loadAudioDevices = useStore((s) => s.loadAudioDevices);
+  useEffect(() => { if (open) void loadAudioDevices(); }, [open, loadAudioDevices]);
   useEffect(() => {
     if (!open) return;
     const trigger = document.activeElement;
@@ -95,6 +100,7 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
 
   if (!open) return null;
   const session = snapshot.session;
+  const monitoringDelay = monitoringDelayLabel(snapshot.audio);
 
   return (
     <div className="modal-root" data-settings data-testid="v3-settings">
@@ -126,9 +132,15 @@ export function SettingsModal({ snapshot }: { snapshot: Snapshot }) {
             <label className="set-row"><span>Buffer</span>
               <select value={String(session.bufferSize ?? 512)}
                 onChange={(e) => void useStore.getState().exec("set_buffer_size", { bufferSize: Number(e.target.value) }).then(() => useStore.getState().refresh())}>
-                {[128, 256, 512, 1024].map((b) => <option key={b} value={b}>{b}</option>)}
+                {bufferSizeOptions(audioDevices, session.bufferSize).map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
             </label>
+            {monitoringDelay && (
+              <div className="set-row" data-testid="v3-monitoring-delay"
+                title="How long a sound takes from the microphone to the headphones, from what the audio devices report. Plugins on the track add their own.">
+                <span>Monitoring delay</span><span className="val">{monitoringDelay}</span>
+              </div>
+            )}
           </div>
 
           <div className="set-sec">
