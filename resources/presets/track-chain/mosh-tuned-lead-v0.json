@@ -1,0 +1,59 @@
+{
+  "kind": "mosh.track-chain",
+  "schema": 1,
+  "id": "mosh.tuned-lead",
+  "revision": 0,
+  "name": "Mosh Tuned Lead v0",
+  "provenance": {
+    "origin": "original",
+    "author": "Mosh",
+    "created": "2026-10-04",
+    "note": "An original Mosh recipe built only from processors already shipped in Mosh: Mosh AutoTune ahead of the Mosh Clean Lead v0 chain. Not derived from, a reconstruction of, or endorsed by any commercial preset.",
+    "rationale": "A starting point for the owner's listening pass, not a voiced result. AutoTune comes first so the pitch tracker hears the voice before the compressor shapes it. Chromatic, because a preset cannot know the song's key: set Root and Scale per song. Look-ahead is 0 so the chain is safe to sing through (about 1.8 ms). The high-pass and compressor are Mosh Clean Lead v0's values unchanged."
+  },
+  "validation": {
+    "engineering": "see docs/vocal-presets/TUNED-LEAD-2026-10-04.md",
+    "listening": "not-run",
+    "release": "internal-candidate"
+  },
+  "target": { "trackType": "audio" },
+  "stages": [
+    {
+      "processor": "moshAutoTune",
+      "state": {},
+      "bypassed": false,
+      "params": {
+        "root": { "value": 0, "unit": "semitones above C" },
+        "scale": { "value": 0, "unit": "scale index" },
+        "retune": { "value": 40, "unit": "ms" },
+        "amount": { "value": 100, "unit": "%" },
+        "range": { "value": 100, "unit": "cents" },
+        "mix": { "value": 100, "unit": "%" },
+        "output": { "value": 0, "unit": "dB" },
+        "glide": { "value": 100, "unit": "%" },
+        "lookahead": { "value": 0, "unit": "ms" }
+      }
+    },
+    {
+      "processor": "lowpass",
+      "state": { "mode": "highpass" },
+      "bypassed": false,
+      "params": {
+        "frequency": { "value": 80, "unit": "Hz" }
+      }
+    },
+    {
+      "processor": "compressor",
+      "state": { "sidechainTrigger": false },
+      "bypassed": false,
+      "params": {
+        "threshold": { "value": -24, "unit": "dB" },
+        "ratio": { "value": 2.5, "unit": ":1" },
+        "attack": { "value": 20, "unit": "ms" },
+        "release": { "value": 150, "unit": "ms" },
+        "output gain": { "value": 0, "unit": "dB" },
+        "input gain": { "value": 0, "unit": "dB" }
+      }
+    }
+  ]
+}

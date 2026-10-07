@@ -1,5 +1,8 @@
 #include "SelfTest.h"
 #include "selftest/MultiplayerAudioRefSelfTest.h"
+#include "selftest/TunedLeadPresetSelfTest.h"
+#include "selftest/VocalPresetSelfTest.h"
+#include "selftest/PluginPanelsSelfTest.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -7,6 +10,9 @@
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
+#include "plugins/moshfx/MoshLowPassPlugin.h"
+#include "plugins/moshfx/MoshFourOscPlugin.h"
+#include "plugins/moshfx/MoshSamplerPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Ids.h"
 #include "state/TakeIdentity.h"
@@ -176,6 +182,81 @@ namespace
         if (! ledger.existsAsFile()) return {};
         return mosh::agenttxn::unresolvedIdsIn (
             juce::StringArray::fromLines (ledger.loadFileAsString()));
+    }
+
+    /** True when `text` holds `token` as a WHOLE token: bounded on each side by the text's
+        edge or a character that is not a letter or digit. "1085", "id=1085", "[1085]" and
+        "track_1085" match; "9ab1085cd" does not, because a run of hex is one token. */
+    bool containsWholeToken (const juce::String& text, const juce::String& token)
+    {
+        if (token.isEmpty()) return false;
+        const auto isWord = [] (juce::juce_wchar c) { return juce::CharacterFunctions::isLetterOrDigit (c); };
+        for (int at = text.indexOf (token); at >= 0; at = text.indexOf (at + 1, token))
+        {
+            const int end = at + token.length();
+            if ((at == 0 || ! isWord (text[at - 1])) && (end >= text.length() || ! isWord (text[end])))
+                return true;
+        }
+        return false;
+    }
+
+    /** The path under `path` at which `v` carries `id` as data, or "" if it does not. */
+    juce::String varPlaceCarrying (const juce::var& v, const juce::String& path, const juce::String& id)
+    {
+        if (auto* o = v.getDynamicObject())
+        {
+            for (auto& p : o->getProperties())
+            {
+                const auto at = path + "/" + p.name.toString();
+                if (containsWholeToken (p.name.toString(), id)) return at + " (key)";
+                if (auto hit = varPlaceCarrying (p.value, at, id); hit.isNotEmpty()) return hit;
+            }
+            return {};
+        }
+        if (auto* a = v.getArray())
+        {
+            for (int i = 0; i < a->size(); ++i)
+                if (auto hit = varPlaceCarrying (a->getReference (i), path + "[" + juce::String (i) + "]", id);
+                    hit.isNotEmpty())
+                    return hit;
+            return {};
+        }
+        if (v.isString())
+            return containsWholeToken (v.toString(), id) ? path : juce::String();
+        // `revision` is the edit-revision counter, not a track id, but it shares their number
+        // space: bootstrap-refusal-txn's revision drifts run to run (1057..1093 in the ledgers
+        // on disk, 2026-09-30) around the fixture's id (1085), and five 2026-08-07 ledgers
+        // carry revision 1073 beside trackId 1073. Equality there is a coincidence.
+        if ((v.isInt() || v.isInt64() || v.isDouble()) && path != "/revision")
+            return id.containsOnly ("0123456789") && (double) v == id.getDoubleValue() ? path : juce::String();
+        return {};
+    }
+
+    /** Where the durable txn ledger carries `id` as DATA ("line N /key"), or "" if nowhere.
+        A substring test over the whole file is not exact for a short numeric id (the
+        2026-09-30 selftest flake): a revision can equal it (above), and the ledger is mostly
+        32-char MD5 hex (two fingerprints per txn record, up to six digests per request
+        record) that holds a given 4 digits in about 1 run in 130. So each line is parsed,
+        and every key and string value, at any depth, is checked for the id as a whole
+        token, and every number except `revision` for equality with it. A line that does not
+        parse — a torn crash tail — is scanned raw, token-wise, so malformed text cannot
+        hide a leak. */
+    juce::String whereLedgerCarries (const juce::String& ledgerText, const juce::String& id)
+    {
+        const auto lines = juce::StringArray::fromLines (ledgerText);
+        for (int n = 0; n < lines.size(); ++n)
+        {
+            const auto line = lines[n].trim();
+            if (line.isEmpty()) continue;
+            const auto record = juce::JSON::parse (line);
+            const auto where = record.getDynamicObject() != nullptr
+                                   ? varPlaceCarrying (record, {}, id)
+                                   : (containsWholeToken (line, id) ? juce::String ("(unparsed line)")
+                                                                    : juce::String());
+            if (where.isNotEmpty())
+                return "line " + juce::String (n + 1) + " " + where;
+        }
+        return {};
     }
 
     // A fixed filename in the shared, machine-wide system temp dir collides when two
@@ -1918,6 +1999,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // gate stays green on a box with zero .component files.
     section ("INS-002/INS-005: AU hosting + scan / blocklist");
     {
+        // Everything below blocks, unblocks and clears quarantines and arms a simulated
+        // crash pedal. A harness run must do that in its OWN plugin state dir: on the
+        // machine-wide ~/Library/Mosh copy, concurrent runs consumed each other's pedal
+        // (failing the FIT-003 checks below) and clear_plugin_blocklist wiped the owner's
+        // real quarantines out of the catalog the GUI loads at launch.
+        check (ops.pluginHostForScan().stateDirectory().isAChildOf (eng.sessionDir()),
+               "plugin catalog, block reasons and scan pedal are private to this run's session");
+
         // The AudioUnit format is registered (proves the JUCE_PLUGINHOST_AU flag is
         // live) -- machine-independent; the format object exists even with no AUs.
         bool auFormatRegistered = false;
@@ -2123,7 +2212,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (reason == "crash_or_hang",
                    "dead-mans-pedal recovery is tagged reason:\"crash_or_hang\" (not \"manual\")");
 
-            // Clean up: never leave a synthetic id in the shared, machine-wide catalog.
+            // Clean up: leave no synthetic id in this run's catalog.
             check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok (crash-recovery cleanup)");
             auto bl2 = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
             check (bl2.isArray() && bl2.size() == 0, "blocklist empty after crash-recovery cleanup");
@@ -3296,6 +3385,299 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // checks live in the separate runUndoSelfTest with its own fresh engine.
     }
 
+    // ─── Mosh AutoTune: real pitch correction, latency compensated ───
+    // docs/AUTOTUNE-SCOPE-2026-10-01.md. Renders a detuned, harmonic-rich tone with a
+    // click ahead of it through the real plugin and reads the stem back. The click is
+    // unvoiced, so it passes at exactly the plugin's latency: it lands on time only if
+    // the reported latency is right and the render compensates for it. This proves the
+    // wiring, not how a voice sounds.
+    section ("Mosh AutoTune: pitch correction through the plugin");
+    {
+        const double fixtureRate = 48000.0;
+        const double detunedHz = 220.0 * std::pow (2.0, 35.0 / 1200.0); // A3 + 35 cents
+        auto makeFixture = [&] () -> File
+        {
+            const int n = (int) (2.0 * fixtureRate);
+            juce::AudioBuffer<float> buf (1, n);
+            buf.clear();
+            const int clickAt = (int) (0.25 * fixtureRate);
+            for (int i = 0; i < 48; ++i)
+                buf.setSample (0, clickAt + i, 0.8f * (1.0f - (float) i / 48.0f) * (i % 2 == 0 ? 1.0f : -1.0f));
+            const int toneStart = (int) (0.5 * fixtureRate), toneEnd = (int) (1.9 * fixtureRate);
+            const int fade = (int) (0.02 * fixtureRate);
+            for (int i = toneStart; i < toneEnd; ++i)
+            {
+                const double phase = juce::MathConstants<double>::twoPi * detunedHz * (double) (i - toneStart) / fixtureRate;
+                double v = 0.0;
+                for (int h = 1; h <= 10; ++h)
+                    v += std::sin (h * phase) / h;
+                const double env = juce::jmin (1.0, (double) (i - toneStart) / fade, (double) (toneEnd - 1 - i) / fade);
+                buf.setSample (0, i, (float) (0.2 * v * env));
+            }
+            auto dir = eng.sessionDir().getChildFile ("autotune-test");
+            dir.createDirectory();
+            auto f = dir.getChildFile ("detuned-vowel.wav");
+            f.deleteFile();
+            juce::WavAudioFormat fmt;
+            if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (os.get(), fixtureRate, 1u, 24, {}, 0));
+                if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, n); }
+            }
+            return f;
+        };
+
+        struct Stem { std::vector<float> samples; double rate = 0.0; };
+        auto renderStem = [&] (const String& trackId, const String& leaf) -> Stem
+        {
+            Stem stem;
+            auto dir = selftestTempPath (eng, leaf);
+            dir.deleteRecursively();
+            auto exp = cmd (ops, "export_stems", objN ({{ "dir", dir.getFullPathName() }}));
+            if (auto* arr = exp["data"].getProperty ("stems", var()).getArray())
+                for (auto& st : *arr)
+                    if (st.getProperty ("trackId", var()).toString() == trackId)
+                    {
+                        AudioFormatManager fm; fm.registerBasicFormats();
+                        std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (File (st.getProperty ("file", var()).toString())));
+                        if (reader != nullptr && reader->lengthInSamples > 0)
+                        {
+                            const int count = (int) reader->lengthInSamples;
+                            AudioBuffer<float> buf ((int) reader->numChannels, count);
+                            reader->read (&buf, 0, count, 0, true, true);
+                            stem.rate = reader->sampleRate;
+                            stem.samples.resize ((size_t) count);
+                            for (int i = 0; i < count; ++i)
+                            {
+                                float sum = 0.0f;
+                                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                                    sum += buf.getSample (ch, i);
+                                stem.samples[(size_t) i] = sum / (float) buf.getNumChannels();
+                            }
+                        }
+                    }
+            dir.deleteRecursively();
+            return stem;
+        };
+        // Time of the largest sample in [0.15 s, 0.40 s): the click.
+        auto clickSeconds = [] (const Stem& stem) -> double
+        {
+            if (stem.rate <= 0.0) return -1.0;
+            const size_t from = (size_t) (0.15 * stem.rate), to = juce::jmin (stem.samples.size(), (size_t) (0.40 * stem.rate));
+            size_t best = from;
+            for (size_t i = from; i < to; ++i)
+                if (std::abs (stem.samples[i]) > std::abs (stem.samples[best])) best = i;
+            return (double) best / stem.rate;
+        };
+        // Autocorrelation pitch over [1.0 s, 1.6 s), searched only around A3.
+        auto toneHz = [] (const Stem& stem) -> double
+        {
+            if (stem.rate <= 0.0 || stem.samples.size() < (size_t) (1.7 * stem.rate)) return 0.0;
+            const float* x = stem.samples.data() + (size_t) (1.0 * stem.rate);
+            const int n = (int) (0.6 * stem.rate);
+            const int minLag = (int) (stem.rate / 260.0), maxLag = (int) (stem.rate / 180.0);
+            auto corr = [&] (int lag) { double sum = 0.0; for (int i = 0; i + lag < n; ++i) sum += (double) x[i] * x[i + lag]; return sum / (double) (n - lag); };
+            int best = minLag; double bestValue = -1.0e30;
+            for (int lag = minLag; lag <= maxLag; ++lag) { const double c = corr (lag); if (c > bestValue) { bestValue = c; best = lag; } }
+            const double a = corr (best - 1), b = corr (best), c = corr (best + 1);
+            const double denom = a - 2.0 * b + c;
+            return stem.rate / ((double) best + (std::abs (denom) > 1.0e-12 ? 0.5 * (a - c) / denom : 0.0));
+        };
+        // Level of one frequency over the same span (Hann-weighted).
+        auto levelAt = [] (const Stem& stem, double hz) -> double
+        {
+            if (stem.rate <= 0.0 || stem.samples.size() < (size_t) (1.7 * stem.rate)) return 0.0;
+            const float* x = stem.samples.data() + (size_t) (1.0 * stem.rate);
+            const int n = (int) (0.6 * stem.rate);
+            double re = 0.0, im = 0.0, weight = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                const double w = 0.5 * (1.0 - std::cos (juce::MathConstants<double>::twoPi * i / (n - 1)));
+                const double angle = juce::MathConstants<double>::twoPi * hz * i / stem.rate;
+                re += w * x[i] * std::cos (angle); im -= w * x[i] * std::sin (angle); weight += w;
+            }
+            return 2.0 * std::sqrt (re * re + im * im) / juce::jmax (weight, 1.0e-12);
+        };
+        auto cents = [] (double hz, double ref) { return hz > 0.0 ? 1200.0 * std::log2 (hz / ref) : 1.0e9; };
+
+        auto fixture = makeFixture();
+        check (fixture.existsAsFile(), "AutoTune fixture synthesized (click + detuned harmonic tone)");
+        auto at = cmd (ops, "create_track", args1 ("name", "AutoTune Render"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "import_clip", objN ({{ "trackId", at }, { "file", fixture.getFullPathName() }}))), "AutoTune fixture imported");
+
+        auto atLoad = cmd (ops, "load_builtin", objN ({{ "trackId", at }, { "type", "moshAutoTune" }}));
+        const int atIdx = (int) atLoad["data"].getProperty ("index", -1);
+        check (ok (atLoad) && atIdx >= 0, "AutoTune loaded on the fixture track");
+
+        bool hasGlide = false, hasLookahead = false; int paramCount = 0;
+        { auto trk = trackById (at);
+          if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == atIdx)
+                if (auto* params = p.getProperty ("params", var()).getArray())
+                {
+                    paramCount = params->size();
+                    if (paramCount > 7) hasGlide = params->getReference (7).getProperty ("name", var()).toString() == "Glide";
+                    if (paramCount > 8) hasLookahead = params->getReference (8).getProperty ("name", var()).toString() == "Look-ahead";
+                } }
+        check (paramCount == 9, "AutoTune exposes nine params (seven original + Glide + Look-ahead)");
+        check (hasGlide && hasLookahead, "AutoTune's new params are appended as Glide then Look-ahead");
+
+        // Key and scale are menus, not sliders: stepped, with every choice named, and the
+        // other controls read back in their own units instead of a bare 0-1 number.
+        {
+            auto atParam = [&] (int paramIndex) -> var
+            {
+                auto trk = trackById (at);
+                if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                    for (auto& p : *arr)
+                        if ((int) p.getProperty ("index", -1) == atIdx)
+                            if (auto* params = p.getProperty ("params", var()).getArray())
+                                if (paramIndex < params->size())
+                                    return params->getReference (paramIndex);
+                return {};
+            };
+            auto shown = [&] (int paramIndex) { return atParam (paramIndex).getProperty ("display", var()).toString(); };
+            auto choice = [&] (int paramIndex, int i) { return atParam (paramIndex).getProperty ("choices", var())[i].toString(); };
+
+            const auto key = atParam (0), scale = atParam (1);
+            check (key.getProperty ("name", var()).toString() == "Key", "AutoTune's first control is named Key");
+            check ((bool) key.getProperty ("discrete", false) && (int) key.getProperty ("states", 0) == 12
+                   && key.getProperty ("choices", var()).size() == 12,
+                   "Key is a stepped control with twelve named choices");
+            check (choice (0, 0) == "C" && choice (0, 7) == "G" && choice (0, 10) == "A#/Bb" && choice (0, 11) == "B",
+                   "Key's choices are the twelve notes in order from C");
+            check (shown (0) == "C", "a new AutoTune is in C");
+            check ((bool) scale.getProperty ("discrete", false) && (int) scale.getProperty ("states", 0) == 3
+                   && choice (1, 0) == "Chromatic" && choice (1, 1) == "Major" && choice (1, 2) == "Minor",
+                   "Scale is a stepped control: Chromatic, Major, Minor");
+            check (shown (1) == "Chromatic", "a new AutoTune is chromatic");
+            check (shown (2) == "80 ms" && shown (3) == "100 %" && shown (4) == "100 cents" && shown (5) == "100 %"
+                   && shown (6) == "0.0 dB" && shown (7) == "100 %" && shown (8) == "0.0 ms",
+                   "the other controls read back in units (retune \"" + shown (2) + "\", output \"" + shown (6) + "\")");
+
+            // A menu sends the exact position of a choice.
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 0 }, { "value", 7.0 / 11.0 }}))),
+                   "set Key to its eighth choice");
+            check (shown (0) == "G", "Key reads G");
+            // Anything else (an old slider position, an automation point) lands on the nearest note.
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 0 }, { "value", 0.80 }}))),
+                   "set Key between two notes");
+            check (shown (0) == "A" && std::abs ((double) atParam (0).getProperty ("value", -1.0) - 9.0 / 11.0) < 1.0e-4,
+                   "a value between two notes snaps to the nearest (0.80 -> A, stored exactly on it)");
+            check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 1 }, { "value", 0.5 }}))),
+                   "set Scale to its middle choice");
+            check (shown (1) == "Major", "Scale reads Major");
+            check (ok (cmd (ops, "undo")) && shown (1) == "Chromatic", "undo puts the scale back to Chromatic");
+            check (ok (cmd (ops, "undo")) && shown (0) == "G", "undo puts the key back to G");
+            check (ok (cmd (ops, "undo")) && shown (0) == "C", "undo puts the key back to C");
+        }
+
+        // The live note display's feed (the 30 Hz "tuner" rail reads this). A headless run
+        // has no audio thread, so the plugin on the track is driven by hand, block by block,
+        // the way the playback graph's PluginNode drives it.
+        auto tunerOnTrack = [&] () -> MoshAutoTunePlugin*
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == at)
+                {
+                    const auto chain = t->pluginList.getPlugins();
+                    if (atIdx >= 0 && atIdx < chain.size())
+                        return dynamic_cast<MoshAutoTunePlugin*> (chain[atIdx].get());
+                }
+            return nullptr;
+        };
+        // `hz` <= 0 is silence. A harmonic tone, because that is what a voice is.
+        auto singThroughTuner = [&] (double hz, double seconds)
+        {
+            auto* tuner = tunerOnTrack();
+            if (tuner == nullptr) return false;
+            const double rate = 48000.0;
+            const int block = 256;
+            juce::AudioBuffer<float> io (1, (int) (seconds * rate));
+            for (int i = 0; i < io.getNumSamples(); ++i)
+            {
+                double v = 0.0;
+                if (hz > 0.0)
+                    for (int h = 1; h <= 6; ++h)
+                        v += std::sin (juce::MathConstants<double>::twoPi * hz * h * i / rate) / h;
+                io.setSample (0, i, (float) (0.2 * v));
+            }
+            tuner->baseClassInitialise ({ tracktion::TimePosition(), rate, block });
+            const auto layout = juce::AudioChannelSet::mono();
+            for (int start = 0; start < io.getNumSamples(); start += block)
+            {
+                const int n = juce::jmin (block, io.getNumSamples() - start);
+                const tracktion::TimeRange time (tracktion::TimePosition::fromSeconds (start / rate),
+                                                 tracktion::TimePosition::fromSeconds ((start + n) / rate));
+                te::PluginRenderContext context (&io, layout, start, n, nullptr, 0.0, time,
+                                                 /*playing*/ true, /*scrubbing*/ false, /*rendering*/ true,
+                                                 /*allowBypassedProcessing*/ false);
+                tuner->applyToBufferWithAutomation (context);
+            }
+            tuner->baseClassDeinitialise();
+            return true;
+        };
+        auto liveTuners = [&] { return ops.tunerReadings().getProperty ("tuners", var()); };
+
+        check (liveTuners().size() == 0, "an AutoTune that has processed no audio reports no live pitch");
+        check (singThroughTuner (detunedHz, 0.5), "a held A3 + 35 cents was put through the tuner");
+        {
+            const auto live = liveTuners();
+            check (live.size() == 1, "one tuner reports a live pitch while it is being sung through");
+            const auto reading = live.size() > 0 ? live[0] : var();
+            check (reading.getProperty ("trackId", var()).toString() == at
+                   && (int) reading.getProperty ("index", -1) == atIdx,
+                   "the reading names its track and its place in the chain, as the snapshot does");
+            const double heardHz = (double) reading.getProperty ("inputHz", 0.0);
+            const double pulledToHz = (double) reading.getProperty ("targetHz", 0.0);
+            check (std::abs (cents (heardHz, detunedHz)) < 8.0,
+                   "it hears the sung pitch (" + String (heardHz, 2) + " Hz for " + String (detunedHz, 2) + " Hz)");
+            check (std::abs (cents (pulledToHz, 220.0)) < 0.5,
+                   "and it is pulling to A3 (" + String (pulledToHz, 2) + " Hz)");
+            check ((double) reading.getProperty ("confidence", 0.0) > 0.5, "with a confident detection");
+        }
+        check (liveTuners().size() == 0,
+               "asked again with no new audio, the reading is gone (a stale pitch is never shown as current)");
+        check (singThroughTuner (0.0, 0.3) && liveTuners().size() == 0, "silence through the tuner is no pitch");
+        check (singThroughTuner (detunedHz, 0.5) && liveTuners().size() == 1, "and the pitch comes back with the voice");
+
+        // Hard tune, and the longest look-ahead so the reported latency is large
+        // enough (about 14 ms) that a missing compensation cannot hide.
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 2 }, { "value", 0.0 }}))), "AutoTune retune set to hard");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", at }, { "index", atIdx }, { "paramIndex", 8 }, { "value", 1.0 }}))), "AutoTune look-ahead set to maximum");
+
+        const auto wet = renderStem (at, "autotune-wet");
+        check (! wet.samples.empty(), "AutoTune wet stem rendered");
+
+        // The bypassed render is the reference: same track, same clip, no plugin and
+        // no latency claimed. (Each stem export renders every track, so two are enough.)
+        check (ok (cmd (ops, "bypass_plugin", objN ({{ "trackId", at }, { "index", atIdx }, { "bypassed", true }}))), "AutoTune bypassed");
+        const auto dry = renderStem (at, "autotune-bypassed");
+        check (! dry.samples.empty(), "AutoTune bypassed stem rendered");
+        check (singThroughTuner (detunedHz, 0.5) && liveTuners().size() == 0,
+               "a bypassed AutoTune reports no live pitch, whatever is sung at it");
+        const double dryHz = toneHz (dry);
+        const double dryClick = clickSeconds (dry);
+        check (std::abs (cents (dryHz, detunedHz)) < 3.0, "bypassed AutoTune leaves the pitch alone (A3 + 35 cents)");
+        check (std::abs (dryClick - 0.25) < 0.002, "bypassed AutoTune adds no delay: the click is where the fixture put it");
+
+        const double wetHz = toneHz (wet);
+        check (std::abs (cents (wetHz, 220.0)) < 6.0,
+               "AutoTune pulls the +35 cent tone onto A3 (output " + String (wetHz, 2) + " Hz)");
+        check (std::abs (clickSeconds (wet) - dryClick) < 0.0005,
+               "AutoTune's latency is reported and compensated: the click lands within 0.5 ms of the bypassed render");
+        bool keepsHarmonics = dryHz > 0.0 && wetHz > 0.0;
+        for (int h = 2; h <= 5 && keepsHarmonics; ++h)
+        {
+            const double before = levelAt (dry, h * dryHz), after = levelAt (wet, h * wetHz);
+            keepsHarmonics = before > 0.0 && after > 0.0 && std::abs (20.0 * std::log10 (after / before)) < 3.0;
+        }
+        check (keepsHarmonics, "AutoTune output keeps harmonics 2-5 within 3 dB (it shifts the voice, it does not replace it)");
+
+        // Leave no latency behind for the sections that follow.
+        check (ok (cmd (ops, "remove_track", args1 ("trackId", at))), "AutoTune fixture track removed");
+    }
+
     // ─── R3.3: highpass + softclip built-ins ───
     // "highpass" is not its own Tracktion xmlTypeName — it's te::LowPassPlugin
     // (xmlTypeName "lowpass") flipped into high-pass mode by load_builtin/
@@ -3410,6 +3792,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (lp->mode.get() == "highpass", "underlying MASTER LowPassPlugin.mode is \"highpass\"");
             check (std::abs (lp->frequencyValue.get() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin.frequency is 180 Hz");
             check (std::abs (lp->frequency->getCurrentValue() - 180.0f) < 0.01f, "underlying MASTER LowPassPlugin frequency PARAMETER is 180 Hz");
+            // Shadow guard (MoshEngine.cpp, autoInitialiseDeviceManager): a master
+            // high-pass is Mosh's slope-capable filter too, and shows its slope read-only
+            // (set_plugin_state is track-only).
+            check (dynamic_cast<MoshLowPassPlugin*> (lp) != nullptr, "a load_master_builtin highpass is a MoshLowPassPlugin");
+            check ((int) hpMasterEntry["state"]["slope"]["value"] == 12, "the master highpass snapshot shows state.slope 12 dB/oct");
         }
         else
             check (false, "master highpass plugin resolves to a live te::LowPassPlugin");
@@ -3466,16 +3853,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (r33NonSilent, "R3.3 render through highpass+softclip is non-silent");
         r33Out.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
+        // The slope persists: 24 dB/oct on the track high-pass survives save/reload, as
+        // the plugin property moshFilterSlope, on a reloaded MoshLowPassPlugin.
+        check (ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", rt }, { "index", hpIdxFinal }, { "key", "slope" }, { "value", 24 }})))
+                   && (int) trackBuiltin ("highpass")["state"]["slope"]["value"] == 24,
+               "set_plugin_state slope 24 dB/oct on the track highpass before save");
         const auto trackReadbackBeforeReload = JSON::toString (trackBuiltin ("highpass")["params"]);
         const auto masterReadbackBeforeReload = JSON::toString (masterBuiltin ("highpass")["params"]);
+        // A 4OSC rides the same save/reload: it must come back as Mosh's metered subclass,
+        // with its state keys and all 68 parameters (ids, ranges) exactly as saved.
+        const auto oscTrack = cmd (ops, "create_track", args1 ("name", "R3.3 4OSC"))["data"].getProperty ("trackId", var()).toString();
+        const int oscIdx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", oscTrack }, { "type", "4osc" }}))["data"].getProperty ("index", -1);
+        auto oscEntry = [&] () -> var {
+            auto plugins = trackById (oscTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if ((int) plugins[i].getProperty ("index", -1) == oscIdx) return plugins[i];
+            return var();
+        };
+        check (oscIdx >= 0
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "filterType" }, { "value", "lowpass" }})))
+                   && ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "key", "waveShape2" }, { "value", "saw" }})))
+                   && ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", oscTrack }, { "index", oscIdx }, { "paramIndex", 40 }, { "value", 0.5 }}))),
+               "a 4OSC with filterType lowpass, osc 2 saw and Amp Attack 0.5 before save");
+        const auto oscParamsBeforeReload = JSON::toString (oscEntry()["params"]);
+        const auto oscStateBeforeReload = JSON::toString (oscEntry()["state"]);
+        // A drum track's sampler rides it too: back as Mosh's metered subclass, with
+        // plugin.sampler (its sounds, a muted pad's parked level) exactly as saved.
+        const auto drumTrack = cmd (ops, "create_track", objN ({{ "name", "R3.3 Drums" }, { "type", "drum" }}))["data"].getProperty ("trackId", var()).toString();
+        auto samplerEntry = [&] () -> var {
+            auto plugins = trackById (drumTrack).getProperty ("plugins", var());
+            for (int i = 0; i < plugins.size(); ++i)
+                if (plugins[i].getProperty ("type", var()).toString() == "sampler") return plugins[i];
+            return var();
+        };
+        check (drumTrack.isNotEmpty()
+                   && ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "gainDb", -6.0 }})))
+                   && ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", drumTrack }, { "note", 38 }, { "mute", true }})))
+                   && samplerEntry()["sampler"]["sounds"].size() == 8,
+               "a drum track (8 pads) with the snare at -6 dB and its lane muted before save");
+        const auto samplerBeforeReload = JSON::toString (samplerEntry()["sampler"]);
         check (ok (cmd (ops, "save")), "save parameter readback fixture ok");
         check (ok (cmd (ops, "reload")), "reload parameter readback fixture ok");
+        {
+            te::Plugin* reloadedOsc = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == oscTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    if (oscIdx >= 0 && oscIdx < plugins.size())
+                        reloadedOsc = plugins[oscIdx].get();
+                }
+            check (dynamic_cast<MoshFourOscPlugin*> (reloadedOsc) != nullptr,
+                   "the reloaded 4OSC is a MoshFourOscPlugin (shadow registered before the session loaded)");
+            const auto reloaded = oscEntry();
+            check (reloaded["params"].size() == 68 && JSON::toString (reloaded["params"]) == oscParamsBeforeReload
+                       && JSON::toString (reloaded["state"]) == oscStateBeforeReload
+                       && reloaded["state"]["filterType"]["value"].toString() == "lowpass"
+                       && reloaded["state"]["waveShape2"]["value"].toString() == "saw",
+                   "the reloaded 4OSC keeps its 68 parameters and its state (filterType lowpass, osc 2 saw) exactly");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", oscTrack))), "R3.3 4OSC track removed");
+
+            const auto drums = samplerEntry();
+            te::Plugin* reloadedSampler = nullptr;
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t != nullptr && t->itemID.toString() == drumTrack)
+                {
+                    auto plugins = t->pluginList.getPlugins();
+                    const int index = (int) drums.getProperty ("index", -1);
+                    if (index >= 0 && index < plugins.size())
+                        reloadedSampler = plugins[index].get();
+                }
+            check (dynamic_cast<MoshSamplerPlugin*> (reloadedSampler) != nullptr,
+                   "the reloaded sampler is a MoshSamplerPlugin (shadow registered before the session loaded)");
+            const auto snare = drums["sampler"]["sounds"][1];
+            check (JSON::toString (drums["sampler"]) == samplerBeforeReload && (int) snare["pitch"] == 38 && (bool) snare["silenced"]
+                       && std::abs ((double) snare["userGainDb"] + 6.0) < 1.0e-6 && std::abs ((double) snare["gainDb"] + 48.0) < 1.0e-6,
+                   "the reloaded sampler keeps plugin.sampler exactly (the muted snare: silenced, live -48 dB, userGainDb -6)");
+            check (ok (cmd (ops, "remove_track", args1 ("trackId", drumTrack))), "R3.3 drum track removed");
+        }
         check (trackBuiltin ("highpass")["params"][0]["display"].toString() == "8806 Hz"
                    && JSON::toString (trackBuiltin ("highpass")["params"]) == trackReadbackBeforeReload,
                "reloaded track highpass retains normalized value, display and physical limits");
         check (masterBuiltin ("highpass")["params"][0]["display"].toString() == "180 Hz"
                    && JSON::toString (masterBuiltin ("highpass")["params"]) == masterReadbackBeforeReload,
                "reloaded master highpass retains normalized value, display and physical limits");
+        {
+            const auto reloaded = trackBuiltin ("highpass");
+            check ((int) reloaded["state"]["slope"]["value"] == 24 && (int) reloaded["state"]["slope"]["step"] == 6,
+                   "reloaded track highpass keeps state.slope 24 dB/oct (step 6)");
+            auto* m = dynamic_cast<MoshLowPassPlugin*> (liveTrackLowPass ((int) reloaded.getProperty ("index", -1)));
+            check (m != nullptr, "the reloaded track highpass is a MoshLowPassPlugin (shadow registered before the session loaded)");
+            if (m != nullptr)
+                check (m->getSlope() == 24 && (int) m->state.getProperty (MoshLowPassPlugin::slopePropertyId(), 0) == 24,
+                       "...running at 24 dB/oct, saved as moshFilterSlope = 24");
+            auto* master = dynamic_cast<MoshLowPassPlugin*> (liveMasterLowPass ((int) masterBuiltin ("highpass").getProperty ("index", -1)));
+            check (master != nullptr && master->getSlope() == 12 && ! master->state.hasProperty (MoshLowPassPlugin::slopePropertyId()),
+                   "the reloaded master highpass is a MoshLowPassPlugin at 12 dB/oct with no slope property written");
+        }
 
         // Leave the master bus as we found it: the next section ("Master bus plugins")
         // asserts it starts empty, and this section's redo'd highpass + softclip were
@@ -3489,6 +3963,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! masterBuiltin ("softclip").isObject() && ! masterBuiltin ("highpass").isObject(),
                "R3.3 cleanup: master bus carries no R3.3 builtins afterwards");
     }
+
+    // ─── Native plugin panels: the engine seam the V3 inspector panels draw from ───
+    // itemId, physical ranges, `state` + set_plugin_state, gesture coalescing, and the
+    // "plugin_meters" rail (incl. the guard that a loaded "compressor" is Mosh's metered
+    // subclass, i.e. Tracktion's init order still lets Mosh register first). Own track,
+    // removed at the end. See src/app/selftest/PluginPanelsSelfTest.cpp.
+    runPluginPanelsSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); } });
 
     // ─── reorder_plugin: chain ordering + undo + out-of-bounds clamp (was 0-ref) ───
     section ("PLG reorder: plugin chain ordering (reorder_plugin)");
@@ -4680,6 +5163,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto rbi = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
         check (! ok (rbi), "bypassing the INSTRUMENT -> render refuses (silent bounce guard; no stale render served)");
         cmd (ops, "bypass_plugin", objN ({{ "trackId", mt }, { "index", instIdx }, { "bypassed", false } }));
+
+        // A CachedValue-only setting (set_plugin_state; here the low-pass slope) is in the
+        // source signature too: an edit is a cache MISS. (Until 2026-10-05 the signature
+        // hashed only names, bypass and parameters, so a slope, filter mode, delay length
+        // or chorus edit served the stale render.) A layer caches ONE render, its latest
+        // (node cacheKey == fingerprint), so going back to 12 re-renders once and only the
+        // identical re-render after it HITs; that the key itself returns exactly to its
+        // earlier value is PluginPanelsSelfTest's signature section.
+        {
+            auto lpLoad = cmd (ops, "load_builtin", objN ({{ "trackId", mt }, { "type", "lowpass" }}));
+            check (ok (lpLoad), "load_builtin (lowpass FX) on the MIDI track ok");
+            const int lpIdx = (int) lpLoad["data"].getProperty ("index", -1);
+            auto renderCache = [&]
+            {
+                auto r = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+                return r["data"].getProperty ("cache", var()).toString();
+            };
+            auto slopeTo = [&] (int dbPerOct)
+            {
+                return ok (cmd (ops, "set_plugin_state", objN ({{ "trackId", mt }, { "index", lpIdx }, { "key", "slope" }, { "value", dbPerOct }})));
+            };
+            check (renderCache() == "miss", "adding the low-pass -> source signature changed -> cache MISS");
+            check (renderCache() == "hit", "an identical re-render with the low-pass is a cache HIT");
+            check (slopeTo (24), "set_plugin_state slope 24 dB/oct on the MIDI track's low-pass ok");
+            check (renderCache() == "miss", "a slope edit (state only, no parameter) -> cache MISS (no stale render served)");
+            check (renderCache() == "hit", "an identical re-render at 24 dB/oct is a cache HIT");
+            check (slopeTo (12), "slope back to 12 dB/oct");
+            check (renderCache() == "miss", "slope back to 12 -> MISS (the layer cached only its latest, 24 dB/oct, render)");
+            check (renderCache() == "hit", "...and the identical re-render at 12 dB/oct HITs");
+            check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", mt }, { "index", lpIdx }}))), "remove the low-pass again");
+        }
 
         // Phase 2 — a MIDI/drum re-imagine AUTO-APPLIES beneath the clip: the source MIDI is muted
         // and a HIDDEN, instrument-free audio render plays in its place. The hidden track is EXCLUDED
@@ -6040,8 +6554,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 // ── USER kit library (~/Library/Mosh/kits; env-pointed here so the
                 // harness never reads or depends on the real user library) ──
                 {
-                    auto userRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                        .getChildFile ("selftest-user-kits");
+                    auto userRoot = selftestTempPath (eng, "selftest-user-kits");
                     auto kitDir = userRoot.getChildFile ("selftest-user-kit");
                     kitDir.createDirectory();
                     // Two REAL pads copied from the bundled kit found above — a partial
@@ -6128,8 +6641,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             }
 
             // Wrong-family refusal: a .vital preset must never touch a 4OSC-only track.
-            auto tmpVital = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                .getChildFile ("selftest-refusal.vital");
+            auto tmpVital = selftestTempPath (eng, "selftest-refusal.vital");
             tmpVital.replaceWithText ("{}");
             check (! ok (cmd (ops, "load_preset", objN ({{ "trackId", mt }, { "file", tmpVital.getFullPathName() }}))),
                    "a .vital preset is refused on a track without Vital");
@@ -6211,12 +6723,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // palette-v2 manifest. UI-only by design (the loop model never sees command result
     // data — StepCommandResult carries {command, ok, error} only, ui/src/agent/loopSeam.ts):
     // this proves the CONTRACT the produce-lane preflight/picker (drumPalette.ts) depends
-    // on, not agent reachability. Hermetic: builds its own manifest under tempDirectory so
-    // it never reads or depends on the real ~/Library/Mosh/palette-v2.
+    // on, not agent reachability. Hermetic: builds its own manifest under a per-process temp
+    // dir so it never reads or depends on the real ~/Library/Mosh/palette-v2 — nor races a
+    // concurrent selftest's deleteRecursively() of the same fixture.
     section ("list_palette (W2.2 produce-lane data seam)");
     {
-        auto tmpDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                          .getChildFile ("selftest-palette");
+        auto tmpDir = selftestTempPath (eng, "selftest-palette");
         tmpDir.deleteRecursively();
         tmpDir.createDirectory();
 
@@ -16168,6 +16680,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                                     objN ({ { "trackId", mt }, { "seconds", 2.0 }, { "freq", 220.0 } })), "clipId");
         const auto eqR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "4bandEq" } }));
         const int  eqIx = (int) eqR.getProperty ("data", var()).getProperty ("index", -1);
+        // A chorus for the set_plugin_state row (its settings are CachedValue-only state).
+        const auto chR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "chorus" } }));
+        const int  chIx = (int) chR.getProperty ("data", var()).getProperty ("index", -1);
+        check (chIx >= 0, "matrix fixture: chorus loaded for the set_plugin_state row");
         const auto mmt  = rid (cmd (ops, "create_track", args1 ("name", "MxMidi")), "trackId");
         const auto mmc  = rid (cmd (ops, "add_midi_clip",
                                     objN ({ { "trackId", mmt }, { "start", 0.0 }, { "length", 4.0 } })), "clipId");
@@ -16245,6 +16761,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "load_builtin",         objN ({ { "trackId", mt }, { "type", "compressor" } }) },
             { "bypass_plugin",        objN ({ { "trackId", mt }, { "index", eqIx }, { "bypassed", true } }) },
             { "set_plugin_param",     objN ({ { "trackId", mt }, { "index", eqIx }, { "paramIndex", 0 }, { "value", 0.7 } }) },
+            { "set_plugin_state",     objN ({ { "trackId", mt }, { "index", chIx }, { "key", "depthMs" }, { "value", 7.5 } }) },
             { "add_automation_point", objN ({ { "trackId", mt }, { "pluginIndex", eqIx }, { "paramIndex", 0 },
                                               { "time", 1.0 }, { "value", 0.5 } }) },
             { "set_master_volume",    objN ({ { "db", -5.0 } }) },
@@ -16981,7 +17498,27 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ledgerText.contains ("\"args\"") == false, "no args key");
         check (ledgerText.contains ("trackId") == false, "no trackId");
         check (ledgerText.contains ("/Users/") == false, "no owner-home path");
-        check (ledgerText.contains (tid) == false, "not even the fixture's own track id");
+        const auto tidPlace = whereLedgerCarries (ledgerText, tid);
+        check (tidPlace.isEmpty(), "not even the fixture's own track id"
+                                       + (tidPlace.isEmpty() ? juce::String() : " (found at " + tidPlace + ")"));
+
+        // EXACTNESS, proven both ways with the fixture's REAL id. A digest that happens to
+        // contain the id's digits and a revision equal to it are coincidences: the old
+        // `ledgerText.contains (tid)` trips on this line, the field check must not.
+        const auto coincidence = "{\"v\": 1, \"transactionId\": \"txn-x\", \"revision\": " + tid
+                               + ", \"fingerprint\": \"9f" + tid + "e0c4d1b27a6f38e5c0d9a4b1f7\""
+                               + ", \"transactionKey\": \"request-" + tid + "ab12cd34\"}";
+        check (coincidence.contains (tid), "…the old substring check DOES trip on a digest/revision collision");
+        check (whereLedgerCarries (coincidence, tid).isEmpty(),
+               "…the field check does not (digits inside a digest, a revision equal to the id)");
+        // …and it still catches the id wherever it really is data.
+        for (const auto& leak : { "{\"v\": 1, \"target\": \"" + tid + "\"}",
+                                  "{\"v\": 1, \"note\": \"moved track " + tid + " to -3 dB\"}",
+                                  "{\"v\": 1, \"applied\": " + tid + "}",
+                                  "{\"v\": 1, \"steps\": [{\"t\": \"" + tid + "\"}]}",
+                                  "{\"v\": 1, \"" + tid + "\": true}",
+                                  "{\"v\": 1, \"target\": \"" + tid })   // torn: does not parse
+            check (whereLedgerCarries (leak, tid).isNotEmpty(), "yet the id IS caught as data: " + leak);
 
         // The RESTART-BLOCK fixture. An unresolved transaction is exactly what a crash
         // leaves behind: a `begin` record with no terminal record after it. Read the ledger
@@ -17071,6 +17608,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               "…and the create_track step it DID apply was undone along with the rest of the batch");
     }
 
+    // Track-chain presets ("Mosh Clean Lead v0"). LAST in the core run on purpose: it
+    // opens a clean project so its renders contain the preset track and nothing else,
+    // and nothing it creates can shift the ids or revision counters earlier sections
+    // assert on. Its own sections cover what a matrix row would (one undo restores the
+    // canonical snapshot; the state survives save/reload) — see VocalPresetSelfTest.cpp.
+    runVocalPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
+    // "Mosh Tuned Lead v0": Mosh AutoTune as a preset stage. Straight after, in the same
+    // clean project, so it is equally unable to shift ids earlier sections assert on.
+    runTunedLeadPresetSelfTest (
+        eng, ops, { [] (const String& name) { section (name); },
+                    [] (bool condition, const String& message) { check (condition, message); },
+                    [&eng] (const String& leaf) { return selftestTempPath (eng, leaf); } });
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
@@ -17115,6 +17669,45 @@ int runUndoSelfTest (MoshEngine&, MoshOps& ops)
     check (trackClips (firstTrack (ops)) == 1, "redo restored clip");
     check (ok (cmd (ops, "redo")), "redo render layer command ok");
     check ((bool) firstTrack (ops)["clips"][0].getProperty ("hasRenderLayer", false), "redo restored render layer");
+
+    // ── Native plugin panels: set_plugin_state and gesture coalescing undo/redo ──
+    {
+        const auto probe = firstTrack (ops).getProperty ("id", var()).toString();
+        const int delayIx = (int) cmd (ops, "load_builtin", objN ({{ "trackId", probe }, { "type", "delay" }}))["data"]
+                                      .getProperty ("index", -1);
+        check (delayIx >= 0, "delay loaded for the plugin-state undo checks");
+        auto lengthMs = [&ops, &probe, delayIx]() -> int {
+            auto snap = ops.snapshot();
+            auto ts = snap.getProperty ("tracks", var());
+            for (int i = 0; i < ts.size(); ++i)
+                if (ts[i].getProperty ("id", var()).toString() == probe)
+                {
+                    auto ps = ts[i].getProperty ("plugins", var());
+                    for (int j = 0; j < ps.size(); ++j)
+                        if ((int) ps[j].getProperty ("index", -1) == delayIx)
+                            return (int) ps[j].getProperty ("state", var()).getProperty ("lengthMs", var()).getProperty ("value", -1);
+                }
+            return -1;
+        };
+        auto setLength = [&ops, &probe, delayIx] (int ms, const char* gesture) {
+            auto* a = new DynamicObject();
+            a->setProperty ("trackId", probe); a->setProperty ("index", delayIx);
+            a->setProperty ("key", "lengthMs"); a->setProperty ("value", ms);
+            if (gesture != nullptr) a->setProperty ("gesture", gesture);
+            return ok (cmd (ops, "set_plugin_state", var (a)));
+        };
+        check (lengthMs() == 150, "delay lengthMs starts at 150");
+        check (setLength (420, nullptr) && lengthMs() == 420, "set_plugin_state lengthMs 420");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "undo set_plugin_state restores 150");
+        check (ok (cmd (ops, "redo")) && lengthMs() == 420, "redo set_plugin_state reapplies 420");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "undo again");
+        check (setLength (200, "undo-drag") && setLength (300, "undo-drag") && setLength (500, "undo-drag") && lengthMs() == 500,
+               "a three-call gesture on lengthMs");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "ONE undo takes back the whole gesture");
+        check (ok (cmd (ops, "redo")) && lengthMs() == 500, "ONE redo puts the whole gesture back");
+        check (ok (cmd (ops, "undo")) && lengthMs() == 150, "and undo once more");
+        check (ok (cmd (ops, "undo")) && lengthMs() == -1, "undo the delay load (the delay is gone)");
+    }
 
     // ── MOSHI-LOOP: Keep is one undoable transaction over a clip that moved tracks ──
     // The loop's one genuinely undoable command. Everything else it does — the listening
