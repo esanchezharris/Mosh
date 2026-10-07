@@ -175,6 +175,8 @@ endif()
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
 add_test(NAME HarnessSessionShell
          COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
+add_test(NAME InstalledAppGateShell
+         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/auto-loop/installed-app-gate-selftest.sh)
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
 if (APPLE)
