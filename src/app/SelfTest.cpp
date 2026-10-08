@@ -150,22 +150,51 @@ namespace
         return juce::var (o);
     }
 
-    // FU1 — pump the REAL JUCE message loop for at least `ms` milliseconds. Used
-    // wherever a check must let a real Edit's UndoTransactionTimer (350 ms,
-    // tracktion_Edit.cpp) actually fire — standing in for the seconds-long LLM
-    // round-trip between an agent task's steps in the real app. Shared by runSelfTest
-    // and runUndoSelfTest so there is one pump loop to keep correct.
-    void pumpMessageLoopFor (int ms)
+    juce::uint32 msSince (juce::uint32 startMs) { return juce::Time::getMillisecondCounter() - startMs; }
+
+    // Deliver every message already queued: post a marker behind them (JUCE's queue is FIFO)
+    // and pump until it runs, for at most `timeoutMs`; true when it did. Sections that run
+    // commands without pumping leave a backlog of async messages, and on macOS JUCE delivers
+    // at most 4 of them per run-loop pass. Under heavy load such a backlog took seconds to
+    // drain (single messages up to 1.9 s), and anything posted after it, a callAsync or a
+    // timer's tick, waits behind all of it. A fixed pump does not always reach its end.
+    bool drainMessageQueue (int timeoutMs)
     {
-        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
-        const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) juce::jmax (0, ms);
-        do
-        {
-            if (mm != nullptr) mm->runDispatchLoopUntil (10);
-            else juce::Thread::sleep (10);
-        }
-        while (juce::Time::getMillisecondCounter() < end);
+        auto arrived = std::make_shared<std::atomic<bool>> (false);
+        juce::MessageManager::callAsync ([arrived] { arrived->store (true); });
+        return pumpUntil ([arrived] { return arrived->load(); }, timeoutMs);
     }
+
+    // Tracktion's Edit::UndoTransactionTimer (tracktion_Edit.cpp) restarts a 350 ms timer on
+    // every change broadcast from the Edit's UndoManager (a juce::ChangeBroadcaster, so
+    // asynchronous) and, when it fires, closes the current step unless an
+    // UndoTransactionInhibitor is held. This witness hears the same broadcasts and restarts its
+    // own 700 ms timer from each. JUCE fires due timers in deadline order, and twice the period
+    // covers the timer thread's countdown granularity, so once the witness has fired,
+    // Tracktion's timer has fired too since the last change. Until then, a check that a step
+    // stayed OPEN proves nothing: the change broadcast and the tick can both land late.
+    class UndoTimerWitness final : private juce::ChangeListener, private juce::Timer
+    {
+    public:
+        explicit UndoTimerWitness (juce::UndoManager& u) : um (u) { um.addChangeListener (this); }
+        ~UndoTimerWitness() override { um.removeChangeListener (this); }
+        bool fired() const noexcept { return fired_; }
+
+    private:
+        void changeListenerCallback (juce::ChangeBroadcaster*) override
+        {
+            fired_ = false;
+            startTimer (700);
+        }
+        void timerCallback() override
+        {
+            stopTimer();
+            fired_ = true;
+        }
+
+        juce::UndoManager& um;
+        bool fired_ = false;
+    };
 
     // ── FS-B2a helpers: the agent batch-TRANSACTION envelope ─────────────────────
     // Transaction metadata rides BESIDE the handler's args (never mixed into them), which
@@ -977,6 +1006,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // (runUndoSelfTest has the fuller version of this same check).
     section ("FU1: agent batch survives a real timer window between two steps");
     {
+        auto& fu1Undo = eng.edit().getUndoManager();
         // Edit installs its undo-transaction change listener ASYNCHRONOUSLY
         // (tracktion_Edit.cpp's UndoTransactionTimer ctor uses MessageManager::callAsync,
         // to avoid startup-phase noise). This section runs early — right after a
@@ -984,18 +1014,33 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // drain the listener would not be attached yet, the pre-batch fixture's own
         // change would be missed, the timer would never arm, and this whole section
         // would pass trivially on BOTH fixed and unfixed code (see the AGT-UNDO section
-        // below, which documents and handles the same gotcha for its own fixture).
-        pumpMessageLoopFor (20);
+        // below, which documents and handles the same gotcha for its own fixture). That
+        // call waits behind the backlog the sections above queued without pumping, and a
+        // fixed 20 ms pump does not always reach it under load: drain the whole queue.
+        const auto fu1DrainStart = juce::Time::getMillisecondCounter();
+        check (drainMessageQueue (20000),
+               "FU1: the message queue the earlier sections left has drained (" + juce::String (msSince (fu1DrainStart))
+                   + " ms; limit 20000), so Tracktion's timer hears this section's edits");
         const auto preId = cmd (ops, "create_track", args1 ("name", "FU1 pre-batch"))
                               ["data"].getProperty ("trackId", var()).toString();
         check (preId.isNotEmpty(), "FU1: pre-batch fixture created (its own transaction)");
         const int preBase = tracks (ops);
 
         check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 agent task"))), "FU1: batch_begin ok");
+        UndoTimerWitness fu1Witness (fu1Undo);
         const auto aId = cmd (ops, "create_track", args1 ("name", "FU1 A"))
                              ["data"].getProperty ("trackId", var()).toString();
         check (aId.isNotEmpty(), "FU1: step A ok");
-        pumpMessageLoopFor (650);   // long enough for the real 350 ms timer to fire
+        // Stand in for the seconds-long LLM round-trip between an agent task's steps: wait
+        // until the witness shows the real 350 ms timer came due after step A. A fixed 650 ms
+        // pump could end before step A's change broadcast and the timer's tick were delivered
+        // (both queue behind any backlog), and then the checks below tested nothing.
+        const auto fu1GapStart = juce::Time::getMillisecondCounter();
+        const bool fu1TimerDue = pumpUntil ([&] { return fu1Witness.fired(); }, 6000);
+        check (fu1TimerDue, "FU1: Tracktion's undo timer came due between the two steps (after "
+                                + juce::String (msSince (fu1GapStart)) + " ms; limit 6000)");
+        check (fu1Undo.getNumActionsInCurrentTransaction() > 0,
+               "FU1: ...and the batch's step is still open: the batch held the timer off");
         const auto bId = cmd (ops, "create_track", args1 ("name", "FU1 B"))
                              ["data"].getProperty ("trackId", var()).toString();
         check (bId.isNotEmpty(), "FU1: step B ok");
@@ -1022,12 +1067,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         (void) cmd (ops, "remove_track", args1 ("trackId", bId));
         check (tracks (ops) == batchBase, "FU1: cleanup -- back to the pre-FU1 baseline");
 
-        // Regression guard: two LONE (non-batch) commands separated by the same real
-        // pump must still land as two separate undo steps — the inhibitor releases at
-        // batch_end and does not leak into ordinary, non-batch editing.
+        // Regression guard: two LONE (non-batch) commands separated by a real timer window
+        // must still land as two separate undo steps — the inhibitor releases at batch_end
+        // and does not leak into ordinary, non-batch editing. Wait for Tracktion's timer to
+        // close lone A's step by itself: with a leaked inhibitor it never does. That close is
+        // also the control showing the timer runs here, so the batch checks above can fail.
         const int loneBase = tracks (ops);
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone A"))), "FU1: lone A ok");
-        pumpMessageLoopFor (650);
+        check (fu1Undo.getNumActionsInCurrentTransaction() > 0, "FU1: lone A leaves its step open");
+        const auto fu1LoneStart = juce::Time::getMillisecondCounter();
+        const bool fu1LoneClosed = pumpUntil ([&] { return fu1Undo.getNumActionsInCurrentTransaction() == 0; }, 6000);
+        check (fu1LoneClosed, "FU1: Tracktion's timer closed lone A's step by itself (after "
+                                  + juce::String (msSince (fu1LoneStart)) + " ms; limit 6000): the inhibitor did not leak");
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone B"))), "FU1: lone B ok");
         cmd (ops, "undo");
         check (tracks (ops) == loneBase + 1,
@@ -19237,11 +19288,16 @@ int runUndoSelfTest (MoshEngine& eng, MoshOps& ops)
     // exactly as long as `inBatch` is true (batch_begin..batch_end, the real loop's own
     // path — see ui/src/agent/loop/taskExec.ts).
     {
+        auto& fu1Undo = eng.edit().getUndoManager();
         // Edit installs its undo-transaction change listener ASYNCHRONOUSLY (see the
         // main --selftest suite's identical FU1 section for the full explanation);
         // drain it here too rather than relying on earlier commands in this function
-        // to have happened to service it.
-        pumpMessageLoopFor (20);
+        // to have happened to service it. Drain the whole queue: that call waits behind
+        // whatever the earlier sections queued without pumping.
+        const auto fu1DrainStart = juce::Time::getMillisecondCounter();
+        check (drainMessageQueue (20000),
+               "FU1: the message queue the earlier sections left has drained (" + juce::String (msSince (fu1DrainStart))
+                   + " ms; limit 20000), so Tracktion's timer hears this section's edits");
 
         // A PRE-batch edit, landed as its OWN transaction, so an over- or under-undo of
         // the batch below is visible as a WRONG track count relative to it — not just a
@@ -19252,13 +19308,21 @@ int runUndoSelfTest (MoshEngine& eng, MoshOps& ops)
         const int baseTracks = tracks (ops);
 
         check (ok (cmd (ops, "batch_begin", args1 ("name", "FU1 agent task"))), "FU1: batch_begin ok");
+        UndoTimerWitness fu1Witness (fu1Undo);
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Step A"))), "FU1: step A (create_track) ok");
         check (tracks (ops) == baseTracks + 1, "FU1: step A landed");
 
-        // Pump the REAL JUCE message loop long enough for a real Edit's
-        // UndoTransactionTimer to fire at least once (350 ms) — this stands in for the
-        // seconds-long LLM round-trip between an agent task's steps in the real app.
-        pumpMessageLoopFor (650);
+        // Pump the REAL JUCE message loop until a real Edit's UndoTransactionTimer (350 ms)
+        // has come due after step A — this stands in for the seconds-long LLM round-trip
+        // between an agent task's steps in the real app. Wait on the witness, not for a fixed
+        // time: under load step A's change broadcast and the timer's tick both queue behind
+        // a backlog and can land after any fixed pause, and the checks below then test nothing.
+        const auto fu1GapStart = juce::Time::getMillisecondCounter();
+        const bool fu1TimerDue = pumpUntil ([&] { return fu1Witness.fired(); }, 6000);
+        check (fu1TimerDue, "FU1: Tracktion's undo timer came due between the two steps (after "
+                                + juce::String (msSince (fu1GapStart)) + " ms; limit 6000)");
+        check (fu1Undo.getNumActionsInCurrentTransaction() > 0,
+               "FU1: ...and the batch's step is still open: the batch held the timer off");
 
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Step B"))), "FU1: step B (create_track) ok");
         check (tracks (ops) == baseTracks + 2, "FU1: step B landed");
@@ -19286,12 +19350,19 @@ int runUndoSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "redo")), "FU1: cleanup redo (batch) ok");
 
         // ── Regression guard: normal (non-batch) transaction splitting must still work ──
-        // A lone command, a real 650 ms pump, then another lone command must STILL land
+        // A lone command, a real timer window, then another lone command must STILL land
         // in two separate undo transactions — proving setInBatch's inhibitor is released
-        // the instant the batch ends and never leaks into ordinary, non-batch editing.
+        // the instant the batch ends and never leaks into ordinary, non-batch editing. The
+        // window lasts until Tracktion's timer has closed lone A's step by itself, which a
+        // leaked inhibitor would prevent; that close is also the control showing the timer
+        // runs here, so the batch checks above can fail.
         const int loneBase = tracks (ops);
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone A"))), "FU1: lone A ok");
-        pumpMessageLoopFor (650);
+        check (fu1Undo.getNumActionsInCurrentTransaction() > 0, "FU1: lone A leaves its step open");
+        const auto fu1LoneStart = juce::Time::getMillisecondCounter();
+        const bool fu1LoneClosed = pumpUntil ([&] { return fu1Undo.getNumActionsInCurrentTransaction() == 0; }, 6000);
+        check (fu1LoneClosed, "FU1: Tracktion's timer closed lone A's step by itself (after "
+                                  + juce::String (msSince (fu1LoneStart)) + " ms; limit 6000): the inhibitor did not leak");
         check (ok (cmd (ops, "create_track", args1 ("name", "FU1 Lone B"))), "FU1: lone B ok");
         check (ok (cmd (ops, "undo")), "FU1: undo lone B ok");
         check (tracks (ops) == loneBase + 1,
