@@ -541,7 +541,11 @@ juce::var MoshOps::cmdTrainingJobStatus (const juce::var& args)
     job->setProperty ("progress", st.getProperty ("progress", 0.0));
     job->setProperty ("error", st.getProperty ("error", var()));
     job->setProperty ("result", st.getProperty ("result", var()));
-    trainerRegistry.updateJob (var (job));
+    // Only the LoRA Lab polls this, but the training popover's job list reads the
+    // snapshot: without a nudge when the recorded job changes, that list kept a
+    // stopped run at "training 3%" until something else invalidated the snapshot.
+    if (trainerRegistry.updateJob (var (job)))
+        emitSnapshotInvalidated();
     return okResult ("training_job_status", st);
 }
 

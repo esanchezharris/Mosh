@@ -127,7 +127,7 @@ export function LoraLab() {
                      : `Train on ${eligibleClips} approved clip${eligibleClips === 1 ? "" : "s"}`}
               onClick={() => void startRun()}>
               {run ? "Train again" : "Train"}
-              {eligibleClips > 0 && <span className="lab-go-n">{eligibleClips} clips</span>}
+              {eligibleClips > 0 && <span className="lab-go-n">{eligibleClips} clip{eligibleClips === 1 ? "" : "s"}</span>}
             </button>
           )}
           {startError && <span className="lab-take-note err" data-testid="lab-start-error">{startError}</span>}

@@ -33,7 +33,9 @@ public:
                                const juce::String& corpusHash,
                                juce::String& error);
     juce::var listJobs();
-    void updateJob (const juce::var& job);
+    /** Merges `job` into the recorded job with the same jobId (or records it).
+        Returns true when anything recorded changed; nothing is written otherwise. */
+    bool updateJob (const juce::var& job);
 
     juce::String activeAdapterId() const;
     juce::String activeAdapterPath() const;
