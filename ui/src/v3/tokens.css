@@ -57,7 +57,8 @@
   /* The LoRA Lab (v2/css/96-lora-lab.css) also needs these. */
   --v2-fs-display: 40px;
   --v2-radius-xs: 4px;
-  --v2-rec: var(--record);
+  /* Error TEXT in the Lab: V3's danger ink (.mi.danger), since --record is about 3.9:1 on its dark. */
+  --v2-rec: #FF8B7A;
   --v2-warn: var(--warn);
   --v2-surface-sunken-solid: var(--rail);
   --v2-blue: #9aa0b4;

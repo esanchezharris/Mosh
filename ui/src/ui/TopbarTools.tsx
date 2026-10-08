@@ -349,9 +349,12 @@ export function TrainingPanel({ training, form, onClose }: {
           </div>
           <div className="pop-group" data-testid="training-sources">
             <div className="pop-label">Sources</div>
-            {sources.length > 0 && (
-              <div className="training-status" role="status">{canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? " needs" : "s need"} review`}</div>
-            )}
+            {/* Always mounted, empty until there is a source: a live region announces a
+                change of its text, so one created along with its first message can stay
+                silent, and adding the first source would go unheard. */}
+            <div className="training-status" role="status">
+              {sources.length === 0 ? "" : canStartTraining ? "All sources ready for training" : `${blockedSources.length} source${blockedSources.length === 1 ? " needs" : "s need"} review`}
+            </div>
             <div className="modal-list training-list">
               {sources.length === 0 && <div className="rack-empty">no sources yet</div>}
               {sources.map((s) => (

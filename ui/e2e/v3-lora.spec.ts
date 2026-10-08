@@ -22,6 +22,8 @@ test("the LoRA button opens the training tools, which register a source and open
   await dialog.getByPlaceholder("Track/beat name").fill("Night drive");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
+  // Focus goes back to the LoRA button, not <body> (where Space and R drive the transport).
+  await expect(trigger).toBeFocused();
   await trigger.click();
   await expect(dialog.getByPlaceholder("Track/beat name")).toHaveValue("Night drive");
 
@@ -40,6 +42,8 @@ test("the LoRA button opens the training tools, which register a source and open
   await expect(dialog).toHaveCount(0);
   const lab = page.getByTestId("lora-lab");
   await expect(lab).toBeVisible();
+  // The keyboard lands in the Lab, not at the top of the app.
+  await expect(page.getByRole("dialog", { name: "LoRA Lab" })).toBeFocused();
   const train = lab.getByTestId("lab-train");
   await expect(train).toBeEnabled();
   await expect(train).toContainText("1 clip");
@@ -78,4 +82,40 @@ test("Re-Imagine applies a kept LoRA at 70, adjustable with the shared strength 
   await page.getByTestId("gen-render").click();
   await expectDispatched(page, "set_render_param", { loras: [{ name: "ken-sa3", value: -20 }] });
   await expect(page.getByTestId("gen-status")).toContainText("with Ken (xperiment) -20");
+});
+
+test("the Lab sits under V3's dialogs and follows the colourway", async ({ page }) => {
+  const trigger = page.getByTestId("v3-training-trigger");
+  await trigger.click();
+  const dialog = page.getByTestId("v3-training-modal");
+  // The dialog's own width, not the 420px every .modal.glass gets.
+  expect((await dialog.boundingBox())!.width).toBeGreaterThan(500);
+  await dialog.getByTestId("open-lora-lab").click();
+  const labWindow = page.getByRole("dialog", { name: "LoRA Lab" });
+  await expect(labWindow).toBeVisible();
+
+  // With the Lab open, the training dialog opens ON TOP of it (classic floats the Lab
+  // at z-index 70, over every V3 layer, which hid the dialog underneath).
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  const box = (await dialog.boundingBox())!;
+  const onTop = await page.evaluate(([x, y]) =>
+    Boolean(document.elementFromPoint(x, y)?.closest('[data-testid="v3-training-modal"]')),
+  [box.x + box.width / 2, box.y + 24]);
+  expect(onTop).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  // V3's palette inside the Lab: the colourway's accent on Train, not classic lime, and
+  // the window's ✕ in V3's muted ink, not classic's danger red.
+  const shell = page.getByTestId("v3-shell");
+  const train = page.getByTestId("lab-train");
+  const background = () => train.evaluate((el) => getComputedStyle(el).backgroundColor);
+  for (const [colorway, rgb] of [["violet", "rgb(184, 164, 255)"], ["coral", "rgb(255, 139, 122)"]] as const) {
+    await shell.evaluate((el, c) => el.setAttribute("data-colorway", c), colorway);
+    await expect.poll(background, { message: colorway }).toBe(rgb);
+  }
+  const close = labWindow.getByRole("button", { name: "Close window" });
+  expect(await close.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(142, 146, 142)");
 });

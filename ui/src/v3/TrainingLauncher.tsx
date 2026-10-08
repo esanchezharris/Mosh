@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useStore } from "../store";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { TrainingPanel, useTrainingForm, useTrainingToolsOpen } from "../ui/TopbarTools";
-import { useV3 } from "./shellState";
+import { TRAINING_TRIGGER_ID, useV3 } from "./shellState";
 
 // V3's way into LoRA training: the rights registry (add and approve sources), the way
 // into the LoRA Lab, the library and the jobs. V3 is the default shell and had none of
@@ -25,6 +25,13 @@ export function TrainingLauncher() {
     if (!open) return;
     onOpen();
     closeRef.current?.focus();
+    // Closing removes the focused control, which leaves focus on <body>, where Space and
+    // R drive the transport. Hand it back to the LoRA button, unless something else has
+    // already taken it (Open LoRA Lab: the Lab focuses itself).
+    return () => {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) document.getElementById(TRAINING_TRIGGER_ID)?.focus();
+    };
   }, [open, onOpen]);
 
   if (!open) return null;

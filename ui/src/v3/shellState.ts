@@ -4,6 +4,9 @@ export type V3Pane = "none" | "browser" | "plugins";
 export type V3Posture = "studio" | "booth";
 export type V3BrowserTab = "files" | "midi" | "presets";
 
+/** The top bar's LoRA button: the training dialog hands focus back to it on close. */
+export const TRAINING_TRIGGER_ID = "v3-training-trigger";
+
 export interface V3ContextMenu {
   x: number;
   y: number;

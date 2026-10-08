@@ -90,7 +90,8 @@
   font-variant-numeric: tabular-nums;
 }
 :is(.v2-shell, .v3-shell) .lab-detail-grid > span:nth-child(odd) { color: var(--v2-faint); letter-spacing: var(--v2-tracking-caps); }
-:is(.v2-shell, .v3-shell) .err { color: var(--v2-rec); }
+.v2-shell .err,
+.v3-shell .lab .err { color: var(--v2-rec); }
 
 /* ── the ask: prompt + seed + source ─────────────────────────────────────── */
 :is(.v2-shell, .v3-shell) .lab-ask { display: flex; gap: 8px; align-items: stretch; }
@@ -217,7 +218,7 @@
 :is(.v2-shell, .v3-shell) .lab-keep-name input {
   flex: 1 1 auto;
   min-width: 0;
-  background: var(--v2-sunk);
+  background: var(--v2-surface-sunken-solid);
   border: 1px solid var(--v2-line);
   border-radius: var(--v2-radius-xs);
   color: var(--v2-text);

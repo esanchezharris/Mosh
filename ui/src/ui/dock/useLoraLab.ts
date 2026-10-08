@@ -36,6 +36,10 @@ function save(w: FloatWin): void {
 interface LoraLabWindowState {
   open: boolean;
   win: FloatWin;
+  /** Bumped by every show: the window takes keyboard focus each time it is asked
+   *  for, also when it is already open (the button that asked for it may be gone,
+   *  e.g. the training dialog's "Open LoRA Lab", leaving focus on <body>). */
+  focusSeq: number;
   show: () => void;
   close: () => void;
   toggle: () => void;
@@ -46,11 +50,12 @@ interface LoraLabWindowState {
 export const useLoraLab = create<LoraLabWindowState>((set, get) => ({
   open: false,
   win: clampWindow(load(), bounds()),
+  focusSeq: 0,
   // Re-clamp on open: the window may have been saved on a larger display, and a
   // panel restored off-screen is indistinguishable from a Lab that failed to open.
-  show: () => set({ open: true, win: clampWindow(get().win, bounds()) }),
+  show: () => set({ open: true, win: clampWindow(get().win, bounds()), focusSeq: get().focusSeq + 1 }),
   close: () => set({ open: false }),
-  toggle: () => (get().open ? set({ open: false }) : set({ open: true, win: clampWindow(get().win, bounds()) })),
+  toggle: () => (get().open ? set({ open: false }) : get().show()),
   move: (dx, dy) => { const w = moveWindow(get().win, dx, dy, bounds()); save(w); set({ win: w }); },
   resize: (edge, dx, dy) => { const w = resizeWindow(get().win, edge, dx, dy, bounds()); save(w); set({ win: w }); },
 }));
