@@ -49,11 +49,19 @@ test("lora rack: add → strength → unbounded stack → Σ readout → remove"
   await expect(row.locator(".nlabel")).toHaveAttribute("title", /kxc.*automatically/);
   await expect(gen.getByTestId("lora-trigger-chip")).toHaveCount(0);
 
-  // Strength slider is live (0–100).
+  // Strength: added at 70; the slider runs 0–200 with a notch at 100 ("ideal").
   const slider = row.getByRole("slider");
   await expect(slider).toHaveValue("70");
+  await expect(slider).toHaveAttribute("max", "200");
+  await expect(row.locator(".lora-strength-ideal")).toHaveText("ideal");
   await slider.fill("40");
   await expect(slider).toHaveValue("40");
+  // The number takes any typed value; past the slider's range it pins to the edge.
+  await row.locator(".lora-strength-num").click();
+  await row.locator(".lora-strength-input").fill("250");
+  await row.locator(".lora-strength-input").press("Enter");
+  await expect(row.locator(".lora-strength-num")).toHaveText("250");
+  await expect(slider).toHaveValue("200");
 
   // Stack a second and a THIRD adapter — no count cap; the add menu stays while
   // addable adapters remain, and the muted Σ readout appears (informational only).
@@ -66,7 +74,7 @@ test("lora rack: add → strength → unbounded stack → Σ readout → remove"
   // Render still works with the rack armed; remove restores the menu entry.
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");
-  await gen.getByTestId("lora-row-mic-sa3").getByRole("button", { name: "✕" }).click();
+  await gen.getByTestId("lora-row-mic-sa3").getByRole("button", { name: /^Remove / }).click();
   await expect(gen.getByTestId("lora-row-mic-sa3")).toHaveCount(0);
   await expect(page.getByTestId("error")).toHaveCount(0);
 });

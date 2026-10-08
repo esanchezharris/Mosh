@@ -76,7 +76,7 @@ export type JobsSlice = {
 
   loadColors: (force?: boolean) => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
-  loadLoras: (force?: boolean) => void;   // LoRA rack: fetch the adapter library (lazy; force re-reads)
+  loadLoras: (force?: boolean, quiet?: boolean) => void; // LoRA library (lazy; force re-reads; quiet leaves service state alone)
   loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
   loadCapabilities: () => void;            // guest-degradation: fetch lazily on first clip-menu/Gen-drawer open (see capabilities field)
   setLab: (b: boolean) => void;
@@ -153,7 +153,10 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
   // moments the library is known to have changed (a take was just kept) or a surface
   // needs it current (Re-Imagine's LoRA picker): without it, a library that already had
   // entries never showed an adapter kept after the first fetch until the app restarted.
-  loadLoras: (force = false) => {
+  // `quiet`: only the list. A surface whose service banner belongs to another probe
+  // (Re-Imagine's is list_colors') must not have a LoRA answer declare the service
+  // "ready" before that probe has said whether direct render is supported.
+  loadLoras: (force = false, quiet = false) => {
     if ((!force && get().availableLoras.length > 0) || get().loraRetrying) return;
     set({ loraRetrying: true });
     let attemptIndex = 0;
@@ -163,10 +166,13 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
         args: {},
       }).then((res) => {
         if (res.ok && res.data?.loras) {
-          set({ availableLoras: res.data.loras, loraRetrying: false, genServiceState: "ready", genServiceError: null });
+          set(quiet
+            ? { availableLoras: res.data.loras, loraRetrying: false }
+            : { availableLoras: res.data.loras, loraRetrying: false, genServiceState: "ready", genServiceError: null });
           return;
         }
         if (attemptIndex >= WARMUP_RETRY_DELAYS_MS.length) {
+          if (quiet) { set({ loraRetrying: false }); return; }
           const ready = get().genServiceState === "ready";
           set({
             loraRetrying: false,
@@ -175,7 +181,7 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
           });
           return;
         }
-        if (get().genServiceState !== "ready") set({ genServiceState: "warming" });
+        if (!quiet && get().genServiceState !== "ready") set({ genServiceState: "warming" });
         const delay = WARMUP_RETRY_DELAYS_MS[attemptIndex];
         attemptIndex += 1;
         setTimeout(attempt, delay);

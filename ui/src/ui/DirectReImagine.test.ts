@@ -63,6 +63,8 @@ describe("direct Re-Imagine", () => {
   it.each([false, undefined])("blocks generation without affirmative SA3 capability (%s)", async (available) => {
     // Given a service which does not affirm SA3 availability.
     useStore.setState({ sa3Available: available }); render();
+    // With a prompt, so the missing capability is the only thing that can block it.
+    edit("gen-prompt", "A soft flute.");
     // When generation is requested.
     await act(async () => button("gen-render").click());
     // Then no adapter, including fake, receives a command.
@@ -332,19 +334,19 @@ describe("direct Re-Imagine", () => {
       useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" }), lora("run-1@12", { family: "lab" }),
         lora("broken", { valid: false })] as never });
       render();
-      expect(useStore.getState().loadLoras).toHaveBeenCalledWith(true);
+      expect(useStore.getState().loadLoras).toHaveBeenCalledWith(true, true);
       expect(loraButtons().map((b) => b.textContent)).toEqual(["Keeper"]);
       expect(loraButtons()[0].getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("renders with a picked LoRA, at 100 unless the strength is changed", async () => {
+    it("renders with a picked LoRA, added at 70 unless the strength is changed", async () => {
       useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" })] as never });
       render(); edit("gen-prompt", "A soft flute.");
       await act(async () => loraButtons()[0].click());
       expect(loraButtons()[0].getAttribute("aria-pressed")).toBe("true");
-      expect(strength("Keeper")?.value).toBe("100");
+      expect(strength("Keeper")?.value).toBe("70");
       await act(async () => button("gen-render").click());
-      expect(setParam()?.loras).toEqual([{ name: "keeper", value: 100 }]);
+      expect(setParam()?.loras).toEqual([{ name: "keeper", value: 70 }]);
 
       exec.mockClear();
       edit("gen-prompt", "A soft flute.");
@@ -365,6 +367,43 @@ describe("direct Re-Imagine", () => {
       expect(strength("keeper")).toBeNull();
       await act(async () => button("gen-render").click());
       expect(setParam()?.loras).toEqual([]);
+    });
+
+    it("follows the layer's LoRAs when they change from elsewhere (undo, another surface)", () => {
+      useStore.setState({ availableLoras: [lora("keeper"), lora("other")] as never });
+      render(clip(layer({ loras: [{ name: "keeper", value: 70 }] })));
+      expect(loraButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+      render(clip(layer({ loras: [{ name: "other", value: 40 }] })));
+      expect(loraButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
+      expect(strength("other")?.value).toBe("40");
+    });
+
+    it("does not claim a LoRA for a result its params no longer describe", () => {
+      useStore.setState({ availableLoras: [lora("keeper", { displayName: "Keeper" })] as never });
+      // A Generate whose params landed but whose render failed: the layer is dirty, and
+      // the pending result is the previous one.
+      render(clip(layer({ status: "dirty", loras: [{ name: "keeper", value: 80 }] })));
+      expect(host.querySelector('[data-testid="gen-status"]')?.textContent).toBe("Result ready to audition");
+    });
+
+    it("lets a LoRA missing from the library be removed, so Generate can work again", async () => {
+      useStore.setState({ availableLoras: [lora("keeper")] as never });
+      render(clip(layer({ loras: [{ name: "gone", value: 100 }] })));
+      expect(host.textContent).toContain("gone (missing)");
+      await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Remove gone"]')!.click());
+      expect(strength("gone")).toBeNull();
+      await act(async () => button("gen-render").click());
+      expect(setParam()?.loras).toEqual([]);
+    });
+
+    it("Retry reads the library again as well as the service's capability", async () => {
+      useStore.setState({ explicitRenderDecision: undefined, genServiceState: "error", genServiceError: "down" });
+      render();
+      vi.mocked(useStore.getState().loadLoras).mockClear();
+      const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!;
+      await act(async () => retry.click());
+      expect(useStore.getState().loadColors).toHaveBeenCalledWith(true);
+      expect(useStore.getState().loadLoras).toHaveBeenCalledWith(true, true);
     });
 
     it("says which LoRA the result was rendered with", () => {

@@ -1948,6 +1948,33 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
                               "audition source must be an audio clip (MIDI/drum clips need a bounce first)");
     }
 
+    // What the take is rendered over: the clip's own material, and how long the take
+    // can be. Worked out here, before the service is touched, so a clip too short to
+    // re-imagine is refused cheaply.
+    juce::File sourceFile;
+    mosh::loratake::SourceRegion region;
+    double takeSeconds = seconds;
+    juce::String sourceId;
+    if (sourceWave != nullptr)
+    {
+        sourceFile = sourceWave->getCurrentSourceFile();
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (sourceFile));
+        const double fileSec = (rd != nullptr && rd->sampleRate > 0.0)
+                             ? (double) rd->lengthInSamples / rd->sampleRate : 0.0;
+        rd.reset();
+        if (fileSec <= 0.0)
+            return errResult ("render_lora_take", "could not read the source clip's audio");
+        const auto pos = sourceWave->getPosition();
+        region = mosh::loratake::sourceRegion (pos.getOffset().inSeconds(), pos.getLength().inSeconds(),
+                                               sourceWave->getSpeedRatio(), fileSec, seconds);
+        if (region.length < mosh::loratake::kMinSourceSeconds)
+            return errResult ("render_lora_take", "the source clip is too short to re-imagine over (needs at least 2 s of audio)");
+        takeSeconds = region.length;
+        sourceId = mosh::loratake::sourceIdentity (sourceFile.getFullPathName(), sourceFile.getSize(),
+                                                   sourceFile.getLastModificationTime().toMilliseconds(), region);
+    }
+
     if (! jobManager.ensureServiceRunning())
         return errResult ("render_lora_take", "generative service unavailable");
 
@@ -1971,7 +1998,7 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
         }
     }
 
-    const auto key = mosh::loratake::cacheKey (prompt, seed, seconds, sourceClipId, sourceNl, stack, shaByName);
+    const auto key = mosh::loratake::cacheKey (prompt, seed, takeSeconds, sourceId, sourceNl, stack, shaByName);
     const auto takeId = juce::String (juce::MD5 (key.toUTF8()).toHexString()).substring (0, 16);
 
     auto jobDir = eng.sessionDir().getChildFile ("lab").getChildFile (takeId);
@@ -2006,19 +2033,11 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
     // over the producer's own beats — so auditioning purely text-to-audio would
     // grade them in a mode nobody works in.
     input.deleteFile();
-    if (sourceWave != nullptr)
-    {
-        const auto src = sourceWave->getCurrentSourceFile();
-        juce::AudioFormatManager fm; fm.registerBasicFormats();
-        std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (src));
-        const double lenSec = (rd != nullptr && rd->sampleRate > 0.0)
-                            ? (double) rd->lengthInSamples / rd->sampleRate : 0.0;
-        rd.reset();
-        if (lenSec <= 0.0 || ! stageWavRegionAt44k (src, 0.0, juce::jmin (lenSec, seconds), input))
-            return errResult ("render_lora_take", "could not stage the source clip's audio");
-    }
+    if (sourceWave != nullptr
+        && ! stageWavRegionAt44k (sourceFile, region.start, region.start + region.length, input))
+        return errResult ("render_lora_take", "could not stage the source clip's audio");
 
-    const auto p = mosh::loratake::params (prompt, seed, seconds, stack, sourceWave != nullptr, sourceNl);
+    const auto p = mosh::loratake::params (prompt, seed, takeSeconds, stack, sourceWave != nullptr, sourceNl);
     const auto jobId = jobManager.submitJob ("stable_audio3", input, output, manifest, p);
     if (jobId.isEmpty())
         return errResult ("render_lora_take", "job submit failed");

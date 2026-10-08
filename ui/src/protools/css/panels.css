@@ -539,6 +539,9 @@
 .direct-reimagine-loras { display: grid; gap: var(--pt-space-1); min-width: 0; margin: 0; padding: 0; border: 0; font-size: 12px; }
 .direct-reimagine-loras legend { padding: 0; color: var(--pt-text-muted); font-size: 11px; }
 .direct-reimagine-loras .gen-actions { flex-wrap: wrap; }
+.direct-reimagine-lora { display: flex; align-items: center; gap: var(--pt-space-2); min-width: 0; }
+.direct-reimagine-lora .nlabel { flex: 0 1 auto; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.direct-reimagine-lora.missing .nlabel { color: var(--pt-text-muted); font-style: italic; }
 .direct-reimagine .gen-actions button[aria-pressed="true"] { color: var(--pt-on-selected); background: var(--pt-selected); }
 .direct-reimagine :is(input, button):focus-visible { outline: 2px solid var(--pt-focus-ring); outline-offset: 2px; }
 .pt-wave-inspector {

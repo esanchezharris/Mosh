@@ -536,6 +536,9 @@
 .v3-shell .direct-reimagine-loras legend { padding: 0; margin-bottom: 4px; color: var(--muted); }
 .v3-shell .direct-reimagine-loras .gen-actions { flex-wrap: wrap; }
 .v3-shell .direct-reimagine-loras .gen-actions .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .direct-reimagine-lora { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.v3-shell .direct-reimagine-lora .nlabel { flex: 0 1 auto; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .direct-reimagine-lora.missing .nlabel { color: var(--warn); }
 .v3-shell .direct-reimagine .gen-service-status { margin: 0; padding: 8px; color: var(--text); background: var(--surface2); }
 .v3-shell .direct-reimagine .gen-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .v3-shell .direct-reimagine .btn { color: var(--text); font-size: 11px; padding: 6px 8px; }

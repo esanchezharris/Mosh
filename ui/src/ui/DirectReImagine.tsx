@@ -2,13 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { AvailableLora, Clip, CommandResult, RenderLayer, RenderLora, Track } from "../types";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
+import { LORA_ADD_VALUE, LoraStrength } from "./LoraStrength";
 
 const MAX_SEED = 2147483647;
-// What a LoRA is added at, on the same 0-100 scale the Lab auditions takes at (100):
-// the strength a producer picked a take by ear is the strength it first renders with.
-const LORA_DEFAULT = 100;
-// Above 100 overdrives the adapter, as the Lab's kept stack allows.
-const LORA_MAX = 150;
 
 /** Adapters a producer kept (the library shelf), usable in a render. Lab checkpoints
  *  on trial and unusable files are not offered here. */
@@ -78,7 +74,8 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   latestLayer.current = layer;
   useEffect(() => { void loadColors(true); }, [loadColors]);
   // Forced: an adapter kept since the library was first read has to be pickable here.
-  useEffect(() => { loadLoras(true); }, [loadLoras]);
+  // Quiet: this panel's service banner is list_colors' to decide.
+  useEffect(() => { loadLoras(true, true); }, [loadLoras]);
   useEffect(() => {
     setPrompt(layer?.prompt ?? ""); setNl(layer?.nl ?? 0.4); setSeed(String(layer?.seed ?? 0)); setSeedTyped(false);
     setLoras(JSON.parse(layerLoras) as RenderLora[]);
@@ -109,11 +106,15 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   const loraName = (name: string) => kept.find((lora) => lora.name === name)?.displayName || name;
   const toggleLora = (name: string) => setLoras((list) => list.some((lora) => lora.name === name)
     ? list.filter((lora) => lora.name !== name)
-    : [...list, { name, value: LORA_DEFAULT }]);
+    : [...list, { name, value: LORA_ADD_VALUE }]);
   const setLoraValue = (name: string, value: number) =>
     setLoras((list) => list.map((lora) => lora.name === name ? { ...lora, value } : lora));
-  // What the shown result was rendered with: the layer's LoRAs at its last Generate.
-  const resultLoras = hasResult ? layer?.loras ?? [] : [];
+  // What the shown result was rendered with: the layer's LoRAs, but only while they are
+  // still the result's. Once the params change (a Generate whose render then failed,
+  // an undo) the layer is "dirty" and its LoRAs are no longer the result's.
+  const settled = layer?.status === "ready" || layer?.status === "bypassed"
+    || layer?.status === "frozen" || layer?.status === "bounced";
+  const resultLoras = hasResult && settled ? layer?.loras ?? [] : [];
   const sourceStart = layer?.sourceStart ?? clip.offset;
   const sourceDuration = layer?.sourceDuration ?? clip.length;
   const commandResult = async (name: string, args: Record<string, unknown>): Promise<CommandResult | null> => {
@@ -198,7 +199,7 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
               ? "The Re-Imagine helper in ~/Library/Application Support/Mosh/ReImagine/service is older than this Mosh (no direct render). Refresh it, then press Retry."
               : "The local service does not support direct Re-Imagine. Use the matching Mosh service, then retry.")
             : "Local SA3 is unavailable. Check that its service and model are available, then retry.")}</span>
-        <button className="btn" type="button" onClick={() => void loadColors(true)}>Retry</button>
+        <button className="btn" type="button" onClick={() => { void loadColors(true); loadLoras(true, true); }}>Retry</button>
       </div>}
       <label className="direct-reimagine-field">Prompt
         <input className="gen-compile-input" data-testid="gen-prompt" data-owns-edit-keys="" value={prompt} disabled={busy}
@@ -225,13 +226,21 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
               title={lora.hint || lora.notes || `Render with ${lora.displayName || lora.name}`}
               onClick={() => toggleLora(lora.name)}>{lora.displayName || lora.name}</button>)}
           </div>}
-        {loras.map((lora) => <label className="nparam" key={lora.name}>
-          <span className="nlabel">{loraName(lora.name)}</span>
-          <span className="nslider"><input type="range" min={0} max={LORA_MAX} step={5}
-            aria-label={`${loraName(lora.name)} strength`} value={lora.value}
-            onChange={(event) => setLoraValue(lora.name, Number(event.target.value))} /></span>
-          <span className="nval">{lora.value}</span>
-        </label>)}
+        {loras.map((lora) => {
+          // A LoRA on the layer that is not in the library (renamed, deleted, unusable,
+          // or a project from another Mac) has no toggle above; it still needs a way off,
+          // or every Generate fails with "not found".
+          const missing = !kept.some((k) => k.name === lora.name);
+          return <div className={`nparam direct-reimagine-lora${missing ? " missing" : ""}`} key={lora.name}>
+            <span className="nlabel" title={missing ? "Not in your LoRA library — remove it to generate" : undefined}>
+              {loraName(lora.name)}{missing ? " (missing)" : ""}
+            </span>
+            <LoraStrength label={loraName(lora.name)} value={lora.value} disabled={busy}
+              onChange={(value) => setLoraValue(lora.name, value)} />
+            <button type="button" className="btn x" disabled={busy} aria-label={`Remove ${loraName(lora.name)}`}
+              onClick={() => toggleLora(lora.name)}>✕</button>
+          </div>;
+        })}
       </fieldset>
       {!validSeed && <p role="alert">Enter a whole-number seed from 0 to 2147483647.</p>}
       {unsupported && <p role="alert">Use an ordinary audio clip without looping, reverse or tempo warp for this workflow.</p>}

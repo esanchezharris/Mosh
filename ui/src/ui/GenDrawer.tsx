@@ -11,6 +11,7 @@ import { isTransformPreview } from "../capabilities";
 import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
 import { DirectReImagine } from "./DirectReImagine";
+import { LORA_ADD_VALUE, LoraStrength } from "./LoraStrength";
 
 export function GenDrawer({ track, selectedClipId, direct = false }: {
   readonly track: Track; readonly selectedClipId?: string; readonly direct?: boolean;
@@ -420,18 +421,19 @@ function LoraRack({ clip }: { clip: Clip }) {
           meta?.hint ?? "", meta?.notes ?? "",
         ].filter(Boolean).join(" — ");
         return (
-          <label key={l.name} className="nparam" data-testid={`lora-row-${l.name}`}>
+          <div key={l.name} className="nparam lora-row" data-testid={`lora-row-${l.name}`}>
             <span className="nlabel" title={tip || undefined}>🧬 {meta?.displayName ?? l.name}</span>
-            <input type="range" min={0} max={100} step={1} value={Math.min(100, Math.round(l.value))}
-              aria-label={`${meta?.displayName ?? l.name} LoRA strength`}
-              onChange={(e) => setLoras(active.map((a) => (a.name === l.name ? { ...a, value: Number(e.target.value) } : a)))} />
-            <button className="btn x" onClick={() => setLoras(active.filter((a) => a.name !== l.name))}>✕</button>
-          </label>
+            <LoraStrength label={`${meta?.displayName ?? l.name} LoRA`} value={l.value}
+              onChange={(value) => setLoras(active.map((a) => (a.name === l.name ? { ...a, value } : a)))} />
+            <button className="btn x" aria-label={`Remove ${meta?.displayName ?? l.name}`}
+              onClick={() => setLoras(active.filter((a) => a.name !== l.name))}>✕</button>
+          </div>
         );
       })}
       {addable.length > 0 && (
         <select className="btn ghost color-add" data-testid="lora-add" value=""
-          onChange={(e) => e.target.value && setLoras([...active, { name: e.target.value, value: 70 }])}>
+          aria-label="Add a LoRA"
+          onChange={(e) => e.target.value && setLoras([...active, { name: e.target.value, value: LORA_ADD_VALUE }])}>
           <option value="">+ LoRA…</option>
           {addable.map((m) => <option key={m.name} value={m.name}>{m.displayName}</option>)}
         </select>

@@ -130,17 +130,26 @@ describe("LoRA Lab — the kept stack", () => {
     ]);
   });
 
-  it("treats 0 as removal, not a zero-strength merge", () => {
+  // Membership is explicit: a slider dragged to 0 must not make its own row vanish
+  // under the producer's hand (the registry skips a zero entry at render time anyway).
+  it("adds at 70, removes on request, and keeps any typed value including 0 and negative", () => {
     const s = useStore.getState();
-    s.setLabStackValue("ken", 100);
-    s.setLabStackValue("bro", 40);
+    s.addLabStack("ken");
+    s.addLabStack("bro");
+    useStore.getState().addLabStack("ken");                 // already there: unchanged
+    expect(useStore.getState().labStack).toEqual([{ name: "ken", value: 70 }, { name: "bro", value: 70 }]);
     useStore.getState().setLabStackValue("ken", 0);
-    expect(useStore.getState().labStack).toEqual([{ name: "bro", value: 40 }]);
+    useStore.getState().setLabStackValue("bro", -25.5);
+    expect(useStore.getState().labStack).toEqual([{ name: "ken", value: 0 }, { name: "bro", value: -25.5 }]);
+    useStore.getState().setLabStackValue("bro", Number.NaN);  // not a number: ignored
+    expect(useStore.getState().labStack[1].value).toBe(-25.5);
+    useStore.getState().removeLabStack("ken");
+    expect(useStore.getState().labStack).toEqual([{ name: "bro", value: -25.5 }]);
   });
 
-  it("allows overdrive above 100 — there is no clamp by owner call", () => {
-    useStore.getState().setLabStackValue("ken", 140);
-    expect(useStore.getState().labStack[0].value).toBe(140);
+  it("allows overdrive past the slider — there is no clamp by owner call", () => {
+    useStore.getState().setLabStackValue("ken", 340);
+    expect(useStore.getState().labStack[0].value).toBe(340);
   });
 
   it("auditions the whole stack as ONE take, with the stack verbatim", async () => {
@@ -177,5 +186,38 @@ describe("LoRA Lab — the kept stack", () => {
     useStore.setState({ labPrompt: "  " } as never);
     await useStore.getState().auditionLabStack();          // empty prompt
     expect(calls).not.toContain("render_lora_take");
+  });
+});
+
+describe("LoRA Lab — the kept rack's controls", () => {
+  it("adds a kept adapter at 70 with the shared strength control, and removes it", async () => {
+    const React = await import("react");
+    const { act } = React;
+    const { createRoot } = await import("react-dom/client");
+    const { KeptRack } = await import("./KeptRack");
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    useStore.getState().resetLab();
+    useStore.setState({ availableLoras: [
+      { name: "ken", displayName: "Ken", trigger: "", hint: "", valid: true, family: "library" },
+      { name: "run1@12", displayName: "run1@12", trigger: "", hint: "", valid: true, family: "lab" },
+    ] } as never);
+    const host = document.createElement("div"); document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(React.createElement(KeptRack)));
+    const q = <T extends Element>(sel: string) => host.querySelector<T>(sel);
+
+    act(() => q<HTMLButtonElement>(".lab-kept-toggle")!.click());
+    expect(q('[data-testid="lab-kept-add-run1@12"]'), "a lab checkpoint is not a kept adapter").toBeNull();
+    act(() => q<HTMLButtonElement>('[data-testid="lab-kept-add-ken"]')!.click());
+    expect(useStore.getState().labStack).toEqual([{ name: "ken", value: 70 }]);
+    const slider = q<HTMLInputElement>('[data-testid="lab-kept-strength-ken"] input[type="range"]');
+    expect(slider?.value).toBe("70");
+    expect(slider?.max).toBe("200");
+    act(() => q<HTMLButtonElement>('button[aria-label="Remove Ken from the stack"]')!.click());
+    expect(useStore.getState().labStack).toEqual([]);
+    expect(q('[data-testid="lab-kept-add-ken"]')).not.toBeNull();
+
+    act(() => root.unmount()); host.remove();
+    useStore.setState({ availableLoras: [] } as never);
   });
 });
