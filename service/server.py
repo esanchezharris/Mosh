@@ -51,7 +51,7 @@ from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; hea
 from training import lora_trainer_adapter  # noqa: E402
 from training.corpus_bundle import build_corpus_bundle  # noqa: E402
 from training.rights import load_registry, read_json_object, save_registry, write_json  # noqa: E402
-from training.trainer_job import train as train_lora  # noqa: E402
+from training.trainer_job import TrainingCancelled, train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
 PROTOCOL_VERSION = 1
@@ -842,13 +842,21 @@ def _run_training_job(job_id: str) -> None:
             "updatedAt": time.time(),
         })
     except Exception as e:  # noqa: BLE001
+        # TrainingCancelled means a Stop ended the run (the trainer only raises it
+        # once should_cancel() is true). That is "cancelled", the same as a Stop
+        # the step loop above catches — not "error", which made the LoRA Lab say
+        # "failed" after every Stop. Anything else, Stop pending or not, is a real
+        # failure and keeps its message.
         with _training_lock:
-            _training_jobs[job_id]["status"] = "error"
-            _training_jobs[job_id]["error"] = str(e)
+            cancelled = isinstance(e, TrainingCancelled)
+            status = "cancelled" if cancelled else "error"
+            error = "" if cancelled else str(e)
+            _training_jobs[job_id]["status"] = status
+            _training_jobs[job_id]["error"] = error
         _record_training_job({
-            "jobId": job_id, "status": "error", "progress": _training_jobs[job_id].get("progress", 0.0),
+            "jobId": job_id, "status": status, "progress": _training_jobs[job_id].get("progress", 0.0),
             "bundlePath": job.get("bundle_path", ""), "outputDir": job.get("output_dir", ""),
-            "error": str(e), "updatedAt": time.time(),
+            "error": error, "updatedAt": time.time(),
         })
 
 
