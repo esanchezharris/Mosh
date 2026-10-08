@@ -76,7 +76,7 @@ export type JobsSlice = {
 
   loadColors: (force?: boolean) => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
-  loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
+  loadLoras: (force?: boolean) => void;   // LoRA rack: fetch the adapter library (lazy; force re-reads)
   loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
   loadCapabilities: () => void;            // guest-degradation: fetch lazily on first clip-menu/Gen-drawer open (see capabilities field)
   setLab: (b: boolean) => void;
@@ -149,8 +149,12 @@ export const createJobsSlice: StateCreator<State, [], [], JobsSlice> = (set, get
     attempt();
   },
 
-  loadLoras: () => {
-    if (get().availableLoras.length > 0 || get().loraRetrying) return;
+  // Lazy by default: the first non-empty answer is kept. `force` re-reads it, for the
+  // moments the library is known to have changed (a take was just kept) or a surface
+  // needs it current (Re-Imagine's LoRA picker): without it, a library that already had
+  // entries never showed an adapter kept after the first fetch until the app restarted.
+  loadLoras: (force = false) => {
+    if ((!force && get().availableLoras.length > 0) || get().loraRetrying) return;
     set({ loraRetrying: true });
     let attemptIndex = 0;
     const attempt = () => {

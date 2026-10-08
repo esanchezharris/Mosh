@@ -356,8 +356,10 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       labKeepError: { ...st.labKeepError, [take]: "" },
     } as Partial<State>));
     // Re-read the library so the new adapter appears in the rack immediately;
-    // otherwise "Keep" looks like it did nothing until the next reload.
-    await get().loadLoras();
+    // otherwise "Keep" looks like it did nothing until the next reload. Forced:
+    // loadLoras keeps its first non-empty answer, so with any adapter already in
+    // the library this refresh used to be a no-op.
+    get().loadLoras(true);
     return true;
   },
 

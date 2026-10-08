@@ -53,6 +53,27 @@ describe("LoRA Lab — Keep", () => {
     expect(useStore.getState().labKeeping).toBeNull();
   });
 
+  // The case that was broken: a library that already lists adapters. loadLoras kept
+  // its first non-empty answer, so the refresh after Keep never ran and the new
+  // adapter stayed invisible until the app restarted (the test above starts from an
+  // EMPTY library, where the lazy fetch happens to run).
+  it("shows the kept adapter even when the library already had adapters", async () => {
+    const library = (names: string[]) => names.map((name) => ({ name, displayName: name, trigger: "", hint: "", valid: true, family: "library" }));
+    useStore.setState({ availableLoras: library(["older-one"]), loraRetrying: false } as never);
+    vi.spyOn(await import("../../bridge"), "executeCommand").mockImplementation(
+      (async (req: { command: string }) => {
+        if (req.command === "promote_lora_checkpoint") return { ok: true, data: { name: "keeper" } };
+        if (req.command === "list_loras") return { ok: true, data: { loras: library(["older-one", "keeper"]) } };
+        return { ok: true, data: {} };
+      }) as never,
+    );
+
+    expect(await useStore.getState().promoteLabTake("ken-01@400", "keeper")).toBe(true);
+    await flush();
+    expect(useStore.getState().availableLoras.map((l) => l.name)).toEqual(["older-one", "keeper"]);
+    useStore.setState({ availableLoras: [] } as never);
+  });
+
   it("keeps a REFUSAL on the row that caused it, and does not claim success", async () => {
     vi.spyOn(await import("../../bridge"), "executeCommand").mockImplementation(
       (async (req: { command: string }) => {

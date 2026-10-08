@@ -14,6 +14,7 @@
 // namespace, verbatim.
 
 #include "MoshOps.h"
+#include "LoraTakeRequest.h"
 #include "BoundedRender.h"
 #include "MoshOpsInternal.h"
 #include "PluginState.h"
@@ -1916,6 +1917,8 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
     const int seed = (int) args.getProperty ("seed", 42);
     const double seconds = juce::jlimit (1.0, 60.0, (double) args.getProperty ("seconds", 12.0));
     const auto sourceClipId = args.getProperty ("sourceClipId", var()).toString();
+    // How far a take over a source clip moves from it; only meaningful with a source.
+    const double sourceNl = (double) args.getProperty ("nl", mosh::loratake::kDefaultSourceNl);
 
     // The stack, in order — order matters, adapters merge sequentially.
     Array<var> stack;
@@ -1968,15 +1971,7 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
         }
     }
 
-    juce::String key;
-    key << prompt << "|" << seed << "|" << juce::String (seconds, 3) << "|" << sourceClipId;
-    for (const auto& e : stack)
-    {
-        const auto nm = e.getProperty ("name", var()).toString();
-        key << "|" << nm << "@" << e.getProperty ("value", var()).toString()
-            << "#" << (shaByName.isObject() ? shaByName.getProperty (juce::Identifier (nm), var()).toString()
-                                            : juce::String());
-    }
+    const auto key = mosh::loratake::cacheKey (prompt, seed, seconds, sourceClipId, sourceNl, stack, shaByName);
     const auto takeId = juce::String (juce::MD5 (key.toUTF8()).toHexString()).substring (0, 16);
 
     auto jobDir = eng.sessionDir().getChildFile ("lab").getChildFile (takeId);
@@ -2011,7 +2006,6 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
     // over the producer's own beats — so auditioning purely text-to-audio would
     // grade them in a mode nobody works in.
     input.deleteFile();
-    juce::String mode = "generate";
     if (sourceWave != nullptr)
     {
         const auto src = sourceWave->getCurrentSourceFile();
@@ -2022,21 +2016,10 @@ juce::var MoshOps::cmdRenderLoraTake (const juce::var& args)
         rd.reset();
         if (lenSec <= 0.0 || ! stageWavRegionAt44k (src, 0.0, juce::jmin (lenSec, seconds), input))
             return errResult ("render_lora_take", "could not stage the source clip's audio");
-        mode = "reimagine";
     }
 
-    auto* p = new DynamicObject();
-    p->setProperty ("prompt", prompt);
-    p->setProperty ("seed", seed);
-    p->setProperty ("mode", mode);
-    p->setProperty ("loras", stack);
-    p->setProperty ("duration_s", seconds);
-    // No colours and no ASTD here on purpose: a take exists to answer "what did the
-    // TRAINING do", and a colour stacked on top would confound the one variable the
-    // Lab is there to isolate.
-    p->setProperty ("colors", Array<var>{});
-
-    const auto jobId = jobManager.submitJob ("stable_audio3", input, output, manifest, var (p));
+    const auto p = mosh::loratake::params (prompt, seed, seconds, stack, sourceWave != nullptr, sourceNl);
+    const auto jobId = jobManager.submitJob ("stable_audio3", input, output, manifest, p);
     if (jobId.isEmpty())
         return errResult ("render_lora_take", "job submit failed");
 
