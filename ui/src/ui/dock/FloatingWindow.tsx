@@ -3,21 +3,29 @@
 // the caller (a useFloatingWindow-style store delegating to the pure engine); this
 // component just translates pointer drags into onMove/onResize deltas.
 
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { FloatWin, ResizeEdge } from "./dockLayout";
 
 export function FloatingWindow({
-  win, title, onMove, onResize, onClose, children,
+  win, title, onMove, onResize, onClose, focusKey, children,
 }: {
   win: FloatWin;
   title: string;
   onMove: (dx: number, dy: number) => void;
   onResize: (edge: ResizeEdge, dx: number, dy: number) => void;
   onClose: () => void;
+  /** When given, the window takes keyboard focus on mount and whenever this changes,
+   *  so a keyboard user lands in it rather than on <body> at the top of the app. */
+  focusKey?: number;
   children: ReactNode;
 }) {
+  const root = useRef<HTMLDivElement>(null);
   const last = useRef<{ x: number; y: number } | null>(null);
   const mode = useRef<"move" | ResizeEdge | null>(null);
+
+  useEffect(() => {
+    if (focusKey !== undefined) root.current?.focus();
+  }, [focusKey]);
 
   const begin = (m: "move" | ResizeEdge) => (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -39,7 +47,8 @@ export function FloatingWindow({
   };
 
   return (
-    <div className="floatwin" data-testid="floating-window" role="dialog" aria-label={title}
+    <div ref={root} className="floatwin" data-testid="floating-window" role="dialog" aria-label={title}
+      tabIndex={focusKey !== undefined ? -1 : undefined}
       style={{ left: win.x, top: win.y, width: win.w, height: win.h }}>
       <div className="floatwin-bar" data-testid="floatwin-bar"
         onPointerDown={begin("move")} onPointerMove={drag} onPointerUp={end}>

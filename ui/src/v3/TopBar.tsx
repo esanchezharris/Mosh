@@ -4,7 +4,7 @@ import { tempoMapFrom, secondsToBBSMap } from "../time";
 import { projectLabel } from "../projectFile";
 import { runAction } from "../menuActions";
 import type { Snapshot } from "../types";
-import { useV3 } from "./shellState";
+import { TRAINING_TRIGGER_ID, useV3 } from "./shellState";
 import { FileMenu } from "./FileMenu";
 import { IconClick, IconCountIn, IconLoop } from "./icons";
 
@@ -17,6 +17,8 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const setMpOpen = useV3((s) => s.setMpOpen);
   const phoneOpen = useV3((s) => s.phoneOpen);
   const setPhoneOpen = useV3((s) => s.setPhoneOpen);
+  const trainingOpen = useV3((s) => s.trainingOpen);
+  const setTrainingOpen = useV3((s) => s.setTrainingOpen);
   const phonePaired = useStore((s) => !!s.remoteStatus?.pairing);
   const mpActive = useStore((s) => s.mp.active);
   const bbs = secondsToBBSMap(tempoMapFrom(snapshot.session), t.position);
@@ -65,6 +67,10 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         aria-haspopup="dialog" aria-expanded={phoneOpen}
         title={phonePaired ? "The phone pad is running — show the QR" : "Pair an iPhone as a recording pad"}
         onClick={() => setPhoneOpen(!phoneOpen)}>Phone</button>
+      <button type="button" className="btn ghost" id={TRAINING_TRIGGER_ID} data-testid="v3-training-trigger"
+        aria-haspopup="dialog" aria-expanded={trainingOpen}
+        title="Train a LoRA on your own music, audition it in the LoRA Lab, keep the take you like"
+        onClick={() => setTrainingOpen(!trainingOpen)}>LoRA</button>
       <button type="button" className="btn ghost" data-testid="v3-history"
         aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}>History</button>
     </div>

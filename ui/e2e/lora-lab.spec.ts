@@ -27,6 +27,8 @@ async function openLab(page: import("@playwright/test").Page) {
   const openBtn = page.getByTestId("open-lora-lab");
   await expect(openBtn).toBeVisible();
   await openBtn.click();
+  // The popover makes way for the Lab (it used to call window.close() and stay open).
+  await expect(page.getByTestId("training-tool-body")).toHaveCount(0);
 }
 
 test("opens from the training tool and auditions a take with the mouse", async ({ page }) => {
