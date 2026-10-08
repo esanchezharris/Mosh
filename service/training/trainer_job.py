@@ -439,10 +439,20 @@ def _local_train(corpus_bundle: str, output_dir: str, config: dict[str, Any],
     if not clips:
         raise RuntimeError("corpus bundle contains no usable clips")
     pre_dir = out / "precompute"
+
+    # Precompute is its own phase, reported as such: without it a running job had
+    # no phase until the trainer's first flush, so the LoRA Lab could only say
+    # "running" for what is minutes of work on a large corpus. Reported once
+    # before the first clip (the encoder may still be loading) and after each one.
+    def _pre_progress(done: int, total: int, _sample_id: str = "") -> None:
+        if on_progress:
+            on_progress({"phase": "precompute", "precomputed": done, "clips": total})
+
+    _pre_progress(0, len(clips))
     # On the MLX-owning thread when the caller provides one (the service always
     # does). Running it on this thread instead poisons every subsequent render —
     # see train()'s docstring.
-    _pre = lambda: PC.precompute(clips, str(pre_dir), on_progress=None,  # noqa: E731
+    _pre = lambda: PC.precompute(clips, str(pre_dir), on_progress=_pre_progress,  # noqa: E731
                                  should_cancel=should_cancel)
     pre = run_on_mlx(_pre) if run_on_mlx else _pre()
     # A Stop during precompute ends the run here. Without this the trainer

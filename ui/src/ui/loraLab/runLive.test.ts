@@ -134,10 +134,11 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
     const pill = () => byId("lab-run-status")?.textContent;
     replies = [
       { status: "queued", detail: {} },
-      // No phase: the local trainer's precompute, or a remote trainer, which
-      // reports no phase for its whole run. Either way all that is known is
-      // that it is running.
+      // No phase: a remote trainer reports none for its whole run, so all that
+      // is known is that it is running.
       { status: "running", detail: {} },
+      // The local trainer encoding the corpus, before any step.
+      { status: "running", detail: { phase: "precompute", precomputed: 3, clips: 10 } },
       { status: "running", detail: { phase: "training", step: 40, totalSteps: 600, etaSeconds: 1200 } },
       // The trainer has exited ("ready" is ITS state, flushed with its last
       // ETA); the job is still running while the service collects the last
@@ -153,13 +154,41 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
     expect(pill(), "a running job with no phase is just running").toBe("running");
     expect(byId("lab-eta")).toBeNull();
     await tick();
+    expect(pill(), "the local trainer encoding the corpus is preparing").toBe("preparing");
+    expect(byId("lab-epochs")?.textContent, "how many clips are encoded so far").toBe("3");
+    expect(host.querySelector(".lab-epochs-of")?.textContent).toBe("of 10 clips prepared");
+    await tick();
     expect(pill()).toBe("training");
+    expect(host.querySelector(".lab-epochs-of")?.textContent, "epochs once training starts").toMatch(/epochs$/);
     expect(byId("lab-eta"), "a training run reporting an ETA shows it").toBeTruthy();
     await tick();
     expect(pill(), "the trainer is done but the job is not").toBe("finishing");
     expect(byId("lab-eta"), "no time left is shown once training is over").toBeNull();
     await tick();
     expect(pill()).toBe("done");
+  });
+
+  // The final adapter is published only after the trainer exits, so it arrives in
+  // the finished run's result, never in its progress. Reading progress alone left
+  // the sheet without the take the run was for (seen on a real local run).
+  it("offers the final take once the run is done", async () => {
+    const take = (step: number, isFinal = false) => ({ name: `run-1@${isFinal ? "final" : step}`, step, isFinal });
+    replies = [
+      { status: "running", detail: { phase: "training", step: 12, totalSteps: 24, takes: [take(12)] } },
+      { status: "ready", detail: { phase: "ready", step: 24, totalSteps: 24, takes: [take(12), take(24)] },
+        result: { takes: [take(12), take(24), take(24, true)] } },
+    ];
+
+    await tick();
+    expect(byId("lab-take-run-1@12")).toBeTruthy();
+    expect(byId("lab-take-run-1@final")).toBeNull();
+    await tick();
+    expect(byId("lab-run-status")?.textContent).toBe("done");
+    const final = byId("lab-take-run-1@final");
+    expect(final, "no Final row after the run finished").toBeTruthy();
+    expect(final?.textContent).toContain("Final");
+    expect(useStore.getState().labTakes.map((t) => t.name).sort(), "each take once")
+      .toEqual(["run-1@12", "run-1@24", "run-1@final"]);
   });
 
   // The service keeps jobs in memory only. If it dies or restarts mid-run, every

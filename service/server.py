@@ -783,6 +783,18 @@ def _run_training_job(job_id: str) -> None:
                 return bool(_training_jobs.get(job_id, {}).get("cancel"))
 
         def _on_progress(state: dict) -> None:
+            if state.get("phase") == "precompute":
+                # Encoding the corpus, ahead of the trainer: no steps yet, so no
+                # step fields and no bar movement — just how many clips are done.
+                with _training_lock:
+                    j = _training_jobs.get(job_id)
+                    if j is not None:
+                        j["detail"] = {
+                            "phase": "precompute",
+                            "precomputed": int(state.get("precomputed") or 0),
+                            "clips": int(state.get("clips") or 0),
+                        }
+                return
             total = max(1, int(state.get("totalSteps") or 1))
             done = int(state.get("step") or 0)
             with _training_lock:

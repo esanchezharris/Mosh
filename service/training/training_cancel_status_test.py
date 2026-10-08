@@ -89,23 +89,28 @@ precompute_hook = {"fn": None}
 precompute_seen = {"should_cancel": None, "cancelled": None}
 
 
-def _fake_precompute(clips, out_dir, *a, should_cancel=None, **k):
-    """Stands in for the SA3 encode but keeps the real precompute's Stop contract:
-    should_cancel is checked before each clip, and a Stop ends it with
+def _fake_precompute(clips, out_dir, *a, should_cancel=None, on_progress=None, **k):
+    """Stands in for the SA3 encode but keeps the real precompute's contracts.
+    Stop: should_cancel is checked before each clip, and a Stop ends it with
     `cancelled: True` and only the clips it finished, none if the Stop came
     first. A stand-in that ignored should_cancel let this test pass with the Stop
     never handed to precompute, and could never return the zero-sample result a
-    Stop before the first clip really produces."""
+    Stop before the first clip really produces. Progress: on_progress(done,
+    total, sample_id) after each encoded clip, as sa3_precompute does."""
     os.makedirs(out_dir, exist_ok=True)
     precompute_seen["should_cancel"] = should_cancel
     if precompute_hook["fn"]:
         precompute_hook["fn"]()
     done, cancelled = [], False
-    for clip in clips:
+    for i, clip in enumerate(clips):
         if should_cancel and should_cancel():
             cancelled = True
             break
         done.append({"id": clip.get("id")})
+        if on_progress:
+            on_progress(i + 1, len(clips), str(clip.get("id")))
+    if precompute_hook.get("after"):
+        precompute_hook["after"]()
     precompute_seen["cancelled"] = cancelled
     manifest_path = os.path.join(out_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -269,6 +274,34 @@ def test_trainer_exit_130_without_stop_is_error():
     status, error = _status(jid)
     check("unrequested exit 130 is error", status == "error", f"status={status!r}")
     check("unrequested exit 130 names the exit code", "trainer exited 130" in (error or ""), repr(error))
+
+
+# ── 7. precompute is reported as its own phase, with how far it has got ───────
+def test_precompute_reports_its_phase_and_clip_count():
+    # Without this a running job had no phase until the trainer's first flush, and
+    # the LoRA Lab could only say "running" through minutes of corpus encoding.
+    trainer["argv"] = [sys.executable, "-c", "import sys; sys.exit(3)"]
+    trainer["launches"] = 0
+    jid = _submit("bundle-phase")
+    seen = {}
+
+    def _detail():
+        with server._training_lock:
+            return dict(server._training_jobs[jid].get("detail") or {})
+
+    precompute_hook["fn"] = lambda: seen.update(before=_detail())
+    precompute_hook["after"] = lambda: seen.update(after=_detail())
+    t = _run(jid)
+    t.join(20.0)
+    precompute_hook["fn"] = None
+    precompute_hook["after"] = None
+    check("precompute is a phase before the first clip",
+          seen.get("before") == {"phase": "precompute", "precomputed": 0, "clips": 1}, repr(seen.get("before")))
+    check("precompute counts the clips it has encoded",
+          seen.get("after") == {"phase": "precompute", "precomputed": 1, "clips": 1}, repr(seen.get("after")))
+    status, error = _status(jid)
+    check("a run past precompute still ends on the trainer's own outcome", status == "error",
+          f"status={status!r} error={error!r}")
 
 
 # ── 6. precompute itself stops between clips ─────────────────────────────────

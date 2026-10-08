@@ -613,13 +613,23 @@ var TrainerRegistry::listJobs()
 // submit knows the whole record (bundle, output dir, config); a status poll and
 // a cancel each bring a few fields, and replacing the record with those erased
 // what the run was trained on.
-void TrainerRegistry::updateJob (const var& job)
+// var's == compares objects and arrays by identity, and a status poll builds a
+// fresh `result` object every time: compare their JSON instead.
+static bool sameRecordedValue (const var& a, const var& b)
+{
+    if (a.isObject() || b.isObject() || a.isArray() || b.isArray())
+        return JSON::toString (a, true) == JSON::toString (b, true);
+    return a == b;
+}
+
+bool TrainerRegistry::updateJob (const var& job)
 {
     auto st = state();
     auto* stObj = st.getDynamicObject();
     auto jobs = toArray (stObj->getProperty ("jobs"));
     const auto jobId = job.getProperty ("jobId", var()).toString();
     bool merged = false;
+    bool changed = false;
     for (int i = 0; i < jobs.size(); ++i)
     {
         auto& stored = jobs.getReference (i);
@@ -628,18 +638,37 @@ void TrainerRegistry::updateJob (const var& job)
             auto* into = stored.getDynamicObject();
             auto* from = job.getDynamicObject();
             if (into != nullptr && from != nullptr)
+            {
                 for (auto& field : from->getProperties())
+                {
+                    // A poll repeats what was already recorded most of the time
+                    // (the LoRA Lab polls once a second): only a real change is
+                    // written, and only a real change is worth a new snapshot.
+                    if (into->hasProperty (field.name) && sameRecordedValue (into->getProperty (field.name), field.value))
+                        continue;
                     into->setProperty (field.name, field.value);
+                    changed = true;
+                }
+            }
             else
+            {
                 jobs.set (i, job);
+                changed = true;
+            }
             merged = true;
             break;
         }
     }
     if (! merged)
+    {
         jobs.add (job);
+        changed = true;
+    }
+    if (! changed)
+        return false;
     stObj->setProperty ("jobs", jobs);
     saveState (st);
+    return true;
 }
 
 String TrainerRegistry::activeAdapterId() const

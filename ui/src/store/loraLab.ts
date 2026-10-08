@@ -71,6 +71,10 @@ export type LabRun = {
    *  service that predates it. Presentation only — whether the run is live is
    *  `status`. */
   phase: string | null;
+  /** While the phase is "precompute": how many of the run's clips have been
+   *  encoded so far, of how many. null outside precompute. */
+  prepared: number | null;
+  preparedOf: number | null;
   step: number;
   totalSteps: number;
   loss: number | null;
@@ -289,7 +293,7 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
       labRun: {
         // What submit records, natively and in the service, until the first
         // poll says otherwise.
-        jobId, label: runLabel, status: "queued", phase: null,
+        jobId, label: runLabel, status: "queued", phase: null, prepared: null, preparedOf: null,
         step: 0, totalSteps: 0, loss: null, sPerStep: null, etaSeconds: null,
         leg: null, legs: null,
         // Unknown until the run reports them — deliberately NOT seeded from the
@@ -495,6 +499,8 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
         ...run,
         status: (status as LabRunStatus) || run.status,
         phase: str(progress.phase) || null,
+        prepared: typeof progress.precomputed === "number" ? progress.precomputed : null,
+        preparedOf: typeof progress.clips === "number" ? progress.clips : null,
         step: num(progress.step, run.step),
         totalSteps: num(progress.totalSteps, run.totalSteps),
         loss: typeof progress.loss === "number" ? progress.loss : run.loss,
@@ -515,7 +521,12 @@ export const createLoraLabSlice: StateCreator<State, [], [], LoraLabSlice> = (se
     // Takes arrive through the run's progress, since publishing happens as each
     // checkpoint lands. Merge rather than replace: `landedAt` is what orders the
     // sheet newest-first, and re-stamping it on every poll would scramble it.
-    const raw = Array.isArray(progress.takes) ? (progress.takes as Record<string, unknown>[]) : [];
+    // The final adapter (`@final`) is published only once the trainer has exited,
+    // so it is in the finished run's `result.takes` and never in its progress:
+    // read both, or the sheet never offers the take the run was for.
+    const result = (d.result ?? {}) as Record<string, unknown>;
+    const raw = [progress.takes, result.takes]
+      .flatMap((list) => (Array.isArray(list) ? (list as Record<string, unknown>[]) : []));
     if (raw.length) {
       const known = new Map(get().labTakes.map((t) => [t.name, t]));
       const now = Date.now();

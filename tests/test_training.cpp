@@ -406,6 +406,45 @@ TEST_CASE ("snapshot: what the caller gets is the caller's own copy", "[training
     root.deleteRecursively();
 }
 
+// training_job_status re-records the same few fields on every poll (the LoRA Lab
+// polls once a second) and refreshes the snapshot only when the record changed:
+// that is what keeps the training popover's job list from showing a stopped run
+// as still training. So updateJob has to tell a real change from a repeat,
+// including for `result`, which every poll builds as a fresh object.
+TEST_CASE ("updateJob says whether the record changed, so a repeated poll is not a change", "[training][snapshot]")
+{
+    auto root = makeTempRoot();
+    auto sessionDir = root.getChildFile ("session");
+    sessionDir.createDirectory();
+    mosh::TrainerRegistry registry (sessionDir);
+
+    auto withResult = [] (juce::var job, const juce::String& adapterId) -> juce::var
+    {
+        auto* result = new juce::DynamicObject();
+        result->setProperty ("adapter_id", adapterId);
+        job.getDynamicObject()->setProperty ("result", juce::var (result));
+        return job;
+    };
+
+    CHECK (registry.updateJob (jobRecord ("job-1", "queued", 0.0)));         // new job
+    CHECK_FALSE (registry.updateJob (jobRecord ("job-1", "queued", 0.0)));   // same poll again
+    CHECK (registry.updateJob (jobRecord ("job-1", "running", 0.0)));        // status moved
+    CHECK (registry.updateJob (jobRecord ("job-1", "running", 0.25)));       // progress moved
+    CHECK_FALSE (registry.updateJob (jobRecord ("job-1", "running", 0.25)));
+    CHECK (registry.updateJob (withResult (jobRecord ("job-1", "ready", 1.0), "a1")));
+    // A fresh `result` object with the same content is a repeat, not a change.
+    CHECK_FALSE (registry.updateJob (withResult (jobRecord ("job-1", "ready", 1.0), "a1")));
+    CHECK (registry.updateJob (withResult (jobRecord ("job-1", "ready", 1.0), "a2")));
+
+    // What was recorded is still the latest of each field.
+    auto jobs = registry.listJobs().getProperty ("jobs", juce::var());
+    REQUIRE (jobs.size() == 1);
+    CHECK (jobs[0].getProperty ("status", juce::var()).toString() == "ready");
+    CHECK (jobs[0].getProperty ("result", juce::var()).getProperty ("adapter_id", juce::var()).toString() == "a2");
+
+    root.deleteRecursively();
+}
+
 TEST_CASE ("sha256File (via buildCorpus manifest): streamed hash equals a full-read reference hash", "[training]")
 {
     auto root = makeTempRoot();

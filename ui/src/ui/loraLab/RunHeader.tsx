@@ -35,12 +35,15 @@ export function RunHeader({ clipCount }: { clipCount: number }) {
   const epochsDone = clips > 0 ? epochsFor(clips, run.step, batch, accum) : 0;
   const epochsTotal = clips > 0 ? epochsFor(clips, run.totalSteps, batch, accum) : 0;
   const frac = run.totalSteps > 0 ? Math.min(1, run.step / run.totalSteps) : 0;
+  // Encoding the corpus comes before any epoch: say how far it has got rather
+  // than an empty epoch count, since on a large corpus it takes minutes.
+  const preparing = run.status === "running" && run.phase === "precompute" && (run.preparedOf ?? 0) > 0;
 
   // The status says whether the run is going; the phase says what it is doing.
-  // The local trainer reports no phase during precompute, then "training", then
-  // the state it exited in while the service collects the last takes and
-  // reports the run's own end. A remote trainer reports no phase at all, so no
-  // phase says only that the run is going: "running", never "preparing".
+  // The local trainer reports "precompute" while it encodes the corpus, then
+  // "training", then the state it exited in while the service collects the last
+  // takes and reports the run's own end. A remote trainer reports no phase at
+  // all, so no phase says only that the run is going: "running".
   const pill =
     run.status === "queued" ? "queued"
     : run.status === "running"
@@ -57,10 +60,12 @@ export function RunHeader({ clipCount }: { clipCount: number }) {
       <div className="lab-run-top">
         <div className="lab-epochs">
           <span className="lab-epochs-n display" data-testid="lab-epochs">
-            {epochsTotal > 0 ? epochsDone.toFixed(epochsDone < 10 ? 1 : 0) : "—"}
+            {preparing ? run.prepared ?? 0
+              : epochsTotal > 0 ? epochsDone.toFixed(epochsDone < 10 ? 1 : 0) : "—"}
           </span>
           <span className="lab-epochs-of">
-            {epochsTotal > 0 ? `of ${epochsTotal.toFixed(0)} epochs` : "epochs"}
+            {preparing ? `of ${run.preparedOf} clips prepared`
+              : epochsTotal > 0 ? `of ${epochsTotal.toFixed(0)} epochs` : "epochs"}
           </span>
         </div>
         <span className={`gen-badge st-${run.status === "error" ? "error" : run.status === "ready" ? "ready" : "working"}`}
