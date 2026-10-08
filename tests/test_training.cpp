@@ -431,6 +431,14 @@ TEST_CASE ("updateJob says whether the record changed, so a repeated poll is not
     CHECK (registry.updateJob (jobRecord ("job-1", "running", 0.0)));        // status moved
     CHECK (registry.updateJob (jobRecord ("job-1", "running", 0.25)));       // progress moved
     CHECK_FALSE (registry.updateJob (jobRecord ("job-1", "running", 0.25)));
+    // The stored copy is read back from training_state.json, written to 15
+    // decimal places: 5/6 returns as 0.833333333333333. A repeat of a value that
+    // is not exact in binary must still read as a repeat (the service's progress
+    // sits at 5/6 through precompute, and step/total is inexact for most totals).
+    CHECK (registry.updateJob (jobRecord ("job-1", "running", 5.0 / 6.0)));
+    CHECK_FALSE (registry.updateJob (jobRecord ("job-1", "running", 5.0 / 6.0)));
+    CHECK (registry.updateJob (jobRecord ("job-1", "running", 391.0 / 1197.0)));
+    CHECK_FALSE (registry.updateJob (jobRecord ("job-1", "running", 391.0 / 1197.0)));
     CHECK (registry.updateJob (withResult (jobRecord ("job-1", "ready", 1.0), "a1")));
     // A fresh `result` object with the same content is a repeat, not a change.
     CHECK_FALSE (registry.updateJob (withResult (jobRecord ("job-1", "ready", 1.0), "a1")));

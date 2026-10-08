@@ -64,7 +64,7 @@ export function RunHeader({ clipCount }: { clipCount: number }) {
               : epochsTotal > 0 ? epochsDone.toFixed(epochsDone < 10 ? 1 : 0) : "—"}
           </span>
           <span className="lab-epochs-of">
-            {preparing ? `of ${run.preparedOf} clips prepared`
+            {preparing ? `of ${run.preparedOf} clip${run.preparedOf === 1 ? "" : "s"} prepared`
               : epochsTotal > 0 ? `of ${epochsTotal.toFixed(0)} epochs` : "epochs"}
           </span>
         </div>

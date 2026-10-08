@@ -289,8 +289,12 @@ def test_precompute_reports_its_phase_and_clip_count():
         with server._training_lock:
             return dict(server._training_jobs[jid].get("detail") or {})
 
+    def _progress():
+        with server._training_lock:
+            return server._training_jobs[jid].get("progress")
+
     precompute_hook["fn"] = lambda: seen.update(before=_detail())
-    precompute_hook["after"] = lambda: seen.update(after=_detail())
+    precompute_hook["after"] = lambda: seen.update(after=_detail(), progress=_progress())
     t = _run(jid)
     t.join(20.0)
     precompute_hook["fn"] = None
@@ -299,6 +303,9 @@ def test_precompute_reports_its_phase_and_clip_count():
           seen.get("before") == {"phase": "precompute", "precomputed": 0, "clips": 1}, repr(seen.get("before")))
     check("precompute counts the clips it has encoded",
           seen.get("after") == {"phase": "precompute", "precomputed": 1, "clips": 1}, repr(seen.get("after")))
+    # Nothing is trained yet: not the 5/6 the warm-up loop leaves behind, which
+    # the jobs list showed as "training 83%" before dropping to 0%.
+    check("precompute does not count as training progress", seen.get("progress") == 0.0, repr(seen.get("progress")))
     status, error = _status(jid)
     check("a run past precompute still ends on the trainer's own outcome", status == "error",
           f"status={status!r} error={error!r}")

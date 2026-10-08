@@ -64,12 +64,12 @@ export type LabRun = {
   jobId: string;
   label: string;
   status: LabRunStatus;
-  /** The trainer's own phase while the job runs (`detail.phase`): "training",
-   *  then the state it exited in while the service collects the last takes.
-   *  null during the local trainer's precompute, which reports no progress, for
-   *  the whole run on a backend that reports none (remote_http), and on a
-   *  service that predates it. Presentation only — whether the run is live is
-   *  `status`. */
+  /** What a running job is doing (`detail.phase`): "precompute" while the local
+   *  trainer encodes the corpus, then "training", then the state the trainer
+   *  exited in while the service collects the last takes. null for the whole run
+   *  on a backend that reports no progress (remote_http), briefly before the
+   *  first report, and on a service that predates it. Presentation only —
+   *  whether the run is live is `status`. */
   phase: string | null;
   /** While the phase is "precompute": how many of the run's clips have been
    *  encoded so far, of how many. null outside precompute. */

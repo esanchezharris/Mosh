@@ -191,6 +191,12 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
       .toEqual(["run-1@12", "run-1@24", "run-1@final"]);
   });
 
+  it("says one clip prepared, not one clips, for a one-clip corpus", async () => {
+    replies = [{ status: "running", detail: { phase: "precompute", precomputed: 1, clips: 1 } }];
+    await tick();
+    expect(host.querySelector(".lab-epochs-of")?.textContent).toBe("of 1 clip prepared");
+  });
+
   it("counts one approved clip as one clip on the Train button", async () => {
     replies = [{ status: "ready", detail: {} }];
     act(() => useStore.setState({ snapshot: { tracks: [], training: { sources: [{ eligible: true }] } } } as never));
