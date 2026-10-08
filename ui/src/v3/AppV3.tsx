@@ -18,6 +18,8 @@ import { MixInspector } from "./MixInspector";
 import { MoshiDock } from "./MoshiDock";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { PhoneLauncher } from "./PhoneLauncher";
+import { TrainingLauncher } from "./TrainingLauncher";
+import { LoraLab } from "../ui/LoraLab";
 import { HistoryFlyout } from "./HistoryFlyout";
 import { SettingsModal } from "./SettingsModal";
 import { BrowserPane } from "./BrowserPane";
@@ -87,6 +89,10 @@ export function AppV3() {
       {snapshot && <SettingsModal snapshot={snapshot} />}
       <MultiplayerLauncher />
       <PhoneLauncher />
+      <TrainingLauncher />
+      {/* The LoRA Lab is a floating window over the workspace, as in v2: training runs
+          for minutes and the producer keeps working (and listening) while it does. */}
+      <LoraLab />
       <ContextMenu />
       <PianoRoll />
     </div>

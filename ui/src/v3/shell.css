@@ -1,5 +1,6 @@
 @import "./tokens.css";
 @import "../v2/css/80-plugin-picker.css";
+@import "../v2/css/96-lora-lab.css";
 @import "./panels/css/index.css";
 
 .v3-shell, .v3-shell * { box-sizing: border-box; }
@@ -949,3 +950,37 @@
   box-shadow: inset 0 0 0 1px var(--record);
 }
 /* demo-round2:pressed end */
+
+/* ── LoRA training dialog (TrainingLauncher) ────────────────────────────────────
+   The panel's markup is shared with the v2/classic popover (TrainingPanel); classic's
+   global rules for these classes carry its own palette, so the dialog restyles them
+   in V3's tokens, which all four colourways follow. */
+.v3-shell .training-modal { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+.v3-shell .training-modal .training-body { display: grid; gap: 12px; min-height: 0; overflow-y: auto; font-size: 12px; line-height: 1.4; color: var(--text); }
+.v3-shell .training-body .pop-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--text); }
+.v3-shell .training-body .pop-head-badge { padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 500; color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.v3-shell .training-body .pop-note { margin: 0; font-size: 12px; color: var(--muted); }
+.v3-shell .training-body .pop-note.tc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3-shell .training-body .pop-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.v3-shell .training-body .pop-group { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--fog-line); }
+.v3-shell .training-body .pop-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.v3-shell .training-body .pop-row { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--muted); }
+.v3-shell .training-body .pop-row input { min-width: 0; padding: 5px 8px; font: inherit; color: var(--text); background: var(--surface2); border: 1px solid var(--line); border-radius: 6px; }
+.v3-shell .training-body .pop-row input::placeholder { color: var(--fog-label); }
+.v3-shell .training-body .pop-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.v3-shell .training-body .training-status { font-size: 12px; color: var(--text); }
+.v3-shell .training-body .modal-list { display: grid; gap: 2px; max-height: 184px; overflow-y: auto; margin: 0; padding: 0; border: 0; background: none; }
+.v3-shell .training-body .rack-empty { padding: 4px 0; font-size: 12px; color: var(--muted); }
+.v3-shell .training-body .plugin-row { display: flex; align-items: center; gap: 8px; min-height: 0; padding: 4px 8px; font-size: 12px; background: var(--surface2); border: 0; border-radius: 6px; }
+.v3-shell .training-body .pr-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--text); }
+.v3-shell .training-body :is(.pr-sub.err, .training-job-error) { font-size: 11px; color: var(--record); }
+.v3-shell .training-body .cmdlog-badge { flex: 0 0 auto; padding: 1px 6px; font-size: 10px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 999px; }
+.v3-shell .training-body .cmdlog-badge.err { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.v3-shell .training-body .training-blocker-list { margin: 4px 0 0; padding-left: 16px; }
+.v3-shell .training-body .training-progress { height: 3px; margin: 2px 8px 4px; overflow: hidden; background: var(--fog-line); border-radius: 2px; }
+.v3-shell .training-body .training-progress-fill { height: 100%; background: var(--accent); }
+
+/* The LoRA Lab's floating window: classic's .floatwin chrome in V3's tokens. */
+.v3-shell .floatwin { color: var(--text); background: var(--surface); border-color: var(--line); }
+.v3-shell .floatwin-bar { background: var(--top); border-bottom-color: var(--fog-line); }
+.v3-shell .floatwin-title { color: var(--text); }

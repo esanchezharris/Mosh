@@ -54,6 +54,12 @@
   --v2-fs-sm: 11px;
   --v2-fs-base: 12px;
   --v2-tracking-caps: .08em;
+  /* The LoRA Lab (v2/css/96-lora-lab.css) also needs these. */
+  --v2-fs-display: 40px;
+  --v2-radius-xs: 4px;
+  --v2-rec: var(--record);
+  --v2-warn: var(--warn);
+  --v2-surface-sunken-solid: var(--rail);
   --v2-blue: #9aa0b4;
   --pr-panel: var(--surface);
   --pr-text: var(--text);
