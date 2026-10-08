@@ -21,17 +21,21 @@
 // adapters the producer actually chose under thirty they discarded.
 
 import { useState } from "react";
+import { LoraStrength } from "../LoraStrength";
 import { useStore } from "../../store";
-import { stackKey } from "../../store/loraLab";
+import { currentRender, labRenderContext, stackKey } from "../../store/loraLab";
 
 export function KeptRack() {
   const loras = useStore((s) => s.availableLoras);
   const stack = useStore((s) => s.labStack);
   const setValue = useStore((s) => s.setLabStackValue);
+  const add = useStore((s) => s.addLabStack);
+  const remove = useStore((s) => s.removeLabStack);
   const audition = useStore((s) => s.auditionLabStack);
   const stop = useStore((s) => s.stopLabAudition);
   const cued = useStore((s) => s.labCued);
   const renders = useStore((s) => s.labRenders);
+  const ctx = useStore((s) => labRenderContext(s));
   const promptSet = useStore((s) => s.labPrompt.trim().length > 0);
   const [openRack, setOpenRack] = useState(false);
 
@@ -41,10 +45,9 @@ export function KeptRack() {
   if (kept.length === 0) return null;
 
   const key = stackKey(stack);
-  const render = renders[key];
+  const render = currentRender(renders[key], ctx);
   const playing = cued === key && render?.status === "ready";
   const total = stack.reduce((n, e) => n + e.value, 0);
-  const valueOf = (name: string) => stack.find((e) => e.name === name)?.value ?? 0;
 
   return (
     <section className="lab-kept" data-testid="lab-kept">
@@ -85,21 +88,20 @@ export function KeptRack() {
       {openRack && (
         <div className="lab-kept-list">
           {kept.map((l) => {
-            const v = valueOf(l.name);
+            const entry = stack.find((e) => e.name === l.name);
+            const label = l.displayName || l.name;
             return (
-              <div className={`nparam lab-kept-row${v > 0 ? " on" : ""}`} key={l.name}>
-                <span className="nlabel" title={l.hint || l.name}>{l.displayName || l.name}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={150}
-                  step={5}
-                  value={v}
-                  aria-label={`${l.displayName || l.name} strength`}
-                  data-testid={`lab-kept-slider-${l.name}`}
-                  onChange={(e) => setValue(l.name, Number(e.target.value))}
-                />
-                <span className="nval">{v || "–"}</span>
+              <div className={`nparam lab-kept-row${entry ? " on" : ""}`} key={l.name}>
+                <span className="nlabel" title={l.hint || l.name}>{label}</span>
+                {entry
+                  ? <>
+                      <LoraStrength label={label} value={entry.value} testId={`lab-kept-strength-${l.name}`}
+                        onChange={(value) => setValue(l.name, value)} />
+                      <button className="btn x" aria-label={`Remove ${label} from the stack`}
+                        onClick={() => remove(l.name)}>✕</button>
+                    </>
+                  : <button className="btn ghost lab-kept-add" data-testid={`lab-kept-add-${l.name}`}
+                      aria-label={`Add ${label} to the stack`} onClick={() => add(l.name)}>Add</button>}
               </div>
             );
           })}

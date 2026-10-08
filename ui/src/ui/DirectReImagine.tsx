@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import type { Clip, CommandResult, RenderLayer, Track } from "../types";
+import type { AvailableLora, Clip, CommandResult, RenderLayer, RenderLora, Track } from "../types";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
+import { LORA_ADD_VALUE, LoraStrength } from "./LoraStrength";
 
 const MAX_SEED = 2147483647;
+
+/** Adapters a producer kept (the library shelf), usable in a render. Lab checkpoints
+ *  on trial and unusable files are not offered here. */
+export function keptLoras(available: readonly AvailableLora[]): AvailableLora[] {
+  return available.filter((lora) => lora.valid !== false && (lora.family ?? "library") === "library");
+}
 
 // When each render began, keyed by the engine's requestId (render_layer answers with it,
 // and the layer carries it while queued/rendering). Module-level so the clock survives the
@@ -47,11 +54,15 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   const serviceState = useStore((state) => state.genServiceState);
   const serviceError = useStore((state) => state.genServiceError);
   const loadColors = useStore((state) => state.loadColors);
+  const loadLoras = useStore((state) => state.loadLoras);
+  const kept = keptLoras(useStore((state) => state.availableLoras));
   const projectEpoch = useStore((state) => state.projectEpoch);
   const layer = clip.renderLayer;
   const [prompt, setPrompt] = useState(layer?.prompt ?? "");
   const [nl, setNl] = useState(layer?.nl ?? 0.4);
   const [seed, setSeed] = useState(String(layer?.seed ?? 0));
+  const [loras, setLoras] = useState<RenderLora[]>(layer?.loras ?? []);
+  const layerLoras = JSON.stringify(layer?.loras ?? []);
   // True once the user edits the seed field; a typed seed is always sent exactly as typed.
   const [seedTyped, setSeedTyped] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -62,9 +73,13 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   const latestLayer = useRef(layer);
   latestLayer.current = layer;
   useEffect(() => { void loadColors(true); }, [loadColors]);
+  // Forced: an adapter kept since the library was first read has to be pickable here.
+  // Quiet: this panel's service banner is list_colors' to decide.
+  useEffect(() => { loadLoras(true, true); }, [loadLoras]);
   useEffect(() => {
     setPrompt(layer?.prompt ?? ""); setNl(layer?.nl ?? 0.4); setSeed(String(layer?.seed ?? 0)); setSeedTyped(false);
-  }, [layer?.id, layer?.prompt, layer?.nl, layer?.seed]);
+    setLoras(JSON.parse(layerLoras) as RenderLora[]);
+  }, [layer?.id, layer?.prompt, layer?.nl, layer?.seed, layerLoras]);
   useEffect(() => {
     active.current = true;
     return () => {
@@ -85,6 +100,21 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   const unavailable = explicitDecisions !== true || (available !== true && !fixtureMode);
   const hasResult = hasPending || layer?.userKept === true;
   const unsupported = clip.loopEnabled || clip.reversed || clip.autoTempo;
+  // The engine refuses an empty prompt ("Enter a prompt first."), after the render layer
+  // already exists: say so before the click instead.
+  const needsPrompt = prompt.trim() === "";
+  const loraName = (name: string) => kept.find((lora) => lora.name === name)?.displayName || name;
+  const toggleLora = (name: string) => setLoras((list) => list.some((lora) => lora.name === name)
+    ? list.filter((lora) => lora.name !== name)
+    : [...list, { name, value: LORA_ADD_VALUE }]);
+  const setLoraValue = (name: string, value: number) =>
+    setLoras((list) => list.map((lora) => lora.name === name ? { ...lora, value } : lora));
+  // What the shown result was rendered with: the layer's LoRAs, but only while they are
+  // still the result's. Once the params change (a Generate whose render then failed,
+  // an undo) the layer is "dirty" and its LoRAs are no longer the result's.
+  const settled = layer?.status === "ready" || layer?.status === "bypassed"
+    || layer?.status === "frozen" || layer?.status === "bounced";
+  const resultLoras = hasResult && settled ? layer?.loras ?? [] : [];
   const sourceStart = layer?.sourceStart ?? clip.offset;
   const sourceDuration = layer?.sourceDuration ?? clip.length;
   const commandResult = async (name: string, args: Record<string, unknown>): Promise<CommandResult | null> => {
@@ -96,7 +126,7 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   };
   const command = async (name: string, args: Record<string, unknown>) => (await commandResult(name, args))?.ok === true;
   const generate = async () => {
-    if (busy || unavailable || legacy || unsupported || !validSeed) return;
+    if (busy || unavailable || legacy || unsupported || !validSeed || needsPrompt) return;
     // "Generate again" with a seed nobody touched would re-run the identical render: step
     // it by one and SHOW the new value. A typed seed (even the same number) is a deliberate
     // choice and goes exactly as typed.
@@ -112,7 +142,8 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
       if (!layer && !await command("create_render_layer", {
         clipId: clip.id, decisionPolicy: "explicit", adapter: "stable_audio3", mode: "reimagine", modelVariant: "sa3-medium",
       })) return;
-      if (!await command("set_render_param", { clipId: clip.id, prompt, nl, seed: nextSeed })) return;
+      // The LoRAs always go, an empty list included: that is how removing one takes effect.
+      if (!await command("set_render_param", { clipId: clip.id, prompt, nl, seed: nextSeed, loras })) return;
       const rendered = await commandResult("render_layer", { clipId: clip.id });
       const requestId = rendered?.ok ? (rendered.data as { requestId?: unknown } | undefined)?.requestId : undefined;
       if (typeof requestId === "string" && requestId) rememberStart(requestId, started);
@@ -139,6 +170,9 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
   }, [ticking]);
   const statusText = submitting ? "Submitting" : resultStatus(layer);
   const statusLine = startedAt !== null ? `${statusText} · ${elapsedLabel(now - startedAt)}` : statusText;
+  const resultWith = resultLoras.length
+    ? ` · with ${resultLoras.map((lora) => `${loraName(lora.name)} ${lora.value}`).join(", ")}`
+    : "";
   const audition = layer?.audition ?? "committed";
   return <div className="gen direct-reimagine" data-testid="generative" data-render-status={layer?.status ?? "empty"}>
     <div className="gen-head">
@@ -165,7 +199,7 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
               ? "The Re-Imagine helper in ~/Library/Application Support/Mosh/ReImagine/service is older than this Mosh (no direct render). Refresh it, then press Retry."
               : "The local service does not support direct Re-Imagine. Use the matching Mosh service, then retry.")
             : "Local SA3 is unavailable. Check that its service and model are available, then retry.")}</span>
-        <button className="btn" type="button" onClick={() => void loadColors(true)}>Retry</button>
+        <button className="btn" type="button" onClick={() => { void loadColors(true); loadLoras(true, true); }}>Retry</button>
       </div>}
       <label className="direct-reimagine-field">Prompt
         <input className="gen-compile-input" data-testid="gen-prompt" data-owns-edit-keys="" value={prompt} disabled={busy}
@@ -182,14 +216,41 @@ export function DirectReImagine({ clip, track }: { readonly clip: Clip; readonly
         <input type="number" min={0} max={2147483647} step={1} data-testid="gen-seed-input" data-owns-edit-keys=""
           value={seed} disabled={busy} aria-invalid={!validSeed} onChange={(event) => { setSeed(event.target.value); setSeedTyped(true); }} />
       </label>
+      <fieldset className="direct-reimagine-loras" disabled={busy}>
+        <legend>LoRA</legend>
+        {kept.length === 0
+          ? <p className="direct-reimagine-hint" data-testid="gen-lora-empty">No kept LoRAs yet. Train one in the LoRA Lab and keep the take you like.</p>
+          : <div className="gen-actions" role="group" aria-label="Kept LoRAs" data-testid="gen-loras">
+            {kept.map((lora) => <button key={lora.name} type="button" className="btn"
+              aria-pressed={loras.some((picked) => picked.name === lora.name)}
+              title={lora.hint || lora.notes || `Render with ${lora.displayName || lora.name}`}
+              onClick={() => toggleLora(lora.name)}>{lora.displayName || lora.name}</button>)}
+          </div>}
+        {loras.map((lora) => {
+          // A LoRA on the layer that is not in the library (renamed, deleted, unusable,
+          // or a project from another Mac) has no toggle above; it still needs a way off,
+          // or every Generate fails with "not found".
+          const missing = !kept.some((k) => k.name === lora.name);
+          return <div className={`nparam direct-reimagine-lora${missing ? " missing" : ""}`} key={lora.name}>
+            <span className="nlabel" title={missing ? "Not in your LoRA library — remove it to generate" : undefined}>
+              {loraName(lora.name)}{missing ? " (missing)" : ""}
+            </span>
+            <LoraStrength label={loraName(lora.name)} value={lora.value} disabled={busy}
+              onChange={(value) => setLoraValue(lora.name, value)} />
+            <button type="button" className="btn x" disabled={busy} aria-label={`Remove ${loraName(lora.name)}`}
+              onClick={() => toggleLora(lora.name)}>✕</button>
+          </div>;
+        })}
+      </fieldset>
       {!validSeed && <p role="alert">Enter a whole-number seed from 0 to 2147483647.</p>}
       {unsupported && <p role="alert">Use an ordinary audio clip without looping, reverse or tempo warp for this workflow.</p>}
       <div className="gen-service-status" role={layer?.status === "error" ? "alert" : "status"} data-testid="gen-status">
-        {statusLine}
+        {statusLine}{resultWith}
       </div>
       {error && <div className="gen-service-error" role="alert">{error}</div>}
       <div className="gen-actions">
-        <button className="btn" data-testid="gen-render" disabled={busy || unavailable || !!unsupported || !validSeed}
+        <button className="btn" data-testid="gen-render" disabled={busy || unavailable || !!unsupported || !validSeed || needsPrompt}
+          title={needsPrompt ? "Describe the sound first" : undefined}
           onClick={() => void generate()}>{hasPending ? "Discard pending and generate" : layer?.hasArtifact || layer?.userKept ? "Generate again" : "Generate"}</button>
         {running && <button className="btn" data-testid="gen-cancel" title="Cancel applying the result; inference may continue."
           onClick={() => void command("cancel_render", { clipId: clip.id, jobId: layer?.jobId, requestId: layer?.requestId })}>Cancel result</button>}

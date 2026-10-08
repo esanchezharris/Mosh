@@ -80,6 +80,8 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_outbox.cpp
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
+    # render_lora_take's request and cache identity (pure: LoraTakeRequest.h).
+    test_lora_take_request.cpp
     # cancel_training_job — what TrainingJobManager hands back from /training/cancel.
     # juce_core only; talks to a fake service on a private loopback port.
     test_training_jobmanager.cpp

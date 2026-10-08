@@ -1,0 +1,91 @@
+/* LoraStrength — shared by V3, Pro Tools, v2 and the LoRA Lab. Colours resolve through
+   whichever shell's tokens are in scope (V3 --accent/--muted/--line, v2 --v2-*,
+   Pro Tools --pt-*), falling back to currentColor, so no shell inherits another's
+   palette. */
+
+.lora-strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lora-strength-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 80px;
+  display: flex;
+  align-items: center;
+  padding-bottom: 11px; /* room for the "ideal" label under the notch */
+}
+
+.lora-strength-track input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent, var(--v2-accent, var(--pt-selected, currentColor)));
+}
+
+/* The notch sits at the track's centre: on a 0-200 range the thumb's centre is at
+   exactly half the input's width when the value is 100, whatever the thumb size. */
+.lora-strength-notch {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  bottom: 11px;
+  width: 0;
+  border-left: 1px solid var(--muted, var(--v2-dim, var(--pt-text-muted, currentColor)));
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.lora-strength-ideal {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 0;
+  transform: translateX(-50%);
+  font-size: 9px;
+  line-height: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted, var(--v2-dim, var(--pt-text-muted, currentColor)));
+  white-space: nowrap;
+}
+
+.lora-strength-num,
+.lora-strength-input {
+  flex: 0 0 auto;
+  width: 48px;
+  box-sizing: border-box;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.lora-strength-num {
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text, var(--v2-text, var(--pt-text, currentColor)));
+  cursor: text;
+}
+
+.lora-strength-num:hover:not(:disabled) {
+  border-color: var(--line, var(--v2-line, var(--pt-border, currentColor)));
+}
+
+.lora-strength-num:disabled { opacity: 0.5; cursor: default; }
+
+.lora-strength-input {
+  padding: 2px 4px;
+  border: 1px solid var(--accent, var(--v2-accent, var(--pt-focus-ring, currentColor)));
+  border-radius: 4px;
+  background: var(--surface2, var(--v2-surface-2, var(--pt-inset, transparent)));
+  color: var(--text, var(--v2-text, var(--pt-text, currentColor)));
+}
+
+.lora-strength :is(input, button):focus-visible {
+  outline: 2px solid var(--accent, var(--v2-accent, var(--pt-focus-ring, currentColor)));
+  outline-offset: 2px;
+}

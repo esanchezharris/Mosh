@@ -242,6 +242,9 @@
    and hiding the unused ones would make adding one a search instead of a nudge. */
 .v2-shell .lab-kept-row .nlabel { color: var(--v2-dim); }
 .v2-shell .lab-kept-row.on .nlabel { color: var(--v2-text); }
+.v2-shell .lab-kept-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.v2-shell .lab-kept-row .nlabel { flex: 0 1 auto; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-shell .lab-kept-add { margin-left: auto; }
 
 /* ── motion: exactly one moment ──────────────────────────────────────────────
    A landing checkpoint slides in while its waveform strokes once, left to right

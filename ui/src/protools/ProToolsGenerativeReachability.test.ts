@@ -10,6 +10,12 @@ vi.mock("../bridge", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../bridge")>();
   return { ...actual, isNative: () => true };
 });
+const typeInto = (field: HTMLInputElement, value: string) => act(() => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (!setter) throw new Error("Input setter unavailable");
+  setter.call(field, value);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+});
 vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock("../hooks/useQwertyMidi", () => ({ useQwertyMidi: vi.fn() }));
 vi.mock("../hooks/useFileDrop", () => ({ useFileDrop: () => false }));
@@ -164,6 +170,7 @@ describe("Pro Tools generative reachability", () => {
     await open();
     const create = host.querySelector<HTMLButtonElement>("[data-testid=gen-render]");
     if (!create) throw new Error("shared Re-imagine create control is missing");
+    typeInto(host.querySelector<HTMLInputElement>("[data-testid=gen-prompt]")!, "A warm pad.");
     await act(async () => create.click());
 
     expect(host.querySelector("[data-testid=engine-badge]")?.textContent).toBe("SA3");
