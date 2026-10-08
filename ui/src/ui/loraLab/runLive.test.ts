@@ -191,6 +191,18 @@ describe("LoRA Lab — a run stays live for every status the service reports whi
       .toEqual(["run-1@12", "run-1@24", "run-1@final"]);
   });
 
+  it("counts one approved clip as one clip on the Train button", async () => {
+    replies = [{ status: "ready", detail: {} }];
+    act(() => useStore.setState({ snapshot: { tracks: [], training: { sources: [{ eligible: true }] } } } as never));
+    await tick();
+    expect(byId("lab-train")?.querySelector(".lab-go-n")?.textContent).toBe("1 clip");
+    act(() => useStore.setState({
+      snapshot: { tracks: [], training: { sources: [{ eligible: true }, { eligible: true }, { eligible: false }] } },
+    } as never));
+    expect(byId("lab-train")?.querySelector(".lab-go-n")?.textContent).toBe("2 clips");
+    act(() => useStore.setState({ snapshot: null } as never));
+  });
+
   // The service keeps jobs in memory only. If it dies or restarts mid-run, every
   // later read of the run answers "unknown jobId", and the run must end here, or
   // the Lab polls forever and the producer can never train again without
