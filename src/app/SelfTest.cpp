@@ -6413,14 +6413,64 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "render-source prep: fresh project ok");
         const auto prepTrack = cmd (ops, "create_track", args1 ("name", "Prep"))["data"]
                                    .getProperty ("trackId", var()).toString();
-        const auto prepClip = cmd (ops, "add_test_tone_clip",
-                                   objN ({{ "trackId", prepTrack }, { "seconds", 1.0 }, { "freq", 271.0 }}))["data"]
+
+        // A 1 s source whose tone stops halfway (271 Hz, then silence), so a render shows
+        // WHICH audio it played: warped from 97 BPM, the tone stops at 0.5 s * 97 / tempo;
+        // the unwarped source, or a proxy for another tempo, stops elsewhere. A steady tone
+        // looks the same either way.
+        constexpr double prepToneEndSeconds = 0.5;
+        const auto prepSource = eng.sessionDir().getChildFile ("audio").getChildFile ("render-prep-half-tone.wav");
+        {
+            constexpr double rate = 44100.0;
+            const int toneSamples = roundToInt (prepToneEndSeconds * rate);
+            AudioBuffer<float> buf (2, roundToInt (rate));
+            buf.clear();
+            for (int i = 0; i < toneSamples; ++i)
+            {
+                const double fade = jmin (1.0, jmin (i, toneSamples - i) / (0.01 * rate));
+                const auto s = (float) (0.25 * fade * std::sin (MathConstants<double>::twoPi * 271.0 * i / rate));
+                buf.setSample (0, i, s);
+                buf.setSample (1, i, s);
+            }
+            prepSource.getParentDirectory().createDirectory();
+            prepSource.deleteFile();
+            WavAudioFormat wav;
+            if (auto os = std::unique_ptr<FileOutputStream> (prepSource.createOutputStream()))
+                if (auto w = std::unique_ptr<AudioFormatWriter> (wav.createWriterFor (os.get(), rate, 2u, 24, {}, 0)))
+                {
+                    os.release();
+                    w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
+                }
+        }
+        const auto prepClip = cmd (ops, "import_clip",
+                                   objN ({{ "trackId", prepTrack }, { "file", prepSource.getFullPathName() },
+                                          { "name", "render-prep-half-tone" }}))["data"]
                                   .getProperty ("clipId", var()).toString();
         check (prepTrack.isNotEmpty() && prepClip.isNotEmpty(), "render-source prep: tone clip created");
 
         auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("render-source-prep-selftest");
         outDir.deleteRecursively();
         outDir.createDirectory();
+
+        // When a render's tone stops: the end of its last 5 ms window louder than -26 dBFS RMS
+        // (the tone itself is -15 dBFS RMS), or -1 when it never sounds.
+        auto toneEndSeconds = [] (const juce::File& f) {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            double end = -1.0;
+            if (reader != nullptr && reader->sampleRate > 0.0)
+            {
+                juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                              (int) juce::jmin ((juce::int64) 1 << 20, reader->lengthInSamples));
+                reader->read (&buf, 0, buf.getNumSamples(), 0, true, true);
+                const int window = roundToInt (reader->sampleRate * 0.005);
+                for (int start = 0; start + window <= buf.getNumSamples(); start += window)
+                    if (buf.getRMSLevel (0, start, window) > 0.05f)
+                        end = (start + window) / reader->sampleRate;
+            }
+            return end;
+        };
 
         auto wavPeak = [] (const juce::File& f) {
             juce::AudioFormatManager fm;
@@ -6461,33 +6511,58 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    && ok (cmd (ops, "rename_track", objN ({{ "trackId", peerTrack }, { "name", "Local Rename" }}))),
                "render-source prep: peer commit fixture serialized, then renamed locally");
 
-        // export_audio. A command queued on the message loop before the export is delivered
-        // while the export waits for the new proxy; it must be refused, not run inside the
-        // export (it would mutate the edit the render is about to read). A multiplayer commit
-        // delivered then must not run inside the export either, and must not be lost: it is
-        // held and lands right after.
-        check (warpTo (97.0), "render-source prep: warp on (97 BPM source)");
+        // export_audio. A command delivered while the export waits for the new proxy must be
+        // refused, not run inside the export (it would mutate the edit the render is about to
+        // read). A multiplayer commit delivered then must not run inside the export either,
+        // and must not be lost: it is held and lands right after.
+        //
+        // The probe arrives on a juce::Timer armed before the warp, not by callAsync. Only the
+        // clip's own timer starts its proxy, and JUCE fires due timers in deadline order, so
+        // the probe runs before that proxy can start: inside the wait whenever the export
+        // waits, after the export whenever it does not. A callAsync runs wherever it sits in
+        // the queue: commands never pump, so async messages pile up, and meanwhile JUCE's
+        // timer thread re-posts its timer message every 300 ms. A copy ahead of the probe
+        // fired the clip's timer, the 1 s proxy finished while the probe was still queued
+        // behind the backlog, and the export stopped waiting before the probe ran (1 run in
+        // 3 on 2026-10-08).
         {
-            struct Probe { bool exporting = true, ran = false, ranDuringExport = false, commitRanMidExport = true; var result; };
+            struct Probe { bool exporting = false, ran = false, ranDuringExport = false, commitRanMidExport = true; var result; };
             auto probe = std::make_shared<Probe>();
-            juce::MessageManager::callAsync ([probe, &ops, prepTrack, peerBlob, peerLogicalId, trackNamed] {
+            struct OneShotTimer : juce::Timer
+            {
+                std::function<void()> fire;
+                void timerCallback() override { stopTimer(); fire(); }
+            } probeTimer;
+            probeTimer.fire = [probe, &ops, prepTrack, peerBlob, peerLogicalId, trackNamed] {
                 probe->ran = true;
                 probe->ranDuringExport = probe->exporting;
                 probe->result = cmd (ops, "rename_track", objN ({{ "trackId", prepTrack }, { "name", "Renamed Mid-Export" }}));
                 ops.applyMultiplayerCommitForSelfTest (objN ({{ "type", "commit" }, { "logicalId", peerLogicalId },
                                                               { "blob", peerBlob }}));
                 probe->commitRanMidExport = trackNamed ("Peer Commit");
-            });
+            };
+            probeTimer.startTimer (1);
+
+            check (warpTo (97.0), "render-source prep: warp on (97 BPM source)");
             const auto warpedFile = outDir.getChildFile ("warped.wav");
+            probe->exporting = true;
             auto exported = cmd (ops, "export_audio", args1 ("file", warpedFile.getFullPathName()));
             probe->exporting = false;
-            if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-                for (int i = 0; i < 300 && ! (probe->ran && trackNamed ("Peer Commit")); ++i)
-                    mm->runDispatchLoopUntil (10);
+            // The held commit lands from MoshOps' 30 Hz timer, which a backlog can delay by seconds.
+            pumpUntil ([&] { return probe->ran && trackNamed ("Peer Commit"); }, 20000);
 
             check (ok (exported), "render-source prep: export_audio right after set_clip_warp succeeds ("
                                   + exported.getProperty ("error", var()).toString() + ")");
             check (wavPeak (warpedFile) > 0.1f, "render-source prep: the warped export carries the tone");
+            const double sourceToneEnd = toneEndSeconds (prepSource);
+            const double expectedToneEnd = prepToneEndSeconds * 97.0
+                                           / eng.edit().tempoSequence.getBpmAt (tracktion::TimePosition());
+            const double warpedToneEnd = toneEndSeconds (warpedFile);
+            check (std::abs (sourceToneEnd - prepToneEndSeconds) < 0.025
+                       && std::abs (warpedToneEnd - expectedToneEnd) < 0.025,
+                   "render-source prep: the export plays the clip time-stretched (its tone stops at "
+                       + String (warpedToneEnd, 3) + " s, expected " + String (expectedToneEnd, 3)
+                       + " s; the source's stops at " + String (sourceToneEnd, 3) + " s)");
             check (probe->ranDuringExport,
                    "render-source prep: the export serviced the message loop while its proxy generated");
             check (! ok (probe->result) && probe->result.getProperty ("error", var()).toString().startsWith ("busy:"),
